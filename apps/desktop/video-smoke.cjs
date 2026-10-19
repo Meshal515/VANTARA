@@ -12,6 +12,7 @@ async function until(fn,timeout=30000){const end=Date.now()+timeout;while(Date.n
 async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixture,reportPath,setServices,publish}) {
   const report={platform:process.platform,realMpv:true,realElectron:true,realEmbeddedChild:false,resized:false,rendererControls:false,cleanup:false};
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vantara-embedded-proof-'));
+  const {screen,desktopCapturer}=require('electron');
   const clip=await fs.readFile(fixture),srt=Buffer.from('1\n00:00:00,000 --> 00:00:03,000\nترجمة عربية مؤلفة للتحقق\n');
   const server=http.createServer((req,res)=>{
     const body=req.url.endsWith('.srt')?srt:clip,range=/^bytes=(\d+)-(\d*)$/.exec(req.headers.range??'');
@@ -53,8 +54,41 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     await window.webContents.executeJavaScript("const s=document.querySelector('[data-control=\"seek\"]');s.value='500';s.dispatchEvent(new Event('change'));document.querySelector('[data-action=\"fullscreen\"]').click()");
     await until(()=>events.some(e=>e.type==='playback/seek'&&e.position>=400));
     await until(()=>window.isFullScreen());report.fullscreen=true;
-    await window.webContents.executeJavaScript("document.querySelector('[data-action=\"fullscreen\"]').click()");
-    await until(()=>!window.isFullScreen());report.rendererControls=true;report.arabicSubtitleSelected=true;
+    const aligned=async()=>{
+      const host=await videoHost.inspect(),content=window.getContentBounds(),overlay=overlayWindow.getBounds();
+      const display=screen.getDisplayMatching(window.getBounds()),scale=display.scaleFactor;
+      const child=host.children.find(c=>/mpv/i.test(c.class));
+      const same=(a,b)=>Math.abs(a-b)<=1;
+      return same(overlay.x,content.x)&&same(overlay.y,content.y)&&same(overlay.width,content.width)&&same(overlay.height,content.height)
+        &&host.x===0&&host.y===0&&host.width===host.parentWidth&&host.height===host.parentHeight&&same(host.width,content.width*scale)&&same(host.height,content.height*scale)&&same(child?.width,host.width)&&same(child?.height,host.height)
+        ?{host,content,overlay,display:display.bounds}:false;
+    };
+    report.fullscreenBounds=await until(async()=>{
+      const value=await aligned();if(!value)return false;
+      return ['x','y','width','height'].every(key=>Math.abs(value.content[key]-value.display[key])<=1)?value:false;
+    });
+    const display=screen.getDisplayMatching(window.getBounds());
+    const sources=await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:Math.round(display.size.width*display.scaleFactor),height:Math.round(display.size.height*display.scaleFactor)}});
+    const capture=sources.find(source=>source.display_id===String(display.id));
+    assert(capture&&!capture.thumbnail.isEmpty(),'Fullscreen desktop capture unavailable');
+    await fs.writeFile(reportPath+'.fullscreen.png',capture.thumbnail.toPNG());
+    const key=async(target,keyCode)=>{target.focus();await until(()=>target.isFocused());target.webContents.sendInputEvent({type:'keyDown',keyCode});target.webContents.sendInputEvent({type:'keyUp',keyCode});};
+    await key(overlayWindow,'Escape');await until(()=>!window.isFullScreen());await until(aligned);report.overlayEscapeRestores=true;
+    await key(window,'F11');await until(()=>window.isFullScreen());await until(aligned);report.mainF11=true;
+    await key(overlayWindow,'F11');await until(()=>!window.isFullScreen());await until(aligned);report.overlayF11=true;
+    // Deliver Win32 key messages to the real mpv child, which must use input.conf
+    // and return through the production IPC/renderer fullscreen action.
+    const nativeKey=(hwnd,key)=>{
+      assert(/^\d{1,20}$/.test(hwnd));
+      const script=`Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class VantaraProofInput{[DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);}'
+$h=[IntPtr]::new([long]::Parse('${hwnd}'));if(-not [VantaraProofInput]::PostMessage($h,256,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1};if(-not [VantaraProofInput]::PostMessage($h,257,[IntPtr]::new(${key}),[IntPtr]::Zero)){exit 1}`;
+      require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:10000});
+    };
+    const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
+    nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
+    nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
+    assert(await window.webContents.executeJavaScript('!!document.querySelector(".desktop-player")'));
+    report.rendererControls=true;report.arabicSubtitleSelected=true;
     // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
     await window.webContents.executeJavaScript('window.VantaraVideoSmoke.enterRoom()');
     await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".pp-lobby .pl-choose-server")'));

@@ -17,6 +17,8 @@ public static class VideoHost {
   [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+  [DllImport("user32.dll")] static extern int MapWindowPoints(IntPtr from,IntPtr to,ref POINT point,uint count);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder text,int size);
   [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hwnd,int index);
   delegate bool EnumProc(IntPtr hwnd,IntPtr param);
@@ -46,10 +48,11 @@ public static class VideoHost {
           if(line=="close")return 0;
           if(line=="hide"){ShowWindow(host,0);continue;}
           if(line=="inspect"){
-            RECT rect;GetClientRect(host,out rect);var children=new List<string>();
+            RECT rect,parentRect,screenRect;GetClientRect(host,out rect);GetClientRect(parent,out parentRect);GetWindowRect(host,out screenRect);
+            var origin=new POINT{x=screenRect.left,y=screenRect.top};MapWindowPoints(IntPtr.Zero,parent,ref origin,1);var children=new List<string>();
             EnumChildWindows(host,(hwnd,param)=>{var cls=new StringBuilder(128);GetClassName(hwnd,cls,128);RECT childRect;GetClientRect(hwnd,out childRect);
               children.Add(String.Format("{{\"hwnd\":\"{0}\",\"parent\":\"{1}\",\"class\":\"{2}\",\"child\":{3},\"width\":{4},\"height\":{5}}}",unchecked((ulong)hwnd.ToInt64()),unchecked((ulong)GetParent(hwnd).ToInt64()),cls.ToString().Replace("\\","\\\\").Replace("\"","\\\""),(GetWindowLongPtr(hwnd,-16).ToInt64()&0x40000000)!=0?"true":"false",childRect.right,childRect.bottom));return children.Count<32;},IntPtr.Zero);
-            Console.WriteLine(String.Format("{{\"event\":\"inspect\",\"host\":\"{0}\",\"parent\":\"{1}\",\"width\":{2},\"height\":{3},\"visible\":{5},\"children\":[{4}]}}",unchecked((ulong)host.ToInt64()),unchecked((ulong)GetParent(host).ToInt64()),rect.right,rect.bottom,String.Join(",",children),IsWindowVisible(host)?"true":"false"));Console.Out.Flush();continue;
+            Console.WriteLine(String.Format("{{\"event\":\"inspect\",\"host\":\"{0}\",\"parent\":\"{1}\",\"width\":{2},\"height\":{3},\"visible\":{5},\"x\":{6},\"y\":{7},\"parentWidth\":{8},\"parentHeight\":{9},\"children\":[{4}]}}",unchecked((ulong)host.ToInt64()),unchecked((ulong)GetParent(host).ToInt64()),rect.right,rect.bottom,String.Join(",",children),IsWindowVisible(host)?"true":"false",origin.x,origin.y,parentRect.right,parentRect.bottom));Console.Out.Flush();continue;
           }
           string[] fields=line.Split(' ');int x,y,w,h;
           if(fields.Length!=5||fields[0]!="bounds"||!Int32.TryParse(fields[1],out x)||!Int32.TryParse(fields[2],out y)||!Int32.TryParse(fields[3],out w)||!Int32.TryParse(fields[4],out h)||x<0||y<0||w<0||h<0||x>524288||y>524288||w>524288||h>524288)return 5;
