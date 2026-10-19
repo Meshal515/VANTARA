@@ -316,33 +316,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   const persistMirror = () => writeJson(MIRROR_KEY, mirror);
 
-  /**
-   * يحفظ الطابور، ويقاتل على المساحة قبل أن يستسلم.
-   *
-   * `localStorage` يرفض الكتابة عند الامتلاء. تجاهل الرفض — وهو ما كان يحدث —
-   * يعني طابورًا يبدو محفوظًا ويضيع عند إغلاق التطبيق. المرآة مشتقة من الخادم
-   * وتُسحب من جديد، فهي أول ما يُفرَّغ لإفساح المكان لكتابة لا يملكها غيرنا.
-   */
+  // Storage pressure must never delete an account's offline mirror. The server
+  // may be unavailable and a newer cursor does not prove history is recoverable.
   const persistQueue = () => {
     refreshOverlay();
-    if (writeJson(QUEUE_KEY, queue)) {
-      durable = true;
-      return true;
-    }
-    mirror = {};
-    valuesCache = new Map();
-    try {
-      localStorage.removeItem(MIRROR_KEY);
-    } catch {
-      // لا شيء نفعله: نحاول الحفظ على أي حال
-    }
     durable = writeJson(QUEUE_KEY, queue);
-    if (durable) {
-      // المرآة فُرِّغت: تُعاد من الخادم، والشاشة تُرقَّع بعدها
-      cursor = 0;
-      localStorage.setItem(CURSOR_KEY, '0');
-      void pull();
-    }
     return durable;
   };
 
