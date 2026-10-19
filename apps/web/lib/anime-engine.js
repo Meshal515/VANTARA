@@ -502,7 +502,7 @@ export function clock(ms) {
 }
 
 /** عنوان اللحظة في المجلس، ومنه تُقرأ بدايتها عند صديقك. */
-export const momentLabel = (episode, startMs, endMs) => `الحلقة ${episode} · ${clock(startMs)}–${clock(endMs)}`;
+export const momentLabel = (episode, startMs, endMs) => `${episode == null ? 'لقطة' : `الحلقة ${episode}`} · ${clock(startMs)}–${clock(endMs)}`;
 
 /** مدى اللحظة كاملًا من عنوانها («· 12:10–12:30») لـ«شاهد اللقطة»، أو null. */
 export function momentRange(label) {

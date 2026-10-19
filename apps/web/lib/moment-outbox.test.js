@@ -20,6 +20,10 @@ describe('durable source-backed moment native handoff',()=>{
  it('retries one stable operation id after a failed push and preserves pending files',async()=>{
   const t=base();t.sync.push.mockRejectedValueOnce(new Error('offline'));await t.drain();await t.drain();expect(t.sync.enqueue.mock.calls.every(c=>c[2].opId==='clip-1')).toBe(true);expect(t.native.acknowledgeOutbox).not.toHaveBeenCalled();
  });
+ it('normalizes the native movie sentinel to nullable episode before server delivery',async()=>{
+  const t=base();t.item.episode=-1;t.item.seriesRef='cinema:tt123456';await t.drain();
+  expect(t.sync.enqueue.mock.calls[0][1]).toMatchObject({seriesRef:'cinema:tt123456',chapterNumber:null,moment:{episode:null}});
+ });
  it('rejects an invalid range without publishing or discarding the native moment',async()=>{
   const t=base();t.item.endMs=11000;await t.drain();expect(t.sync.enqueue).not.toHaveBeenCalled();expect(t.native.acknowledgeOutbox).not.toHaveBeenCalled();
  });

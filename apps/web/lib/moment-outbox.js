@@ -33,17 +33,17 @@ export function createMomentOutbox({ native, sync, currentUser, storage = global
         };
         if (confirmed()) { await acknowledge(); continue; }
         try {
+          const ep = Number(it.episode) > 0 ? Number(it.episode) : null;
           const moment = it.type === 'moment' ? {
-            version: 1, startMs: it.startMs, endMs: it.endMs, episode: Number(it.episode) || null,
+            version: 1, startMs: it.startMs, endMs: it.endMs, episode: ep,
             sources: it.sources ?? it.moment?.sources ?? [],
           } : null;
           if (moment && (!Number.isFinite(moment.startMs) || !Number.isFinite(moment.endMs) || moment.startMs < 0 || moment.endMs <= moment.startMs || moment.endMs - moment.startMs > 70000)) throw new Error('invalid_clip');
           if (!active()) return;
-          const ep = Number(it.episode) || 1;
           sync.enqueue('recommendation.send', {
             toId: it.toId ?? null, seriesRef: it.seriesRef || `anime:${it.animeId}`,
             seriesTitle: it.title || 'عمل', coverUrl: it.poster ?? null, message: null, hiddenFrom: [],
-            chapterLabel: it.type === 'moment' ? momentLabel(ep, it.startMs, it.endMs) : `الحلقة ${ep}`, chapterNumber: ep,
+            chapterLabel: it.type === 'moment' ? momentLabel(ep, it.startMs, it.endMs) : ep == null ? 'فيلم' : `الحلقة ${ep}`, chapterNumber: ep,
             ...(moment ? { moment } : {}),
           }, { opId: it.id, requireDurable: true });
           await sync.push({ force: true });
