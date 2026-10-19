@@ -183,29 +183,34 @@ export function clearMomentSources(resolveSources) { sourceCaches.get(resolveSou
 /** No autoplay and no full-source blob fetch. A visible source gets metadata and one frame. */
 export function createMomentPreviews({ mediaUrl, resolveSources, cache = momentMediaCache, root = null } = {}) {
   const items = new Map(); let destroyed = false;
-  const stop = (item) => {
+  const stop = (item, owner = null) => {
+    if (owner && item.controller !== owner) return;
+    clearTimeout(item.timer); item.timer = null;
     item.controller?.abort(); item.controller = null;
+    if (item.video) item.video.onloadedmetadata = item.video.onloadeddata = item.video.onseeked = item.video.onerror = null;
     item.video?.pause?.(); item.video?.removeAttribute('src'); item.video?.load?.(); item.video?.remove(); item.video = null;
     item.lease?.release(); item.lease = null;
   };
   async function prepare(item) {
-    if (destroyed || item.controller || item.ready || globalThis.navigator?.connection?.saveData) return;
+    if (destroyed || item.controller || item.finished || globalThis.navigator?.connection?.saveData) return;
     const controller = item.controller = new AbortController();
+    let lease;
     try {
       let url;
       if (item.moment.mediaKey && mediaUrl) {
         url = safeMediaUrl(mediaUrl(item.moment.mediaKey));
         if (!url || !/\/v1\/media\/[^/]+$/.test(new URL(url).pathname)) return;
-        item.lease = await cache.acquire(url, { signal: controller.signal }); url = item.lease.url;
+        lease = await cache.acquire(url, { signal: controller.signal }); url = lease.url;
       } else if (resolveSources) {
-        item.lease = await acquireMomentSources(item.row, resolveSources, { signal: controller.signal });
+        lease = await acquireMomentSources(item.row, resolveSources, { signal: controller.signal });
         // Snapshot a public URL directly. Background preparation could replace Windows' active proxy.
-        const source = item.lease.sources.find((s) => safeMediaUrl(s.url) && !Object.keys(s.headers ?? {}).length);
+        const source = lease.sources.find((s) => safeMediaUrl(s.url) && !Object.keys(s.headers ?? {}).length);
         url = source && safeMediaUrl(source.url);
       }
-      if (destroyed || controller.signal.aborted) { stop(item); return; }
+      if (destroyed || controller.signal.aborted || item.controller !== controller) { lease?.release(); stop(item, controller); return; }
+      item.lease = lease;
       item.ready = true; item.shot.dataset.ready = 'true';
-      if (!url || item.moment.posterKey) { stop(item); return; }
+      if (!url || item.moment.posterKey) { item.finished = true; stop(item, controller); return; }
       const video = item.video = document.createElement('video');
       video.muted = true; video.playsInline = true; video.preload = 'metadata'; video.crossOrigin = 'anonymous';
       let positioned = Boolean(item.moment.trimmed);
@@ -218,13 +223,13 @@ export function createMomentPreviews({ mediaUrl, resolveSources, cache = momentM
           canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
           item.img.src = canvas.toDataURL('image/jpeg', .78);
         } catch { /* Poster remains when CORS or the codec blocks a snapshot. */ }
-        stop(item);
+        item.finished = true; stop(item, controller);
       };
       video.onloadedmetadata = () => { video.currentTime = item.moment.trimmed ? 0 : item.moment.startMs / 1000; };
       video.onseeked = () => { positioned = true; snapshot(); };
-      video.onloadeddata = snapshot; video.onerror = () => stop(item); video.src = url; video.load?.();
-      item.timer = setTimeout(() => stop(item), 8000);
-    } catch { if (!controller.signal.aborted) item.shot.dataset.ready = 'false'; stop(item); }
+      video.onloadeddata = snapshot; video.onerror = () => { item.finished = true; stop(item, controller); }; video.src = url; video.load?.();
+      item.timer = setTimeout(() => stop(item, controller), 8000);
+    } catch { if (!controller.signal.aborted) item.shot.dataset.ready = 'false'; lease?.release(); stop(item, controller); }
   }
   const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => {
     for (const entry of entries) {
