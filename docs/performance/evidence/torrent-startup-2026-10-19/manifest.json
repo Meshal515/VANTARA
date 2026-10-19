@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "folder": "before-n5",
+      "sourceRevision": "23850a566dcc561953a78b565317f88ca44bc1a5",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "6eaf1f9f2d21b3066a8dcfc4cfa34fcf26146c029dab0d1b0ba1730f94029e03",
+      "total": 30,
+      "successful": 30,
+      "failed": 0,
+      "renderedPNGs": 30
+    },
+    {
+      "folder": "after-n5",
+      "sourceRevision": null,
+      "sourceWorkingSnapshot": true,
+      "resultsSha256": "55b5e8315a41e0d4a0bb622c8db0bae008abe15a6a8b3166db14b20eb147de4c",
+      "total": 30,
+      "successful": 30,
+      "failed": 0,
+      "renderedPNGs": 30
+    },
+    {
+      "folder": "final-n5",
+      "sourceRevision": "8292dc09828c7c4876298326e089c278b91fbb1e",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "1f8bbb7d7c676a7c162a80a4e7f3f408df35869f90e384e9f0bc3b0043280b9c",
+      "total": 30,
+      "successful": 30,
+      "failed": 0,
+      "renderedPNGs": 30
+    },
+    {
+      "folder": "containers-before",
+      "sourceRevision": "23850a566dcc561953a78b565317f88ca44bc1a5",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "94a9ddc65b3c6f060d47586449b1ce5d8ce6ae517535ff732142f96f24453ad1",
+      "total": 6,
+      "successful": 6,
+      "failed": 0,
+      "renderedPNGs": 6
+    },
+    {
+      "folder": "containers-after",
+      "sourceRevision": "8292dc09828c7c4876298326e089c278b91fbb1e",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "773f38025ce6f1502530fb19f8988bbbe0b9f27d1d55e40177ec5a5ea28c177e",
+      "total": 6,
+      "successful": 6,
+      "failed": 0,
+      "renderedPNGs": 6
+    },
+    {
+      "folder": "slow-before",
+      "sourceRevision": "23850a566dcc561953a78b565317f88ca44bc1a5",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "1a2a5a51fef2d7537204283a96c4e3284f62cbee18ad13b8b8169388ac00a9af",
+      "total": 3,
+      "successful": 1,
+      "failed": 2,
+      "renderedPNGs": 3
+    },
+    {
+      "folder": "slow-after",
+      "sourceRevision": "8292dc09828c7c4876298326e089c278b91fbb1e",
+      "sourceWorkingSnapshot": false,
+      "resultsSha256": "8f50311c3ad96e79ce3647dd6ca6ccb5a2d85ce0c9b736ce3a9e20f4582bc897",
+      "total": 3,
+      "successful": 3,
+      "failed": 0,
+      "renderedPNGs": 3
+    }
+  ],
+  "hashAlgorithm": "sha256",
+  "notes": "Result file paths sanitized; native tools identified by hashes in each report; source snapshots preserved exactly."
+}

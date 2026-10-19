@@ -61,3 +61,7 @@ Run helper assertions with:
 ```sh
 node --test tools/torrent-startup-benchmark.test.mjs
 ```
+
+## Recorded local evidence
+
+The [2026-10-19 evidence bundle](evidence/torrent-startup-2026-10-19/README.md) preserves seven completed matrices, 108 rendered PNGs, exact source snapshots and sanitized JSON reports. It includes the final committed-source five-trial MP4 comparison, one-trial MKV/late-moov cases, and controlled 512 KiB/s peer cases with two baseline stability failures retained. Its README reports slower cases and scope limits alongside warm/restart improvements.
