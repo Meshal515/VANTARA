@@ -1,4 +1,5 @@
 name: Publish verified VANTARA Windows 0.3.15
+run-name: Verify Windows 0.3.15 account recovery and device-owned moments
 on:
   push:
     branches: ['codex/windows-moments-20261019', 'codex/windows-manga-parity-20261018', 'codex/windows-current-accounts-20261018', 'claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.15-integrated-20261018']
@@ -168,7 +169,7 @@ jobs:
             SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
-            --notes "استرجاع سجل الحساب والمكتبة والأصدقاء والمجلس من الخادم مع حفظ التغييرات غير المتصلة وتخزين الحالة الكبيرة في IndexedDB. محرر لحظات موحد من كاميرا المشغل، عرض مصغر داخل المجلس، وحفظ النطاق المحدد فقط كملف MP4 محلي ونسخ الملف للمشاركة الخارجية. لا تُرفع ملفات الفيديو إلى الخادم. يحتفظ بمشغل ويندوز والتورنت و4K وتصميمه. يُنشر فقط بعد التثبيت والتشغيل والتصدير الحقيقي بواسطة MPV المرفق وفحص حافظة الملفات على Windows CI. نسخة غير موقعة." \
+            --notes "استرجاع سجل الحساب والمكتبة والأصدقاء والمجلس من الخادم مع حفظ التغييرات غير المتصلة وتخزين الحالة الكبيرة في IndexedDB. محرر لحظات موحد من كاميرا المشغل، عرض مصغر داخل المجلس، وحفظ النطاق المحدد فقط كملف MP4 محلي ونسخ الملف للمشاركة الخارجية. لا تُرفع ملفات الفيديو إلى الخادم. يصحح كذلك ترميز ملفات الترجمة العربية القديمة ويحترم BOM والترميز المعلن. يحتفظ بمشغل ويندوز والتورنت و4K وتصميمه. يُنشر فقط بعد التثبيت والتشغيل والتصدير الحقيقي بواسطة MPV المرفق وفحص حافظة الملفات على Windows CI. نسخة غير موقعة." \
             --prerelease --latest=false
       - name: Publish Windows update channel after verified release exists
         shell: bash
