@@ -124,7 +124,7 @@ export function momentSendPayload(args, selection) {
   return {
     userId: args.usageUserId ?? args.presenceUserId ?? null,
     seriesRef: selection.work.ref, seriesTitle: selection.work.title, coverUrl: selection.work.cover ?? null,
-    chapterLabel: `الحلقة ${selection.episode} · ${clock(selection.startMs / 1000)}–${clock(selection.endMs / 1000)}`,
+    chapterLabel: `${selection.episode == null ? 'الفيلم' : `الحلقة ${selection.episode}`} · ${clock(selection.startMs / 1000)}–${clock(selection.endMs / 1000)}`,
     chapterNumber: selection.episode, moment: selection.moment, toIds: selection.toIds,
     broadcast: selection.broadcast, ...(selection.message ? { message: selection.message } : {}),
   };
@@ -294,7 +294,7 @@ export function openPlayer(args) {
     };
     momentComposer = openMomentComposer({
       positionMs: Math.round((video.currentTime || 0) * 1000), durationMs: Math.floor(video.duration * 1000),
-      work, episode: state.episode, friends: args.friends ?? [], sourceHints: [rawSource],
+      work, episode: movie ? null : state.episode, friends: args.friends ?? [], sourceHints: [rawSource],
       onSend: (selection) => emit('momentSend', momentSendPayload(args, selection)),
       onSave: (selection) => save(selection), onShare: (selection) => save(selection, true),
       onPreview: (selection) => {

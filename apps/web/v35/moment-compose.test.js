@@ -32,4 +32,10 @@ describe('shared moment composer', () => {
   it('strips private addresses, request headers and local engine handles from transmitted source hints', () => {
     expect(publicMomentHints([{ url: 'http://127.0.0.1:8080/proxy', sourceId: 'torrent', session: 'local' }, { url: 'https://user:secret@source.example/movie', headers: { Cookie: 'secret' } }, { url: 'https://source.example/movie.mp4', headers: { Cookie: 'secret' }, exportHandle: 'local' }])).toEqual([{ sourceId: 'torrent' }, { url: 'https://source.example/movie.mp4' }]);
   });
+  it('limits transmitted hints to the backend contract and preserves movie episode null', async () => {
+    expect(publicMomentHints(Array.from({ length: 12 }, (_, i) => ({ sourceId: `source${i}` })))).toHaveLength(8);
+    const onSend = vi.fn(); composer = openMomentComposer({ ...options, episode: null, onSend });
+    document.querySelector('[data-compose-action="send"]').click(); await Promise.resolve();
+    expect(onSend.mock.calls[0][0].moment.episode).toBeNull();
+  });
 });
