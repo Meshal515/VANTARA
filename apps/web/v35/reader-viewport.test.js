@@ -78,9 +78,9 @@ describe('reader viewport capture geometry', () => {
   it('clips a scrolled paged image to its frame, including horizontal clipping', () => {
     const plan = buildViewportCapture({ viewport: rect(0, 0, 400, 800), scroll: rect(0, 0, 400, 800),
       pages: [page(rect(-100, -800, 500, 5000), 1000, 10000, rect(0, 40, 350, 600))] });
-    expect(plan.bounds).toEqual(rect(0, 0, 350, 800));
+    expect(plan.bounds).toEqual(rect(0, 40, 350, 600));
     expect(plan.draws[0].source).toEqual(rect(200, 1680, 700, 1200));
-    expect(plan.draws[0].dest).toEqual(rect(0, 40, 350, 600));
+    expect(plan.draws[0].dest).toEqual(rect(0, 0, 350, 600));
   });
 
   it('preserves fit-height letterboxing and crops desktop side gutters to the page frame', () => {
@@ -133,6 +133,8 @@ describe('zoomed manga image capture (exactly what is visible)', () => {
     expect(result.mode).toBe('viewport');
     expect(result.draws[0].source.width).toBeCloseTo(1510);
     expect(result.draws[0].source.left).toBeCloseTo(0);
+    expect(result.bounds).toEqual(rect(110, 200, 302, 600));
+    expect(result.draws[0].dest).toEqual(rect(0, 0, 302, 600));
   });
 });
 
