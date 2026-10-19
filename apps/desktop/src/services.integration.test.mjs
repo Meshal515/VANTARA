@@ -82,11 +82,12 @@ test('mpv الحقيقي يفك فيديو مؤلف وترجمة عربية وي
   t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
   t.mock.method(https,'request',(url,options,cb)=>http.request(`http://127.0.0.1:${source.address().port}${url.pathname}`,{...options,lookup:undefined},cb));
   const wrapper=join(dir,'mpv');
-  await writeFile(wrapper,`#!${process.execPath}\nimport {spawn} from 'node:child_process';import fs from 'node:fs';const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(join(dir,'args'))},JSON.stringify(args));const child=spawn(${JSON.stringify(mpvBinary)},args,{env:process.env,stdio:'ignore'});fs.writeFileSync(${JSON.stringify(join(dir,'pid'))},String(child.pid));process.on('SIGTERM',()=>{child.kill();setTimeout(()=>child.kill('SIGKILL'),300);});child.once('exit',code=>process.exit(code??0));`);
+  await writeFile(wrapper,`#!${process.execPath}\nimport {spawn} from 'node:child_process';import fs from 'node:fs';const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(join(dir,'args'))},JSON.stringify(args));const child=spawn(${JSON.stringify(mpvBinary)},args,{env:process.env,stdio:'inherit'});fs.writeFileSync(${JSON.stringify(join(dir,'pid'))},String(child.pid));process.on('SIGTERM',()=>{child.kill();setTimeout(()=>child.kill('SIGKILL'),300);});child.once('exit',code=>process.exit(code??0));`);
   const {chmod}=await import('node:fs/promises');await chmod(wrapper,0o755);
-  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit:binary??'/not-used',mpv:wrapper},onEvent:e=>events.push(e)});t.after(()=>services.close());
+  const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit:binary??'/not-used',mpv:wrapper},videosDir:join(dir,'Videos'),onEvent:e=>events.push(e)});t.after(()=>services.close());
   assert.deepEqual(await services.startPlayback({session:'real-video',candidate:{url:'https://fixture.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',position:1000,pause:true}),{started:true});
   await until(()=>events.some(e=>e.type==='playback/ready'));
+  const playerPid=Number(await readFile(join(dir,'pid'),'utf8'));
   const args=JSON.parse(await readFile(join(dir,'args'),'utf8')),path=args.find(x=>x.startsWith('--input-ipc-server=')).slice(19);
   const socket=net.createConnection(path);t.after(()=>socket.destroy());await new Promise((r,j)=>{socket.once('connect',r);socket.once('error',j);});
   const params=await new Promise((resolve,reject)=>{let buffer='';const timer=setTimeout(()=>reject(new Error('IPC timeout')),2000);socket.on('data',chunk=>{buffer+=chunk;for(const line of buffer.split('\n').slice(0,-1)){const message=JSON.parse(line);if(message.request_id===99){clearTimeout(timer);resolve(message.data);}}buffer=buffer.split('\n').at(-1);});socket.write(JSON.stringify({command:['get_property','video-out-params'],request_id:99})+'\n');});
@@ -124,7 +125,11 @@ test('mpv الحقيقي يفك فيديو مؤلف وترجمة عربية وي
   await until(()=>events.some(e=>e.type==='playback/seek'&&e.position>=3900));
   await services.playbackCommand({session:'real-video',command:'rate',value:0.98});
   await services.playbackCommand({session:'real-video',command:'rate',value:1});
+  const clip=await services.exportMoment({session:'real-video',startMs:1250,endMs:3750,filename:'owned-range.mp4',action:'save'});
+  const clipFile=await readFile(clip.path);assert.ok(clipFile.includes(Buffer.from('ftyp')));
+  assert.deepEqual(Buffer.from((await services.readMoment({session:'real-video'})).base64,'base64'),clipFile);
+  assert.equal((await services.inspectPlayback({session:'real-video'})).video.w,320);
   await services.stopPlayback({session:'real-video'});
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
-  const pid=Number(await readFile(join(dir,'pid'),'utf8'));assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+  assert.throws(()=>process.kill(playerPid,0),{code:'ESRCH'});
 });

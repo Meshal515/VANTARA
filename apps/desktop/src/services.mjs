@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createMomentExporter,validateMomentExport} from './moment-export.mjs';
 import { createPlaybackBudget } from './playback-budget.mjs';
 import https from 'node:https';
 import net from 'node:net';
@@ -349,9 +350,11 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,videosDir=null,shareFile=null}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
-  let current=null,closed=false;
+  let current=null,preparedMoment=null,closed=false;
+  const momentExporter=createMomentExporter({mpv:binaries.mpv,videosDir,shareFile});
+  let exporting=false;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
   const lookup=dnsOverHttps?unblockingLookup:systemLookup;
   const puncher=holePuncher??createHolePuncher(platform);
@@ -366,13 +369,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return {position:state.progress.position??0,duration:state.progress.duration??0,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true};
   }
   function emitPlaybackState(state) {if(state.ready){const value=playbackState(state);state.budget?.update(value);emit(state,{type:'playback/state',...value});}}
-  function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
+  function assertSession(state) { if (state.stopped||(state.prepared?!states.has(state):current!==state)||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
     state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
+      await state.sourceJob?.catch(()=>{});
+      await state.exportJob?.catch(()=>{});
       if(state.proxy){state.proxy.closeAllConnections();await new Promise(resolve=>state.proxy.close(resolve));}
       await Promise.all([...state.children].map(kill));
       await state.videoSurface?.close();
@@ -429,6 +434,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const mapping=new Map();let counter=0;
     function mapped(url) { const id=String(counter++);mapping.set(id,url);return `http://127.0.0.1:${state.proxy.address().port}/${token}/${id}`; }
     const server=http.createServer(async(req,res)=>{
+      if(state.prepared){res.setHeader('Access-Control-Allow-Origin','vantara://app');res.setHeader('Access-Control-Expose-Headers','content-length,content-range,accept-ranges');}
       if(state.stopped||!['GET','HEAD'].includes(req.method)) {res.writeHead(403);return res.end();}
       const match=new RegExp(`^/${token}/(\\d+)$`).exec(req.url);
       if(!match||!mapping.has(match[1])){res.writeHead(404);return res.end();}
@@ -486,7 +492,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function engine(state,candidate) {
     emit(state,{type:'playback/stage',stage:'engine-start'});
     const chosen=await selectTorrentCacheRoot({userData,platform});assertSession(state);
-    state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
+    state.cacheParent=await prepareTorrentCache(chosen.root,state.prepared?join(userData,state.exportSource?'active-moment-export':'moment-export'):userData);assertSession(state);
     const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
     state.auth=`vantara:${secret()}`;
@@ -752,7 +758,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(closed)throw new Error('أغلقت الخدمات');
     if(typeof session!=='string'||!session||session.length>200||!Number.isFinite(position)||position<0||typeof pause!=='boolean')throw new Error('جلسة أو موضع تشغيل غير صالح');
     candidate=validateCandidate(candidate);
-    const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
+    const old=current,state={session,candidate,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     current=state;states.add(state);
@@ -765,12 +771,66 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
       emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
-      const url=candidate.infoHash?await engine(state,candidate):await makeProxy(state,candidate.url,candidate.headers);
-      assertSession(state);await player(state,url,title,position,pause);assertSession(state);
+      state.sourceJob=candidate.infoHash?engine(state,candidate):makeProxy(state,candidate.url,candidate.headers);
+      const url=await state.sourceJob;
+      state.momentURL=url;assertSession(state);await player(state,url,title,position,pause);assertSession(state);
       const embedded=(Array.isArray(candidate.subtitles)?candidate.subtitles:[]).slice(0,100).sort((a,b)=>Number(subtitleLanguage(b?.lang)==='ar')-Number(subtitleLanguage(a?.lang)==='ar'));
       for(const subtitle of embedded)void loadSubtitle(state,subtitle).catch(()=>{});
       return {started:true};
     }catch(e){const wasCancelled=state.stopped||current!==state||closed;if(!wasCancelled)emit(state,{type:'playback/error',message:e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو'});await cleanup(state);if(current===state)current=null;if(state.failure)throw new Error(state.failure);if(wasCancelled)throw cancelled();throw new Error(e.message?.match(/ملف|fileIdx|هوية|DASH|تورنت|المصدر|المساحة|مساحة|كاش|حجم/)?e.message:'تعذر بدء تشغيل الفيديو');}
+  }
+  async function prepareMoment({session,candidate}={}) {
+    if(closed)throw new Error('أغلقت الخدمات');
+    if(typeof session!=='string'||!session||session.length>200)throw new Error('جلسة المقطع غير صالحة');
+    candidate=validateCandidate(candidate);
+    const old=preparedMoment,state={session,exportHandle:secret(),prepared:true,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
+    preparedMoment=state;states.add(state);
+    try {
+      const startupError=await startup;if(startupError)throw startupError;
+      if(old)await cleanup(old);assertSession(state);
+      state.sourceJob=candidate.infoHash?engine(state,candidate):makeProxy(state,candidate.url,candidate.headers);
+      state.momentURL=await state.sourceJob;
+      assertSession(state);const hls=candidate.type==='hls'||/\.m3u8(?:\?|$)/i.test(candidate.url??'');
+      return {prepared:true,session,exportHandle:state.exportHandle,url:state.momentURL,type:hls?'hls':'file',mimeType:hls?'application/vnd.apple.mpegurl':'video/mp4'};
+    }catch(error){await cleanup(state);if(preparedMoment===state)preparedMoment=null;throw new Error('تعذر تجهيز مصدر المقطع؛ اختر مصدرًا آخر');}
+  }
+  async function releaseMoment({session,exportHandle}={}) {
+    const state=preparedMoment;if(!state||state.session!==session||state.exportHandle!==exportHandle)return false;
+    preparedMoment=null;await cleanup(state);return true;
+  }
+  async function exportMoment(value) {
+    const request=validateMomentExport(value);
+    const state=request.exportHandle?preparedMoment:current;
+    if(!state||state.stopped||state.session!==request.session||request.exportHandle&&state.exportHandle!==request.exportHandle||!state.prepared&&!state.ready||!state.momentURL)throw new Error('جلسة المقطع قديمة أو لم يجهز الفيديو');
+    assertSession(state);
+    if(exporting)throw new Error('يوجد مقطع قيد التصدير؛ انتظر اكتماله');
+    if(state.progress.duration>0&&request.endMs>state.progress.duration)throw new Error('نهاية المقطع تتجاوز مدة الفيديو');
+    exporting=true;
+    state.exportJob=(async()=>{
+      let source=state,abort=null;
+      try {
+        if(!state.prepared) {
+          // Export reads must not move/rebuild the full player's bounded torrent cache.
+          source={session:state.session,prepared:true,exportSource:true,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
+          states.add(source);abort=()=>source.controller.abort();state.controller.signal.addEventListener('abort',abort,{once:true});
+          assertSession(state);const candidate=state.candidate;
+          source.sourceJob=candidate.infoHash?engine(source,candidate):makeProxy(source,candidate.url,candidate.headers);
+          source.momentURL=await source.sourceJob;
+          assertSession(state);
+        }
+        return await momentExporter.exportClip({...request,url:source.momentURL,signal:source.controller.signal});
+      }finally {if(source!==state){state.controller.signal.removeEventListener('abort',abort);await cleanup(source);}}
+    })();
+    try {const result=await state.exportJob;state.exportedFile={path:result.path,filename:result.filename};return result;}finally {exporting=false;state.exportJob=null;}
+  }
+  async function readMoment(value) {
+    if(!plain(value)||Object.keys(value).some(key=>!['session','exportHandle'].includes(key))||typeof value.session!=='string'||!value.session||value.exportHandle!==undefined&&(typeof value.exportHandle!=='string'||!/^[a-f0-9]{48}$/.test(value.exportHandle)))throw new Error('طلب قراءة المقطع غير صالح');
+    const state=value.exportHandle?preparedMoment:current;
+    if(!state||state.stopped||state.session!==value.session||value.exportHandle&&state.exportHandle!==value.exportHandle)throw new Error('جلسة المقطع قديمة');
+    assertSession(state);if(!state.exportedFile)throw new Error('لم يُحفظ مقطع لهذه الجلسة بعد');
+    const file=await fs.open(state.exportedFile.path,'r');
+    try {const stat=await file.stat();if(!stat.isFile()||stat.size>16*1024**2)throw new Error('ملف المقطع أكبر من الحد');const contents=await file.readFile();assertSession(state);return {base64:contents.toString('base64'),mimeType:'video/mp4',filename:state.exportedFile.filename};}
+    finally {await file.close();}
   }
   async function stopPlayback({session}={}) {
     const state=current;if(!state||state.session!==session)return;
@@ -852,8 +912,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   // Internal verification only: not registered on the renderer IPC bridge.
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay};}
-  async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));current=null;}
-  return {requestResource,startPlayback,stopPlayback,playbackCommand,inspectPlayback,close};
+  async function close(){closed=true;for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));current=null;preparedMoment=null;}
+  return {requestResource,startPlayback,stopPlayback,playbackCommand,prepareMoment,releaseMoment,exportMoment,readMoment,inspectPlayback,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {

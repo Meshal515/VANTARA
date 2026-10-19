@@ -6,3 +6,8 @@ test('the isolated Windows preload reports the packaged application version supp
   assert.equal(bridge.version,expected);
  }
 });
+test('moment bridge exposes only prepare, release and bounded export IPC calls',()=>{
+ let bridge;const calls=[];
+ vm.runInNewContext(fs.readFileSync(require.resolve('./preload.cjs'),'utf8'),{process:{argv:[]},require:()=>({contextBridge:{exposeInMainWorld:(_name,value)=>bridge=value},ipcRenderer:{invoke:(...args)=>calls.push(args),on(){},removeListener(){}}})});
+ for(const [method,channel]of [['prepareMoment','prepare-moment'],['releaseMoment','release-moment'],['exportMoment','export-moment'],['readMoment','read-moment']]){const request={session:'local'};bridge[method](request);assert.equal(calls.at(-1)[0],'vantara:'+channel);assert.equal(calls.at(-1)[1],request);}
+});

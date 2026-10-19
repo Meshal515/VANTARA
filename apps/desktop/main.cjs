@@ -133,11 +133,15 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     userData: app.getPath('userData'),
     binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
     platform: process.platform,
+    videosDir:app.getPath('videos'),
+    shareFile:process.platform==='win32'?file=>new Promise((resolve,reject)=>{
+      require('node:child_process').execFile(process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),['--copy-file',file],{windowsHide:true,shell:false,timeout:10000},error=>error?reject(new Error('تعذر نسخ ملف المقطع للمشاركة')):resolve());
+    }):null,
     videoHost,
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
   });
-  for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
+  for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['prepare-moment','prepareMoment'], ['release-moment','releaseMoment'], ['export-moment','exportMoment'], ['read-moment','readMoment']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     let parsed;

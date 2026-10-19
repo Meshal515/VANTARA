@@ -105,7 +105,6 @@ test('سطر rqbit: خيارات 9.0.1 الصحيحة، وحفظ DHT يمكن ت
 
 async function fixture(t, mode='normal', serviceOptions={}) {
   const dir=await mkdtemp(join(tmpdir(),'vantara-services-test-'));
-  t.after(() => rm(dir,{recursive:true,force:true}));
   const rqbit=join(dir,'rqbit'), mpv=join(dir,'mpv');
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
@@ -115,7 +114,7 @@ const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:tracks.length+1,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];const services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,...serviceOptions});
-  t.after(()=>services.close());return {dir,services,events,binaries:{rqbit,mpv}};
+  t.after(async()=>{await services.close();await rm(dir,{recursive:true,force:true});});return {dir,services,events,binaries:{rqbit,mpv}};
 }
 test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC وتقدم وأوامر وتنظيف',async t=>{
   const {dir,services,events}=await fixture(t);
@@ -489,4 +488,76 @@ test('manual speed, fit and subtitle position are constrained MPV properties',as
  for(const [command,value] of [['speed',0],['speed',Infinity],['video-fit','arbitrary'],['subtitle-position',101]])await assert.rejects(services.playbackCommand({session:'appearance',command,value}));
  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).map(m=>m.command);
  for(const expected of [['set_property','speed',1.5],['set_property','panscan',1],['set_property','sub-pos',85]])assert.ok(commands.some(c=>JSON.stringify(c)===JSON.stringify(expected)));
+});
+
+test('prepared moment has a private export handle without launching or replacing active MPV',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{videosDir:join(tmpdir(),'unused-vantara-videos')});
+  await services.startPlayback({session:'watching',candidate:{url:'https://example.com/full.mp4'}});
+  assert.equal(await hasReadyEvent(events),true);
+  const commands=await readFile(join(dir,'commands'),'utf8');
+  const prepared=await services.prepareMoment({session:'incoming',candidate:{url:'https://example.com/clip.mp4',headers:{Authorization:'private-provider-token'}}});
+  assert.equal(prepared.prepared,true);assert.match(prepared.exportHandle,/^[a-f0-9]{48}$/);
+  assert.equal(await readFile(join(dir,'commands'),'utf8'),commands);
+  await assert.rejects(services.exportMoment({session:'incoming',startMs:0,endMs:2500,action:'save'}),/جلسة/);
+  await assert.rejects(services.exportMoment({session:'incoming',exportHandle:'0'.repeat(48),startMs:0,endMs:2500,action:'save'}),/جلسة/);
+  await services.releaseMoment(prepared);
+  await assert.rejects(services.exportMoment({session:prepared.session,exportHandle:prepared.exportHandle,startMs:0,endMs:2500,action:'save'}),/جلسة/);
+  await services.playbackCommand({session:'watching',command:'pause',value:true});
+});
+
+test('prepared moment exports and reads only its own last real file without touching active playback',async t=>{
+  const {dir,services,binaries}=await fixture(t,'normal',{videosDir:join(tmpdir(),'unused')});
+  // Fixture services need a destination owned by this test rather than a user's Videos folder.
+  await services.close();const client=createDesktopServices({userData:dir,binaries,videosDir:join(dir,'Videos'),dnsOverHttps:false});t.after(()=>client.close());
+  const watching={session:'watching',candidate:{infoHash:hash,fileIdx:0}};await client.startPlayback(watching);
+  const engine=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));const cache=engine.args.at(-2);const sentinel=join(cache,'keep-active');await writeFile(sentinel,'active-cache');
+  const prepared=await client.prepareMoment({session:'incoming',candidate:{infoHash:hash,fileIdx:0}});
+  assert.equal(await readFile(sentinel,'utf8'),'active-cache');assert.match(prepared.url,/^http:\/\/127\.0\.0\.1:\d+\/[a-f0-9]{48}\/0$/);
+  const response=await fetch(prepared.url);assert.equal(response.headers.get('access-control-allow-origin'),'vantara://app');await response.arrayBuffer();
+  await assert.rejects(client.readMoment({session:'incoming',exportHandle:prepared.exportHandle}),/مقطع/);
+  const {session,exportHandle}=prepared;
+  await writeFile(binaries.mpv,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2),output=args.find(a=>a.startsWith('--o='));if(output)fs.writeFileSync(output.slice(4),Buffer.alloc(2048,7));else console.log(args.find(a=>a.startsWith('--term-playing-msg=')).slice(19).split('$')[0]+(args.at(-1).endsWith('clip.mp4')?'2.5':'60'));`);
+  const saved=await client.exportMoment({session,exportHandle,startMs:1250,endMs:3750,filename:'incoming',action:'save'});
+  const read=await client.readMoment({session,exportHandle});assert.equal(read.mimeType,'video/mp4');assert.equal(read.filename,saved.filename);assert.deepEqual(Buffer.from(read.base64,'base64'),await readFile(saved.path));
+  await assert.rejects(client.readMoment({session,exportHandle,path:saved.path}));
+  await client.releaseMoment({session,exportHandle});assert.equal(await readFile(sentinel,'utf8'),'active-cache');
+  await assert.rejects(client.readMoment({session,exportHandle}),/جلسة/);await client.playbackCommand({session:'watching',command:'pause',value:true});await client.close();
+});
+
+test('active full-player export uses a separate source and cleans it without a seek or cache replacement',async t=>{
+  const {dir,services:unused,binaries}=await fixture(t);await unused.close();
+  const services=createDesktopServices({userData:dir,binaries,videosDir:join(dir,'Videos'),dnsOverHttps:false});t.after(()=>services.close());
+  await services.startPlayback({session:'active-export',candidate:{infoHash:hash,fileIdx:0}});
+  const original=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));const originalCache=original.args.at(-2);await writeFile(join(originalCache,'keep'),'playing');
+  const commands=await readFile(join(dir,'commands'),'utf8');
+  await writeFile(binaries.mpv,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2),output=args.find(a=>a.startsWith('--o='));if(output)fs.writeFileSync(output.slice(4),Buffer.alloc(2048,7));else console.log(args.find(a=>a.startsWith('--term-playing-msg=')).slice(19).split('$')[0]+(args.at(-1).endsWith('clip.mp4')?'2.5':'60'));`);
+  await services.exportMoment({session:'active-export',startMs:1250,endMs:3750,filename:'captured.mp4',action:'save'});
+  const exported=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));assert.notEqual(exported.pid,original.pid);assert.notEqual(exported.args.at(-2),originalCache);
+  assert.equal(await readFile(join(originalCache,'keep'),'utf8'),'playing');assert.equal(await readFile(join(dir,'commands'),'utf8'),commands);
+  assert.doesNotThrow(()=>process.kill(original.pid,0));assert.throws(()=>process.kill(exported.pid,0),{code:'ESRCH'});
+  assert.equal((await services.readMoment({session:'active-export'})).mimeType,'video/mp4');
+  await services.playbackCommand({session:'active-export',command:'pause',value:true});await services.close();
+});
+
+test('replacing a prepared moment aborts its encoder and an old handle cannot release the replacement',async t=>{
+  const {dir,services:unused,binaries}=await fixture(t);await unused.close();
+  const services=createDesktopServices({userData:dir,binaries,videosDir:join(dir,'Videos'),dnsOverHttps:false});t.after(()=>services.close());
+  const old=await services.prepareMoment({session:'old',candidate:{url:'https://example.com/old.mp4'}});
+  const pidFile=join(dir,'export-pid');await writeFile(binaries.mpv,`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000);`);
+  const exportResult=services.exportMoment({session:old.session,exportHandle:old.exportHandle,startMs:0,endMs:1000,action:'save'}).catch(error=>error);
+  for(let i=0;i<100;i++){try{await readFile(pidFile);break;}catch{await new Promise(resolve=>setTimeout(resolve,10));}}
+  const pid=Number(await readFile(pidFile,'utf8'));
+  const replacement=await services.prepareMoment({session:'new',candidate:{url:'https://example.com/new.mp4'}});
+  assert.match((await exportResult).message,/أُلغي/);assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+  assert.equal(await services.releaseMoment(old),false);assert.equal(await services.releaseMoment(replacement),true);
+});
+
+test('close waits for in-flight prepared torrent cache creation and removes the late directory',async t=>{
+  const fs=await import('node:fs/promises');const {default:promises}=fs;const {cacheNamespace}=await import('./torrent-cache.mjs');
+  const {dir,services}=await fixture(t);const cache=join(dir,cacheNamespace(join(dir,'moment-export')));
+  const original=promises.mkdir;let entered,unblock;const reached=new Promise(resolve=>entered=resolve),resume=new Promise(resolve=>unblock=resolve);
+  t.mock.method(promises,'mkdir',async function(path,...args){if(String(path)===cache){entered();await resume;}return original.call(this,path,...args);});
+  const preparing=services.prepareMoment({session:'closing',candidate:{infoHash:hash,fileIdx:0}}).catch(error=>error);
+  await reached;const closing=services.close();await new Promise(resolve=>setTimeout(resolve,10));unblock();
+  await closing;assert.ok(await preparing instanceof Error);await assert.rejects(fs.stat(cache),{code:'ENOENT'});
 });

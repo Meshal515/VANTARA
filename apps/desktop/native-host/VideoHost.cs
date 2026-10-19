@@ -1,6 +1,7 @@
 // Genuine child HWND in Electron's client area. mpv owns its video child;
 // Chromium owns controls outside this rectangle. No top-level video window.
 using System;
+using System.IO;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -27,7 +28,38 @@ public static class VideoHost {
   [StructLayout(LayoutKind.Sequential)] struct POINT { public int x,y; }
   [StructLayout(LayoutKind.Sequential)] struct RECT {public int left,top,right,bottom;}
   [StructLayout(LayoutKind.Sequential)] struct MSG {public IntPtr hwnd;public uint message;public UIntPtr wParam;public IntPtr lParam;public uint time;public POINT point;public uint reserved;}
+  [DllImport("user32.dll", SetLastError=true)] static extern bool OpenClipboard(IntPtr owner);
+  [DllImport("user32.dll")] static extern bool CloseClipboard();
+  [DllImport("user32.dll")] static extern bool EmptyClipboard();
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetClipboardData(uint format,IntPtr memory);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr GlobalAlloc(uint flags,UIntPtr bytes);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr memory);
+  // CF_HDROP is a real Windows file list, so external applications receive the MP4 file.
+  static int CopyFile(string input) {
+    string file;
+    try {file=Path.GetFullPath(input);if(!File.Exists(file)||!String.Equals(Path.GetExtension(file),".mp4",StringComparison.OrdinalIgnoreCase))return 20;}catch{return 20;}
+    byte[] names=Encoding.Unicode.GetBytes(file+"\0\0");
+    IntPtr memory=GlobalAlloc(0x0042,new UIntPtr((uint)(20+names.Length)));if(memory==IntPtr.Zero)return 21;
+    bool transferred=false,opened=false;
+    try {
+      IntPtr data=GlobalLock(memory);if(data==IntPtr.Zero)return 21;
+      try {Marshal.WriteInt32(data,0,20);Marshal.WriteInt32(data,16,1);Marshal.Copy(names,0,IntPtr.Add(data,20),names.Length);}finally{GlobalUnlock(memory);}
+      // Clipboard ownership requires a window on this thread even for a console helper.
+      IntPtr owner=CreateWindowEx(0,"STATIC","VANTARA moment share",0,0,0,1,1,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero);
+      if(owner==IntPtr.Zero)return 22;
+      try {
+        for(int i=0;i<20&&!opened;i++){opened=OpenClipboard(owner);if(!opened)Thread.Sleep(25);}
+        if(!opened||!EmptyClipboard())return 22;
+        if(SetClipboardData(15,memory)==IntPtr.Zero)return 23;
+        transferred=true;return 0;
+      }finally{if(opened)CloseClipboard();DestroyWindow(owner);}
+    }finally{if(!transferred)GlobalFree(memory);}
+  }
+  [STAThread]
   public static int Main(string[] args) {
+    if(args.Length==2&&args[0]=="--copy-file")return CopyFile(args[1]);
     ulong raw;uint expected,pid;
     if(args.Length!=2||!UInt64.TryParse(args[0],out raw)||raw==0||!UInt32.TryParse(args[1],out expected))return 2;
     IntPtr parent=new IntPtr(unchecked((long)raw));
