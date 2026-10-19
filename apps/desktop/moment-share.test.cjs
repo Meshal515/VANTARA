@@ -12,7 +12,14 @@ test('Windows clipboard contains an actual CF_HDROP file usable by external apps
  const file=join(dir,'لحظة owned.mp4');await fs.writeFile(file,'owned clipboard test');
  await run(binary,['--copy-file',file],{windowsHide:true,shell:false});
  const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; @(Get-Clipboard -Format FileDropList | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.FullName } }) | ConvertTo-Json -Compress"],{windowsHide:true,shell:false});
- const value=JSON.parse(stdout.replace(/^\uFEFF/,''));assert.deepEqual(Array.isArray(value)?value:[value],[file]);
+ const value=JSON.parse(stdout.replace(/^\uFEFF/,''));
+ // CF_HDROP may canonicalize the Windows 8.3 short temp path (RUNNER~1)
+ // to its long name (runneradmin). Verify file identity and REAL bytes,
+ // not the caller's particular path spelling.
+ const items=Array.isArray(value)?value:[value];
+ assert.equal(items.length,1);
+ assert.equal(await fs.realpath(items[0]),await fs.realpath(file));
+ assert.equal(await fs.readFile(items[0],'utf8'),'owned clipboard test');
 });
 test('bundled Windows MPV encodes the selected owned fixture without a separate ffmpeg executable',{skip:process.platform!=='win32'||!process.env.VANTARA_MPV_BINARY,timeout:30000},async t=>{
  const {createMomentExporter}=await import('./src/moment-export.mjs');
