@@ -178,6 +178,41 @@ export function createAddonRegistry({
       return view(next);
     });
   }
+  // Refresh the installed provider from its original configured URL without
+  // deleting the working copy first or losing provider-specific credentials.
+  function reinstall(key, { signal } = {}) {
+    return mutate(async () => {
+      const before = row(key);
+      if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
+      const abort = () => { if (signal?.aborted) throw new DOMException("ألغي إعادة التثبيت", "AbortError"); };
+      abort();
+      const raw = await transport.json(before.url, { signal, limit: LIMITS.manifest, cache: "no-store" });
+      abort();
+      assertBoundedData(raw);
+      const checked = validateManifest(raw, { origin: publicUrl(before.url).origin });
+      if (checked.errors.length) throw new Error("بيانات إعادة التثبيت غير متوافقة؛ احتُفظ بالإضافة السابقة");
+      const manifest = checked.manifest;
+      if (manifest.key !== key || manifest.protocol !== before.manifest.protocol)
+        throw new Error("هوية الإضافة تغيرت؛ احتُفظ بالإضافة السابقة");
+      if (manifest.configuration?.required && !manifest.configuration.configured)
+        throw new Error("تحتاج الإضافة إلى الإعداد؛ احتُفظ بالإضافة السابقة");
+      if (manifest.baseUrl !== before.manifest.baseUrl ||
+          canonicalData([...manifest.permissions.networkHosts].sort()) !== canonicalData([...before.manifest.permissions.networkHosts].sort()))
+        throw new Error("المضيف أو صلاحيات الشبكة تغيرت؛ افحص تحديث الإضافة أولًا");
+      if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
+      abort();
+      const next = { ...before, manifest, manifestRaw: structuredClone(raw),
+        cacheEpoch: crypto.randomUUID(), staged: null,
+        previous: { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } };
+      const rows = [...entries.values()].map(entry => entry === before ? next : entry);
+      if ((await store.set("state", STORAGE, rows)) === false)
+        throw new Error("تعذر حفظ إعادة التثبيت؛ احتُفظ بالإضافة السابقة");
+      entries.set(key, next);
+      health.reset(key);
+      await flushHealth();
+      return view(next);
+    });
+  }
   function configurationUrl(key) {
     const r = row(key);
     // كما يفعل Stremio: «configure» بجانب manifest.json في مساره نفسه. إضافة على مسار فرعي
@@ -292,6 +327,7 @@ export function createAddonRegistry({
     inspectData,
     configurationUrl,
     install,
+    reinstall,
     enable,
     remove,
     stage,

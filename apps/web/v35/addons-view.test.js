@@ -550,3 +550,33 @@ it("on the phone, Install inside the configure page installs the configured addo
   expect(registry.install).not.toHaveBeenCalled();
   expect(link.textContent).toBe("إعداد الإضافة");
 });
+
+it("offers Torrentio in Explore and manages it instead of duplicating an installed provider", () => {
+  setup();
+  const installed = row("Torrentio", {
+    key: "torrentio|configured",
+    id: "com.stremio.torrentio.addon",
+    bundled: false,
+    protocol: "stremio",
+    capabilities: ["streams"],
+    contentTypes: ["movie", "series"],
+  });
+  let list = [];
+  const view = renderAddons({ registry: { list: () => list, runtimeName: "desktop" } });
+  click(view, "استكشاف");
+  expect(view.querySelector(".addon-grid").textContent).toContain("Torrentio");
+  expect(view.querySelector(".addon-grid").textContent).toContain("يحتاج إعداد");
+  list = [installed];
+  click(view, "استكشاف");
+  expect(view.querySelector(".addon-grid").textContent).toContain("مثبتة · إدارة");
+  expect(view.querySelector(".addon-grid").textContent).not.toContain("تثبيت\n");
+});
+it("shows a real reinstallation control only for installed external addons", async () => {
+  setup();
+  const addon = row("Demo", { bundled: false, key: "addon.demo" });
+  const reinstall = vi.fn(async () => {});
+  const view = renderAddonDetails({ addon, registry: { reinstall }, onBack: vi.fn() });
+  click(view, "إعادة تثبيت الإضافة");
+  await tick();
+  expect(reinstall).toHaveBeenCalledWith("addon.demo", expect.objectContaining({ signal: expect.anything() }));
+});
