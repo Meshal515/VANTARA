@@ -340,7 +340,10 @@ describe('push', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].payload).toMatchObject({ page: 30, ratio: 0.9 });
     expect(sync.pendingWrites).toBe(0);
-    expect(sync.health().state).toBe('ok');
+    // The write queue is clear, but this fixture has no local account mirror.
+    // Reporting fully synced here would recreate the owner's false-green APK.
+    expect(sync.health().state).toBe('syncing');
+    expect(sync.health().backlog).toBe(true);
   });
 
   it('records the last successful sync', async () => {
