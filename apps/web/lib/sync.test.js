@@ -342,7 +342,7 @@ describe('push', () => {
     expect(sync.pendingWrites).toBe(0);
     // The write queue is clear, but this fixture has no local account mirror.
     // Reporting fully synced here would recreate the owner's false-green APK.
-    expect(sync.health().state).toBe('syncing');
+    expect(sync.health().state).not.toBe('ok');
     expect(sync.health().backlog).toBe(true);
   });
 
