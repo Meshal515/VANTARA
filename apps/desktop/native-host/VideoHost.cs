@@ -58,6 +58,14 @@ public static class VideoHost {
           if(fields.Length!=5||fields[0]!="bounds"||!Int32.TryParse(fields[1],out x)||!Int32.TryParse(fields[2],out y)||!Int32.TryParse(fields[3],out w)||!Int32.TryParse(fields[4],out h)||x<0||y<0||w<0||h<0||x>524288||y>524288||w>524288||h>524288)return 5;
           // SWP_NOACTIVATE preserves keyboard focus on VANTARA controls.
           if(!SetWindowPos(host,IntPtr.Zero,x,y,w,h,0x0010|0x0040))return 6;
+          // A paused mpv renderer may not notice an owner's fullscreen resize.
+          // Keep its direct child in the same client rectangle without stealing focus.
+          // ASYNCWINDOWPOS avoids blocking this host on the separate mpv UI thread.
+          RECT client;GetClientRect(host,out client);
+          EnumChildWindows(host,(hwnd,param)=>{
+            if(GetParent(hwnd)==host)SetWindowPos(hwnd,IntPtr.Zero,0,0,client.right,client.bottom,0x0010|0x0004|0x4000);
+            return true;
+          },IntPtr.Zero);
         }
         MSG message;while(PeekMessage(out message,IntPtr.Zero,0,0,1)){TranslateMessage(ref message);DispatchMessage(ref message);}
         Thread.Sleep(10);
