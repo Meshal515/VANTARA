@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { newerVersion, desktopUpdateFromManifest, checkDesktopUpdate, startDesktopUpdateWatch } from './update-check.js';
 
@@ -55,7 +55,7 @@ test('a missing Windows asset is unavailable, never a false up-to-date result',a
   assert.equal(await checkDesktopUpdate(bridge),null);
   await assert.rejects(checkDesktopUpdate({...bridge,requestResource:async()=>({status:200,text:JSON.stringify({format:2,versionName:'0.0.149',versionCode:149})})}),/ويندوز/);
 });
-test('Windows downloads the update in the background, then offers restart or install on quit, once per version',async()=>{
+test('Settings downloads a Windows update, then offers restart or install on quit, once per version',async()=>{
   const {parseHTML}=await import('linkedom');
   const {document}=parseHTML('<html><body></body></html>');
   document.visibilityState='visible';
@@ -66,7 +66,7 @@ test('Windows downloads the update in the background, then offers restart or ins
     downloadUpdate:async()=>{downloads++;listener?.({type:'update/progress',received:120*1048576,total:240000000});return {ready:true,version:'0.2.5'};},
     applyUpdate:async()=>{applied++;return true;}};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
-  await watch.check();await new Promise(r=>setTimeout(r,0));
+  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
   const bar=document.querySelector('[data-vantara-desktop-update]');
   assert.match(bar.textContent,/جاهز: 0\.2\.5/);
   const [restart,onQuit]=bar.querySelectorAll('button');
@@ -75,7 +75,7 @@ test('Windows downloads the update in the background, then offers restart or ins
   assert.equal(applied,1);
   onQuit.onclick();
   assert.equal(document.querySelector('[data-vantara-desktop-update]'),null);
-  await watch.check();await new Promise(r=>setTimeout(r,0));
+  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
   assert.equal(document.querySelector('[data-vantara-desktop-update]'),null);
   assert.equal(downloads,1);
   watch.close();
@@ -86,7 +86,31 @@ test('a portable copy or a failed download falls back to the manual installer li
   const release={...windowsRelease,version:'0.2.5',url:windowsRelease.url.replaceAll('0.2.3','0.2.5')};
   const bridge={version:'0.2.4',requestResource:async()=>({status:200,text:JSON.stringify(release)}),openUpdatePage:async()=>true,downloadUpdate:async()=>({ready:false,manual:true})};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
-  await watch.check();await new Promise(r=>setTimeout(r,0));
+  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
   assert.equal(document.querySelector('[data-vantara-desktop-update] button').textContent,'تحميل تحديث ويندوز');
   watch.close();
+});
+
+test('Windows boot and resume never check, download or show an update', async () => {
+  vi.useFakeTimers();
+  const {parseHTML}=await import('linkedom');
+  const {document}=parseHTML('<html><body></body></html>');
+  document.visibilityState='visible';
+  let queries=0,downloads=0;
+  const bridge={version:'0.2.2',requestResource:async()=>{queries++;return {status:200,text:JSON.stringify(windowsRelease)};},openUpdatePage:async()=>true,
+    downloadUpdate:async()=>{downloads++;return {ready:true};}};
+  const watch=startDesktopUpdateWatch({bridge,doc:document});
+  try {
+    await watch.check();
+    document.dispatchEvent(new document.defaultView.Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(4*60*60*1000);
+    assert.equal(queries,0);
+    assert.equal(downloads,0);
+    assert.equal(document.querySelector('[data-vantara-desktop-update]'),null);
+    await watch.check({force:true});
+    await vi.advanceTimersByTimeAsync(0);
+    assert.equal(queries,1);
+    assert.equal(downloads,1);
+    assert.ok(document.querySelector('[data-vantara-desktop-update]'));
+  } finally {watch.close();vi.useRealTimers();}
 });
