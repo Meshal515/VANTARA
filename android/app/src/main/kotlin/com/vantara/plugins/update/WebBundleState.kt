@@ -5,7 +5,7 @@ package com.vantara.plugins.update
  *
  * دورة الحزمة:
  *
- *   staged ──(الإقلاع التالي أو `promoteNow`)──▶ trial ──(`healthy`)──▶ good
+ *   staged ──(طلب المستخدم أو `promoteNow`)──▶ trial ──(`healthy`)──▶ good
  *                                                  │
  *                          (لم تؤكد نفسها) ────────┴──▶ bad + رجوع إلى good
  *
@@ -59,14 +59,19 @@ class WebBundleState(
             own.put(TRIAL_BOOTS, boots.toString())
             return Boot.Trial(version)
         }
-        return promote()?.let { Boot.Trial(it.second) } ?: Boot.Nothing
+        // حزمة طلبها المستخدم تبقى قابلة للإكمال بعد إغلاق التطبيق أثناء التنزيل.
+        // الحزم القديمة التي نزلت تلقائيًا لا تُفعّل عند الإقلاع.
+        return if (own.get(STAGED_MANUAL) == "true") {
+            promote()?.let { Boot.Trial(it.second) } ?: Boot.Nothing
+        } else Boot.Nothing
     }
 
-    /** حزمة تحققت: تُعرض في الإقلاع التالي. */
-    fun stage(path: String, version: String, bundleNative: String): Boolean {
+    /** حزمة تحققت: الطلب اليدوي وحده يسمح بإكمالها في الإقلاع التالي. */
+    fun stage(path: String, version: String, bundleNative: String, userInitiated: Boolean = false): Boolean {
         if (bundleNative != native || version in bad()) return false
         own.put(STAGED, path)
         own.put(STAGED_VERSION, version)
+        own.put(STAGED_MANUAL, userInitiated.toString())
         return true
     }
 
@@ -78,6 +83,7 @@ class WebBundleState(
         val version = own.get(STAGED_VERSION) ?: ""
         own.put(STAGED, null)
         own.put(STAGED_VERSION, null)
+        own.put(STAGED_MANUAL, null)
         if (!exists(staged) || version in bad()) return null
         own.put(TRIAL, staged)
         own.put(TRIAL_VERSION, version)
@@ -137,7 +143,7 @@ class WebBundleState(
     }
 
     private fun clearAll(keepBad: Boolean) {
-        for (k in listOf(STAGED, STAGED_VERSION, TRIAL, TRIAL_VERSION, TRIAL_BOOTS, GOOD, GOOD_VERSION)) own.put(k, null)
+        for (k in listOf(STAGED, STAGED_VERSION, STAGED_MANUAL, TRIAL, TRIAL_VERSION, TRIAL_BOOTS, GOOD, GOOD_VERSION)) own.put(k, null)
         if (!keepBad) own.put(BAD, null)
     }
 
@@ -148,6 +154,7 @@ class WebBundleState(
         private const val NATIVE = "native"
         private const val STAGED = "staged"
         private const val STAGED_VERSION = "stagedVersion"
+        private const val STAGED_MANUAL = "stagedManual"
         private const val TRIAL = "trial"
         private const val TRIAL_VERSION = "trialVersion"
         private const val TRIAL_BOOTS = "trialBoots"

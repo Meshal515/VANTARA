@@ -66,3 +66,16 @@ describe('dismissedRecently', () => {
     expect(dismissedRecently({ version: '0.0.9', required: true })).toBe(false);
   });
 });
+
+describe('manual web staging ownership', () => {
+  it('marks the requested download so native boot may finish it after interruption', async () => {
+    const previous = globalThis.Capacitor;
+    let requested;
+    globalThis.Capacitor = { Plugins: { AppUpdate: { downloadWeb: async options => { requested = options; } } } };
+    try {
+      const { stageWeb } = await import('./updater.js');
+      expect(await stageWeb({ url: 'https://x/web.zip', version: '0.0.9', sha256: 'a'.repeat(64) })).toBe(true);
+      expect(requested.userInitiated).toBe(true);
+    } finally { globalThis.Capacitor = previous; }
+  });
+});
