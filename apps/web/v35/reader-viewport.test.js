@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildViewportCapture, containImageRect, saveViewportImage } from './reader-viewport.js';
+import { buildViewportCapture, buildZoomCapture, containImageRect, saveViewportImage } from './reader-viewport.js';
 
 const rect = (left, top, width, height) => ({ left, top, width, height, right: left + width, bottom: top + height });
 const page = (box, width = 1000, height = 10000, clip = box) => ({ rect: box, clip, naturalWidth: width, naturalHeight: height });
@@ -100,6 +100,39 @@ describe('reader viewport capture geometry', () => {
 
   it('rejects a capture with no visible manga instead of saving blank UI', () => {
     expect(() => buildViewportCapture({ viewport: rect(0, 0, 400, 800), scroll: rect(0, 0, 400, 800), pages: [page(rect(0, 900, 400, 1000))] })).toThrow(/visible/);
+  });
+});
+
+describe('zoomed manga image capture (exactly what is visible)', () => {
+  it('captures only the transformed and panned visible slice of a zoomed manga page', () => {
+    const result = buildZoomCapture({
+      viewport: rect(0, 0, 400, 800), imageRect: rect(-200, -350, 800, 1600),
+      naturalWidth: 2000, naturalHeight: 4000, pixelRatio: 2,
+    });
+    expect(result.mode).toBe('viewport');
+    expect(result.draws).toHaveLength(1);
+    expect(result.draws[0].source).toEqual(rect(500, 875, 1000, 2000));
+    expect(result.draws[0].dest).toEqual(rect(0, 0, 400, 800));
+    expect([result.width, result.height]).toEqual([800, 1600]);
+  });
+
+  it('saves the natural image if zoom has returned to a full view', () => {
+    const result = buildZoomCapture({
+      viewport: rect(0, 0, 412, 900), imageRect: rect(56, 180, 300, 450),
+      naturalWidth: 1600, naturalHeight: 2400, pixelRatio: 3,
+    });
+    expect(result.mode).toBe('original');
+    expect([result.width, result.height]).toEqual([1600, 2400]);
+  });
+
+  it('does not include a hidden frame when zoom is clipped by the right edge', () => {
+    const result = buildZoomCapture({
+      viewport: rect(0, 0, 412, 900), imageRect: rect(110, 200, 600, 600),
+      naturalWidth: 3000, naturalHeight: 3000, pixelRatio: 2,
+    });
+    expect(result.mode).toBe('viewport');
+    expect(result.draws[0].source.width).toBeCloseTo(1510);
+    expect(result.draws[0].source.left).toBeCloseTo(0);
   });
 });
 
