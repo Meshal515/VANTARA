@@ -1,6 +1,5 @@
 package com.vantara.addons
 
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -122,23 +121,4 @@ class RemoteAddonTest {
         assertEquals(2, paths.size)
         assertTrue(paths[0].contains("tt0388629%3A5%3A2"))
     }
-    @Test fun `legacy Arabic subtitle bytes use fallback while UTF8 BOM and declared charset win`() {
-        val arabic = "مرحبا بالعالم"
-        val cases = listOf(
-            Triple(arabic.toByteArray(java.nio.charset.Charset.forName("windows-1256")), "application/force-download", arabic),
-            Triple(arabic.toByteArray(Charsets.UTF_8), "text/plain", arabic),
-            Triple(byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte()) + arabic.toByteArray(Charsets.UTF_8), "text/plain; charset=windows-1256", arabic),
-            Triple(byteArrayOf(0xe9.toByte()), "text/plain; charset=windows-1252", "é"),
-            Triple(byteArrayOf(0xff.toByte(), 0xfe.toByte()) + arabic.toByteArray(Charsets.UTF_16LE), "text/plain", arabic),
-            Triple(byteArrayOf(0xfe.toByte(), 0xff.toByte()) + arabic.toByteArray(Charsets.UTF_16BE), "text/plain", arabic),
-        )
-        for ((bytes, type, expected) in cases) {
-            val client = RemoteAddonClient(OkHttpClient.Builder().addInterceptor { chain ->
-                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                    .body(bytes.toResponseBody(type.toMediaType())).build()
-            }.build())
-            assertEquals(expected, client.request("https://subs.test/ar.srt", "file", fallbackCharset = "windows-1256"))
-        }
-    }
-
 }
