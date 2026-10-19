@@ -40,6 +40,7 @@ test('أول إقلاع portable يرحل الحساب والإضافات قبل
   await loaded;
   assert.equal(appUserModelId, 'com.vantara.desktop');
   assert.equal(windowOptions.icon, path.join(__dirname, 'assets/vantara.ico'));
+  assert.equal(windowOptions.autoHideMenuBar, true);
   assert.equal(userData, target);
   assert.equal(await fs.readFile(path.join(target, 'account-and-addons.json'), 'utf8'), 'previous-profile');
   assert.equal(await fs.readFile(path.join(old, 'account-and-addons.json'), 'utf8'), 'previous-profile');
