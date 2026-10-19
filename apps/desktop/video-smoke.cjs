@@ -80,7 +80,7 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     report.stage='overlay-f11';await key(overlayWindow,'F11');await until(()=>!window.isFullScreen());await until(aligned);report.overlayF11=true;
     // Deliver Win32 key messages to the real mpv child, which must use input.conf
     // and return through the production IPC/renderer fullscreen action.
-    const nativeKey=(hwnd,key)=>{
+    const nativeKey=async(hwnd,key)=>{
       // PostMessage(WM_KEYDOWN) is not actual user input: mpv on Windows
       // may ignore it (no keyboard focus, missing scan-code context).
       // Focus the genuine mpv child and send real OS key events instead.
@@ -118,13 +118,13 @@ Start-Sleep -Milliseconds 80
 Start-Sleep -Milliseconds 35
 [VantaraProofInput]::keybd_event([byte]${key},[byte]0,[uint32]2,[UIntPtr]::Zero)
 `;
-      require('node:child_process').execFileSync('powershell.exe',
+      await new Promise((resolve,reject)=>require('node:child_process').execFile('powershell.exe',
         ['-NoProfile','-NonInteractive','-Command',script],
-        {windowsHide:true,timeout:15000});
+        {windowsHide:true,timeout:15000},error=>error?reject(error):resolve()));
     };
     const mpvChild=(await videoHost.inspect()).children.find(c=>/mpv/i.test(c.class));
-    report.stage='native-f11';nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
-    report.stage='native-escape';nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
+    report.stage='native-f11';await nativeKey(mpvChild.hwnd,0x7a);await until(()=>window.isFullScreen());await until(aligned);report.nativeF11=true;
+    report.stage='native-escape';await nativeKey(mpvChild.hwnd,0x1b);await until(()=>!window.isFullScreen());await until(aligned);report.nativeEscapeRestores=true;
     assert(await window.webContents.executeJavaScript('!!document.querySelector(".desktop-player")'));
     report.rendererControls=true;report.arabicSubtitleSelected=true;
     // Production HTML room and controls must hide the actual child HWND, not just cover it with CSS.
