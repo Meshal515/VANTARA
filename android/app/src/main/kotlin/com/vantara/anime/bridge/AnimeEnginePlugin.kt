@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
@@ -40,6 +41,7 @@ class AnimeEnginePlugin : Plugin() {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val crawls = ConcurrentHashMap<String, Job>()
     private lateinit var engine: AnimeEngine
+    private var momentExporter: com.vantara.anime.player.ClipExporter? = null
     /** مستودعات Aniyomi وإضافاتها التي ثبّتها المستخدم. */
     private val userStore by lazy { com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json")) }
     private val http by lazy { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client }
@@ -65,12 +67,71 @@ class AnimeEnginePlugin : Plugin() {
         com.vantara.anime.player.PlaybackEvents.events = { name, data -> notifyListeners(name, JSObject(data.toString())) }
     }
 
-    /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
+    /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يبقى حتى تأكيد التسليم. */
     @PluginMethod
     fun outbox(call: PluginCall) {
         val userId = call.getString("userId")?.takeIf { it.isNotBlank() }
             ?: return call.reject("userId مطلوب")
         call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context, userId).toString())))
+    }
+
+    @PluginMethod
+    fun acknowledgeOutbox(call: PluginCall) {
+        val userId = call.getString("userId")?.takeIf { it.isNotBlank() } ?: return call.reject("userId مطلوب")
+        val id = call.getString("id") ?: return call.reject("id مطلوب")
+        scope.launch {
+            runCatching { com.vantara.anime.player.Outbox.acknowledge(context, userId, id) }
+                .onSuccess { call.resolve() }.onFailure { call.reject(it.message ?: "تعذّر تأكيد الإرسال") }
+        }
+    }
+
+    /** Local resolved candidates only; URLs/headers never enter the social outbox. */
+    @PluginMethod
+    fun momentCandidates(call: PluginCall) {
+        val sessionId = call.getString("session") ?: return call.reject("session مطلوب")
+        val prep = engine.prepared(sessionId) ?: return call.reject("الجلسة انتهت")
+        val candidates = prep.routes().flatMap { prep.candidatesOf(it.id) }.distinctBy { it.id }
+        call.resolve(JSObject().put("candidates", candidates, ListSerializer(com.vantara.anime.stream.Candidate.serializer())))
+    }
+
+    /** Export only a source resolved by this device's prepared session. */
+    @PluginMethod
+    fun exportMoment(call: PluginCall) {
+        val sessionId = call.getString("session") ?: return call.reject("session مطلوب")
+        val candidateId = call.getString("candidate") ?: return call.reject("candidate مطلوب")
+        val session = engine.session(sessionId) ?: return call.reject("الجلسة انتهت")
+        val candidate = engine.sessionCandidate(session, candidateId)
+            ?: engine.prepared(sessionId)?.candidate(candidateId)
+            ?: return call.reject("السيرفر غير موجود في الجلسة")
+        val start = call.getDouble("startMs") ?: return call.reject("startMs مطلوب")
+        val end = call.getDouble("endMs") ?: return call.reject("endMs مطلوب")
+        val action = call.getString("action") ?: "save"
+        if (!start.isFinite() || !end.isFinite() || start < 0 || end <= start ||
+            end - start > com.vantara.anime.player.ClipMath.MAX_TOTAL_MS || start % 1 != 0.0 || end % 1 != 0.0 ||
+            action !in listOf("save", "share")) return call.reject("مدى اللقطة أو الإجراء غير صالح")
+        activity.runOnUiThread {
+            if (momentExporter?.busy == true) return@runOnUiThread call.reject("جارٍ تجهيز لقطة أخرى")
+            val exporter = com.vantara.anime.player.ClipExporter(context, uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client)
+            momentExporter = exporter
+            val range = com.vantara.anime.player.ClipRange(start.toLong(), end.toLong(), ((start + end) / 2).toLong())
+            exporter.export(candidate, range, null, {}, { result ->
+                when (result) {
+                    is com.vantara.anime.player.ClipExporter.Result.Failed -> { exporter.purge(); call.reject(result.message) }
+                    is com.vantara.anime.player.ClipExporter.Result.Done -> scope.launch {
+                        runCatching {
+                            if (action == "save") {
+                                val saved = exporter.saveToGallery(result.file, call.getString("filename") ?: "VANTARA")
+                                check(saved != null) { "تعذّر الحفظ في الصور" }
+                            } else withContext(Dispatchers.Main) {
+                                com.vantara.anime.player.ClipShares.share(activity, result.file, call.getString("title") ?: "VANTARA")
+                            }
+                        }.onSuccess { call.resolve(JSObject().put(if (action == "save") "saved" else "shared", true)) }
+                            .onFailure { call.reject(it.message ?: "تعذّر تصدير اللقطة") }
+                        exporter.purge()
+                    }
+                }
+            })
+        }
     }
 
     /**
@@ -110,6 +171,7 @@ class AnimeEnginePlugin : Plugin() {
                 presenceDeviceCredential = call.getString("presenceDeviceCredential"),
                 clipStartMs = (call.getDouble("clipStart") ?: -1.0).toLong(),
                 clipEndMs = (call.getDouble("clipEnd") ?: -1.0).toLong(),
+                momentMini = call.getBoolean("momentMini") ?: false,
                 together = call.getObject("together")?.toString(),
             ),
         )
@@ -218,6 +280,7 @@ class AnimeEnginePlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        activity.runOnUiThread { momentExporter?.cancel(); momentExporter?.purge(); momentExporter = null }
         scope.cancel()
         engine.health.flush()
     }

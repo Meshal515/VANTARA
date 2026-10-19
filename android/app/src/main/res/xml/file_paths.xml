@@ -12,4 +12,5 @@
     <cache-path name="page_cache" path="pages/" />
     <!-- مقاطع «الكاميرا» في المشغّل: ملف مؤقت واحد يُشارك عبر ACTION_SEND -->
     <cache-path name="clips" path="clips/" />
+    <cache-path name="shared_clips" path="shared-clips/" />
 </paths>

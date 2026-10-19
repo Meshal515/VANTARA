@@ -22,7 +22,7 @@ class RemoteAddonClient(base: OkHttpClient) {
     // Capacitor cancellation may arrive before the IO coroutine registers its Call.
     private val cancelled = LinkedHashMap<String, Boolean>()
 
-    fun request(url: String, requestId: String, limit: Int = 2 * 1024 * 1024, timeoutMs: Long = 15000): String {
+    fun request(url: String, requestId: String, limit: Int = 2 * 1024 * 1024, timeoutMs: Long = 15000, fallbackCharset: String? = null): String {
         require(limit in 1..2 * 1024 * 1024)
         val target = publicUrl(url)
         val call = client.newCall(Request.Builder().url(target).get().header("Accept", "application/json, application/vnd.api+json, text/plain").build())
@@ -42,7 +42,25 @@ class RemoteAddonClient(base: OkHttpClient) {
                 while (source.read(buffer, minOf(8192L, limit + 1L - buffer.size)) != -1L) {
                     check(buffer.size <= limit) { "حجم نتيجة الإضافة أكبر من الحد" }
                 }
-                return buffer.readUtf8()
+                val bytes = buffer.readByteArray()
+                val bom = when {
+                    bytes.size >= 3 && bytes[0] == 0xef.toByte() && bytes[1] == 0xbb.toByte() && bytes[2] == 0xbf.toByte() -> Charsets.UTF_8 to 3
+                    bytes.size >= 2 && bytes[0] == 0xff.toByte() && bytes[1] == 0xfe.toByte() -> Charsets.UTF_16LE to 2
+                    bytes.size >= 2 && bytes[0] == 0xfe.toByte() && bytes[1] == 0xff.toByte() -> Charsets.UTF_16BE to 2
+                    else -> null
+                }
+                if (bom != null) return String(bytes, bom.second, bytes.size - bom.second, bom.first)
+                body.contentType()?.charset(null)?.let { return String(bytes, it) }
+                if (fallbackCharset != null) {
+                    return try {
+                        Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                            .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                    } catch (_: java.nio.charset.CharacterCodingException) {
+                        String(bytes, java.nio.charset.Charset.forName(fallbackCharset))
+                    }
+                }
+                return String(bytes, Charsets.UTF_8)
             }
         } finally {
             synchronized(cancelled) {
