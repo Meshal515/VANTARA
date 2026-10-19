@@ -1189,7 +1189,9 @@
 /* Keep local text protection above field background resets. */
 .v35 .pf-copy-guard { background: rgba(0,0,0,.6); border-radius: 6px; box-shadow: none; }
 
-/* The wide banner crops the same image differently; lower its desktop placement. */
+/* Give desktop banners room below the top edge and keep favorites cover-sized. */
 @media (min-width: 1024px) {
-  .v35 .pf-banner-img { object-position: center 25%; }
+  .v35 .pf-banner { height: calc(clamp(280px, 24vw, 400px) + var(--safe-top)); }
+  .v35 .pf-banner-img { object-position: center top; }
+  .v35 .pf-top5 { width: 100%; max-width: 600px; }
 }
