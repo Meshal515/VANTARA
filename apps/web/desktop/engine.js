@@ -2,6 +2,7 @@ import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
 import { publicUrl } from '../addons/manifest.js';
 import { parseRelease } from '../addons/release-info.js';
+import { publicMomentHints } from '../v35/moment-compose.js';
 
 // Same quality, variant and swarm weights as Android StreamRanker/TorrentSwarm.
 function playbackScore(candidate, session) {
@@ -262,10 +263,25 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const c = choices(s).find(c => c.code === prefer) ?? choices(s)[0];
       return { candidate: c?.id ?? null, route: c?.route ?? null, code: c?.code ?? null };
     },
+    async momentCandidates({ session }) { return { candidates: choices(sessionOf(session)) }; },
+    async sendMoment({ session, selection }) {
+      const s = sessionOf(session), args = s.playArgs ?? {};
+      const clock = ms => { const seconds = Math.max(0, Math.floor(Number(ms) / 1000) || 0), hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds / 60) % 60, tail = String(seconds % 60).padStart(2, '0'); return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${tail}` : `${minutes}:${tail}`; };
+      emit('momentSend', {
+        userId: args.usageUserId ?? args.presenceUserId ?? null,
+        seriesRef: selection.work.ref, seriesTitle: selection.work.title, coverUrl: selection.work.cover ?? null,
+        chapterLabel: `${selection.episode == null ? 'الفيلم' : `الحلقة ${selection.episode}`} · ${clock(selection.startMs)}–${clock(selection.endMs)}`,
+        chapterNumber: selection.episode, moment: selection.moment, toIds: selection.toIds, broadcast: selection.broadcast,
+        ...(selection.message ? { message: selection.message } : {}),
+      });
+      return { ok: true };
+    },
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
     async playerState({session}) {
-      const s=sessionOf(session);
-      return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
+      const s=sessionOf(session), args=s.playArgs??{}, candidate=s.candidates.get(args.candidate);
+      const movie=args.section==='cinema'&&!(Number(args.total)>1);
+      const moment={work:{ref:args.work?.ref??args.seriesRef??args.subtitleIdentity?.canonicalId??`${args.section==='cinema'?'cinema':'anime'}:${args.animeId}`,title:args.title??'VANTARA',cover:args.poster??null},episode:movie?null:s.context?.episode??s.episode,friends:args.friends??[],sourceHints:publicMomentHints(candidate?[candidate]:[])};
+      return {moment,title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
         total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
         sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },

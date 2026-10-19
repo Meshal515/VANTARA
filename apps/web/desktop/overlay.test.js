@@ -137,3 +137,7 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
  view.update({position:1000,subtitles:structuredClone(tracks),subtitleDelay:0});
  expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
 });
+it('opens the shared moment composer from the native camera control',()=>{
+ vi.useFakeTimers();const {document}=parseHTML('<html><body></body></html>');const send=vi.fn();const view=createOverlayView(document,send);
+ view.update({ready:true,duration:60000});const camera=view.root.querySelector('[data-action="camera"]');expect(camera).toBeTruthy();camera.click();expect(send).toHaveBeenLastCalledWith({name:'moment'});
+});

@@ -20,6 +20,7 @@ export const ICON = {
   pause: svg('<rect x="6.5" y="5" width="3.5" height="14" rx="1.2"/><rect x="14" y="5" width="3.5" height="14" rx="1.2"/>', { fill: true }),
   rewind: svg('<path d="M12 3.5a8.5 8.5 0 1 1-7.4 4.3"/><path d="M8 2.2 7.1 5.2l3.1.7"/><text x="12" y="14.7" font-size="7.6" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui">10</text>'),
   forward: svg('<path d="M12 3.5a8.5 8.5 0 1 0 7.4 4.3"/><path d="m16 2.2.9 3-3.1.7"/><text x="12" y="14.7" font-size="7.6" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui">10</text>'),
+  camera: svg('<path d="M4 8.7c0-.9.7-1.7 1.6-1.7h2.2l1.5-2.2h5.4L16.2 7h2.2c.9 0 1.6.8 1.6 1.7v8.6c0 .9-.7 1.7-1.6 1.7H5.6c-.9 0-1.6-.8-1.6-1.7Z"/><circle cx="12" cy="12.9" r="3.3"/>'),
   more: svg('<circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/>', { fill: true }),
   episodes: svg('<rect x="3" y="4" width="18" height="11" rx="2.5"/><path d="m10.5 7.5 4 2-4 2Z" fill="currentColor"/><path d="M5 19h14"/>'),
   servers: svg('<rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M12 7.25h5M12 16.75h5"/><circle cx="7.5" cy="7.25" r="1.1" fill="currentColor"/><circle cx="7.5" cy="16.75" r="1.1" fill="currentColor"/>'),
@@ -78,7 +79,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
   peopleButton.onclick = () => cmd('room');
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('camera', 'شارك لحظة', () => cmd('moment')), iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');

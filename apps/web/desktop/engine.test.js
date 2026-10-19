@@ -388,3 +388,31 @@ it('keeps failed standalone playback in the player so a 4K source can be retried
  expect((await f.engine.playerState({session:'s'})).position).toBe(1810000);expect(f.release()).toBe(0);
  await f.engine.retryPlayback({session:'s'});expect(f.starts.at(-1).position).toBe(1810000);await f.engine.closeSession({session:'s'});
 });
+
+it('exposes actual validated live moment candidates without preparing native media',async()=>{
+ const f=fixture();f.bridge.prepareMoment=vi.fn();
+ f.source.streams=async()=>[{...f.stream,expiresAt:Date.now()-1},{...f.stream,infoHash:'b'.repeat(40),headers:{Referer:'https://source.example/'}}];
+ await prepared(f);
+ const {candidates}=await f.engine.momentCandidates({session:'s'});
+ expect(candidates).toHaveLength(1);expect(candidates[0]).toMatchObject({infoHash:'b'.repeat(40),fileIdx:0,headers:{Referer:'https://source.example/'}});
+ await f.engine.play({session:'s',candidate:candidates[0].id});expect(f.starts[0].candidate).toBe(candidates[0]);
+ expect(f.bridge.prepareMoment).not.toHaveBeenCalled();await f.engine.closeSession({session:'s'});
+ await expect(f.engine.momentCandidates({session:'s'})).rejects.toThrow('الجلسة');
+});
+it('supplies composer context and sends a moment with playback account attribution',async()=>{
+ const f=fixture(),sent=[];await prepared(f);const best=await f.engine.best({session:'s'});
+ await f.engine.play({session:'s',candidate:best.candidate,animeId:'tt123:2',section:'cinema',title:'فيلم',poster:'https://img.example/a.jpg',episode:1,total:12,usageUserId:'owner',friends:[{userId:'a',displayName:'أحمد'}]});
+ const state=await f.engine.playerState({session:'s'});
+ expect(state.moment).toMatchObject({work:{ref:'cinema:tt123:2',title:'فيلم',cover:'https://img.example/a.jpg'},episode:1,friends:[{userId:'a'}],sourceHints:[{sourceId:'addon|torrentio'}]});
+ f.engine.addListener('momentSend',e=>sent.push(e));
+ const moment={version:1,startMs:1000,endMs:20000,episode:1,sources:[]};
+ await f.engine.sendMoment({session:'s',selection:{work:state.moment.work,episode:1,startMs:1000,endMs:20000,moment,toIds:['a'],broadcast:false,message:'لقطة'}});
+ expect(sent).toEqual([{userId:'owner',seriesRef:'cinema:tt123:2',seriesTitle:'فيلم',coverUrl:'https://img.example/a.jpg',chapterLabel:'الحلقة 1 · 0:01–0:20',chapterNumber:1,moment,toIds:['a'],broadcast:false,message:'لقطة'}]);
+ await f.engine.closeSession({session:'s'});
+});
+
+it('formats hour-long movie moments with the same payload contract as the shared player',async()=>{
+ const f=fixture(),sent=[];await prepared(f);const {candidate}=await f.engine.best({session:'s'});await f.engine.play({session:'s',candidate,section:'cinema',animeId:'tt1',presenceUserId:'fallback'});f.engine.addListener('momentSend',e=>sent.push(e));
+ await f.engine.sendMoment({session:'s',selection:{work:{ref:'cinema:tt1',title:'فيلم'},episode:null,startMs:3601000,endMs:3670000,moment:{},toIds:[],broadcast:true}});
+ expect(sent[0]).toMatchObject({userId:'fallback',chapterLabel:'الفيلم · 1:00:01–1:01:10',chapterNumber:null});expect((await f.engine.playerState({session:'s'})).moment.episode).toBeNull();await f.engine.closeSession({session:'s'});
+});

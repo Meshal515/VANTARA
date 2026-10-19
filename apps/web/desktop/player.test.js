@@ -1,13 +1,14 @@
 import {expect,it,vi} from 'vitest';
 import {parseHTML} from 'linkedom';
 import {installDesktopPlayer} from './player.js';
-function fixture({skipLoader}={}){
- const {document}=parseHTML('<html><body><button id="previous">عمل</button></body></html>');const callbacks=[],commands=[],listeners=new Map();
+function fixture({skipLoader,overlay=false}={}){
+ const {document}=parseHTML('<html><body><button id="previous">عمل</button></body></html>');const callbacks=[],commands=[],listeners=new Map();let overlayCommand;
  const bridge={playerViewport:vi.fn(async()=>true),playerFullscreen:vi.fn(async()=>true),playbackCommand:vi.fn(async arg=>commands.push(arg)),stopPlayback:vi.fn(async()=>{}),onEvent:fn=>{callbacks.push(fn);return()=>{};}};
+ if(overlay){bridge.playerOverlay=vi.fn(async()=>true);bridge.onOverlayCommand=fn=>{overlayCommand=fn;return()=>{};};}
  const engine={addListener:(name,fn)=>{listeners.set(name,fn);return{remove(){}};},playerState:async()=>({title:'فيلم',candidate:'source-1',sources:[{id:'source-1',label:'مصدر · 1080p'}]}),switchSource:vi.fn(async()=>{}),closeSession:vi.fn(async()=>{})};
  document.defaultView.HTMLElement.prototype.getBoundingClientRect=function(){return{x:0,y:64,width:1000,height:600};};
  const g={document,innerWidth:1000,innerHeight:800,addEventListener:vi.fn(),removeEventListener:vi.fn()};const player=installDesktopPlayer({g,bridge,engine,skipLoader});
- return{document,bridge,engine,commands,player,event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
+ return{document,bridge,engine,commands,player,overlay:message=>overlayCommand?.(message),event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
 }
 it('opens an in-app native viewport with controls outside it and sends pause/seek safely',async()=>{
  const f=fixture();f.event({type:'playback/preparing',session:'one',title:'فيلم'});await Promise.resolve();
@@ -131,3 +132,57 @@ it('retains the player and its source controls after an error followed by native
 });
 
 it('keeps torrent phase and cache rebuild diagnostics out of the viewing surface',()=>{const f=fixture();f.event({type:'playback/preparing',session:'one'});for(const stage of ['metadata','first-frame','cache-selected'])f.event({type:'playback/stage',session:'one',stage,volume:'E:'});f.event({type:'playback/retrying',session:'one',message:'رجعت لجزء حُذف من الكاش'});const text=f.document.querySelector('.desktop-player-status').textContent;expect(text).not.toMatch(/إطار|مغناطيس|كاش|حذف/);f.player.dispose();});
+
+function momentFixture(options){
+ const f=fixture(options);vi.stubGlobal('document',f.document);vi.stubGlobal('window',f.document.defaultView);
+ f.engine.playerState=async()=>({title:'عمل',section:'anime',episode:3,sources:[],moment:{work:{ref:'anime:1',title:'عمل'},episode:3,friends:[{userId:'a',displayName:'أحمد'}],sourceHints:[{sourceId:'own',headers:{Cookie:'private'},url:'https://source.example/video.mp4'}]}});
+ f.engine.sendMoment=vi.fn(async()=>({ok:true}));f.bridge.exportMoment=vi.fn(async()=>({saved:true,shareStatus:'clipboard'}));
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});f.event({type:'playback/progress',session:'one',position:120000,duration:600000,paused:false});
+ return f;
+}
+const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+it('uses the shared composer, hides native airspace, sends selections, then resumes',async()=>{
+ const f=momentFixture();await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ expect(f.document.querySelector('.moment-compose')).toBeTruthy();expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({session:'one',hidden:true}));expect(f.commands).toContainEqual({session:'one',command:'pause',value:true});
+ f.document.querySelector('[data-recipient="a"]').click();f.document.querySelector('[data-compose-action="send"]').click();await settle();
+ expect(f.engine.sendMoment).toHaveBeenCalledWith({session:'one',selection:expect.objectContaining({startMs:85000,endMs:155000,toIds:['a'],moment:{version:1,startMs:85000,endMs:155000,episode:3,sources:[{sourceId:'own',url:'https://source.example/video.mp4'}]}})});
+ expect(f.document.querySelector('.moment-compose')).toBeNull();expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:false}));expect(f.commands.at(-1)).toEqual({session:'one',command:'pause',value:false});f.player.dispose();vi.unstubAllGlobals();
+});
+it('exports edited ranges from the active native session and reports clipboard sharing accurately',async()=>{
+ const f=momentFixture();await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ const start=f.document.querySelector('[data-bound="start"]');start.value='90000';start.dispatchEvent(new f.document.defaultView.Event('input'));
+ f.document.querySelector('[data-compose-action="share"]').click();await settle();
+ expect(f.bridge.exportMoment).toHaveBeenCalledWith(expect.objectContaining({session:'one',startMs:90000,endMs:155000,action:'share'}));expect(f.bridge.exportMoment.mock.calls[0][0]).not.toHaveProperty('exportHandle');
+ expect(f.document.querySelector('.mco-status').textContent).toBe('حُفظ ونسخ الملف للمشاركة');
+ f.player.dispose();expect(f.document.querySelector('.moment-compose')).toBeNull();expect(f.commands.filter(c=>c.command==='pause'&&c.value===false)).toHaveLength(0);vi.unstubAllGlobals();
+});
+it('does not resume an already paused native player when the composer closes',async()=>{
+ const f=momentFixture();f.event({type:'playback/pause',session:'one',paused:true});await settle();f.document.querySelector('[data-action="moment"]').click();await settle();f.document.querySelector('.mco-close').click();await settle();
+ expect(f.commands.some(c=>c.command==='pause'&&c.value===false)).toBe(false);f.player.dispose();vi.unstubAllGlobals();
+});
+
+it('native overlay moment command opens the same composer and ignores commands from an old session',async()=>{
+ const f=momentFixture({overlay:true});await settle();f.overlay({session:'old',name:'moment'});await settle();expect(f.document.querySelector('.moment-compose')).toBeNull();
+ f.overlay({session:'one',name:'moment'});await settle();expect(f.document.querySelector('.moment-compose')).toBeTruthy();expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:true}));f.player.dispose();vi.unstubAllGlobals();
+});
+it('closes the composer without resuming a replaced playback in the same native session',async()=>{
+ const f=momentFixture();await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ f.event({type:'playback/preparing',session:'one'});expect(f.document.querySelector('.moment-compose')).toBeNull();expect(f.commands.some(c=>c.command==='pause'&&c.value===false)).toBe(false);f.player.dispose();vi.unstubAllGlobals();
+});
+it('reports a saved file without claiming an unavailable external share succeeded',async()=>{
+ const f=momentFixture();f.bridge.exportMoment.mockResolvedValue({saved:true,shareStatus:'unavailable'});await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ f.document.querySelector('[data-compose-action="share"]').click();await settle();expect(f.document.querySelector('.mco-status').textContent).toBe('حُفظت اللقطة فقط؛ المشاركة غير متاحة على هذا الجهاز');f.player.dispose();vi.unstubAllGlobals();
+});
+it('previews actual native MP4 bytes and revokes the blob when the composer closes',async()=>{
+ const f=momentFixture(),create=f.document.createElement.bind(f.document);
+ f.document.createElement=name=>{const n=create(name);if(name==='video'){n.pause=vi.fn();n.play=vi.fn(async()=>{});n.load=vi.fn();n.canPlayType=()=>'';n.currentTime=0;}return n;};
+ f.bridge.readMoment=vi.fn(async()=>({base64:btoa('native-mp4'),mimeType:'video/mp4'}));const revoke=vi.spyOn(URL,'revokeObjectURL');
+ await settle();f.document.querySelector('[data-action="moment"]').click();await settle();f.document.querySelector('[data-compose-action="preview"]').click();await settle();await settle();
+ const video=f.document.querySelector('.mv-video');expect(video).toBeTruthy();expect(video.src).toMatch(/^blob:/);const blobUrl=video.src;expect(await (await fetch(blobUrl)).text()).toBe('native-mp4');
+ expect(f.bridge.exportMoment).toHaveBeenCalledWith(expect.objectContaining({session:'one',action:'save',startMs:85000,endMs:155000}));expect(f.bridge.readMoment).toHaveBeenCalledWith({session:'one'});
+ f.document.querySelector('.mco-close').click();expect(f.document.querySelector('.mv-viewer')).toBeNull();expect(revoke).toHaveBeenCalledWith(blobUrl);revoke.mockRestore();f.player.dispose();vi.unstubAllGlobals();
+});
+it('does not mount a preview after the composer closes while native export is pending',async()=>{
+ const f=momentFixture();let exported;f.bridge.exportMoment=vi.fn(()=>new Promise(resolve=>{exported=resolve;}));f.bridge.readMoment=vi.fn();await settle();f.document.querySelector('[data-action="moment"]').click();await settle();
+ f.document.querySelector('[data-compose-action="preview"]').click();f.document.querySelector('.mco-close').click();exported({saved:true});await settle();expect(f.bridge.readMoment).not.toHaveBeenCalled();expect(f.document.querySelector('.mv-viewer')).toBeNull();f.player.dispose();vi.unstubAllGlobals();
+});

@@ -3,6 +3,8 @@ import { glyph } from '../v35/icons.js';
 import { createServerSheet } from '../v35/server-sheet.js';
 import { createDesktopLobby, openDesktopRoomEntry } from './lobby.js';
 import { createOverlayLink } from './overlay-link.js';
+import { openMomentComposer } from '../v35/moment-compose.js';
+import { openMomentViewer } from '../v35/moment-viewer.js';
 const safeMessage=value=>String(value??'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi,'[رابط الخدمة]');
 const clock=ms=>{const s=Math.max(0,Math.floor((ms??0)/1000));return `${Math.floor(s/3600)?`${Math.floor(s/3600)}:`:''}${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;};
 /** Real native video occupies .desktop-player-video. Chromium controls live in
@@ -13,6 +15,9 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
   let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA';
+  let momentComposer=null,momentPreview=null,momentOpening=false;
+  const momentUrls=new Set();
+  const clearMomentPreview=()=>{momentPreview?.destroy();momentPreview=null;for(const url of momentUrls)URL.revokeObjectURL(url);momentUrls.clear();};
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
   const command=async(name,value)=>{if(!session)return;try{if(engine.playerCommand)await engine.playerCommand({session,command:name,value});else await bridge.playbackCommand({session,command:name,value});}catch(error){tell(error.message,true);}};
@@ -21,7 +26,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const rect=video.getBoundingClientRect?.();if(!rect)return;
     const width=g.innerWidth??doc.documentElement.clientWidth,height=g.innerHeight??doc.documentElement.clientHeight;
     if(!Number.isFinite(width)||!width||!Number.isFinite(height)||!height)return;
-    void bridge.playerViewport({session,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>tell(error.message,true));
+    void bridge.playerViewport({session,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||momentOpening||!!momentComposer||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>tell(error.message,true));
   };
   const refreshSkip=()=>{
     const segment=activeSegment(skipResult?.timings,position);
@@ -39,7 +44,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     try{cleanup?.();}catch{}
     serverSheet=null;viewport();
   };
-  const dismiss=()=>{link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
+  const dismiss=()=>{revision++;momentOpening=false;const composer=momentComposer;momentComposer=null;composer?.destroy();clearMomentPreview();link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
   const close=async()=>{const id=session;if(!id)return;engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action,'aria-label':label,title:label});b.onclick=fn;return b;};
   const iconButton=(label,action,icon,fn)=>{const b=button(label,action,fn);b.innerHTML=action==='fullscreen'?'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>':glyph(icon,{size:24});return b;};
@@ -76,6 +81,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'fullscreen':panel?.querySelector('[data-action="fullscreen"]')?.click();break;
       case 'room':engine.openPlayerRoom?.({session:id});break;
       case 'settings':showSettings();break;
+      case 'moment':void composeMoment();break;
       case 'fit':if(value==='fit'||value==='fill'){fitValue=value;void command('video-fit',value);link?.push(true);}break;
       case 'volume':if(Number.isFinite(value)){volumeValue=Math.max(0,Math.min(100,Math.round(value)));void command('volume',volumeValue);link?.push(true);}break;
       case 'speed':if(Number.isFinite(value)){speedValue=value;void command('speed',value);link?.push(true);}break;
@@ -97,6 +103,44 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'key':if(typeof value==='string')keyboard({key:value,target:{},preventDefault(){}});break;
     }
   };
+  async function composeMoment(){
+    if(momentComposer||momentOpening||!session)return;
+    if(!ready||!Number.isFinite(duration)||duration<=0){tell('انتظر حتى يجهز الفيديو');return;}
+    const id=session,rev=revision,resume=!paused;let pausedForMoment=false;
+    const owned=()=>session===id&&revision===rev;
+    momentOpening=true;viewport();
+    try{
+      const state=await engine.playerState({session:id});if(!owned())return;
+      const context=state?.moment;if(!context)throw new Error('اللقطة غير متاحة لهذا التشغيل');
+      if(resume){if(engine.playerCommand)await engine.playerCommand({session:id,command:'pause',value:true});else await bridge.playbackCommand({session:id,command:'pause',value:true});pausedForMoment=true;}
+      if(!owned())return;
+      const filename=`VANTARA-moment-${Date.now()}.mp4`;
+      const exported=async(selection,action)=>{
+        if(!owned()||selection.signal?.aborted)throw new DOMException('closed','AbortError');
+        const result=await bridge.exportMoment({session:id,startMs:selection.startMs,endMs:selection.endMs,filename,action});
+        if(!result?.saved)throw new Error('export_failed');
+        return {...result,message:action==='save'?'حُفظت اللقطة':result.shareStatus==='clipboard'?'حُفظ ونسخ الملف للمشاركة':'حُفظت اللقطة فقط؛ المشاركة غير متاحة على هذا الجهاز'};
+      };
+      momentComposer=openMomentComposer({positionMs:position,durationMs:duration,...context,
+        onSend:selection=>engine.sendMoment({session:id,selection}),
+        onSave:typeof bridge.exportMoment==='function'?selection=>exported(selection,'save'):undefined,
+        onShare:typeof bridge.exportMoment==='function'?selection=>exported(selection,'share'):undefined,
+        onPreview:typeof bridge.exportMoment==='function'&&typeof bridge.readMoment==='function'?async selection=>{
+          clearMomentPreview();await exported(selection,'save');
+          if(!owned()||selection.signal?.aborted)throw new DOMException('closed','AbortError');
+          const file=await bridge.readMoment({session:id});
+          if(!owned()||selection.signal?.aborted)throw new DOMException('closed','AbortError');
+          if(typeof file?.base64!=='string'||file.base64.length>Math.ceil(16*1024*1024*4/3)+4)throw new Error('invalid_export');
+          const binary=atob(file.base64);if(!binary.length||binary.length>16*1024*1024)throw new Error('invalid_export');
+          const url=URL.createObjectURL(new Blob([Uint8Array.from(binary,c=>c.charCodeAt(0))],{type:'video/mp4'}));momentUrls.add(url);
+          const row={id:'moment-draft',series_ref:context.work.ref,series_title:context.work.title,cover_url:context.work.cover,moment_json:JSON.stringify({...selection.moment,sources:[]})};
+          momentPreview=openMomentViewer({row,resolveSources:async()=>[{url,clipped:true}],toast:message=>tell(message)});
+        }:undefined,
+        onClose:()=>{clearMomentPreview();momentComposer=null;if(!owned())return;momentOpening=false;viewport();if(pausedForMoment)void command('pause',false);},
+      });
+    }catch(error){if(owned()){tell(error.message,true);if(pausedForMoment)void command('pause',false);}}
+    finally{if(owned()){momentOpening=false;viewport();}}
+  }
   const showSettings=()=>{settings.hidden=false;viewport();settings.querySelector('button')?.focus?.();};
 
   function ensureStyles(){for(const [id,path]of [['desktop-shared-player-style','../pwa/player/player.css'],['desktop-player-style','./player.css'],['desktop-server-style','../v35/server-sheet.css']])if(!doc.getElementById(id)){const link=node('link',null,{id,rel:'stylesheet',href:new URL(path,import.meta.url).href});doc.head.append(link);}}
@@ -131,12 +175,12 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
+    if(panel&&session===event.session){revision++;momentOpening=false;const composer=momentComposer;momentComposer=null;composer?.destroy();clearMomentPreview();skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
     dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
-    header.append(iconButton('شاهد مع أصدقائك','room','users',()=>engine.openPlayerRoom?.({session})),iconButton('ملء الشاشة','fullscreen','sidebar',async()=>{fullscreen=!fullscreen;try{await bridge.playerFullscreen({enabled:fullscreen});viewport();}catch(error){tell(error.message,true);}link?.push(true);}));
+    header.append(iconButton('شارك لحظة','moment','camera',()=>void composeMoment()),iconButton('شاهد مع أصدقائك','room','users',()=>engine.openPlayerRoom?.({session})),iconButton('ملء الشاشة','fullscreen','sidebar',async()=>{fullscreen=!fullscreen;try{await bridge.playerFullscreen({enabled:fullscreen});viewport();}catch(error){tell(error.message,true);}link?.push(true);}));
     header.append(iconButton('خيارات المشغل','menu','more',showSettings));
     video=node('div',null,{class:'desktop-player-video','aria-label':'الفيديو'});video.append(node('div','يجهز الفيديو…',{class:'desktop-player-placeholder'}));
     const controls=node('div',null,{class:'desktop-player-controls'}),row=node('div',null,{class:'desktop-player-row'});
@@ -216,7 +260,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     entryView=openDesktopRoomEntry({document:doc,...event});
   });
   const noticeListener=engine.addListener?.('desktopNotice',event=>{if(event.session===session)tell(event.message,true);});
-  const keyboard=e=>{if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','F11','Escape'].includes(e.key))e.preventDefault();if(e.key==='F11'){panel.querySelector('[data-action="fullscreen"]')?.click();return;}if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
+  const keyboard=e=>{if(momentComposer||momentOpening)return;if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','F11','Escape'].includes(e.key))e.preventDefault();if(e.key==='F11'){panel.querySelector('[data-action="fullscreen"]')?.click();return;}if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
   g.addEventListener?.('keydown',keyboard);g.addEventListener?.('resize',viewport);
   return {close,dispose(){entryView?.destroy();void close();off?.();void routeListener?.remove?.();void preparedListener?.remove?.();void togetherListener?.remove?.();void noticeListener?.remove?.();void entryListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
 }
