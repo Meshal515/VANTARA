@@ -63,3 +63,9 @@ The user later authorized merging and publishing after verification. Integration
 - CI at handoff: web latest-head runs `39312402214` (PR) / `39312391947` (push), Android debug `39312391674`; Android PR CI `39312398536` / push `39312361899`, Android debug `39312361866`. Read the current run status rather than treating this pending snapshot as success.
 
 Merge only once current-head required CI and native build verification succeed. Then monitor the main CI and existing `Android stable APK` workflow. That workflow consumes the exact main SHA that passed CI and assigns its own monotonically increasing version. Do not manually bypass the gate or force a version. No torrent improvement is claimed: the user reported Windows 0.3.16 torrent playback still poor/worse; subtitle/profile publication is independent.
+
+### Authorized merges completed
+
+All latest-head PR/push CI jobs passed, both debug APK builds passed, and the web PWA guard passed. Both PRs had `mergeStateStatus=CLEAN`; main still pointed to the intended production base when merging began. PR #262 merged as `3be3f58ace190c8813c152bd90e820d509020e86`, then PR #263 merged as **`b5291f505cd7b77e2dbcc34b4077ccf12c92ea14`**. Current main includes the shared/Android subtitle fixes and profile CSS without any desktop file changes.
+
+Main CI for the combined exact SHA is https://github.com/Meshal515/VANTARA/actions/runs/39313319427; main debug APK run `39313319685`, addon playback runtime run `39313319477`. Publication remains gated on main CI followed by the existing Android stable workflow. The prior pending-run listing above is historical; do not merge again or manually trigger a stable version. Final publication result will be appended when available.
