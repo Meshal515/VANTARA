@@ -349,7 +349,7 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='demand'}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
@@ -369,7 +369,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function assertSession(state) { if (state.stopped||current!==state||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
-    state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
+    state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.resolveCommands?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
     for(const pending of state.pending.values()) {clearTimeout(pending.timer);pending.reject(cancelled());}state.pending.clear();
     state.socket?.destroy();
     state.cleanup=(async()=>{
@@ -472,7 +472,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
           res.writeHead(upstream.statusCode,responseHeaders);
           if(req.method==='HEAD'){upstream.destroy();res.end();}else {
-            if(torrent&&state.win){const token={};state.win.reader=token;let sent=0;upstream.on('data',c=>{sent+=c.length;if(state.win.reader===token)state.win.readPos=start+sent;});}
+            if(torrent&&state.win){const token={};state.win.reader=token;let sent=0;upstream.on('data',c=>{sent+=c.length;if(state.win.reader===token){state.demandFlowAt=Date.now();state.win.readPos=start+sent;}});}
             upstream.once('error',()=>res.destroy());upstream.once('aborted',()=>res.destroy());upstream.pipe(res);
           }
         }
@@ -499,9 +499,20 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     await launchEngine(state,dir,env,options);
 
     emit(state,{type:'playback/stage',stage:'metadata'});
-    const metadata=await getTorrentMetadata(
-      ()=>localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:45000}),
-      ms=>sleep(ms,state.controller.signal),()=>assertSession(state));assertSession(state);
+    // rqbit validates only_files against the resolved metadata BEFORE opening
+    // storage. A known index can therefore use one managed add: resolving a
+    // list_only magnet first would throw away its metadata peer receiver.
+    let added=null,metadata;
+    if(torrentMetadataStrategy==='direct-index'&&candidate.fileIdx!=null){
+      state.win={index:candidate.fileIdx,magnet:candidate.magnet,peers:[]};
+      added=await addTorrent(state,options,'');
+      metadata=added;
+    }else{
+      metadata=await getTorrentMetadata(
+        ()=>localJSON(state.api,'/torrents?list_only=true',{...options,body:candidate.magnet,timeout:45000}),
+        ms=>sleep(ms,state.controller.signal),()=>assertSession(state));
+    }
+    assertSession(state);
     if(metadata.details?.info_hash?.toLowerCase()!==candidate.infoHash)throw new Error('هوية التورنت لا تطابق النتيجة');
     const index=selectTorrentFile(metadata.details.files,candidate);
     emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
@@ -518,14 +529,17 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.win={index,magnet:candidate.magnet,peers:initialPeers(metadata.seen_peers),fileLength:Number(files[index].length),fileOffset,totalPieces,pieceLength:pieceLengthOf(totalBytes,totalPieces),evictedTo:0,paused:false,readPos:null,filePath:null};
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
-    const added=await addTorrent(state,options,'');assertSession(state);
+    if(!added)added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
-    warmEdges(state);
+    // Every rqbit HTTP reader contributes a 32 MiB priority window. Let mpv's
+    // actual container Range requests drive demand rather than competing with
+    // speculative head/tail readers. Retain the old strategy for measured A/B.
+    if(torrentWarmup==='both')warmEdges(state);
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
-      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;if(Number.isFinite(speed)&&speed>0.05)state.flowAt=Date.now();
+      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
       }catch{}finally{state.statsPending=false;}
     },1000);
@@ -721,13 +735,14 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     emit(state,{type:'playback/stage',stage:'first-frame'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
+    state.resolveCommands(true);
     // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.
     // أعد فتح رابط الـproxy الداخلي *مرة واحدة*؛ يحتفظ rqbit بنفس الجلسة
     // والأجزاء التي وصلت، فلا يُعاد حل المغناطيس أو الاختيار أو الإعدادات.
     if(!state.ready) {
       // تورنت ينزل فعلًا (سرعة خلال آخر 15 ث): لا نعيد فتح الفيديو، فإعادة الفتح تهدم ما تجمّع في
       // ذاكرة mpv وتطيل البداية. ننتظر ما دام التنزيل يتحرك (ضمن مهلة البداية الكلية)، ونعيد المحاولة عند التوقف فقط.
-      const flowing=()=>state.win&&state.flowAt&&Date.now()-state.flowAt<15000&&Date.now()-state.startedAt<90000;
+      const flowing=()=>state.win&&state.demandFlowAt&&Date.now()-state.demandFlowAt<15000&&Date.now()-state.startedAt<90000;
       const waitWhileFlowing=()=>{
         if(state.stopped||current!==state||state.ready)return;
         if(flowing()){emit(state,{type:'playback/stage',stage:'downloading'});state.firstFrameWatchdog=setTimeout(waitWhileFlowing,10000);return;}
@@ -755,6 +770,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
+    state.whenCommands=new Promise(resolve=>state.resolveCommands=resolve);
     current=state;states.add(state);
     state.budget=createPlaybackBudget({torrent:!!candidate.infoHash,onTimeout:reason=>{
       if(state.stopped||current!==state)return;
@@ -830,6 +846,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function playbackCommand({session,command,value}={}) {
     const state=current;if(!state||state.session!==session||state.stopped)throw new Error('جلسة تشغيل قديمة');
+    if(!await state.whenCommands)throw cancelled();
+    assertSession(state);
     if(command==='pause'&&typeof value==='boolean')await ipcCommand(state,['set_property','pause',value]);
     else if(command==='seek'&&Number.isFinite(value)&&value>=0){state.seekTarget=value;state.budget?.seek(value);await ipcCommand(state,['seek',value/1000,'absolute']);}
     else if(command==='rate'&&Number.isFinite(value)&&value>=0.95&&value<=1.05)await ipcCommand(state,['set_property','speed',value]);
