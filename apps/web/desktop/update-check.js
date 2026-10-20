@@ -1,6 +1,5 @@
 /** قناة ويندوز مستقلة: لا تختلط بإصدارات APK التي لا تحتوي مثبت ويندوز. */
 export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/download/windows-channel/desktop-update.json';
-export const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 
 export function newerVersion(candidate, installed) {
   const parse = value => {
@@ -52,7 +51,7 @@ export async function checkDesktopUpdate(bridge, {url=MANIFEST_URL} = {}) {
 
 export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=globalThis.document} = {}) {
   if(!bridge?.requestResource||!bridge?.openUpdatePage||!doc?.body)return null;
-  let pending=null,interval=null,checking=null,disposed=false,downloading=null,offProgress=null,settled=null;
+  let pending=null,checking=null,disposed=false,downloading=null,offProgress=null,settled=null;
   const mb=n=>`${Math.round(n/1048576)}MB`;
   // شريط واحد بحالاته: يُنزَّل ← جاهز (أعد التشغيل / عند الإغلاق) ← أو تنزيل يدوي إن تعذر
   const bar=()=>{
@@ -79,7 +78,7 @@ export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=gl
     ['تحميل تحديث ويندوز',()=>void bridge.openUpdatePage({url:update.url}).catch(()=>render('تحديث VANTARA متاح: '+update.version,'تعذر فتح التحميل. افتح إصدارات VANTARA على GitHub.'))],
     ['لاحقًا',()=>{settled=update.version;doc.querySelector('[data-vantara-desktop-update]')?.remove();}],
   ]);
-  // نسخة جهزت (أو أجّلها المستخدم): الفحص الدوري لا يعيد إظهار الشريط لها
+  // لا نكرر تنزيل نسخة جاهزة في الجلسة نفسها؛ الفحص يبدأ من الإعدادات فقط
   const ready=update=>(settled=update.version,render('تحديث VANTARA جاهز: '+update.version,'نُزّل وتحققنا من بصمته. أعد التشغيل الآن، أو يُثبَّت وحده عند إغلاقك التطبيق.',[
     ['أعد التشغيل وحدّث',()=>void bridge.applyUpdate().catch(()=>manual(update,'تعذر بدء التثبيت. حمّل المثبت يدويًا.'))],
     ['عند الإغلاق',()=>doc.querySelector('[data-vantara-desktop-update]')?.remove()],
@@ -97,6 +96,7 @@ export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=gl
     }).catch(()=>manual(update,'تعذر تنزيل التحديث تلقائيًا. حمّل المثبت يدويًا.')).finally(()=>{downloading=null;});
   };
   const check=({force=false}={})=>{
+    if(disposed||!force)return Promise.resolve({update:null,status:'idle'});
     if(checking)return checking;
     checking=checkDesktopUpdate(bridge).then(update=>{
       if(update)show(update);
@@ -104,9 +104,5 @@ export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=gl
     }).catch(error=>{if(force)throw error;return {update:null,status:'unknown'};}).finally(()=>{checking=null;});
     return checking;
   };
-  void check();
-  interval=setInterval(()=>void check(),CHECK_EVERY_MS);
-  const visible=()=>{if(doc.visibilityState==='visible')void check();};
-  doc.addEventListener('visibilitychange',visible);
-  return {check,close(){disposed=true;offProgress?.();clearInterval(interval);doc.removeEventListener('visibilitychange',visible);doc.querySelector('[data-vantara-desktop-update]')?.remove();}};
+  return {check,close(){disposed=true;offProgress?.();doc.querySelector('[data-vantara-desktop-update]')?.remove();}};
 }

@@ -28,7 +28,9 @@ export function createSubtitleSession({
     hls = null,
     hlsClass = null;
   const nodes = new Map(),
-    blobs = new Set();
+    blobs = new Set(),
+    downloads = new Map();
+  let selection = 0;
   const change = () => {
     if (!closed) onChange();
   };
@@ -47,6 +49,8 @@ export function createSubtitleSession({
     detach();
     for (const n of nodes.values()) n.remove();
     nodes.clear();
+    downloads.clear();
+    selection++;
     for (const u of blobs) URL.revokeObjectURL(u);
     blobs.clear();
     list = [];
@@ -171,6 +175,7 @@ export function createSubtitleSession({
   async function select(id, { automatic = false } = {}) {
     if (!automatic) manualChoice = true;
     const run = generation;
+    const choice = ++selection;
     adjustments.bind(null);
     selected = id;
     const t = tracks().find((x) => x.id === id);
@@ -194,9 +199,19 @@ export function createSubtitleSession({
     }
     let n = nodes.get(t.id);
     if (!n) {
-      const text = await transport.text(t.url, { signal: controller.signal });
-      const vtt = toWebVtt(text);
-      if (run !== generation || closed || selected !== id) return;
+      let download = downloads.get(t.id);
+      if (!download) {
+        download = transport.text(t.url, { signal: controller.signal, fallbackCharset: t.lang === "ar" ? "windows-1256" : null }).then(toWebVtt);
+        downloads.set(t.id, download);
+      }
+      let vtt;
+      try { vtt = await download; }
+      catch (error) {
+        if (run !== generation || closed || choice !== selection) return;
+        throw error;
+      }
+      finally { if (downloads.get(t.id) === download) downloads.delete(t.id); }
+      if (run !== generation || closed || choice !== selection) return;
       const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
       blobs.add(url);
       n = document.createElement("track");

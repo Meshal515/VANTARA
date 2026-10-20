@@ -213,11 +213,11 @@ function bounded(value, fallback, low, high) {
   if (!Number.isSafeInteger(value) || value < low || value > high) throw new Error('حد الطلب غير صالح');
   return value;
 }
-function readResponse(response, limit) {
+function readResponse(response, limit, decode=data=>data.toString('utf8')) {
   return new Promise((resolve,reject) => {
     const chunks=[];let size=0;
     response.on('data', chunk => { size+=chunk.length; if (size > limit) { reject(new Error('حجم الاستجابة أكبر من الحد')); response.destroy(); } else chunks.push(chunk); });
-    response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    response.on('end', () => {try{resolve(decode(Buffer.concat(chunks)));}catch(error){reject(error);}});
     response.on('error',reject);
     response.on('aborted',()=>reject(new Error('انقطع نقل الاستجابة')));
   });
@@ -899,7 +899,13 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         response.destroy();
       }
       if(response.statusCode<200||response.statusCode>=300)throw new Error('تعذر تنزيل الترجمة؛ استجابة غير ناجحة');
-      const validated=validateSubtitleText(await readResponse(response,2*1024*1024));assertSession(state);
+      const validated=validateSubtitleText(await readResponse(response,2*1024*1024,data=>{
+        const bom=data[0]===0xef&&data[1]===0xbb&&data[2]===0xbf?'utf-8':data[0]===0xff&&data[1]===0xfe?'utf-16le':data[0]===0xfe&&data[1]===0xff?'utf-16be':null;
+        const declared=/charset\s*=\s*["']?([^;\s"']+)/i.exec(response.headers['content-type']??'')?.[1];
+        if(bom||declared){try{return new TextDecoder(bom||declared).decode(data);}catch{throw new Error('ترميز ملف الترجمة غير مدعوم');}}
+        if(value.lang==='ar'){try{return new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{return new TextDecoder('windows-1256').decode(data);}}
+        return data.toString('utf8');
+      }));assertSession(state);
       const storage=await fs.statfs(userData,{bigint:true});assertSession(state);
       if(storage.bavail*storage.bsize<BigInt(Buffer.byteLength(validated.text))+8n*1024n**2n)throw new Error('المساحة لا تكفي لتنزيل الترجمة؛ حرر 8 ميغابايت على الأقل');
       if(!state.subtitleDir){state.subtitleDir=join(userData,'subtitle-cache',secret());await mkdir(state.subtitleDir,{recursive:true});assertSession(state);}
