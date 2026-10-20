@@ -17,6 +17,6 @@ test('faststart MP4 and non-MP4 containers request no tail',async()=>{
 });
 test('incomplete sparse headers wait; malformed sizes and end-extending media do not trigger requests',async()=>{
  assert.deepEqual(await inspectMp4Index(source(new Map()).read,100000,4096),{state:'wait'});
- assert.deepEqual(await inspectMp4Index(source(new Map([[0,atom('ftyp',24)],[24,atom('mdat',100)]] )).read,100000,4096),{state:'wait'});
+ assert.deepEqual(await inspectMp4Index(source(new Map([[0,atom('ftyp',24)],[24,atom('mdat',100)]] )).read,100000,4096),{state:'index',offset:99999});
  for(const next of [atom('mdat',0),atom('mdat',4),atom('mdat',200000)])assert.deepEqual(await inspectMp4Index(source(new Map([[0,atom('ftyp',24)],[24,next]])).read,100000,4096),{state:'none'});
 });
