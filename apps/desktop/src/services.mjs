@@ -978,7 +978,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let url;try{url=publicURL(value.url).href;}catch{return Promise.reject(new Error('رابط ترجمة غير مسموح'));}
     if(value.select===true)chooseSubtitle(state,url);
     const existing=state.subtitleFiles.get(url);
-    if(existing&&value.select===true)return ipcCommand(state,['set_property','sid',existing.id]);
+    if(existing)return value.select===true?ipcCommand(state,['set_property','sid',existing.id]):Promise.resolve();
     if(state.subtitleJobs.has(url))return state.subtitleJobs.get(url);
     const subtitle={url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة'),select:value.select};
     const job=state.subtitleQueue.then(async()=>{
@@ -1009,9 +1009,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       } catch(error){state.subtitleExpectedSelection=null;await rm(path,{force:true}).catch(()=>{});throw error;}
     }).catch(error=>{
       if(!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
-      state.subtitleJobs.delete(url);
       throw error;
-    });
+    }).finally(()=>{if(state.subtitleJobs.get(url)===job)state.subtitleJobs.delete(url);});
     state.subtitleJobs.set(url,job);state.subtitleQueue=job.catch(()=>{});
     return job;
   }

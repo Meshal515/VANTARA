@@ -507,7 +507,10 @@ test('explicitly choosing another subtitle after eight keeps the native file lim
   }
   const tracks=events.filter(e=>e.type==='playback/subtitles').at(-1).tracks;
   assert.equal(tracks.filter(x=>x.id>0).length,8);assert.equal(tracks.filter(x=>x.selected).length,1);assert.equal(tracks.find(x=>x.selected).label,'Choice 18');
-  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(commands.filter(x=>x.command[0]==='sub-remove').length,11);assert.equal(commands.filter(x=>x.command[0]==='loadfile').length,1);
+  const evicted=tracks.find(x=>x.label==='Choice 0');assert.ok(evicted.id<0);
+  await services.playbackCommand({session:'many-subs',command:'subtitle-select',value:evicted.id});
+  assert.equal(events.filter(e=>e.type==='playback/subtitles').at(-1).tracks.find(x=>x.selected).label,'Choice 0');
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.equal(commands.filter(x=>x.command[0]==='sub-remove').length,12);assert.equal(commands.filter(x=>x.command[0]==='loadfile').length,1);
 });
 test('turning subtitles off cancels a slow pending selection without selecting it or reporting a stale failure',async t=>{
   await subtitleSource(t,{slow:true});const {services,events,dir}=await fixture(t);await services.startPlayback({session:'subs-off',candidate:{url:'https://video.example.com/owned.mp4'}});
