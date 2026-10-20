@@ -515,6 +515,15 @@ test('turning subtitles off cancels a slow pending selection without selecting i
   await new Promise(r=>setTimeout(r,20));await services.playbackCommand({session:'subs-off',command:'subtitle-off'});await rejected;
   const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(x=>x.command[0]==='sub-add'));assert.ok(!events.some(e=>e.type==='playback/subtitles'&&e.message));
 });
+test('a manual click on an already downloading subtitle selects it on the first click',async t=>{
+  await subtitleSource(t,{slow:true});const {services,dir}=await fixture(t);
+  const subtitle={url:'https://subs.example.com/shared.srt',lang:'ar',label:'العربية'};
+  await services.startPlayback({session:'pending-choice',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[subtitle]}});
+  await new Promise(r=>setTimeout(r,20));
+  await services.playbackCommand({session:'pending-choice',command:'subtitle-load',value:{...subtitle,select:true}});
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse),adds=commands.filter(x=>x.command[0]==='sub-add');
+  assert.equal(adds.length,1);assert.equal(adds[0].command[2],'select');
+});
 test('subtitle غير صالح يفشل بلا قطع الفيديو ولا sub-add ولا ready وهمي',async t=>{
   await subtitleSource(t,{invalid:true});const {services,events,dir}=await fixture(t);await services.startPlayback({session:'bad-sub',candidate:{url:'https://video.example.com/owned.mp4'}});
   await assert.rejects(services.playbackCommand({session:'bad-sub',command:'subtitle-load',value:{url:'https://subs.example.com/error.srt',lang:'ar'}}),/ترجمة/);

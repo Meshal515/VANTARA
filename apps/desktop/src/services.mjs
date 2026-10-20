@@ -998,7 +998,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         }
         const selected=state.subtitleTracks.find(t=>t.selected);
         const automatic=!state.subtitleManual&&(!selected||subtitle.lang==='ar'&&selected.lang!=='ar');
-        const select=subtitle.select===true||subtitle.select!==false&&automatic;
+        const select=state.subtitleManual?state.subtitleWanted===url:subtitle.select===true||subtitle.select!==false&&automatic;
         if(select)state.subtitleExpectedSelection={lang:subtitle.lang,label:subtitle.label};
         await ipcCommand(state,['sub-add',path,select?'select':'auto',subtitle.label,subtitle.lang]);assertSession(state);
         const all=await ipcCommand(state,['get_property','track-list']);assertSession(state);
