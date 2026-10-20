@@ -1,0 +1,58 @@
+[
+  {
+    "file": "demand-png0-n2.json.gz",
+    "uncompressedSha256": "7df4c053e20c3d660c59ae898239f544bad637235294cd86495ea1d05f0c044f",
+    "bytes": 224710
+  },
+  {
+    "file": "demand-png0-n2-cold.png",
+    "originalPngSha256": "0702a30b740ff29cac4995fa13e96e8c787c41c87787069adf2bffa46d16b041",
+    "recompressedPngSha256": "8fdb1978f537ecd3485c78c85803e25104adea661b0a8941a860742942d5ee8d",
+    "pixelSha256": "53a6e828ef96b30d9189815e7b9985b88ac0645968ce271c6b9e404799acc94e",
+    "note": "Lossless recompression; identical decoded pixels"
+  },
+  {
+    "file": "container-png0-n2.json.gz",
+    "uncompressedSha256": "e2aedeca71f9552b3ba9007594f556cb93769c069bb498bb7175a733157a9095",
+    "bytes": 182621
+  },
+  {
+    "file": "container-png0-n2-cold.png",
+    "originalPngSha256": "0702a30b740ff29cac4995fa13e96e8c787c41c87787069adf2bffa46d16b041",
+    "recompressedPngSha256": "8fdb1978f537ecd3485c78c85803e25104adea661b0a8941a860742942d5ee8d",
+    "pixelSha256": "53a6e828ef96b30d9189815e7b9985b88ac0645968ce271c6b9e404799acc94e",
+    "note": "Lossless recompression; identical decoded pixels"
+  },
+  {
+    "file": "container-fast-n3.json.gz",
+    "uncompressedSha256": "4c4ef6b75d612874450f10bc928ce852bf31dcaa8f620371cc2f8ec440f1999d",
+    "bytes": 640437
+  },
+  {
+    "file": "container-fast-n3-cold.png",
+    "originalPngSha256": "0702a30b740ff29cac4995fa13e96e8c787c41c87787069adf2bffa46d16b041",
+    "recompressedPngSha256": "8fdb1978f537ecd3485c78c85803e25104adea661b0a8941a860742942d5ee8d",
+    "pixelSha256": "53a6e828ef96b30d9189815e7b9985b88ac0645968ce271c6b9e404799acc94e",
+    "note": "Lossless recompression; identical decoded pixels"
+  },
+  {
+    "file": "container-fast-n3-warm.png",
+    "originalPngSha256": "0b5758b9cf20d20831faef9e1d8c0d9c5680e21bcecc0c0ce64c00e16b6fce32",
+    "recompressedPngSha256": "d9ec2c57a39a0eb367473a64a19cfa1573db4ac36b82abf77cc08937dc2b27b3",
+    "pixelSha256": "f3f7428f58661a4805abfcb0f14c3f920da4c55704ac108ff39d62238aa1226c",
+    "note": "Lossless recompression; identical decoded pixels"
+  },
+  {
+    "file": "container-fast-n3-restart.png",
+    "originalPngSha256": "b0c6bc8701954f4be7ac71d92e9811ef681239f4c7a344a0e94871e12faaede1",
+    "recompressedPngSha256": "eed0e5d219fac2bab8c0bb89baecf1a47fb28cd21bda5fead60be43a228342a4",
+    "pixelSha256": "e5c8fb0cdbdf10784b71cd84b2c71e10421d25de0fca23f06022c8998b829dd6",
+    "note": "Lossless recompression; identical decoded pixels"
+  },
+  {
+    "file": "windows-first-gate-failed.json.gz",
+    "uncompressedSha256": "f45b1b43954f12a088bf3bb0753e3720246448e3b4c2bc5e4759e31a4a18b8dc",
+    "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/39488062625",
+    "note": "All 6 first rendered frames observed, all 6 stability assertions failed; kept as failures"
+  }
+]
