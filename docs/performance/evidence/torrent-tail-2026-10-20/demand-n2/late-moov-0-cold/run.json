@@ -1,0 +1,5153 @@
+{
+  "fixture": "late-moov",
+  "trial": 0,
+  "mode": "cold",
+  "infoHash": "e91670d58d1e3f9c0e5bbb882e7d2270928c46b0",
+  "fileIdx": 0,
+  "logicalFileBytes": 270689965,
+  "cacheBefore": {
+    "entries": [],
+    "partialFixtureTrimmed": false,
+    "available": false
+  },
+  "directory": "<evidence>/demand-n2/late-moov-0-cold",
+  "events": [
+    {
+      "type": "playback/diagnostic",
+      "stage": "source-selected",
+      "elapsedMs": 0.124,
+      "fileIdx": 0,
+      "mode": "cold",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 3.0874979999998686
+    },
+    {
+      "type": "playback/preparing",
+      "title": "VANTARA authored benchmark",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 3.5569980000000214
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "replay-lookup",
+      "elapsedMs": 1.315,
+      "mode": "cold",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4.23438299999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "engine-start",
+      "elapsedMs": 1.544,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4.457611999999926
+    },
+    {
+      "type": "playback/stage",
+      "stage": "engine-start",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4.462277999999969
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "cache-selection-start",
+      "elapsedMs": 1.558,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4.467296000000033
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "cache-selection-complete",
+      "elapsedMs": 2.258,
+      "waitMs": 0.692939000000024,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 5.1756069999999
+    },
+    {
+      "type": "playback/stage",
+      "stage": "cache-selected",
+      "volume": "<evidence>/demand-n2/profile-late-moov-0",
+      "availableBytes": 19760631808,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 5.457441000000017
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "engine-ready",
+      "elapsedMs": 17.973,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20.889171999999917
+    },
+    {
+      "type": "playback/stage",
+      "stage": "metadata",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20.89621299999999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "magnet-metadata-start",
+      "elapsedMs": 17.992,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20.903843999999935
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "managed-add-start",
+      "elapsedMs": 18.233,
+      "fileIdx": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 21.16248399999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "managed-add-complete",
+      "elapsedMs": 65.099,
+      "waitMs": 46.86384599999997,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 68.02165300000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "magnet-metadata-complete",
+      "elapsedMs": 65.12,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 68.03010599999993
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "file-selected",
+      "elapsedMs": 65.268,
+      "fileIdx": 0,
+      "fileBytes": 270689965,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 68.19019099999991
+    },
+    {
+      "type": "playback/stage",
+      "stage": "file-selected",
+      "fileIdx": 0,
+      "bytes": 270689965,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 68.2016779999999
+    },
+    {
+      "type": "playback/stage",
+      "stage": "downloading",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 78.24727099999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "player-start",
+      "elapsedMs": 76.067,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 78.98220100000003
+    },
+    {
+      "type": "playback/stage",
+      "stage": "player-start",
+      "embedded": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 79.08814699999994
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "player-ipc-ready",
+      "elapsedMs": 204.365,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 207.29009899999983
+    },
+    {
+      "type": "playback/stage",
+      "stage": "first-frame",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 223.2913759999999
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 477.875186
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 477.8975290000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 561.511,
+      "requestId": 1,
+      "rangeStart": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 564.4485790000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 587.53,
+      "requestId": 1,
+      "rangeStart": 0,
+      "rangeEnd": 270689964,
+      "waitMs": 26.03201799999988,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 590.4571829999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 1079.091,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258819,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 1082.0251580000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "peer-connected",
+      "elapsedMs": 1079.158,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 1082.0683809999998
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258819,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 1082.0824019999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 2078.865,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259660,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 2081.7899129999996
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259660,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 2081.797464
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19757998080,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 2083.0549220000003
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 3082.862,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259168,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 3085.785032
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259168,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 3085.792923
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19755794432,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4082.0930770000004
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 4082.758,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259227,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4085.6799490000003
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259227,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 4085.6923070000003
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 5082.501,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258525,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 5085.4255920000005
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258525,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 5085.435316
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19755270144,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 6082.559476
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 6081.708,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257672,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 6084.629649
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 257672,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 6084.635458
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 7083.105,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259342,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 7086.032322000001
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259342,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 7086.041996
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19754745856,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 8082.322501000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 8082.263,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259352,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 8085.1833449999995
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259352,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 8085.191177000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 9082.401,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259587,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 9085.324465
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259587,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 9085.333979
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 10082.327,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291140,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 10085.386324000001
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 291140,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 10085.399714000001
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19754221568,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 10086.69
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 11084.388,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258994,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 11087.320603
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258994,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 11087.326812
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19753697280,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 12083.878295
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 12083.091,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259589,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 12086.015106
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259589,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 12086.01794
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 13083.571,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259330,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 13086.495798
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259330,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 13086.498933
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 14085.404,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259082,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 14088.325299
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259082,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 14088.328493
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19753172992,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 14088.48258
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 15083.933,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259328,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15086.855145
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259328,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15086.857778
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-first-byte",
+      "elapsedMs": 15112.519,
+      "bytes": 65536,
+      "waitMs": 14550.992999,
+      "mode": "torrent",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15115.454967
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15112.569,
+      "requestId": 1,
+      "cursor": 65536,
+      "waitMs": 14551.060638,
+      "mode": "torrent",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15115.493003000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "first-useful-piece",
+      "elapsedMs": 15112.595,
+      "requestedPiece": 0,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15115.507544999999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15132.29,
+      "requestId": 2,
+      "rangeStart": 245828,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15135.210422000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 15160.664,
+      "requestId": 2,
+      "rangeStart": 245828,
+      "rangeEnd": 270689964,
+      "waitMs": 28.377325000001292,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15163.587206000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15160.761,
+      "requestId": 2,
+      "cursor": 311111,
+      "waitMs": 28.467767999998614,
+      "mode": "torrent",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15163.674414
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15172.568,
+      "requestId": 3,
+      "rangeStart": 2247490,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15175.488877000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15195.17,
+      "requestId": 3,
+      "cursor": 3951616,
+      "waitMs": 22.600806000002194,
+      "mode": "cache",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15198.096253000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15199.383,
+      "requestId": 4,
+      "rangeStart": 270682946,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15202.305699999999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 15252.716,
+      "requestId": 4,
+      "rangeStart": 270682946,
+      "rangeEnd": 270689964,
+      "waitMs": 53.3343160000004,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 15255.635378
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19748454400,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 16085.746701000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 16083.682,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258677,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 16086.605292999999
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258677,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 16086.612384000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 17084.819,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259217,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 17087.742155
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259217,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 17087.74513
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19747930112,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 18084.297103999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 18083.247,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259715,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 18086.168154
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259715,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 18086.171079
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 19083.698,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259658,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 19086.619695999998
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259658,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 19086.62286
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19747405824,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20084.485224999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 20084.898,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259090,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20087.819226
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259090,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 20087.822249999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 21085.401,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259526,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 21088.323409999997
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259526,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 21088.326715
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19746881536,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 22084.187758
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 22085.375,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259607,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 22088.295395999998
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259607,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 22088.298841
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 23086.929,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258489,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 23089.857189
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258489,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 23089.862215999998
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19745878016,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 24084.061007999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 24085.163,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 292228,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 24088.102988
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 292228,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 24088.106312999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 25091.353,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259137,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 25094.279574999997
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259137,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 25094.285843999998
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19742801920,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 26084.778897
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 26085.891,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258583,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 26088.816680999997
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258583,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 26088.821057999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 27086.533,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259543,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 27089.459281
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259543,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 27089.463316999998
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19741945856,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 28084.721213999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 28086.24,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259493,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 28089.160128
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259493,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 28089.163352
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 29086.897,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258067,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 29089.819463
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258067,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 29089.823599
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19741425664,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 30084.6086
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 30087.82,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259741,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 30090.741574
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259741,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 30090.745609999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 31088.405,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259564,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 31091.327231
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259564,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 31091.331928
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19740897280,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 32084.827158
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 32088.326,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258064,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 32091.2517
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258064,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 32091.256167
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 33088.485,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257849,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 33091.407846
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 257849,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 33091.412061999996
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19740377088,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 34084.700882
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 34087.523,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259262,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 34090.444053
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259262,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 34090.447136999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 35088.721,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257071,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 35091.645372
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 257071,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 35091.648537
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19739848704,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 36085.622814999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 36088.434,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259518,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 36091.359286
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259518,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 36091.363472
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 37088.392,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259328,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 37091.318885
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259328,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 37091.325625
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19739324416,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 38087.020811999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 38087.812,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259686,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 38090.73387
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259686,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 38090.737454999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 39088.612,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259616,
+      "checkedBytes": 8388608,
+      "checkedPieces": 2,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1704126,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39091.534435
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259616,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39091.538842
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 39703.124,
+      "requestId": 4,
+      "cursor": 270689965,
+      "waitMs": 24503.720906000002,
+      "mode": "torrent",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39706.051461999996
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39707.707446
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39707.726274
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "container-metadata-ready",
+      "elapsedMs": 39709.939,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39712.871406
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 39710.348,
+      "requestId": 5,
+      "rangeStart": 44,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39713.264674
+    },
+    {
+      "type": "playback/progress",
+      "position": 0,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39713.477587
+    },
+    {
+      "type": "playback/progress",
+      "position": 0,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39713.491738
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39713.517295
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39713.521821999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 39730.307,
+      "requestId": 5,
+      "cursor": 4194304,
+      "waitMs": 19.95137799999793,
+      "mode": "cache",
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39733.22827
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39858.809729
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39858.817942
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "decoder-output",
+      "elapsedMs": 39878.525,
+      "mode": "render-unmeasured",
+      "decoderWidth": 3840,
+      "decoderHeight": 2160,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39881.460149
+    },
+    {
+      "type": "playback/ready",
+      "position": 0,
+      "duration": 24000,
+      "embedded": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39881.608558
+    },
+    {
+      "type": "playback/state",
+      "position": 0,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 39881.621326
+    },
+    {
+      "type": "playback/progress",
+      "position": 83,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40013.603393
+    },
+    {
+      "type": "playback/state",
+      "position": 83,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40013.657923
+    },
+    {
+      "type": "playback/progress",
+      "position": 167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40029.702418
+    },
+    {
+      "type": "playback/state",
+      "position": 167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40029.756497999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 40090.877,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 242505,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40093.800454
+    },
+    {
+      "type": "playback/progress",
+      "position": 167,
+      "duration": 24000,
+      "downloadSpeed": 242505,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40093.808456
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19738779648,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40094.289483
+    },
+    {
+      "type": "playback/progress",
+      "position": 250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40181.983839
+    },
+    {
+      "type": "playback/state",
+      "position": 250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40182.041944
+    },
+    {
+      "type": "playback/progress",
+      "position": 333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40197.689342
+    },
+    {
+      "type": "playback/state",
+      "position": 333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40197.743280999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40305.025867
+    },
+    {
+      "type": "playback/state",
+      "position": 417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40305.093346
+    },
+    {
+      "type": "playback/progress",
+      "position": 500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40405.751363999996
+    },
+    {
+      "type": "playback/state",
+      "position": 500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40405.801437999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40417.826402
+    },
+    {
+      "type": "playback/state",
+      "position": 583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40417.864107
+    },
+    {
+      "type": "playback/progress",
+      "position": 667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40572.417357
+    },
+    {
+      "type": "playback/state",
+      "position": 667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40572.475512
+    },
+    {
+      "type": "playback/progress",
+      "position": 750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40576.12123
+    },
+    {
+      "type": "playback/state",
+      "position": 750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40576.145316
+    },
+    {
+      "type": "playback/progress",
+      "position": 833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40695.625307999995
+    },
+    {
+      "type": "playback/state",
+      "position": 833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40695.660109
+    },
+    {
+      "type": "playback/progress",
+      "position": 917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40774.011162999996
+    },
+    {
+      "type": "playback/state",
+      "position": 917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40774.046435
+    },
+    {
+      "type": "playback/progress",
+      "position": 1000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40825.907746
+    },
+    {
+      "type": "playback/state",
+      "position": 1000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40825.959752999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 1083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40906.321302
+    },
+    {
+      "type": "playback/state",
+      "position": 1083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 40906.358216
+    },
+    {
+      "type": "playback/progress",
+      "position": 1167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41011.155438
+    },
+    {
+      "type": "playback/state",
+      "position": 1167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41011.191932
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 41099.085,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258876,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41102.008848
+    },
+    {
+      "type": "playback/progress",
+      "position": 1167,
+      "duration": 24000,
+      "downloadSpeed": 258876,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41102.013605
+    },
+    {
+      "type": "playback/progress",
+      "position": 1250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41122.609964999996
+    },
+    {
+      "type": "playback/state",
+      "position": 1250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41122.647911
+    },
+    {
+      "type": "playback/progress",
+      "position": 1333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41177.755053
+    },
+    {
+      "type": "playback/state",
+      "position": 1333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41177.78682
+    },
+    {
+      "type": "playback/progress",
+      "position": 1417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41278.191366
+    },
+    {
+      "type": "playback/state",
+      "position": 1417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41278.222071
+    },
+    {
+      "type": "playback/progress",
+      "position": 1500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41328.748571
+    },
+    {
+      "type": "playback/state",
+      "position": 1500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41328.777473
+    },
+    {
+      "type": "playback/progress",
+      "position": 1583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41504.401171
+    },
+    {
+      "type": "playback/state",
+      "position": 1583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41504.445516
+    },
+    {
+      "type": "playback/progress",
+      "position": 1667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41513.989623
+    },
+    {
+      "type": "playback/state",
+      "position": 1667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41514.04212
+    },
+    {
+      "type": "playback/progress",
+      "position": 1750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41606.545655
+    },
+    {
+      "type": "playback/state",
+      "position": 1750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41606.591462
+    },
+    {
+      "type": "playback/progress",
+      "position": 1833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41709.860579
+    },
+    {
+      "type": "playback/state",
+      "position": 1833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41709.892596
+    },
+    {
+      "type": "playback/progress",
+      "position": 1917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41773.741365
+    },
+    {
+      "type": "playback/state",
+      "position": 1917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41773.780773
+    },
+    {
+      "type": "playback/progress",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41820.485445
+    },
+    {
+      "type": "playback/state",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41820.519455
+    },
+    {
+      "type": "playback/progress",
+      "position": 2083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41970.254549
+    },
+    {
+      "type": "playback/state",
+      "position": 2083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41970.291614
+    },
+    {
+      "type": "playback/progress",
+      "position": 2167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41984.68039
+    },
+    {
+      "type": "playback/state",
+      "position": 2167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 41984.708371
+    },
+    {
+      "type": "playback/progress",
+      "position": 2250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42073.63123
+    },
+    {
+      "type": "playback/state",
+      "position": 2250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42073.881448
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19738259456,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42093.403039
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 42099.578,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259101,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42102.508211
+    },
+    {
+      "type": "playback/progress",
+      "position": 2250,
+      "duration": 24000,
+      "downloadSpeed": 259101,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42102.512016
+    },
+    {
+      "type": "playback/progress",
+      "position": 2333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42181.696692
+    },
+    {
+      "type": "playback/state",
+      "position": 2333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42181.732224
+    },
+    {
+      "type": "playback/progress",
+      "position": 2417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42281.507714
+    },
+    {
+      "type": "playback/state",
+      "position": 2417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42281.562995
+    },
+    {
+      "type": "playback/progress",
+      "position": 2500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42328.652862999996
+    },
+    {
+      "type": "playback/state",
+      "position": 2500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42328.685379999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 2583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42497.675342999995
+    },
+    {
+      "type": "playback/state",
+      "position": 2583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42497.710344
+    },
+    {
+      "type": "playback/progress",
+      "position": 2667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42497.754108
+    },
+    {
+      "type": "playback/state",
+      "position": 2667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42497.757954
+    },
+    {
+      "type": "playback/progress",
+      "position": 2750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42618.412809
+    },
+    {
+      "type": "playback/state",
+      "position": 2750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42618.449293
+    },
+    {
+      "type": "playback/progress",
+      "position": 2833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42677.716106
+    },
+    {
+      "type": "playback/state",
+      "position": 2833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42677.748684
+    },
+    {
+      "type": "playback/progress",
+      "position": 2917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42731.664344
+    },
+    {
+      "type": "playback/state",
+      "position": 2917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42731.697492
+    },
+    {
+      "type": "playback/progress",
+      "position": 3000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42877.691356999996
+    },
+    {
+      "type": "playback/state",
+      "position": 3000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42877.726508
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "stable-playback",
+      "elapsedMs": 42921.659,
+      "position": 3083,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42924.624635
+    },
+    {
+      "type": "playback/progress",
+      "position": 3083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42924.631214
+    },
+    {
+      "type": "playback/state",
+      "position": 3083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 42924.661249
+    },
+    {
+      "type": "playback/progress",
+      "position": 3167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43001.762523
+    },
+    {
+      "type": "playback/state",
+      "position": 3167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43001.794990999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 43101.58,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259494,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43104.502189
+    },
+    {
+      "type": "playback/progress",
+      "position": 3167,
+      "duration": 24000,
+      "downloadSpeed": 259494,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43104.506595
+    },
+    {
+      "type": "playback/progress",
+      "position": 3250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43120.026183999995
+    },
+    {
+      "type": "playback/state",
+      "position": 3250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43120.051341
+    },
+    {
+      "type": "playback/progress",
+      "position": 3333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43173.885851
+    },
+    {
+      "type": "playback/state",
+      "position": 3333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43173.915895
+    },
+    {
+      "type": "playback/progress",
+      "position": 3417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43282.407463999996
+    },
+    {
+      "type": "playback/state",
+      "position": 3417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43282.441494
+    },
+    {
+      "type": "playback/progress",
+      "position": 3500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43332.487015
+    },
+    {
+      "type": "playback/state",
+      "position": 3500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43332.520264
+    },
+    {
+      "type": "playback/progress",
+      "position": 3583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43406.995379
+    },
+    {
+      "type": "playback/state",
+      "position": 3583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43407.033305
+    },
+    {
+      "type": "playback/progress",
+      "position": 3667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43524.979819
+    },
+    {
+      "type": "playback/state",
+      "position": 3667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43525.016963999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 3750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43672.986699
+    },
+    {
+      "type": "playback/state",
+      "position": 3750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43673.029331
+    },
+    {
+      "type": "playback/progress",
+      "position": 3833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43693.705498999996
+    },
+    {
+      "type": "playback/state",
+      "position": 3833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43693.740639999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 3917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43827.335102
+    },
+    {
+      "type": "playback/state",
+      "position": 3917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43827.367249999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 4000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43828.471271999995
+    },
+    {
+      "type": "playback/state",
+      "position": 4000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 43828.481297
+    },
+    {
+      "type": "playback/progress",
+      "position": 4083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44005.706442999995
+    },
+    {
+      "type": "playback/state",
+      "position": 4083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44005.741603999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 4167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44005.779669999996
+    },
+    {
+      "type": "playback/state",
+      "position": 4167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44005.782925
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19737735168,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44094.142831
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 44103.813,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 289579,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44106.734628
+    },
+    {
+      "type": "playback/progress",
+      "position": 4167,
+      "duration": 24000,
+      "downloadSpeed": 289579,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44106.738633
+    },
+    {
+      "type": "playback/progress",
+      "position": 4250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44129.509098999995
+    },
+    {
+      "type": "playback/state",
+      "position": 4250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44129.528177
+    },
+    {
+      "type": "playback/progress",
+      "position": 4333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44181.896041
+    },
+    {
+      "type": "playback/state",
+      "position": 4333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44181.920206999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 4417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44296.97447
+    },
+    {
+      "type": "playback/state",
+      "position": 4417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44296.998995999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 4500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44373.947897
+    },
+    {
+      "type": "playback/state",
+      "position": 4500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44373.975448
+    },
+    {
+      "type": "playback/progress",
+      "position": 4583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44472.536472
+    },
+    {
+      "type": "playback/state",
+      "position": 4583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44472.559015
+    },
+    {
+      "type": "playback/progress",
+      "position": 4667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44525.706484999995
+    },
+    {
+      "type": "playback/state",
+      "position": 4667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44525.728067
+    },
+    {
+      "type": "playback/progress",
+      "position": 4750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44685.403189
+    },
+    {
+      "type": "playback/state",
+      "position": 4750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44685.429037
+    },
+    {
+      "type": "playback/progress",
+      "position": 4833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44689.836164
+    },
+    {
+      "type": "playback/state",
+      "position": 4833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44689.851166
+    },
+    {
+      "type": "playback/progress",
+      "position": 4917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44820.411568999996
+    },
+    {
+      "type": "playback/state",
+      "position": 4917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44820.436827
+    },
+    {
+      "type": "playback/progress",
+      "position": 5000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44837.648232
+    },
+    {
+      "type": "playback/state",
+      "position": 5000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 44837.66727
+    },
+    {
+      "type": "playback/progress",
+      "position": 5083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45025.735742
+    },
+    {
+      "type": "playback/state",
+      "position": 5083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45025.817471999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 5167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45026.123432
+    },
+    {
+      "type": "playback/state",
+      "position": 5167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45026.130412
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 45108.564,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 239832,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45111.515732
+    },
+    {
+      "type": "playback/progress",
+      "position": 5167,
+      "duration": 24000,
+      "downloadSpeed": 239832,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45111.520379
+    },
+    {
+      "type": "playback/progress",
+      "position": 5250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45213.653056999996
+    },
+    {
+      "type": "playback/state",
+      "position": 5250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45213.680306999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 5333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45220.516414
+    },
+    {
+      "type": "playback/state",
+      "position": 5333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45220.533699
+    },
+    {
+      "type": "playback/progress",
+      "position": 5417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45225.805207
+    },
+    {
+      "type": "playback/state",
+      "position": 5417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45225.818336
+    },
+    {
+      "type": "playback/progress",
+      "position": 5500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45393.738681999996
+    },
+    {
+      "type": "playback/state",
+      "position": 5500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45393.789226
+    },
+    {
+      "type": "playback/progress",
+      "position": 5583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45397.472319
+    },
+    {
+      "type": "playback/state",
+      "position": 5583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45397.490696
+    },
+    {
+      "type": "playback/progress",
+      "position": 5667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45514.469819
+    },
+    {
+      "type": "playback/state",
+      "position": 5667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45514.494504999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 5750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45677.889964999995
+    },
+    {
+      "type": "playback/state",
+      "position": 5750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45677.915944
+    },
+    {
+      "type": "playback/progress",
+      "position": 5833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45681.748737
+    },
+    {
+      "type": "playback/state",
+      "position": 5833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45681.763278
+    },
+    {
+      "type": "playback/progress",
+      "position": 5917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45870.895133
+    },
+    {
+      "type": "playback/state",
+      "position": 5917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45870.920991
+    },
+    {
+      "type": "playback/progress",
+      "position": 6000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45880.765008999995
+    },
+    {
+      "type": "playback/state",
+      "position": 6000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45880.780321
+    },
+    {
+      "type": "playback/progress",
+      "position": 6083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45926.358727
+    },
+    {
+      "type": "playback/state",
+      "position": 6083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 45926.382022
+    },
+    {
+      "type": "playback/progress",
+      "position": 6167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46030.43085
+    },
+    {
+      "type": "playback/state",
+      "position": 6167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46030.455476999996
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19737210880,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46089.468151
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 46110.977,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258935,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46113.898296
+    },
+    {
+      "type": "playback/progress",
+      "position": 6167,
+      "duration": 24000,
+      "downloadSpeed": 258935,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46113.902372
+    },
+    {
+      "type": "playback/progress",
+      "position": 6250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46116.298472999995
+    },
+    {
+      "type": "playback/state",
+      "position": 6250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46116.314246999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 6333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46210.231215
+    },
+    {
+      "type": "playback/state",
+      "position": 6333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46210.254419
+    },
+    {
+      "type": "playback/progress",
+      "position": 6417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46277.740433
+    },
+    {
+      "type": "playback/state",
+      "position": 6417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46277.801833
+    },
+    {
+      "type": "playback/progress",
+      "position": 6500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46382.303969
+    },
+    {
+      "type": "playback/state",
+      "position": 6500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46382.327373
+    },
+    {
+      "type": "playback/progress",
+      "position": 6583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46432.572887999995
+    },
+    {
+      "type": "playback/state",
+      "position": 6583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46432.59458
+    },
+    {
+      "type": "playback/progress",
+      "position": 6667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46518.429421
+    },
+    {
+      "type": "playback/state",
+      "position": 6667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46518.450822
+    },
+    {
+      "type": "playback/progress",
+      "position": 6750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46690.981408
+    },
+    {
+      "type": "playback/state",
+      "position": 6750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46691.004291
+    },
+    {
+      "type": "playback/progress",
+      "position": 6833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46692.903383
+    },
+    {
+      "type": "playback/state",
+      "position": 6833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46692.912606
+    },
+    {
+      "type": "playback/progress",
+      "position": 6917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46830.301595
+    },
+    {
+      "type": "playback/state",
+      "position": 6917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46830.326311
+    },
+    {
+      "type": "playback/progress",
+      "position": 7000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46871.605268
+    },
+    {
+      "type": "playback/state",
+      "position": 7000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 46871.625137999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 7083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47017.701064
+    },
+    {
+      "type": "playback/state",
+      "position": 7083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47017.724629
+    },
+    {
+      "type": "playback/progress",
+      "position": 7167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47018.658450999996
+    },
+    {
+      "type": "playback/state",
+      "position": 7167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47018.66484
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 47107.968,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257210,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47110.891285
+    },
+    {
+      "type": "playback/progress",
+      "position": 7167,
+      "duration": 24000,
+      "downloadSpeed": 257210,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47110.895971
+    },
+    {
+      "type": "playback/progress",
+      "position": 7250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47184.725968
+    },
+    {
+      "type": "playback/state",
+      "position": 7250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47184.751746
+    },
+    {
+      "type": "playback/progress",
+      "position": 7333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47187.118685
+    },
+    {
+      "type": "playback/state",
+      "position": 7333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47187.192293
+    },
+    {
+      "type": "playback/progress",
+      "position": 7417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47374.259994
+    },
+    {
+      "type": "playback/state",
+      "position": 7417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47374.288756999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 7500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47382.028611
+    },
+    {
+      "type": "playback/state",
+      "position": 7500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47382.044975
+    },
+    {
+      "type": "playback/progress",
+      "position": 7583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47432.47393
+    },
+    {
+      "type": "playback/state",
+      "position": 7583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47432.517694999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 7667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47523.996835
+    },
+    {
+      "type": "playback/state",
+      "position": 7667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47524.031777
+    },
+    {
+      "type": "playback/progress",
+      "position": 7750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47705.734568
+    },
+    {
+      "type": "playback/state",
+      "position": 7750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47705.764642
+    },
+    {
+      "type": "playback/progress",
+      "position": 7833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47719.458438
+    },
+    {
+      "type": "playback/state",
+      "position": 7833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47719.476555
+    },
+    {
+      "type": "playback/progress",
+      "position": 7917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47778.155735
+    },
+    {
+      "type": "playback/state",
+      "position": 7917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47778.184626999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 8000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47908.279256
+    },
+    {
+      "type": "playback/state",
+      "position": 8000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47908.306756
+    },
+    {
+      "type": "playback/progress",
+      "position": 8083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47909.769776
+    },
+    {
+      "type": "playback/state",
+      "position": 8083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 47909.776847
+    },
+    {
+      "type": "playback/progress",
+      "position": 8167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48077.331958999996
+    },
+    {
+      "type": "playback/state",
+      "position": 8167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48077.364005999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 8250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48089.578558
+    },
+    {
+      "type": "playback/state",
+      "position": 8250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48089.596094
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19734081536,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48094.071620999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 48111.71,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 290735,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48114.636536
+    },
+    {
+      "type": "playback/progress",
+      "position": 8250,
+      "duration": 24000,
+      "downloadSpeed": 290735,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48114.643175
+    },
+    {
+      "type": "playback/progress",
+      "position": 8333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48195.061335
+    },
+    {
+      "type": "playback/state",
+      "position": 8333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48195.087734
+    },
+    {
+      "type": "playback/progress",
+      "position": 8417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48274.725722999996
+    },
+    {
+      "type": "playback/state",
+      "position": 8417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48274.751891
+    },
+    {
+      "type": "playback/progress",
+      "position": 8500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48320.562238
+    },
+    {
+      "type": "playback/state",
+      "position": 8500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48320.586934
+    },
+    {
+      "type": "playback/progress",
+      "position": 8583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48431.073885
+    },
+    {
+      "type": "playback/state",
+      "position": 8583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48431.103599
+    },
+    {
+      "type": "playback/progress",
+      "position": 8667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48485.769249
+    },
+    {
+      "type": "playback/state",
+      "position": 8667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48485.796328
+    },
+    {
+      "type": "playback/progress",
+      "position": 8750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48616.625769
+    },
+    {
+      "type": "playback/state",
+      "position": 8750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48616.659218
+    },
+    {
+      "type": "playback/progress",
+      "position": 8833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48673.819965999995
+    },
+    {
+      "type": "playback/state",
+      "position": 8833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48673.845855
+    },
+    {
+      "type": "playback/progress",
+      "position": 8917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48775.602475
+    },
+    {
+      "type": "playback/state",
+      "position": 8917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48775.627992
+    },
+    {
+      "type": "playback/progress",
+      "position": 9000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48827.37227
+    },
+    {
+      "type": "playback/state",
+      "position": 9000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48827.400240999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 9083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48912.136126
+    },
+    {
+      "type": "playback/state",
+      "position": 9083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48912.174141999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 9167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48999.268232999995
+    },
+    {
+      "type": "playback/state",
+      "position": 9167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 48999.300391
+    },
+    {
+      "type": "playback/progress",
+      "position": 9250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49087.528227999996
+    },
+    {
+      "type": "playback/state",
+      "position": 9250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49087.560155
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 49115.969,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257775,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49118.896299
+    },
+    {
+      "type": "playback/progress",
+      "position": 9250,
+      "duration": 24000,
+      "downloadSpeed": 257775,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49118.902959
+    },
+    {
+      "type": "playback/progress",
+      "position": 9333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49176.873628
+    },
+    {
+      "type": "playback/state",
+      "position": 9333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49176.899095
+    },
+    {
+      "type": "playback/progress",
+      "position": 9417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49229.884807999995
+    },
+    {
+      "type": "playback/state",
+      "position": 9417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49229.910596
+    },
+    {
+      "type": "playback/progress",
+      "position": 9500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49335.99057
+    },
+    {
+      "type": "playback/state",
+      "position": 9500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49336.022557
+    },
+    {
+      "type": "playback/progress",
+      "position": 9583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49414.134237
+    },
+    {
+      "type": "playback/state",
+      "position": 9583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49414.248445
+    },
+    {
+      "type": "playback/progress",
+      "position": 9667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49496.678631999996
+    },
+    {
+      "type": "playback/state",
+      "position": 9667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49496.705511
+    },
+    {
+      "type": "playback/progress",
+      "position": 9750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49579.883626999996
+    },
+    {
+      "type": "playback/state",
+      "position": 9750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49579.911378
+    },
+    {
+      "type": "playback/progress",
+      "position": 9833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49680.473432
+    },
+    {
+      "type": "playback/state",
+      "position": 9833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49680.511688
+    },
+    {
+      "type": "playback/progress",
+      "position": 9917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49733.779275
+    },
+    {
+      "type": "playback/state",
+      "position": 9917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49733.809169
+    },
+    {
+      "type": "playback/progress",
+      "position": 10000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49834.26657
+    },
+    {
+      "type": "playback/state",
+      "position": 10000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49834.296453999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 10083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49934.053008999996
+    },
+    {
+      "type": "playback/state",
+      "position": 10083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49934.079307
+    },
+    {
+      "type": "playback/progress",
+      "position": 10167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49983.284870999996
+    },
+    {
+      "type": "playback/state",
+      "position": 10167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 49983.310248
+    },
+    {
+      "type": "playback/progress",
+      "position": 10250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50083.829754
+    },
+    {
+      "type": "playback/state",
+      "position": 10250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50083.857635
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19733557248,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50087.548217999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50101.179170999996
+    },
+    {
+      "type": "playback/state",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50101.232199
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 50130.73,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 245393,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5898386,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50133.672414
+    },
+    {
+      "type": "playback/progress",
+      "position": 12000,
+      "duration": 24000,
+      "downloadSpeed": 245393,
+      "peers": 1,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50133.678082
+    },
+    {
+      "type": "playback/progress",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50288.782245999995
+    },
+    {
+      "type": "playback/state",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-0-cold",
+      "atMs": 50288.787744
+    },
+    {
+      "type": "playback/closed",
+      "session": "bench-late-moov-0-cold",
+      "position": 2000,
+      "duration": 24000,
+      "atMs": 50293.618042999995
+    }
+  ],
+  "http": [
+    {
+      "atMs": 16.37224399999991,
+      "method": "GET",
+      "path": "/",
+      "query": "",
+      "range": null,
+      "headersMs": 18.902231999999913,
+      "status": 200,
+      "bodyBytes": 1799,
+      "firstBodyMs": 19.379543999999896,
+      "completedMs": 19.677631999999903
+    },
+    {
+      "atMs": 21.6734449999999,
+      "method": "POST",
+      "path": "/torrents",
+      "query": "?only_files=0&initial_peers=127.0.0.1%3A33151",
+      "range": null,
+      "headersMs": 67.28984799999989,
+      "status": 200,
+      "bodyBytes": 736,
+      "firstBodyMs": 67.48909000000003,
+      "completedMs": 67.54445199999986
+    },
+    {
+      "atMs": 588.3803799999998,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=0-",
+      "headersMs": 589.9118310000001,
+      "status": 206,
+      "bodyBytes": 4194304,
+      "firstBodyMs": 15113.948934000002
+    },
+    {
+      "atMs": 1079.5397150000001,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 1081.0986460000001,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 1081.2742540000002,
+      "completedMs": 1081.3225949999999
+    },
+    {
+      "atMs": 2079.8512039999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 2080.535239,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 2080.666512,
+      "completedMs": 2080.703447
+    },
+    {
+      "atMs": 2081.859515,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 2082.166387,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 2082.2925020000002,
+      "completedMs": 2082.3468519999997,
+      "havePieces": []
+    },
+    {
+      "atMs": 3084.86495,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 3085.2840850000002,
+      "status": 200,
+      "bodyBytes": 679,
+      "firstBodyMs": 3085.401398,
+      "completedMs": 3085.437221
+    },
+    {
+      "atMs": 4081.2334840000003,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 4081.5793519999997,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 4081.7740890000005,
+      "completedMs": 4081.8149789999998,
+      "havePieces": []
+    },
+    {
+      "atMs": 4084.495188,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 4085.2833760000003,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 4085.368872,
+      "completedMs": 4085.413898
+    },
+    {
+      "atMs": 5084.411391000001,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 5084.828835,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 5084.993197,
+      "completedMs": 5085.034327
+    },
+    {
+      "atMs": 6081.406232,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 6082.069887000001,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 6082.254548,
+      "completedMs": 6082.287587,
+      "havePieces": []
+    },
+    {
+      "atMs": 6083.901769,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 6084.162553,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 6084.234078,
+      "completedMs": 6084.394684
+    },
+    {
+      "atMs": 7085.054435,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 7085.452259,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 7085.608238000001,
+      "completedMs": 7085.641627000001
+    },
+    {
+      "atMs": 8081.60066,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 8081.963083000001,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 8082.0702,
+      "completedMs": 8082.093074,
+      "havePieces": []
+    },
+    {
+      "atMs": 8084.6254260000005,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 8084.830657,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 8084.892198,
+      "completedMs": 8084.909132000001
+    },
+    {
+      "atMs": 9084.569255,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 9084.961111,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 9085.049981,
+      "completedMs": 9085.073686
+    },
+    {
+      "atMs": 10084.278906,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 10084.63525,
+      "status": 200,
+      "bodyBytes": 679,
+      "firstBodyMs": 10084.719854,
+      "completedMs": 10084.741486
+    },
+    {
+      "atMs": 10085.813382,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 10086.373284,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 10086.448525,
+      "completedMs": 10086.467363,
+      "havePieces": []
+    },
+    {
+      "atMs": 11086.238603,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 11086.545744000001,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 11086.894847,
+      "completedMs": 11086.918101
+    },
+    {
+      "atMs": 12083.082005,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 12083.540859,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 12083.633415,
+      "completedMs": 12083.655548,
+      "havePieces": []
+    },
+    {
+      "atMs": 12085.233327,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 12085.642618,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 12085.711089,
+      "completedMs": 12085.729095
+    },
+    {
+      "atMs": 13085.758715,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 13086.169338,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 13086.25243,
+      "completedMs": 13086.274273
+    },
+    {
+      "atMs": 14086.43456,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 14087.46884,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 14087.550039,
+      "completedMs": 14087.570349
+    },
+    {
+      "atMs": 14086.903579,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 14087.658338,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 14087.787348,
+      "completedMs": 14087.809911,
+      "havePieces": []
+    },
+    {
+      "atMs": 15085.241954,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 15086.243496000001,
+      "status": 200,
+      "bodyBytes": 676,
+      "firstBodyMs": 15086.350042,
+      "completedMs": 15086.373897
+    },
+    {
+      "atMs": 15161.418378,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=245828-",
+      "headersMs": 15162.057618,
+      "status": 206,
+      "bodyBytes": 3948476,
+      "firstBodyMs": 15162.156032
+    },
+    {
+      "atMs": 15208.583085,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=3951616-270689964",
+      "headersMs": 15218.011026000002,
+      "status": 206,
+      "bodyBytes": 242688,
+      "firstBodyMs": 15218.153836
+    },
+    {
+      "atMs": 15254.865376,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=270682946-",
+      "headersMs": 15255.42574,
+      "status": 206,
+      "bodyBytes": 7019,
+      "firstBodyMs": 39705.620609,
+      "completedMs": 39705.817398
+    },
+    {
+      "atMs": 16082.881159999999,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 16084.327115000002,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 16084.439660000002,
+      "completedMs": 16084.466869999998,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 16085.884844000002,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 16086.257412,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 16086.331790999999,
+      "completedMs": 16086.350879
+    },
+    {
+      "atMs": 17085.700575,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 17087.330339999997,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 17087.491497,
+      "completedMs": 17087.515992999997
+    },
+    {
+      "atMs": 18083.626779,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 18083.949873999998,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 18084.049489999998,
+      "completedMs": 18084.070601,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 18085.677572999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 18085.870766999997,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 18085.967258999997,
+      "completedMs": 18085.985945999997
+    },
+    {
+      "atMs": 19085.9964,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 19086.317191,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 19086.395335999998,
+      "completedMs": 19086.415876
+    },
+    {
+      "atMs": 20083.729984999998,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 20084.145106,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 20084.222509,
+      "completedMs": 20084.24357,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 20086.851843999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 20087.568797999997,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 20087.626592999997,
+      "completedMs": 20087.64521
+    },
+    {
+      "atMs": 21087.567148,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 21087.913557,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 21088.060462999998,
+      "completedMs": 21088.084037999997
+    },
+    {
+      "atMs": 22083.340281999997,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 22083.632522,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 22083.713461,
+      "completedMs": 22083.736073999997,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 22087.557460999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 22088.03298,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 22088.095020999997,
+      "completedMs": 22088.112656999998
+    },
+    {
+      "atMs": 23087.576115999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 23089.182366999998,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 23089.294842,
+      "completedMs": 23089.3271
+    },
+    {
+      "atMs": 24083.446104,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 24083.73565,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 24083.808467,
+      "completedMs": 24083.829608,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 24087.370562,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 24087.584636,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 24087.638885999997,
+      "completedMs": 24087.656322
+    },
+    {
+      "atMs": 25088.623992999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 25093.816605,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 25093.958443,
+      "completedMs": 25093.991742
+    },
+    {
+      "atMs": 26083.970639,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 26084.328083999997,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 26084.430695,
+      "completedMs": 26084.460419,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 26088.167207,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 26088.436161999998,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 26088.518794,
+      "completedMs": 26088.542088
+    },
+    {
+      "atMs": 27088.703910999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 27089.106193,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 27089.186981,
+      "completedMs": 27089.209403999997
+    },
+    {
+      "atMs": 28084.106860999997,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 28084.436195,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 28084.510634,
+      "completedMs": 28084.531615,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 28088.065219,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 28088.390005999998,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 28088.450323999998,
+      "completedMs": 28088.466448
+    },
+    {
+      "atMs": 29089.170468999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 29089.466524,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 29089.581894,
+      "completedMs": 29089.604896999997
+    },
+    {
+      "atMs": 30084.068195,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 30084.340085,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 30084.409937999997,
+      "completedMs": 30084.430318,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 30089.836453999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 30090.481391999998,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 30090.542962,
+      "completedMs": 30090.562210999997
+    },
+    {
+      "atMs": 31090.513935,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 31091.026248,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 31091.100928,
+      "completedMs": 31091.121918999997
+    },
+    {
+      "atMs": 32084.088983,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 32084.438846999998,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 32084.534988,
+      "completedMs": 32084.56314,
+      "havePieces": [
+        0,
+        1
+      ]
+    },
+    {
+      "atMs": 32090.224089999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 32090.867615999996,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 32090.975533999997,
+      "completedMs": 32090.99994
+    },
+    {
+      "atMs": 33090.753423999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 33091.101185,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 33091.176646,
+      "completedMs": 33091.198868
+    },
+    {
+      "atMs": 34084.080731,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 34084.340593,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 34084.410065,
+      "completedMs": 34084.430495,
+      "havePieces": [
+        0,
+        1
+      ]
+    },
+    {
+      "atMs": 34090.008241999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 34090.210239,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 34090.261344,
+      "completedMs": 34090.276997
+    },
+    {
+      "atMs": 35091.000214,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 35091.333925,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 35091.408383999995,
+      "completedMs": 35091.429675
+    },
+    {
+      "atMs": 36084.789851,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 36085.202016999996,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 36085.296225,
+      "completedMs": 36085.325228,
+      "havePieces": [
+        0,
+        1
+      ]
+    },
+    {
+      "atMs": 36090.697984,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 36090.999327,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 36091.070801999995,
+      "completedMs": 36091.110650999995
+    },
+    {
+      "atMs": 37090.514142,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 37090.887690999996,
+      "status": 200,
+      "bodyBytes": 723,
+      "firstBodyMs": 37091.013095999995,
+      "completedMs": 37091.04334
+    },
+    {
+      "atMs": 38086.154128999995,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 38086.548759,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 38086.647023,
+      "completedMs": 38086.674913999996,
+      "havePieces": [
+        0,
+        1
+      ]
+    },
+    {
+      "atMs": 38090.283167,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 38090.492375,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 38090.543129,
+      "completedMs": 38090.557930999996
+    },
+    {
+      "atMs": 39090.69418,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 39091.198541,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 39091.270026,
+      "completedMs": 39091.288372999996
+    },
+    {
+      "atMs": 40092.091453,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 40093.891388,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 40093.980118,
+      "completedMs": 40093.99471,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 40092.264016,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 40093.401909,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 40093.489026999996,
+      "completedMs": 40093.511069
+    },
+    {
+      "atMs": 41098.175363999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 41101.616540999996,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 41101.716318,
+      "completedMs": 41101.738761
+    },
+    {
+      "atMs": 42092.467013,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 42092.770008,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 42093.012644999995,
+      "completedMs": 42093.033214999996,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 42101.990009,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 42102.213027,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 42102.266766,
+      "completedMs": 42102.281557999995
+    },
+    {
+      "atMs": 43102.298539999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 43103.996365,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 43104.087749,
+      "completedMs": 43104.109521
+    },
+    {
+      "atMs": 44090.070917,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 44093.697857,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 44093.770663999996,
+      "completedMs": 44093.790494,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 44106.15083,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 44106.412253999995,
+      "status": 200,
+      "bodyBytes": 730,
+      "firstBodyMs": 44106.465962999995,
+      "completedMs": 44106.534363
+    },
+    {
+      "atMs": 45110.013344,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 45111.100231,
+      "status": 200,
+      "bodyBytes": 731,
+      "firstBodyMs": 45111.231483999996,
+      "completedMs": 45111.254919
+    },
+    {
+      "atMs": 46088.768512999995,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 46089.142522999995,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 46089.238534,
+      "completedMs": 46089.258834,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 46110.000676999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 46113.622671,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 46113.689068,
+      "completedMs": 46113.707596
+    },
+    {
+      "atMs": 47110.284733,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 47110.5885,
+      "status": 200,
+      "bodyBytes": 731,
+      "firstBodyMs": 47110.661657,
+      "completedMs": 47110.682167
+    },
+    {
+      "atMs": 48090.764631,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 48093.63499,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 48093.745091,
+      "completedMs": 48093.773973999996,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 48113.996865,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 48114.314132,
+      "status": 200,
+      "bodyBytes": 730,
+      "firstBodyMs": 48114.386527999995,
+      "completedMs": 48114.409282
+    },
+    {
+      "atMs": 49118.174287999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 49118.510462,
+      "status": 200,
+      "bodyBytes": 731,
+      "firstBodyMs": 49118.60409,
+      "completedMs": 49118.630238
+    },
+    {
+      "atMs": 50086.917491,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 50087.255368,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 50087.331419999995,
+      "completedMs": 50087.351719,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 50126.255513,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 50132.954689,
+      "status": 200,
+      "bodyBytes": 731,
+      "firstBodyMs": 50133.246488,
+      "completedMs": 50133.28866
+    }
+  ],
+  "ok": true,
+  "mpvPid": 1682,
+  "firstRenderedMs": 47305.523553,
+  "renderedProof": {
+    "atMs": 47305.523553,
+    "pixels": {
+      "nonblack": true,
+      "litFraction": 1,
+      "meanMaxChannel": 60.369791666666664
+    },
+    "params": {
+      "pixelformat": "yuv420p",
+      "average-bpp": 12,
+      "w": 3840,
+      "h": 2160,
+      "dw": 3840,
+      "dh": 2160,
+      "crop-x": 0,
+      "crop-y": 0,
+      "crop-w": 3840,
+      "crop-h": 2160,
+      "aspect": 1.777778,
+      "aspect-name": "16:9",
+      "par": 1,
+      "sar": 1.777778,
+      "sar-name": "16:9",
+      "colormatrix": "bt.709",
+      "colorlevels": "limited",
+      "primaries": "bt.709",
+      "gamma": "bt.1886",
+      "sig-peak": 0,
+      "light": "display",
+      "chroma-location": "mpeg2/4/h264",
+      "stereo-in": "mono",
+      "rotate": 0
+    },
+    "screenshot": "<evidence>/demand-n2/late-moov-0-cold/first-rendered.png",
+    "sha256": "c1324750d54d039c85763561f2460f2469a949e872425d729e60d888f0c5c951"
+  },
+  "stablePlayback": {
+    "fromSeconds": 8.25,
+    "toSeconds": 10.25,
+    "observedSeconds": 2
+  },
+  "seeks": [
+    {
+      "targetSeconds": 12,
+      "settledMs": 1.3486320000010892
+    },
+    {
+      "targetSeconds": 2,
+      "settledMs": 187.1085380000004
+    }
+  ],
+  "resources": {
+    "available": true,
+    "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+    "processes": [
+      {
+        "role": "rqbit",
+        "pid": 1676,
+        "cpuTicks": 21,
+        "rssBytes": 18046976
+      },
+      {
+        "role": "mpv",
+        "pid": 1682,
+        "cpuTicks": 2659,
+        "rssBytes": 691417088
+      }
+    ]
+  },
+  "storageDuring": {
+    "logicalBytes": 274892341,
+    "allocatedBytes": 17633280,
+    "files": 7
+  },
+  "mpvExit": {
+    "code": 0,
+    "signal": null
+  },
+  "storageAfter": {
+    "logicalBytes": 4202376,
+    "allocatedBytes": 4218880,
+    "files": 6
+  },
+  "elapsedMs": 50406.789412
+}

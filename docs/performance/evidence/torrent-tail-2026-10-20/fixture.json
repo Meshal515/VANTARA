@@ -1,0 +1,15 @@
+{
+  "name": "authored-late-moov.mp4",
+  "sha256": "91f5b993ef098c3dafc2a49cc2894dd1fb0f9f370782db88a7e555633aa33c0c",
+  "bytes": 270689965,
+  "durationSeconds": 24,
+  "codec": "HEVC Main 10",
+  "width": 3840,
+  "height": 2160,
+  "moovOffset": 270682946,
+  "freeBoxBytes": 268435456,
+  "precedingFreeBoxBytes": 2001662,
+  "torrentPieceBytes": 4194304,
+  "seedUploadBytesPerSecond": 262144,
+  "source": "tools/fixtures/vantara-4k-hevc10.mp4 looped eight times with stream-copy; synthetic free boxes inserted before trailing moov"
+}

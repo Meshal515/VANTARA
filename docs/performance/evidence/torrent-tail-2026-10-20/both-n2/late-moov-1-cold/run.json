@@ -1,0 +1,7447 @@
+{
+  "fixture": "late-moov",
+  "trial": 1,
+  "mode": "cold",
+  "infoHash": "e91670d58d1e3f9c0e5bbb882e7d2270928c46b0",
+  "fileIdx": 0,
+  "logicalFileBytes": 270689965,
+  "cacheBefore": {
+    "entries": [],
+    "partialFixtureTrimmed": false,
+    "available": false
+  },
+  "directory": "<evidence>/both-n2/late-moov-1-cold",
+  "events": [
+    {
+      "type": "playback/diagnostic",
+      "stage": "source-selected",
+      "elapsedMs": 0.01,
+      "fileIdx": 0,
+      "mode": "cold",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 2.5408649999953923
+    },
+    {
+      "type": "playback/preparing",
+      "title": "VANTARA authored benchmark",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 2.7833909999972093
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "replay-lookup",
+      "elapsedMs": 0.91,
+      "mode": "cold",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3.4286989999964135
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "engine-start",
+      "elapsedMs": 0.92,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3.436099999998987
+    },
+    {
+      "type": "playback/stage",
+      "stage": "engine-start",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3.440536999994947
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "cache-selection-start",
+      "elapsedMs": 0.932,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3.444462999999814
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "cache-selection-complete",
+      "elapsedMs": 1.593,
+      "waitMs": 0.6559939999933704,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 4.112553999999363
+    },
+    {
+      "type": "playback/stage",
+      "stage": "cache-selected",
+      "volume": "<evidence>/both-n2/profile-late-moov-1",
+      "availableBytes": 19144372224,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 4.354449999998906
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "engine-ready",
+      "elapsedMs": 66.257,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 68.77914199999941
+    },
+    {
+      "type": "playback/stage",
+      "stage": "metadata",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 68.78394899999694
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "magnet-metadata-start",
+      "elapsedMs": 66.274,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 68.78593199999887
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "managed-add-start",
+      "elapsedMs": 66.291,
+      "fileIdx": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 68.80995699999767
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "managed-add-complete",
+      "elapsedMs": 113.153,
+      "waitMs": 46.857076000000234,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 115.67867999999726
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "magnet-metadata-complete",
+      "elapsedMs": 113.172,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 115.68556999999419
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "file-selected",
+      "elapsedMs": 113.439,
+      "fileIdx": 0,
+      "fileBytes": 270689965,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 115.96005399999558
+    },
+    {
+      "type": "playback/stage",
+      "stage": "file-selected",
+      "fileIdx": 0,
+      "bytes": 270689965,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 115.96628299999429
+    },
+    {
+      "type": "playback/stage",
+      "stage": "downloading",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 123.45298499999626
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "player-start",
+      "elapsedMs": 121.421,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 123.93650599999819
+    },
+    {
+      "type": "playback/stage",
+      "stage": "player-start",
+      "embedded": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 124.035861999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "player-ipc-ready",
+      "elapsedMs": 207.567,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 210.09023299999535
+    },
+    {
+      "type": "playback/stage",
+      "stage": "first-frame",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 280.81407399999443
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 405.3478779999932
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 405.3607369999954
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 443.46,
+      "requestId": 1,
+      "rangeStart": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 445.99327799999446
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 451.239,
+      "requestId": 1,
+      "rangeStart": 0,
+      "rangeEnd": 270689964,
+      "waitMs": 7.790390000001935,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 453.7638189999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 1133.806,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257082,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 1136.3394649999973
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "peer-connected",
+      "elapsedMs": 1133.939,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 1136.455624999995
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 257082,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 1136.472299999994
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19143553024,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 2126.6212589999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 2136.647,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258912,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 2139.1739119999984
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258912,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 2139.216204999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 3136.805,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259498,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3139.3905719999966
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259498,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 3139.3968419999946
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19143024640,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 4125.2780069999935
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 4136.623,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 290953,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 4139.149203999994
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 290953,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 4139.153039999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 5139.617,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258600,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 5142.147155999999
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258600,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 5142.152803999998
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19142500352,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 6125.926857999999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 6136.672,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259625,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 6139.198842999998
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259625,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 6139.203068999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 7137.144,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257699,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 7139.672379000003
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 257699,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 7139.676444999997
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19141976064,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 8124.97761899999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 8136.963,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259661,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 8139.509545999994
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259661,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 8139.513962999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 9137.641,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259261,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 9140.168199
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259261,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 9140.172476
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19141451776,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 10125.66763399999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 10137.007,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259153,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 10139.534663999999
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259153,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 10139.539140999994
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 11138.494,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258991,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 11141.027217000003
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258991,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 11141.034907999994
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19140927488,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 12126.549376000003
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 12136.941,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291815,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 12139.472097999991
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 291815,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 12139.477416000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 13137.483,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259298,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 13140.010445999993
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259298,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 13140.014961999994
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19140403200,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 14126.514455999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 14136.845,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259606,
+      "checkedBytes": 0,
+      "checkedPieces": 0,
+      "requestedPiece": 0,
+      "cursor": 0,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 14139.371632000002
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259606,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 14139.37582899999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-first-byte",
+      "elapsedMs": 15123.865,
+      "bytes": 65536,
+      "waitMs": 14680.413145000006,
+      "mode": "torrent",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15126.400564999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15123.952,
+      "requestId": 1,
+      "cursor": 65536,
+      "waitMs": 14680.446955,
+      "mode": "torrent",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15126.470657999998
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "first-useful-piece",
+      "elapsedMs": 15123.964,
+      "requestedPiece": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15126.477787999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15144.292,
+      "requestId": 2,
+      "rangeStart": 245828,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15146.814076999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 15144.963,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259459,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 0,
+      "cursor": 245828,
+      "cacheBytesRead": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15147.482880000003
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259459,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15147.488647999991
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 15153.353,
+      "requestId": 2,
+      "rangeStart": 245828,
+      "rangeEnd": 270689964,
+      "waitMs": 9.064552000010735,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15155.878428000004
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15153.472,
+      "requestId": 2,
+      "cursor": 311111,
+      "waitMs": 9.181354000000283,
+      "mode": "torrent",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15155.98918099999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15169.895,
+      "requestId": 3,
+      "rangeStart": 2247490,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15172.418746999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 15186.019,
+      "requestId": 3,
+      "cursor": 4027392,
+      "waitMs": 16.130332000000635,
+      "mode": "cache",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15188.549479000001
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 15190.217,
+      "requestId": 4,
+      "rangeStart": 270682946,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15192.754809999991
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-headers",
+      "elapsedMs": 15232.788,
+      "requestId": 4,
+      "rangeStart": 270682946,
+      "rangeEnd": 270689964,
+      "waitMs": 42.575402000002214,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 15235.310533000003
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19135684608,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 16130.051130999993
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 16144.45,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259593,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 16146.977657999996
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259593,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 16146.987031999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 17144.277,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291187,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 17146.806877999996
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 291187,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 17146.81165499999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19135160320,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 18134.08166199999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 18144.061,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259529,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 18146.628122000002
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259529,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 18146.632147999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 19145.554,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259545,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 19148.083345
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259545,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 19148.087590999996
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19134636032,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 20127.557861
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 20145.891,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258998,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 20148.418669999992
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 258998,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 20148.423107000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 21145.803,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259059,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 21148.332571
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259059,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 21148.33699799999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19134115840,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 22131.101837000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 22145.107,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259423,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 22147.634304
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259423,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 22147.63969199999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 23145.44,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259478,
+      "checkedBytes": 4194304,
+      "checkedPieces": 1,
+      "requestedPiece": 64,
+      "cursor": 270682946,
+      "cacheBytesRead": 1779902,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23147.970681999992
+    },
+    {
+      "type": "playback/progress",
+      "downloadSpeed": 259478,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23147.975077999996
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 23716.419,
+      "requestId": 4,
+      "cursor": 270689965,
+      "waitMs": 8526.055483000004,
+      "mode": "torrent",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23718.953692999996
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23723.750903999993
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23723.782971
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "container-metadata-ready",
+      "elapsedMs": 23725.223,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23727.74526399999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "http-range",
+      "elapsedMs": 23726.443,
+      "requestId": 5,
+      "rangeStart": 44,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23728.967119999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 0,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23729.174114
+    },
+    {
+      "type": "playback/progress",
+      "position": 0,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23729.184778999996
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23729.217417
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23729.222394999997
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "range-first-byte",
+      "elapsedMs": 23738.171,
+      "requestId": 5,
+      "cursor": 4194304,
+      "waitMs": 11.734405000010156,
+      "mode": "cache",
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23740.69544599999
+    },
+    {
+      "type": "playback/audio",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23853.37471699999
+    },
+    {
+      "type": "playback/subtitles",
+      "tracks": [],
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23853.381617
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "decoder-output",
+      "elapsedMs": 23851.548,
+      "mode": "render-unmeasured",
+      "decoderWidth": 3840,
+      "decoderHeight": 2160,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23854.080534999994
+    },
+    {
+      "type": "playback/ready",
+      "position": 0,
+      "duration": 24000,
+      "embedded": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23854.158128999996
+    },
+    {
+      "type": "playback/state",
+      "position": 0,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23854.164998999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 83,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23899.640632999995
+    },
+    {
+      "type": "playback/state",
+      "position": 83,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23899.671798999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23978.974077
+    },
+    {
+      "type": "playback/state",
+      "position": 167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 23979.003059999995
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19133587456,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24145.826364
+    },
+    {
+      "type": "playback/progress",
+      "position": 250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24146.65383999999
+    },
+    {
+      "type": "playback/state",
+      "position": 250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24146.66937299999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 24144.953,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 274299,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24147.479193
+    },
+    {
+      "type": "playback/progress",
+      "position": 250,
+      "duration": 24000,
+      "downloadSpeed": 274299,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24147.484921000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24151.676262
+    },
+    {
+      "type": "playback/state",
+      "position": 333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24151.68899999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24255.452908999992
+    },
+    {
+      "type": "playback/state",
+      "position": 417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24255.479337999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24357.316314999996
+    },
+    {
+      "type": "playback/state",
+      "position": 500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24357.347711000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24441.658934
+    },
+    {
+      "type": "playback/state",
+      "position": 583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24441.688617999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24481.720190999993
+    },
+    {
+      "type": "playback/state",
+      "position": 667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24481.74206299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24591.893619999995
+    },
+    {
+      "type": "playback/state",
+      "position": 750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24591.931204999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24696.672369999993
+    },
+    {
+      "type": "playback/state",
+      "position": 833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24696.699220000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24737.755048
+    },
+    {
+      "type": "playback/state",
+      "position": 917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24737.789889
+    },
+    {
+      "type": "playback/progress",
+      "position": 1000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24835.025782999997
+    },
+    {
+      "type": "playback/state",
+      "position": 1000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24835.055757000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 1083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24944.81661999999
+    },
+    {
+      "type": "playback/state",
+      "position": 1083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24944.867926
+    },
+    {
+      "type": "playback/progress",
+      "position": 1167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24986.996940999998
+    },
+    {
+      "type": "playback/state",
+      "position": 1167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 24987.030651
+    },
+    {
+      "type": "playback/progress",
+      "position": 1250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25054.505234999997
+    },
+    {
+      "type": "playback/state",
+      "position": 1250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25054.542429999994
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 25151.286,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 253548,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25153.815093999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 1250,
+      "duration": 24000,
+      "downloadSpeed": 253548,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25153.820361
+    },
+    {
+      "type": "playback/progress",
+      "position": 1333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25167.260512999994
+    },
+    {
+      "type": "playback/state",
+      "position": 1333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25167.283306999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 1417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25272.95677299999
+    },
+    {
+      "type": "playback/state",
+      "position": 1417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25272.986486
+    },
+    {
+      "type": "playback/progress",
+      "position": 1500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25345.609516999997
+    },
+    {
+      "type": "playback/state",
+      "position": 1500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25345.63790899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 1583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25484.505358000002
+    },
+    {
+      "type": "playback/state",
+      "position": 1583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25484.53511199999
+    },
+    {
+      "type": "playback/progress",
+      "position": 1667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25487.65293399999
+    },
+    {
+      "type": "playback/state",
+      "position": 1667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25487.669407999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 1750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25594.080087000002
+    },
+    {
+      "type": "playback/state",
+      "position": 1750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25594.11040099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 1833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25749.614821000003
+    },
+    {
+      "type": "playback/state",
+      "position": 1833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25749.643894
+    },
+    {
+      "type": "playback/progress",
+      "position": 1917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25751.071401999994
+    },
+    {
+      "type": "playback/state",
+      "position": 1917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25751.079183999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25968.80191799999
+    },
+    {
+      "type": "playback/state",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25968.859082000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 2083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25977.880771000004
+    },
+    {
+      "type": "playback/state",
+      "position": 2083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25977.906488999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 2167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25985.934497000002
+    },
+    {
+      "type": "playback/state",
+      "position": 2167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 25985.952985000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 2250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26085.532824999995
+    },
+    {
+      "type": "playback/state",
+      "position": 2250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26085.566134
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 26148.239,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 256184,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26150.767797999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 2250,
+      "duration": 24000,
+      "downloadSpeed": 256184,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26150.772936
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19133063168,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26151.024375
+    },
+    {
+      "type": "playback/progress",
+      "position": 2333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26235.276909
+    },
+    {
+      "type": "playback/state",
+      "position": 2333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26235.304790000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 2417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26252.197376000004
+    },
+    {
+      "type": "playback/state",
+      "position": 2417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26252.224496000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 2500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26354.373981999997
+    },
+    {
+      "type": "playback/state",
+      "position": 2500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26354.402953999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 2583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26404.448534999996
+    },
+    {
+      "type": "playback/state",
+      "position": 2583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26404.54893299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 2667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26562.474410999996
+    },
+    {
+      "type": "playback/state",
+      "position": 2667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26562.502522000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 2750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26577.641511
+    },
+    {
+      "type": "playback/state",
+      "position": 2750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26577.669812999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 2833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26670.481515999993
+    },
+    {
+      "type": "playback/state",
+      "position": 2833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26670.509367
+    },
+    {
+      "type": "playback/progress",
+      "position": 2917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26782.36351599999
+    },
+    {
+      "type": "playback/state",
+      "position": 2917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26782.400801000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 3000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26837.686311999998
+    },
+    {
+      "type": "playback/state",
+      "position": 3000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26837.71296099999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "stable-playback",
+      "elapsedMs": 26895.236,
+      "position": 3083,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26897.772158999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 3083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26897.77977
+    },
+    {
+      "type": "playback/state",
+      "position": 3083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 26897.804566999992
+    },
+    {
+      "type": "playback/progress",
+      "position": 3167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27038.75655099999
+    },
+    {
+      "type": "playback/state",
+      "position": 3167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27038.784330999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 3250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27089.660882999997
+    },
+    {
+      "type": "playback/state",
+      "position": 3250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27089.690016
+    },
+    {
+      "type": "playback/progress",
+      "position": 3333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27146.36691199999
+    },
+    {
+      "type": "playback/state",
+      "position": 3333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27146.393380999994
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 27146.971,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291075,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27149.49664199999
+    },
+    {
+      "type": "playback/progress",
+      "position": 3333,
+      "duration": 24000,
+      "downloadSpeed": 291075,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27149.500827999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 3417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27257.611855999996
+    },
+    {
+      "type": "playback/state",
+      "position": 3417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27257.639988000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 3500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27366.46291699999
+    },
+    {
+      "type": "playback/state",
+      "position": 3500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27366.495044000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 3583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27437.679681999995
+    },
+    {
+      "type": "playback/state",
+      "position": 3583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27437.713010999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 3667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27479.075080000002
+    },
+    {
+      "type": "playback/state",
+      "position": 3667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27479.110311999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 3750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27577.525879999994
+    },
+    {
+      "type": "playback/state",
+      "position": 3750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27577.554291999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 3833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27682.373352999995
+    },
+    {
+      "type": "playback/state",
+      "position": 3833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27682.401454
+    },
+    {
+      "type": "playback/progress",
+      "position": 3917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27781.618595
+    },
+    {
+      "type": "playback/state",
+      "position": 3917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27781.64631599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 4000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27841.686234999994
+    },
+    {
+      "type": "playback/state",
+      "position": 4000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27841.713754999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 4083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27887.19355599999
+    },
+    {
+      "type": "playback/state",
+      "position": 4083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27887.215158
+    },
+    {
+      "type": "playback/progress",
+      "position": 4167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27998.201901999993
+    },
+    {
+      "type": "playback/state",
+      "position": 4167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 27998.228200999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 4250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28094.497595999994
+    },
+    {
+      "type": "playback/state",
+      "position": 4250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28094.526498999992
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 28148.693,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 244475,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28151.220779999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 4250,
+      "duration": 24000,
+      "downloadSpeed": 244475,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28151.22596799999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19132538880,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28157.918773999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 4333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28194.098867
+    },
+    {
+      "type": "playback/state",
+      "position": 4333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28194.127008000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 4417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28238.222524999997
+    },
+    {
+      "type": "playback/state",
+      "position": 4417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28238.246859999992
+    },
+    {
+      "type": "playback/progress",
+      "position": 4500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28342.23509899999
+    },
+    {
+      "type": "playback/state",
+      "position": 4500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28342.26187899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 4583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28463.079047999992
+    },
+    {
+      "type": "playback/state",
+      "position": 4583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28463.105055999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 4667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28537.379257999994
+    },
+    {
+      "type": "playback/state",
+      "position": 4667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28537.408040000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 4750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28575.151128999998
+    },
+    {
+      "type": "playback/state",
+      "position": 4750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28575.17775899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 4833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28694.573511999995
+    },
+    {
+      "type": "playback/state",
+      "position": 4833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28694.60549899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 4917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28751.57609699999
+    },
+    {
+      "type": "playback/state",
+      "position": 4917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28751.603977999992
+    },
+    {
+      "type": "playback/progress",
+      "position": 5000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28840.501824
+    },
+    {
+      "type": "playback/state",
+      "position": 5000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28840.523236
+    },
+    {
+      "type": "playback/progress",
+      "position": 5083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28951.066788000004
+    },
+    {
+      "type": "playback/state",
+      "position": 5083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 28951.106437000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 5167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29001.413632000003
+    },
+    {
+      "type": "playback/state",
+      "position": 5167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29001.468002
+    },
+    {
+      "type": "playback/progress",
+      "position": 5250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29061.801543
+    },
+    {
+      "type": "playback/state",
+      "position": 5250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29061.853299000002
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 29150.685,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291313,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29153.216062
+    },
+    {
+      "type": "playback/progress",
+      "position": 5250,
+      "duration": 24000,
+      "downloadSpeed": 291313,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29153.222080999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 5333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29180.458049
+    },
+    {
+      "type": "playback/state",
+      "position": 5333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29180.48567999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 5417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29342.349727
+    },
+    {
+      "type": "playback/state",
+      "position": 5417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29342.378579000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 5500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29358.025585999996
+    },
+    {
+      "type": "playback/state",
+      "position": 5500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29358.058152999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 5583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29454.312325
+    },
+    {
+      "type": "playback/state",
+      "position": 5583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29454.340095999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 5667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29537.77727099999
+    },
+    {
+      "type": "playback/state",
+      "position": 5667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29537.805281999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 5750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29557.713901999996
+    },
+    {
+      "type": "playback/state",
+      "position": 5750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29557.73385099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 5833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29657.474647999996
+    },
+    {
+      "type": "playback/state",
+      "position": 5833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29657.502598999992
+    },
+    {
+      "type": "playback/progress",
+      "position": 5917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29770.427791999995
+    },
+    {
+      "type": "playback/state",
+      "position": 5917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29770.456344
+    },
+    {
+      "type": "playback/progress",
+      "position": 6000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29837.239112999996
+    },
+    {
+      "type": "playback/state",
+      "position": 6000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 29837.265441999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 6083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30003.243905999996
+    },
+    {
+      "type": "playback/state",
+      "position": 6083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30003.272768999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 6167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30034.793694
+    },
+    {
+      "type": "playback/state",
+      "position": 6167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30034.821355
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19132014592,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30141.084496999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 6250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30142.314114
+    },
+    {
+      "type": "playback/state",
+      "position": 6250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30142.33073899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 6333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30149.710604
+    },
+    {
+      "type": "playback/state",
+      "position": 6333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30149.724815
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 30156.968,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259687,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30159.493511999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 6333,
+      "duration": 24000,
+      "downloadSpeed": 259687,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30159.498067999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 6417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30247.448786999994
+    },
+    {
+      "type": "playback/state",
+      "position": 6417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30247.474624999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 6500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30354.363756999992
+    },
+    {
+      "type": "playback/state",
+      "position": 6500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30354.391507999993
+    },
+    {
+      "type": "playback/progress",
+      "position": 6583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30392.846715
+    },
+    {
+      "type": "playback/state",
+      "position": 6583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30392.87080099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 6667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30566.38296699999
+    },
+    {
+      "type": "playback/state",
+      "position": 6667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30566.410236999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 6750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30572.146568000004
+    },
+    {
+      "type": "playback/state",
+      "position": 6750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30572.16801
+    },
+    {
+      "type": "playback/progress",
+      "position": 6833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30679.253179
+    },
+    {
+      "type": "playback/state",
+      "position": 6833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30679.280129
+    },
+    {
+      "type": "playback/progress",
+      "position": 6917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30782.465017000002
+    },
+    {
+      "type": "playback/state",
+      "position": 6917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30782.490104000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 7000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30837.093312999998
+    },
+    {
+      "type": "playback/state",
+      "position": 7000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30837.119031000002
+    },
+    {
+      "type": "playback/progress",
+      "position": 7083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30889.807215
+    },
+    {
+      "type": "playback/state",
+      "position": 7083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30889.857379
+    },
+    {
+      "type": "playback/progress",
+      "position": 7167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30998.423516000003
+    },
+    {
+      "type": "playback/state",
+      "position": 7167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 30998.45124599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 7250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31099.359078
+    },
+    {
+      "type": "playback/state",
+      "position": 7250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31099.386397999995
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 31153.111,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259608,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31155.639032
+    },
+    {
+      "type": "playback/progress",
+      "position": 7250,
+      "duration": 24000,
+      "downloadSpeed": 259608,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31155.64450999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 7333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31238.03264099999
+    },
+    {
+      "type": "playback/state",
+      "position": 7333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31238.058008
+    },
+    {
+      "type": "playback/progress",
+      "position": 7417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31245.749032
+    },
+    {
+      "type": "playback/state",
+      "position": 7417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31245.76803
+    },
+    {
+      "type": "playback/progress",
+      "position": 7500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31354.252963999992
+    },
+    {
+      "type": "playback/state",
+      "position": 7500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31354.282377000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 7583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31434.446273
+    },
+    {
+      "type": "playback/state",
+      "position": 7583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31434.474284000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 7667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31484.422400999996
+    },
+    {
+      "type": "playback/state",
+      "position": 7667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31484.45193399999
+    },
+    {
+      "type": "playback/progress",
+      "position": 7750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31634.39389
+    },
+    {
+      "type": "playback/state",
+      "position": 7750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31634.42253199999
+    },
+    {
+      "type": "playback/progress",
+      "position": 7833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31645.822515999993
+    },
+    {
+      "type": "playback/state",
+      "position": 7833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31645.878468999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 7917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31745.858616999998
+    },
+    {
+      "type": "playback/state",
+      "position": 7917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31745.89272699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 8000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31840.091047999995
+    },
+    {
+      "type": "playback/state",
+      "position": 8000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31840.122555
+    },
+    {
+      "type": "playback/progress",
+      "position": 8083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31942.198773000004
+    },
+    {
+      "type": "playback/state",
+      "position": 8083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 31942.228505999992
+    },
+    {
+      "type": "playback/progress",
+      "position": 8167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32037.672167999997
+    },
+    {
+      "type": "playback/state",
+      "position": 8167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32037.697955999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 8250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32140.335329999994
+    },
+    {
+      "type": "playback/state",
+      "position": 8250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32140.357723
+    },
+    {
+      "type": "playback/progress",
+      "position": 8333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32147.39196
+    },
+    {
+      "type": "playback/state",
+      "position": 8333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32147.40976599999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19131490304,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32154.484523999992
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 32153.347,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 289614,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32155.876379
+    },
+    {
+      "type": "playback/progress",
+      "position": 8333,
+      "duration": 24000,
+      "downloadSpeed": 289614,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32155.882949
+    },
+    {
+      "type": "playback/progress",
+      "position": 8417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32260.870466999993
+    },
+    {
+      "type": "playback/state",
+      "position": 8417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32260.904115999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 8500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32369.650147
+    },
+    {
+      "type": "playback/state",
+      "position": 8500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32369.704747000003
+    },
+    {
+      "type": "playback/progress",
+      "position": 8583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32437.899662000003
+    },
+    {
+      "type": "playback/state",
+      "position": 8583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32437.929194999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 8667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32477.817388000003
+    },
+    {
+      "type": "playback/state",
+      "position": 8667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32477.866910999997
+    },
+    {
+      "type": "playback/progress",
+      "position": 8750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32588.113206
+    },
+    {
+      "type": "playback/state",
+      "position": 8750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32588.149559999998
+    },
+    {
+      "type": "playback/progress",
+      "position": 8833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32686.902284999996
+    },
+    {
+      "type": "playback/state",
+      "position": 8833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32686.93048599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 8917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32747.289773999997
+    },
+    {
+      "type": "playback/state",
+      "position": 8917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32747.318305999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 9000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32847.875542999995
+    },
+    {
+      "type": "playback/state",
+      "position": 9000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32847.909232
+    },
+    {
+      "type": "playback/progress",
+      "position": 9083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32967.97927599999
+    },
+    {
+      "type": "playback/state",
+      "position": 9083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32968.006927
+    },
+    {
+      "type": "playback/progress",
+      "position": 9167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32977.57249499999
+    },
+    {
+      "type": "playback/state",
+      "position": 9167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 32977.592264
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 33154.146,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 240300,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33156.673395
+    },
+    {
+      "type": "playback/progress",
+      "position": 9167,
+      "duration": 24000,
+      "downloadSpeed": 240300,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33156.679224
+    },
+    {
+      "type": "playback/progress",
+      "position": 9250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33197.56780699999
+    },
+    {
+      "type": "playback/state",
+      "position": 9250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33197.60572299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 9333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33204.35238799999
+    },
+    {
+      "type": "playback/state",
+      "position": 9333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33204.368882
+    },
+    {
+      "type": "playback/progress",
+      "position": 9417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33248.991032
+    },
+    {
+      "type": "playback/state",
+      "position": 9417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33249.01688999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 9500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33393.054077
+    },
+    {
+      "type": "playback/state",
+      "position": 9500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33434.033965
+    },
+    {
+      "type": "playback/progress",
+      "position": 9583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33434.15265899999
+    },
+    {
+      "type": "playback/state",
+      "position": 9583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33434.167259999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 9667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33539.76263199999
+    },
+    {
+      "type": "playback/state",
+      "position": 9667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33539.792416000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 9750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33593.60528299999
+    },
+    {
+      "type": "playback/state",
+      "position": 9750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33593.632813
+    },
+    {
+      "type": "playback/progress",
+      "position": 9833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33648.64459199999
+    },
+    {
+      "type": "playback/state",
+      "position": 9833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33648.671442
+    },
+    {
+      "type": "playback/progress",
+      "position": 9917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33758.29468299999
+    },
+    {
+      "type": "playback/state",
+      "position": 9917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33758.328202
+    },
+    {
+      "type": "playback/progress",
+      "position": 10000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33857.609353
+    },
+    {
+      "type": "playback/state",
+      "position": 10000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33857.666657
+    },
+    {
+      "type": "playback/progress",
+      "position": 10083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33937.814865
+    },
+    {
+      "type": "playback/state",
+      "position": 10083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33937.855655
+    },
+    {
+      "type": "playback/progress",
+      "position": 10167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33987.911992999994
+    },
+    {
+      "type": "playback/state",
+      "position": 10167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 33987.93744
+    },
+    {
+      "type": "playback/progress",
+      "position": 10250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34074.280639
+    },
+    {
+      "type": "playback/state",
+      "position": 10250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34074.312937
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19130966016,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34146.902043
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 34154.225,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257344,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34156.750647999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 10250,
+      "duration": 24000,
+      "downloadSpeed": 257344,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34156.75493399999
+    },
+    {
+      "type": "playback/progress",
+      "position": 10333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34182.264254
+    },
+    {
+      "type": "playback/state",
+      "position": 10333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34182.285656
+    },
+    {
+      "type": "playback/progress",
+      "position": 10417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34286.487799
+    },
+    {
+      "type": "playback/state",
+      "position": 10417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34286.511183
+    },
+    {
+      "type": "playback/progress",
+      "position": 10500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34334.333055999996
+    },
+    {
+      "type": "playback/state",
+      "position": 10500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34334.35816299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 10583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34395.441256
+    },
+    {
+      "type": "playback/state",
+      "position": 10583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34395.46487999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 10667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34534.95931099999
+    },
+    {
+      "type": "playback/state",
+      "position": 10667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34534.98789299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 10750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34585.00109
+    },
+    {
+      "type": "playback/state",
+      "position": 10750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34585.02694799999
+    },
+    {
+      "type": "playback/progress",
+      "position": 10833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34648.586623999996
+    },
+    {
+      "type": "playback/state",
+      "position": 10833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34648.61087
+    },
+    {
+      "type": "playback/progress",
+      "position": 10917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34750.302246
+    },
+    {
+      "type": "playback/state",
+      "position": 10917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34750.328495
+    },
+    {
+      "type": "playback/progress",
+      "position": 11000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34856.08238099999
+    },
+    {
+      "type": "playback/state",
+      "position": 11000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34856.107178
+    },
+    {
+      "type": "playback/progress",
+      "position": 11083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34937.844489999996
+    },
+    {
+      "type": "playback/state",
+      "position": 11083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34937.870628
+    },
+    {
+      "type": "playback/progress",
+      "position": 11167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34987.964915
+    },
+    {
+      "type": "playback/state",
+      "position": 11167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 34987.989691
+    },
+    {
+      "type": "playback/progress",
+      "position": 11250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35066.549955
+    },
+    {
+      "type": "playback/state",
+      "position": 11250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35066.57487199999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 35159.462,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 254491,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35161.992531
+    },
+    {
+      "type": "playback/progress",
+      "position": 11250,
+      "duration": 24000,
+      "downloadSpeed": 254491,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35161.997819000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 11333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35170.67580399999
+    },
+    {
+      "type": "playback/state",
+      "position": 11333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35170.698937999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 11417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35274.26671599999
+    },
+    {
+      "type": "playback/state",
+      "position": 11417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35274.29540899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 11500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35334.472799999996
+    },
+    {
+      "type": "playback/state",
+      "position": 11500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35334.49988899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 11583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35391.99741599999
+    },
+    {
+      "type": "playback/state",
+      "position": 11583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35392.023815
+    },
+    {
+      "type": "playback/progress",
+      "position": 11667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35486.461604000004
+    },
+    {
+      "type": "playback/state",
+      "position": 11667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35486.489215
+    },
+    {
+      "type": "playback/progress",
+      "position": 11750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35582.15571499999
+    },
+    {
+      "type": "playback/state",
+      "position": 11750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35582.18332599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 11833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35674.765829
+    },
+    {
+      "type": "playback/state",
+      "position": 11833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35674.79370999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 11917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35783.000527000004
+    },
+    {
+      "type": "playback/state",
+      "position": 11917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35783.023972
+    },
+    {
+      "type": "playback/progress",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35835.94488599999
+    },
+    {
+      "type": "playback/state",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35835.973368
+    },
+    {
+      "type": "playback/progress",
+      "position": 12083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35893.778587
+    },
+    {
+      "type": "playback/state",
+      "position": 12083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35893.804585
+    },
+    {
+      "type": "playback/progress",
+      "position": 12167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35998.431171
+    },
+    {
+      "type": "playback/state",
+      "position": 12167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 35998.457168999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 12250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36144.369979
+    },
+    {
+      "type": "playback/state",
+      "position": 12250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36144.400093
+    },
+    {
+      "type": "playback/progress",
+      "position": 12333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36149.82288299999
+    },
+    {
+      "type": "playback/state",
+      "position": 12333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36149.858355
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19130441728,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36158.255767
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 36159.404,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 240329,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36161.932922
+    },
+    {
+      "type": "playback/progress",
+      "position": 12333,
+      "duration": 24000,
+      "downloadSpeed": 240329,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36161.93800999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 12417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36250.23183
+    },
+    {
+      "type": "playback/state",
+      "position": 12417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36250.260642999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 12500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36361.631994
+    },
+    {
+      "type": "playback/state",
+      "position": 12500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36361.657241
+    },
+    {
+      "type": "playback/progress",
+      "position": 12583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36434.310624
+    },
+    {
+      "type": "playback/state",
+      "position": 12583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36434.33599099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 12667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36474.70743599999
+    },
+    {
+      "type": "playback/state",
+      "position": 12667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36474.727836
+    },
+    {
+      "type": "playback/progress",
+      "position": 12750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36584.853383
+    },
+    {
+      "type": "playback/state",
+      "position": 12750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36584.883045999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 12833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36697.613747
+    },
+    {
+      "type": "playback/state",
+      "position": 12833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36697.637001999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 12917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36737.49558499999
+    },
+    {
+      "type": "playback/state",
+      "position": 12917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36737.516656
+    },
+    {
+      "type": "playback/progress",
+      "position": 13000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36838.44039699999
+    },
+    {
+      "type": "playback/state",
+      "position": 13000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 36838.465584
+    },
+    {
+      "type": "playback/progress",
+      "position": 13083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37050.449172
+    },
+    {
+      "type": "playback/state",
+      "position": 13083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37050.47597199999
+    },
+    {
+      "type": "playback/progress",
+      "position": 13167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37061.67120599999
+    },
+    {
+      "type": "playback/state",
+      "position": 13167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37061.694981
+    },
+    {
+      "type": "playback/progress",
+      "position": 13250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37077.609080999995
+    },
+    {
+      "type": "playback/state",
+      "position": 13250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37077.631103
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 37155.987,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 290744,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37158.515072
+    },
+    {
+      "type": "playback/progress",
+      "position": 13250,
+      "duration": 24000,
+      "downloadSpeed": 290744,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37158.520379999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 13333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37166.40828299999
+    },
+    {
+      "type": "playback/state",
+      "position": 13333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37166.428932999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 13417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37263.472673000004
+    },
+    {
+      "type": "playback/state",
+      "position": 13417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37263.49758
+    },
+    {
+      "type": "playback/progress",
+      "position": 13500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37434.237447
+    },
+    {
+      "type": "playback/state",
+      "position": 13500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37434.272187999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 13583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37439.317453999996
+    },
+    {
+      "type": "playback/state",
+      "position": 13583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37439.340688000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 13667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37550.356364
+    },
+    {
+      "type": "playback/state",
+      "position": 13667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37550.39081399999
+    },
+    {
+      "type": "playback/progress",
+      "position": 13750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37561.74128699999
+    },
+    {
+      "type": "playback/state",
+      "position": 13750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37561.768877
+    },
+    {
+      "type": "playback/progress",
+      "position": 13833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37666.23460599999
+    },
+    {
+      "type": "playback/state",
+      "position": 13833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37666.257469
+    },
+    {
+      "type": "playback/progress",
+      "position": 13917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37759.258756999996
+    },
+    {
+      "type": "playback/state",
+      "position": 13917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37759.28532599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 14000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37857.68433899999
+    },
+    {
+      "type": "playback/state",
+      "position": 14000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37857.71202
+    },
+    {
+      "type": "playback/progress",
+      "position": 14083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37934.358069
+    },
+    {
+      "type": "playback/state",
+      "position": 14083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37934.383005
+    },
+    {
+      "type": "playback/progress",
+      "position": 14167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37984.428731
+    },
+    {
+      "type": "playback/state",
+      "position": 14167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 37984.45337699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 14250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38070.30890299999
+    },
+    {
+      "type": "playback/state",
+      "position": 14250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38070.334901
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 38156.365,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258070,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38158.89462099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 14250,
+      "duration": 24000,
+      "downloadSpeed": 258070,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38158.899568999994
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19129901056,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 0,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38159.102907
+    },
+    {
+      "type": "playback/progress",
+      "position": 14333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38169.89981699999
+    },
+    {
+      "type": "playback/state",
+      "position": 14333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38169.916961999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 14417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38277.57816699999
+    },
+    {
+      "type": "playback/state",
+      "position": 14417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38277.601321
+    },
+    {
+      "type": "playback/progress",
+      "position": 14500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38337.821879
+    },
+    {
+      "type": "playback/state",
+      "position": 14500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38337.886995
+    },
+    {
+      "type": "playback/progress",
+      "position": 14583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38481.062167000004
+    },
+    {
+      "type": "playback/state",
+      "position": 14583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38481.087955
+    },
+    {
+      "type": "playback/progress",
+      "position": 14667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38489.615598
+    },
+    {
+      "type": "playback/state",
+      "position": 14667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38489.635277
+    },
+    {
+      "type": "playback/progress",
+      "position": 14750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38635.187983
+    },
+    {
+      "type": "playback/state",
+      "position": 14750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38635.212358
+    },
+    {
+      "type": "playback/progress",
+      "position": 14833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38638.500897
+    },
+    {
+      "type": "playback/state",
+      "position": 14833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38638.529218
+    },
+    {
+      "type": "playback/progress",
+      "position": 14917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38744.06133399999
+    },
+    {
+      "type": "playback/state",
+      "position": 14917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38744.08740299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 15000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38850.39539899999
+    },
+    {
+      "type": "playback/state",
+      "position": 15000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38850.42312
+    },
+    {
+      "type": "playback/progress",
+      "position": 15083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38960.04416099999
+    },
+    {
+      "type": "playback/state",
+      "position": 15083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 38960.068116
+    },
+    {
+      "type": "playback/progress",
+      "position": 15167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39034.32341199999
+    },
+    {
+      "type": "playback/state",
+      "position": 15167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39034.347688
+    },
+    {
+      "type": "playback/progress",
+      "position": 15250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39075.384761
+    },
+    {
+      "type": "playback/state",
+      "position": 15250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39075.403268
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 39159.371,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259192,
+      "checkedBytes": 6448813,
+      "checkedPieces": 2,
+      "requestedPiece": 1,
+      "cursor": 4194304,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39161.899465999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 15250,
+      "duration": 24000,
+      "downloadSpeed": 259192,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39161.905223999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 15333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39179.007871
+    },
+    {
+      "type": "playback/state",
+      "position": 15333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39179.02826099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 15417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39287.291680999995
+    },
+    {
+      "type": "playback/state",
+      "position": 15417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39287.315576
+    },
+    {
+      "type": "playback/progress",
+      "position": 15500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39341.70336199999
+    },
+    {
+      "type": "playback/state",
+      "position": 15500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39341.730300999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 15583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39401.711118
+    },
+    {
+      "type": "playback/state",
+      "position": 15583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39401.73714599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 15667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39489.27422099999
+    },
+    {
+      "type": "playback/state",
+      "position": 15667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39489.302042
+    },
+    {
+      "type": "playback/progress",
+      "position": 15750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39592.30409099999
+    },
+    {
+      "type": "playback/state",
+      "position": 15750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39592.32987899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 15833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39696.580272
+    },
+    {
+      "type": "playback/state",
+      "position": 15833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39696.60606
+    },
+    {
+      "type": "playback/progress",
+      "position": 15917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39737.64048699999
+    },
+    {
+      "type": "playback/state",
+      "position": 15917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39737.660687
+    },
+    {
+      "type": "playback/progress",
+      "position": 16000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39870.076635
+    },
+    {
+      "type": "playback/state",
+      "position": 16000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39870.100631
+    },
+    {
+      "type": "playback/progress",
+      "position": 16083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39937.846679
+    },
+    {
+      "type": "playback/state",
+      "position": 16083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39937.866208
+    },
+    {
+      "type": "playback/progress",
+      "position": 16167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39992.955702
+    },
+    {
+      "type": "playback/state",
+      "position": 16167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 39992.98136
+    },
+    {
+      "type": "playback/progress",
+      "position": 16250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40142.924181
+    },
+    {
+      "type": "playback/state",
+      "position": 16250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40142.96051499999
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 40157.598,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 289373,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40160.12953699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 16250,
+      "duration": 24000,
+      "downloadSpeed": 289373,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40160.136506999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 16333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40161.57421
+    },
+    {
+      "type": "playback/state",
+      "position": 16333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40161.591695999996
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19129376768,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40162.239347
+    },
+    {
+      "type": "playback/progress",
+      "position": 16417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40285.636139999995
+    },
+    {
+      "type": "playback/state",
+      "position": 16417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40285.66516299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 16500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40337.781792
+    },
+    {
+      "type": "playback/state",
+      "position": 16500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40337.810234
+    },
+    {
+      "type": "playback/progress",
+      "position": 16583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40467.198771999996
+    },
+    {
+      "type": "playback/state",
+      "position": 16583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40467.226883
+    },
+    {
+      "type": "playback/progress",
+      "position": 16667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40493.69323099999
+    },
+    {
+      "type": "playback/state",
+      "position": 16667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40493.71829699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 16750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40565.751172
+    },
+    {
+      "type": "playback/state",
+      "position": 16750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40565.77681999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 16833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40671.956268
+    },
+    {
+      "type": "playback/state",
+      "position": 16833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40672.003087
+    },
+    {
+      "type": "playback/progress",
+      "position": 16917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40777.609877999996
+    },
+    {
+      "type": "playback/state",
+      "position": 16917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40777.637408999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 17000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40837.913586
+    },
+    {
+      "type": "playback/state",
+      "position": 17000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40837.93675999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 17083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40887.95281699999
+    },
+    {
+      "type": "playback/state",
+      "position": 17083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40887.977823
+    },
+    {
+      "type": "playback/progress",
+      "position": 17167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40981.118859999995
+    },
+    {
+      "type": "playback/state",
+      "position": 17167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 40981.144127
+    },
+    {
+      "type": "playback/progress",
+      "position": 17250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41081.26614299999
+    },
+    {
+      "type": "playback/state",
+      "position": 17250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41081.288756
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 41163.277,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 257487,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41165.80563899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 17250,
+      "duration": 24000,
+      "downloadSpeed": 257487,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41165.812709
+    },
+    {
+      "type": "playback/progress",
+      "position": 17333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41179.85483599999
+    },
+    {
+      "type": "playback/state",
+      "position": 17333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41179.87124
+    },
+    {
+      "type": "playback/progress",
+      "position": 17417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41285.123507000004
+    },
+    {
+      "type": "playback/state",
+      "position": 17417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41285.14643
+    },
+    {
+      "type": "playback/progress",
+      "position": 17500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41335.32202099999
+    },
+    {
+      "type": "playback/state",
+      "position": 17500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41335.345115
+    },
+    {
+      "type": "playback/progress",
+      "position": 17583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41395.546912
+    },
+    {
+      "type": "playback/state",
+      "position": 17583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41395.56888499999
+    },
+    {
+      "type": "playback/progress",
+      "position": 17667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41500.38568
+    },
+    {
+      "type": "playback/state",
+      "position": 17667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41500.59652
+    },
+    {
+      "type": "playback/progress",
+      "position": 17750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41638.40213899999
+    },
+    {
+      "type": "playback/state",
+      "position": 17750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41638.482597999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 17833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41641.661449
+    },
+    {
+      "type": "playback/state",
+      "position": 17833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41641.67244599999
+    },
+    {
+      "type": "playback/progress",
+      "position": 17917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41749.662064
+    },
+    {
+      "type": "playback/state",
+      "position": 17917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41749.68463699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 18000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41847.792263999996
+    },
+    {
+      "type": "playback/state",
+      "position": 18000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41847.818712
+    },
+    {
+      "type": "playback/progress",
+      "position": 18083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41948.012383999994
+    },
+    {
+      "type": "playback/state",
+      "position": 18083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41948.037701
+    },
+    {
+      "type": "playback/progress",
+      "position": 18167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41996.375481999996
+    },
+    {
+      "type": "playback/state",
+      "position": 18167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 41996.395792
+    },
+    {
+      "type": "playback/progress",
+      "position": 18250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42066.384612
+    },
+    {
+      "type": "playback/state",
+      "position": 18250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42066.583064
+    },
+    {
+      "type": "playback/progress",
+      "position": 18333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42169.27159099999
+    },
+    {
+      "type": "playback/state",
+      "position": 18333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42169.30413899999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19128852480,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42173.657147
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 42175.365,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 291825,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42177.89167999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 18333,
+      "duration": 24000,
+      "downloadSpeed": 291825,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42177.896938
+    },
+    {
+      "type": "playback/progress",
+      "position": 18417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42276.88296499999
+    },
+    {
+      "type": "playback/state",
+      "position": 18417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42276.910985999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 18500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42341.643462
+    },
+    {
+      "type": "playback/state",
+      "position": 18500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42341.675459
+    },
+    {
+      "type": "playback/progress",
+      "position": 18583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42438.502222
+    },
+    {
+      "type": "playback/state",
+      "position": 18583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42441.031089000004
+    },
+    {
+      "type": "playback/progress",
+      "position": 18667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42488.44766499999
+    },
+    {
+      "type": "playback/state",
+      "position": 18667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42488.473643
+    },
+    {
+      "type": "playback/progress",
+      "position": 18750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42569.620548
+    },
+    {
+      "type": "playback/state",
+      "position": 18750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42569.65141299999
+    },
+    {
+      "type": "playback/progress",
+      "position": 18833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42691.443865999994
+    },
+    {
+      "type": "playback/state",
+      "position": 18833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42691.476925
+    },
+    {
+      "type": "playback/progress",
+      "position": 18917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42741.621444
+    },
+    {
+      "type": "playback/state",
+      "position": 18917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42741.650837999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 19000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42842.360364
+    },
+    {
+      "type": "playback/state",
+      "position": 19000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42842.394895
+    },
+    {
+      "type": "playback/progress",
+      "position": 19083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42965.421702
+    },
+    {
+      "type": "playback/state",
+      "position": 19083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42965.473527999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 19167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42973.671027
+    },
+    {
+      "type": "playback/state",
+      "position": 19167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 42973.687079999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 19250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43094.900913
+    },
+    {
+      "type": "playback/state",
+      "position": 19250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43094.947131
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 43175.455,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259575,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43177.986027
+    },
+    {
+      "type": "playback/progress",
+      "position": 19250,
+      "duration": 24000,
+      "downloadSpeed": 259575,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43177.99328799999
+    },
+    {
+      "type": "playback/progress",
+      "position": 19333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43250.015536
+    },
+    {
+      "type": "playback/state",
+      "position": 19333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43250.093621
+    },
+    {
+      "type": "playback/progress",
+      "position": 19417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43269.620751
+    },
+    {
+      "type": "playback/state",
+      "position": 19417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43269.64483699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 19500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43380.85813099999
+    },
+    {
+      "type": "playback/state",
+      "position": 19500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43380.88453999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 19583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43389.680959
+    },
+    {
+      "type": "playback/state",
+      "position": 19583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43389.698885
+    },
+    {
+      "type": "playback/progress",
+      "position": 19667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43506.206381
+    },
+    {
+      "type": "playback/state",
+      "position": 19667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43506.233631
+    },
+    {
+      "type": "playback/progress",
+      "position": 19750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43635.773626999995
+    },
+    {
+      "type": "playback/state",
+      "position": 19750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43635.825743999994
+    },
+    {
+      "type": "playback/progress",
+      "position": 19833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43640.212511
+    },
+    {
+      "type": "playback/state",
+      "position": 19833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43640.223055999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 19917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43735.00739399999
+    },
+    {
+      "type": "playback/state",
+      "position": 19917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43735.035404999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 20000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43887.16062
+    },
+    {
+      "type": "playback/state",
+      "position": 20000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43887.186838999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 20083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43897.164914
+    },
+    {
+      "type": "playback/state",
+      "position": 20083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43897.18397199999
+    },
+    {
+      "type": "playback/progress",
+      "position": 20167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43985.62351
+    },
+    {
+      "type": "playback/state",
+      "position": 20167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 43985.650109
+    },
+    {
+      "type": "playback/progress",
+      "position": 20250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44080.32687899999
+    },
+    {
+      "type": "playback/state",
+      "position": 20250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44080.36656799999
+    },
+    {
+      "type": "playback/cache",
+      "freeBytes": 19125735424,
+      "evictedBytes": 0,
+      "downloadPaused": false,
+      "aheadSeconds": 3,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44162.958316
+    },
+    {
+      "type": "playback/progress",
+      "position": 20333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44171.32027599999
+    },
+    {
+      "type": "playback/state",
+      "position": 20333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44171.336820000004
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 44172.638,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 259370,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44175.163133999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 20333,
+      "duration": 24000,
+      "downloadSpeed": 259370,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44175.16698999999
+    },
+    {
+      "type": "playback/progress",
+      "position": 20417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44260.968445
+    },
+    {
+      "type": "playback/state",
+      "position": 20417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44260.997528
+    },
+    {
+      "type": "playback/progress",
+      "position": 20500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44361.653642
+    },
+    {
+      "type": "playback/state",
+      "position": 20500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44361.68709099999
+    },
+    {
+      "type": "playback/progress",
+      "position": 20583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44437.991948999996
+    },
+    {
+      "type": "playback/state",
+      "position": 20583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44438.024497
+    },
+    {
+      "type": "playback/progress",
+      "position": 20667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44474.772657999994
+    },
+    {
+      "type": "playback/state",
+      "position": 20667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44474.800419
+    },
+    {
+      "type": "playback/progress",
+      "position": 20750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44576.711206
+    },
+    {
+      "type": "playback/state",
+      "position": 20750,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44576.740379
+    },
+    {
+      "type": "playback/progress",
+      "position": 20833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44673.672203999995
+    },
+    {
+      "type": "playback/state",
+      "position": 20833,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44673.710159
+    },
+    {
+      "type": "playback/progress",
+      "position": 20917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44771.866885
+    },
+    {
+      "type": "playback/state",
+      "position": 20917,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44771.89564699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 21000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44834.369442
+    },
+    {
+      "type": "playback/state",
+      "position": 21000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44834.396692
+    },
+    {
+      "type": "playback/progress",
+      "position": 21083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44965.990065
+    },
+    {
+      "type": "playback/state",
+      "position": 21083,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44966.023693999996
+    },
+    {
+      "type": "playback/progress",
+      "position": 21167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44975.333993
+    },
+    {
+      "type": "playback/state",
+      "position": 21167,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 44975.360362
+    },
+    {
+      "type": "playback/progress",
+      "position": 21250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45072.019345999994
+    },
+    {
+      "type": "playback/state",
+      "position": 21250,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45072.054016999995
+    },
+    {
+      "type": "playback/progress",
+      "position": 21333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45167.507057999996
+    },
+    {
+      "type": "playback/state",
+      "position": 21333,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45167.532235
+    },
+    {
+      "type": "playback/diagnostic",
+      "stage": "torrent-sample",
+      "elapsedMs": 45172.478,
+      "knownPeers": 1,
+      "connectedPeers": 1,
+      "speedBytes": 258454,
+      "checkedBytes": 10643117,
+      "checkedPieces": 3,
+      "requestedPiece": 1,
+      "cursor": 4447232,
+      "cacheBytesRead": 5974162,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45175.004828
+    },
+    {
+      "type": "playback/progress",
+      "position": 21333,
+      "duration": 24000,
+      "downloadSpeed": 258454,
+      "peers": 1,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45175.008433
+    },
+    {
+      "type": "playback/progress",
+      "position": 21417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45270.382227999995
+    },
+    {
+      "type": "playback/state",
+      "position": 21417,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45270.40884699999
+    },
+    {
+      "type": "playback/progress",
+      "position": 21500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45339.08263
+    },
+    {
+      "type": "playback/state",
+      "position": 21500,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45339.109259
+    },
+    {
+      "type": "playback/progress",
+      "position": 21583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45461.11270199999
+    },
+    {
+      "type": "playback/state",
+      "position": 21583,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45461.13795899999
+    },
+    {
+      "type": "playback/progress",
+      "position": 21667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45534.39812399999
+    },
+    {
+      "type": "playback/state",
+      "position": 21667,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45534.424553
+    },
+    {
+      "type": "playback/progress",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45581.88808099999
+    },
+    {
+      "type": "playback/state",
+      "position": 12000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45581.898897
+    },
+    {
+      "type": "playback/progress",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45773.257445
+    },
+    {
+      "type": "playback/state",
+      "position": 2000,
+      "duration": 24000,
+      "paused": false,
+      "buffering": false,
+      "session": "bench-late-moov-1-cold",
+      "atMs": 45773.264525
+    },
+    {
+      "type": "playback/closed",
+      "session": "bench-late-moov-1-cold",
+      "position": 2000,
+      "duration": 24000,
+      "atMs": 45781.778839
+    }
+  ],
+  "http": [
+    {
+      "atMs": 14.954077999995206,
+      "method": "GET",
+      "path": "/",
+      "query": "",
+      "range": null
+    },
+    {
+      "atMs": 67.63323799999489,
+      "method": "GET",
+      "path": "/",
+      "query": "",
+      "range": null,
+      "headersMs": 68.41952299999684,
+      "status": 200,
+      "bodyBytes": 1799,
+      "firstBodyMs": 68.50909499999398,
+      "completedMs": 68.53264999999374
+    },
+    {
+      "atMs": 69.34839899999497,
+      "method": "POST",
+      "path": "/torrents",
+      "query": "?only_files=0&initial_peers=127.0.0.1%3A34091",
+      "range": null,
+      "headersMs": 115.09786699999677,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 115.33486499999708,
+      "completedMs": 115.36663199999748
+    },
+    {
+      "atMs": 129.66231100000005,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=0-1048575",
+      "headersMs": 130.78600199999346,
+      "status": 206,
+      "bodyBytes": 1048576,
+      "firstBodyMs": 15136.352391,
+      "completedMs": 15145.366048000004
+    },
+    {
+      "atMs": 130.9287619999959,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=269641389-270689964",
+      "headersMs": 131.38648499999545,
+      "status": 206,
+      "bodyBytes": 1048576,
+      "firstBodyMs": 23714.91939399999,
+      "completedMs": 23717.412959
+    },
+    {
+      "atMs": 450.5034369999994,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=0-",
+      "headersMs": 453.5081229999996,
+      "status": 206,
+      "bodyBytes": 4194304,
+      "firstBodyMs": 15122.287229000001
+    },
+    {
+      "atMs": 1134.9248159999988,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 1135.8816919999954,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 1135.9913529999976,
+      "completedMs": 1136.022398999994
+    },
+    {
+      "atMs": 2126.0123539999986,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 2126.3151789999974,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 2126.4080350000004,
+      "completedMs": 2126.4296169999943,
+      "havePieces": []
+    },
+    {
+      "atMs": 2138.2309069999974,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 2138.8265219999957,
+      "status": 200,
+      "bodyBytes": 678,
+      "firstBodyMs": 2138.9288919999963,
+      "completedMs": 2138.9482109999954
+    },
+    {
+      "atMs": 3138.5708679999952,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 3138.918958999995,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 3138.997574999994,
+      "completedMs": 3139.0206089999992
+    },
+    {
+      "atMs": 4124.676774,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 4125.0106039999955,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 4125.086795999996,
+      "completedMs": 4125.107566999999,
+      "havePieces": []
+    },
+    {
+      "atMs": 4138.611804,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 4138.885446,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 4138.948087999997,
+      "completedMs": 4138.965654
+    },
+    {
+      "atMs": 5138.307241999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 5141.717864999999,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 5141.81652,
+      "completedMs": 5141.874154999998
+    },
+    {
+      "atMs": 6124.302890999999,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 6124.676159999995,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 6124.764609999998,
+      "completedMs": 6124.785219999998,
+      "havePieces": []
+    },
+    {
+      "atMs": 6138.612961999999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 6138.880864999999,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 6138.957908999997,
+      "completedMs": 6138.975654999995
+    },
+    {
+      "atMs": 7139.017826999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 7139.34969499999,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 7139.4268079999965,
+      "completedMs": 7139.448790999995
+    },
+    {
+      "atMs": 8124.362545000004,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 8124.6691349999965,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 8124.746739000002,
+      "completedMs": 8124.767839999993,
+      "havePieces": []
+    },
+    {
+      "atMs": 8138.935181999994,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 8139.182905999995,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 8139.2480619999915,
+      "completedMs": 8139.265406999992
+    },
+    {
+      "atMs": 9139.536010000003,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 9139.860076999998,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 9139.937230000003,
+      "completedMs": 9139.958831999997
+    },
+    {
+      "atMs": 10125.048223999991,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 10125.356607000002,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 10125.433450000004,
+      "completedMs": 10125.481609999995,
+      "havePieces": []
+    },
+    {
+      "atMs": 10139.004215,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 10139.274631999993,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 10139.333888999994,
+      "completedMs": 10139.349511999993
+    },
+    {
+      "atMs": 11139.963282999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 11140.504928999995,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 11140.625355999997,
+      "completedMs": 11140.660006999991
+    },
+    {
+      "atMs": 12126.023303000002,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 12126.280980999996,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 12126.352626999993,
+      "completedMs": 12126.372385999995,
+      "havePieces": []
+    },
+    {
+      "atMs": 12138.913146999992,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 12139.136844999994,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 12139.190804999998,
+      "completedMs": 12139.207038999994
+    },
+    {
+      "atMs": 13139.352928999993,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 13139.661923,
+      "status": 200,
+      "bodyBytes": 680,
+      "firstBodyMs": 13139.733367999994,
+      "completedMs": 13139.758966000001
+    },
+    {
+      "atMs": 14125.817871999992,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 14126.158363000002,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 14126.31554399999,
+      "completedMs": 14126.334911999998,
+      "havePieces": []
+    },
+    {
+      "atMs": 14138.904214999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 14139.114133999996,
+      "status": 200,
+      "bodyBytes": 681,
+      "firstBodyMs": 14139.170657000002,
+      "completedMs": 14139.18636
+    },
+    {
+      "atMs": 15146.560804,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 15147.009903999999,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 15147.098133999993,
+      "completedMs": 15147.112344999994
+    },
+    {
+      "atMs": 15149.747878000002,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=245828-",
+      "headersMs": 15150.243576999994,
+      "status": 206,
+      "bodyBytes": 3948476,
+      "firstBodyMs": 15150.3004
+    },
+    {
+      "atMs": 15202.252317999992,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=4027392-270689964",
+      "headersMs": 15202.684864000003,
+      "status": 206,
+      "bodyBytes": 166912,
+      "firstBodyMs": 15202.759704000004
+    },
+    {
+      "atMs": 15234.512169000001,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=270682946-",
+      "headersMs": 15235.035117999993,
+      "status": 206,
+      "bodyBytes": 7019,
+      "firstBodyMs": 23716.46766999999,
+      "completedMs": 23716.521579
+    },
+    {
+      "atMs": 16126.13234199999,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 16129.716909999996,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 16129.802946000003,
+      "completedMs": 16129.819349999998,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 16146.422832999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 16146.653631999994,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 16146.722342999994,
+      "completedMs": 16146.734491000003
+    },
+    {
+      "atMs": 17146.192355,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 17146.53038199999,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 17146.599133000003,
+      "completedMs": 17146.614374999997
+    },
+    {
+      "atMs": 18131.864614,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 18132.881508,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 18133.138906999993,
+      "completedMs": 18133.156152000003,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 18145.856166999998,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 18146.133173999995,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 18146.186131999995,
+      "completedMs": 18146.197047999995
+    },
+    {
+      "atMs": 19147.052932,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 19147.375225000003,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 19147.447741000004,
+      "completedMs": 19147.471025999992
+    },
+    {
+      "atMs": 20126.965831,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 20127.217880999997,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 20127.281794999995,
+      "completedMs": 20127.297398000002,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 20147.279365999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 20148.025151999995,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 20148.095674999997,
+      "completedMs": 20148.10861399999
+    },
+    {
+      "atMs": 21147.408032999992,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 21147.799798,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 21147.957850999992,
+      "completedMs": 21147.97882099999
+    },
+    {
+      "atMs": 22130.066826000002,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 22130.312237,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 22130.38908,
+      "completedMs": 22130.404833,
+      "havePieces": [
+        0
+      ]
+    },
+    {
+      "atMs": 22147.116331999998,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 22147.341664,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 22147.393359999995,
+      "completedMs": 22147.404917
+    },
+    {
+      "atMs": 23147.306294999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 23147.64074699999,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 23147.709156999998,
+      "completedMs": 23147.72547099999
+    },
+    {
+      "atMs": 23765.915270999998,
+      "method": "GET",
+      "path": "/torrents/0/stream/0",
+      "query": "",
+      "range": "bytes=4194304-270689964",
+      "headersMs": 23773.639403,
+      "status": 206,
+      "bodyBytes": 4194304,
+      "firstBodyMs": 39749.80164099999
+    },
+    {
+      "atMs": 24142.265269999996,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 24145.510539999996,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 24145.608212999992,
+      "completedMs": 24145.625028000002,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 24146.988512000004,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 24147.218098999998,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 24147.27169799999,
+      "completedMs": 24147.282474
+    },
+    {
+      "atMs": 25147.272508000002,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 25149.51983099999,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 25149.603003000004,
+      "completedMs": 25149.622471999995
+    },
+    {
+      "atMs": 26147.963266,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 26149.98387599999,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 26150.05821499999,
+      "completedMs": 26150.073918000002
+    },
+    {
+      "atMs": 26150.183098999994,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 26150.796901,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 26150.875477,
+      "completedMs": 26150.88696299999,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 27148.939332999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 27149.212523999995,
+      "status": 200,
+      "bodyBytes": 725,
+      "firstBodyMs": 27149.27200199999,
+      "completedMs": 27149.285821999998
+    },
+    {
+      "atMs": 28149.655208999997,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 28150.952335,
+      "status": 200,
+      "bodyBytes": 727,
+      "firstBodyMs": 28151.021526999997,
+      "completedMs": 28151.035538000004
+    },
+    {
+      "atMs": 28150.171316999993,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 28157.655416999994,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 28157.722365,
+      "completedMs": 28157.736836999997,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 29152.490675999994,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 29152.905055000003,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 29152.981416999995,
+      "completedMs": 29152.998541999994
+    },
+    {
+      "atMs": 30140.369826999995,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 30140.621867,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 30140.686492,
+      "completedMs": 30140.70178499999,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 30153.727997999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 30159.184887999996,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 30159.25528199999,
+      "completedMs": 30159.297444000003
+    },
+    {
+      "atMs": 31155.089264000002,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 31155.360601999993,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 31155.427441,
+      "completedMs": 31155.443234
+    },
+    {
+      "atMs": 32147.966674000003,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 32154.096182999994,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 32154.180707,
+      "completedMs": 32154.197672000002,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 32154.813898,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 32155.592381999995,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 32155.651489000003,
+      "completedMs": 32155.664958
+    },
+    {
+      "atMs": 33155.978003000004,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 33156.381296,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 33156.45282099999,
+      "completedMs": 33156.46973599999
+    },
+    {
+      "atMs": 34146.397722,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 34146.64219199999,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 34146.70329099999,
+      "completedMs": 34146.716901,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 34156.26349199999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 34156.53945799999,
+      "status": 200,
+      "bodyBytes": 724,
+      "firstBodyMs": 34156.585585,
+      "completedMs": 34156.596151
+    },
+    {
+      "atMs": 35156.215149999996,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 35161.554056999994,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 35161.68126399999,
+      "completedMs": 35161.704057
+    },
+    {
+      "atMs": 36150.46753999999,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 36157.55740099999,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 36157.66436799999,
+      "completedMs": 36157.685508999995,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 36158.41123599999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 36161.64150399999,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 36161.71392,
+      "completedMs": 36161.725237
+    },
+    {
+      "atMs": 37157.973225999995,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 37158.245925999996,
+      "status": 200,
+      "bodyBytes": 726,
+      "firstBodyMs": 37158.31191299999,
+      "completedMs": 37158.327486
+    },
+    {
+      "atMs": 38158.049049,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 38158.478069,
+      "status": 200,
+      "bodyBytes": 728,
+      "firstBodyMs": 38158.54401599999,
+      "completedMs": 38158.557846
+    },
+    {
+      "atMs": 38158.652385,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 38158.92196099999,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 38158.969601,
+      "completedMs": 38158.987327999996,
+      "havePieces": [
+        0,
+        64
+      ]
+    },
+    {
+      "atMs": 39159.038421,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 39161.555801,
+      "status": 200,
+      "bodyBytes": 729,
+      "firstBodyMs": 39161.636418999995,
+      "completedMs": 39161.654065
+    },
+    {
+      "atMs": 40159.44850599999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 40159.766102999994,
+      "status": 200,
+      "bodyBytes": 730,
+      "firstBodyMs": 40159.874332,
+      "completedMs": 40159.89530299999
+    },
+    {
+      "atMs": 40161.774033999995,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 40161.983952,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 40162.03404599999,
+      "completedMs": 40162.04596299999,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 41162.102886999994,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 41165.367364,
+      "status": 200,
+      "bodyBytes": 731,
+      "firstBodyMs": 41165.511846999994,
+      "completedMs": 41165.532147
+    },
+    {
+      "atMs": 42160.967958999994,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 42163.731309999996,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 42164.290101,
+      "completedMs": 42164.328137,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 42174.157241999994,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 42177.52060499999,
+      "status": 200,
+      "bodyBytes": 730,
+      "firstBodyMs": 42177.616676,
+      "completedMs": 42177.633641
+    },
+    {
+      "atMs": 43174.23744799999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 43177.529506,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 43177.639007,
+      "completedMs": 43177.660018
+    },
+    {
+      "atMs": 44162.307590000004,
+      "method": "GET",
+      "path": "/torrents/0/haves",
+      "query": "",
+      "range": null,
+      "headersMs": 44162.59343999999,
+      "status": 200,
+      "bodyBytes": 9,
+      "firstBodyMs": 44162.66619699999,
+      "completedMs": 44162.68227,
+      "havePieces": [
+        0,
+        1,
+        64
+      ]
+    },
+    {
+      "atMs": 44174.64644399999,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 44174.942239,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 44174.995166999994,
+      "completedMs": 44175.00857699999
+    },
+    {
+      "atMs": 45174.017025999994,
+      "method": "GET",
+      "path": "/torrents/0/stats/v1",
+      "query": "",
+      "range": null,
+      "headersMs": 45174.699359,
+      "status": 200,
+      "bodyBytes": 732,
+      "firstBodyMs": 45174.769532,
+      "completedMs": 45174.78442399999
+    }
+  ],
+  "ok": true,
+  "mpvPid": 19948,
+  "firstRenderedMs": 42888.58336,
+  "renderedProof": {
+    "atMs": 42888.58336,
+    "pixels": {
+      "nonblack": true,
+      "litFraction": 1,
+      "meanMaxChannel": 60.369791666666664
+    },
+    "params": {
+      "pixelformat": "yuv420p",
+      "average-bpp": 12,
+      "w": 3840,
+      "h": 2160,
+      "dw": 3840,
+      "dh": 2160,
+      "crop-x": 0,
+      "crop-y": 0,
+      "crop-w": 3840,
+      "crop-h": 2160,
+      "aspect": 1.777778,
+      "aspect-name": "16:9",
+      "par": 1,
+      "sar": 1.777778,
+      "sar-name": "16:9",
+      "colormatrix": "bt.709",
+      "colorlevels": "limited",
+      "primaries": "bt.709",
+      "gamma": "bt.1886",
+      "sig-peak": 0,
+      "light": "display",
+      "chroma-location": "mpeg2/4/h264",
+      "stereo-in": "mono",
+      "rotate": 0
+    },
+    "screenshot": "<evidence>/both-n2/late-moov-1-cold/first-rendered.png",
+    "sha256": "c1324750d54d039c85763561f2460f2469a949e872425d729e60d888f0c5c951"
+  },
+  "stablePlayback": {
+    "fromSeconds": 19.666667,
+    "toSeconds": 21.666667,
+    "observedSeconds": 2
+  },
+  "seeks": [
+    {
+      "targetSeconds": 12,
+      "settledMs": 32.22876699999324
+    },
+    {
+      "targetSeconds": 2,
+      "settledMs": 191.49957499999437
+    }
+  ],
+  "resources": {
+    "available": true,
+    "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+    "processes": [
+      {
+        "role": "rqbit",
+        "pid": 19942,
+        "cpuTicks": 20,
+        "rssBytes": 18198528
+      },
+      {
+        "role": "mpv",
+        "pid": 19948,
+        "cpuTicks": 4771,
+        "rssBytes": 723783680
+      }
+    ]
+  },
+  "storageDuring": {
+    "logicalBytes": 274892340,
+    "allocatedBytes": 16453632,
+    "files": 7
+  },
+  "mpvExit": {
+    "code": 0,
+    "signal": null
+  },
+  "storageAfter": {
+    "logicalBytes": 4455515,
+    "allocatedBytes": 4472832,
+    "files": 7
+  },
+  "elapsedMs": 45914.82668399999
+}
