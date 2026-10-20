@@ -135,12 +135,51 @@ const safeText = (s) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+function assCues(text) {
+  let events = false, fields = null;
+  const cues = [];
+  const time = value => {
+    const m = /^(\d{1,3}):(\d{2}):(\d{2})\.(\d{1,3})$/.exec(value.trim());
+    if (!m || Number(m[2]) > 59 || Number(m[3]) > 59) return null;
+    return ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000 + Number(m[4].padEnd(3, '0'));
+  };
+  const stamp = ms => `${String(Math.floor(ms / 3600000)).padStart(2, '0')}:${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (/^\[[^\]]+\]$/.test(line)) { events = /^\[events\]$/i.test(line); fields = null; continue; }
+    if (!events) continue;
+    if (/^format\s*:/i.test(line)) { fields = line.slice(line.indexOf(':') + 1).split(',').map(s => s.trim().toLowerCase()); continue; }
+    if (!fields || !/^dialogue\s*:/i.test(line) || fields.at(-1) !== 'text') continue;
+    const startIndex = fields.indexOf('start'), endIndex = fields.indexOf('end');
+    if (startIndex < 0 || endIndex < 0) continue;
+    const columns = line.slice(line.indexOf(':') + 1).trimStart().split(',');
+    if (columns.length < fields.length) continue;
+    const start = time(columns[startIndex]), end = time(columns[endIndex]);
+    if (start == null || end == null || end <= start) continue;
+    const source = columns.slice(fields.length - 1).join(',');
+    let drawing = false, body = '';
+    for (const part of source.matchAll(/\{([^}]*)\}|([^{}]+)/g)) {
+      if (part[1] !== undefined) {
+        for (const command of part[1].matchAll(/\\(?:p(\d+)(?![0-9a-z])|r[^\\}]*)/gi)) drawing = command[1] !== undefined && Number(command[1]) > 0;
+      } else if (!drawing) body += part[2];
+    }
+    body = safeText(body.replace(/\\[Nn]/g, '\n').replace(/\\h/g, '\u00a0')).trim();
+    if (!body) continue;
+    cues.push({start, value:`${stamp(start)} --> ${stamp(end)}\n${body}`});
+    if (cues.length > 20000) throw new Error('عدد أسطر الترجمة أكبر من الحد');
+  }
+  return cues.sort((a, b) => a.start - b.start).map(c => c.value);
+}
 export function toWebVtt(text) {
   if (typeof text !== "string" || text.length > 2 * 1024 * 1024)
     throw new Error("ملف الترجمة أكبر من الحد");
+  text = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, '\n');
+  if (/^\s*\[events\]\s*$/im.test(text)) {
+    const converted = assCues(text);
+    if (!converted.length) throw new Error('لا توجد أسطر ترجمة نصية صالحة');
+    return 'WEBVTT\n\n' + converted.join('\n\n') + '\n';
+  }
   const blocks = text
-      .replace(/^\uFEFF/, "")
-      .replace(/\r/g, "")
       .split(/\n\s*\n/),
     cues = [];
   for (const block of blocks) {
@@ -166,6 +205,6 @@ export function toWebVtt(text) {
     if (cues.length > 20000) throw new Error("عدد أسطر الترجمة أكبر من الحد");
   }
   if (!cues.length)
-    throw new Error("لا توجد ترجمة SRT/VTT صالحة؛ ASS غير مدعوم هنا");
+    throw new Error("لا توجد أسطر ترجمة صالحة");
   return "WEBVTT\n\n" + cues.join("\n\n") + "\n";
 }
