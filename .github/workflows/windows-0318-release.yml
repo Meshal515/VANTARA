@@ -258,12 +258,12 @@ jobs:
           $ErrorActionPreference='Stop'
           node tools/create-torrent-tail-fixture.mjs "$env:TORRENT_FFMPEG" tools/fixtures/vantara-4k-hevc10.mp4 "$env:TORRENT_PROOF/fixtures"
           if ($LASTEXITCODE -ne 0) { throw 'Authored HEVC fixture creation failed' }
-          node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit "$env:TORRENT_RQBIT" --mpv "$env:TORRENT_MPV" --ffmpeg "$env:TORRENT_FFMPEG" --output "$env:TORRENT_PROOF/runs" --fixtures-from "$env:TORRENT_PROOF/fixtures" --runs 2 --kinds late-moov --modes cold,warm,restart --piece-length 4194304 --seed-upload-bps 5242880 --torrent-warmup container --stable-seconds 2 --timeout-ms 30000
+          node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit "$env:TORRENT_RQBIT" --mpv "$env:TORRENT_MPV" --ffmpeg "$env:TORRENT_FFMPEG" --output "$env:TORRENT_PROOF/runs" --fixtures-from "$env:TORRENT_PROOF/fixtures" --runs 2 --kinds late-moov --modes cold,warm,restart --piece-length 4194304 --seed-upload-bps 5242880 --torrent-warmup container --stable-seconds 2 --timeout-ms 30000 --probe-local true
           if ($LASTEXITCODE -ne 0) { throw 'Real first-frame benchmark failed; inspect report' }
           $measured=Get-Content (Join-Path $env:TORRENT_PROOF 'runs/results.json') -Raw | ConvertFrom-Json
           foreach ($sample in $measured.runs) {
             if ($sample.ok -ne $true -or $sample.firstRenderedMs -gt 10000) { throw 'First rendered HEVC frame did not satisfy the 10 second gate' }
-            if ($sample.renderedProof.params.w -ne 3840 -or $sample.renderedProof.params.h -ne 2160) { throw 'Proof is not the authored 4K source' }
+            if ($sample.renderedProof.decodedParams.w -ne 3840 -or $sample.renderedProof.decodedParams.h -ne 2160) { throw 'Decoded source is not the authored 4K source' }
           }
       - name: Summarize measured first-frame latency (not a public-swarm claim)
         if: always()

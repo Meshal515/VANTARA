@@ -45,6 +45,26 @@ async function ipc(path){
   socket.on('data',chunk=>{buffer+=chunk;while(buffer.includes('\n')){const n=buffer.indexOf('\n'),line=buffer.slice(0,n);buffer=buffer.slice(n+1);let m;try{m=JSON.parse(line);}catch{continue;}const p=pending.get(m.request_id);if(p){pending.delete(m.request_id);clearTimeout(p.timer);m.error==='success'?p.resolve(m.data):p.reject(new Error(m.error));}}});
   return {socket,send:command=>new Promise((resolveIPC,reject)=>{const request_id=++id,timer=setTimeout(()=>{pending.delete(request_id);reject(new Error('mpv IPC deadline'));},command[0]==='screenshot-to-file'?20000:3000);pending.set(request_id,{resolve:resolveIPC,reject,timer});socket.write(JSON.stringify({command,request_id})+'\n');}),close(){socket.destroy();for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('IPC closed'));}pending.clear();}};
 }
+async function playerStatus(connection){
+  const names=['time-pos','pause','paused-for-cache','speed','hwdec-current','current-vo','video-params','video-out-params','container-fps','estimated-vf-fps','decoder-frame-drop-count','frame-drop-count','vo-delayed-frame-count','demuxer-cache-state'];
+  return Object.fromEntries(await Promise.all(names.map(async name=>[name,await connection.send(['get_property',name]).catch(()=>null)])));
+}
+async function localPlayerProbe(mpv,file,root,nativeEnv){
+  const results=[];
+  for(const [label,args] of [['default',[]],['d3d11-gpu',['--vo=gpu','--gpu-api=d3d11']],['d3d11-next',['--vo=gpu-next','--gpu-api=d3d11']]]){
+    const pipe=process.platform==='win32'?`\\\\.\\pipe\\vantara-probe-${randomBytes(8).toString('hex')}`:join(root,`probe-${label}.sock`);
+    const row={label,args};results.push(row);let connection,child;
+    try{
+      child=nativeSpawn(mpv,['--no-config','--idle=yes','--terminal=no','--force-window=yes','--hwdec=auto-safe',`--input-ipc-server=${pipe}`,`--log-file=${join(root,`local-${label}.log`)}`,...args],{env:nativeEnv,stdio:'ignore'});
+      connection=await ipc(pipe);await connection.send(['loadfile',file]);
+      await until(async()=>{const p=await connection.send(['get_property','video-params']);return p?.w>0;},15000);
+      await sleep(1000);row.before=await playerStatus(connection);await sleep(2000);row.after=await playerStatus(connection);
+    }catch(error){row.error=String(error.message);}finally{connection?.close();await terminate(child);}
+  }
+  await fs.writeFile(join(root,'local-player-probe.json'),JSON.stringify(results,null,2));
+  console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current']}))}));
+  return results;
+}
 async function diskBytes(directory){let logical=0,allocated=0,files=0;try{for(const entry of await fs.readdir(directory,{withFileTypes:true})){const path=join(directory,entry.name);if(entry.isDirectory()){const c=await diskBytes(path);logical+=c.logicalBytes;allocated+=c.allocatedBytes??0;files+=c.files;}else if(entry.isFile()){const s=await fs.stat(path);logical+=s.size;allocated+=(s.blocks??0)*512;files++;}}}catch{}return {logicalBytes:logical,allocatedBytes:process.platform==='win32'?null:allocated,files};}
 async function snapshotModule(entry,directory){
   const base=dirname(entry),modules=[];const visited=new Set();
@@ -88,6 +108,7 @@ export async function main(argv=process.argv.slice(2)){
     const snapshot=await snapshotModule(serviceModule,join(root,'module-snapshot'));report.sourceModules=snapshot.modules;
     if(process.platform==='linux'&&!nativeEnv.DISPLAY){assert.ok(options.xvfb,'--xvfb required when DISPLAY is absent');const n=100+Math.floor(Math.random()*500);display=track(nativeSpawn(options.xvfb,[`:${n}`,'-screen','0','1024x768x24','-nolisten','tcp'],{env:nativeEnv,stdio:'ignore'}),'xvfb');nativeEnv.DISPLAY=`:${n}`;await until(()=>fs.stat(`/tmp/.X11-unix/X${n}`));}
     const seedFolder=join(root,'seed');await fs.mkdir(seedFolder,{recursive:true});const fixtures=[];for(const kind of options.kinds.split(','))fixtures.push(await fixture(seedFolder,kind,options.paddingMiB,ffmpeg,options.fixturesFrom,options.pieceLength));
+    if(options.probeLocal==='true')report.localPlayerProbe=await localPlayerProbe(mpv,fixtures[0].path,root,nativeEnv);
     report.fixtures=fixtures.map(({torrent,path,...f})=>f);
     const newSources=[];for(const f of fixtures){const bytes=await fs.readFile(f.path),name='newsource-'+f.name,pieces=[];for(let i=0;i<bytes.length;i+=f.pieceLength)pieces.push(sha(bytes.subarray(i,i+f.pieceLength)));const info={name,length:bytes.length,'piece length':f.pieceLength,pieces:Buffer.concat(pieces)};await fs.copyFile(f.path,join(seedFolder,name));newSources.push({...f,name,infoHash:sha(encode(info)).toString('hex'),torrent:encode({info})});}
     const seedPort=await port(),peer=await port(),seedApi=`http://127.0.0.1:${seedPort}`,seedAuth=`fixture:${randomBytes(16).toString('hex')}`,headers={Authorization:`Basic ${Buffer.from(seedAuth).toString('base64')}`};
@@ -101,7 +122,7 @@ export async function main(argv=process.argv.slice(2)){
           const forward=http.request({hostname:'127.0.0.1',port:backend,path:url.pathname+url.search,method:req.method,headers:req.headers},back=>{row.headersMs=performance.now()-run.startedAt;row.status=back.statusCode;res.writeHead(back.statusCode,back.headers);res.flushHeaders();const haves=[];back.on('data',b=>{row.bodyBytes=(row.bodyBytes??0)+b.length;if(url.pathname.endsWith('/haves'))haves.push(b);});back.once('end',()=>{row.completedMs=performance.now()-run.startedAt;if(haves.length){const bits=Buffer.concat(haves);row.havePieces=[];for(let i=0;i<bits.length*8;i++)if(bits[i>>3]&(128>>(i&7)))row.havePieces.push(i);}});back.once('data',()=>{row.firstBodyMs=performance.now()-run.startedAt;});back.pipe(res);});forward.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});res.on('close',()=>forward.destroy());req.pipe(forward);});server.listen(external,'127.0.0.1');proxies.push(server);run.proxy=server;
         return track(nativeSpawn(binary,rewritten,{...spawnOptions,env:{...spawnOptions.env,...(options.libraryPath?{LD_LIBRARY_PATH:options.libraryPath}:{}),...{}}}),'rqbit');
       }
-      if(resolve(String(binary))===mpv&&active){const run=active;const log=createWriteStream(join(run.directory,'mpv.log'));active.mpvIpc=args.find(a=>a.startsWith('--input-ipc-server=')).slice(19);const child=track(nativeSpawn(binary,args,{...spawnOptions,env:{...spawnOptions.env,...nativeEnv},stdio:['ignore','ignore','pipe']}),'mpv');child.stderr.pipe(log);run.mpvPid=child.pid;child.once('exit',(code,signal)=>{run.mpvExit={code,signal};});child.once('error',error=>{run.mpvError={code:error.code,message:error.message.slice(0,300)};});return child;}
+      if(resolve(String(binary))===mpv&&active){const run=active;const log=createWriteStream(join(run.directory,'mpv.log'));active.mpvIpc=args.find(a=>a.startsWith('--input-ipc-server=')).slice(19);const child=track(nativeSpawn(binary,[...args,`--log-file=${join(run.directory,'mpv-native.log')}`,'--msg-level=all=info'],{...spawnOptions,env:{...spawnOptions.env,...nativeEnv},stdio:['ignore','ignore','pipe']}),'mpv');child.stderr.pipe(log);run.mpvPid=child.pid;child.once('exit',(code,signal)=>{run.mpvExit={code,signal};});child.once('error',error=>{run.mpvError={code:error.code,message:error.message.slice(0,300)};});return child;}
       return nativeSpawn(binary,args,spawnOptions);
     };syncBuiltinESMExports();
     const {createDesktopServices}=await import(pathToFileURL(snapshot.entry));
@@ -122,11 +143,11 @@ export async function main(argv=process.argv.slice(2)){
           await connection.send(['set_property','screenshot-png-compression',0]);
           const screenshot=join(directory,'first-rendered.png');
           const proof=await until(async()=>{const params=await connection.send(['get_property','video-out-params']);if(!(params?.w>0&&params?.h>0))return;await connection.send(['screenshot-to-file',screenshot,'window']);const atMs=performance.now()-run.startedAt;const rgb=await command(ffmpeg,['-v','error','-i',screenshot,'-vf','scale=64:36','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','pipe:1']);const pixels=framePixels(rgb);return pixels.nonblack?{atMs,pixels,params}:null;},options.timeoutMs);
-          run.firstRenderedMs=proof.atMs;run.renderedProof={...proof,screenshot,sha256:sha(await fs.readFile(screenshot),'sha256').toString('hex')};await start;
+          run.firstRenderedMs=proof.atMs;run.renderedProof={...proof,decodedParams:await connection.send(['get_property','video-params']),screenshot,sha256:sha(await fs.readFile(screenshot),'sha256').toString('hex')};await start;
           const before=await connection.send(['get_property','time-pos']);await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);assert.ok(after>before+options.stableSeconds*.6,`Playback did not progress: ${before} → ${after}`);run.stablePlayback={fromSeconds:before,toSeconds:after,observedSeconds:options.stableSeconds};
           run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);run.seeks.push({targetSeconds:target,settledMs:performance.now()-at});}
           run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit'].includes(role)&&child.exitCode===null));run.storageDuring=await diskBytes(userData);run.ok=true;
-        }catch(error){run.error=String(error.stack??error);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv.log'),'utf8')).slice(-2400);}catch{}process.exitCode=1;}
+        }catch(error){run.error=String(error.stack??error);if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
         finally{connection?.close();await services.stopPlayback({session}).catch(()=>{});if(run.proxy){run.proxy.closeAllConnections();await new Promise(r=>run.proxy.close(r));delete run.proxy;}run.storageAfter=await diskBytes(userData);run.elapsedMs=performance.now()-run.startedAt;delete run.startedAt;delete run.mpvIpc;delete run.backend;await fs.writeFile(join(directory,'run.json'),JSON.stringify(run,null,2));await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({event:'run-end',fixture:f.kind,trial,mode,ok:run.ok,firstRenderedMs:run.firstRenderedMs,error:run.error?.split('\n')[0],mpvExit:run.mpvExit,mpvError:run.mpvError,mpvLogTail:run.ok?undefined:run.mpvLogTail,startPlaybackError:run.startPlaybackError,eventsTail:run.ok?undefined:run.events.slice(-12).map(({type,stage,message,atMs})=>({type,stage,message,atMs}))}));}
       }
       await services?.close();active=null;
