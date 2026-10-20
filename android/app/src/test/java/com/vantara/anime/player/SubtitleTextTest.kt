@@ -54,4 +54,43 @@ class SubtitleTextTest {
         assertNull(SubtitleText.time("00:61:00,000"))
         assertEquals(0, SubtitleText.parse("00:00:05,000 --> 00:00:01,000\nمقلوب").size)
     }
+
+    @Test fun parsesAssDeclaredFieldsEscapesAndKeepsDialogueCommas() {
+        val ass = """
+            [Script Info]
+            [Events]
+            Format: Layer, End, Start, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+            Comment: 0,0:00:05.00,0:00:01.00,Default,,0,0,0,,تعليق
+            Dialogue: 0,0:00:04.50,0:00:01.23,Default,,0,0,0,,{\an8\i1}مرحبا، بالعالم, welcome{\i0}\Nالسطر الثاني\nالسطر الثالث\hهنا
+            [Fonts]
+            Dialogue: 0,0:00:05.00,0:00:01.00,Default,,0,0,0,,ليس حوارا
+        """.trimIndent()
+        assertEquals(listOf(TimedCue(1230, 4500, "مرحبا، بالعالم, welcome\nالسطر الثاني\nالسطر الثالث\u00a0هنا")), SubtitleText.parse(ass))
+    }
+
+    @Test fun parsesSsaAndSkipsVectorDrawingsIncludingMixedEvents() {
+        val ssa = """
+            [Script Info]
+            [V4 Styles]
+            Format: Name, Fontname, Fontsize
+            Style: Default,Arial,28
+            [Events]
+            Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+            Dialogue: Marked=0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\p1}m 0 0 l 100 0 100 100
+            Dialogue: Marked=0,0:00:02.00,0:00:03.00,Default,,0,0,0,,قبل{\p1\an7}m 0 0 l 10 10{\p0\i1}بعد
+            Dialogue: Marked=0,1:02:03.04,1:02:05.60,Default,,0,0,0,,<i>النص</i> & الباقي
+        """.trimIndent()
+        assertEquals(listOf(TimedCue(2000, 3000, "قبلبعد"), TimedCue(3723040, 3725600, "النص & الباقي")), SubtitleText.parse(ssa))
+    }
+
+    @Test fun assDoesNotInventTimesOrRenderStyleRecords() {
+        val malformed = """
+            [Events]
+            Format: Start, End, Text
+            Dialogue: 0:00:99.00,0:00:01.00,ثوان غير صالحة
+            Dialogue: 0:00:03.00,0:00:01.00,مقلوب
+            Comment: 0:00:01.00,0:00:02.00,تعليق
+        """.trimIndent()
+        assertEquals(emptyList<TimedCue>(), SubtitleText.parse(malformed))
+    }
 }
