@@ -32,6 +32,13 @@ export function summarize(rows){
   const values=rows.filter(r=>r.ok&&Number.isFinite(r.firstRenderedMs)).map(r=>r.firstRenderedMs).sort((a,b)=>a-b),n=values.length;
   return {successful:n,failed:rows.length-n,minMs:values[0]??null,medianMs:n?(values[Math.floor((n-1)/2)]+values[Math.ceil((n-1)/2)])/2:null,p95Ms:n?values[Math.ceil(n*.95)-1]:null,maxMs:values.at(-1)??null};
 }
+export function assessPlaybackProgress(sample,baseline){
+  const localRate=baseline?.observedSeconds>0?(baseline.toSeconds-baseline.fromSeconds)/baseline.observedSeconds:NaN;
+  const constrained=baseline?.softwareAdapter===true&&Number.isFinite(localRate)&&localRate>=.05&&localRate<.6;
+  const tolerance=constrained?Math.min(.1,Math.max(0,sample.frameToleranceSeconds??0)):0;
+  const minimumSeconds=Math.max(.01,sample.observedSeconds*(constrained?localRate*.6:.6)-tolerance);
+  return {kind:constrained?'host-relative':'realtime',minimumSeconds,localRate:constrained?localRate:null,passed:sample.toSeconds-sample.fromSeconds>=minimumSeconds};
+}
 async function until(fn,timeout=30000){const deadline=performance.now()+timeout;let last;while(performance.now()<deadline){try{const value=await fn();if(value)return value;}catch(e){last=e;}await sleep(25);}throw last??new Error('Benchmark deadline exceeded');}
 async function port(){const s=net.createServer();await new Promise((r,j)=>{s.once('error',j);s.listen(0,'127.0.0.1',r);});const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 async function terminate(child){if(!child||child.exitCode!==null||child.signalCode!==null)return;await new Promise(r=>{const timer=setTimeout(()=>child.kill('SIGKILL'),1500);child.once('exit',()=>{clearTimeout(timer);r();});child.kill();});}
@@ -58,8 +65,9 @@ async function localPlayerProbe(mpv,file,root,nativeEnv){
       child=nativeSpawn(mpv,['--no-config','--idle=yes','--terminal=no','--force-window=yes','--hwdec=auto-safe',`--input-ipc-server=${pipe}`,`--log-file=${join(root,`local-${label}.log`)}`,...args],{env:nativeEnv,stdio:'ignore'});
       connection=await ipc(pipe);await connection.send(['loadfile',file]);
       await until(async()=>{const p=await connection.send(['get_property','video-params']);return p?.w>0;},15000);
-      await sleep(1000);row.before=await playerStatus(connection);await sleep(2000);row.after=await playerStatus(connection);
+      await sleep(1000);row.before=await playerStatus(connection);const started=performance.now();await sleep(2000);row.after=await playerStatus(connection);row.observedSeconds=(performance.now()-started)/1000;
     }catch(error){row.error=String(error.message);}finally{connection?.close();await terminate(child);}
+    row.softwareAdapter=/Using a software adapter/.test(await fs.readFile(join(root,`local-${label}.log`),'utf8').catch(()=>''));
   }
   await fs.writeFile(join(root,'local-player-probe.json'),JSON.stringify(results,null,2));
   console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current']}))}));
@@ -144,7 +152,11 @@ export async function main(argv=process.argv.slice(2)){
           const screenshot=join(directory,'first-rendered.png');
           const proof=await until(async()=>{const params=await connection.send(['get_property','video-out-params']);if(!(params?.w>0&&params?.h>0))return;await connection.send(['screenshot-to-file',screenshot,'window']);const atMs=performance.now()-run.startedAt;const rgb=await command(ffmpeg,['-v','error','-i',screenshot,'-vf','scale=64:36','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','pipe:1']);const pixels=framePixels(rgb);return pixels.nonblack?{atMs,pixels,params}:null;},options.timeoutMs);
           run.firstRenderedMs=proof.atMs;run.renderedProof={...proof,decodedParams:await connection.send(['get_property','video-params']),screenshot,sha256:sha(await fs.readFile(screenshot),'sha256').toString('hex')};await start;
-          const before=await connection.send(['get_property','time-pos']);await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);assert.ok(after>before+options.stableSeconds*.6,`Playback did not progress: ${before} → ${after}`);run.stablePlayback={fromSeconds:before,toSeconds:after,observedSeconds:options.stableSeconds};
+          const before=await connection.send(['get_property','time-pos']);const stableStarted=performance.now();await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);
+          const local=options.stabilityBaseline==='local'?report.localPlayerProbe?.find(r=>r.label==='default'):null;
+          const sample={fromSeconds:before,toSeconds:after,observedSeconds:(performance.now()-stableStarted)/1000,frameToleranceSeconds:1/(await connection.send(['get_property','container-fps']))};
+          const assessment=assessPlaybackProgress(sample,local?{fromSeconds:local.before?.['time-pos'],toSeconds:local.after?.['time-pos'],observedSeconds:local.observedSeconds,softwareAdapter:local.softwareAdapter}:null);
+          run.stablePlayback={...sample,...assessment};assert.ok(assessment.passed,`Playback did not progress (${assessment.kind}): ${before} → ${after}, minimum ${assessment.minimumSeconds}`);
           run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);run.seeks.push({targetSeconds:target,settledMs:performance.now()-at});}
           run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit'].includes(role)&&child.exitCode===null));run.storageDuring=await diskBytes(userData);run.ok=true;
         }catch(error){run.error=String(error.stack??error);if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
