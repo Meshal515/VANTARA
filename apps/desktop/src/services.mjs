@@ -926,7 +926,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function downloadSubtitle(state,value) {
     const controller=new AbortController(),abort=()=>controller.abort();
-    state.subtitleDownload={url:value.url,controller};
+    const download=state.subtitleDownload={url:value.url,controller,superseded:false};
     state.controller.signal.addEventListener('abort',abort,{once:true});
     const timer=setTimeout(abort,15000);let response;
     try {
@@ -953,6 +953,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const path=join(state.subtitleDir,`${secret()}.${validated.extension}`);
       await fs.writeFile(path,validated.text,{encoding:'utf8',flag:'wx',mode:0o600});assertSession(state);
       return path;
+    } catch(error){
+      if(download.superseded)throw Object.assign(new Error('اختيار ترجمة قديم'),{code:'SUBTITLE_SUPERSEDED'});
+      throw error;
     } finally { if(state.subtitleDownload?.controller===controller)state.subtitleDownload=null;clearTimeout(timer);state.controller.signal.removeEventListener('abort',abort);response?.destroy(); }
   }
   function emitSubtitleTracks(state,message) {
@@ -970,7 +973,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   function chooseSubtitle(state,url) {
     state.subtitleManual=true;state.subtitleWanted=url;
-    if(state.subtitleDownload&&state.subtitleDownload.url!==url)state.subtitleDownload.controller.abort();
+    if(state.subtitleDownload&&state.subtitleDownload.url!==url){state.subtitleDownload.superseded=true;state.subtitleDownload.controller.abort();}
   }
   function loadSubtitle(state,value) {
     assertSession(state);
@@ -979,7 +982,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(value.select===true)chooseSubtitle(state,url);
     const existing=state.subtitleFiles.get(url);
     if(existing)return value.select===true?ipcCommand(state,['set_property','sid',existing.id]):Promise.resolve();
-    if(state.subtitleJobs.has(url))return state.subtitleJobs.get(url);
+    if(state.subtitleJobs.has(url)){
+      const pending=state.subtitleJobs.get(url);
+      if(state.subtitleDownload?.url===url&&state.subtitleDownload.superseded)return pending.catch(()=>{}).then(()=>{assertSession(state);if(state.subtitleWanted===url)return loadSubtitle(state,value);});
+      return pending;
+    }
     const subtitle={url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة'),select:value.select};
     const job=state.subtitleQueue.then(async()=>{
       assertSession(state);
@@ -1008,7 +1015,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(subtitle.select===true)state.subtitleManual=true;
       } catch(error){state.subtitleExpectedSelection=null;await rm(path,{force:true}).catch(()=>{});throw error;}
     }).catch(error=>{
-      if(!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
+      if(error.code!=='SUBTITLE_SUPERSEDED'&&!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
       throw error;
     }).finally(()=>{if(state.subtitleJobs.get(url)===job)state.subtitleJobs.delete(url);});
     state.subtitleJobs.set(url,job);state.subtitleQueue=job.catch(()=>{});

@@ -527,6 +527,14 @@ test('a manual click on an already downloading subtitle selects it on the first 
   const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse),adds=commands.filter(x=>x.command[0]==='sub-add');
   assert.equal(adds.length,1);assert.equal(adds[0].command[2],'select');
 });
+test('rapidly returning to a canceled subtitle downloads it again and selects the latest choice',async t=>{
+  await subtitleSource(t,{slow:true});const {services,events,dir}=await fixture(t);await services.startPlayback({session:'rapid-subs',candidate:{url:'https://video.example.com/owned.mp4'}});
+  const a={url:'https://subs.example.com/a.srt',lang:'ar',label:'A',select:true},b={...a,url:'https://subs.example.com/b.srt',label:'B'};
+  const first=services.playbackCommand({session:'rapid-subs',command:'subtitle-load',value:a});const rejected=assert.rejects(first);
+  await new Promise(r=>setTimeout(r,20));const middle=services.playbackCommand({session:'rapid-subs',command:'subtitle-load',value:b});
+  await services.playbackCommand({session:'rapid-subs',command:'subtitle-load',value:a});await middle;await rejected;
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse),adds=commands.filter(x=>x.command[0]==='sub-add');assert.equal(adds.length,1);assert.equal(adds[0].command[3],'A');assert.equal(adds[0].command[2],'select');assert.ok(!events.some(e=>e.type==='playback/subtitles'&&e.message));
+});
 test('subtitle غير صالح يفشل بلا قطع الفيديو ولا sub-add ولا ready وهمي',async t=>{
   await subtitleSource(t,{invalid:true});const {services,events,dir}=await fixture(t);await services.startPlayback({session:'bad-sub',candidate:{url:'https://video.example.com/owned.mp4'}});
   await assert.rejects(services.playbackCommand({session:'bad-sub',command:'subtitle-load',value:{url:'https://subs.example.com/error.srt',lang:'ar'}}),/ترجمة/);
