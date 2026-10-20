@@ -8,7 +8,7 @@ export async function inspectMp4Index(readAt, fileLength, pieceLength) {
   for(let count=0;count<16&&offset+8<=fileLength;count++){
     const header=await readAt(offset,Math.min(16,fileLength-offset));
     if(!header||header.length<8)return {state:'wait'};
-    if(header.every(byte=>byte===0))return media&&offset>=headPiece?{state:'index',offset}:{state:'wait'};
+    if(header.every(byte=>byte===0))return media?{state:'index',offset:offset>=headPiece?offset:fileLength-1}:{state:'wait'};
     const type=header.toString('ascii',4,8);
     if(offset===0&&type!=='ftyp')return {state:'none'};
     if(type==='moov')return media?{state:'index',offset}:{state:'none'};
