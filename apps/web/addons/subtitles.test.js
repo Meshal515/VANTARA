@@ -74,6 +74,10 @@ it("converts Arabic SRT safely and retains timing without rendering HTML", () =>
   expect(v).not.toContain("<script>");
   expect(() => toWebVtt("not subtitles")).toThrow();
 });
+it('accepts the short fractional timestamp returned by SubSense and omits zero-duration cues',()=>{
+  const text='1\n00:00:01,500 --> 00:00:03,08\nصحيح\n\n2\n00:00:04,000 --> 00:00:04,000\nبلا مدة\n\n3\n00:00:06,000 --> 00:00:05,000\nمقلوب';
+  expect(toWebVtt(text)).toBe('WEBVTT\n\n00:00:01.500 --> 00:00:03.080\nصحيح\n');
+});
 it("converts ASS dialogue with declared event fields and centisecond timing", () => {
   const text = `[Script Info]
 Title: this metadata is not a cue

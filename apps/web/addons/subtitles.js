@@ -196,26 +196,25 @@ export function toWebVtt(text) {
   const blocks = text
       .split(/\n\s*\n/),
     cues = [];
+  const milliseconds = raw => {
+    const m=/^(?:(\d{1,3}):)?(\d{1,2}):(\d{2})[,.](\d{1,3})$/.exec(raw);
+    if(!m||Number(m[2])>59||Number(m[3])>59)return null;
+    return ((Number(m[1]??0)*60+Number(m[2]))*60+Number(m[3]))*1000+Number(m[4].padEnd(3,'0'));
+  };
+  const stamp = ms => `${String(Math.floor(ms/3600000)).padStart(2,'0')}:${String(Math.floor(ms/60000)%60).padStart(2,'0')}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`;
   for (const block of blocks) {
     const lines = block.split("\n");
-    const index = lines.findIndex((l) =>
-      /^\s*(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s*-->\s*(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}/.test(
-        l,
-      ),
-    );
+    const index = lines.findIndex(l=>/^\s*\S+\s*-->\s*\S+/.test(l));
     if (index < 0) continue;
-    const timing = lines[index]
-      .replace(/,/g, ".")
-      .match(
-        /((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d{2}:)?\d{2}:\d{2}\.\d{3})/,
-      );
-    const stamp = (s) => (s.split(":").length === 2 ? "00:" + s : s);
+    const timing=/^\s*(\S+)\s*-->\s*(\S+)/.exec(lines[index]);
+    const start=milliseconds(timing[1]),end=milliseconds(timing[2]);
+    if(start==null||end==null||end<=start)continue;
     const body = lines
       .slice(index + 1)
       .map(safeText)
       .join("\n");
     if (body.trim())
-      cues.push(`${stamp(timing[1])} --> ${stamp(timing[2])}\n${body}`);
+      cues.push(`${stamp(start)} --> ${stamp(end)}\n${body}`);
     if (cues.length > 20000) throw new Error("عدد أسطر الترجمة أكبر من الحد");
   }
   if (!cues.length)
