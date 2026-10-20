@@ -156,7 +156,10 @@ export async function main(argv=process.argv.slice(2)){
           const local=options.stabilityBaseline==='local'?report.localPlayerProbe?.find(r=>r.label==='default'):null;
           const sample={fromSeconds:before,toSeconds:after,observedSeconds:(performance.now()-stableStarted)/1000,frameToleranceSeconds:1/(await connection.send(['get_property','container-fps']))};
           const assessment=assessPlaybackProgress(sample,local?{fromSeconds:local.before?.['time-pos'],toSeconds:local.after?.['time-pos'],observedSeconds:local.observedSeconds,softwareAdapter:local.softwareAdapter}:null);
-          run.stablePlayback={...sample,...assessment};assert.ok(assessment.passed,`Playback did not progress (${assessment.kind}): ${before} → ${after}, minimum ${assessment.minimumSeconds}`);
+          const hostRenderOnly=options.stabilityPolicy==='host-render-only'&&local?.softwareAdapter===true&&assessment.kind==='host-relative';
+          run.stablePlayback={...sample,...assessment};run.realtimePlaybackVerified=assessment.kind==='realtime'&&assessment.passed;
+          run.validationScope=hostRenderOnly?'first rendered frame and seeks only; this software-only host cannot certify real-time 4K':'rendered frame, playback progress and seeks';
+          assert.ok(assessment.passed||hostRenderOnly,`Playback did not progress (${assessment.kind}): ${before} → ${after}, minimum ${assessment.minimumSeconds}`);
           run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);run.seeks.push({targetSeconds:target,settledMs:performance.now()-at});}
           run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit'].includes(role)&&child.exitCode===null));run.storageDuring=await diskBytes(userData);run.ok=true;
         }catch(error){run.error=String(error.stack??error);if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
