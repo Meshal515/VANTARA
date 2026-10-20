@@ -33,18 +33,29 @@ class UpdateLogicTest {
     private fun versionAt(p: String) = if (p.isEmpty()) "bundled" else p.substringAfterLast('/')
 
     @Test
-    fun `a staged bundle shows on the next launch and becomes good once it confirms`() {
+    fun `staged bundles remain inactive across launches until Settings promotes them`() {
         device().onBoot()
         onDisk += "/web/0.0.5"
         assertTrue(device().stage("/web/0.0.5", "0.0.5", "n1"))
-        assertEquals("", path())
-
-        val boot = launch { versionAt(it) }
-        assertEquals(WebBundleState.Boot.Trial("0.0.5"), boot)
-        assertEquals("/web/0.0.5", path())
+        repeat(3) {
+            assertEquals(WebBundleState.Boot.Nothing, launch { versionAt(it) })
+            assertEquals("", path())
+            assertEquals("0.0.5", device().stagedVersion())
+        }
+        assertEquals("/web/0.0.5" to "0.0.5", device().promoteNow())
+        assertEquals(WebBundleState.Boot.Trial("0.0.5"), launch { versionAt(it) })
         assertEquals("0.0.5", device().goodVersion())
         assertEquals(WebBundleState.Boot.Nothing, launch { versionAt(it) })
-        assertEquals("/web/0.0.5", path())
+    }
+
+    @Test
+    fun `an interrupted manual update can finish on restart`() {
+        device().onBoot()
+        onDisk += "/web/0.0.5"
+        assertTrue(device().stage("/web/0.0.5", "0.0.5", "n1", userInitiated = true))
+        assertEquals(WebBundleState.Boot.Trial("0.0.5"), launch { versionAt(it) })
+        assertEquals("0.0.5", device().goodVersion())
+        assertEquals(WebBundleState.Boot.Nothing, launch { versionAt(it) })
     }
 
     @Test
@@ -52,11 +63,13 @@ class UpdateLogicTest {
         device().onBoot()
         onDisk += listOf("/web/0.0.5", "/web/0.0.6")
         device().stage("/web/0.0.5", "0.0.5", "n1")
+        device().promoteNow()
         launch { versionAt(it) }
         device().stage("/web/0.0.6", "0.0.6", "n1")
+        device().promoteNow()
 
         // 0.0.6 تنهار قبل أول شاشة: لا healthy
-        assertEquals(WebBundleState.Boot.Trial("0.0.6"), launch { null })
+        assertTrue(device().inTrial("0.0.6"))
         assertEquals(WebBundleState.Boot.Trial("0.0.6"), launch { null })
         assertEquals(WebBundleState.Boot.RolledBack("0.0.6"), launch { null })
         assertEquals("/web/0.0.5", path())
@@ -70,7 +83,7 @@ class UpdateLogicTest {
         onDisk += "/web/0.0.5"
         device().stage("/web/0.0.5", "0.0.5", "n1")
         val state = device()
-        state.onBoot()
+        state.promoteNow()
         assertTrue(state.inTrial("0.0.5"))
         assertEquals("", state.rollback())
         assertEquals("", path())
@@ -90,6 +103,7 @@ class UpdateLogicTest {
         device().onBoot()
         onDisk += "/web/0.0.5"
         device().stage("/web/0.0.5", "0.0.5", "n1")
+        device().promoteNow()
         launch { versionAt(it) }
         assertEquals("/web/0.0.5", path())
 
@@ -103,6 +117,7 @@ class UpdateLogicTest {
         device().onBoot()
         onDisk += "/web/0.0.5"
         device().stage("/web/0.0.5", "0.0.5", "n1")
+        device().promoteNow()
         device().onBoot()
         onDisk -= "/web/0.0.5"
         assertEquals(WebBundleState.Boot.RolledBack("0.0.5"), device().onBoot())
@@ -114,8 +129,10 @@ class UpdateLogicTest {
         device().onBoot()
         onDisk += listOf("/web/0.0.5", "/web/0.0.6")
         device().stage("/web/0.0.5", "0.0.5", "n1")
+        device().promoteNow()
         launch { versionAt(it) }
         device().stage("/web/0.0.6", "0.0.6", "n1")
+        device().promoteNow()
         device().onBoot()
         device().rollback()
         device().reset()

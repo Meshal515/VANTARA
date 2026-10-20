@@ -167,7 +167,7 @@ class AppUpdatePlugin : Plugin() {
                 val target = File(webRoot, version)
                 target.deleteRecursively()
                 require(staging.renameTo(target)) { "could not place bundle" }
-                require(state.stage(target.absolutePath, version, meta.optString("native"))) { "not staged" }
+                require(state.stage(target.absolutePath, version, meta.optString("native"), call.getBoolean("userInitiated", false) == true)) { "not staged" }
                 prune()
                 call.resolve(JSObject().put("staged", version))
             } catch (t: Throwable) {
