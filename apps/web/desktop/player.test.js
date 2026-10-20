@@ -198,3 +198,13 @@ it('discards a delayed overlay source choice after a newer source was chosen',as
  expect(f.engine.switchSource).toHaveBeenCalledTimes(1);
  expect(f.engine.switchSource).toHaveBeenCalledWith(expect.objectContaining({candidate:'new-source'}));f.player.dispose();
 });
+
+
+it('ignores a canceled subtitle selection error after the user turns subtitles off',async()=>{
+ const f=fixture({overlay:true});let fail;f.bridge.playbackCommand=vi.fn(({command})=>command==='subtitle-select'?new Promise((_resolve,reject)=>{fail=reject;}):Promise.resolve());
+ f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one',embedded:true});
+ await Promise.resolve();await Promise.resolve();
+ f.overlay({session:'one',name:'subtitle-select',value:-1});f.overlay({session:'one',name:'subtitle-off'});fail(new Error('خطأ اختيار قديم'));
+ await Promise.resolve();await Promise.resolve();expect(f.document.querySelector('.desktop-player').textContent).not.toContain('خطأ اختيار قديم');
+ expect(f.bridge.playbackCommand).toHaveBeenCalledWith({session:'one',command:'subtitle-off',value:undefined});
+});

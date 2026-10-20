@@ -3,6 +3,7 @@ import { createPlaybackBudget } from './playback-budget.mjs';
 import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
+import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
@@ -352,7 +353,7 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='demand',replayCache=true}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
@@ -387,6 +388,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.cleanup=(async()=>{
       if(state.proxy){state.proxy.closeAllConnections();await new Promise(resolve=>state.proxy.close(resolve));}
       await state.engineTask?.catch(()=>{});
+      await state.bootstrapTask?.catch(()=>{});
       await Promise.all([...state.children].map(kill));
       await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
@@ -509,7 +511,16 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(!torrent&&/dash\+xml/i.test(contentType))throw new Error('DASH غير مدعوم');
           const responseHeaders={'content-type':contentType,'cache-control':'no-store'};
           for(const key of ['content-length','content-range','accept-ranges'])if(upstream.headers[key])responseHeaders[key]=upstream.headers[key];
-          if(!res.headersSent)res.writeHead(upstream.statusCode,responseHeaders);
+          if(!res.headersSent){
+            res.writeHead(upstream.statusCode,responseHeaders);
+            if(torrent){
+              // rqbit can describe a Range before its first piece is ready.
+              // Node otherwise buffers these headers until the first body byte.
+              res.flushHeaders();
+              const end=/^bytes \d+-(\d+)\//.exec(String(upstream.headers['content-range']??''));
+              state.trace.record('http-headers',{requestId:reader.requestId,rangeStart:start,...(end?{rangeEnd:Number(end[1])}:{}),waitMs:performance.now()-reader.at});
+            }
+          }
           if(req.method==='HEAD'){upstream.destroy();res.end();}else {
             if(torrent&&state.win){let sent=0;upstream.on('data',c=>{sent+=c.length;demandBytes(c.length,start+sent);});}
             if(torrent&&state.replayEntry&&[200,206].includes(upstream.statusCode)){
@@ -600,6 +611,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // actual container Range requests drive demand rather than competing with
     // speculative head/tail readers. Retain the old strategy for measured A/B.
     if(torrentWarmup==='both')warmEdges(state);
+    if(torrentWarmup==='container')state.bootstrapTask=warmContainerIndex(state,files[index].name);
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
@@ -661,6 +673,34 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const req=http.get(state.streamUrl,{headers:{Range:range,Authorization:`Basic ${Buffer.from(state.auth).toString('base64')}`},signal:state.controller.signal},res=>{res.on('data',()=>{});res.on('error',()=>{});});
       req.on('error',()=>{});req.setTimeout(180000,()=>req.destroy());
     }
+  }
+  async function warmContainerIndex(state,filename) {
+    const w=state.win;
+    if(!/\.mp4$/i.test(String(filename))||!w.filePath)return;
+    const deadline=performance.now()+8000;
+    try{
+      while(!state.stopped&&!state.ready&&performance.now()<deadline){
+        let file,hint;
+        try{
+          const stat=await fs.lstat(w.filePath);
+          if(stat.isSymbolicLink()||!stat.isFile())return;
+          file=await fs.open(w.filePath,'r');
+          hint=await inspectMp4Index(async(position,length)=>{
+            const bytes=Buffer.alloc(length);const result=await file.read(bytes,0,length,position);return bytes.subarray(0,result.bytesRead);
+          },w.fileLength,w.pieceLength);
+        }catch(error){if(error.code!=='ENOENT')return;}
+        finally{await file?.close();}
+        if(state.stopped||state.ready)return;
+        if(hint?.state==='none')return;
+        if(hint?.state==='index'){
+          state.trace.once('container-index-request',{rangeStart:hint.offset});
+          const req=http.get(state.streamUrl,{headers:{Range:`bytes=${hint.offset}-${hint.offset}`,Authorization:`Basic ${Buffer.from(state.auth).toString('base64')}`},signal:state.controller.signal},res=>{res.resume();res.on('error',()=>{});});
+          state.bootstrapRequest=req;req.on('error',()=>{});req.setTimeout(30000,()=>req.destroy());
+          return;
+        }
+        await sleep(100,state.controller.signal);
+      }
+    }catch{ /* Hints are optional; normal verified HTTP reads remain authoritative. */ }
   }
   /** يسجّل تورنتًا مضافًا: رقمه ورابط بثه ومسار ملفه على القرص. */
   function adopt(state,added) {
@@ -762,7 +802,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=()=>{if(state.ready)return;state.ready=true;state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured'});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
+    const ready=()=>{if(state.ready)return;state.ready=true;state.bootstrapRequest?.destroy();state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured'});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
@@ -801,7 +841,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             if(expected&&selected?.lang===expected.lang&&selected?.label===expected.label)state.subtitleExpectedSelection=null;
             else if(!expected&&state.lastSubtitleSelection!=null&&state.lastSubtitleSelection!==selectedId)state.subtitleManual=true;
             state.lastSubtitleSelection=selectedId;
-            emit(state,{type:'playback/subtitles',tracks:state.subtitleTracks});
+            emitSubtitleTracks(state);
           }
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
@@ -847,7 +887,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
     candidate=validateCandidate(candidate);
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
-    state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();
+    state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();state.subtitleCatalog=new Map();state.subtitleSequence=0;
     state.cacheRecorders=new Set();state.torrentReaders=new Map();state.replayStore=candidate.infoHash?replayFor(ownerId):null;
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     state.whenCommands=new Promise(resolve=>state.resolveCommands=resolve);
@@ -886,6 +926,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function downloadSubtitle(state,value) {
     const controller=new AbortController(),abort=()=>controller.abort();
+    const download=state.subtitleDownload={url:value.url,controller,superseded:false};
     state.controller.signal.addEventListener('abort',abort,{once:true});
     const timer=setTimeout(abort,15000);let response;
     try {
@@ -912,33 +953,71 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const path=join(state.subtitleDir,`${secret()}.${validated.extension}`);
       await fs.writeFile(path,validated.text,{encoding:'utf8',flag:'wx',mode:0o600});assertSession(state);
       return path;
-    } finally { clearTimeout(timer);state.controller.signal.removeEventListener('abort',abort);response?.destroy(); }
+    } catch(error){
+      if(download.superseded)throw Object.assign(new Error('اختيار ترجمة قديم'),{code:'SUBTITLE_SUPERSEDED'});
+      throw error;
+    } finally { if(state.subtitleDownload?.controller===controller)state.subtitleDownload=null;clearTimeout(timer);state.controller.signal.removeEventListener('abort',abort);response?.destroy(); }
+  }
+  function emitSubtitleTracks(state,message) {
+    const pending=[...state.subtitleCatalog.values()].filter(track=>!state.subtitleFiles.has(track.url)).map(({id,lang,label})=>({id,lang,label,selected:false,origin:'addon'}));
+    emit(state,{type:'playback/subtitles',tracks:[...state.subtitleTracks,...pending],...(message?{message}:{})});
+  }
+  function registerSubtitle(state,value) {
+    if(!plain(value)||typeof value.url!=='string')throw new Error('طلب ترجمة غير صالح');
+    const url=publicURL(value.url).href;
+    if(!state.subtitleCatalog.has(url)){
+      if(state.subtitleCatalog.size>=500)throw new Error('عدد نتائج الترجمة أكبر من الحد');
+      state.subtitleCatalog.set(url,{id:--state.subtitleSequence,url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة')});
+      emitSubtitleTracks(state);
+    }
+  }
+  function chooseSubtitle(state,url) {
+    state.subtitleManual=true;state.subtitleWanted=url;
+    if(state.subtitleDownload&&state.subtitleDownload.url!==url){state.subtitleDownload.superseded=true;state.subtitleDownload.controller.abort();}
   }
   function loadSubtitle(state,value) {
     assertSession(state);
     if(!plain(value)||typeof value.url!=='string'||value.select!=null&&typeof value.select!=='boolean')return Promise.reject(new Error('طلب ترجمة غير صالح'));
     let url;try{url=publicURL(value.url).href;}catch{return Promise.reject(new Error('رابط ترجمة غير مسموح'));}
-    if(state.subtitleJobs.has(url))return state.subtitleJobs.get(url);
+    if(value.select===true)chooseSubtitle(state,url);
+    const existing=state.subtitleFiles.get(url);
+    if(existing)return value.select===true?ipcCommand(state,['set_property','sid',existing.id]):Promise.resolve();
+    if(state.subtitleJobs.has(url)){
+      const pending=state.subtitleJobs.get(url);
+      if(state.subtitleDownload?.url===url&&state.subtitleDownload.superseded)return pending.catch(()=>{}).then(()=>{assertSession(state);if(state.subtitleWanted===url)return loadSubtitle(state,value);});
+      return pending;
+    }
     const subtitle={url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة'),select:value.select};
     const job=state.subtitleQueue.then(async()=>{
       assertSession(state);
+      if(state.subtitleManual&&state.subtitleWanted!==url)return;
       const loaded=[...state.subtitleFiles.values()];
-      if(loaded.length>=8||subtitle.lang!=='ar'&&loaded.filter(s=>s.lang!=='ar').length>=4)throw new Error('وصلت الترجمات إلى الحد؛ يمكن تحميل 8 مسارات منها 4 بغير العربية');
+      const atLimit=loaded.length>=8||subtitle.lang!=='ar'&&loaded.filter(s=>s.lang!=='ar').length>=4;
+      if(atLimit&&subtitle.select!==true)throw new Error('وصلت الترجمات إلى الحد؛ يمكن تحميل 8 مسارات منها 4 بغير العربية');
       const path=await downloadSubtitle(state,subtitle);
       try {
         if(!await state.whenReady)throw cancelled();assertSession(state);
+        if(state.subtitleManual&&state.subtitleWanted!==url){await rm(path,{force:true});return;}
+        if(atLimit){
+          const old=loaded.find(file=>Number.isSafeInteger(file.id)&&!state.subtitleTracks.some(track=>track.id===file.id&&track.selected)&&(subtitle.lang==='ar'||file.lang!=='ar'));
+          if(!old)throw new Error('تعذر تحرير مسار ترجمة قديم؛ أعد الاختيار');
+          await ipcCommand(state,['sub-remove',old.id]);state.subtitleFiles.delete(old.url);await rm(old.path,{force:true});
+        }
         const selected=state.subtitleTracks.find(t=>t.selected);
         const automatic=!state.subtitleManual&&(!selected||subtitle.lang==='ar'&&selected.lang!=='ar');
-        const select=subtitle.select===true||subtitle.select!==false&&automatic;
+        const select=state.subtitleManual?state.subtitleWanted===url:subtitle.select===true||subtitle.select!==false&&automatic;
         if(select)state.subtitleExpectedSelection={lang:subtitle.lang,label:subtitle.label};
         await ipcCommand(state,['sub-add',path,select?'select':'auto',subtitle.label,subtitle.lang]);assertSession(state);
-        state.subtitleFiles.set(url,{...subtitle,path});
+        const all=await ipcCommand(state,['get_property','track-list']);assertSession(state);
+        const track=Array.isArray(all)?all.filter(t=>t.type==='sub'&&(t['external-filename']===path||t.title===subtitle.label&&subtitleLanguage(t.lang)===subtitle.lang)).at(-1):null;
+        if(!Number.isSafeInteger(track?.id))throw new Error('لم يسجل المشغل مسار الترجمة');
+        state.subtitleFiles.set(url,{...subtitle,path,id:track.id});emitSubtitleTracks(state);
         if(subtitle.select===true)state.subtitleManual=true;
       } catch(error){state.subtitleExpectedSelection=null;await rm(path,{force:true}).catch(()=>{});throw error;}
     }).catch(error=>{
-      if(!state.stopped&&current===state)emit(state,{type:'playback/subtitles',tracks:state.subtitleTracks,message:error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو'});
+      if(error.code!=='SUBTITLE_SUPERSEDED'&&!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
       throw error;
-    });
+    }).finally(()=>{if(state.subtitleJobs.get(url)===job)state.subtitleJobs.delete(url);});
     state.subtitleJobs.set(url,job);state.subtitleQueue=job.catch(()=>{});
     return job;
   }
@@ -960,8 +1039,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     else if(command==='volume'&&Number.isFinite(value)&&value>=0&&value<=100)await ipcCommand(state,['set_property','volume',value]);
     else if(command==='audio-select'&&Number.isSafeInteger(value)&&state.audioTracks?.some(t=>t.id===value))await ipcCommand(state,['set_property','aid',value]);
     else if(command==='subtitle-load')await loadSubtitle(state,value);
-    else if(command==='subtitle-off') {state.subtitleManual=true;await ipcCommand(state,['set_property','sid','no']);}
-    else if(command==='subtitle-select'&&Number.isSafeInteger(value)&&state.subtitleTracks.some(t=>t.id===value)) {state.subtitleManual=true;await ipcCommand(state,['set_property','sid',value]);}
+    else if(command==='subtitle-register')registerSubtitle(state,value);
+    else if(command==='subtitle-off') {chooseSubtitle(state,null);await ipcCommand(state,['set_property','sid','no']);}
+    else if(command==='subtitle-select'&&Number.isSafeInteger(value)&&value<0&&[...state.subtitleCatalog.values()].some(t=>t.id===value))await loadSubtitle(state,{...[...state.subtitleCatalog.values()].find(t=>t.id===value),select:true});
+    else if(command==='subtitle-select'&&Number.isSafeInteger(value)&&state.subtitleTracks.some(t=>t.id===value)) {chooseSubtitle(state,null);await ipcCommand(state,['set_property','sid',value]);}
     else if(command==='subtitle-delay'&&Number.isFinite(value)&&Math.abs(value)<=60000)await ipcCommand(state,['set_property','sub-delay',value/1000]);
     else if(command==='subtitle-size'&&Number.isFinite(value)&&value>=20&&value<=80)await ipcCommand(state,['set_property','sub-font-size',value]);
     else throw new Error('أمر مشغل غير مسموح');

@@ -244,7 +244,8 @@ it('discoverSubtitles يستخدم subtitleIdentity ومزود runtime في ال
   const best=await f.engine.best({session:'subs'});
   expect(await f.engine.play({session:'subs',candidate:best.candidate,subtitleIdentity:{kind:'movie',externalIds:{imdb:'tt123'}}})).toEqual({started:true});
   pendingProvider.resolve([{url:'https://subs.example.com/arabic.srt',lang:'ara',label:'العربية'}]);await tick();await tick();
-  expect(f.commands).toContainEqual(expect.objectContaining({session:'subs',command:'subtitle-load',value:expect.objectContaining({url:'https://subs.example.com/arabic.srt',lang:'ar'})}));
+  expect(f.commands.some(c=>c.command==='subtitle-load')).toBe(false);
+  expect(f.commands).toContainEqual(expect.objectContaining({session:'subs',command:'subtitle-register',value:expect.objectContaining({url:'https://subs.example.com/arabic.srt',lang:'ar'})}));
 });
 it('يبني هوية Kitsu الدقيقة لترجمة الأنمي قبل استعلام المزود دون إيقاف الفيديو',async()=>{
   const f=coreFixture(),queries=[];
@@ -256,7 +257,7 @@ it('يبني هوية Kitsu الدقيقة لترجمة الأنمي قبل اس
   expect(await f.engine.play({session:'anime-subs',candidate:best.candidate,subtitleIdentity:{kind:'anime',episode:1,externalIds:{mal:'414'}}})).toEqual({started:true});
   await tick();await tick();
   expect(queries[0].externalIds.kitsu).toBe('901');
-  expect(f.commands).toContainEqual(expect.objectContaining({command:'subtitle-load',value:expect.objectContaining({url:'https://subs.example.com/re-zero.srt',lang:'ar'})}));
+  expect(f.commands).toContainEqual(expect.objectContaining({command:'subtitle-register',value:expect.objectContaining({url:'https://subs.example.com/re-zero.srt',lang:'ar'})}));
 });
 it('نتيجة ترجمة من تشغيل سابق بنفس session لا تلتحق بالتشغيل الجديد',async()=>{
   const pendingProvider=deferred(),f=coreFixture({pendingProvider});await f.engine.prepare({session:'same',copies:[{sourceId:'owned-core',url:'/work/owned'}],episode:-1});await tick();
