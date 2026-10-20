@@ -123,7 +123,7 @@ export async function stageWeb(web) {
   const native = plugin();
   if (!native || !web) return false;
   try {
-    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version, userInitiated: true });
+    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version });
     return true;
   } catch {
     return false;
