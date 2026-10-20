@@ -3,6 +3,7 @@ import { createPlaybackBudget } from './playback-budget.mjs';
 import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
+import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
@@ -390,6 +391,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.cleanup=(async()=>{
       if(state.proxy){state.proxy.closeAllConnections();await new Promise(resolve=>state.proxy.close(resolve));}
       await state.engineTask?.catch(()=>{});
+      await state.bootstrapTask?.catch(()=>{});
       await Promise.all([...state.children].map(kill));
       await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
@@ -614,6 +616,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // actual container Range requests drive demand rather than competing with
     // speculative head/tail readers. Retain the old strategy for measured A/B.
     if(torrentWarmup==='both')warmEdges(state);
+    if(torrentWarmup==='container')state.bootstrapTask=warmContainerIndex(state,files[index].name);
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
@@ -685,6 +688,34 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const req=http.get(state.streamUrl,{headers:{Range:range,Authorization:`Basic ${Buffer.from(state.auth).toString('base64')}`},signal:state.controller.signal},res=>{res.on('data',()=>{});res.on('error',()=>{});});
       req.on('error',()=>{});req.setTimeout(180000,()=>req.destroy());
     }
+  }
+  async function warmContainerIndex(state,filename) {
+    const w=state.win;
+    if(!/\.mp4$/i.test(String(filename))||!w.filePath)return;
+    const deadline=performance.now()+8000;
+    try{
+      while(!state.stopped&&!state.ready&&performance.now()<deadline){
+        let file,hint;
+        try{
+          const stat=await fs.lstat(w.filePath);
+          if(stat.isSymbolicLink()||!stat.isFile())return;
+          file=await fs.open(w.filePath,'r');
+          hint=await inspectMp4Index(async(position,length)=>{
+            const bytes=Buffer.alloc(length);const result=await file.read(bytes,0,length,position);return bytes.subarray(0,result.bytesRead);
+          },w.fileLength,w.pieceLength);
+        }catch(error){if(error.code!=='ENOENT')return;}
+        finally{await file?.close();}
+        if(state.stopped||state.ready)return;
+        if(hint?.state==='none')return;
+        if(hint?.state==='index'){
+          state.trace.once('container-index-request',{rangeStart:hint.offset});
+          const req=http.get(state.streamUrl,{headers:{Range:`bytes=${hint.offset}-${hint.offset}`,Authorization:`Basic ${Buffer.from(state.auth).toString('base64')}`},signal:state.controller.signal},res=>{res.resume();res.on('error',()=>{});});
+          state.bootstrapRequest=req;req.on('error',()=>{});req.setTimeout(30000,()=>req.destroy());
+          return;
+        }
+        await sleep(100,state.controller.signal);
+      }
+    }catch{ /* Hints are optional; normal verified HTTP reads remain authoritative. */ }
   }
   /** يسجّل تورنتًا مضافًا: رقمه ورابط بثه ومسار ملفه على القرص. */
   function adopt(state,added) {
@@ -786,7 +817,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let buffer='';
     state.socket.on('error',()=>fail(state,'انقطعت قناة التحكم بالمشغل'));
     state.socket.on('close',()=>{if(!state.stopped)fail(state,'انقطعت قناة التحكم بالمشغل');});
-    const ready=params=>{if(state.ready)return;state.ready=true;state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured',decoderWidth:params.w,decoderHeight:params.h});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
+    const ready=params=>{if(state.ready)return;state.ready=true;state.bootstrapRequest?.destroy();state.stableSince=performance.now();state.firstPosition=state.progress.position??0;state.trace.once('decoder-output',{mode:'render-unmeasured',decoderWidth:params.w,decoderHeight:params.h});state.budget?.ready(playbackState(state));clearTimeout(state.firstFrameWatchdog);state.publishedSeekRevision=state.seekRevision;state.resolveReady(true);emit(state,{type:'playback/ready',...state.progress,embedded:!!state.videoSurface});emitPlaybackState(state);};
     state.socket.on('data',data=>{
       buffer+=data.toString('utf8');if(buffer.length>1024*1024){state.socket.destroy();return;}
       while(buffer.includes('\n')){
