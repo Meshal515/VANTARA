@@ -74,6 +74,52 @@ it("converts Arabic SRT safely and retains timing without rendering HTML", () =>
   expect(v).not.toContain("<script>");
   expect(() => toWebVtt("not subtitles")).toThrow();
 });
+it("converts ASS dialogue with declared event fields and centisecond timing", () => {
+  const text = `[Script Info]
+Title: this metadata is not a cue
+[Events]
+Format: Layer, End, Start, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Comment: 0,0:00:04.50,0:00:01.23,Default,,0,0,0,,do not render this comment
+Dialogue: 0,0:00:04.50,0:00:01.23,Default,,0,0,0,,{\\an8\\i1}مرحبا، بالعالم, welcome{\\i0}\\Nالسطر الثاني\\nالسطر الثالث\\hهنا
+[Fonts]
+Dialogue: 0,0:00:09.00,0:00:08.00,Default,,0,0,0,,not an event
+`;
+  expect(toWebVtt(text)).toBe("WEBVTT\n\n00:00:01.230 --> 00:00:04.500\nمرحبا، بالعالم, welcome\nالسطر الثاني\nالسطر الثالث\u00a0هنا\n");
+});
+it("accepts SSA's Marked event field and preserves hours without rendering styles", () => {
+  const text = `[Script Info]
+ScriptType: v4.00
+[V4 Styles]
+Format: Name, Fontname, Fontsize
+Style: Default,Arial,28
+[Events]
+Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: Marked=0,1:02:03.04,1:02:05.60,Default,,0000,0000,0000,,<i>النص</i> & الباقي
+`;
+  expect(toWebVtt(text)).toBe("WEBVTT\n\n01:02:03.040 --> 01:02:05.600\nالنص &amp; الباقي\n");
+});
+it("omits ASS drawing paths while retaining dialogue after drawing mode ends", () => {
+  const text = `[Script Info]
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\p1}m 0 0 l 100 0 100 100
+Dialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,قبل{\\p1\\an7}m 0 0 l 10 10{\\p0\\i1}بعد
+`;
+  expect(toWebVtt(text)).toBe("WEBVTT\n\n00:00:02.000 --> 00:00:03.000\nقبلبعد\n");
+});
+it("rejects invalid ASS event times and missing timing fields without inventing cues", () => {
+  for (const event of [
+    "Format: Start, End, Text\nDialogue: 0:00:99.00,0:00:01.00,invalid seconds",
+    "Format: Start, End, Text\nDialogue: 0:00:03.00,0:00:01.00,backwards",
+    "Format: Layer, Style, Text\nDialogue: 0,Default,missing time",
+    "Format: Start, End, Text\nComment: 0:00:01.00,0:00:02.00,comment only",
+  ]) expect(() => toWebVtt(`[Script Info]\n[Events]\n${event}`)).toThrow();
+});
+it("applies existing subtitle size and cue limits to ASS conversion", () => {
+  const header = "[Script Info]\n[Events]\nFormat: Start, End, Text\n";
+  expect(() => toWebVtt(header + "Dialogue: 0:00:01.00,0:00:02.00," + "x".repeat(2 * 1024 * 1024))).toThrow("أكبر من الحد");
+  expect(() => toWebVtt(header + "Dialogue: 0:00:01.00,0:00:02.00,نص\n".repeat(20001))).toThrow("عدد أسطر");
+});
 it('preserves a provider-confirmed video identity for compatible non-IMDb subtitle providers',()=>{
  expect(subtitleRequest({kind:'series',addonKey:'https://addon.test|demo',videoId:'custom:episode:one',season:1,episode:1}, {videoHash:'0123456789abcdef',videoSize:12345})).toMatchObject({type:'series',videoId:'custom:episode:one',extra:{videoHash:'0123456789abcdef',videoSize:12345}});
  expect(subtitleRequest({kind:'series',title:'Custom episode'},{})).toBeNull();
