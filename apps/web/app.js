@@ -1951,38 +1951,19 @@ async function drainProgressOutbox() {
 
 // ───────────────────────────── التحديث ─────────────────────────────
 //
-// الواجهة تتحدث وحدها: تنزل في الخلفية وتُعرض في الإقلاع التالي، أو عند
-// الرجوع للتطبيق بعد غياب. والـAPK (حين يتغيّر الكود الأصلي) شريطٌ واحد:
-// «يوجد تحديث جديد» و«تثبيت». التفاصيل في `lib/updater.js`.
-
-const UPDATE_EVERY_MS = 3 * 60 * 60 * 1000;
-const APPLY_AFTER_AWAY_MS = 30 * 60 * 1000;
+// فحص التحديث وتنزيله وتطبيقه يبدأ من «تحديث التطبيق» في الإعدادات فقط.
 let updatesStarted = false;
-let hiddenAt = 0;
 
 async function startUpdates() {
   if (updatesStarted) return;
   updatesStarted = true;
-  // أول شاشة ظهرت: هذه الواجهة تعمل. بلا هذا النداء يرجع التطبيق عنها وحده
-  const health = await reportHealthy();
-  if (health.confirmed) showToast({ title: 'تحدّث VANTARA', body: `الإصدار ${appVersion() ?? ''}` });
-  void checkUpdates();
-  setInterval(() => void checkUpdates(), UPDATE_EVERY_MS);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      hiddenAt = Date.now();
-      return;
-    }
-    const away = hiddenAt ? Date.now() - hiddenAt : 0;
-    hiddenAt = 0;
-    // غاب نصف ساعة: الواجهة الجاهزة تُعرض الآن، إلا وسط فصل
-    if (away >= APPLY_AFTER_AWAY_MS && state.screen !== 'READER') void activateStaged();
-    else void checkUpdates();
-  });
+  // اعتماد صحة الواجهة يحافظ على الرجوع الآمن، بلا فحص أو تنبيه تلقائي.
+  await reportHealthy();
 }
 
 /** `force`: من «تحديث التطبيق» في الإعدادات — الواجهة الجديدة تُطبَّق فورًا. */
 async function checkUpdates({ force = false } = {}) {
+  if (!force) return null;
   if (supports('webUpdate')) {
     const { checkForUpdates } = await import('./pwa/update.js');
     try {
@@ -2081,14 +2062,11 @@ globalThis.__vantaraCheckUpdate = (opts) => checkUpdates(opts);
 
 if ('serviceWorker' in navigator) {
   // الويب: أول تثبيت للعامل لا يعيد التحميل؛ التحديث يُطبَّق حين يطلبه الشخص فقط
-  // (pwa/update.js). الـAPK كما كان.
+  // (pwa/update.js). تسجيل العامل يبقي دعم التشغيل دون اتصال.
   const hadController = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
   navigator.serviceWorker
     .register('/sw.js')
-    .then((registration) => {
-      if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.watchForUpdates(registration, { onReady: showWebUpdate }));
-    })
     .catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (supports('webUpdate') && !hadController) return;
@@ -2099,7 +2077,7 @@ if ('serviceWorker' in navigator) {
   if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(showWhatsNew, 1500));
 }
 
-/** الويب: نسخة جديدة نزلت بالكامل في الخلفية. لا تُطبَّق إلا بضغطة. */
+/** نتيجة الفحص اليدوي: تأكيد تطبيق نسخة PWA الجاهزة. */
 function showWebUpdate(apply) {
   if (document.querySelector('.vupdate')) return;
   const bar = el('div', 'vupdate');

@@ -1,19 +1,4 @@
-/**
- * التحديث: الواجهة وحدها بصمت، والـAPK بزرّ «تثبيت» واحد.
- *
- * البيان على آخر إصدار مستقر في GitHub (`vantara-update.json`) يبنيه CI من
- * main بعد نجاح الاختبارات، موقّعًا بمفتاح VANTARA الثابت. رابط الإصدار دائم
- * (لا artifact ينتهي). فيه:
- *   - `versionName`/`versionCode`، `changelog`، `minimumSupportedVersionCode`.
- *   - `native`: بصمة الكود الأصلي الذي بُنيت له الواجهة.
- *   - `web` و`apk`: الروابط والبصمات (sha256).
- *
- * القرار:
- *   - نفس البصمة وواجهة أحدث ← تنزل في الخلفية وتُعرض في الإقلاع التالي (أو
- *     عند الرجوع للتطبيق بعد غياب). لا سؤال ولا زر. فشلها = رجوع تلقائي.
- *   - بصمة مختلفة ← الواجهة الجديدة تحتاج كودًا أصليًا جديدًا: «يوجد تحديث
- *     جديد» و«تثبيت». أقدم من `minimumSupportedVersionCode` ← إجباري.
- */
+/** تحديث Android: فحص وتنزيل من الإعدادات، مع التحقق من البصمة والتوافق. */
 
 import { appVersion } from './config.js';
 
@@ -123,7 +108,7 @@ export async function stageWeb(web) {
   const native = plugin();
   if (!native || !web) return false;
   try {
-    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version });
+    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version, userInitiated: true });
     return true;
   } catch {
     return false;
