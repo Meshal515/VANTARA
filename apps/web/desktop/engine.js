@@ -194,7 +194,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         onHealth: (key, ok) => { if (!current(s) || generation !== s.playGeneration) return; const health = runtime.addons.registry.health; if (ok) health?.success?.(key, 'subtitles', 'desktop'); else health?.failure?.(key, 'subtitles', 'desktop'); },
         onResult: result => {
           if (!current(s) || generation !== s.playGeneration) return;
-          void bridge.playbackCommand({ session: s.id, command: 'subtitle-load', value: { url: result.url, lang: result.lang, label: `${result.label} · ${result.provider}` } }).catch(() => {});
+          void bridge.playbackCommand({ session: s.id, command: 'subtitle-register', value: { url: result.url, lang: result.lang, label: `${result.label} · ${result.provider}` } }).catch(() => {});
         } });
     } catch { /* تعطل مزود الترجمة لا يوقف الفيديو */ }
   }
