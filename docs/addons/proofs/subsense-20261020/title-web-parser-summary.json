@@ -1,0 +1,202 @@
+[
+  {
+    "index": 0,
+    "id": "subsense-srt-opensubtitles-ara-0",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 164746,
+    "web_cues": 1785,
+    "web_error": null
+  },
+  {
+    "index": 1,
+    "id": "subsense-srt-opensubtitles-ara-1",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "sub.wyzie.io",
+    "bytes": 156643,
+    "web_cues": 1781,
+    "web_error": null
+  },
+  {
+    "index": 2,
+    "id": "subsense-vtt-opensubtitles-ara-2",
+    "format": "vtt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 157768,
+    "web_cues": 1808,
+    "web_error": null
+  },
+  {
+    "index": 3,
+    "id": "subsense-srt-opensubtitles-ara-3",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 164418,
+    "web_cues": 1808,
+    "web_error": null
+  },
+  {
+    "index": 4,
+    "id": "subsense-srt-opensubtitles-ara-4",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "sub.wyzie.io",
+    "bytes": 151830,
+    "web_cues": 1731,
+    "web_error": null
+  },
+  {
+    "index": 5,
+    "id": "subsense-srt-opensubtitles-ara-5",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "sub.wyzie.io",
+    "bytes": 151736,
+    "web_cues": 1678,
+    "web_error": null
+  },
+  {
+    "index": 6,
+    "id": "subsense-ssa-opensubtitles-ara-6",
+    "format": "ass",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 379513,
+    "web_cues": 0,
+    "web_error": "لا توجد ترجمة SRT/VTT صالحة؛ ASS غير مدعوم هنا",
+    "ass_sections": [
+      "Script Info",
+      "V4+ Styles",
+      "Events"
+    ],
+    "ass_format_fields": [
+      "Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    ],
+    "ass_dialogues": 3616
+  },
+  {
+    "index": 7,
+    "id": "subsense-srt-opensubtitles-ara-7",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 160239,
+    "web_cues": 1738,
+    "web_error": null
+  },
+  {
+    "index": 8,
+    "id": "subsense-srt-opensubtitles-ara-8",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 159047,
+    "web_cues": 1677,
+    "web_error": null
+  },
+  {
+    "index": 9,
+    "id": "subsense-srt-opensubtitles-ara-9",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 118557,
+    "web_cues": 1785,
+    "web_error": null
+  },
+  {
+    "index": 10,
+    "id": "subsense-srt-opensubtitles-ara-10",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 159408,
+    "web_cues": 1777,
+    "web_error": null
+  },
+  {
+    "index": 11,
+    "id": "subsense-srt-opensubtitles-ara-11",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 162393,
+    "web_cues": 1830,
+    "web_error": null
+  },
+  {
+    "index": 12,
+    "id": "subsense-srt-opensubtitles-ara-12",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "dl.opensubtitles.org",
+    "bytes": 161363,
+    "web_cues": 1853,
+    "web_error": null
+  },
+  {
+    "index": 13,
+    "id": "subsense-srt-ytssubs-ara-13",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 160063,
+    "web_cues": 1774,
+    "web_error": null
+  },
+  {
+    "index": 14,
+    "id": "subsense-srt-ytssubs-ara-14",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 164551,
+    "web_cues": 1783,
+    "web_error": null
+  },
+  {
+    "index": 15,
+    "id": "subsense-srt-ytssubs-ara-15",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 164551,
+    "web_cues": 1783,
+    "web_error": null
+  },
+  {
+    "index": 16,
+    "id": "subsense-srt-ytssubs-ara-16",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 162121,
+    "web_cues": 1828,
+    "web_error": null
+  },
+  {
+    "index": 17,
+    "id": "subsense-srt-ytssubs-ara-17",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 154864,
+    "web_cues": 1776,
+    "web_error": null
+  },
+  {
+    "index": 18,
+    "id": "subsense-srt-ytssubs-ara-18",
+    "format": "srt",
+    "lang": "ara",
+    "url_host": "subsense.nepiraw.com",
+    "bytes": 144662,
+    "web_cues": 1594,
+    "web_error": null
+  }
+]
