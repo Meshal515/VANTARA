@@ -48,6 +48,8 @@ Each fixture has five trials by default, with the same sequence:
 
 Use `--modes cold,warm,restart` and `--kinds mp4` for a shorter matrix. `--runs 1` is a smoke run, not a distribution estimate. `--seed-upload-bps 524288` rate-limits the real rqbit seeder to a controlled 512 KiB/s; this tests one slow peer, not a mixed-speed swarm. The script does not claim that an HTTP delay is peer/network behavior.
 
+`--piece-length 4194304` builds torrents with 4 MiB pieces instead of the default 256 KiB; accepted values are powers of two from 16 KiB through 16 MiB. Reuse the same fixture bytes and piece length when comparing strategies. `--torrent-warmup demand` selects normal player-driven reads; `--torrent-warmup both` selects the retained legacy head/tail warming option for engineering comparisons. This flag does not change the application's default. The adapter flushes engine response headers immediately and records response byte counts and completed `/haves` bitfields, so its forwarding server does not add an artificial first-piece header wait.
+
 ## Evidence and interpretation
 
 Every run stores its rendered-window PNG, mpv error log, events, HTTP request/header/first-body-byte timings, exact infoHash/fileIdx, source snapshots, hashes of native binaries, stable-playback positions, seek settling times, app-cache coverage, CPU/RSS observations where available, and disk observations in results.json and per-run run.json. Range logging is confined to the local engine API; it contains no external source magnet or addon URL.
