@@ -389,3 +389,22 @@ it('keeps failed standalone playback in the player so a 4K source can be retried
  expect((await f.engine.playerState({session:'s'})).position).toBe(1810000);expect(f.release()).toBe(0);
  await f.engine.retryPlayback({session:'s'});expect(f.starts.at(-1).position).toBe(1810000);await f.engine.closeSession({session:'s'});
 });
+it('يجهّز أفضل تورنت في الخلفية قبل الضغط على تشغيل، ولا يكرر التجهيز لنفس الملف', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = fixture(), prewarms = [];
+    f.bridge.prewarmTorrent = async args => { prewarms.push(args); return { prewarmed: true }; };
+    f.source.streams = async () => [
+      {...f.stream, infoHash:'a'.repeat(40),title:'ميت\n👤 0 💾 40 GB'},
+      {...f.stream, infoHash:'b'.repeat(40),title:'حي\n👤 500 💾 1.4 GB'},
+    ];
+    await prepared(f);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(prewarms).toHaveLength(1);
+    expect(prewarms[0].candidate.infoHash).toBe('b'.repeat(40));
+    await f.engine.extend({ session: 's', copies: [] });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(prewarms).toHaveLength(1);
+    await f.engine.closeSession({session:'s'});
+  } finally { vi.useRealTimers(); }
+});

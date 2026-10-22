@@ -27,6 +27,21 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     emit('route', { session: s.id, route: { ...route }, retryAt: 0 });
   };
   const live = c => !Number.isFinite(c.expiresAt) || c.expiresAt > Date.now();
+  // تجهيز مسبق: أفضل تورنت في الجلسة يبدأ تنزيل أوله وفهرسه في الخلفية قبل الضغط على تشغيل،
+  // فيبدأ العرض من القرص (services.prewarmTorrent). مهلة قصيرة حتى يستقر ترتيب المرشحين.
+  const schedulePrewarm = s => {
+    if (!bridge?.prewarmTorrent || s.playing) return;
+    clearTimeout(s.prewarmTimer);
+    s.prewarmTimer = setTimeout(() => {
+      if (!current(s) || s.playing) return;
+      const c = choices(s)[0];
+      if (!c?.infoHash) return;
+      const key = `${c.infoHash}|${c.fileIdx ?? ''}`;
+      if (s.prewarmKey === key) return;
+      s.prewarmKey = key;
+      void Promise.resolve(bridge.prewarmTorrent({ candidate: c })).catch(() => {});
+    }, 1200);
+  };
   const choices = (s, route = null) => [...s.candidates.values()].filter(c => (!route || c.route === route) && s.routes.get(c.route)?.state === 'READY')
     .filter(live)
     .sort((a, b) => playbackScore(b, s) - playbackScore(a, s));
@@ -43,7 +58,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
   };
   async function finish(s, { stop = false } = {}) {
     if (!current(s)) return;
-    s.closed = true; s.controller.abort(); s.subtitleController?.abort(); sessions.delete(s.id);
+    s.closed = true; clearTimeout(s.prewarmTimer); s.controller.abort(); s.subtitleController?.abort(); sessions.delete(s.id);
     s.together?.close();emit('desktopTogether',{session:s.id,closed:true});
     s.snapshot?.release();
     if (s.playing) emit('playback', { ...s.context, session: s.id, ...s.progress, final: true });
@@ -156,6 +171,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
                   identity: st.identity ?? { ...copy.identity, externalIds: copy.externalIds, kind: copy.type ?? (def?.content === 'anime' ? 'anime' : undefined), season: ep.season ?? copy.requestedSeason, episode: ep.number } };
                 s.candidates.set(id, candidate);
                 routeUpdate(s, { ...base, id, server: server.name, code: candidate.code, quality: candidate.quality, label: st.title ?? st.filename ?? st.name ?? null, state: 'READY', runtimeReady: true, candidates: [id] });
+                schedulePrewarm(s);
               }
             };
             try {

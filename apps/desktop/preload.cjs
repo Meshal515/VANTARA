@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   playerViewport:call('player-viewport'),
   playerFullscreen:call('player-fullscreen'),
   playerOverlay:call('player-overlay'),
+  prewarmTorrent: call('prewarm-torrent'),
   startPlayback: call('start-playback'),
   stopPlayback: call('stop-playback'),
   playbackCommand: call('playback-command'),

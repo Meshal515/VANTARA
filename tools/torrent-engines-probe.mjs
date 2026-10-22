@@ -1,8 +1,7 @@
 // فحص المحركات على ويندوز، على أسراب Torrentio حقيقية: كم ثانية حتى أول إطار مفكوك؟
 //   app        : مسار التطبيق الكامل (services.mjs: rqbit + الوكيل + mpv)
 //   stremio    : خادم Stremio الحقيقي (server.js) + mpv على رابطه
-//   ts-stremio : torrent-stream بإعدادات Stremio + mpv
-//   webtorrent : WebTorrent + mpv
+//   app+prewarm: التطبيق بعد تجهيز مسبق 15 ث (الزمن من الضغط على تشغيل)
 // كل محرك يبدأ باردًا (مجلد جديد، عملية جديدة) والترتيب يتناوب حتى لا يستفيد محرك واحد من سرب «دافئ».
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -61,13 +60,18 @@ async function external(engine, url, start) {
   } finally { kill(child); await sleep(2000); }
 }
 
-async function runApp(c) {
+async function runApp(c, { prewarmMs = 0 } = {}) {
   const events = [];
   const svc = createDesktopServices({ userData: await mkdtemp(join(tmpdir(), 'en-app-')), binaries: { rqbit, mpv }, onEvent: (e) => events.push({ t: Date.now(), ...e }), firstFrameRecoveryMs: BUDGET, firstFrameFailureMs: 60000 });
+  // التطبيق الحقيقي ينشئ الخدمات عند فتحه، قبل أي ضغط على تشغيل بوقت طويل
+  await sleep(6000);
+  const candidate = { infoHash: c.infoHash, fileIdx: c.fileIdx, sources: c.trackers.map((t) => `tracker:${t}`) };
+  // التجهيز المسبق: صفحة العمل تعرف أفضل تورنت، والمستخدم يقرأ الصفحة قبل الضغط على تشغيل
+  if (prewarmMs) { await svc.prewarmTorrent({ candidate }); await sleep(prewarmMs); }
   const t0 = Date.now(), session = `en-${c.infoHash.slice(0, 6)}`;
   let ready = null, error = null;
   await new Promise((resolve) => {
-    svc.startPlayback({ session, candidate: { infoHash: c.infoHash, fileIdx: c.fileIdx, sources: c.trackers.map((t) => `tracker:${t}`) }, title: 'probe', position: 0 }).catch((e) => { error ??= e.message; });
+    svc.startPlayback({ session, candidate, title: 'probe', position: 0 }).catch((e) => { error ??= e.message; });
     const iv = setInterval(() => {
       const r = events.find((e) => e.session === session && e.type === 'playback/ready'), f = events.find((e) => e.session === session && e.type === 'playback/error');
       if (r || f || Date.now() - t0 > BUDGET) { clearInterval(iv); ready = r ? r.t - t0 : null; error = f?.message ?? (r ? null : 'لا إطار خلال المهلة'); resolve(); }
@@ -76,7 +80,7 @@ async function runApp(c) {
   const brief = (e) => [e.stage, Math.round(e.elapsedMs), ...['rangeStart', 'waitMs', 'connectedPeers', 'speedBytes', 'checkedBytes', 'requestedPiece', 'status'].filter((k) => e[k] != null).map((k) => `${k}=${Math.round(e[k])}`)].join(':');
   const trace = events.filter((e) => e.type === 'playback/diagnostic').map(brief).slice(0, 80).join(' ');
   await svc.stopPlayback({ session }).catch(() => {}); await svc.close().catch(() => {});
-  return { engine: 'app', ms: ready, error, trace };
+  return { engine: prewarmMs ? `app+prewarm${prewarmMs / 1000}s` : 'app', ms: ready, error, trace };
 }
 async function runStremio(c) {
   if (!stremioServer) return { engine: 'stremio', ms: null, error: 'server.js غير موجود' };
@@ -97,7 +101,9 @@ try { const s = await torrentio('series/tt0903747:1:1'); pools.push(...pick(s, '
 try { const s = await torrentio('series/kitsu:46474:1'); pools.push(...pick(s, 'أنمي حلقة', (x) => (sizeGb(x) ?? 9) < 3, 2)); } catch (e) { report.candidates.push({ error: `أنمي: ${e.message}` }); }
 report.candidates.push(...pools); await save();
 
-const engines = [runApp, runStremio, local('ts-stremio'), local('webtorrent')];
+// القياس السابق: torrent-stream وWebTorrent أبطأ من التطبيق ومن Stremio في كل الحالات، فخرجا من الفحص
+const runAppPrewarmed = (c) => runApp(c, { prewarmMs: 15000 });
+const engines = [runApp, runAppPrewarmed, runStremio];
 for (const [i, c] of pools.entries()) {
   const order = engines.map((_, k) => engines[(k + i) % engines.length]);
   for (const run of order) {

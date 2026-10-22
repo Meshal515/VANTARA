@@ -159,6 +159,28 @@ test('rqbit 500 «initializing» is retried by the proxy and never reaches the p
   assert.equal(await readFile(join(dir,'init-count'),'utf8'),'3');
   assert.ok(events.some(e=>e.stage==='engine-file-initializing'));
 });
+test('a prewarmed torrent is adopted by playback: one engine add, paused while waiting, resumed on play',async t=>{
+  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
+  for(let i=0;i<200&&!(await requests()).some(r=>r.url.endsWith('/pause'));i++)await new Promise(r=>setTimeout(r,25));
+  assert.ok((await requests()).some(r=>r.url.endsWith('/pause')),'the prewarm stops downloading after the edges');
+  await services.startPlayback({session:'prewarmed',candidate:{infoHash:hash,fileIdx:0}});
+  const all=await requests();
+  assert.equal(all.filter(r=>r.url.startsWith('/torrents?')).length,1,'playback reuses the prewarmed engine and torrent');
+  assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')));
+});
+test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
+  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  for(let i=0;i<200&&!(await requests()).some(r=>r.url.endsWith('/pause'));i++)await new Promise(r=>setTimeout(r,25));
+  await services.startPlayback({session:'other',candidate:{url:'https://video.example.com/fixture.mp4'}});
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  for(let i=0;i<200&&(await requests()).filter(r=>r.url.startsWith('/torrents?')).length<2;i++)await new Promise(r=>setTimeout(r,25));
+  assert.equal((await requests()).filter(r=>r.url.startsWith('/torrents?')).length,2,'the old prewarm was dropped, so the same torrent is prepared afresh');
+});
 test('controls arriving during preparation wait for loadfile rather than reporting a disconnected player',async t=>{
   let enter,release;const entered=new Promise(r=>enter=r),gate=new Promise(r=>release=r);
   const {dir,services}=await fixture(t,'normal',{videoHost:{acquire:async()=>{enter();await gate;return {windowId:'1234',close:async()=>{}};}}});

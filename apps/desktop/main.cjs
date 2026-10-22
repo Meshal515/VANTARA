@@ -153,7 +153,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
   });
-  for (const [name, method] of [['request-resource', 'requestResource'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
+  for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     let parsed;
