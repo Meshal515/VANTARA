@@ -33,8 +33,8 @@ jobs:
       - run: sudo chmod 666 /dev/kvm
       - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
-          api-level: 30
-          target: default
+          api-level: 35
+          target: google_apis
           arch: x86_64
           disable-animations: true
           script: |
