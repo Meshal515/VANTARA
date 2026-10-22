@@ -50,8 +50,18 @@ class TorrentSwarmDiscoveryDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val out = File(context.filesDir, "addon-proof/swarm-discovery.json").apply { parentFile!!.mkdirs() }
         val results = JSONArray()
-        val choices = listOf("movie/tt0111161", "series/tt0903747:1:1", "series/kitsu:46474:1").flatMap { runCatching { torrentio(it) }.getOrDefault(emptyList()) }
-        val variants = listOf<Pair<String, () -> SettingsPack>>("production" to { TorrentEngine.streamingSettings() }, "libtorrent-defaults" to { SettingsPack() })
+        val choices = listOf("movie/tt0111161", "movie/tt0468569", "series/tt0903747:1:1", "series/kitsu:46474:1").flatMap { runCatching { torrentio(it) }.getOrDefault(emptyList()) }
+        // «aggressive»: الإنتاج مع حدود اتصال أعلى ومهل اتصال أطول (شبكات الجوال بطيئة المصافحة) وبلا حد رفع
+        // (رسائل طلب القطع وعبء IP تُحسب على الرفع؛ حد 128KB/s قد يبطئ التنزيل نفسه).
+        val aggressive = {
+            TorrentEngine.streamingSettings().connectionsLimit(400).uploadRateLimit(0).apply {
+                setInteger(com.frostwire.jlibtorrent.swig.settings_pack.int_types.connection_speed.swigValue(), 200)
+                setInteger(com.frostwire.jlibtorrent.swig.settings_pack.int_types.peer_connect_timeout.swigValue(), 15)
+                setInteger(com.frostwire.jlibtorrent.swig.settings_pack.int_types.handshake_timeout.swigValue(), 15)
+                setInteger(com.frostwire.jlibtorrent.swig.settings_pack.int_types.torrent_connect_boost.swigValue(), 100)
+            }
+        }
+        val variants = listOf<Pair<String, () -> SettingsPack>>("production" to { TorrentEngine.streamingSettings() }, "aggressive" to aggressive)
         for ((i, choice) in choices.withIndex()) {
             val order = if (i % 2 == 0) variants else variants.reversed()
             for ((name, settings) in order) {
