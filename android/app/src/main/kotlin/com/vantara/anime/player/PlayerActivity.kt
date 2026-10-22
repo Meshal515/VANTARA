@@ -348,12 +348,12 @@ class PlayerActivity : Activity() {
         scope.launch {
             // الملف كله عندنا: نعرضه بأنفسنا، فلا يُعاد تحضير الفيديو (كان يعيد تحميله، والتورنت يعيد الاتصال)
             val cues = withContext(Dispatchers.IO) {
-                runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-${track.id}")) }.getOrNull()
+                runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-$selection", fallbackCharset = if (track.lang == "ar") "windows-1256" else null)) }.getOrNull()
             }
             if (auto) autoSubtitleBusy = false
             if (cues.isNullOrEmpty()) {
-                if (auto) { if (generation == addonSubtitles.generation && addonSubtitles.current(generation, selection)) autoArabicSubtitle() }
-                else if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر")
+                if (auto) { if (generation == addonSubtitles.generation && addonSubtitles.current(generation, selection) && current?.id == c.id) autoArabicSubtitle() }
+                else if (addonSubtitles.current(generation, selection) && current?.id == c.id) message("تعذر تحميل الترجمة؛ الفيديو مستمر")
                 return@launch
             }
             if (!addonSubtitles.current(generation, selection) || current?.id != c.id) return@launch
@@ -420,10 +420,17 @@ class PlayerActivity : Activity() {
     private val settings by lazy { getSharedPreferences("vantara.player", MODE_PRIVATE) }
 
     private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${PlaybackBudgets.startupMs(current?.url) / 1000} ثانية") }
+    private val seekBudget = PlaybackSeekBudget()
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
-        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل ${PlaybackBudgets.stalledMs(current?.url) / 1000} ثانية")
+        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل")
+    }
+    private fun watchStall() {
+        main.removeCallbacks(stallWatchdog)
+        if (reportedStart && player.playbackState == Player.STATE_BUFFERING) {
+            main.postDelayed(stallWatchdog, seekBudget.stalledMs(current?.url, SystemClock.elapsedRealtime()))
+        }
     }
     private val hideControls = Runnable { setControls(false) }
     private val usageClock = ForegroundTime(SystemClock::elapsedRealtime)
@@ -600,20 +607,23 @@ class PlayerActivity : Activity() {
     // ───────────── التشغيل والتبديل ─────────────
 
     private val listener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            // A seek inside buffered media can stay READY without a state-change callback.
+            if (player.playbackState == Player.STATE_READY) seekBudget.reset()
+        }
+
         override fun onPlaybackStateChanged(state: Int) {
             sampleUsage()
             if (state == Player.STATE_BUFFERING) together?.onBuffering()
             if (state == Player.STATE_READY) together?.onReady()
             if (state == Player.STATE_BUFFERING) {
                 spinner.visibility = View.VISIBLE
-                if (reportedStart) {
-                    main.removeCallbacks(stallWatchdog)
-                    main.postDelayed(stallWatchdog, PlaybackBudgets.stalledMs(current?.url))
-                }
+                watchStall()
             } else {
                 main.removeCallbacks(stallWatchdog)
             }
             if (state == Player.STATE_READY) {
+                seekBudget.reset()
                 spinner.visibility = View.GONE
                 if (presenceActive) sendPresence()
                 if (!reportedStart) {
@@ -657,6 +667,10 @@ class PlayerActivity : Activity() {
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
+                watchStall()
+            }
             loadCoverage()
             if (reason == Player.DISCONTINUITY_REASON_SEEK) together?.onUserSeek(newPosition.positionMs)
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
@@ -695,6 +709,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun start(c: Candidate, positionMs: Long) {
+        seekBudget.reset()
+        main.removeCallbacks(stallWatchdog)
         waiting?.cancel()
         hideError()
         clearSkipTimings()

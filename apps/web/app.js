@@ -22,6 +22,7 @@ import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
 import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
+import { canManageDangerZone } from './lib/identity.js';
 import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
@@ -1469,6 +1470,7 @@ function screenV35(page) {
             // ضغطة المستخدم تتجاوز التراجع الأُسّي: هو يعرف أن الشبكة عادت
             await sync.push({ force: true });
             await sync.pull();
+            await sync.retryRecovery();
             await refreshPresence();
           },
           resync: () => sync.resync(),
@@ -1675,6 +1677,8 @@ async function screenSettings() {
   const body = el('div', 'page__body');
 
   const current = endpoints();
+  // The account-less first-run recovery screen still needs server setup.
+  const mayConfigureServer = () => canManageDangerZone(sync) || (!sync.user && !syncConfigured());
   const form = el('form', 'form');
 
   const rows = [
@@ -1701,12 +1705,13 @@ async function screenSettings() {
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (!mayConfigureServer()) return;
     setEndpoints({ sync: inputs.get('sync').value.trim(), api: inputs.get('api').value.trim() });
     note.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
     // العنوانان يُقرآن مرة عند الإقلاع، فالتغيير يحتاج إعادة تحميل
     setTimeout(() => window.location.reload(), 400);
   });
-  body.append(form);
+  if (mayConfigureServer()) body.append(form);
 
   const facts = el('div', 'list');
   const version = appVersion();
@@ -1733,10 +1738,11 @@ async function screenSettings() {
   }
   body.append(facts);
 
-  if (health.quarantined > 0) {
+  if (health.quarantined > 0 && canManageDangerZone(sync)) {
     const retry = el('button', 'btn btn--ghost', 'إعادة محاولة المعزولات');
     retry.type = 'button';
     retry.addEventListener('click', () => {
+      if (!canManageDangerZone(sync)) return;
       const count = sync.retryQuarantined();
       retry.disabled = true;
       retry.textContent = `أُعيدت ${count} عملية للطابور`;
@@ -1786,16 +1792,19 @@ async function screenSettings() {
   }
   body.append(notifications);
 
-  const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
-  rebuild.type = 'button';
-  rebuild.addEventListener('click', async () => {
-    rebuild.disabled = true;
-    rebuild.textContent = 'جارٍ إعادة البناء…';
-    // الطابور لا يُمسّ: الكتابات غير المرسلة ليست جزءًا من المرآة
-    await sync.resync();
-    await go({ name: 'settings' });
-  });
-  body.append(rebuild);
+  if (canManageDangerZone(sync)) {
+    const rebuild = el('button', 'btn btn--ghost', 'إعادة بناء البيانات المحلية');
+    rebuild.type = 'button';
+    rebuild.addEventListener('click', async () => {
+      if (!canManageDangerZone(sync)) return;
+      rebuild.disabled = true;
+      rebuild.textContent = 'جارٍ إعادة البناء…';
+      // الطابور لا يُمسّ: الكتابات غير المرسلة ليست جزءًا من المرآة
+      await sync.resync();
+      await go({ name: 'settings' });
+    });
+    body.append(rebuild);
+  }
 
   const force = el('button', 'btn btn--ghost', 'مزامنة الآن');
   force.type = 'button';
@@ -2201,6 +2210,7 @@ setInterval(() => void sync.push(), 15_000);
  * وتختفي وحدها إن تراجع، وبعد المسح النهائي خروج إلى «من يتابع؟».
  */
 let pendingNotice = null;
+let verifyingDeletion = false;
 function followAccountState() {
   if (!sync.user || sync.deletingHere || state.screen === 'GATE') return;
   const accountState = sync.accountState;
@@ -2209,10 +2219,20 @@ function followAccountState() {
     pendingNotice = null;
   }
   if (accountState === 'DELETED') {
-    dropV35();
-    sync.signOut();
-    void go({ name: 'gate' });
-    showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    if (verifyingDeletion) return;
+    verifyingDeletion = true;
+    const affectedUserId = sync.user.userId;
+    // The local mirror can contain a stale tombstone from a previously deleted
+    // account. Never sign out or destroy unsent edits on that evidence alone.
+    void sync.verifyDeletedAccount().then((result) => {
+      if (result !== 'deleted' || sync.user?.userId !== affectedUserId || sync.deletingHere || sync.accountState !== 'DELETED') return;
+      dropV35();
+      sync.signOut();
+      void go({ name: 'gate' });
+      showToast({ title: 'حُذف هذا الحساب نهائيًا' });
+    }).catch(() => {
+      // Offline is not deletion. Preserve the session and queued edits.
+    }).finally(() => { verifyingDeletion = false; });
     return;
   }
   if (accountState === 'PENDING_DELETE' && !pendingNotice) {
@@ -2238,7 +2258,7 @@ function followAccountState() {
 
 /**
  * قفل الحساب: عليه PIN وما أُدخل منذ فُتح التطبيق. الرمز قبل أي شاشة، وإذن
- * الجلسة يعيش ما دام التطبيق مفتوحًا فقط (sessionStorage). «تبديل الحساب»
+ * الجلسة يبقى على الجهاز حتى يبدّل الحساب أو يسجل الخروج. «تبديل الحساب»
  * مخرج دائم: لا أحد يُحبس خلف رمز لا يعرفه.
  */
 let lockOpen = false;

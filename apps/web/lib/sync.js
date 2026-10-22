@@ -26,6 +26,7 @@ import {
   syncHealth,
   trimQueue,
 } from './queue.js';
+import { createAccountStore } from './account-store.js';
 import { accountWithIdentity, withIdentity } from './identity.js';
 import { PROJECTIONS, projectQueue } from './optimistic.js';
 
@@ -34,6 +35,11 @@ const USER_KEY = 'vantara.user';
 const CURSOR_KEY = 'vantara.cursor';
 const QUEUE_KEY = 'vantara.queue';
 const MIRROR_KEY = 'vantara.mirror';
+// A verified server snapshot, not a local delta cursor, establishes mirror completeness.
+const MIRROR_AUDIT_KEY = 'vantara.mirror.audit.v1';
+const MIRROR_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const MIRROR_AUDIT_RETRY_MS = 5 * 60 * 1000;
+const MAX_MIRROR_AUDIT_PAGES = 200;
 const QUARANTINE_KEY = 'vantara.quarantine';
 const DEVICE_ID_KEY = 'vantara.device.id';
 const DEVICE_CREDENTIAL_KEY = 'vantara.device.credential';
@@ -292,6 +298,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   // تقولها. بلا هذا يعرض الجهاز «مُزامَن» وهو خلف بآلاف الصفوف.
   let backlog = false;
   let lastError = null;
+  let auditingMirror = false;
+  let auditCompletion = null;
+  let completeAudit = null;
+  let auditFailure = null;
+  let nextAuditAttemptAt = 0;
   /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
   let durable = true;
   let overflowing = false;
@@ -306,36 +317,62 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   };
 
+  const accountStore = createAccountStore();
+  // Writes are serialized so a slow older snapshot/queue cannot replace a newer
+  // record. Capture the account and payload before crossing an async boundary.
+  let storageWrites = Promise.resolve();
+  const storeCopy = (kind, value) => {
+    const ownerId = user?.userId;
+    const captured = JSON.parse(JSON.stringify(value));
+    const result = storageWrites.then(() => accountStore.write(kind, ownerId, captured));
+    storageWrites = result.catch(() => false);
+    return result;
+  };
   const persistMirror = () => writeJson(MIRROR_KEY, mirror);
+  let lastAudit = readJson(MIRROR_AUDIT_KEY, null);
+  const commitMirror = async (snapshot, nextCursor, auditedAt = lastAudit?.userId === user?.userId ? lastAudit.at : null) => {
+    const localSaved = writeJson(MIRROR_KEY, snapshot);
+    const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt });
+    return localSaved || independentSaved;
+  };
+  const recoveryOwner = user?.userId;
+  const recoveryToken = token;
+  const recoveryGeneration = sessionGeneration;
+  const recovered = Promise.all([
+    accountStore.read('snapshot', recoveryOwner), accountStore.read('queue', recoveryOwner),
+  ]).then(([saved, pending]) => {
+    if (disposed || user?.userId !== recoveryOwner || token !== recoveryToken || sessionGeneration !== recoveryGeneration) return;
+    if (saved?.mirror && Number.isSafeInteger(saved.cursor) && saved.cursor >= cursor) {
+      mirror = saved.mirror;
+      cursor = saved.cursor;
+      if (saved.auditedAt) {
+        lastAudit = { userId: recoveryOwner, at: saved.auditedAt };
+        writeJson(MIRROR_AUDIT_KEY, lastAudit);
+      }
+    }
+    if (Array.isArray(pending?.ops)) {
+      const known = new Set(queue.map((op) => op.opId));
+      queue.push(...pending.ops.filter((op) => !known.has(op.opId)));
+    }
+    refreshOverlay();
+    emit([...Object.keys(KEYS), 'sync']);
+  }).catch(() => {});
 
-  /**
-   * يحفظ الطابور، ويقاتل على المساحة قبل أن يستسلم.
-   *
-   * `localStorage` يرفض الكتابة عند الامتلاء. تجاهل الرفض — وهو ما كان يحدث —
-   * يعني طابورًا يبدو محفوظًا ويضيع عند إغلاق التطبيق. المرآة مشتقة من الخادم
-   * وتُسحب من جديد، فهي أول ما يُفرَّغ لإفساح المكان لكتابة لا يملكها غيرنا.
-   */
+  // Storage pressure must never delete an account's offline mirror. The server
+  // may be unavailable and a newer cursor does not prove history is recoverable.
+  let queueSaveVersion = 0;
   const persistQueue = () => {
     refreshOverlay();
-    if (writeJson(QUEUE_KEY, queue)) {
-      durable = true;
-      return true;
-    }
-    mirror = {};
-    valuesCache = new Map();
-    try {
-      localStorage.removeItem(MIRROR_KEY);
-    } catch {
-      // لا شيء نفعله: نحاول الحفظ على أي حال
-    }
-    durable = writeJson(QUEUE_KEY, queue);
-    if (durable) {
-      // المرآة فُرِّغت: تُعاد من الخادم، والشاشة تُرقَّع بعدها
-      cursor = 0;
-      localStorage.setItem(CURSOR_KEY, '0');
-      void pull();
-    }
-    return durable;
+    const localSaved = writeJson(QUEUE_KEY, queue);
+    durable = localSaved;
+    const version = ++queueSaveVersion;
+    const generation = sessionGeneration;
+    void storeCopy('queue', { ops: queue }).then((saved) => {
+      if (disposed || generation !== sessionGeneration || version !== queueSaveVersion) return;
+      durable = localSaved || saved;
+      emit(['sync']);
+    });
+    return localSaved;
   };
 
   const persistQuarantine = () => writeJson(QUARANTINE_KEY, quarantine);
@@ -814,6 +851,111 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     persistQuarantine();
   }
 
+  /**
+   * Reconcile against the authoritative server, independent of the delta cursor.
+   *
+   * v0.0.177 could erase the local mirror while keeping a newer cursor, so fresh
+   * views arrived but historical works, friends and the Majlis never returned.
+   * A successful incremental poll does NOT prove the local mirror is complete.
+   *
+   * Stage a full, paginated snapshot off-screen; keep the old mirror and queued
+   * writes until the server's last page and the owner's ACTIVE row are verified.
+   * Never overwrite a working offline copy with an empty or partial response.
+   */
+  async function auditMirror({ force = false } = {}) {
+    if (auditingMirror) return auditCompletion;
+    const ownerId = user?.userId;
+    if (!token || !ownerId || disposed || auditingMirror || Date.now() < nextAuditAttemptAt) return;
+    const savedAudit = lastAudit;
+    const missingOwner = cursor > 0 && !mirror.accounts?.[ownerId];
+    const due = missingOwner || savedAudit?.userId !== ownerId ||
+      !Number.isFinite(Number(savedAudit?.at)) ||
+      Date.now() - Number(savedAudit.at) >= MIRROR_AUDIT_INTERVAL_MS;
+    if (!due && !force) return;
+    auditingMirror = true;
+    auditCompletion = new Promise((resolve) => { completeAudit = resolve; });
+    emit(['sync']);
+    const generation = sessionGeneration;
+    const tokenAtStart = token;
+    const snapshot = {};
+    let snapshotCursor = 0;
+    let skippedInitialZero = false;
+    try {
+      let completed = false;
+      for (let page = 0; page < MAX_MIRROR_AUDIT_PAGES; page += 1) {
+        const continuation = snapshotCursor === 0 && skippedInitialZero ? '&afterZero=1' : '';
+        const payload = await request(`/v1/sync?since=${snapshotCursor}${continuation}`);
+        if (disposed || user?.userId !== ownerId ||
+            sessionGeneration !== generation || token !== tokenAtStart) return;
+        if (!payload || payload.reset || !payload.changes || typeof payload.changes !== 'object') {
+          throw new Error('mirror_audit_invalid_response');
+        }
+        for (const [table, rows] of Object.entries(payload.changes)) {
+          const keyOf = KEYS[table];
+          if (!keyOf || !Array.isArray(rows)) continue;
+          const bucket = (snapshot[table === 'public_work_views' ? 'work_views' : table] ??= {});
+          for (const row of rows) bucket[keyOf(row)] = row;
+        }
+        const next = Number(payload.cursor);
+        if (!Number.isSafeInteger(next) || next < snapshotCursor) throw new Error('mirror_audit_stalled');
+        // A migrated dataset can contain 500+ rows at rev=0. The first page
+        // supplies all rev=0 rows (the server expands the revision boundary),
+        // and the follow-up opts into rev>0. Without this opt-in, since=0
+        // would repeat the migrated rows and leave the snapshot incomplete.
+        if (payload.more && next === snapshotCursor) {
+          if (next !== 0 || skippedInitialZero) throw new Error('mirror_audit_stalled');
+          skippedInitialZero = true;
+        } else {
+          snapshotCursor = next;
+          skippedInitialZero = false;
+        }
+        if (!payload.more) { completed = true; break; }
+      }
+      if (!completed) throw new Error('mirror_audit_page_limit');
+      const owner = snapshot.accounts?.[ownerId];
+      if (!owner || gone(owner)) throw new Error('mirror_audit_missing_active_owner');
+      // A substantially smaller or empty full response is not permission to
+      // destroy an older local backup. Retain it for recovery investigation.
+      for (const table of ['library', 'work_views', 'collections', 'completions', 'chapter_reads']) {
+        const previous = Object.values(mirror[table] ?? {}).filter((row) => row.user_id === ownerId).length;
+        const restored = Object.values(snapshot[table] ?? {}).filter((row) => row.user_id === ownerId).length;
+        if (previous > restored) throw new Error('mirror_audit_shrank_' + table);
+      }
+      if (disposed || user?.userId !== ownerId ||
+          sessionGeneration !== generation || token !== tokenAtStart) return;
+      // localStorage.setItem replaces the whole value atomically. A quota error
+      // leaves the old backup intact. Advance the cursor ONLY after this succeeds.
+      if (!await commitMirror(snapshot, snapshotCursor, Date.now())) throw new Error('mirror_audit_storage_full');
+      if (disposed || user?.userId !== ownerId || sessionGeneration !== generation || token !== tokenAtStart) return;
+      mirror = snapshot;
+      cursor = snapshotCursor;
+      landing = landing.filter((item) => item.rev > cursor);
+      refreshOverlay(); // Unsynced local edits remain visible over the restored snapshot.
+      writeJson(CURSOR_KEY, cursor);
+      lastAudit = { userId: ownerId, at: Date.now() };
+      writeJson(MIRROR_AUDIT_KEY, lastAudit);
+      lastSyncAt = Date.now();
+      writeJson('vantara.lastSync', lastSyncAt);
+      lastError = null;
+      nextAuditAttemptAt = 0;
+      auditFailure = null;
+      emit([...Object.keys(KEYS), 'sync']); // Refresh library, friends, profile and Majlis.
+      // Changes committed after the snapshot are fetched by the ordinary delta.
+      queueMicrotask(() => void pull());
+    } catch (error) {
+      nextAuditAttemptAt = Date.now() + MIRROR_AUDIT_RETRY_MS;
+      auditFailure = error?.message ?? 'mirror_audit_failed';
+      lastError = { status: 0, at: Date.now(), code: auditFailure };
+      emit(['sync']); // Never claim complete synchronization after a failed audit.
+    } finally {
+      auditingMirror = false;
+      completeAudit?.();
+      auditCompletion = null;
+      completeAudit = null;
+      emit(['sync']);
+    }
+  }
+
   // ───────────────────────── السحب ─────────────────────────
 
   /**
@@ -823,6 +965,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * تعني دفعة مقطوعة عند السقف، فنُكمل فورًا بلا انتظار الدورة القادمة.
    */
   async function pull() {
+    await recovered;
     if (!token || disposed) return;
     if (pulling) {
       pullAgain = true;
@@ -831,11 +974,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     pulling = true;
     const generation = sessionGeneration;
     const pullUserId = user?.userId ?? null;
+    let skippedInitialZero = false;
     try {
       // كل مسارات النداء تستخدم `void pull()`، فرفضٌ بلا معالجة كان يصبح
       // unhandled rejection: لا يظهر للمستخدم، ولا يُسجّل في صحة المزامنة
       for (let round = 0; round < MAX_PULL_ROUNDS; round += 1) {
-        const payload = await request(`/v1/sync?since=${cursor}`);
+        const continuation = cursor === 0 && skippedInitialZero ? '&afterZero=1' : '';
+        const payload = await request(`/v1/sync?since=${cursor}${continuation}`);
         if (!payload) break;
 
         // رد بدأ تحت حساب/جلسة أقدم لا يملك حق لمس مرآة الحساب الحالي.
@@ -847,8 +992,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         if (payload.reset) {
           // عدّاد الخادم رجع (استعادة نسخة احتياطية): نُعيد بناء المرآة، ولا
           // نمسّ الطابور — كتاباتنا غير المرسلة ليست جزءًا مما استُعيد
-          resyncMirror();
-          continue;
+          // Stage a complete replacement while the previous offline copy stays
+          // readable. A server restore never authorizes clearing local data.
+          nextAuditAttemptAt = 0;
+          await auditMirror({ force: true });
+          break;
         }
 
         const touched = [];
@@ -875,16 +1023,24 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           if (purged) touched.push('work_views');
         }
 
-        persistMirror();
-        cursor = Number(payload.cursor ?? cursor) || cursor;
+        const nextCursor = Number(payload.cursor ?? cursor) || cursor;
+        if (!await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
+        if (generation !== sessionGeneration || pullUserId !== (user?.userId ?? null)) break;
+        if (payload.more && nextCursor === 0) {
+          if (skippedInitialZero) throw new Error('mirror_delta_stalled_zero');
+          skippedInitialZero = true;
+        } else {
+          skippedInitialZero = false;
+        }
+        cursor = nextCursor;
         // ما لم يُرسل بعد، وما أُقرّ ولم يصل بعد، يبقى ظاهرًا فوق ما وصل:
         // سحبٌ أسبق من الكتابة لا يُرجع القلب ولا نقطة الإشعار
         if (landing.length) landing = landing.filter((l) => l.rev > cursor);
         refreshOverlay();
-        localStorage.setItem(CURSOR_KEY, String(cursor));
+        writeJson(CURSOR_KEY, cursor);
         if (touched.length > 0) emit(touched);
         lastSyncAt = Date.now();
-        localStorage.setItem('vantara.lastSync', String(lastSyncAt));
+        writeJson('vantara.lastSync', lastSyncAt);
         if (!payload.more) {
           backlog = false;
           break;
@@ -898,15 +1054,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
       }
       lastError = null;
-      // مرآةٌ بلا حسابات: سُحبت قبل أن يرسل الخادم صفوف rev = 0 (الحسابات
-      // المزروعة)، فالأسماء «صديق» والمجلس بلا وجوه. سحبٌ كامل مرة يصلحها
-      if (cursor > 0 && !Object.keys(mirror.accounts ?? {}).length && !localStorage.getItem('vantara.resync.accounts')) {
-        localStorage.setItem('vantara.resync.accounts', '1');
-        resyncMirror();
-        pullAgain = true;
-      }
+      // The old one-shot 'vantara.resync.accounts' flag allowed a broken local
+      // mirror to stay empty forever. Verify the FULL server state periodically,
+      // and immediately whenever even the owner's account row is missing.
+      if (!backlog) void auditMirror();
     } catch (error) {
-      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null };
+      lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null, code: error?.message === 'mirror_storage_full' ? 'mirror_storage_full' : null };
+      if (error?.message === 'mirror_storage_full') auditFailure = 'mirror_storage_full';
       emit(['sync']);
     } finally {
       pulling = false;
@@ -986,6 +1140,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * سببان يستحقان محاولة فورية، بينما الدورة الزمنية تحترم التراجع.
    */
   async function push({ force = false } = {}) {
+    await recovered;
     if (!token || queue.length === 0) return;
     if (pushing) {
       // طلب أثناء إرسال جارٍ لا يُهمل: الدفعة الحالية قد لا تحمل آخر عملية
@@ -1067,7 +1222,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         persistQueue();
 
         lastSuccessAt = Date.now();
-        localStorage.setItem('vantara.lastPush', String(lastSuccessAt));
+        writeJson('vantara.lastPush', lastSuccessAt);
         lastError = null;
         nextPushAt = 0;
         overflowing = false;
@@ -1110,9 +1265,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function health() {
-    return syncHealth({
+    const result = syncHealth({
       lastSyncAt,
-      backlog,
+      backlog: backlog || auditingMirror || (cursor > 0 && !mirror.accounts?.[user?.userId]),
       pending: queue.length,
       quarantined: quarantine.length,
       lastSuccessAt,
@@ -1122,6 +1277,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       overflowing,
       now: Date.now(),
     });
+    return auditFailure
+      ? {
+          ...result, state: 'degraded',
+          message: auditFailure.endsWith('storage_full')
+            ? 'تعذّر حفظ بيانات الحساب على الجهاز؛ وفّر مساحة ثم اضغط زامن الآن. بياناتك القديمة محفوظة'
+            : 'لم يكتمل استرجاع بيانات الحساب؛ ستُعاد المحاولة',
+          // A later successful delta poll clears lastError, but must never hide
+          // the real full-history restoration failure.
+          lastError: { ...(result.lastError ?? {}), code: auditFailure },
+        }
+      : result;
   }
 
   // ───────────────────────── الحضور ─────────────────────────
@@ -1471,17 +1637,18 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     publishLatest: (sourceId, value, leaseUntil, leaseToken) => request('/v1/source-latest', { method: 'POST', body: { sourceId, value, leaseUntil, leaseToken } }),
     health,
     retryQuarantined,
-    /**
-     * إعادة بناء المرآة من الخادم.
-     *
-     * مخرج صريح حين تبدو البيانات المحلية غريبة: يمسح المرآة والـcursor ولا
-     * يمسّ الطابور. بلا مسار كهذا كان الحل الوحيد تسجيل خروج ودخول — وذلك
-     * يمسح كتابات غير مرسلة.
-     */
+    // Explicit recovery retries storage immediately, keeping the old offline
+    // mirror until the complete server snapshot has a durable replacement.
     async resync() {
-      resyncMirror();
-      emit(['sync']);
-      await pull();
+      await recovered;
+      nextAuditAttemptAt = 0;
+      await auditMirror({ force: true });
+    },
+    async retryRecovery() {
+      await recovered;
+      if (!auditFailure && !auditingMirror) return;
+      nextAuditAttemptAt = 0;
+      await auditMirror({ force: true });
     },
     get quarantined() {
       return quarantine.length;

@@ -159,7 +159,9 @@ describe('long offline then online', () => {
     for (const count of server.state.reads.values()) expect(count).toBe(1);
     expect(server.state.usageMs).toBe(40 * 60_000);
     expect(sync.pendingWrites).toBe(0);
-    expect(sync.health().state).toBe('ok');
+    // This fixture proves all writes reached the server, not that the local
+    // account mirror was fully hydrated; do not display a false green status.
+    expect(sync.health().state).not.toBe('ok');
   });
 
   it('survives a reply lost after the server already applied it', async () => {
@@ -263,7 +265,9 @@ describe('a very large queue', () => {
     expect(sizes.some((n) => n === 1)).toBe(true);
     expect(server.state.reads.size).toBe(14);
     expect(sync.pendingWrites).toBe(0);
-    expect(sync.health().state).toBe('ok');
+    // This fixture proves all writes reached the server, not that the local
+    // account mirror was fully hydrated; do not display a false green status.
+    expect(sync.health().state).not.toBe('ok');
   });
 
   it('keeps the reads when the queue overflows its limit', async () => {
@@ -362,7 +366,9 @@ describe('content API down while the worker is up', () => {
     expect(server.state.progress.get('c1')).toBe(30);
     // لا عملية إقرار: الإقرار يأتي من نجاح كتابة عند المالك، والمالك ساقط
     expect(sync.pendingWrites).toBe(0);
-    expect(sync.health().state).toBe('ok');
+    // This fixture proves all writes reached the server, not that the local
+    // account mirror was fully hydrated; do not display a false green status.
+    expect(sync.health().state).not.toBe('ok');
   });
 
   it('never lets an older device push progress backwards', async () => {

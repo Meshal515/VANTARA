@@ -72,7 +72,9 @@ it('renews an expired identity after offline recovery and retries a lost write r
     expect(db.prepare('SELECT COUNT(*) AS n FROM applied_ops').get().n).toBe(1);
     expect(db.prepare('SELECT read_count FROM chapter_reads WHERE user_id = ? AND chapter_key = ?').get(USER, 'src:test:chapter-1').read_count).toBe(1);
     expect(sync.rows('chapter_reads')).toEqual(expect.arrayContaining([expect.objectContaining({ user_id: USER, chapter_key: 'src:test:chapter-1', read_count: 1 })]));
-    expect(sync.health().state).toBe('ok');
+    // This fixture proves all writes reached the server, not that the local
+    // account mirror was fully hydrated; do not display a false green status.
+    expect(sync.health().state).not.toBe('ok');
   } finally {
     db.close();
   }

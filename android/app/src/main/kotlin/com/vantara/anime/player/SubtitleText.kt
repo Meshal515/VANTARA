@@ -1,7 +1,7 @@
 package com.vantara.anime.player
 
 /**
- * ترجمة نصية (SRT/WebVTT) نعرضها بأنفسنا لا عبر Media3:
+ * ترجمة نصية (SRT/WebVTT/ASS/SSA) نعرضها بأنفسنا لا عبر Media3:
  *  - التأخير والتقديم بالاتجاهين: السطر يُختار بوقت المشغّل + الإزاحة، فالتقديم ممكن
  *    لأن الملف كله عندنا (Media3 لا يعطي سطرًا قبل موعده).
  *  - تغيير الترجمة لا يعيد تحميل الفيديو (كان الاختيار يبني MediaSource جديدًا ويحضّره).
@@ -9,9 +9,61 @@ package com.vantara.anime.player
 data class TimedCue(val startMs: Long, val endMs: Long, val text: String)
 
 object SubtitleText {
-    private val TIME = Regex("""(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[,.](\d{1,3})""")
+    private val TIME = Regex("""(?:(\d{1,3}):)?(\d{1,2}):(\d{2})[,.](\d{1,3})""")
     private val ARROW = Regex("""^\s*(\S+)\s*-->\s*(\S+)""")
     private val TAG = Regex("""<[^>]+>|\{\\[^}]*\}""")
+    private val SECTION = Regex("""^\[[^\]]+\]$""")
+    private val ASS_PART = Regex("""\{([^}]*)\}|([^{}]+)""")
+    private val ASS_DRAW = Regex("""\\(?:p(\d+)(?![0-9a-z])|r[^\\}]*)""", RegexOption.IGNORE_CASE)
+
+    private fun assBody(source: String): String {
+        var drawing = false
+        val body = StringBuilder()
+        for (part in ASS_PART.findAll(source)) {
+            val override = part.groups[1]
+            if (override != null) {
+                for (command in ASS_DRAW.findAll(override.value)) {
+                    drawing = command.groups[1]?.value?.any { it != '0' } ?: false
+                }
+            } else if (!drawing) body.append(part.groupValues[2])
+        }
+        return body.toString().replace("\\N", "\n").replace("\\n", "\n").replace("\\h", "\u00a0").replace(TAG, "").trim()
+    }
+
+    private fun parseAss(text: String): List<TimedCue> {
+        val out = ArrayList<TimedCue>()
+        var events = false
+        var fields: List<String>? = null
+        for (raw in text.lineSequence()) {
+            val line = raw.trim()
+            if (SECTION.matches(line)) {
+                events = line.equals("[Events]", ignoreCase = true)
+                fields = null
+                continue
+            }
+            if (!events) continue
+            if (line.startsWith("Format:", ignoreCase = true)) {
+                fields = line.substringAfter(':').split(',').map { it.trim().lowercase(java.util.Locale.ROOT) }
+                continue
+            }
+            val format = fields ?: continue
+            if (!line.startsWith("Dialogue:", ignoreCase = true) || format.lastOrNull() != "text") continue
+            val startIndex = format.indexOf("start")
+            val endIndex = format.indexOf("end")
+            if (startIndex < 0 || endIndex < 0) continue
+            // Text is the final field and may itself contain any number of commas.
+            val columns = line.substringAfter(':').trimStart().split(',', limit = format.size)
+            if (columns.size != format.size) continue
+            val start = time(columns[startIndex]) ?: continue
+            val end = time(columns[endIndex]) ?: continue
+            if (end <= start) continue
+            val body = assBody(columns.last())
+            if (body.isEmpty()) continue
+            out.add(TimedCue(start, end, body))
+            require(out.size <= 20000) { "عدد أسطر الترجمة أكبر من الحد" }
+        }
+        return out.sortedBy { it.startMs }
+    }
 
     /** «00:01:02,500» أو «01:02.5» ← ميلي ثانية، أو null. */
     fun time(raw: String): Long? {
@@ -26,8 +78,11 @@ object SubtitleText {
 
     /** يقرأ SRT وWebVTT معًا: كل كتلة فيها «بداية --> نهاية» ثم سطور النص. مرتّبة بالبداية. */
     fun parse(text: String): List<TimedCue> {
+        require(text.length <= 2 * 1024 * 1024) { "ملف الترجمة أكبر من الحد" }
+        val normalized = text.removePrefix("﻿").replace("\r\n", "\n").replace('\r', '\n')
+        if (normalized.lineSequence().any { it.trim().equals("[Events]", ignoreCase = true) }) return parseAss(normalized)
         val out = ArrayList<TimedCue>()
-        val blocks = text.removePrefix("﻿").replace("\r\n", "\n").replace('\r', '\n').split(Regex("\n\\s*\n"))
+        val blocks = normalized.split(Regex("\n\\s*\n"))
         for (block in blocks) {
             val lines = block.split('\n')
             val at = lines.indexOfFirst { ARROW.containsMatchIn(it) }
@@ -39,6 +94,7 @@ object SubtitleText {
             val body = lines.drop(at + 1).map { it.replace(TAG, "").trim() }.filter { it.isNotEmpty() }
             if (body.isEmpty()) continue
             out.add(TimedCue(start, end, body.joinToString("\n")))
+            require(out.size <= 20000) { "عدد أسطر الترجمة أكبر من الحد" }
         }
         out.sortBy { it.startMs }
         return out

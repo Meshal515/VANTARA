@@ -84,3 +84,43 @@ describe('بلا إطارات زائدة (F)', () => {
     expect(rule('.v35 .cn-search')).not.toMatch(/box-shadow/);
   });
 });
+
+describe('ترويسات السينما على الجوال: لمس ثابت رغم تمرير البانر', () => {
+  it('ترويسة الرئيسية خارج طبقة الصورة المتحركة وبدون translateZ', () => {
+    const selector = ".v35[data-section='cinema'] #home:has(> #cinemaHome:not([hidden]) > .cn-hero-alt) > .header";
+    const rules = rule(selector);
+    expect(rules).toMatch(/position:\s*fixed/);
+    expect(rules).toMatch(/z-index:\s*100/);
+    expect(rules).toMatch(/transform:\s*none/);
+    expect(rule('.v35 .cn-hero-alt')).toMatch(/margin-top:\s*0/);
+  });
+  it('شريط الرجوع ثابت في الشاشة، ويستقبل اللمس من الحاوية نفسها', () => {
+    const bar = rule('.v35 #cinema.active .cn-detail-bar');
+    expect(bar).toMatch(/position:\s*fixed/);
+    expect(bar).toMatch(/z-index:\s*100/);
+    expect(bar).toMatch(/pointer-events:\s*auto/);
+    expect(bar).toMatch(/transform:\s*none/);
+  });
+});
+
+describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبتلع اللمس', () => {
+  const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
+  it('يلغي إطار الفتح المؤجل عند الإغلاق ويمنع إعادة فتح الستار بعده', () => {
+    expect(shell).toContain('cancelAnimationFrame(sectionOpenFrame)');
+    expect(shell).toContain('if (!sectionsOpen()) return;');
+  });
+  it('يعطّل التقاط اللمس على الستار والقائمة فور بدء الإغلاق', () => {
+    expect(shell).toContain("scrim.style.pointerEvents = 'none'");
+    expect(shell).toContain("menu.style.pointerEvents = 'none'");
+  });
+});
+
+describe('لا قوائم شفافة تعترض أزرار الترويسة', () => {
+  const coreCss = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
+  it('يحترم hidden رغم display:grid في قائمة الأقسام', () => {
+    expect(coreCss).toMatch(/\.v35 \.section-menu\[hidden\]\s*\{\s*display:\s*none/);
+  });
+  it('لا يستقبل الستار المغلق اللمس أثناء انتقال الشفافية', () => {
+    expect(coreCss).toMatch(/\.v35 \.section-scrim:not\(\.open\)\s*\{\s*pointer-events:\s*none/);
+  });
+});

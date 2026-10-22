@@ -13,6 +13,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { SHELL_HTML } from './markup.js';
+import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { getAddonRuntime } from '../addons/runtime.js';
@@ -57,6 +58,7 @@ import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
 import { onLongPress, roomInitial } from './social-kit.js';
+import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
 import { reconcileCardNodes } from './card-reconcile.js';
 import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
@@ -226,28 +228,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     t._x = setTimeout(() => t.classList.remove('show'), ms);
   }
 
-  let sheetClose = null;
-  /** ورقة سفلية واحدة في وقتٍ واحد. `build` يملأها ويرجع ما يُنادى عند الإغلاق. */
-  /** `tone`: لون نوع المحتوى (manga/anime) إن اختلف عن القسم المفتوح. `full`: صفحة كاملة لا ورقة. */
-  function openSheet(build, { tone = null, full = false } = {}) {
-    closeSheet();
-    const body = q('sheetBody');
-    body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
-    body.className = 'sheet';
-    if (tone) q('sheet').dataset.tone = tone;
-    // صفحة كاملة (اختيار السيرفر والجودة): نفس الطبقة وزر الرجوع يغلقها
-    q('sheet').classList.toggle('sheet-backdrop--full', full);
-    sheetClose = build(body) ?? null;
-    q('sheet').classList.add('show');
-  }
-  function closeSheet() {
-    if (!q('sheet').classList.contains('show')) return false;
-    q('sheet').classList.remove('show');
-    delete q('sheet').dataset.tone;
-    sheetClose?.();
-    sheetClose = null;
-    return true;
-  }
+  // ورقة واحدة مشتركة: الإغلاق يُعطّل شجرة اللمس كاملة، لا خلفيتها فقط.
+  const sheetController = createSheetController(q('sheet'), q('sheetBody'));
+  const openSheet = sheetController.open;
+  const closeSheet = sheetController.close;
   function sheetItem(icon, label, run, { pressed, danger } = {}) {
     const b = el('button', `sheet-item${danger ? ' sheet-item--danger' : ''}`);
     b.type = 'button';
@@ -4666,13 +4650,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const health = api.health();
     const bad = health.state !== 'ok' && health.state !== 'syncing';
+    // This code contains no account details. Make a failed recovery actionable:
+    // the previous screen only said "recovery incomplete" for every cause.
+    const recoveryCode = health.lastError?.code
+      || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
     group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
+      ...(bad ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
         run: async () => {
           toast('جارٍ المزامنة…');
           await api.syncNow().catch(() => {});
-          toast('تمّت المزامنة');
+          // Settled writes are not the same as a verified complete local mirror.
+          const after = api.health();
+          toast(after.state === 'ok' ? 'اكتملت المزامنة' : after.message);
           renderSettings();
         },
       }),
@@ -4694,17 +4685,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
     }
 
-    group(
-      'منطقة الخطر',
-      [
-        row('server', 'عنوان الخادم', 'غلط فيه يفصل التطبيق عن حساباتكم', { value: hostOf(api.endpoints().sync), danger: true, run: () => confirmDanger('serverUrl') }),
-        row('layers', 'أعد بناء البيانات المحلية', 'يمسح ما على الجهاز ويجيبه من الخادم من جديد', { danger: true, run: () => confirmDanger('rebuild') }),
-        health.quarantined
-          ? row('alert', 'عمليات رفضها الخادم', null, { value: String(health.quarantined), danger: true, run: () => confirmDanger('retry') })
-          : null,
-      ],
-      { cls: 'danger-zone', note: 'لا تلمس شي هنا إلا إذا طُلب منك. كل خيار يسألك قبل ما يسوي شي.' },
-    );
+    // Not a general account setting: hide ALL dangerous actions for friends.
+    if (canManageDangerZone(sync)) {
+      group(
+        'منطقة الخطر',
+        [
+          row('server', 'عنوان الخادم', 'غلط فيه يفصل التطبيق عن حساباتكم', { value: hostOf(api.endpoints().sync), danger: true, run: () => confirmDanger('serverUrl') }),
+          row('layers', 'أعد بناء البيانات المحلية', 'يمسح ما على الجهاز ويجيبه من الخادم من جديد', { danger: true, run: () => confirmDanger('rebuild') }),
+          health.quarantined
+            ? row('alert', 'عمليات رفضها الخادم', null, { value: String(health.quarantined), danger: true, run: () => confirmDanger('retry') })
+            : null,
+        ],
+        { cls: 'danger-zone', note: 'متاحة لحساب المالك فقط. كل إجراء يسألك قبل ما يسوي شي.' },
+      );
+    }
   }
 
   /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
@@ -4799,6 +4793,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** كل ما في منطقة الخطر يمرّ بسؤال واحد واضح قبل أن يفعل شيئًا. */
   function confirmDanger(what) {
+    // Recheck even for stale buttons/sheets after switching accounts.
+    if (!canManageDangerZone(sync)) return;
     const api = deps.settings;
     const copy = {
       serverUrl: ['تغيّر عنوان الخادم؟', 'لو كتبت عنوانًا غلط ينفصل التطبيق عن حساباتكم ومزامنتكم. غيّره بس إذا طُلب منك.', 'أبغى أغيّره', () => openServerSheet()],
@@ -4814,6 +4810,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         renderSettings();
       }],
     }[what];
+    if (!copy) return;
     const [title, text, label, run] = copy;
     openSheet((body) => {
       body.append(el('h3', null, title), el('p', null, text));
@@ -4825,6 +4822,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       go.type = 'button';
       go.onclick = () => {
         closeSheet();
+        if (!canManageDangerZone(sync)) return;
         void run();
       };
       actions.append(cancel, go);
@@ -4841,6 +4839,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openServerSheet() {
+    if (!canManageDangerZone(sync)) return;
     const api = deps.settings;
     const ep = api.endpoints();
     openSheet((body) => {
@@ -4865,6 +4864,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       save.type = 'button';
       const status = el('p', 'settings-note');
       save.onclick = async () => {
+        if (!canManageDangerZone(sync)) return;
         const valid = (v) => !v || /^https:\/\/[^\s]+$/i.test(v);
         const next = { sync: syncInput.value.trim().replace(/\/+$/, ''), api: apiInput.value.trim().replace(/\/+$/, '') };
         if (!next.sync) return void (status.textContent = 'عنوان خادم المزامنة مطلوب.');
@@ -4889,6 +4889,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           status.textContent = !syncOk ? 'خادم المزامنة ما ردّ. ما حفظنا شي، والعنوان القديم باقي.' : 'خادم المحتوى ما ردّ. ما حفظنا شي.';
           return;
         }
+        if (!canManageDangerZone(sync)) return;
         api.setEndpoints(next);
         save.textContent = 'حُفظ. جارٍ إعادة التشغيل…';
         setTimeout(() => window.location.reload(), 400);
@@ -4947,22 +4948,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
-  // «VANTARA MANGA ⌄»: قائمة الأقسام. الأنمي والسينما قريبًا.
+  // ألغِ فتحًا مؤجَّلًا عند الإغلاق كي لا تعود طبقة كاملة لابتلاع اللمس.
+  let sectionOpenFrame = 0;
   function setSectionsOpen(open) {
     const menu = q('sectionMenu');
     const scrim = q('sectionScrim');
     const button = q('brandSwitch');
     if (!menu || !button) return;
+    if (sectionOpenFrame) {
+      cancelAnimationFrame(sectionOpenFrame);
+      sectionOpenFrame = 0;
+    }
     button.setAttribute('aria-expanded', String(open));
     if (open) {
+      menu.style.removeProperty('pointer-events');
+      scrim.style.removeProperty('pointer-events');
       for (const layer of [menu, scrim]) layer.hidden = false;
-      requestAnimationFrame(() => {
+      sectionOpenFrame = requestAnimationFrame(() => {
+        sectionOpenFrame = 0;
+        if (!sectionsOpen()) return;
         menu.classList.add('open');
         scrim.classList.add('open');
         menuIn(menu, [...menu.querySelectorAll('.section-item')]);
       });
       return;
     }
+    // تعتيم الطبقة لا يعطّل hit testing: أوقف اللمس فورًا لا بعد 240ms.
+    menu.style.pointerEvents = 'none';
+    scrim.style.pointerEvents = 'none';
     scrim.classList.remove('open');
     setTimeout(() => {
       if (!scrim.classList.contains('open')) scrim.hidden = true;
@@ -5548,6 +5561,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       majlis.hide();
       clearInterval(state.heroTimer);
       clearInterval(chapterRefreshTimer);
+      sheetController.destroy();
       document.removeEventListener('visibilitychange', refreshChapters);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);

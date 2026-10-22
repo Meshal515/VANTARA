@@ -1,0 +1,116 @@
+[
+  {
+    "index": 0,
+    "android_cues": 1785,
+    "arabic_chars": 38001,
+    "replacement_chars": 0
+  },
+  {
+    "index": 1,
+    "android_cues": 1781,
+    "arabic_chars": 37911,
+    "replacement_chars": 0
+  },
+  {
+    "index": 2,
+    "android_cues": 1808,
+    "arabic_chars": 40106,
+    "replacement_chars": 0
+  },
+  {
+    "index": 3,
+    "android_cues": 1808,
+    "arabic_chars": 40106,
+    "replacement_chars": 0
+  },
+  {
+    "index": 4,
+    "android_cues": 1730,
+    "arabic_chars": 38124,
+    "replacement_chars": 0
+  },
+  {
+    "index": 5,
+    "android_cues": 1679,
+    "arabic_chars": 39584,
+    "replacement_chars": 0
+  },
+  {
+    "index": 6,
+    "android_cues": 0,
+    "arabic_chars": 0,
+    "replacement_chars": 0
+  },
+  {
+    "index": 7,
+    "android_cues": 1737,
+    "arabic_chars": 38292,
+    "replacement_chars": 0
+  },
+  {
+    "index": 8,
+    "android_cues": 1678,
+    "arabic_chars": 39622,
+    "replacement_chars": 0
+  },
+  {
+    "index": 9,
+    "android_cues": 1785,
+    "arabic_chars": 36491,
+    "replacement_chars": 0
+  },
+  {
+    "index": 10,
+    "android_cues": 1777,
+    "arabic_chars": 38231,
+    "replacement_chars": 0
+  },
+  {
+    "index": 11,
+    "android_cues": 1830,
+    "arabic_chars": 33830,
+    "replacement_chars": 0
+  },
+  {
+    "index": 12,
+    "android_cues": 1853,
+    "arabic_chars": 37988,
+    "replacement_chars": 0
+  },
+  {
+    "index": 13,
+    "android_cues": 1774,
+    "arabic_chars": 35484,
+    "replacement_chars": 0
+  },
+  {
+    "index": 14,
+    "android_cues": 1783,
+    "arabic_chars": 38001,
+    "replacement_chars": 0
+  },
+  {
+    "index": 15,
+    "android_cues": 1783,
+    "arabic_chars": 38001,
+    "replacement_chars": 0
+  },
+  {
+    "index": 16,
+    "android_cues": 1828,
+    "arabic_chars": 33780,
+    "replacement_chars": 0
+  },
+  {
+    "index": 17,
+    "android_cues": 1776,
+    "arabic_chars": 36744,
+    "replacement_chars": 0
+  },
+  {
+    "index": 18,
+    "android_cues": 1594,
+    "arabic_chars": 35153,
+    "replacement_chars": 0
+  }
+]

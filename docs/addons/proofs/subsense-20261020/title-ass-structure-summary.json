@@ -1,0 +1,23 @@
+{
+  "dialogue_count": 3616,
+  "field_counts": {
+    "10": 3616
+  },
+  "override_tags": {
+    "an": 2,
+    "c": 2,
+    "Nhttps": 2,
+    "p": 3614,
+    "N": 687,
+    "i": 164
+  },
+  "literal_newline_count": 685,
+  "hard_space_count": 0,
+  "unique_timestamp_and_plain_text": 3616,
+  "styles": {
+    "Default": 1809,
+    "SE-box-bg": 1807
+  },
+  "bom": false,
+  "crlf_count": 3631
+}

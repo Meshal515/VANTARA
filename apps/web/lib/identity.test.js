@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountWithIdentity, identityFor, withIdentity } from './identity.js';
+import { accountWithIdentity, canManageDangerZone, identityFor, withIdentity } from './identity.js';
 
 const NGM = 'bedcf897-a6f0-4730-b757-402b14891ca5';
 const DAHMI = '07588797-a471-44d1-99ce-7fb4f188c196';
@@ -39,5 +39,49 @@ describe('الهوية الأساسية', () => {
   it('حساب غريب يمرّ كما هو', () => {
     const row = { user_id: 'x', display_name: null, avatar_key: null };
     expect(withIdentity(row)).toBe(row);
+  });
+});
+
+
+describe('منطقة الخطر: صلاحية حساب المالك وحده', () => {
+  const MANSOUR = '9e4b51d9-4ca0-4da2-9b1f-2205e67134ed';
+  const session = (who, rows, locked = false) => ({
+    user: who ? { userId: who, username: 'ngm' } : null,
+    locked,
+    rows(table, predicate) {
+      return table === 'accounts' ? rows.filter(predicate) : [];
+    },
+  });
+  const owner = { user_id: NGM, badge: 'owner', lifecycle: 'ACTIVE' };
+
+  it('يعرضها فقط لحساب ngm المالك الذي منحه الخادم شارة المالك', () => {
+    expect(canManageDangerZone(session(NGM, [owner]))).toBe(true);
+  });
+
+  it('يخفيها عن منصور ودحمي حتى لو نُسخت الشارة إلى حسابهما', () => {
+    for (const id of [DAHMI, MANSOUR]) {
+      expect(canManageDangerZone(session(id, [owner]))).toBe(false);
+      expect(canManageDangerZone(session(id, [{ user_id: id, badge: 'owner', lifecycle: 'ACTIVE' }]))).toBe(false);
+    }
+  });
+
+  it('لا يمنحها لمجرد تطابق اسم المستخدم أو عند غياب سجل المالك', () => {
+    expect(canManageDangerZone(session('impostor', [owner]))).toBe(false);
+    expect(canManageDangerZone(session(NGM, []))).toBe(false);
+    expect(canManageDangerZone(session(NGM, [{ ...owner, badge: null }]))).toBe(false);
+    expect(canManageDangerZone(session(null, [owner]))).toBe(false);
+  });
+
+  it('يقفلها أثناء قفل الحساب أو فترة حذفه', () => {
+    expect(canManageDangerZone(session(NGM, [owner], true))).toBe(false);
+    expect(canManageDangerZone(session(NGM, [{ ...owner, lifecycle: 'PENDING_DELETE' }]))).toBe(false);
+    expect(canManageDangerZone(session(NGM, [{ ...owner, lifecycle: 'DELETED' }]))).toBe(false);
+  });
+
+  it('تتغير الصلاحية فور تبديل الحساب على الجهاز نفسه', () => {
+    const active = session(NGM, [owner]);
+    expect(canManageDangerZone(active)).toBe(true);
+    active.user = { userId: DAHMI, username: 'dahmi' };
+    expect(canManageDangerZone(active)).toBe(false);
   });
 });

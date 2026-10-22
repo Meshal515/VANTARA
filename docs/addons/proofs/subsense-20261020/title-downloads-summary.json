@@ -1,0 +1,511 @@
+[
+  {
+    "index": 0,
+    "id": "subsense-srt-opensubtitles-ara-0",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 164746,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1785,
+    "sha256": "3723d9169a041a4ca03f3de4cd85524cc72a2c386c565e9df004a2cac0de50ab",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 1,
+    "id": "subsense-srt-opensubtitles-ara-1",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "sub.wyzie.io",
+    "url_extension": "",
+    "bytes": 156643,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1781,
+    "sha256": "dbeadb6f5695ce74194fc199abb280d9c8a807976d0891ddbccada7502c20fd3",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "sub.wyzie.io",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 2,
+    "id": "subsense-vtt-opensubtitles-ara-2",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 157768,
+    "format": "vtt",
+    "encoding": "utf-8",
+    "timing_count": 1808,
+    "sha256": "fc4fe10dcb885a69935fe1762e1532a72983f9723c9ec53a5b062c1cec040258",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/vtt; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-subsense-original-format",
+        "ass"
+      ],
+      [
+        "x-subsense-output-format",
+        "vtt"
+      ]
+    ]
+  },
+  {
+    "index": 3,
+    "id": "subsense-srt-opensubtitles-ara-3",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 164418,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1808,
+    "sha256": "6316c8655984eb14cae69ec26f43d6502208dea3c3a4d6f9dbb51ff7e28eb59e",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-subsense-original-format",
+        "ass"
+      ],
+      [
+        "x-subsense-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 4,
+    "id": "subsense-srt-opensubtitles-ara-4",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "sub.wyzie.io",
+    "url_extension": "",
+    "bytes": 151830,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1731,
+    "sha256": "531c006a7f5092e2503c395f060d7163f8dc7ce1bb625b9f0c2af837d276b115",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "sub.wyzie.io",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 5,
+    "id": "subsense-srt-opensubtitles-ara-5",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "sub.wyzie.io",
+    "url_extension": "",
+    "bytes": 151736,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1688,
+    "sha256": "74f114a0d544a5686dd7498b5596fd9be6bdaa40bb22bf6f1c550ceae24211ae",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "sub.wyzie.io",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 6,
+    "id": "subsense-ssa-opensubtitles-ara-6",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".ssa",
+    "bytes": 379513,
+    "format": "ass",
+    "encoding": "utf-8",
+    "timing_count": 0,
+    "sha256": "307efeb8fb9ca2420de5d2765b8eea0bd5c5354afed25d06de3daf1dbd4d133f",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 7,
+    "id": "subsense-srt-opensubtitles-ara-7",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 160239,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1738,
+    "sha256": "f130c45b915e0ed1c7f72aa149083706074e0446aa0b0bc04002a313e7d0f9d9",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 8,
+    "id": "subsense-srt-opensubtitles-ara-8",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 159047,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1689,
+    "sha256": "c173124f4992b2542b71931aa8791c1e42353720c5d231cf118607a4c0ba9a3d",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 9,
+    "id": "subsense-srt-opensubtitles-ara-9",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 118557,
+    "format": "srt",
+    "encoding": "cp1256",
+    "timing_count": 1785,
+    "sha256": "c382c22f384c30c67e889ed8552a980545f6b5a208b51bf446c7af11acb86b09",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 10,
+    "id": "subsense-srt-opensubtitles-ara-10",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 159408,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1777,
+    "sha256": "8865f0a91bbbc51189be099961a9d3cd911f402c4723c3f87236a1e5d2bc516c",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 11,
+    "id": "subsense-srt-opensubtitles-ara-11",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 162393,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1830,
+    "sha256": "23cb3c9a523e49df8b5bd017ba55866b8abe69fb1095ee4fa385a2e914f03da5",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 12,
+    "id": "subsense-srt-opensubtitles-ara-12",
+    "lang": "ara",
+    "source": "opensubtitles",
+    "url_host": "dl.opensubtitles.org",
+    "url_extension": ".srt",
+    "bytes": 161363,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1853,
+    "sha256": "3fb2c549caf933b2e08c6623603a59f097ee674b5d30464751dc301dd4fbae96",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "application/force-download",
+    "final_host": "dl.opensubtitles.org",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": []
+  },
+  {
+    "index": 13,
+    "id": "subsense-srt-ytssubs-ara-13",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 160063,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1774,
+    "sha256": "a23a6ab726e63d51d7f0d2e4225f8c6df5d35ba6f48ec9f88ec7509d59e8d2c3",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 14,
+    "id": "subsense-srt-ytssubs-ara-14",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 164551,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1783,
+    "sha256": "6de682bb3bbf60443ac1cb6e839d61c6625878b3373afe8996ba97f4131e8297",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 15,
+    "id": "subsense-srt-ytssubs-ara-15",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 164551,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1783,
+    "sha256": "9b5e29cb91102143275d5bb0861e9aca8143d96bc8001bb379b986207417dc7c",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 16,
+    "id": "subsense-srt-ytssubs-ara-16",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 162121,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1828,
+    "sha256": "07684e979929a4422f502d9402f4858b0a9d43b6ed307f198d9112e088374299",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 17,
+    "id": "subsense-srt-ytssubs-ara-17",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 154864,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1776,
+    "sha256": "f192082f3cb5c3045cc5213e9ad379a5e9330e9964c83446c0576bf1334d0a68",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  },
+  {
+    "index": 18,
+    "id": "subsense-srt-ytssubs-ara-18",
+    "lang": "ara",
+    "source": "yts-subs",
+    "url_host": "subsense.nepiraw.com",
+    "url_extension": "",
+    "bytes": 144662,
+    "format": "srt",
+    "encoding": "utf-8",
+    "timing_count": 1594,
+    "sha256": "c3b567fb437b74b76960d72d5f63e5c63867841666d5937ceab9ca4de825acfc",
+    "http": 200,
+    "redirects": 0,
+    "content_type": "text/plain; charset=utf-8",
+    "final_host": "subsense.nepiraw.com",
+    "exit": 0,
+    "cors_allow_origin": [
+      "*"
+    ],
+    "response_encoding": [],
+    "original_format_headers": [
+      [
+        "x-yify-original-format",
+        "srt"
+      ],
+      [
+        "x-yify-output-format",
+        "srt"
+      ]
+    ]
+  }
+]

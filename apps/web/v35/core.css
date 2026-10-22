@@ -464,6 +464,14 @@ html,
 .v35 .section-menu.open {
   opacity: 1;
 }
+/* display:grid كان يتجاوز [hidden] في UA stylesheet؛ يمنع قائمة شفافة
+   من البقاء فوق شريط الأزرار مع أنها تبدو مغلقة. */
+.v35 .section-menu[hidden] {
+  display: none;
+}
+.v35 .section-scrim:not(.open) {
+  pointer-events: none;
+}
 .v35 .section-item {
   --tone: #8f5cff;
   position: relative;
@@ -2019,6 +2027,15 @@ html,
 .v35 .sheet-backdrop.show {
   opacity: 1;
   pointer-events: auto;
+}
+/* The shared server sheet has interactive descendants with pointer-events:auto.
+   When it closes, make the entire subtree non-interactive regardless of those rules. */
+.v35 .sheet-backdrop[hidden] {
+  display: none;
+}
+.v35 .sheet-backdrop[inert],
+.v35 .sheet-backdrop[inert] * {
+  pointer-events: none !important;
 }
 .v35 .sheet {
   width: min(100%, 520px);
