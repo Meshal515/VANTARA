@@ -1276,7 +1276,7 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
     ['Faster reader', 'Fix typo'],
   );
   const manifest = buildManifest({
-    version: '0.0.9', code: '9', native: 'a'.repeat(24), base: 'https://x',
+    version: '0.0.9', code: '9', native: 'a'.repeat(24), base: 'https://github.com/Meshal515/VANTARA/releases/download/stable-9',
     apk: 'tools/update-policy.json', web: 'tools/update-policy.json', changelog: ['x'], policy: { minimumSupportedVersionCode: 4 },
   });
   for (const key of ['versionName', 'versionCode', 'native', 'minimumSupportedVersionCode', 'changelog', 'apk', 'web']) {

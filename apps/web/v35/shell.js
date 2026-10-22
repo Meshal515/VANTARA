@@ -383,7 +383,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ...sync.rows('collections', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
       ...sync.rows('completions', (r) => r.user_id === me() && r.member && !isMediaRef(r.series_ref)).map((r) => r.series_ref),
     ]);
-    return [...refs]
+    const cards = [...refs]
       .map((ref) => {
         const row = libraryRows().find((r) => r.series_ref === ref);
         const col = sync.rows('collections', (r) => r.user_id === me() && r.series_ref === ref)[0];
@@ -402,6 +402,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return true;
       })
       .map(({ work }) => work);
+    return mergeWorkPages(cards);
   }
   const descriptorOf = (w) => ({
     seriesRef: String(w.id),
@@ -770,8 +771,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
     // عدة فصول نزلت للعمل: بطاقة واحدة ورقم خفيف بعددها
-    const more = work._newCount > 1 ? ` +${work._newCount}` : '';
-    return work._updateAt ? `${label}${more} · ${agoAr(work._updateAt)}` : label + more;
+    const more = work._newCount > 1 ? ` +${work._newCount - 1}` : '';
+    const when = work._updatePublishedAt > 0 ? agoAr(work._updateAt) : `رُصد ${agoAr(work._updateAt)}`;
+    return work._updateAt ? `${label}${more} · ${when}` : label + more;
   }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
@@ -912,7 +914,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   };
   const recentFromLatest = (fresh, previous) =>
-    uniqueById([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
+    mergeWorkPages([...keepChapterFacts(fresh, previous), ...previous]).slice(0, 40);
   let latestJob = null;
   let latestResult = null;
   let latestPartial = null;
@@ -2889,7 +2891,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const meta = el('span', 'rv-meta');
       if (v.chapter_label || v.chapter_number != null) {
         const ch = el('span', 'rv-chapter');
-        ch.innerHTML = glyph('book', { size: 13 });
+        ch.innerHTML = glyph('book', { size: 17 });
         ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
         meta.append(ch);
       }
@@ -2899,21 +2901,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
         meta.append(spent);
       }
       const when = el('time', 'rv-time', d);
-      when.innerHTML = glyph('clock', { size: 14 });
+      when.innerHTML = glyph('calendar', { size: 16 });
       when.append(document.createTextNode(d));
       meta.append(when);
       if (profile) {
         when.replaceChildren(document.createTextNode(d));
         meta.removeChild(when);
         copy.append(meta, when);
-      } else copy.append(meta);
+      } else {
+        // سطران: الفصل بارزًا، ثم المدة وآخر مرة بهدوء
+        const ch = meta.querySelector('.rv-chapter');
+        if (ch) copy.append(ch);
+        copy.append(meta);
+      }
       open.append(cover, copy);
       open.onclick = () => void openWork(work);
       item.append(open);
       if (own) {
         const del = el('button', 'rv-del');
         del.type = 'button';
-        del.innerHTML = glyph('trash', { size: 18 });
+        del.innerHTML = glyph('trash', { size: 22 });
         del.setAttribute('aria-label', `احذف ${titleOf(work)} من آخر المشاهدات`);
         del.onclick = () => {
           item.classList.add('rv-row--gone');
@@ -2931,7 +2938,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         for (const span of list.querySelectorAll('.rv-duration')) {
           const ms = byRef.get(span.dataset.ref);
           if (ms > 0) {
-            span.innerHTML = glyph('clock', { size: 14 });
+            span.innerHTML = glyph('hourglass', { size: 16 });
             span.append(document.createTextNode(insightDuration(ms)));
           }
         }
@@ -3078,7 +3085,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     // غلاف الحدث مرشّحٌ دائمًا بعد غلاف العمل: غلافٌ محفوظ قديم لا يُسقط البطاقة إلى حرف
     if (g.cover && base.bannerImage !== g.cover && !coverCandidates(base).some((c) => c.url === g.cover)) base.bannerImage = g.cover;
-    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _newCount: g.events?.length ?? 1 };
+    return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _updatePublishedAt: g.publishedAt, _newCount: g.events?.length ?? 1 };
   }
   function openUpdate(g) {
     if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });
@@ -4615,7 +4622,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
       row('info', 'الإصدار', currentPlatform() === 'pwa' ? 'نسخة PWA المثبتة على هذا الجهاز' : apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
-      row('spark', 'ما الجديد', `${RELEASE.product} ${RELEASE.version}`, { run: openWhatsNew }),
+      row('spark', 'ما الجديد', `${RELEASE.product} ${globalThis.VantaraDesktop?.version ?? RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
         ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
             run: async () => {

@@ -101,3 +101,8 @@ it("preserves cancellation rather than publishing an old work's enrichment", asy
   const resolver = createAnimeIdentityResolver({ transport: { json: async () => al } });
   await expect(resolver.enrich(identity, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
 });
+it('preserves an explicit Kitsu identity when exact mapping services are unavailable',async()=>{
+ const resolver=createAnimeIdentityResolver({transport:{json:async()=>{throw Error('offline');}}});
+ const existing={...identity,externalIds:{anilist:'21',kitsu:'12'}};
+ expect(await resolver.enrich(existing)).toEqual(existing);
+});

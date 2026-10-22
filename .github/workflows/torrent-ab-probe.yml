@@ -1,0 +1,47 @@
+name: Torrent A/B probe (app vs rqbit vs peerflix)
+# تشخيص فقط: زمن أول إطار على أسراب Torrentio حقيقية بثلاثة محركات على نفس جهاز ويندوز.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/torrent-ab-probe.yml'
+      - 'tools/torrent-ab-probe.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: torrent-ab-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native binaries from the published Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          gh release download windows-v0.3.18 --repo $env:GITHUB_REPOSITORY --pattern '*-x64.zip' --dir $dir
+          Expand-Archive (Get-ChildItem $dir -Filter *.zip | Select-Object -First 1).FullName -DestinationPath (Join-Path $dir 'app')
+          $rqbit = Get-ChildItem (Join-Path $dir 'app') -Recurse -Filter rqbit.exe | Select-Object -First 1
+          "NATIVE=$($rqbit.DirectoryName)" | Out-File -Append $env:GITHUB_ENV
+      - name: peerflix (torrent-stream, the engine family Stremio's server builds on)
+        shell: pwsh
+        run: |
+          $pf = Join-Path $env:RUNNER_TEMP 'pf'
+          npm install --prefix $pf --no-audit --no-fund peerflix@0.39.0 | Out-Null
+          "PEERFLIX=$(Join-Path $pf 'node_modules\peerflix\app.js')" | Out-File -Append $env:GITHUB_ENV
+      - name: Probe
+        shell: pwsh
+        run: node tools/torrent-ab-probe.mjs "$env:NATIVE" "$env:RUNNER_TEMP/ab.json" "$env:PEERFLIX"
+      - name: Notes
+        if: always()
+        shell: pwsh
+        run: |
+          node -e "const r=require(process.argv[1]);const c=s=>String(s??'').replace(/[\r\n]+/g,' ').replace(/::/g,':');for(const x of (r.candidates||[]))console.log('::notice title=candidate::'+c(JSON.stringify(x)));for(const x of (r.runs||[]))console.log('::notice title=run::'+c(JSON.stringify(x)))" "$env:RUNNER_TEMP/ab.json"

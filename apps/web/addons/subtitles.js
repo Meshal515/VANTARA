@@ -31,8 +31,8 @@ export function animeImdbAddresses(map, episode) {
   if (Number.isInteger(absolute) && absolute > 0 && !(season === 1 && number === absolute)) out.push([1, absolute]);
   return out;
 }
-/** كل الطلبات الممكنة لهذه الحلقة بالترتيب؛ المزوّد يجرّب التالي إن رجع الأول فارغًا. */
-export function subtitleRequests(identity, stream = {}) {
+/** طلبات عمل واحد بهويته كما هي (المعرّف الخاص إن وُجد، ثم Kitsu، ثم IMDb بعناوينه). */
+function requestsFor(identity, stream = {}) {
   const imdb = identity?.externalIds?.imdb;
   const providerId = identity?.addonKey && typeof identity.videoId === "string" && identity.videoId.length <= 2000 && !/[\x00-\x1f]/.test(identity.videoId) ? identity.videoId : null;
   const kitsu = !providerId && kitsuVideoRequest(identity);
@@ -46,7 +46,7 @@ export function subtitleRequests(identity, stream = {}) {
     // Kitsu لإضافات تعرفه، وIMDb بعده لإضافات لا تعرف إلا tt (OpenSubtitles)
     if (providerId) return [first];
     const { kitsu: _k, ...externalIds } = identity.externalIds ?? {};
-    return [first, ...subtitleRequests({ ...identity, externalIds }, stream)];
+    return [first, ...requestsFor({ ...identity, externalIds }, stream)];
   }
   if (!/^tt\d+$/.test(imdb ?? "")) return [];
   const type =
@@ -63,8 +63,21 @@ export function subtitleRequests(identity, stream = {}) {
     : Number.isInteger(identity.season) && identity.season >= 0 ? [[identity.season, identity.episode]] : [];
   return addresses.map(([season, episode]) => ({ type, videoId: `${imdb}:${season}:${episode}`, extra }));
 }
+/**
+ * كل الطلبات الممكنة لهذه الحلقة عند مزوّد بعينه، بالترتيب؛ المزوّد يجرّب التالي إن رجع الأول فارغًا.
+ * المعرّف الخاص بإضافة (videoId) لا يُرسل إلا لتلك الإضافة نفسها؛ لغيرها البدائل العامة وحدها
+ * (Kitsu ثم IMDb بموسم TVDB ثم المطلق)، فلا يوسّع ترشيح النطاق الثقةَ بمعرّف خاص.
+ */
+export function subtitleRequests(identity, stream = {}, addonKey = null) {
+  const canonical = { ...identity, addonKey: null, videoId: null };
+  const requests = [
+    ...(addonKey && addonKey === identity?.addonKey ? requestsFor(identity, stream) : []),
+    ...requestsFor(canonical, stream),
+  ];
+  return requests.filter((request, index) => requests.findIndex((other) => other.type === request.type && other.videoId === request.videoId) === index);
+}
 export function subtitleRequest(identity, stream = {}) {
-  return subtitleRequests(identity, stream)[0] ?? null;
+  return subtitleRequests(identity, stream, identity?.addonKey)[0] ?? null;
 }
 export async function discoverSubtitles({
   identity,
@@ -79,7 +92,7 @@ export async function discoverSubtitles({
   const seen = new Set();
   await runProgressive(
     providers.flatMap((p) => {
-      const requests = (p.requests ? p.requests(identity, stream) : p.request ? [p.request(identity, stream)] : subtitleRequests(identity, stream)).filter(Boolean).slice(0, 3);
+      const requests = (p.requests ? p.requests(identity, stream) : p.request ? [p.request(identity, stream)] : subtitleRequests(identity, stream, p.key)).filter(Boolean).slice(0, 3);
       if (!requests.length) return [];
       return [{
       origin: p.origin ?? p.key,
@@ -89,9 +102,10 @@ export async function discoverSubtitles({
         let result = [];
         for (const request of requests) {
           result = boundedItems(await p.subtitles({ ...request, signal }));
-          if (result.length) break;
+          if (result.length || signal?.aborted) break;
         }
-        onHealth(p.key, true);
+        // أُلغي البحث والناقل تجاهل الإلغاء: لا صحة تُسجَّل
+        if (!signal?.aborted) onHealth(p.key, true);
         return { p, result };
       },
     }]; }),

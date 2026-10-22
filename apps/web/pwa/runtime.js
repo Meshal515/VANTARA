@@ -4,6 +4,7 @@
  */
 
 import { createAddonRuntime } from '../addons/runtime.js';
+import { desktopPlugin } from './platform.js';
 import { createFetcher } from './net/fetcher.js';
 import { fetchBase } from './net/endpoint.js';
 import { createStore, SPACES } from './cache/store.js';
@@ -37,6 +38,8 @@ async function loadDefs() {
 }
 
 export function getRuntime() {
+  const desktop = desktopPlugin('SourceRuntime');
+  if (desktop) return desktop.getRuntime();
   if (runtime) return runtime;
   const store = createStore();
   const fetcher = createFetcher({ auth: { header: () => auth.header(), refresh: () => auth.refresh?.() } });

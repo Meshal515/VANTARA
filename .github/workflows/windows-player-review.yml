@@ -1,0 +1,86 @@
+name: Review Windows player startup and fullscreen
+on:
+  push:
+    branches: ['codex/windows-torrent-startup-20261019', 'codex/windows-player-fullscreen-20261019', 'chatgpt/windows-torrent-f11-integrated-20261019']
+    paths: ['apps/desktop/**', 'apps/web/desktop/**', 'tools/build-video-host.ps1', '.github/workflows/windows-player-review.yml', '.github/workflows/windows-torrent-benchmark-integration.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-player-review-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-player:
+    name: Actual Electron, MPV child, F11 and Escape
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test window ownership and compile native host
+        shell: pwsh
+        run: |
+          node --test apps/desktop/fullscreen.test.cjs apps/desktop/video-host.test.cjs apps/desktop/player-overlay.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Window regression tests failed' }
+          ./tools/build-video-host.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native host compilation failed' }
+      - name: Fetch checksum-pinned runtime fixtures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runtime=Join-Path $env:RUNNER_TEMP 'vantara-player-review'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          function Fetch-Pinned([string]$Url,[string]$Name,[string]$Hash) {
+            $file=Join-Path $runtime $Name
+            Invoke-WebRequest $Url -OutFile $file
+            if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $Hash) { throw "Checksum mismatch: $Name" }
+            return $file
+          }
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $mpv=Fetch-Pinned 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-x86_64-20261014-git-ec38361c56.7z' 'mpv.7z' 'ab6236a2b78a3e9e93a156c1f638d3182ee906006d019c15d1b7b056a7c9a4c5'
+          $rqbit=Fetch-Pinned 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe' 'rqbit.exe' '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea'
+          Expand-Archive $electron (Join-Path $runtime 'electron')
+          & 7z x -y "-o$PWD/apps/desktop/native" $mpv
+          if ($LASTEXITCODE -ne 0) { throw 'MPV extraction failed' }
+          Copy-Item $rqbit 'apps/desktop/native/rqbit.exe'
+          Copy-Item (Join-Path $runtime 'electron/vulkan-1.dll') 'apps/desktop/native/vulkan-1.dll'
+          node -e "require('node:fs').cpSync('apps/web','apps/desktop/web',{recursive:true,filter:p=>!p.includes('node_modules')})"
+          if ($LASTEXITCODE -ne 0) { throw 'Web fixture staging failed' }
+      - name: Prove real MPV binding, Electron fullscreen and matching native bounds
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runtime=Join-Path $env:RUNNER_TEMP 'vantara-player-review'
+          $report=Join-Path $runtime 'embedded-report.json'
+          $fixture=(Resolve-Path 'android/app/src/androidTest/assets/addon-torrent-proof.mp4').Path
+          $app=(Resolve-Path 'apps/desktop').Path
+          $stdout=Join-Path $runtime 'electron.stdout.log'
+          $stderr=Join-Path $runtime 'electron.stderr.log'
+          $proc=Start-Process (Join-Path $runtime 'electron/electron.exe') -ArgumentList @("`"$app`"","--native-video-smoke-report=`"$report`"","--native-video-smoke-fixture=`"$fixture`"") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          if (-not $proc.WaitForExit(180000)) { $proc.Kill(); throw 'Embedded player proof timed out' }
+          if ($proc.ExitCode -ne 0) { Get-Content $stderr; throw "Embedded player proof exited $($proc.ExitCode)" }
+          $proof=Get-Content $report -Raw | ConvertFrom-Json
+          foreach ($key in @('realMpv','realElectron','realEmbeddedChild','resized','fullscreen','mainF11','overlayF11','mpvMappedF11','overlayEscapeRestores','mpvMappedEscape','rendererControls','arabicSubtitleSelected','overlaySubtitleDelay','cleanup')) {
+            if ($proof.$key -ne $true) { throw "Missing runtime proof: $key" }
+          }
+          if (-not $proof.fullscreenBounds -or -not (Test-Path "$report.fullscreen.png")) { throw 'Missing actual fullscreen bounds or screen capture' }
+          @{sourceSha=$env:GITHUB_SHA;ref=$env:GITHUB_REF;publish=$false} | ConvertTo-Json | Set-Content (Join-Path $runtime 'review-source.json')
+      - name: Read proof diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $runtime=Join-Path $env:RUNNER_TEMP 'vantara-player-review'
+          Get-ChildItem $runtime -Filter '*report.json' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName }
+          Get-ChildItem $runtime -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 80 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-player-review-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-player-review/*report.json*
+            ${{ runner.temp }}/vantara-player-review/*.log
+            ${{ runner.temp }}/vantara-player-review/review-source.json
+            apps/desktop/native/vantara-video-host.exe
+          if-no-files-found: warn

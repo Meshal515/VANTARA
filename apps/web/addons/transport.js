@@ -7,7 +7,7 @@ export function createTransport({
 } = {}) {
   async function text(
     url,
-    { signal, limit = LIMITS.resource, timeout = timeoutMs, json = false, fallbackCharset = null } = {},
+    { signal, limit = LIMITS.resource, timeout = timeoutMs, json = false, cache, fallbackCharset = null } = {},
   ) {
     const u = publicUrl(url);
     const controller = new AbortController();
@@ -23,6 +23,7 @@ export function createTransport({
     try {
       const res = await fetchImpl(u.href, {
         method: "GET",
+        ...(cache ? { cache } : {}),
         credentials: "omit",
         redirect: "error",
         referrerPolicy: "no-referrer",

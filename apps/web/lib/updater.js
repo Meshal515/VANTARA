@@ -38,16 +38,25 @@ export function isNewer(candidate, current) {
  */
 export function decideUpdate(manifest, device) {
   const none = { web: null, apk: null };
-  if (!manifest || typeof manifest !== 'object' || !manifest.native) return none;
+  if (!manifest || manifest.format !== 2 || !/^[a-f0-9]{24}$/.test(manifest.native ?? '') ||
+      !/^\d+\.\d+\.\d+$/.test(manifest.versionName ?? '') ||
+      !Number.isSafeInteger(manifest.versionCode) || manifest.versionCode < 1 ||
+      !Number.isSafeInteger(manifest.minimumSupportedVersionCode ?? 0) ||
+      (manifest.minimumSupportedVersionCode ?? 0) < 0 ||
+      (manifest.minimumSupportedVersionCode ?? 0) > manifest.versionCode) return none;
+  const artifact = (entry, filename) => {
+    if (!entry || !/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '') || !Number.isSafeInteger(entry.size) || entry.size < 1) return false;
+    return entry.url === `https://github.com/Meshal515/VANTARA/releases/download/stable-${manifest.versionCode}/${filename}`;
+  };
   // بناء محلي (debug): لا بصمة، ولا مفتاح رسمي يثبت فوقه تحديث
-  if (!device?.native || device.native === 'dev') return none;
+  if (!/^[a-f0-9]{24}$/.test(device?.native ?? '') || !Number.isSafeInteger(device.versionCode) || device.versionCode < 1) return none;
   const version = String(manifest.versionName ?? '');
   const changelog = Array.isArray(manifest.changelog) ? manifest.changelog.map(String).slice(0, 6) : [];
   const required = Number(device.versionCode) < Number(manifest.minimumSupportedVersionCode ?? 0);
   const sameNative = manifest.native === device.native;
 
   let apk = null;
-  const apkNewer = Number(manifest.versionCode) > Number(device.versionCode) && manifest.apk?.url && manifest.apk?.sha256;
+  const apkNewer = Number(manifest.versionCode) > Number(device.versionCode) && device.official !== false && artifact(manifest.apk, 'VANTARA-stable.apk');
   if (apkNewer && (!sameNative || required)) {
     apk = { version, versionCode: Number(manifest.versionCode), changelog, required, ...manifest.apk };
   }
@@ -55,8 +64,7 @@ export function decideUpdate(manifest, device) {
   let web = null;
   if (
     sameNative &&
-    manifest.web?.url &&
-    manifest.web?.sha256 &&
+    artifact(manifest.web, 'VANTARA-web.zip') &&
     isNewer(version, device.webVersion) &&
     !(device.bad ?? []).includes(version) &&
     device.staged !== version
@@ -108,7 +116,7 @@ export async function stageWeb(web) {
   const native = plugin();
   if (!native || !web) return false;
   try {
-    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version, userInitiated: true });
+    await native.downloadWeb({ url: web.url, sha256: web.sha256, version: web.version, size: web.size, userInitiated: true });
     return true;
   } catch {
     return false;
@@ -165,7 +173,7 @@ export async function installApk(apk, { onProgress = () => {}, onResult = () => 
     onResult(status);
   });
   try {
-    const out = await native.installApk({ url: apk.url, sha256: apk.sha256 });
+    const out = await native.installApk({ url: apk.url, sha256: apk.sha256, size: apk.size });
     if (!out?.started) void result?.remove?.();
     return out?.needsPermission ? { needsPermission: true } : { started: true };
   } catch (error) {

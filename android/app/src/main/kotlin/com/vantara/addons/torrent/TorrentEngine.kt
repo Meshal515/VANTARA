@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One native session; requests only register tickets. Network/metadata/pieces run on Media3's loader. */
-class TorrentEngine internal constructor(context: Context, private val networkFilter: () -> ip_filter = ::publicNetworkFilter) : AutoCloseable {
+class TorrentEngine internal constructor(context: Context, private val sessionSettings: () -> SettingsPack = ::streamingSettings, private val networkFilter: () -> ip_filter = ::publicNetworkFilter) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
@@ -46,7 +46,7 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                     } else state.readFailed(alert.piece())
                 }
             })
-            val params = SessionParams(streamingSettings())
+            val params = SessionParams(sessionSettings())
             // جدول DHT المحفوظ: بدء بارد بلا عقد كان يكلّف عشرات الثواني قبل أول مشارك
             runCatching {
                 val saved = File(directory, DHT_STATE_FILE)
@@ -548,8 +548,12 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
          * التالي حتى تنتهي مهلته)، ومهل أقصر لطلبات القطع المتعثرة.
          */
         internal fun streamingSettings(): SettingsPack {
-            val settings = SettingsPack().connectionsLimit(96).activeDownloads(2).activeSeeds(0).activeLimit(2)
-                .maxPeerlistSize(1000).uploadRateLimit(128 * 1024).maxQueuedDiskBytes(8 * 1024 * 1024)
+            // اتصالات ومهل قيست على محاكي وأسراب Torrentio حقيقية (TorrentSwarmDiscoveryDeviceTest): بحدود
+            // 96 اتصالًا/60 في الثانية ومهلة 7 ث وحد رفع 128KB/s كان يعرف 500–700 مشارك ويتصل بـ4–10 في
+            // أول 5 ثوانٍ؛ بهذه القيم 21–45 والبيانات تصل أبكر. حد الرفع أُلغي: رسائل طلب القطع وعبء IP
+            // تُحسب على الرفع، فالحد كان يبطئ التنزيل نفسه.
+            val settings = SettingsPack().connectionsLimit(400).activeDownloads(2).activeSeeds(0).activeLimit(2)
+                .maxPeerlistSize(1000).uploadRateLimit(0).maxQueuedDiskBytes(8 * 1024 * 1024)
                 .validateHttpsTrackers(true).stopTrackerTimeout(1)
             settings.setEnableLsd(false)
             settings.setBoolean(settings_pack.bool_types.ssrf_mitigation.swigValue(), true)
@@ -560,10 +564,11 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
             // تورنت اكتملت قطعه المطلوبة (طرفا الملف مسبقًا، أو نافذة قدّام امتلأت) كان يقطع المشاركين
             // الكاملين؛ القطعة التالية تنتظر إعادة اتصال (~5 ث في اختبار سرب محلي حقيقي، 52ms بدونه).
             settings.setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), false)
-            settings.setInteger(settings_pack.int_types.connection_speed.swigValue(), 60)
-            settings.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 40)
-            settings.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 7)
-            settings.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 7)
+            settings.setInteger(settings_pack.int_types.connection_speed.swigValue(), 200)
+            settings.setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 100)
+            // شبكات الجوال بطيئة المصافحة: مهلة 7 ث كانت تُسقط مشاركين صالحين
+            settings.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 15)
+            settings.setInteger(settings_pack.int_types.handshake_timeout.swigValue(), 15)
             settings.setInteger(settings_pack.int_types.tracker_receive_timeout.swigValue(), 6)
             settings.setInteger(settings_pack.int_types.tracker_completion_timeout.swigValue(), 15)
             // Stremio (btRequestTimeout 4000): طلب لم يُجب خلال 4 ث يُعاد طلبه من مشارك آخر،

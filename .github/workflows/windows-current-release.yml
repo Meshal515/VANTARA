@@ -1,0 +1,189 @@
+name: Publish verified VANTARA Windows 0.3.14
+on:
+  push:
+    branches: ['codex/windows-manga-parity-20261018', 'codex/windows-current-accounts-20261018', 'claude/manga-translation-system-9a2zjl', 'ccr-251776ba-jzfra3', 'codex/windows-player-repair-20261018', 'release/windows-v0.3.14-integrated-20261018']
+    paths: ['.github/workflows/windows-current-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-current-release
+  cancel-in-progress: false
+env:
+  VERSION: '0.3.14'
+  TAG: 'windows-v0.3.14'
+jobs:
+  checks:
+    name: Safety, torrent, rooms, and player tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Repository safety and PWA shell digest
+        run: pnpm test:safety
+      - name: Windows desktop torrent and cache integration
+        run: node --test --test-concurrency=1 --test-timeout=60000 apps/desktop/*.test.cjs apps/desktop/src/*.test.mjs tools/windows-icon-resources.test.mjs
+      - name: Build shared domain used by account transport tests
+        run: pnpm --filter @vantara/domain build
+      - name: Renderer, video timing, and invitation regression tests
+        run: pnpm exec vitest run apps/web/lib/sync*.test.js apps/web/screens/add-account.test.js apps/web/desktop apps/web/pwa/player apps/web/lib/together apps/web/v35/together*.test.js apps/web/v35/reader*.test.js
+  video-host:
+    name: Compile native Windows video host
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify video host
+        shell: pwsh
+        run: |
+          ./tools/build-video-host.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows video-host compilation failed' }
+          node --test apps/desktop/video-host.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows video-host unit tests failed' }
+          node --test apps/desktop/src/torrent-window.win.test.mjs apps/desktop/src/torrent-window.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows NTFS sliding-window cache tests failed' }
+      - name: Embed original VANTARA artwork in pinned Electron executable
+        shell: pwsh
+        run: |
+          $zip=Join-Path $env:RUNNER_TEMP 'electron.zip'
+          Invoke-WebRequest 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'){throw 'Electron checksum mismatch'}
+          $electron=Join-Path $env:RUNNER_TEMP 'electron'
+          Expand-Archive $zip $electron
+          ./tools/brand-windows-executable.ps1 -InputExe (Join-Path $electron 'electron.exe') -OutputExe 'apps/desktop/native/VANTARA.exe'
+          node tools/windows-icon-resources.mjs apps/desktop/native/VANTARA.exe apps/desktop/assets/vantara.ico
+          if($LASTEXITCODE -ne 0){throw 'Executable artwork verification failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-current-video-host
+          path: |
+            apps/desktop/native/vantara-video-host.exe
+            apps/desktop/native/VANTARA.exe
+          if-no-files-found: error
+  package:
+    name: Create unsigned Windows installer and portable ZIP
+    needs: [checks,video-host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-current-video-host
+          path: ${{ runner.temp }}/video-host
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install NSIS and 7-Zip
+        run: sudo apt-get update && sudo apt-get install -y nsis 7zip
+      - name: Build versioned installer and ZIP with pinned checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const version=JSON.parse(fs.readFileSync("apps/desktop/package.json","utf8")).version; assert.equal(version,process.env.VERSION,"رقم التطبيق لا يطابق رقم النشر"); assert.equal(process.env.TAG,`windows-v${version}`,"وسم الإصدار لا يطابق رقم التطبيق");'
+          node tools/build-windows.mjs --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe" --output="$RUNNER_TEMP/windows-current"
+          cd "$RUNNER_TEMP/windows-current"
+          sha256sum -c SHA256SUMS.txt
+          test -s "VANTARA-$VERSION-Windows-x64-Setup.exe"
+          test -s "VANTARA-$VERSION-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-current-release-candidate
+          path: |
+            ${{ runner.temp }}/windows-current/*-Setup.exe
+            ${{ runner.temp }}/windows-current/*-x64.zip
+            ${{ runner.temp }}/windows-current/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+  verify:
+    name: Install and play actual MPV on Windows
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-current-release-candidate
+          path: ${{ runner.temp }}/windows-current
+      - name: Verify install, branding, real embedded playback and user-data preservation
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'windows-current'
+          try { ./tools/verify-windows-runtime.ps1 -CandidateDir $dir -Version $env:VERSION }
+          catch {
+            # سبب الفشل وتقارير الفحص كملاحظات يقرؤها الـAPI (السجلات نفسها خارج متناوله)
+            Write-Host "::error title=verify::$($_.Exception.Message)"
+            Get-ChildItem $dir -Filter *report.json | ForEach-Object {
+              $c = (Get-Content $_.FullName -Raw) -replace "`r?`n", ' '
+              Write-Host "::notice title=$($_.Name)::$($c.Substring(0, [Math]::Min(3500, $c.Length)))"
+            }
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-current-verify-evidence
+          path: |
+            ${{ runner.temp }}/windows-current/*report.json
+            ${{ runner.temp }}/windows-current/*report.json.png
+          if-no-files-found: warn
+  publish:
+    name: Publish verified Windows 0.3.14
+    needs: [checks,video-host,package,verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-current-release-candidate
+          path: ${{ runner.temp }}/windows-current
+      - name: Release only tested version; do not replace existing assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/windows-current"
+          sha256sum -c SHA256SUMS.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version $TAG already exists. Refusing to overwrite release." >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            "VANTARA-$VERSION-Windows-x64-Setup.exe" \
+            "VANTARA-$VERSION-Windows-x64.zip" \
+            SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "VANTARA Windows $VERSION — مطابقة لأحدث نسخة من التطبيق والويب" \
+            --notes "يحافظ على تصميم مشغل 0.3.13 وإصلاحاته وفحوص MPV و4K والغرف. يصلح إرسال رمز حجز تحديثات مصادر المانجا إلى الخادم؛ كانت واجهة النقل تسقطه فتُرفض بعض عمليات النشر بصمت. يحتفظ بمنطق جمع الفصول والأسماء البديلة وتحديثات المصادر الموجود في فرع ويندوز، والذي نُقل كذلك إلى main لضمان تقارب المنصات. يتضمن إصلاحات الحسابات المنشورة في APK 0.0.178. لا يدّعي دعم إضافات أندرويد Java على ويندوز أو إصلاح MangaTek الحي على جهاز المالك. نسخة غير موقعة." \
+            --prerelease --latest=false
+      - name: Publish Windows update channel after verified release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/windows-current"
+          python3 - <<'PYMANIFEST'
+          import os,json,pathlib,hashlib
+          version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['GITHUB_SHA'],'notes':['إصلاحات الحسابات المنشورة في APK 0.0.178 على ويندوز','إكمال إنشاء الحساب والاعتماد وثبات دخول PIN','الحفاظ على بيانات المجلس والأصدقاء وإصلاحات مشغل 0.3.12']}
+          pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          PYMANIFEST
+          if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create windows-channel --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'VANTARA Windows update channel' --notes 'قناة بيان تحديث ويندوز، مستقلة عن إصدارات APK.' --prerelease --latest=false
+          fi
+          gh release upload windows-channel desktop-update.json --clobber --repo "$GITHUB_REPOSITORY"

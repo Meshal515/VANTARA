@@ -203,7 +203,7 @@ export function latestBoundary(keys, prev) {
  * Audit every work on fetched pages, including stationary works. Continue beyond
  * the page budget on the next pass. Chapter failures and cancellation retain the
  * full work payload so a work removed from Latest can still be retried.
- * Keep the existing listing-motion hint for the server publication rules.
+ * Source baselines on the server, rather than list motion, decide real advances.
  */
 export async function collectLatestChapters(list, page, {
   latest = (id, p) => engine.latest(id, p),
@@ -264,8 +264,8 @@ export async function collectLatestChapters(list, page, {
     const stable = prev ? latestBoundary(keys, prev.keys ?? []) : -1;
     const moved = !prev ? 0 : stable >= 0 ? stable : keys.length;
     const tasks = new Map();
-    // Retry even when the work disappeared from the next listing, retaining
-    // the original listing timestamp and the full manga request payload.
+    // Retry even when the work disappeared from the next listing. The timestamp
+    // is only a listing hint; the server requires a real chapter baseline.
     for (const [key, value] of Object.entries(prev?.retry ?? {})) {
       if (value?.manga) tasks.set(key, { source, manga: value.manga, position: value.position ?? keys.length, key, since: value.since ?? null });
     }
@@ -325,7 +325,7 @@ export async function collectLatestChapters(list, page, {
         try {
           await fetchChapters(task);
         } catch {
-          // Keep failed work for the next scan even if it leaves Latest.
+          // عملٌ لم يُجلب يُعاد في المسح التالي ما دامت شهادته قائمة
           diagnostics.failedChapters++;
           retry[task.key] = { manga: task.manga, since: task.since, position: task.position };
         }
@@ -729,9 +729,8 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
 
 /** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
 export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
-  // العربية وحدها: قوائم مصادر التكملة الإنجليزية (MangaDex…) مئات الأعمال العالمية
-  // كل ساعة، كانت تستهلك المسح كله وتملأ «آخر التحديثات» بأعمال لا نسخة عربية لها
-  const list = await listingSources();
+  // Every available source participates; each source has its own resumable cursor.
+  const list = await listingSources({ includeFillers: true });
   const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
   const { entries, known } = await collectLatestChapters(list, 1, {
     known: prior,

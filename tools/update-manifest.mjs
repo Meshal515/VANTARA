@@ -37,12 +37,19 @@ export function changelogFrom(log) {
 
 export function buildManifest({ version, code, native, base, apk, web, changelog, policy }) {
   if (!/^[0-9a-f]{24}$/.test(native)) throw new Error(`bad native fingerprint: ${native}`);
+  const versionCode = Number(code);
+  const minimum = Number(policy?.minimumSupportedVersionCode ?? 0);
+  if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !Number.isSafeInteger(versionCode) || versionCode < 1) throw new Error('bad stable version');
+  if (!Number.isSafeInteger(minimum) || minimum < 0 || minimum > versionCode) throw new Error('bad minimum supported version');
+  if (!Array.isArray(changelog) || changelog.some(line => typeof line !== 'string')) throw new Error('bad changelog');
+  if (base !== `https://github.com/Meshal515/VANTARA/releases/download/stable-${versionCode}`) throw new Error('bad stable release URL');
+  for (const file of [apk, web]) if (!statSync(file).isFile() || statSync(file).size < 1) throw new Error('empty release artifact');
   return {
     format: 2,
     versionName: version,
-    versionCode: Number(code),
+    versionCode,
     native,
-    minimumSupportedVersionCode: Number(policy?.minimumSupportedVersionCode ?? 0),
+    minimumSupportedVersionCode: minimum,
     changelog,
     apk: { url: `${base}/VANTARA-stable.apk`, sha256: sha256(apk), size: statSync(apk).size },
     web: { url: `${base}/VANTARA-web.zip`, sha256: sha256(web), size: statSync(web).size },

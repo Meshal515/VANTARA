@@ -1,0 +1,55 @@
+name: Windows torrent and network probe
+# فحص تشخيصي فقط: لا يبني ولا ينشر. يشغّل services.mjs من هذا الـcommit مع rqbit وmpv
+# من إصدار ويندوز المنشور، على أسراب حقيقية ومواقع حقيقية، ويكتب الجدول الزمني في الملخص.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/windows-torrent-probe.yml'
+      - 'tools/windows-torrent-probe.mjs'
+      - 'tools/windows-torrent-probe-notes.mjs'
+      - 'apps/desktop/src/services.mjs'
+      - 'apps/desktop/src/net-unblock.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-torrent-probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native binaries from the published Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          gh release download windows-v0.3.2 --repo $env:GITHUB_REPOSITORY --pattern '*-x64.zip' --dir $dir
+          Expand-Archive (Get-ChildItem $dir -Filter *.zip | Select-Object -First 1).FullName -DestinationPath (Join-Path $dir 'app')
+          $rqbit = Get-ChildItem (Join-Path $dir 'app') -Recurse -Filter rqbit.exe | Select-Object -First 1
+          if (-not $rqbit) { throw 'rqbit.exe غير موجود في الحزمة' }
+          "NATIVE=$($rqbit.DirectoryName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Probe network, real swarms, seek and server switch
+        shell: pwsh
+        run: node tools/windows-torrent-probe.mjs "$env:NATIVE" "$env:RUNNER_TEMP/probe-report.json"
+      - name: Network notes
+        if: always()
+        shell: pwsh
+        run: node tools/windows-torrent-probe-notes.mjs "$env:RUNNER_TEMP/probe-report.json" network
+      - name: Torrent notes
+        if: always()
+        shell: pwsh
+        run: node tools/windows-torrent-probe-notes.mjs "$env:RUNNER_TEMP/probe-report.json" torrents
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-torrent-probe
+          path: ${{ runner.temp }}/probe-report.json
+          if-no-files-found: warn

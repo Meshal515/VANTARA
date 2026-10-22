@@ -8,8 +8,8 @@ const manifest = (over = {}) => ({
   native: 'aaaaaaaaaaaaaaaaaaaaaaaa',
   minimumSupportedVersionCode: 0,
   changelog: ['تحسين القارئ'],
-  apk: { url: 'https://x/VANTARA-stable.apk', sha256: 'a'.repeat(64), size: 1 },
-  web: { url: 'https://x/VANTARA-web.zip', sha256: 'b'.repeat(64), size: 1 },
+  apk: { url: 'https://github.com/Meshal515/VANTARA/releases/download/stable-9/VANTARA-stable.apk', sha256: 'a'.repeat(64), size: 1 },
+  web: { url: 'https://github.com/Meshal515/VANTARA/releases/download/stable-9/VANTARA-web.zip', sha256: 'b'.repeat(64), size: 1 },
   ...over,
 });
 const device = (over = {}) => ({ versionCode: 5, native: 'aaaaaaaaaaaaaaaaaaaaaaaa', webVersion: '0.0.7', bad: [], staged: null, ...over });
@@ -26,7 +26,7 @@ describe('decideUpdate', () => {
   it('same native code: a newer web bundle, silently, and no APK', () => {
     const out = decideUpdate(manifest(), device());
     expect(out.apk).toBeNull();
-    expect(out.web).toMatchObject({ version: '0.0.9', url: 'https://x/VANTARA-web.zip' });
+    expect(out.web).toMatchObject({ version: '0.0.9', url: 'https://github.com/Meshal515/VANTARA/releases/download/stable-9/VANTARA-web.zip' });
   });
 
   it('native code changed: the APK, never a web bundle that needs code the phone lacks', () => {
@@ -64,6 +64,23 @@ describe('decideUpdate', () => {
 describe('dismissedRecently', () => {
   it('a required update can never be postponed', () => {
     expect(dismissedRecently({ version: '0.0.9', required: true })).toBe(false);
+  });
+});
+
+describe('stable platform manifest boundaries',()=>{
+  it('Windows assets never become an APK update',()=>{
+    const desktop={url:'https://github.com/Meshal515/VANTARA/releases/download/stable-9/VANTARA-0.0.9-Windows-x64-Setup.exe',sha256:'a'.repeat(64),size:2048};
+    expect(decideUpdate(manifest({native:'b'.repeat(24),apk:desktop,desktop}),device()).apk).toBeNull();
+    expect(decideUpdate(manifest({native:'b'.repeat(24),apk:null,desktop}),device()).apk).toBeNull();
+  });
+  it('rejects wrong tags, malformed hashes, absent sizes and unpublished metadata',()=>{
+    for(const apk of [
+      {...manifest().apk,url:manifest().apk.url.replace('stable-9','stable-10')},
+      {...manifest().apk,sha256:'bad'}, {...manifest().apk,size:0},
+    ]) expect(decideUpdate(manifest({native:'b'.repeat(24),apk}),device()).apk).toBeNull();
+    for(const over of [{format:1},{versionName:'preview'},{versionCode:'9'},{minimumSupportedVersionCode:10}])
+      expect(decideUpdate(manifest(over),device())).toEqual({web:null,apk:null});
+    expect(decideUpdate(manifest({native:'b'.repeat(24)}),device({official:false})).apk).toBeNull();
   });
 });
 

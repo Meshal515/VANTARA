@@ -35,7 +35,20 @@ export function createAddonRegistry({
   let sessions = 0,
     profileKey = "local";
   const pins = new Map();
-  const pinned = (key) => pins.get(JSON.stringify([profileKey, key])) ?? false;
+  const pinned = (key) => {
+    const current = pins.get(JSON.stringify([profileKey, key]));
+    if (current !== undefined) return current;
+    return (entries.get(key)?.formerKeys ?? []).some(old => pins.get(JSON.stringify([profileKey, old])) === true);
+  };
+  function safeFormerKey(value, id) {
+    if (typeof value !== "string") return false;
+    const split = value.indexOf("|");
+    try { return value === `${publicUrl(value.slice(0, split)).origin}|${id}`; } catch { return false; }
+  }
+  function resolveKey(key) {
+    if (entries.has(key)) return key;
+    return [...entries.values()].find(row => row.formerKeys?.includes(key))?.manifest.key ?? key;
+  }
   const ready = (async () => {
     const savedPins = await store
       .get("state", "addons.pins.v1")
@@ -65,6 +78,7 @@ export function createAddonRegistry({
           entries.set(checked.manifest.key, {
             ...row,
             manifest: checked.manifest,
+            formerKeys: (Array.isArray(row.formerKeys) ? row.formerKeys.slice(-50) : []).filter(value => safeFormerKey(value, checked.manifest.id)),
           });
       } catch {
         /* سجل إضافة تالف لا يعطل core */
@@ -151,13 +165,24 @@ export function createAddonRegistry({
     }));
     return results;
   }
-  function install(preview) {
+  function install(preview, { replace = true, expectedCacheEpoch, replaceKey } = {}) {
     return mutate(async () => {
       const hidden = previews.get(preview);
       if (!hidden) throw new Error("عاين الإضافة أولًا");
       const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
       if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
-      const m = checked.manifest, before = entries.get(m.key);
+      const m = checked.manifest, target = entries.get(m.key), before = replaceKey ? row(replaceKey) : target;
+      if (replaceKey && before.manifest.id !== m.id) throw new Error("هوية الإضافة مختلفة عن الإعداد المراد استبداله");
+      if (replaceKey && target && target !== before) throw new Error("يوجد إعداد مثبت على هذا المضيف؛ راجعه قبل الاستبدال");
+      const beforeKey = before?.manifest.key, moved = beforeKey && beforeKey !== m.key;
+      if (expectedCacheEpoch !== undefined && before?.cacheEpoch !== expectedCacheEpoch) {
+        previews.delete(preview);
+        return null;
+      }
+      if (before && replace === false) {
+        previews.delete(preview);
+        return view(before);
+      }
       if (before && before.url === hidden.url && canonicalData(before.manifestRaw) === canonicalData(hidden.raw)) {
         previews.delete(preview);
         return view(before);
@@ -168,44 +193,51 @@ export function createAddonRegistry({
         manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url,
         enabled: before?.enabled ?? true, installedAt: before?.installedAt ?? clock(),
         cacheEpoch: crypto.randomUUID(), staged: null,
-        previous: before ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+        previous: before && !moved ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+        formerKeys: before ? [...new Set([...(before.formerKeys ?? []), ...(moved ? [beforeKey] : [])])].filter(key => key !== m.key).slice(-50) : [],
       };
+      if (moved) entries.delete(beforeKey);
       entries.set(m.key, next);
       try { await save(); }
-      catch (e) { if (before) entries.set(m.key, before); else entries.delete(m.key); throw e; }
+      catch (e) { entries.delete(m.key); if (before) entries.set(beforeKey, before); throw e; }
       previews.delete(preview);
       health.reset(m.key);
+      if (moved) health.reset(beforeKey);
       return view(next);
     });
   }
-  // Refresh the installed provider from its original configured URL without
-  // deleting the working copy first or losing provider-specific credentials.
+  // Reinstallation is a fresh request to the saved (possibly secret-bearing)
+  // endpoint. Never remove first or silently replace it with a public default.
   function reinstall(key, { signal } = {}) {
     return mutate(async () => {
+      key = resolveKey(key);
       const before = row(key);
+      const cancelled = () => {
+        if (signal?.aborted) throw new DOMException("ألغي إعادة التثبيت", "AbortError");
+      };
+      cancelled();
       if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
-      const abort = () => { if (signal?.aborted) throw new DOMException("ألغي إعادة التثبيت", "AbortError"); };
-      abort();
       const raw = await transport.json(before.url, { signal, limit: LIMITS.manifest, cache: "no-store" });
-      abort();
+      cancelled();
       assertBoundedData(raw);
       const checked = validateManifest(raw, { origin: publicUrl(before.url).origin });
       if (checked.errors.length) throw new Error("بيانات إعادة التثبيت غير متوافقة؛ احتُفظ بالإضافة السابقة");
       const manifest = checked.manifest;
       if (manifest.key !== key || manifest.protocol !== before.manifest.protocol)
-        throw new Error("هوية الإضافة تغيرت؛ احتُفظ بالإضافة السابقة");
+        throw new Error("هوية إعادة التثبيت مختلفة؛ احتُفظ بالإضافة السابقة");
       if (manifest.configuration?.required && !manifest.configuration.configured)
-        throw new Error("تحتاج الإضافة إلى الإعداد؛ احتُفظ بالإضافة السابقة");
-      if (manifest.baseUrl !== before.manifest.baseUrl ||
-          canonicalData([...manifest.permissions.networkHosts].sort()) !== canonicalData([...before.manifest.permissions.networkHosts].sort()))
-        throw new Error("المضيف أو صلاحيات الشبكة تغيرت؛ افحص تحديث الإضافة أولًا");
+        throw Object.assign(new Error("تحتاج الخدمة إلى إعداد؛ احتُفظ بالإضافة السابقة ورابطها"), { code: "CONFIG_REQUIRED" });
+      if (manifest.baseUrl !== before.manifest.baseUrl || canonicalData([...manifest.permissions.networkHosts].sort()) !== canonicalData([...before.manifest.permissions.networkHosts].sort()))
+        throw new Error("مصدر الإضافة أو صلاحيات الشبكة تغيرت؛ عاين التحديث أولًا");
       if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
-      abort();
-      const next = { ...before, manifest, manifestRaw: structuredClone(raw),
-        cacheEpoch: crypto.randomUUID(), staged: null,
-        previous: { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } };
-      const rows = [...entries.values()].map(entry => entry === before ? next : entry);
-      if ((await store.set("state", STORAGE, rows)) === false)
+      const next = {
+        ...before,
+        manifest, manifestRaw: structuredClone(raw), cacheEpoch: crypto.randomUUID(), staged: null,
+        previous: { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url },
+      };
+      // Publish in memory only after the complete replacement is durable.
+      const replacement = [...entries.values()].map(entry => entry === before ? next : entry);
+      if ((await store.set("state", STORAGE, replacement)) === false)
         throw new Error("تعذر حفظ إعادة التثبيت؛ احتُفظ بالإضافة السابقة");
       entries.set(key, next);
       health.reset(key);
@@ -225,14 +257,14 @@ export function createAddonRegistry({
     return u.href;
   }
   function row(key) {
-    const r = entries.get(key);
+    const r = entries.get(resolveKey(key));
     if (!r) throw new Error("إضافة خارجية غير مثبتة");
     return r;
   }
   function pin(key, value) {
     const pinKey = JSON.stringify([profileKey, key]);
     return mutate(async () => {
-      if (!entries.has(key) && !coreAdapters.some((c) => c.key === key)) throw new Error("الإضافة غير موجودة");
+      if (!entries.has(resolveKey(key)) && !coreAdapters.some((c) => c.key === key)) throw new Error("الإضافة غير موجودة");
       const before = pins.get(pinKey);
       pins.set(pinKey, Boolean(value));
       try {
@@ -249,6 +281,7 @@ export function createAddonRegistry({
   }
   function remove(key) {
     return mutate(async () => {
+      key = resolveKey(key);
       const before = row(key);
       entries.delete(key);
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
@@ -269,6 +302,8 @@ export function createAddonRegistry({
   }
   function activateStaged(key) {
     return mutate(async () => {
+      key = resolveKey(key);
+      key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.staged) return false;
       const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
@@ -284,6 +319,7 @@ export function createAddonRegistry({
   }
   function rollback(key) {
     return mutate(async () => {
+      key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
       const prev = r.previous;
@@ -326,8 +362,8 @@ export function createAddonRegistry({
     inspect,
     inspectData,
     configurationUrl,
-    install,
     reinstall,
+    install,
     enable,
     remove,
     stage,
@@ -335,6 +371,7 @@ export function createAddonRegistry({
     rollback,
     snapshot,
     connection,
+    resolveKey,
     health,
   };
 }

@@ -119,7 +119,7 @@ export function report(r) {
 
 /**
  * تواريخ رفع لا يُعتمد عليها: مصدر يضع «الآن» لكل فصوله (كلها في نفس الدقيقة).
- * نُسقطها فيعتمد الخادم على أول اكتشاف بدلها.
+ * نُسقطها؛ الخادم لا يُنشئ حدثًا بلا تاريخ إلا بعد تقدّم خط أساس المصدر.
  */
 export function trustDates(units) {
   const dated = units.filter((u) => u.publishedAt);
@@ -128,12 +128,8 @@ export function trustDates(units) {
   return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }
 
-/**
- * عملٌ رآه مسح Latest يصعد في قائمة «آخر التحديثات» لمصدره منذ مسحٍ سابق في
- * `since`: المصدر نفسه يشهد أنه تحدّث بين `since` والآن. يُرفق بتقرير فصوله
- * التالي فيسجّل الخادم أعلى فصل حتى إن كان أول مشاهدة للعمل أو بلا تاريخ رفع
- * (كان يصير خط أساس صامتًا فيسقط العمل من «آخر التحديثات»).
- */
+/** Listing-motion hint for diagnosis only. The server never uses this as proof
+ * of publication or as permission to create an undated first-sighting event. */
 const LISTED_TTL_MS = 120_000;
 const listedHints = new Map();
 const listedKey = (sourceId, manga) => `${sourceId}|${manga?.url ?? ''}|${normalizeTitle(manga?.title)}`;

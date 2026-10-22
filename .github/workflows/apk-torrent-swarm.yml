@@ -1,0 +1,57 @@
+name: APK torrent swarm discovery
+# تشخيص فقط: محرك تورنت الـAPK على محاكي وسرب Torrentio حقيقي — المتصلون/المعروفون/المرشحون كل ثانية،
+# بإعدادات الإنتاج مقابل إعدادات libtorrent الافتراضية. لا ينشر شيئًا.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/apk-torrent-swarm.yml'
+      - 'android/app/src/androidTest/java/com/vantara/addons/torrent/TorrentSwarmDiscoveryDeviceTest.kt'
+      - 'android/app/src/main/kotlin/com/vantara/addons/torrent/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apk-torrent-swarm-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  swarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: Build emulator APKs
+        run: |
+          cat > "$RUNNER_TEMP/x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/x86.gradle" :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Real swarm on the emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r -e swarmDiscovery 1 -e class com.vantara.addons.torrent.TorrentSwarmDiscoveryDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tail -20
+            adb exec-out run-as com.vantara.app.debug cat files/addon-proof/swarm-discovery.json > swarm-discovery.json || true
+            echo "SWARM-BEGIN"; cat swarm-discovery.json; echo "SWARM-END"

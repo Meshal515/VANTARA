@@ -1,0 +1,80 @@
+name: APK player screenshots
+# توثيق تصميم فقط: يلتقط مشغل الـAPK الحقيقي (أدوات التحكم وكل ورقة) على محاكي بمقاس هاتف،
+# مرجعًا يُطابَق عليه مشغل ويندوز. لا ينشر شيئًا.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/apk-player-shots.yml'
+      - 'android/app/src/androidTest/java/com/vantara/anime/player/PlayerScreensDeviceTest.kt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apk-player-shots-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: Build emulator APKs
+        run: |
+          cat > "$RUNNER_TEMP/x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/x86.gradle" :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Capture the real player
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            mkdir -p player-shots
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r -e playerShots 1 -e class com.vantara.anime.player.PlayerScreensDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee player-shots/instrumentation.txt
+            for f in $(adb shell run-as com.vantara.app.debug ls files/player-shots | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/player-shots/$f" > "player-shots/$f"; done
+            ls -la player-shots
+      - name: Shots as notes (readable through the checks API)
+        if: always()
+        run: |
+          pip install --quiet pillow
+          python3 - <<'PY'
+          import base64, io, pathlib
+          from PIL import Image
+          shots = sorted(pathlib.Path('player-shots').glob('*.png'))
+          if not shots:
+              print('::error title=shots::لا لقطات'); raise SystemExit(0)
+          for p in shots[:10]:
+              im = Image.open(p).convert('RGB')
+              if im.width < im.height: im = im.rotate(90, expand=True)
+              im.thumbnail((960, 960))
+              buf = io.BytesIO(); im.save(buf, 'JPEG', quality=55, optimize=True)
+              print(f"::notice title=shot {p.stem}::{base64.b64encode(buf.getvalue()).decode()}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apk-player-shots
+          path: player-shots/
+          if-no-files-found: warn

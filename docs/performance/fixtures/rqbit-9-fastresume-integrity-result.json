@@ -1,0 +1,11 @@
+{
+  "binary_version": "rqbit 9.0.1",
+  "fixture_bytes": 13200,
+  "piece_count": 1,
+  "initial_finished": true,
+  "restart_fastresume_finished_after_same_length_corruption": true,
+  "restart_fastresume_served_corrupted_range": true,
+  "restart_without_fastresume_finished": false,
+  "restart_without_fastresume_range_blocked_no_peers": true,
+  "binary_sha256": "82ed2c23f4c7b91bb2c92eaab92e4a850d386cdf337bcdf9e0971c8ce3da4335"
+}

@@ -406,3 +406,92 @@ it("gives anime/cinema core sources «آخر التحديثات» only when the 
   expect(caps.plain).not.toContain("home");
   expect(caps.plain).toContain("search");
 });
+it('selects canonical IMDb fallback for another subtitle provider when playback has an origin private ID',async()=>{
+ const manifest={id:'org.subs',name:'Subs',version:'1.0.0',types:['series'],resources:[{name:'subtitles',types:['series'],idPrefixes:['tt']}],catalogs:[]};
+ const store=createStore({indexedDB:null});
+ const a=createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async()=>manifest}});await a.ready;
+ await a.registry.install(await a.registry.inspect('https://subs.test/manifest.json'));
+ expect(a.subtitleProviders()[0].request({kind:'series',addonKey:'origin',videoId:'private:one',externalIds:{imdb:'tt123'},season:1,episode:2},{})).toMatchObject({videoId:'tt123:1:2'});
+});
+it('enriches anime identity for a Kitsu subtitle-only provider',async()=>{
+ const manifest={id:'org.subs',name:'Subs',version:'1.0.0',types:['series'],resources:[{name:'subtitles',types:['series'],idPrefixes:['kitsu:']}],catalogs:[]};
+ const store=createStore({indexedDB:null});
+ const a=createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async url=>url.includes('/mappings')?{data:[{type:'mappings',attributes:{externalSite:'anilist/anime',externalId:'21'},relationships:{item:{data:{type:'anime',id:'12'}}}}]}:manifest}});await a.ready;
+ await a.registry.install(await a.registry.inspect('https://subs.test/manifest.json'));
+ expect((await a.enrichAnimeIdentity({kind:'anime',episode:2,externalIds:{anilist:'21'}})).externalIds.kitsu).toBe('12');
+});
+it('retains anime kind and Kitsu identity in a resolved addon stream for subtitle fan-out',async()=>{
+ const manifest={id:'org.streams',name:'Streams',version:'1.0.0',types:['series'],resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}],catalogs:[]};
+ const store=createStore({indexedDB:null});
+ const a=createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async url=>url.endsWith('/manifest.json')?manifest:{streams:[{url:'https://cdn.test/a.mp4'}]}}});await a.ready;
+ const installed=await a.registry.install(await a.registry.inspect('https://streams.test/manifest.json'));
+ const source=a.sources.source(`addon|${installed.key}`), identity={kind:'anime',format:'TV',externalIds:{kitsu:'12'},episode:7};
+ const [episode]=await source.episodes({id:'kitsu:12',type:'series',episode:7,externalIds:identity.externalIds,identity});
+ const [server]=await source.servers(episode);const [stream]=await source.streams(server);
+ expect(stream.identity).toMatchObject({kind:'anime',externalIds:{kitsu:'12'},episode:7});
+});
+it('rejects a late cancelled subtitle response without recording health or caching it',async()=>{
+ const manifest={id:'org.subs',name:'Subs',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[]};
+ const store=createStore({indexedDB:null}); let release;
+ const a=createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async url=>url.endsWith('/manifest.json')?manifest:new Promise(resolve=>{release=resolve;})}});await a.ready;
+ const installed=await a.registry.install(await a.registry.inspect('https://subs.test/manifest.json'));
+ const controller=new AbortController();const done=a.adapter(installed.key).subtitles({type:'movie',videoId:'tt123',signal:controller.signal});
+ while(!release)await Promise.resolve();controller.abort();release({subtitles:[{id:'one',url:'https://subs.test/a.srt',lang:'ara'}]});
+ await expect(done).rejects.toMatchObject({name:'AbortError'});
+ expect(a.registry.health.state(installed.key,'subtitles','pwa').functionalSuccessAt).toBeUndefined();
+});
+it('does not replace an IMDb provider copy with another provider Kitsu video ID',async()=>{
+ const manifest={id:'org.streams',name:'Streams',version:'1.0.0',types:['series'],resources:[{name:'stream',types:['series'],idPrefixes:['tt']}],catalogs:[]};
+ const store=createStore({indexedDB:null}),a=createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async()=>manifest}});await a.ready;
+ const installed=await a.registry.install(await a.registry.inspect('https://streams.test/manifest.json'));
+ const episodes=await a.sources.source(`addon|${installed.key}`).episodes({id:'tt123',type:'series',requestedSeason:2,episode:3,externalIds:{kitsu:'12',imdb:'tt123'},identity:{kind:'anime',episode:3,externalIds:{kitsu:'12',imdb:'tt123'}}});
+ expect(episodes[0].url).toBe('tt123:2:3');
+});
+it('routes an old saved addon source reference through its reviewed replacement host after reload',async()=>{
+ const manifest={id:'org.catalog',name:'Catalog',version:'1.0.0',types:['movie'],resources:['catalog'],catalogs:[{id:'search',type:'movie',extra:[{name:'search',isRequired:true}]}]},store=createStore({indexedDB:null}),urls=[];
+ const make=()=>createAddonRuntime({runtime:{ready:Promise.resolve(),store,registry:{list:()=>[]}},transport:{json:async url=>{urls.push(url);return url.endsWith('/manifest.json')?manifest:{metas:[{id:'tt123',name:'Movie'}]};}}});
+ const first=make();await first.ready;const original=await first.registry.install(await first.registry.inspect('https://addon.test/manifest.json'));
+ await first.registry.install(await first.registry.inspect('https://other.test/manifest.json'),{replaceKey:original.key});
+ const again=make();await again.ready;const results=await again.sources.source(`addon|${original.key}`).search('Movie');
+ expect(results[0].id).toBe('tt123');expect(urls.at(-1)).toContain('https://other.test/catalog/');expect(again.sources.list()).toHaveLength(1);
+});
+
+it.each(['pwa', 'apk', 'desktop'])('reinstall refreshes only its own catalog cache and preserves platform capabilities on %s', async runtimeName => {
+  let generation = 1; const requests = [];
+  const manifest = { id: 'org.catalog', name: 'Catalog', version: '1.0.0', types: ['movie'], resources: ['catalog', 'stream', 'subtitles'], catalogs: [{ type: 'movie', id: 'top' }] };
+  const store = createStore({ indexedDB: null });
+  const a = createAddonRuntime({ runtime: { ready: Promise.resolve(), store, runtimeName, native: runtimeName === 'apk', addonStreams: true, registry: { list: () => [] } }, transport: { json: async url => {
+    requests.push(url); return url.includes('/manifest.json') ? manifest : { metas: [{ id: 'tt1', name: `Generation ${generation}` }] };
+  } } });
+  await a.ready;
+  const one = await a.registry.install(await a.registry.inspect('stremio://addon.test/private/manifest.json?token=private'));
+  const other = await a.registry.install(await a.registry.inspect('https://other.test/manifest.json'));
+  const request = { type: 'movie', id: 'top' };
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 1');
+  await a.adapter(other.key).catalog(request);
+  generation = 2;
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 1');
+  const updated = await a.registry.reinstall(one.key);
+  expect(updated.compatibility).toMatchObject({ pwa: true, apk: true, desktop: true, apkCapabilities: ['catalog', 'streams', 'subtitles'] });
+  expect((await a.adapter(one.key).catalog(request))[0].name).toBe('Generation 2');
+  expect((await a.adapter(other.key).catalog(request))[0].name).toBe('Generation 1');
+  expect(requests.filter(url => url.includes('other.test/catalog/'))).toHaveLength(1);
+  expect(a.registry.connection(one.key).manifestUrl).toBe('https://addon.test/private/manifest.json?token=private');
+});
+
+it.each(['success', 'failure'])('ignores late pre-reinstall resource %s when updating health', async result => {
+  let release, hold = true;
+  const manifest = { id: 'org.subs', name: 'Subs', version: '1.0.0', types: ['movie'], resources: ['subtitles'], catalogs: [] };
+  const store = createStore({ indexedDB: null });
+  const a = createAddonRuntime({ runtime: { ready: Promise.resolve(), store, registry: { list: () => [] } }, transport: { json: async url => {
+    if (url.endsWith('/manifest.json')) return manifest;
+    if (hold) return new Promise((resolve, reject) => { release = () => result === 'success' ? resolve({ subtitles: [{ id: 'one', url: 'https://subs.test/a.srt', lang: 'ara' }] }) : reject(new Error('offline')); });
+    return { subtitles: [] };
+  } } });
+  await a.ready; const one = await a.registry.install(await a.registry.inspect('https://subs.test/manifest.json'));
+  const pending = a.adapter(one.key).subtitles({ type: 'movie', videoId: 'tt123' });
+  while (!release) await Promise.resolve();
+  await a.registry.reinstall(one.key); hold = false;
+  release(); await expect(pending).rejects.toThrow();
+  expect(a.registry.list()[0].health.subtitles.state).toBe('unknown');
+});

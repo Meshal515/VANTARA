@@ -527,6 +527,19 @@
   margin-top: -84px;
 }
 
+/* الشاشة العريضة (ويندوز والكمبيوتر): 4/3 بعرض الشاشة كان أطول من الشاشة نفسها فلا يظهر
+   تحته شيء. ارتفاع محسوب من الشاشة، والشعار والأزرار بعرض مقروء في جهة البداية */
+@media (min-width: 900px) {
+  .v35 .cn-hero-alt .cn-bill-stage {
+    aspect-ratio: auto;
+    height: clamp(380px, 62vh, 640px);
+  }
+  .v35 .cn-hero-alt .cn-bill-info {
+    max-width: 560px;
+    margin-top: -120px;
+  }
+}
+
 /* أزرار الترويسة في السينما (الجوال): الجرس والبحث في كبسولة داكنة شفيفة واحدة،
    والقائمة في دائرة بنفس المادة — تُقرأ فوق أي صورة. الشعار ومبدّل الأقسام كما هما.
    لا تُثبَّت داخل البانر المتحرك: ترويسات مستقلة على مستوى الشاشة حتى لا
@@ -1572,6 +1585,11 @@
   }
   .v35 .cn-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+  /* مكتبة السينما: بطاقتان عريضتان بنصف الشاشة كانتا ضخمتين على الكمبيوتر */
+  .v35 .cn-wide-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px 16px;
   }
   .v35 .cn-chart-grid {
     grid-auto-columns: 46%;

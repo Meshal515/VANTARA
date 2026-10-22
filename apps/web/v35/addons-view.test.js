@@ -190,6 +190,37 @@ it("configure opens only an HTTPS provider page in a new protected tab", () => {
   expect(link.rel).toContain("noopener");
   expect(view.querySelector("iframe")).toBeNull();
 });
+it("explains how to bring a provider's Stremio install link back into VANTARA beside configuration", () => {
+  setup();
+  const addon = row("Torrentio", {
+    bundled: false,
+    configuration: { required: true, configurable: true, configured: false },
+  });
+  const view = renderAddonDetails({
+    addon,
+    registry: { configurationUrl: () => "https://torrentio.test/configure" },
+  });
+  const help = view.querySelector(".addon-configure-help");
+  expect(help).not.toBeNull();
+  expect(help?.textContent).toContain("تثبيت في Stremio");
+  expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+  expect(help?.textContent).toContain("إضافة جديدة");
+  expect(help?.textContent).toContain("stremio://");
+  expect(help?.previousElementSibling).toBe(view.querySelector(".addon-actions"));
+});
+it("shows the same Stremio handoff instructions on discovery cards that open provider setup", () => {
+  setup();
+  const view = renderAddons({ registry: { list: () => [] } });
+  click(view, "استكشاف");
+  for (const card of view.querySelectorAll(".addon-card")) {
+    const help = card.querySelector(".addon-configure-help");
+    if (card.querySelector("[data-configure]")) {
+      expect(help).not.toBeNull();
+      expect(help?.textContent).toContain("انسخ رابط هذا الزر");
+      expect(help?.textContent).toContain("stremio://");
+    } else expect(help).toBeNull();
+  }
+});
 it("keeps network permissions and diagnostics collapsed and shows supplied assessment", () => {
   setup();
   const addon = row("Addon", {
@@ -524,6 +555,64 @@ it('يعيد فحص المصدر المتعثر عند انتهاء المهلة
     expect(calls).toBe(2);
   } finally { vi.useRealTimers(); }
 });
+it('previews a configured return link beside setup and replaces saved settings without duplicates', async () => {
+  setup();
+  const {createAddonRegistry}=await import('../addons/registry.js');
+  const {createStore}=await import('../pwa/cache/store.js');
+  const store=createStore({indexedDB:null}),manifest={id:'org.demo',name:'Demo',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[],behaviorHints:{configurable:true}};
+  const registry=createAddonRegistry({store,transport:{json:async()=>manifest}});await registry.ready;
+  const addon=await registry.install(await registry.inspect('https://addon.test/manifest.json'));
+  await registry.enable(addon.key,false);
+  const view=renderAddonDetails({addon,registry});const input=view.querySelector('[data-configured-url]');
+  expect(input).not.toBeNull();input.value='stremio://addon.test/settings/manifest.json?token=private';
+  click(view,'معاينة رابط الإعداد');await tick();
+  expect((await store.get('state','addons.v1')).value[0].url).toBe('https://addon.test/manifest.json');
+  expect(view.textContent).not.toContain('private');
+  click(view,'حفظ الإعداد');await tick();
+  expect(registry.list()).toHaveLength(1);expect(registry.list()[0].enabled).toBe(false);
+  const again=createAddonRegistry({store,transport:{json:async()=>manifest}});await again.ready;
+  expect(again.list()[0].enabled).toBe(false);await again.enable(addon.key,true);
+  expect(again.connection(addon.key).manifestUrl).toBe('https://addon.test/settings/manifest.json?token=private');
+});
+it('cancels a configured-link preview and rejects a different addon identity',async()=>{
+ setup();let release;const install=vi.fn();
+ const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
+ const registry={configurationUrl:()=> 'https://addon.test/configure',inspect:()=>new Promise(resolve=>{release=resolve;}),install};
+ const view=renderAddonDetails({addon,registry});view.querySelector('[data-configured-url]').value='https://addon.test/configured/manifest.json';
+ click(view,'معاينة رابط الإعداد');view.close();release({manifest:{id:'org.demo',name:'Late'}});await tick();
+ expect(view.textContent).not.toContain('Late');expect([...view.querySelectorAll('button')].some(b=>b.textContent==='حفظ الإعداد')).toBe(false);
+ const other=renderAddonDetails({addon,registry:{...registry,inspect:async()=>({manifest:{id:'org.other',name:'Other'}})}});
+ other.querySelector('[data-configured-url]').value='https://addon.test/other/manifest.json';click(other,'معاينة رابط الإعداد');await tick();
+ expect(other.textContent).toContain('هوية الإضافة');expect(install).not.toHaveBeenCalled();
+});
+it('describes desktop automatic capture and browser or APK manual fallback honestly',()=>{
+ setup();const addon=row('Demo',{bundled:false,configuration:{configurable:true}});
+ const desktop=renderAddonDetails({addon,registry:{runtimeName:'desktop',configurationUrl:()=> 'https://addon.test/configure'}});
+ expect(desktop.querySelector('.addon-configure-help').textContent).toContain('معاينة داخل VANTARA');
+ for(const runtimeName of ['pwa','apk']){
+  const view=renderAddonDetails({addon,registry:{runtimeName,configurationUrl:()=> 'https://addon.test/configure'}});
+  expect(view.querySelector('.addon-configure-help').textContent).toContain('لا تضمن الخدمة العودة التلقائية');
+ }
+});
+it('allows correcting the configured link while a slow preview is pending',async()=>{
+ setup();let release;const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
+ const view=renderAddonDetails({addon,registry:{configurationUrl:()=> 'https://addon.test/configure',inspect:()=>new Promise(resolve=>{release=resolve;}),install:async()=>{}}});
+ const input=view.querySelector('[data-configured-url]');input.value='https://addon.test/old/manifest.json';click(view,'معاينة رابط الإعداد');
+ input.value='https://addon.test/new/manifest.json';input.dispatchEvent(new document.defaultView.Event('input'));
+ expect([...view.querySelectorAll('button')].find(b=>b.textContent==='معاينة رابط الإعداد').disabled).toBe(false);
+ release({manifest:{id:'org.demo',name:'Old'}});await tick();expect(view.textContent).not.toContain('Old');
+});
+it('reviews another host explicitly before replacing the configured addon without a duplicate',async()=>{
+ setup();const {createAddonRegistry}=await import('../addons/registry.js');const {createStore}=await import('../pwa/cache/store.js');
+ const manifest={id:'org.demo',name:'Demo',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[],behaviorHints:{configurable:true}};
+ const registry=createAddonRegistry({store:createStore({indexedDB:null}),transport:{json:async()=>manifest}});await registry.ready;
+ const addon=await registry.install(await registry.inspect('https://addon.test/manifest.json')),view=renderAddonDetails({addon,registry});
+ view.querySelector('[data-configured-url]').value='https://other.test/manifest.json';click(view,'معاينة رابط الإعداد');await tick();
+ expect(view.textContent).toContain('مضيف الإضافة');expect(view.textContent).toContain('other.test');expect(registry.list()).toHaveLength(1);
+ expect(registry.connection(addon.key).manifestUrl).toBe('https://addon.test/manifest.json');
+ click(view,'حفظ الإعداد');await tick();expect(registry.list()).toHaveLength(1);
+ expect(registry.connection(addon.key).manifestUrl).toBe('https://other.test/manifest.json');
+});
 
 it("on the phone, Install inside the configure page installs the configured addon here instead of opening Stremio", async () => {
   setup();
@@ -551,32 +640,69 @@ it("on the phone, Install inside the configure page installs the configured addo
   expect(link.textContent).toBe("إعداد الإضافة");
 });
 
-it("offers Torrentio in Explore and manages it instead of duplicating an installed provider", () => {
-  setup();
-  const installed = row("Torrentio", {
-    key: "torrentio|configured",
-    id: "com.stremio.torrentio.addon",
-    bundled: false,
-    protocol: "stremio",
-    capabilities: ["streams"],
-    contentTypes: ["movie", "series"],
-  });
-  let list = [];
-  const view = renderAddons({ registry: { list: () => list, runtimeName: "desktop" } });
-  click(view, "استكشاف");
-  expect(view.querySelector(".addon-grid").textContent).toContain("Torrentio");
-  expect(view.querySelector(".addon-grid").textContent).toContain("يحتاج إعداد");
-  list = [installed];
-  click(view, "استكشاف");
-  expect(view.querySelector(".addon-grid").textContent).toContain("مثبتة · إدارة");
-  expect(view.querySelector(".addon-grid").textContent).not.toContain("تثبيت\n");
+it('offers Torrentio as a configuration-only source provider without fetching or installing', () => {
+  setup(); const inspect = vi.fn(), install = vi.fn();
+  const view = renderAddons({ registry: { list: () => [], inspect, install } });
+  click(view, 'استكشاف');
+  const card = [...view.querySelectorAll('.addon-card')].find(el => el.textContent.includes('Torrentio'));
+  expect(card.textContent).toContain('مزود روابط تورنت');
+  expect(card.querySelector('[data-configure]').href).toBe('https://torrentio.strem.fun/configure');
+  expect(card.textContent).toContain('يحتاج إعداد');
+  expect([...card.querySelectorAll('button')].map(b => b.textContent)).not.toContain('تثبيت');
+  expect(inspect).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled();
 });
-it("shows a real reinstallation control only for installed external addons", async () => {
+
+it.each([
+  [{}, 'مثبتة · لم تُختبر بعد'],
+  [{ enabled: false }, 'معطلة'],
+  [{ configuration: { required: true, configured: false } }, 'يحتاج إعداد'],
+  [{ assessment: { level: 'broken', label: 'تواجه مشكلة', detail: 'فشل الاتصال' } }, 'تواجه مشكلة'],
+])('shows the real existing Torrentio state in Explore and manages the existing entry', (extra, label) => {
+  setup(); const addon = row('Torrentio', { id: 'com.stremio.torrentio.addon', key: 'https://torrentio.strem.fun|com.stremio.torrentio.addon', bundled: false, capabilities: ['streams'], contentTypes: ['movie'], ...extra });
+  const view = renderAddons({ registry: { list: () => [addon] } });
+  click(view, 'استكشاف');
+  const cards = [...view.querySelectorAll('.addon-card')].filter(el => el.textContent.includes('Torrentio'));
+  expect(cards).toHaveLength(1); expect(cards[0].textContent).toContain(label);
+  expect(cards[0].querySelector('[data-configure]')).toBeNull();
+  click(cards[0], 'إدارة الإضافة المثبتة');
+  expect(view.querySelector('.addon-details').textContent).toContain('Torrentio');
+});
+
+it('keeps retry, update and actual reinstall distinct and prevents duplicate reinstall clicks', async () => {
+  setup(); let release; const reinstall = vi.fn(() => new Promise(resolve => { release = resolve; }));
+  const stage = vi.fn(), reset = vi.fn(), onCheck = vi.fn(async () => ({ checks: [] })), onBack = vi.fn();
+  const addon = row('External', { bundled: false });
+  const view = renderAddonDetails({ addon, registry: { reinstall, stage, health: { reset } }, onCheck, onBack });
+  click(view, 'إعادة المحاولة'); await tick();
+  expect(reset).toHaveBeenCalledWith(addon.key); expect(onCheck).toHaveBeenCalledOnce(); expect(reinstall).not.toHaveBeenCalled();
+  click(view, 'فحص تحديث الإضافة'); await tick(); expect(stage).toHaveBeenCalledWith(addon.key);
+  onBack.mockClear();
+  click(view, 'إعادة تثبيت الإضافة'); click(view, 'إعادة تثبيت الإضافة');
+  expect(reinstall).toHaveBeenCalledOnce(); expect(onBack).not.toHaveBeenCalled();
+  expect(reinstall.mock.calls[0][0]).toBe(addon.key);
+  release(); await tick(); expect(onBack).toHaveBeenCalledOnce();
+});
+
+it('keeps the installed detail visible and sanitizes a failed reinstall endpoint', async () => {
+  setup(); const onBack = vi.fn();
+  const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: async () => { throw new Error('failed https://addon.test/private-config/manifest.json?token=private'); } }, onBack });
+  click(view, 'إعادة تثبيت الإضافة'); await tick();
+  expect(onBack).not.toHaveBeenCalled();
+  expect(view.textContent).toContain('[رابط الخدمة]');
+  expect(view.textContent).not.toContain('private-config');
+  expect([...view.querySelectorAll('button')].find(b => b.textContent === 'إعادة تثبيت الإضافة').disabled).toBe(false);
+});
+
+it('cancels a pending reinstall when details close and ignores late navigation', async () => {
+  setup(); let release, signal; const onBack = vi.fn();
+  const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: (_key, options) => { signal = options.signal; return new Promise(resolve => { release = resolve; }); } }, onBack });
+  click(view, 'إعادة تثبيت الإضافة'); view.close();
+  expect(signal.aborted).toBe(true); release(); await tick();
+  expect(onBack).not.toHaveBeenCalled();
+});
+
+it('shows disabled before configuration when both apply to an installed addon', () => {
   setup();
-  const addon = row("Demo", { bundled: false, key: "addon.demo" });
-  const reinstall = vi.fn(async () => {});
-  const view = renderAddonDetails({ addon, registry: { reinstall }, onBack: vi.fn() });
-  click(view, "إعادة تثبيت الإضافة");
-  await tick();
-  expect(reinstall).toHaveBeenCalledWith("addon.demo", expect.objectContaining({ signal: expect.anything() }));
+  const view = renderAddonDetails({ addon: row('Disabled', { bundled: false, enabled: false, configuration: { required: true, configured: false } }), registry: {} });
+  expect(view.querySelector('.addon-health').textContent).toBe('معطلة');
 });

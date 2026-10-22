@@ -90,6 +90,16 @@ it("distinguishes a resolver timeout from user cancellation so health can cool d
   }
 });
 
+it('bypasses the browser response cache for an explicit reinstall fetch', async () => {
+  let options;
+  const t = createTransport({ fetchImpl: async (_url, value) => {
+    options = value;
+    return new Response('{}', { headers: { 'content-type': 'application/json' } });
+  } });
+  await t.json('https://addon.test/manifest.json', { cache: 'no-store' });
+  expect(options.cache).toBe('no-store');
+});
+
 it("decodes legacy Arabic subtitle downloads without corrupting UTF8 or declared encodings", async () => {
   const arabic = "مرحبا بالعالم";
   const legacy = new Uint8Array([227, 209, 205, 200, 199, 32, 200, 199, 225, 218, 199, 225, 227]);
@@ -104,4 +114,5 @@ it("decodes legacy Arabic subtitle downloads without corrupting UTF8 or declared
     const t = createTransport({fetchImpl: async () => new Response(bytes, {headers: {"content-type": type}})});
     expect(await t.text("https://subs.test/ar.srt", {fallbackCharset: "windows-1256"})).toBe(expected);
   }
+
 });

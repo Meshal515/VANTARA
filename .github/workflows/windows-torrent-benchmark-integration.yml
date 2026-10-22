@@ -1,0 +1,105 @@
+name: VANTARA Windows torrent first-frame benchmark (owned swarm)
+on:
+  push:
+    branches: ['chatgpt/windows-torrent-f11-integrated-20261019']
+    paths:
+      - 'apps/desktop/src/**'
+      - 'tools/torrent-startup-benchmark.mjs'
+      - '.github/workflows/windows-torrent-benchmark-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-torrent-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  first-frame:
+    name: Real rqbit/mpv owned-swarm first frame
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run deterministic startup/cache tests
+        shell: pwsh
+        run: |
+          node --test apps/desktop/src/startup-trace.test.mjs apps/desktop/src/torrent-replay-cache.test.mjs apps/desktop/src/torrent-replay-http.test.mjs apps/desktop/src/torrent-window.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Torrent unit tests failed' }
+      - name: Fetch hash-pinned rqbit and mpv for actual decoding
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'vantara-torrent-benchmark'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          function Fetch-Pinned([string]$Url,[string]$Name,[string]$Hash) {
+            $file=Join-Path $dir $Name
+            Invoke-WebRequest $Url -OutFile $file
+            if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $Hash) { throw "Checksum mismatch: $Name" }
+            return $file
+          }
+          $rqbit=Fetch-Pinned 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe' 'rqbit.exe' '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea'
+          $archive=Fetch-Pinned 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-x86_64-20261014-git-ec38361c56.7z' 'mpv.7z' 'ab6236a2b78a3e9e93a156c1f638d3182ee906006d019c15d1b7b056a7c9a4c5'
+          $out=Join-Path $dir 'mpv'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          & 7z x -y "-o$out" $archive | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'MPV archive failed' }
+          $mpv=Get-ChildItem $out -Recurse -File -Filter 'mpv.exe' | Select-Object -First 1
+          if (-not $mpv) { throw 'MPV binary missing' }
+          # Match the bundled native runtime used by the real Electron/MPV
+          # integration smoke. Its Vulkan loader is not guaranteed on CI hosts.
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $electronDir=Join-Path $dir 'electron'
+          Expand-Archive $electron -DestinationPath $electronDir
+          $vulkan=Join-Path $electronDir 'vulkan-1.dll'
+          if (-not (Test-Path $vulkan)) { throw 'Pinned Electron Vulkan loader is missing' }
+          Copy-Item $vulkan (Join-Path $mpv.DirectoryName 'vulkan-1.dll') -Force
+          Write-Output "MPV executable: $($mpv.FullName)"
+          Write-Output "MPV sibling DLLs:"
+          Get-ChildItem $mpv.DirectoryName -Filter '*.dll' -File | Select-Object -First 50 -ExpandProperty Name | Write-Output
+          & $mpv.FullName --version
+          $mpvVersionExit=$LASTEXITCODE
+          Write-Output "MPV standalone version exit code: $mpvVersionExit (hex: 0x$([Convert]::ToString([int64]$mpvVersionExit -band 0xffffffffL,16)))"
+          if ($mpvVersionExit -ne 0) { throw 'MPV executable cannot start even without a video; investigate Windows DLL dependencies before torrent performance' }
+          "TORRENT_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
+          "TORRENT_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "TORRENT_PROOF=$dir" | Out-File -Append $env:GITHUB_ENV
+      - name: Fetch checksum-verified FFmpeg encoder and screenshot verifier
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:TORRENT_PROOF 'ffmpeg.zip'
+          Invoke-WebRequest 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip' -OutFile $zip
+          $expected='46e480b5509ce50061158621cac3d1930836475fadf60c72da9aca15fd830620'
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'FFmpeg asset changed; update verified digest before testing' }
+          $out=Join-Path $env:TORRENT_PROOF 'ffmpeg'
+          Expand-Archive $zip -DestinationPath $out
+          $binary=Get-ChildItem $out -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $binary) { throw 'FFmpeg binary missing' }
+          "TORRENT_FFMPEG=$($binary.FullName)" | Out-File -Append $env:GITHUB_ENV
+      - name: 'Fast gate: actual rendered cold and warm MP4; full matrix remains available via script'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit "$env:TORRENT_RQBIT" --mpv "$env:TORRENT_MPV" --ffmpeg "$env:TORRENT_FFMPEG" --output "$env:TORRENT_PROOF/runs" --runs 1 --kinds mp4 --modes cold,warm --stable-seconds 2 --timeout-ms 20000
+          if ($LASTEXITCODE -ne 0) { throw 'Real first-frame benchmark failed; inspect report' }
+      - name: Summarize measured first-frame latency (not a public-swarm claim)
+        if: always()
+        shell: pwsh
+        run: |
+          $report=Join-Path $env:TORRENT_PROOF 'runs/results.json'
+          if (-not (Test-Path $report)) { 'Benchmark did not produce results.json' | Out-File -Append $env:GITHUB_STEP_SUMMARY; exit 0 }
+          $result=Get-Content $report -Raw | ConvertFrom-Json
+          '### First-rendered frame in owned loopback swarm' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| Fixture | Mode | Successful | Failed | Median ms | P95 ms |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| --- | --- | ---: | ---: | ---: | ---: |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          foreach ($item in $result.summaries) {
+            "| $($item.fixture) | $($item.mode) | $($item.successful) | $($item.failed) | $($item.medianMs) | $($item.p95Ms) |" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-torrent-first-frame-${{ github.sha }}
+          path: ${{ runner.temp }}/vantara-torrent-benchmark/runs/
+          if-no-files-found: warn

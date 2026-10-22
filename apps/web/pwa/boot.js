@@ -9,7 +9,7 @@
  * ثم هذا عبر `webPlugin()` في pwa/platform.js.
  */
 
-import { isNative } from './platform.js';
+import { isNative, isDesktop } from './platform.js';
 
 /** واجهة كسولة: كل دالة تنتظر تحميل الوحدة ثم تنادي نظيرتها. */
 function lazyPlugin(load, pick) {
@@ -32,6 +32,7 @@ function lazyPlugin(load, pick) {
 }
 
 export function installWebBridges(g = globalThis) {
+  if (isDesktop(g)) return null;
   if (isNative(g) || g.VantaraWeb) return g.VantaraWeb ?? null;
   const runtime = () => import('./runtime.js');
   g.VantaraWeb = Object.freeze({

@@ -41,7 +41,8 @@ describe('capabilities', () => {
   });
 
   it('the real manifest keeps Rafiq and translation APK-only, and the three sections on both', () => {
-    for (const f of ['manga', 'anime', 'cinema', 'social', 'library', 'progress']) expect(RELEASE.features[f]).toEqual(['apk', 'pwa']);
+    expect(RELEASE.features.manga).toEqual(['apk', 'pwa', 'desktop']);
+    for (const f of ['anime', 'cinema', 'social', 'library', 'progress']) expect(RELEASE.features[f]).toEqual(['apk', 'pwa', 'desktop']);
     for (const f of ['rafiq', 'translation', 'autoTranslation']) expect(RELEASE.features[f]).toEqual(['apk']);
     for (const f of ['webSources', 'webInstall', 'webUpdate']) expect(RELEASE.features[f]).toEqual(['pwa']);
     for (const r of RELEASE.releases) for (const it of r.items) expect(it.platforms.every((p) => ['shared', 'apk', 'pwa'].includes(p))).toBe(true);

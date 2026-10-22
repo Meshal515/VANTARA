@@ -1,0 +1,94 @@
+{
+  "observedAt": "2026-10-14T15:32:37.826963+00:00",
+  "environment": "بيئة Linux للتنفيذ؛ User-Agent لمتصفح ويندوز؛ HTTPS GET عام دون بيانات حساب",
+  "limits": "ملخصات manifests تثبت الاكتشاف فقط. أعداد الترجمات لا تثبت التنزيل أو التشغيل. توفر Torrentio على ويندوز غير متحقق.",
+  "bundledMetadataProvenance": {
+    "commit": "0d75331f3cd7f1873279f7a3a57fc1591a21013f",
+    "manifestSource": "https://github.com/TheBeastLT/torrentio-scraper/blob/0d75331f3cd7f1873279f7a3a57fc1591a21013f/addon/lib/manifest.js",
+    "typesSource": "https://github.com/TheBeastLT/torrentio-scraper/blob/0d75331f3cd7f1873279f7a3a57fc1591a21013f/addon/lib/types.js",
+    "sourceFilesReadHttpStatus": 200,
+    "selection": "بيانات manifest الأساسية دون Debrid، الإصدار 0.0.15؛ Type.ANIME يساوي anime؛ catalogs فارغة. لا بيانات stream مضمّنة ولا ادعاء نجاح الشبكة."
+  },
+  "results": [
+    {
+      "url": "https://torrentio.strem.fun/manifest.json",
+      "httpStatus": 403
+    },
+    {
+      "url": "https://v3-cinemeta.strem.io/manifest.json",
+      "httpStatus": 200,
+      "contentType": "application/json; charset=utf-8",
+      "manifestSummary": {
+        "id": "com.linvo.cinemeta",
+        "name": "Cinemeta",
+        "version": "3.0.14",
+        "types": [
+          "movie",
+          "series"
+        ],
+        "resources": [
+          "catalog",
+          "meta",
+          "addon_catalog"
+        ],
+        "behaviorHints": {
+          "newEpisodeNotifications": true
+        }
+      },
+      "catalogCount": 8
+    },
+    {
+      "url": "https://opensubtitles-v3.strem.io/manifest.json",
+      "httpStatus": 200,
+      "contentType": "application/json; charset=utf-8",
+      "manifestSummary": {
+        "id": "org.stremio.opensubtitlesv3",
+        "name": "OpenSubtitles v3",
+        "version": "1.0.0",
+        "types": [
+          "movie",
+          "series"
+        ],
+        "resources": [
+          "subtitles"
+        ]
+      },
+      "catalogCount": 0
+    },
+    {
+      "url": "https://arabic-subtitle-stremio.lovable.app/api/public/manifest.json",
+      "httpStatus": 200,
+      "contentType": "application/json; charset=utf-8",
+      "manifestSummary": {
+        "id": "org.arabicsubs.combined",
+        "name": "ترجمة عربية مجمّعة (SubDL + SubSource)",
+        "version": "2.0.0",
+        "types": [
+          "movie",
+          "series"
+        ],
+        "resources": [
+          "subtitles"
+        ]
+      },
+      "catalogCount": 0
+    },
+    {
+      "url": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json",
+      "httpStatus": 200,
+      "contentType": "application/json; charset=utf-8",
+      "subtitleCount": 2,
+      "languages": [
+        "eng",
+        "ind"
+      ]
+    },
+    {
+      "url": "https://arabic-subtitle-stremio.lovable.app/api/public/subtitles/movie/tt1254207.json",
+      "httpStatus": 200,
+      "contentType": "application/json; charset=utf-8",
+      "subtitleCount": 0,
+      "languages": []
+    }
+  ]
+}

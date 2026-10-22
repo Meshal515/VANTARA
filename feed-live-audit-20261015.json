@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-14T21:18:48.994Z",
+  "environment": "container direct curl, public listing and chapter metadata only, not device/Worker validation",
+  "sources": [
+    {
+      "source": "eu.kanade.tachiyomi.extension.ar.teamx",
+      "domain": "olympustaff.com",
+      "pages": [
+        {
+          "page": 1,
+          "ms": 965,
+          "works": 40,
+          "hasNextPage": true
+        },
+        {
+          "page": 2,
+          "ms": 797,
+          "works": 40,
+          "hasNextPage": true
+        },
+        {
+          "page": 3,
+          "ms": 912,
+          "works": 40,
+          "hasNextPage": true
+        },
+        {
+          "page": 4,
+          "ms": 572,
+          "works": 40,
+          "hasNextPage": true
+        }
+      ],
+      "chapters": [
+        {
+          "title": "The Hero Cannot Rest",
+          "ms": 632,
+          "count": 5,
+          "dated": 5
+        },
+        {
+          "title": "The Berserker's Second Playthrough",
+          "ms": 872,
+          "count": 38,
+          "dated": 38
+        }
+      ]
+    }
+  ]
+}

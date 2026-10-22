@@ -1,0 +1,97 @@
+name: Verify and publish immutable Windows 0.2.3 candidate # locale-independent shortcut reader
+on:
+  push:
+    branches: ['codex/windows-current-installer-20261016']
+    paths: ['.github/workflows/windows-current-verify.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: windows-current-release
+  cancel-in-progress: false
+env:
+  VERSION: '0.2.3'
+  TAG: 'windows-v0.2.3'
+  CANDIDATE_SHA: '4b62f0b739d202e7d6d962966be0d8904524e2d6'
+jobs:
+  verify:
+    name: Verify the already built installer on actual Windows
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-current-release-candidate
+          run-id: 38810881488
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/windows-current
+      - name: Verify candidate hashes and test actual installation
+        shell: pwsh
+        run: |
+          $dir=Join-Path $env:RUNNER_TEMP 'windows-current'
+          Get-Content (Join-Path $dir 'SHA256SUMS.txt') | ForEach-Object {
+            if($_ -notmatch '^([0-9a-f]{64})  (.+)$'){throw 'Invalid checksum record'}
+            if((Get-FileHash (Join-Path $dir $Matches[2]) -Algorithm SHA256).Hash.ToLower() -ne $Matches[1]){throw 'Candidate checksum mismatch'}
+          }
+          ./tools/verify-windows-runtime.ps1 -CandidateDir $dir -Version $env:VERSION
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-current-verify-evidence
+          path: |
+            ${{ runner.temp }}/windows-current/*report.json
+            ${{ runner.temp }}/windows-current/*report.json.png
+          if-no-files-found: warn
+  publish:
+    name: Publish verified Windows 0.2.3
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-current-release-candidate
+          run-id: 38810881488
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/windows-current
+      - name: Release only tested version; do not replace existing assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/windows-current"
+          sha256sum -c SHA256SUMS.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version $TAG already exists. Refusing to overwrite release." >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            "VANTARA-$VERSION-Windows-x64-Setup.exe" \
+            "VANTARA-$VERSION-Windows-x64.zip" \
+            SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" \
+            --title "VANTARA Windows $VERSION — أحدث الواجهة والغرف ومثبت التطبيق" \
+            --notes "نسخة ويندوز تجمع واجهة main عند c2f4ec59 مع مشغل ويندوز المدمج والتورنت ذي النافذة المتحركة، وتوقيت الفيديو المحلي، وإصلاح تموضع الغرفة واختيار السيرفر وصور المدعوين. مثبت يحمل شعار فانتارا ويضيف اختصارات سطح المكتب وابدأ، مع قناة تحديثات مستقلة لويندوز. اختُبر في Windows CI: التثبيت والتحديث وإزالة التطبيق مع حفظ الملفات الشخصية، الشعار والاختصارات، إقلاع الواجهة، وتشغيل فيديو وترجمة مؤلفين داخل نافذة التطبيق باستخدام MPV الحقيقي. لم يختبر على جهاز المالك أو جلسة أصدقاء فعلية أو Torrentio حي. نسخة غير موقعة." \
+            --prerelease --latest=false
+      - name: Publish Windows update channel after verified release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/windows-current"
+          python3 - <<'PYMANIFEST'
+          import os,json,pathlib,hashlib
+          version=os.environ['VERSION'];p=pathlib.Path(f'VANTARA-{version}-Windows-x64-Setup.exe')
+          data={'format':1,'product':'VANTARA','platform':'win32-x64','installer':'nsis','version':version,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/{p.name}",'sourceSha':os.environ['CANDIDATE_SHA'],'notes':['واجهة الغرفة واختيار السيرفر وصور الأصدقاء','مثبت بشعار فانتارا وتحديثات ويندوز']}
+          pathlib.Path('desktop-update.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          PYMANIFEST
+          if ! gh release view windows-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create windows-channel --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" --title 'VANTARA Windows update channel' --notes 'قناة بيان تحديث ويندوز، مستقلة عن إصدارات APK.' --prerelease --latest=false
+          fi
+          gh release upload windows-channel desktop-update.json --clobber --repo "$GITHUB_REPOSITORY"

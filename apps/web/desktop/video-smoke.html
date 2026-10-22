@@ -1,0 +1,34 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>VANTARA · إثبات الفيديو المدمج</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/v35/core.css"><style>body{margin:0;background:#000}</style></head><body>
+<script type="module">
+import {installDesktopPlayer} from './player.js';
+import {createDesktopTogetherPlayer} from './together-player.js';
+const bridge=window.VantaraDesktop, listeners=new Map();
+let coordinator=null;
+const media={kind:'cinema',format:'movie',title:'VANTARA · فيديو مؤلف',cover:'/icons/icon-512.png',banner:'/icons/icon-512.png',key:'cinema:owned#1',seriesRef:'cinema:owned',episode:1};
+const roomListeners=new Map(),commands=[];
+const room={status:'live',isHost:true,canControl:true,me:'host',info:{mode:'sync',invited:['host','friend']},
+ roster:[{userId:'host',name:'مشعل',host:true,state:'ready',avatarKey:'/avatars/meshal.webp'},{userId:'friend',name:'منصور',state:'ready',avatarKey:'/avatars/man.webp'}],clock:{serverNow:()=>Date.now()},
+ timeline:{media,started:false,playing:false,pos:0,at:Date.now(),seq:0},report(){},
+ on(name,fn){const set=roomListeners.get(name)||new Set();set.add(fn);roomListeners.set(name,set);return()=>set.delete(fn)},
+ command(name,data){commands.push({name,...data});this.timeline={...this.timeline,...data,started:true,playing:name==='play',at:Date.now()+(data.countdownMs||0),seq:this.timeline.seq+1};for(const fn of roomListeners.get('state')||[])fn({state:this.timeline});},
+};
+const joined={room,media,mode:'sync'},hub={session:joined,person:id=>({userId:id,displayName:'منصور',avatarKey:'/avatars/man.webp'}),onChange:()=>()=>{},openPanel(){},avatar(p){const img=document.createElement('img');img.src=p.avatarKey;img.style.cssText='width:44px;height:44px;border-radius:50%;object-fit:cover';return img}};
+const emit=(name,event)=>{for(const fn of listeners.get(name)||[])fn(event)};
+const engine={
+ playerCommand:args=>args.command==='pause'&&coordinator?coordinator.playPause(!args.value):args.command==='seek'&&coordinator?coordinator.seek(args.value):bridge.playbackCommand(args),
+ closeSession:args=>{coordinator?.close();return bridge.stopPlayback(args)},roomHub:()=>coordinator?hub:null,
+ playerState:async()=>({title:media.title,section:'cinema',media,candidate:'owned',sources:[{id:'owned',label:'فيديو مؤلف للتحقق'}],server:{code:'VANTARA',quality:1080},together:!!coordinator,videoOffsetMs:coordinator?.getVideoOffset()||0}),
+ routes:async()=>({done:true,routes:[{id:'owned',state:'READY',sourceId:'owned',sourceName:'VANTARA',server:'فيديو مؤلف',quality:1080,label:'فيديو مؤلف',candidates:[{id:'owned'}]}]}),
+ pick:async()=>({candidate:'owned'}),best:async()=>({candidate:'owned'}),switchSource:async()=>{},
+ setVideoOffset:({ms})=>coordinator.setVideoOffset(ms),
+ addListener(name,fn){const set=listeners.get(name)||new Set();set.add(fn);listeners.set(name,set);return{remove:()=>set.delete(fn)}},
+};
+installDesktopPlayer({bridge,engine});
+bridge.onEvent(event=>coordinator?.progressEvent(event));
+window.VantaraVideoSmoke={commands,enterRoom(){
+ coordinator=createDesktopTogetherPlayer({together:{hub,session:joined,mediaPrefix:'cinema:owned'},bridge,session:'embedded-proof',episode:()=>1,
+   onLobby:event=>emit('desktopTogether',{session:'embedded-proof',media,...event})});
+ coordinator.progressEvent({type:'playback/progress',session:'embedded-proof',position:500,duration:4000,paused:true});coordinator.ready();
+}};
+window.VantaraVideoSmokeReady=true;
+</script></body></html>

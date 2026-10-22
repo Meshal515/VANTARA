@@ -21,6 +21,7 @@ import { createSubtitleSession } from './subtitles.js';
 import { nextEpisodeCopies } from '../../addons/video.js';
 import { SUBTITLE_SIZES } from './subtitle-adjustments.js';
 import { createTogetherPlayer } from './together-player.js';
+import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
 import { connectionLabel } from '../../v35/together.js';
 import { renderLobby, pendingInvitees } from './together-lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
@@ -354,9 +355,16 @@ export function openPlayer(args) {
     const hub = together.hub;
     const unmount = hub.mountStrip(strip);
     let sheetCleanup = null;
+    let offsetControls = null;
     const surface = hub.useSurface({ openSheet: build => {
       sheetCleanup?.(); sheetCleanup = null;
-      openSheet('مشاهدة معًا', null, body => { sheetCleanup = build(body); });
+      openSheet('مشاهدة معًا', null, body => {
+        sheetCleanup = build(body);
+        if ((together.session.room.info?.mode ?? together.session.mode) === 'sync' && tg) {
+          offsetControls = createVideoOffsetControls({ getOffset: () => tg?.offset() ?? 0, setOffset: ms => tg?.setOffset(ms) });
+          body.append(offsetControls);
+        }
+      });
     }, closeSheet, toast: message });
     // البنر والشعار وعنوان الحلقة: ما جاء مع الدعوة فورًا، ثم ما يُكمَّل من ani.zip/metahub.
     // الحلقة تتغيّر في الغرفة؟ يتغيّر البنر والعنوان معها.
@@ -379,6 +387,7 @@ export function openPlayer(args) {
       episode: () => state.episode, source: () => state.current?.code ?? null,
       onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
       onLobby: (l) => {
+        offsetControls?.refresh();
         lobby.hidden = !l.visible;
         root.classList.toggle('pp--lobby', l.visible);
         if (!l.visible) return;
@@ -1029,22 +1038,23 @@ export function openPlayer(args) {
     const caps = adjust.capabilities();
     if (!Object.values(caps).some(Boolean)) return;
     openSheet('تعديل الترجمة', null, (body) => {
-      const stepper = (key, title, label, next) => {
+      const stepper = (key, title, label, next, values = () => adjust.values()[key], set = n => adjust.set(key, n)) => {
         const group = el('div', 'pp-sub-step');
         group.append(el('small', null, title));
         const pill = el('div', 'pp-sub-step__pill'); pill.dir = 'ltr';
         const value = el('output'); value.setAttribute('aria-live', 'polite');
         const minus = el('button', null, '−'), plus = el('button', null, '+');
         const paint = () => {
-          const current = adjust.values()[key]; value.textContent = label(current);
+          const current = values(); value.textContent = label(current);
           minus.disabled = next(current, -1) === current; plus.disabled = next(current, 1) === current;
         };
         for (const [button, direction] of [[minus, -1], [plus, 1]]) {
           button.type = 'button'; button.setAttribute('aria-label', `${direction > 0 ? 'زيادة' : 'تقليل'} ${title}`);
-          button.onclick = () => { adjust.set(key, next(adjust.values()[key], direction)); paint(); };
+          button.onclick = () => { set(next(values(), direction)); paint(); };
         }
         pill.append(minus, value, plus); group.append(pill); body.append(group); paint();
       };
+      if (tg) stepper('video', 'توقيت الفيديو', n => `${n.toFixed(2)} ث`, (n, d) => Math.round(Math.max(-120, Math.min(120, n + d * 0.1)) * 10) / 10, () => (tg?.offset() ?? 0) / 1000, n => tg?.setOffset(n * 1000));
       if (caps.timing) {
         stepper('delay', 'توقيت الترجمة', n => `${n.toFixed(2)} ث`, (n, d) => Math.round(Math.max(-10, Math.min(10, n + d * 0.1)) * 10) / 10);
         body.append(el('small', 'pp-sub-hint', '+ يؤخر الترجمة، − يقدمها'));

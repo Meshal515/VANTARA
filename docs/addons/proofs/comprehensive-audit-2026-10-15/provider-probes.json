@@ -1,0 +1,14 @@
+{
+  "observedAt": "2026-10-14T21:11:00Z",
+  "method": "Public HTTPS JSON requests via Python urllib, VANTARA-provider-audit/1.0 User-Agent, no credentials, 12-15 second timeout; response summaries only",
+  "results": [
+    { "url": "https://opensubtitles-v3.strem.io/manifest.json", "httpStatus": 200, "durationMs": 179, "manifestId": "org.stremio.opensubtitlesv3", "resources": ["subtitles"], "configurationRequired": false },
+    { "url": "https://opensubtitles-v3.strem.io/subtitles/movie/tt1254207.json", "httpStatus": 200, "durationMs": 423, "subtitleCount": 2, "arabicCount": 0 },
+    { "url": "https://arabic-subtitle-stremio.lovable.app/api/public/manifest.json", "httpStatus": 200, "durationMs": 1187, "manifestId": "org.arabicsubs.combined", "resources": ["subtitles"], "configurationRequired": false },
+    { "url": "https://kitsu.io/api/edge/mappings?filter%5BexternalSite%5D=anilist%2Fanime&filter%5BexternalId%5D=21&include=item", "httpStatus": 200, "durationMs": 370, "externalSite": "anilist/anime", "externalId": "21", "kitsuId": "12" },
+    { "url": "https://arabic-subtitle-stremio.lovable.app/api/public/subtitles/series/kitsu%3A12%3A1.json", "httpStatus": 200, "durationMs": 1325, "subtitleCount": 0, "arabicCount": 0 },
+    { "url": "https://arabic-subtitle-stremio.lovable.app/api/public/subtitles/series/tt0388629%3A1%3A1.json", "httpStatus": 200, "durationMs": 1902, "subtitleCount": 0, "arabicCount": 0 }
+  ],
+  "repeatObservation": "Repeating the OpenSubtitles movie request with Python's default User-Agent returned HTTP 403; repeating with VANTARA-provider-audit/1.0 returned English and Indonesian descriptors hosted at subs5.strem.io. No subtitle file was fetched or rendered in this probe.",
+  "limits": "Manifest availability and valid JSON are not playback, Arabic anime subtitle availability, or device testing. The two tested Arabic anime IDs returned no subtitle results. PWA supports SRT/VTT conversion; native Windows MPV and APK Media3 support ASS according to existing engine paths, with real-device subtitle rendering untested here. Desktop setup captures stremio links within its settings window; no universal provider return URL or OS protocol handoff was assumed. APK/PWA use explicit copied-link preview fallback."
+}

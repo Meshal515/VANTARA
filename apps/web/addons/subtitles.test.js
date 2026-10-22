@@ -136,6 +136,30 @@ it('uses a provider-specific exact request without requesting incompatible names
  await discoverSubtitles({identity:{kind:'anime',format:'MOVIE',externalIds:{kitsu:'12',imdb:'tt123'}},providers:[{key:'imdb',request:()=>({type:'movie',videoId:'tt123',extra:{}}),subtitles:async input=>{calls.push(input);return [{url:'https://sub.test/a.srt',lang:'ara'}];}},{key:'wrong',request:()=>null,subtitles:async()=>{throw Error('must not request');}}],onResult:x=>results.push(x)});
  expect(calls[0].videoId).toBe('tt123');expect(results).toHaveLength(1);
 });
+it('never sends one provider private video ID to another unrestricted subtitle provider', async () => {
+  const calls = [];
+  await discoverSubtitles({ identity: { kind: 'series', addonKey: 'origin', videoId: 'private:episode', externalIds: { imdb: 'tt123' }, season: 2, episode: 3 }, providers: [
+    { key: 'origin', subtitles: async request => { calls.push(['origin', request.videoId]); return []; } },
+    { key: 'other', subtitles: async request => { calls.push(['other', request.videoId]); return []; } },
+  ] });
+  // المعرّف الخاص لإضافته وحدها (أولًا)، والأخرى لا تستلم إلا العنوان العام؛ الأصلية تجرّب العام بعد الخاص الفارغ
+  expect(calls.filter(([key]) => key === 'other')).toEqual([['other', 'tt123:2:3']]);
+  expect(calls.filter(([key]) => key === 'origin')).toEqual([['origin', 'private:episode'], ['origin', 'tt123:2:3']]);
+});
+it('does not query a different provider when only the origin private ID is known', async () => {
+  const calls = [];
+  await discoverSubtitles({ identity: { kind: 'series', addonKey: 'origin', videoId: 'private:episode' }, providers: [{ key: 'other', subtitles: async request => { calls.push(request); return []; } }] });
+  expect(calls).toEqual([]);
+});
+it('does not publish subtitle health after cancellation even if transport ignores abort', async () => {
+  const controller = new AbortController(), health = [], found = [];
+  let release;
+  const done = discoverSubtitles({ identity: { kind: 'movie', externalIds: { imdb: 'tt123' } }, signal: controller.signal, providers: [{ key: 'slow', subtitles: () => new Promise(resolve => { release = resolve; }) }], onHealth: (...row) => health.push(row), onResult: row => found.push(row) });
+  await Promise.resolve();
+  controller.abort(); release([{ url: 'https://subs.test/a.srt', lang: 'ara' }]);
+  await done; await Promise.resolve();
+  expect(found).toEqual([]); expect(health).toEqual([]);
+});
 
 it('عنوان حلقة الأنمي في IMDb: موسم TVDB ثم المطلق، وحلقة لم تصل الخريطة تكمل من آخر معروفة', () => {
   const map = { 1: [2, 13, 38], 2: [2, 14, 39] };

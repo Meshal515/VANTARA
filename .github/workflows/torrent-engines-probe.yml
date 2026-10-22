@@ -1,0 +1,52 @@
+name: Torrent engines probe (app vs Stremio server vs torrent-stream vs WebTorrent)
+# تشخيص فقط: زمن أول إطار على أسراب Torrentio حقيقية، أربعة محركات على نفس جهاز ويندوز.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl']
+    paths:
+      - '.github/workflows/torrent-engines-probe.yml'
+      - 'tools/torrent-engines-probe.mjs'
+      - 'tools/torrent-engine-server.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: torrent-engines-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native binaries from the published Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          gh release download windows-v0.3.18 --repo $env:GITHUB_REPOSITORY --pattern '*-x64.zip' --dir $dir
+          Expand-Archive (Get-ChildItem $dir -Filter *.zip | Select-Object -First 1).FullName -DestinationPath (Join-Path $dir 'app')
+          $rqbit = Get-ChildItem (Join-Path $dir 'app') -Recurse -Filter rqbit.exe | Select-Object -First 1
+          "NATIVE=$($rqbit.DirectoryName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Stremio streaming server and the open engines
+        shell: pwsh
+        run: |
+          $st = Join-Path $env:RUNNER_TEMP 'stremio'
+          New-Item -ItemType Directory -Force $st | Out-Null
+          Invoke-WebRequest https://dl.strem.io/server/v4.20.8/desktop/server.js -OutFile (Join-Path $st 'server.js')
+          "STREMIO=$(Join-Path $st 'server.js')" | Out-File -Append $env:GITHUB_ENV
+          $eng = Join-Path $env:RUNNER_TEMP 'engines'
+          npm install --prefix $eng --no-audit --no-fund torrent-stream@1.2.1 webtorrent@3.0.21 | Out-Null
+          "ENGINES=$(Join-Path $eng 'node_modules')" | Out-File -Append $env:GITHUB_ENV
+      - name: Probe
+        shell: pwsh
+        run: node tools/torrent-engines-probe.mjs "$env:NATIVE" "$env:RUNNER_TEMP/engines.json" "$env:STREMIO" "$env:ENGINES"
+      - name: Notes
+        if: always()
+        shell: pwsh
+        run: |
+          node -e "const r=require(process.argv[1]);const c=s=>String(s??'').replace(/[\r\n]+/g,' ').replace(/::/g,':');for(const x of (r.candidates||[]))console.log('::notice title=candidate::'+c(JSON.stringify(x)));for(const x of (r.runs||[]))console.log('::notice title=run::'+c(JSON.stringify({label:x.label,engine:x.engine,ms:x.ms,firstByteMs:x.firstByteMs,error:x.error})))" "$env:RUNNER_TEMP/engines.json"

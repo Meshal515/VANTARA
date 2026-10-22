@@ -902,6 +902,13 @@
     max-width: min(100%, 460px);
     filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55));
   }
+  /* الخانة تتسع للشعار الأكبر وإلا قُصّ رأسه (overflow:hidden بارتفاع 72px) */
+  .v35 .cn-bill-mark {
+    height: 120px;
+  }
+  .v35 .cn-bill-info {
+    --cn-bill-info-h: 244px;
+  }
   .v35 .cn-bill-mark .cn-mark-logo {
     max-height: 120px;
     max-width: min(100%, 400px);

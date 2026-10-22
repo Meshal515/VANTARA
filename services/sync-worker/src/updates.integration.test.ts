@@ -18,7 +18,7 @@ const list = (e: UpdatesEnv, q: string) =>
   handleUpdatesList(new URL(`https://x/v1/updates?${q}`), e).then((r) => r.json() as Promise<{ events: Array<Record<string, unknown>>; next: string | null }>);
 const manga = (work: string, numbers: number[], s: string, dates: Record<number, number> = {}) => ({
   work, section: 'manga', kind: 'chapter', title: work.slice(4), source: { s, u: `/m/${work}` },
-  units: numbers.map((number) => ({ number, ...(dates[number] ? { publishedAt: dates[number] } : {}) })),
+  units: [...numbers].sort((a,b) => b-a).map((number) => ({ number, ...(dates[number] ? { publishedAt: dates[number] } : {}) })),
 });
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
@@ -56,7 +56,8 @@ describe('Update Engine: خط الأساس', () => {
     const e = env();
     expect(await observe(e, [manga('ext:solo', range(343, 400), 'mangalek', { 400: NOW - 30 * 86_400_000 })], NOW)).toMatchObject({ created: 1, baselined: 1 });
     expect((await list(e, 'section=manga')).events.map((r) => r.at)).toEqual([NOW - 30 * 86_400_000]);
-    // صفحة العمل في مصدر آخر تكشف 401 (لم يظهر في Latest)
+    // The second source has an established baseline too.
+    await observe(e, [manga('ext:solo', [400], 'teamx')], NOW);
     expect(await observe(e, [manga('ext:solo', range(380, 401), 'teamx')], NOW + H)).toMatchObject({ created: 1, baselined: 0 });
     // Latest المصدر الأول يلحق بعد ساعتين: يُدمج تحت نفس الحدث بلا تغيير وقته
     expect(await observe(e, [manga('ext:solo', [401], 'mangalek')], NOW + 3 * H)).toMatchObject({ created: 0 });
@@ -130,7 +131,7 @@ describe('Update Engine: خط الأساس', () => {
 describe('Update Engine: شهادة قائمة Latest', () => {
   const listed = (work: string, numbers: number[], since: number, dates: Record<number, number> = {}) => ({ ...manga(work, numbers, 'mangalek', dates), listed: since });
 
-  it('64 works that moved up in a source Latest list are 64 timeline rows, not a silent baseline', async () => {
+  it('64 known source works advancing produce 64 rows; first listing sight baselines', async () => {
     const before = env();
     const works = Array.from({ length: 64 }, (_, i) => manga(`ext:work ${i}`, range(1, 10 + i), 'mangalek', { 1: NOW - 90 * 86_400_000 }));
     await observe(before, works, NOW);
@@ -138,6 +139,7 @@ describe('Update Engine: شهادة قائمة Latest', () => {
     expect((await list(before, 'section=manga&limit=100')).events.filter((x) => (x.at as number) > NOW - H)).toHaveLength(0);
 
     const e = env();
+    for (let i = 0; i < works.length; i += 20) await observe(e, works.slice(i, i + 20).map((w, j) => manga(w.work, [9 + i + j], 'mangalek')), NOW - H);
     const vouched = works.map((w, i) => listed(w.work, range(1, 10 + i), NOW - 20 * 60_000, { 1: NOW - 90 * 86_400_000 }));
     // دفعات المجسّ كما يرسلها الجهاز (20 عملًا لكل طلب)
     for (let i = 0; i < vouched.length; i += 20) await observe(e, vouched.slice(i, i + 20), NOW);
@@ -147,14 +149,14 @@ describe('Update Engine: شهادة قائمة Latest', () => {
     expect(fresh.find((x) => x.work === 'ext:work 5')).toMatchObject({ number: 15, publishedAt: null, firstSeenAt: NOW });
   });
 
-  it('only the top unit is vouched; old testimony and catch-up below it stay quiet', async () => {
+  it('listing hints never vouch for undated first-source catch-up', async () => {
     const e = env();
     // شهادة أقدم من ثلاث ساعات لا تُقبل («تحدّث منذ أمس» لا يُكتب الآن)
     expect(await observe(e, [listed('ext:stale', range(1, 40), NOW - 5 * H)], NOW)).toMatchObject({ created: 0 });
     // عمل معروف عند 2 ومصدر أكمل يلحق بـ19 فصلًا بلا تواريخ وهو في قائمة Latest: حدث واحد لأعلاها
     await observe(e, [manga('ext:finals', [1, 2], 'small')], NOW);
-    expect(await observe(e, [listed('ext:finals', range(1, 21), NOW + H - 600_000)], NOW + H)).toMatchObject({ created: 1 });
-    expect((await list(e, 'section=manga')).events.map((x) => x.id)).toEqual(['ext:finals|c:21']);
+    expect(await observe(e, [listed('ext:finals', range(1, 21), NOW + H - 600_000)], NOW + H)).toMatchObject({ created: 0 });
+    expect((await list(e, 'section=manga')).events).toHaveLength(0);
     // قفزة ترقيم خاطئة لا تشفع لها الشهادة
     expect(await observe(e, [listed('ext:finals', [9999], NOW + 2 * H - 600_000)], NOW + 2 * H)).toMatchObject({ created: 0 });
     // تاريخ موثوق يبقى كما هو؛ الشهادة لا تضيف حدثًا ثانيًا
@@ -202,4 +204,42 @@ describe('Update Engine: الأقسام والخط الزمني', () => {
     expect(out).toEqual({ accepted: 0, created: 0, baselined: 0 });
     expect(eventId('ext:a', 'chapter', null, 12.5)).toBe(eventId('ext:a', 'chapter', null, 12.50));
   });
+});
+
+it('a reordered listing never turns first sight of old undated chapters into new events', async () => {
+  const e = env();
+  expect(await observe(e, [{ ...manga('ext:old reorder', [300], 'source'), listed: NOW - 60_000 }], NOW)).toMatchObject({ created: 0 });
+  expect((await list(e, 'section=manga')).events).toHaveLength(0);
+});
+
+it('a newly discovered fuller source baselines before a genuine multi-chapter release', async () => {
+  const e = env();
+  await observe(e, [manga('ext:source baseline', [2], 'small')], NOW);
+  expect(await observe(e, [manga('ext:source baseline', [3, 4], 'full')], NOW + H)).toMatchObject({ created: 0 });
+  await observe(e, [manga('ext:source baseline', [5, 6, 7, 8, 9], 'full')], NOW + 2 * H);
+  expect((await list(e, 'section=manga')).events.map(x => x.number).sort((a,b) => Number(a)-Number(b))).toEqual([5, 6, 7, 8, 9]);
+});
+
+it('returns verified undated advances separately from legacy first-seen rows', async () => {
+  const e = env();
+  await observe(e, [manga('ext:verified', [1], 's')], NOW);
+  await observe(e, [manga('ext:verified', [2], 's')], NOW + H);
+  const event = (await list(e, 'section=manga')).events[0];
+  expect(event).toMatchObject({ observedAdvance: true, publishedAt: null, firstSeenAt: NOW + H });
+});
+
+it('discards a future publication date without dropping the observed chapter', async () => {
+  const e = env();
+  await observe(e, [manga('ext:clock', [1], 's')], NOW);
+  await observe(e, [manga('ext:clock', [2], 's', { 2: NOW + 10 * H })], NOW + H);
+  expect((await list(e, 'section=manga')).events[0]).toMatchObject({ number: 2, publishedAt: null, firstSeenAt: NOW + H });
+});
+
+it('two devices discovering the same chapter concurrently retain both source editions', async () => {
+  const e = env();
+  await observe(e, [manga('ext:concurrent', [1], 'a'), manga('ext:concurrent', [1], 'b')], NOW);
+  await Promise.all([observe(e, [manga('ext:concurrent', [2], 'a')], NOW + H), observe(e, [manga('ext:concurrent', [2], 'b')], NOW + H)]);
+  expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b']);
+  await Promise.all([observe(e, [manga('ext:concurrent', [2], 'c')], NOW + 2 * H), observe(e, [manga('ext:concurrent', [2], 'd')], NOW + 2 * H)]);
+  expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b','c','d']);
 });
