@@ -7,7 +7,7 @@ export const MiB = 1024n * 1024n;
 export const TORRENT_FREE_RESERVE = 512n * MiB;
 const CACHE_FOLDER = '.vantara-torrent-cache';
 
-function windowsFixedRoots() {
+export function windowsFixedRoots() {
   // Enumerate ready *fixed* NTFS/ReFS volumes. Do not select removable drives or mapped shares.
   return new Promise(resolve => {
     const script = '[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::Fixed -and $_.IsReady -and ($_.DriveFormat -eq "NTFS" -or $_.DriveFormat -eq "ReFS") } | ForEach-Object { $_.RootDirectory.FullName }';

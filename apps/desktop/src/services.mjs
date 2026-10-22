@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import fs, { mkdir, rm } from 'node:fs/promises';
 import { join, basename, resolve, sep } from 'node:path';
 import { tmpdir, freemem } from 'node:os';
-import { selectTorrentCacheRoot, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom } from './torrent-cache.mjs';
+import { selectTorrentCacheRoot, windowsFixedRoots, prepareTorrentCache, cacheFreeBytes, validateStreamingHeadroom } from './torrent-cache.mjs';
 import { planWindow, readNeedsRebuild, rangeStart, createHolePuncher, safeEvictionEnd } from './torrent-window.mjs';
 import { createUnblockingLookup, FragmentingAgent, looksLikeSniReset, describeNetError } from './net-unblock.mjs';
 
@@ -371,6 +371,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   };
   // Electron owns the single-instance lock before constructing services.
   // This directory contains only disposable session downloads.
+  // تعداد أقراص ويندوز عبر PowerShell يستغرق حتى 5 ث باردًا؛ يبدأ مع الخدمات لا عند الضغط على تشغيل،
+  // ويُحدَّث في الخلفية بعد كل استعمال (قرص أُضيف أو أزيل). المساحة الحرة تُقرأ طازجة في كل تشغيل.
+  let fixedRoots=platform==='win32'?windowsFixedRoots():null;
   const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
     .then(()=>null,()=>new Error('تعذر تنظيف ملفات التورنت المتروكة؛ أغلق المحركات القديمة ثم حاول مجددًا'));
   const publish = event => { try { onEvent(event); } catch {} };
@@ -487,7 +490,18 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(torrent){
           if(replay?.sent)requestHeaders.Range=`bytes=${start}-${replay.range.end}`;
           requestHeaders.Authorization=`Basic ${Buffer.from(state.auth).toString('base64')}`;
-          upstream=await new Promise((resolve,reject)=>{const r=http.get(url,{headers:requestHeaders,signal:abort.signal},resolve);r.on('error',reject);r.setTimeout(120000,()=>r.destroy(new Error('مهلة الفيديو')));});
+          // rqbit يرد 500 «invalid state: initializing» حتى يفتح تخزين الملف (ثوانٍ بعد الإضافة، خاصة في حزم المواسم).
+          // نعيد الطلب بدل تمرير نص الخطأ إلى mpv، فهو يقرأه كفيديو ويفشل فورًا.
+          const notReadyUntil=performance.now()+30000;
+          for(;;){
+            upstream=await new Promise((resolve,reject)=>{const r=http.get(url,{headers:requestHeaders,signal:abort.signal},resolve);r.on('error',reject);r.setTimeout(120000,()=>r.destroy(new Error('مهلة الفيديو')));});
+            if(upstream.statusCode<500)break;
+            upstream.resume();
+            if(performance.now()>notReadyUntil)throw new Error('محرك التورنت لم يجهز الملف');
+            state.trace.once('engine-file-initializing',{status:upstream.statusCode});
+            await sleep(250,abort.signal);assertSession(state);
+            url=state.streamUrl;
+          }
           if(replay?.sent&&(upstream.statusCode!==206||!String(upstream.headers['content-range']??'').startsWith(`bytes ${start}-`)))throw new Error('Invalid torrent continuation');
         } else {
           for(let redirects=0;;redirects++){
@@ -552,7 +566,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(state.replayEntry){
       try{const root=state.replayEntry.descriptor.root,available=await cacheFreeBytes(root);if(available>=512n*1024n*1024n)chosen={root,available};}catch{}
     }
-    chosen??=await selectTorrentCacheRoot({userData,platform});assertSession(state);
+    if(!chosen){const roots=fixedRoots?await fixedRoots:undefined;if(fixedRoots)fixedRoots=windowsFixedRoots();chosen=await selectTorrentCacheRoot({userData,platform,...(roots?.length?{roots}:{})});}assertSession(state);
     state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
     const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
