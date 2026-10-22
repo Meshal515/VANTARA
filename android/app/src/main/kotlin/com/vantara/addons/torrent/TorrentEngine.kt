@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One native session; requests only register tickets. Network/metadata/pieces run on Media3's loader. */
-class TorrentEngine internal constructor(context: Context, private val networkFilter: () -> ip_filter = ::publicNetworkFilter, private val sessionSettings: () -> SettingsPack = ::streamingSettings) : AutoCloseable {
+class TorrentEngine internal constructor(context: Context, private val sessionSettings: () -> SettingsPack = ::streamingSettings, private val networkFilter: () -> ip_filter = ::publicNetworkFilter) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
