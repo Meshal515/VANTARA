@@ -163,6 +163,7 @@ jobs:
           set -euo pipefail
           apk=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
           test -n "$apk" || { echo 'No stable APK produced'; exit 1; }
+          python3 tools/verify-android-bundle.py "$apk"
           tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$tools/apksigner" verify --verbose --print-certs "$apk" | tee /tmp/apksigner.txt
           grep -qE 'v2 scheme \(APK Signature Scheme v2\): true' /tmp/apksigner.txt             || { echo 'v2 signature missing'; exit 1; }
@@ -227,6 +228,12 @@ jobs:
           # Stage assets in a draft; a retry recovers a partially uploaded release.
           # GITHUB_TOKEN publication does not emit release:published to other workflows.
           # The Windows companion consumes this workflow's successful workflow_run.
+          # المسودة لا تنشئ git tag قبل نشرها؛ ثبّته أولًا على نفس النسخة المختبرة.
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/stable-tag.json"; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$HEAD_SHA" > "$RUNNER_TEMP/stable-tag.json"
+          fi
+          jq -e --arg sha "$HEAD_SHA" '.object.type == "commit" and .object.sha == $sha' "$RUNNER_TEMP/stable-tag.json"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > "$RUNNER_TEMP/release-state.json"; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$HEAD_SHA" \
               --title "VANTARA $VERSION_NAME" --draft \
