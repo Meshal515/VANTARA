@@ -1,0 +1,31 @@
+name: استعادة نشر النسخة المستقرة 191
+on:
+  push:
+    branches: [fix/recover-stable-191]
+    paths: ['.github/workflows/recover-stable-191.yml']
+permissions:
+  contents: write
+  actions: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      EXPECTED_SHA: 1f0efd42f1362a2f02beb8827ebbbcd6bb226143
+    steps:
+      - name: التحقق من الفحوص والبناء ثم استعادة الوسم وإعادة النشر
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO" = Meshal515/VANTARA
+          gh api "repos/$REPO/actions/runs/39815473558" > "$RUNNER_TEMP/ci.json"
+          jq -e --arg sha "$EXPECTED_SHA" '.head_sha == $sha and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .conclusion == "success"' "$RUNNER_TEMP/ci.json"
+          gh api "repos/$REPO/actions/runs/39816575276" > "$RUNNER_TEMP/stable.json"
+          jq -e --arg sha "$EXPECTED_SHA" '.head_sha == $sha and .head_branch == "main" and .path == ".github/workflows/android-stable.yml" and .run_number == 191 and .status == "completed" and .conclusion == "failure"' "$RUNNER_TEMP/stable.json"
+          if ! gh api "repos/$REPO/git/ref/tags/stable-191" > "$RUNNER_TEMP/tag.json"; then
+            gh api --method POST "repos/$REPO/git/refs" -f ref=refs/tags/stable-191 -f sha="$EXPECTED_SHA" > "$RUNNER_TEMP/tag.json"
+          fi
+          jq -e --arg sha "$EXPECTED_SHA" '.object.type == "commit" and .object.sha == $sha' "$RUNNER_TEMP/tag.json"
+          gh run rerun 39816575276 --repo "$REPO" --failed
