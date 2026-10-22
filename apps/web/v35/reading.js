@@ -81,6 +81,12 @@ export function markChapter(sync, seriesRef, row, read) {
   sync.enqueue('chapter.mark', { seriesRef, chapterKey, read });
 }
 
+/**
+ * الفصل يُعلَّم مقروءًا حين تصل 20% منه (أبعد صفحة بلغتها)، بلا شرط وقت.
+ * كان الشرط 90% من الصفحات كلٌّ بقي «الأوضح» نصف ثانية: في الويبتون المتصل يتجاوز التمرير
+ * شرائح كثيرة أسرع من ذلك، فتُعلَّم فصول وتُترك أخرى بلا نمط.
+ */
+export const MARK_READ_RATIO = 0.2;
 export function shouldAutoMark({ ratio, alreadyRead }) {
-  return !alreadyRead && ratio >= AUTO_READ_RATIO;
+  return !alreadyRead && ratio >= MARK_READ_RATIO;
 }

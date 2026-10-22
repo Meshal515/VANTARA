@@ -2960,7 +2960,7 @@ html,
 .v35 .top-slot-hint { flex: none; font-size: var(--fs-caption); color: var(--text-3); }
 
 /* ── آخر المشاهدات: بطاقات بالأيام، بهوية VANTARA ── */
-.v35 .rv-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+.v35 .rv-list { display: flex; flex-direction: column; gap: 22px; padding: 6px 0 16px; }
 .v35 .rv-day {
   margin: 10px 2px 2px;
   font-size: var(--fs-caption);
@@ -2969,37 +2969,43 @@ html,
   color: var(--text-3);
 }
 .v35 .rv-day:first-child { margin-top: 2px; }
+/* سطر حديث بلا صناديق (على نهج Mihon وWebtoon وApple Books): الغلاف هو البطل،
+   العنوان ثم الفصل بلون التطبيق، ثم المدة وآخر مرة بهدوء؛ والمسافة وحدها تفصل الأعمال */
 .v35 .rv-row {
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 0;
-  background: transparent;
-  border-bottom: 1px solid var(--line);
   transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 .v35 .rv-row--gone { opacity: 0; transform: translateX(-24px); }
 .v35 .rv-open {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
-  padding: 12px 2px; border: 0; background: none; color: inherit; text-align: start;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 18px;
+  padding: 4px 0; border: 0; background: none; color: inherit; text-align: start;
+  transition: transform 160ms var(--ease);
 }
+.v35 .rv-open:active { transform: scale(.985); }
 .v35 .rv-cover {
-  position: relative; flex: none; width: 62px; aspect-ratio: 3 / 4; border-radius: 10px;
+  position: relative; flex: none; width: 104px; aspect-ratio: 3 / 4; border-radius: 16px;
   overflow: hidden; background: var(--surface-2);
-  box-shadow: none;
+  box-shadow: 0 14px 30px -12px rgba(0, 0, 0, .75), 0 2px 6px rgba(0, 0, 0, .35);
 }
+.v35 .rv-cover::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); pointer-events: none; }
 .v35 .rv-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.v35 .rv-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.v35 .rv-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .v35 .rv-title {
-  display: block; font-size: var(--fs-body-lg); font-weight: 700; color: var(--text-1);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  font-size: 18px; font-weight: 800; line-height: 1.3; letter-spacing: -.015em; color: var(--text-1);
+  overflow: hidden; overflow-wrap: anywhere; max-width: 100%;
 }
-.v35 .rv-meta { display: flex; align-items: center; gap: 7px 12px; flex-wrap: wrap; }
+.v35 .rv-meta { display: flex; align-items: center; gap: 6px 16px; flex-wrap: wrap; }
 .v35 .rv-chapter {
-  display: inline-flex; align-items: center; gap: 4px;
-  color: var(--text-2); font-size: var(--fs-caption); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%;
+  color: var(--accent-text, var(--text-1)); font-size: 15px; font-weight: 700;
 }
-.v35 .rv-duration, .v35 .rv-time { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.v35 .rv-chapter svg { flex: none; }
+.v35 .rv-chapter bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v35 .rv-duration, .v35 .rv-time { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.v35 .rv-duration svg, .v35 .rv-time svg { opacity: .75; }
 .v35 .rv-duration:empty { display: none; }
 .v35 .rv-progress {
   --p: 0%;
@@ -3010,8 +3016,8 @@ html,
   background: linear-gradient(90deg, var(--accent), var(--accent-text)); border-radius: inherit;
 }
 .v35 .rv-del {
-  flex: none; width: var(--tap); height: var(--tap); margin-inline-end: 4px; display: grid; place-items: center;
-  border: 0; border-radius: 50%; background: none; color: var(--text-4);
+  flex: none; align-self: center; width: var(--tap); height: var(--tap); margin-inline-start: 6px; display: grid; place-items: center;
+  border: 0; border-radius: 14px; background: none; color: var(--text-4);
 }
 .v35 .rv-del:active { color: var(--danger); background: var(--danger-soft); }
 

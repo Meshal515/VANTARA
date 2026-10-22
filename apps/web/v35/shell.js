@@ -2889,7 +2889,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const meta = el('span', 'rv-meta');
       if (v.chapter_label || v.chapter_number != null) {
         const ch = el('span', 'rv-chapter');
-        ch.innerHTML = glyph('book', { size: 13 });
+        ch.innerHTML = glyph('book', { size: 17 });
         ch.append(el('bdi', null, v.chapter_label || `الفصل ${v.chapter_number}`));
         meta.append(ch);
       }
@@ -2899,21 +2899,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
         meta.append(spent);
       }
       const when = el('time', 'rv-time', d);
-      when.innerHTML = glyph('clock', { size: 14 });
+      when.innerHTML = glyph('calendar', { size: 16 });
       when.append(document.createTextNode(d));
       meta.append(when);
       if (profile) {
         when.replaceChildren(document.createTextNode(d));
         meta.removeChild(when);
         copy.append(meta, when);
-      } else copy.append(meta);
+      } else {
+        // سطران: الفصل بارزًا، ثم المدة وآخر مرة بهدوء
+        const ch = meta.querySelector('.rv-chapter');
+        if (ch) copy.append(ch);
+        copy.append(meta);
+      }
       open.append(cover, copy);
       open.onclick = () => void openWork(work);
       item.append(open);
       if (own) {
         const del = el('button', 'rv-del');
         del.type = 'button';
-        del.innerHTML = glyph('trash', { size: 18 });
+        del.innerHTML = glyph('trash', { size: 22 });
         del.setAttribute('aria-label', `احذف ${titleOf(work)} من آخر المشاهدات`);
         del.onclick = () => {
           item.classList.add('rv-row--gone');
@@ -2931,7 +2936,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         for (const span of list.querySelectorAll('.rv-duration')) {
           const ms = byRef.get(span.dataset.ref);
           if (ms > 0) {
-            span.innerHTML = glyph('clock', { size: 14 });
+            span.innerHTML = glyph('hourglass', { size: 16 });
             span.append(document.createTextNode(insightDuration(ms)));
           }
         }
