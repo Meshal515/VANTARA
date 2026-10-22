@@ -288,12 +288,17 @@ class PlayerActivity : Activity() {
     private var subtitleJobs: Job? = null
     private val subtitleFiles = mutableListOf<File>()
     private var selectedAddonSubtitle: String? = null
+    /** اختار المستخدم ترجمة (أو أطفأها) بنفسه: لا اختيار تلقائي بعدها في هذا المشغل. */
+    private var subtitleUserChoice = false
+    private val autoSubtitleTried = mutableSetOf<String>()
+    private var autoSubtitleBusy = false
 
     private fun clearAddonSubtitles(): Int {
         subtitleJobs?.cancel()
         addonClient.cancelPrefix("subtitle-")
         subtitleFiles.forEach { it.delete() }; subtitleFiles.clear()
         selectedAddonSubtitle = null
+        autoSubtitleTried.clear(); autoSubtitleBusy = false
         stopOwnSubtitles()
         return addonSubtitles.begin()
     }
@@ -310,24 +315,49 @@ class PlayerActivity : Activity() {
                 val tracks = withContext(Dispatchers.IO) {
                     runCatching { SubtitleProviders.discover(addonClient, provider, launch.subtitleIdentity, episode, "subtitle-$generation-${provider.key}", c) }.getOrDefault(emptyList())
                 }
-                if (current?.id == c.id && addonSubtitles.accept(generation, tracks) && openSheet == SheetKind.SUBTITLES) sheet.refresh()
+                if (current?.id == c.id && addonSubtitles.accept(generation, tracks)) {
+                    if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+                    autoArabicSubtitle()
+                }
                 } finally { gate.release() }
             }
         }
     }
 
-    private fun selectAddonSubtitle(track: AddonSubtitle) {
+    /**
+     * العربية تلقائيًا من إضافات الترجمة: بعد معرفة مسارات الفيديو، إن لم يكن فيه مسار عربي مختار
+     * ولم يختر المستخدم شيئًا، تُحمَّل أول نتيجة عربية؛ الفاشلة تُتجاوز بصمت (حتى 3 محاولات).
+     */
+    private fun autoArabicSubtitle() {
+        if (subtitleUserChoice || autoSubtitleBusy || ownCues != null || autoSubtitleTried.size >= 3) return
+        if (player.playbackState == Player.STATE_IDLE || player.currentTracks.isEmpty) return
+        val embeddedArabic = player.currentTracks.groups.any { g -> g.type == C.TRACK_TYPE_TEXT && (0 until g.length).any { i -> g.isTrackSelected(i) && g.getTrackFormat(i).language?.startsWith("ar", true) == true } }
+        if (embeddedArabic) return
+        val next = addonSubtitles.tracks.firstOrNull { it.lang == "ar" && it.url !in autoSubtitleTried } ?: return
+        autoSubtitleTried += next.url
+        selectAddonSubtitle(next, auto = true)
+    }
+
+    private fun selectAddonSubtitle(track: AddonSubtitle, auto: Boolean = false) {
         val c = current ?: return
+        if (!auto) subtitleUserChoice = true
         val generation = addonSubtitles.generation
         val selection = addonSubtitles.select()
+        if (auto) autoSubtitleBusy = true
         sheet.refresh()
         scope.launch {
             // الملف كله عندنا: نعرضه بأنفسنا، فلا يُعاد تحضير الفيديو (كان يعيد تحميله، والتورنت يعيد الاتصال)
             val cues = withContext(Dispatchers.IO) {
                 runCatching { SubtitleText.parse(addonClient.request(track.url, "subtitle-$generation-file-${track.id}")) }.getOrNull()
             }
-            if (cues.isNullOrEmpty()) { if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر"); return@launch }
+            if (auto) autoSubtitleBusy = false
+            if (cues.isNullOrEmpty()) {
+                if (auto) { if (generation == addonSubtitles.generation && addonSubtitles.current(generation, selection)) autoArabicSubtitle() }
+                else if (generation == addonSubtitles.generation) message("تعذر تحميل الترجمة؛ الفيديو مستمر")
+                return@launch
+            }
             if (!addonSubtitles.current(generation, selection) || current?.id != c.id) return@launch
+            if (auto && subtitleUserChoice) return@launch
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
             main.removeCallbacksAndMessages(embeddedCues)
             selectedAddonSubtitle = track.id
@@ -488,6 +518,8 @@ class PlayerActivity : Activity() {
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
             .build()
+        // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
         buildUi()
         attach(sessionId)
@@ -650,6 +682,7 @@ class PlayerActivity : Activity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             updateQualityLabel()
+            autoArabicSubtitle()
             val selected = selectedAddonSubtitle ?: return
             if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return
             for (g in tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }) for (i in 0 until g.length) {
@@ -1516,6 +1549,7 @@ class PlayerActivity : Activity() {
         }
         val disabled = ownCues == null && player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
         body.addView(sheetRow("إيقاف", null, trailing = if (disabled) check() else null, selected = disabled) {
+            subtitleUserChoice = true
             addonSubtitles.select(); selectedAddonSubtitle = null; stopOwnSubtitles()
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
             sheet.refresh()
@@ -1527,6 +1561,7 @@ class PlayerActivity : Activity() {
             val on = ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i)
             val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
             body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
+                subtitleUserChoice = true
                 addonSubtitles.select(); selectedAddonSubtitle = null; stopOwnSubtitles()
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
