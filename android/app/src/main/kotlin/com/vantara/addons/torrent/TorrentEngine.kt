@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One native session; requests only register tickets. Network/metadata/pieces run on Media3's loader. */
-class TorrentEngine internal constructor(context: Context, private val networkFilter: () -> ip_filter = ::publicNetworkFilter) : AutoCloseable {
+class TorrentEngine internal constructor(context: Context, private val networkFilter: () -> ip_filter = ::publicNetworkFilter, private val sessionSettings: () -> SettingsPack = ::streamingSettings) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
@@ -46,7 +46,7 @@ class TorrentEngine internal constructor(context: Context, private val networkFi
                     } else state.readFailed(alert.piece())
                 }
             })
-            val params = SessionParams(streamingSettings())
+            val params = SessionParams(sessionSettings())
             // جدول DHT المحفوظ: بدء بارد بلا عقد كان يكلّف عشرات الثواني قبل أول مشارك
             runCatching {
                 val saved = File(directory, DHT_STATE_FILE)
