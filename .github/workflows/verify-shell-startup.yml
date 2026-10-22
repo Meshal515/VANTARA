@@ -1,0 +1,48 @@
+name: التحقق الفعلي من إقلاع واجهة أندرويد
+on:
+  push:
+    branches: [fix/verify-startup-191]
+    paths: ['.github/workflows/verify-shell-startup.yml']
+permissions:
+  contents: read
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: بناء نفس الواجهة للمحاكي
+        run: |
+          cat > "$RUNNER_TEMP/shell-x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/shell-x86.gradle" :app:assembleDebug
+      - run: sudo chmod 666 /dev/kvm
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
+            python3 tools/verify-shell-startup.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-shell-startup
+          path: shell-proof/
