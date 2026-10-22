@@ -612,3 +612,30 @@ test('Arabic subtitle downloads decode legacy1256 and honor UTF16 BOM without ch
  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);const subs=commands.filter(x=>x.command[0]==='sub-add');assert.equal(subs.length,3);for(const sub of subs){const text=await readFile(sub.command[1],'utf8');assert.match(text,/مرحبا/);assert.ok(!text.includes('\uFFFD'));}
 });
 
+test('first Arabic provider result loads and selects itself; English and a user choice never auto-load',async t=>{
+  await subtitleSource(t);const {services,events,dir}=await fixture(t);await services.startPlayback({session:'auto-ar',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await services.playbackCommand({session:'auto-ar',command:'subtitle-register',value:{url:'https://subs.example.com/en.srt',lang:'en',label:'English'}});
+  await services.playbackCommand({session:'auto-ar',command:'subtitle-register',value:{url:'https://subs.example.com/ar1.srt',lang:'ar',label:'SubDL ar'}});
+  await services.playbackCommand({session:'auto-ar',command:'subtitle-register',value:{url:'https://subs.example.com/ar2.srt',lang:'ar',label:'SubSense ar'}});
+  await new Promise(r=>setTimeout(r,80));
+  const adds=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add');
+  assert.equal(adds.length,1);assert.equal(adds[0].command[3],'SubDL ar');assert.equal(adds[0].command[2],'select');
+  assert.ok(events.filter(e=>e.type==='playback/subtitles').at(-1).tracks.some(x=>x.selected&&x.lang==='ar'));
+});
+test('a broken Arabic result is skipped quietly for the next one',async t=>{
+  const {services,events,dir}=await fixture(t);await services.startPlayback({session:'auto-skip',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await subtitleSource(t,{invalid:true});
+  await services.playbackCommand({session:'auto-skip',command:'subtitle-register',value:{url:'https://subs.example.com/bad.srt',lang:'ar',label:'bad'}});
+  await new Promise(r=>setTimeout(r,80));t.mock.restoreAll();await subtitleSource(t);
+  await services.playbackCommand({session:'auto-skip',command:'subtitle-register',value:{url:'https://subs.example.com/good.srt',lang:'ar',label:'good'}});
+  await new Promise(r=>setTimeout(r,80));
+  const adds=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add');
+  assert.equal(adds.length,1);assert.equal(adds[0].command[3],'good');assert.ok(!events.some(e=>e.type==='playback/subtitles'&&e.message));
+});
+test('subtitles off before an Arabic result arrives stays off',async t=>{
+  await subtitleSource(t);const {services,dir}=await fixture(t);await services.startPlayback({session:'auto-off',candidate:{url:'https://video.example.com/owned.mp4'}});
+  await services.playbackCommand({session:'auto-off',command:'subtitle-off'});
+  await services.playbackCommand({session:'auto-off',command:'subtitle-register',value:{url:'https://subs.example.com/ar.srt',lang:'ar',label:'ar'}});
+  await new Promise(r=>setTimeout(r,80));
+  assert.equal((await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add').length,0);
+});

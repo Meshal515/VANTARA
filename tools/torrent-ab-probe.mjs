@@ -34,10 +34,15 @@ const magnetOf = (c) => `magnet:?xt=urn:btih:${c.infoHash}${mergeTrackers(c.trac
 /** mpv بلا نافذة: يخرج بعد أول إطار مفكوك. الزمن من t0. */
 function mpvFirstFrame(url, t0) {
   return new Promise((resolve) => {
-    const child = spawn(mpv, ['--no-config', '--vo=null', '--ao=null', '--frames=1', '--network-timeout=150', '--msg-level=all=error', url], { stdio: 'ignore', windowsHide: true });
-    const timer = setTimeout(() => { kill(child); resolve({ ms: null, error: 'لا إطار خلال المهلة' }); }, BUDGET);
-    child.once('exit', (code) => { clearTimeout(timer); resolve(code === 0 ? { ms: Date.now() - t0 } : { ms: null, error: `mpv خرج ${code}` }); });
+    const child = spawn(mpv, ['--no-config', '--vo=null', '--ao=null', '--frames=1', '--network-timeout=150', '--msg-level=all=warn', url], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let log = ''; const keep = (d) => { log = (log + d).slice(-600); }; child.stdout.on('data', keep); child.stderr.on('data', keep);
+    const timer = setTimeout(() => { kill(child); resolve({ ms: null, error: 'لا إطار خلال المهلة', mpvLog: log }); }, BUDGET);
+    child.once('exit', (code) => { clearTimeout(timer); resolve(code === 0 ? { ms: Date.now() - t0 } : { ms: null, error: `mpv خرج ${code}`, mpvLog: log }); });
   });
+}
+async function headersOf(url) {
+  try { const r = await fetch(url, { headers: { Range: 'bytes=0-' } }); const h = Object.fromEntries(['content-type', 'content-length', 'content-range', 'accept-ranges'].map((k) => [k, r.headers.get(k)])); r.body?.cancel(); return { status: r.status, ...h }; }
+  catch (e) { return { error: e.message }; }
 }
 async function firstByte(url, t0) {
   for (let i = 0; i < 300; i++) {
@@ -61,9 +66,12 @@ async function runApp(c) {
   svc.startPlayback({ session, candidate: { infoHash: c.infoHash, fileIdx: c.fileIdx, sources: c.trackers.map((t) => `tracker:${t}`) }, title: 'ab', position: 0 }).catch((e) => { error ??= e.message; });
   await done;
   const stages = events.filter((e) => e.session === session && e.type === 'playback/stage').map((e) => `${e.stage}@${e.t - t0}`);
+  // التتبّع الداخلي (startup-trace): أين تذهب الثواني بين تشغيل mpv وأول إطار
+  const brief = (e) => [e.stage, Math.round(e.elapsedMs), ...['rangeStart', 'rangeEnd', 'waitMs', 'connectedPeers', 'speedBytes', 'checkedBytes', 'requestedPiece', 'bytes', 'cursor'].filter((k) => e[k] != null).map((k) => `${k}=${Math.round(e[k])}`)].join(':');
+  const trace = events.filter((e) => e.type === 'playback/diagnostic').map(brief).slice(0, 120).join(' ');
   const peers = Math.max(0, ...events.filter((e) => Number.isFinite(e.peers)).map((e) => e.peers));
   await svc.stopPlayback({ session }).catch(() => {}); await svc.close().catch(() => {});
-  return { engine: 'app', ms: ready, error, stages: stages.join('>'), peers };
+  return { engine: 'app', ms: ready, error, stages: stages.join('>'), peers, trace };
 }
 
 async function runRqbit(c) {
@@ -75,9 +83,9 @@ async function runRqbit(c) {
     const added = await (await fetch(`${base}/torrents?overwrite=true&only_files=${c.fileIdx}`, { method: 'POST', body: magnetOf(c) })).json();
     const metaMs = Date.now() - t0;
     const url = `${base}/torrents/${added.id}/stream/${c.fileIdx}`;
-    const [frame, byte] = await Promise.all([mpvFirstFrame(url, t0), firstByte(url, t0)]);
+    const [frame, byte, head] = await Promise.all([mpvFirstFrame(url, t0), firstByte(url, t0), headersOf(url)]);
     let peers = null; try { peers = (await (await fetch(`${base}/torrents/${added.id}/stats/v1`)).json()).live?.snapshot?.peer_stats?.live ?? null; } catch {}
-    return { engine: 'rqbit', ms: frame.ms, error: frame.error ?? null, metaMs, firstByteMs: byte, peers };
+    return { engine: 'rqbit', ms: frame.ms, error: frame.error ?? null, mpvLog: frame.mpvLog, head, metaMs, firstByteMs: byte, peers };
   } catch (e) { return { engine: 'rqbit', ms: null, error: e.message }; }
   finally { kill(child); await sleep(1500); }
 }
@@ -90,14 +98,15 @@ async function runPeerflix(c) {
     const url = `http://127.0.0.1:${port}/`;
     const byte = await firstByte(url, t0);
     const frame = byte == null ? { ms: null, error: 'لم يبدأ الخادم' } : await mpvFirstFrame(url, t0);
-    return { engine: 'peerflix', ms: frame.ms, error: frame.error ?? null, firstByteMs: byte };
+    return { engine: 'peerflix', ms: frame.ms, error: frame.error ?? null, mpvLog: frame.mpvLog, firstByteMs: byte };
   } finally { kill(child); await sleep(1500); }
 }
 
 const pools = [];
 try { const s = await torrentio('movie/tt0111161'); pools.push(...pick(s, 'فيلم 1080p x264', (x) => /1080p/i.test(x.title) && !/x265|hevc|265/i.test(x.title), 1), ...pick(s, 'فيلم 1080p x265', (x) => /1080p/i.test(x.title) && /x265|hevc/i.test(x.title), 1)); } catch (e) { report.candidates.push({ error: `فيلم: ${e.message}` }); }
 try { const s = await torrentio('series/tt0903747:1:1'); pools.push(...pick(s, 'مسلسل حلقة', (x) => (sizeGb(x) ?? 9) < 4, 1)); } catch (e) { report.candidates.push({ error: `مسلسل: ${e.message}` }); }
-try { const s = await torrentio('series/kitsu:46474:1'); pools.push(...pick(s, 'أنمي حلقة', (x) => (sizeGb(x) ?? 9) < 3, 1)); } catch (e) { report.candidates.push({ error: `أنمي: ${e.message}` }); }
+try { const s = await torrentio('series/kitsu:46474:1'); pools.push(...pick(s, 'أنمي حلقة', (x) => (sizeGb(x) ?? 9) < 3, 2)); } catch (e) { report.candidates.push({ error: `أنمي: ${e.message}` }); }
+try { const s = await torrentio('series/kitsu:11061:1'); pools.push(...pick(s, 'أنمي HxH', (x) => (sizeGb(x) ?? 9) < 3, 1)); } catch (e) { report.candidates.push({ error: `أنمي2: ${e.message}` }); }
 report.candidates.push(...pools); await save();
 
 for (const [i, c] of pools.entries()) {

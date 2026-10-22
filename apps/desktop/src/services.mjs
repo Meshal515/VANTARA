@@ -835,13 +835,16 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
               .map(t=>({id:t.id,lang:subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'صوت'),selected:t.selected===true}));
             emit(state,{type:'playback/audio',tracks:state.audioTracks});
             state.subtitleTracks=event.data.filter(t=>t.type==='sub'&&Number.isSafeInteger(t.id)&&t.id>=0).slice(0,200)
-              .map(t=>({id:t.id,lang:subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'ترجمة'),selected:t.selected===true}));
+              .map(t=>({id:t.id,lang:subtitleLanguage(t.lang)==='und'&&/arab|عرب/i.test(t.title??'')?'ar':subtitleLanguage(t.lang),label:subtitleLabel(t.title??t.lang??'ترجمة'),selected:t.selected===true}));
             const selected=state.subtitleTracks.find(t=>t.selected),selectedId=selected?.id??null;
             const expected=state.subtitleExpectedSelection;
             if(expected&&selected?.lang===expected.lang&&selected?.label===expected.label)state.subtitleExpectedSelection=null;
             else if(!expected&&state.lastSubtitleSelection!=null&&state.lastSubtitleSelection!==selectedId)state.subtitleManual=true;
             state.lastSubtitleSelection=selectedId;
-            emitSubtitleTracks(state);
+            // مسار عربي مضمّن بلا وسم لغة (عنوانه Arabic/عربي) لا يلتقطه --slang
+            const untagged=!state.subtitleManual&&!state.embeddedArabicChosen&&!(selected?.lang==='ar')&&state.subtitleTracks.find(t=>t.lang==='ar'&&event.data.some(x=>x.id===t.id&&x.type==='sub'&&!x.external));
+            if(untagged){state.embeddedArabicChosen=true;state.subtitleExpectedSelection={lang:untagged.lang,label:untagged.label};ipcCommand(state,['set_property','sid',untagged.id]).catch(()=>{});}
+            emitSubtitleTracks(state);autoArabic(state);
           }
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
@@ -887,7 +890,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
     candidate=validateCandidate(candidate);
     const old=current,state={session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
-    state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();state.subtitleCatalog=new Map();state.subtitleSequence=0;
+    state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();state.subtitleCatalog=new Map();state.subtitleSequence=0;state.subtitleAutoTried=new Set();state.subtitleAuto=null;
     state.cacheRecorders=new Set();state.torrentReaders=new Map();state.replayStore=candidate.infoHash?replayFor(ownerId):null;
     state.whenReady=new Promise(resolve=>state.resolveReady=resolve);
     state.whenCommands=new Promise(resolve=>state.resolveCommands=resolve);
@@ -968,14 +971,25 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!state.subtitleCatalog.has(url)){
       if(state.subtitleCatalog.size>=500)throw new Error('عدد نتائج الترجمة أكبر من الحد');
       state.subtitleCatalog.set(url,{id:--state.subtitleSequence,url,lang:subtitleLanguage(value.lang),label:subtitleLabel(value.label??value.lang??'ترجمة')});
-      emitSubtitleTracks(state);
+      emitSubtitleTracks(state);autoArabic(state);
     }
+  }
+  // العربية تلقائيًا: أول نتيجة عربية من الإضافات تُحمّل وتُختار ما لم يختر المستخدم بنفسه
+  // وما لم يكن في الملف مسار عربي مختار. الفاشلة تُتجاوز إلى التالية بصمت (3 محاولات).
+  function autoArabic(state) {
+    if(state.stopped||current!==state||state.subtitleManual||state.subtitleAuto||state.subtitleAutoTried.size>=3)return;
+    if(state.subtitleTracks.some(t=>t.selected&&t.lang==='ar')||[...state.subtitleFiles.values()].some(f=>f.lang==='ar'))return;
+    const next=[...state.subtitleCatalog.values()].find(t=>t.lang==='ar'&&!state.subtitleFiles.has(t.url)&&!state.subtitleAutoTried.has(t.url));
+    if(!next)return;
+    state.subtitleAutoTried.add(next.url);
+    state.subtitleAuto=loadSubtitle(state,{url:next.url,lang:next.lang,label:next.label},{quiet:true}).catch(()=>{})
+      .finally(()=>{state.subtitleAuto=null;autoArabic(state);});
   }
   function chooseSubtitle(state,url) {
     state.subtitleManual=true;state.subtitleWanted=url;
     if(state.subtitleDownload&&state.subtitleDownload.url!==url){state.subtitleDownload.superseded=true;state.subtitleDownload.controller.abort();}
   }
-  function loadSubtitle(state,value) {
+  function loadSubtitle(state,value,{quiet=false}={}) {
     assertSession(state);
     if(!plain(value)||typeof value.url!=='string'||value.select!=null&&typeof value.select!=='boolean')return Promise.reject(new Error('طلب ترجمة غير صالح'));
     let url;try{url=publicURL(value.url).href;}catch{return Promise.reject(new Error('رابط ترجمة غير مسموح'));}
@@ -1015,7 +1029,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(subtitle.select===true)state.subtitleManual=true;
       } catch(error){state.subtitleExpectedSelection=null;await rm(path,{force:true}).catch(()=>{});throw error;}
     }).catch(error=>{
-      if(error.code!=='SUBTITLE_SUPERSEDED'&&!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
+      if(!quiet&&error.code!=='SUBTITLE_SUPERSEDED'&&!state.stopped&&current===state&&(!state.subtitleManual||state.subtitleWanted===url))emitSubtitleTracks(state,error.message?.match(/ترجمة|ترجمات|المساحة|الحد/)?error.message:'تعذر تحميل الترجمة؛ يستمر الفيديو');
       throw error;
     }).finally(()=>{if(state.subtitleJobs.get(url)===job)state.subtitleJobs.delete(url);});
     state.subtitleJobs.set(url,job);state.subtitleQueue=job.catch(()=>{});
