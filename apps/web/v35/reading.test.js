@@ -66,7 +66,8 @@ describe('chapter read state', () => {
 
   it('auto marks only after most of the chapter was actually read, once', () => {
     expect(shouldAutoMark({ ratio: 0.19, alreadyRead: false })).toBe(false);
-    expect(shouldAutoMark({ ratio: 0.2, alreadyRead: false })).toBe(false);
+    // 20% من الفصل تكفي: الفصل مقروء حتمًا
+    expect(shouldAutoMark({ ratio: 0.2, alreadyRead: false })).toBe(true);
     expect(shouldAutoMark({ ratio: 0.9, alreadyRead: false })).toBe(true);
     expect(shouldAutoMark({ ratio: 0.8, alreadyRead: true })).toBe(false);
   });
