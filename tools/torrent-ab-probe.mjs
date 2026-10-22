@@ -41,7 +41,7 @@ function mpvFirstFrame(url, t0) {
   });
 }
 async function headersOf(url) {
-  try { const r = await fetch(url, { headers: { Range: 'bytes=0-' } }); const h = Object.fromEntries(['content-type', 'content-length', 'content-range', 'accept-ranges'].map((k) => [k, r.headers.get(k)])); r.body?.cancel(); return { status: r.status, ...h }; }
+  try { const r = await fetch(url, { headers: { Range: 'bytes=0-' } }); const h = Object.fromEntries(['content-type', 'content-length', 'content-range', 'accept-ranges'].map((k) => [k, r.headers.get(k)])); const body = r.status >= 400 ? (await r.text()).slice(0, 300) : (r.body?.cancel(), undefined); return { status: r.status, ...h, body }; }
   catch (e) { return { error: e.message }; }
 }
 async function firstByte(url, t0) {
@@ -83,9 +83,9 @@ async function runRqbit(c) {
     const added = await (await fetch(`${base}/torrents?overwrite=true&only_files=${c.fileIdx}`, { method: 'POST', body: magnetOf(c) })).json();
     const metaMs = Date.now() - t0;
     const url = `${base}/torrents/${added.id}/stream/${c.fileIdx}`;
-    const [frame, byte, head] = await Promise.all([mpvFirstFrame(url, t0), firstByte(url, t0), headersOf(url)]);
+    const [frame, byte, head, headLater] = await Promise.all([mpvFirstFrame(url, t0), firstByte(url, t0), headersOf(url), sleep(3000).then(() => headersOf(url))]);
     let peers = null; try { peers = (await (await fetch(`${base}/torrents/${added.id}/stats/v1`)).json()).live?.snapshot?.peer_stats?.live ?? null; } catch {}
-    return { engine: 'rqbit', ms: frame.ms, error: frame.error ?? null, mpvLog: frame.mpvLog, head, metaMs, firstByteMs: byte, peers };
+    return { engine: 'rqbit', ms: frame.ms, error: frame.error ?? null, mpvLog: frame.mpvLog, head, headLater, metaMs, firstByteMs: byte, peers };
   } catch (e) { return { engine: 'rqbit', ms: null, error: e.message }; }
   finally { kill(child); await sleep(1500); }
 }
