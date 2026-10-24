@@ -53,4 +53,39 @@ describe('العمق المربوط بالتمرير في CSS', () => {
       expect(bg2.style.transform).toContain('translate3d(0, 200.0px, 0)');
     } finally { Object.assign(g, saved); }
   });
+
+  it('بعد رفع الإصبع يتسلّم المسار الانزلاق بنفس قيم CSS ثم يعيده (WebView يحبس الانزلاق مع حركة مربوطة بالتمرير)', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const g = globalThis;
+    const saved = { window: g.window, getComputedStyle: g.getComputedStyle, requestAnimationFrame: g.requestAnimationFrame };
+    const props = {};
+    const node = (anim, h = 460) => ({ style: { setProperty: (k, v) => (props[k] = v) }, isConnected: true, offsetHeight: h, classList: { toggle() {} }, anim });
+    const bg = node('aw-bg-depth'), head = node('aw-head-depth'), hero = node('none'), bar = node('none', 60);
+    const on = {};
+    g.window = { scrollY: 0, addEventListener: (k, f) => (on[k] = f), removeEventListener: (k) => delete on[k] };
+    g.getComputedStyle = (n) => ({ animationName: n.anim });
+    g.requestAnimationFrame = (f) => f();
+    try {
+      const unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => true });
+      expect(props['--hero-span']).toBe('400px');
+      // لمسة بلا تمرير: لا تسليم
+      on.touchstart(); on.touchend();
+      expect(bg.style.animation).toBeUndefined();
+      on.touchstart();
+      g.window.scrollY = 500; on.scroll();
+      expect(bg.style.transform).toBeUndefined();
+      on.touchend();
+      expect(bg.style.animation).toBe('none');
+      expect(head.style.animation).toBe('none');
+      // يثبت عند نهاية المدى كما يثبت CSS
+      expect(bg.style.transform).toContain('translate3d(0, 200.0px, 0) scale(1.1200)');
+      expect(head.style.opacity).toBe('0');
+      on.scrollend();
+      expect(bg.style.animation).toBe('');
+      expect(bg.style.transform).toBe('');
+      expect(head.style.opacity).toBe('');
+      unbind();
+      expect(Object.keys(on)).toEqual([]);
+    } finally { Object.assign(g, saved); }
+  });
 });
