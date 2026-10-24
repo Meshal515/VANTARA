@@ -31,6 +31,7 @@ export const ICON = {
   crop: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6 12h3M15 12h3M7.5 10.2 5.8 12l1.7 1.8M16.5 10.2l1.7 1.8-1.7 1.8"/>'),
   volume: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
   mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" fill="currentColor"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+  audio: svg('<path d="M3 10v4M6 7.5v9M9 5v14M12 7.5v9M15 9.5v5M18 6v12M21 10v4"/>'),
   subtitles: svg('<rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M6.5 13.5h4M13 13.5h4.5M6.5 16h7"/>'),
   network: svg('<path d="M4 18h2.5v-4H4ZM9 18h2.5V10H9ZM14 18h2.5V7H14ZM19 18h2.5V4H19Z" fill="currentColor"/>'),
   users: svg('<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0"/><path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M18.5 19.5a6.5 6.5 0 0 0-3-5.5"/>'),
@@ -109,9 +110,10 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const right = el('div', 'pp-group');
   const qualityBtn = el('button', 'pp-quality', 'HD'); qualityBtn.type = 'button'; qualityBtn.setAttribute('aria-label', 'الجودة');
   qualityBtn.onclick = (e) => { e.stopPropagation(); showQuality(); };
-  const audioBtn = iconButton('volume', 'المسارات الصوتية', () => showAudio(), 'pp-desk'); audioBtn.hidden = true;
+  // كما في الـAPK وStremio: موجة صوت بجانب الترجمة (أيقونة مكبر الصوت كانت تُقرأ «مستوى الصوت»)
+  const audioBtn = iconButton('audio', 'المسارات الصوتية', () => showAudio(), 'pp-desk'); audioBtn.hidden = true;
   const fullBottom = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'), 'pp-desk');
-  right.append(qualityBtn, audioBtn, iconButton('subtitles', 'الترجمة (C)', () => showSubtitles(), 'pp-desk'), iconButton('speed', 'السرعة', () => showSpeed()), fullBottom);
+  right.append(qualityBtn, iconButton('subtitles', 'الترجمة (C)', () => showSubtitles(), 'pp-desk'), audioBtn, iconButton('speed', 'السرعة', () => showSpeed()), fullBottom);
   row.append(left, center, right);
   bottom.append(times, bar, row);
   controls.append(el('div', 'pp-shade pp-shade--top'), el('div', 'pp-shade pp-shade--bottom'), top, bottom);
@@ -382,10 +384,17 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     subtitlesPaint = paint;
   }
   let subtitlesBody = null, subtitlesPaint = null, offsetOut = null;
+  const audioNames = (() => { try { return new Intl.DisplayNames(['ar'], { type: 'language' }); } catch { return null; } })();
+  /** «jpn» ← «اليابانية»؛ الرمز كما هو إن تعذّر. */
+  function audioLanguage(code) {
+    if (!code || code === 'und') return null;
+    try { return audioNames?.of(code) ?? code; } catch { return code; }
+  }
   function showAudio() {
-    openSheet('audio', 'الصوت', null, body => {
+    openSheet('audio', 'المسارات الصوتية', null, body => {
       for(const t of state.audio??[]) {
-        body.append(sheetRow(t.label, t.lang && t.lang!=='und' ? t.lang : null,
+        const lang = audioLanguage(t.lang);
+        body.append(sheetRow(t.label && t.label !== t.lang ? t.label : lang ?? t.label, t.label && t.label !== t.lang ? lang : null,
           {on:!!t.selected,onClick:()=>{closeSheet();cmd('audio-select',t.id);}}));
       }
     });
@@ -406,10 +415,6 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         const row = stepper('ديلاي فيديوي', paintOffset(), (d) => { cmd('video-offset', (state.videoOffsetMs ?? 0) + d * 500); });
         offsetOut = row.querySelector('output');
         body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
-      }
-      if ((state.audio ?? []).length > 1) {
-        body.append(sectionLabel('الصوت'));
-        for (const a of state.audio) body.append(sheetRow(a.label, a.lang && a.lang !== 'und' ? a.lang : null, { on: !!a.selected, onClick: () => { closeSheet(); cmd('audio-select', a.id); } }));
       }
       body.append(sectionLabel('الشبكة'));
       const net = el('div', 'pp-net');
@@ -472,7 +477,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     const key=JSON.stringify(people.map(p=>[p.userId,p.name,p.avatarKey,p.state,p.host]));
     if(key!==peopleKey){peopleKey=key;peopleButton.replaceChildren(...faces);}
     peopleButton.setAttribute('aria-label',`في الغرفة ${people.length} · عرض المشاركين`);
-    audioBtn.hidden=!(state.audio??[]).length||state.audio.length<2;
+    audioBtn.hidden=!(state.audio??[]).length;
     nextBtn.hidden = state.movie || !(Number(state.total) > Number(state.episode));
     nextBtn.disabled = state.canChangeEpisode === false;
     qualityBtn.textContent = state.qualityLabel || badgeOf(state.quality);
@@ -489,7 +494,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);
-  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, speed: showSpeed, more: showMore } };
+  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore } };
 }
 
 // تشغيل حقيقي داخل نافذة الطبقة (overlay-preload.cjs يعرّف VantaraOverlay)
