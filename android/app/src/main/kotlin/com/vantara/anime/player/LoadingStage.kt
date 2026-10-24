@@ -27,7 +27,7 @@ class LoadingStage(context: Context, private val title: String) : FrameLayout(co
     /** الشعار نفسه مرتين في نفس المكان: تحت شفافًا، وفوقه بكامل لونه مقصوصًا من اليسار بقدر التقدّم. */
     private val mark = FrameLayout(context).apply { visibility = View.GONE }
     private val logo = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; adjustViewBounds = true; contentDescription = title; imageAlpha = 90 }
-    private val fill = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+    private val fill = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; adjustViewBounds = true; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
     private var clip: ClipDrawable? = null
     private var pulse: ValueAnimator? = null
     private val name = TextView(context).apply {
@@ -51,9 +51,11 @@ class LoadingStage(context: Context, private val title: String) : FrameLayout(co
         addView(backdrop, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(scrim, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val width = (resources.displayMetrics.widthPixels.coerceAtMost(resources.displayMetrics.heightPixels * 2) * 0.32f).toInt()
-        logo.maxHeight = (resources.displayMetrics.heightPixels * 0.3f).toInt()
-        mark.addView(logo, LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT))
-        mark.addView(fill, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // النسختان بنفس الإعداد تمامًا فتنطبق إحداهما على الأخرى (MATCH_PARENT كان يأخذ عرض الصورة الأصلية)
+        for (v in listOf(logo, fill)) {
+            v.maxHeight = (resources.displayMetrics.heightPixels * 0.3f).toInt()
+            mark.addView(v, LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         addView(mark, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         addView(name, LayoutParams((width * 1.4f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         paint()
