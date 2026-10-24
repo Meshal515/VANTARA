@@ -1015,13 +1015,13 @@
     .v35 .cn-detail-art > .cn-img {
       animation: cn-art-depth linear both;
       animation-timeline: scroll(root block);
-      animation-range: 0 62vw;
+      animation-range: 0 var(--hero-span, 62vw);
     }
   }
 }
 @keyframes cn-art-depth {
   from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(0, 31vw, 0) scale(1.12); }
+  to { transform: translate3d(0, calc(var(--hero-span, 62vw) * 0.5), 0) scale(1.12); }
 }
 .v35 .cn-detail-art::after {
   content: '';

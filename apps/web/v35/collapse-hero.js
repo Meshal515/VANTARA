@@ -42,14 +42,28 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
   // من هنا متأخرة إطارًا عن التمرير وهي سبب الاهتزاز. يبقى هذا المسار للمحركات التي لا تدعمه.
   const scrollDriven = (node) => !!node && (globalThis.getComputedStyle?.(node)?.animationName ?? 'none') !== 'none';
   const cssBg = scrollDriven(bg), cssHead = scrollDriven(head);
+  const cssNodes = [cssBg ? bg : null, cssHead ? head : null].filter(Boolean);
+  // WebView من 153 إلى 156 يحبس الانزلاق بعد رفع الإصبع ما دامت على الصفحة حركة مربوطة بالتمرير
+  // ثم يلقيه دفعة واحدة (crbug 572898003). فالسحب بالإصبع لـCSS، والانزلاق بعده لهذا المسار
+  // بنفس القيم حتى يتوقف، ثم يعود CSS.
+  let handed = false;
+  let span = 0;
+  let touching = false;
+  let moved = false;
+  let idle = null;
   const frame = () => {
     queued = false;
     if (!active() || !hero.isConnected) return;
     const y = window.scrollY;
+    const next = Math.max(1, hero.offsetHeight - bar.offsetHeight);
+    // مدى CSS هو مدى هذا المسار نفسه: لا قفزة عند التسليم بينهما
+    if (cssNodes.length && next !== span) hero.style.setProperty?.('--hero-span', `${next}px`);
+    span = next;
     const p = collapseProgress(y, hero.offsetHeight, bar.offsetHeight);
-    const f = heroFrame(y, p, { still });
-    if (bg && f.bg && !cssBg) bg.style.transform = f.bg;
-    if (head && !cssHead) {
+    // CSS يثبت عند نهاية المدى، فالمسار حين يتسلّم منه يثبت مثله
+    const f = heroFrame(handed ? Math.min(y, span) : y, p, { still });
+    if (bg && f.bg && (!cssBg || handed)) bg.style.transform = f.bg;
+    if (head && (!cssHead || handed)) {
       if (f.head) head.style.transform = f.head;
       head.style.opacity = String(f.headOpacity);
     }
@@ -58,12 +72,61 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
       bar.classList.toggle('collapsed', f.collapsed);
     }
   };
+  const handBack = () => {
+    clearTimeout(idle);
+    idle = null;
+    if (!handed) return;
+    handed = false;
+    for (const n of cssNodes) n.style.animation = '';
+    // حركة CSS العائدة تبدأ معلّقة إطارًا تُرسم فيه بلا قيمها (البنر في أعلاه لحظة)؛ القيم
+    // المكتوبة تبقى تحتها حتى تعمل، فهي تغطيها ما دامت فاعلة
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (handed) return;
+      for (const n of cssNodes) {
+        n.style.transform = '';
+        n.style.opacity = '';
+      }
+    }));
+  };
+  const settle = (ms) => {
+    clearTimeout(idle);
+    idle = setTimeout(handBack, ms);
+  };
   const onScroll = () => {
+    if (touching) moved = true;
+    if (handed) settle(180);
     if (queued) return;
     queued = true;
     requestAnimationFrame(frame);
   };
+  const onTouchStart = () => {
+    touching = true;
+    moved = false;
+    handBack();
+  };
+  const onTouchEnd = () => {
+    touching = false;
+    if (!moved || !cssNodes.length || !active() || !hero.isConnected) return;
+    handed = true;
+    frame();
+    for (const n of cssNodes) n.style.animation = 'none';
+    settle(180);
+  };
+  const touch = { passive: true };
   window.addEventListener('scroll', onScroll, { passive: true });
+  if (cssNodes.length) {
+    window.addEventListener('touchstart', onTouchStart, touch);
+    window.addEventListener('touchend', onTouchEnd, touch);
+    window.addEventListener('touchcancel', onTouchEnd, touch);
+    window.addEventListener('scrollend', handBack, touch);
+  }
   frame();
-  return () => window.removeEventListener('scroll', onScroll);
+  return () => {
+    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('touchstart', onTouchStart);
+    window.removeEventListener('touchend', onTouchEnd);
+    window.removeEventListener('touchcancel', onTouchEnd);
+    window.removeEventListener('scrollend', handBack);
+    handBack();
+  };
 }

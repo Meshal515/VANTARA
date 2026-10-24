@@ -1577,7 +1577,7 @@
 @supports (animation-timeline: scroll()) {
   @media (prefers-reduced-motion: no-preference) {
     .v35 .aw-hero {
-      --aw-span: calc(clamp(380px, 112vw, 560px) - var(--top-h) - var(--safe-top));
+      --aw-span: var(--hero-span, calc(clamp(380px, 112vw, 560px) - var(--top-h) - var(--safe-top)));
     }
     .v35 .aw-bg {
       animation: aw-bg-depth linear both;
