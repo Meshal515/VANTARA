@@ -436,6 +436,9 @@ export async function open(args) {
   if (identity && identity.canonicalId === args.subtitleIdentity?.canonicalId && identity.kind === args.subtitleIdentity?.kind) args = { ...args, subtitleIdentity: { ...args.subtitleIdentity, externalIds: { ...args.subtitleIdentity.externalIds, ...identity.externalIds } } };
   // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
   if (args.subtitleIdentity) args = { ...args, subtitleIdentity: await withImdbEpisode(args.subtitleIdentity) };
+  // شعار وخلفية Stremio نفسيهما من رقم IMDb إن لم تمرّرهما الصفحة
+  const imdb = args.subtitleIdentity?.externalIds?.imdb;
+  if (/^tt\d+$/.test(imdb ?? '')) args = { ...args, logo: args.logo ?? `https://images.metahub.space/logo/medium/${imdb}/img`, backdrop: args.backdrop ?? `https://images.metahub.space/background/medium/${imdb}/img` };
   if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
     try {
       const a = await getAddonRuntime(); await a.ready;

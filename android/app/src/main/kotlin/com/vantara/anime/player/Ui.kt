@@ -97,7 +97,7 @@ fun Context.label(text: String, sp: Float, color: Int = Tone.TEXT, bold: Boolean
 class Glyph(private val kind: Kind, private var color: Int = Color.WHITE, private val sizePx: Int = 0) : Drawable() {
     enum class Kind {
         BACK, PLAY, PAUSE, REWIND10, FORWARD10, CAMERA, MORE, EPISODES, SERVERS, QUALITY, SUBTITLES,
-        SPEED, FIT, FILL, NEXT, CHECK, CLOSE, VOLUME, BRIGHTNESS, SHARE, SAVE, SEND, LOCK, UNLOCK, RETRY, SPARK,
+        SPEED, FIT, FILL, NEXT, CHECK, CLOSE, VOLUME, BRIGHTNESS, SHARE, SAVE, SEND, LOCK, UNLOCK, RETRY, SPARK, AUDIO,
     }
 
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -171,6 +171,11 @@ class Glyph(private val kind: Kind, private var color: Int = Color.WHITE, privat
                 canvas.drawRoundRect(RectF(2.5f, 5f, 21.5f, 19f), 3f, 3f, stroke)
                 canvas.drawLine(6f, 11.5f, 11f, 11.5f, stroke); canvas.drawLine(13.5f, 11.5f, 18f, 11.5f, stroke)
                 canvas.drawLine(6f, 15f, 14f, 15f, stroke); canvas.drawLine(16.5f, 15f, 18f, 15f, stroke)
+            }
+            Kind.AUDIO -> {
+                // موجة صوت: أعمدة متفاوتة الطول
+                val bars = floatArrayOf(4f, 9f, 14f, 9f, 5f, 11f, 4f)
+                for ((i, h) in bars.withIndex()) { val x = 3f + i * 3f; canvas.drawLine(x, 12f - h / 2f, x, 12f + h / 2f, stroke) }
             }
             Kind.SPEED -> {
                 canvas.drawArc(RectF(3f, 5f, 21f, 23f), 180f, 180f, false, stroke)

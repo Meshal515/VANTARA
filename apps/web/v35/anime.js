@@ -2078,6 +2078,9 @@ export function createAnime(deps) {
         position: startAt,
         ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
         poster: m.posterSmall ?? m.poster ?? null,
+        // شاشة التحميل في المشغّل: شعار العمل وخلفيته العريضة (الغلاف إن لم توجد)
+        logo: artOf(m)?.logo ?? null,
+        backdrop: artOf(m)?.fanart ?? m.banner ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
         copies: sheet.copies ?? sheet.work.copies,
         malId: m.idMal ?? null,

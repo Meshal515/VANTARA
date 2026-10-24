@@ -120,6 +120,9 @@ class PlayerActivity : Activity() {
         /** رمز السيرفر المفضّل لهذا الأنمي: ترجيح لا قفل. */
         val preferCode: String? = null,
         val poster: String? = null,
+        /** شاشة التحميل كما في Stremio: خلفية العمل العريضة وشعاره (metahub/ani.zip). */
+        val backdrop: String? = null,
+        val logo: String? = null,
         /** أصدقاء المستخدم (JSON: [{userId, displayName}]) لـ«أرسل لصديق». */
         val friends: String? = null,
         /** نسخ الأنمي من المصادر (JSON) لتبديل الحلقة من داخل المشغّل. */
@@ -163,6 +166,11 @@ class PlayerActivity : Activity() {
     private lateinit var nextButton: ImageView
     private lateinit var qualityLabel: TextView
     private lateinit var spinner: ProgressBar
+    private lateinit var stage: LoadingStage
+    private val stageImages by lazy { com.vantara.anime.player.together.TogetherImages(this, presenceClient) }
+    private var firstFrameShown = false
+    private var stageShownAt = 0L
+    private var stageBaseBytes = -1L
     private lateinit var pill: TextView
     private lateinit var level: LinearLayout
     private lateinit var levelText: TextView
@@ -546,7 +554,7 @@ class PlayerActivity : Activity() {
         if (picked != null) {
             start(picked, startAt)
         } else if (prep != null) {
-            spinner.visibility = View.VISIBLE
+            loading(true)
             message("نجهّز أفضل سيرفر…", long = true)
             waiting = scope.launch {
                 val best = prep.awaitBest(preferCode, BEST_WAIT_MS)?.let { s.take(it.id) } ?: s.next()
@@ -617,14 +625,14 @@ class PlayerActivity : Activity() {
             if (state == Player.STATE_BUFFERING) together?.onBuffering()
             if (state == Player.STATE_READY) together?.onReady()
             if (state == Player.STATE_BUFFERING) {
-                spinner.visibility = View.VISIBLE
+                loading(true)
                 watchStall()
             } else {
                 main.removeCallbacks(stallWatchdog)
             }
             if (state == Player.STATE_READY) {
                 seekBudget.reset()
-                spinner.visibility = View.GONE
+                loading(false)
                 if (presenceActive) sendPresence()
                 if (!reportedStart) {
                     reportedStart = true
@@ -653,6 +661,8 @@ class PlayerActivity : Activity() {
         }
 
         override fun onRenderedFirstFrame() {
+            firstFrameShown = true
+            if (player.playbackState == Player.STATE_READY) loading(false)
             usageStarted = true
             sampleUsage()
         }
@@ -717,9 +727,10 @@ class PlayerActivity : Activity() {
         val subtitleGeneration = clearAddonSubtitles()
         current = c
         reportedStart = false
+        firstFrameShown = false
         startedAt = System.currentTimeMillis()
         together?.onPreparing()
-        spinner.visibility = View.VISIBLE
+        loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
         val item = MediaItem.Builder()
             .setUri(c.url)
@@ -807,7 +818,7 @@ class PlayerActivity : Activity() {
             return
         }
         player.stop()
-        spinner.visibility = View.VISIBLE
+        loading(true)
         val p = prep
         waiting = scope.launch {
             val again = when {
@@ -832,7 +843,7 @@ class PlayerActivity : Activity() {
                 message("تم التبديل إلى سيرفر آخر")
                 start(again, at)
             } else {
-                spinner.visibility = View.GONE
+                loading(false)
                 report(final = false)
                 attemptEnd("error", "all_servers_failed")
                 showError("تعذّر التشغيل من كل السيرفرات المتاحة")
@@ -945,7 +956,7 @@ class PlayerActivity : Activity() {
         attach(id)
         if (warmed != null) engine.completePreparation(id)
         hideError()
-        spinner.visibility = View.VISIBLE
+        loading(true)
         if (warmed == null) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
         val p = prep ?: return
@@ -1001,9 +1012,45 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
 
     private var openSheet: SheetKind? = null
+
+    /**
+     * التحميل: شعار العمل يمتلئ لونًا بقدر ما وصل فعلًا (بايتات التورنت منذ بدء الانتظار، أو ما
+     * خُزّن قدّام الموضع)، مع زحف زمني خفيف لا يتجاوز الثلث حتى لا تبدو الشاشة متجمّدة.
+     */
+    private fun loading(on: Boolean) {
+        spinner.visibility = View.GONE
+        main.removeCallbacks(stageTick)
+        main.removeCallbacks(stageShow)
+        if (!::stage.isInitialized) return
+        if (!on) { stage.finish(); return }
+        // قبل أول إطار تظهر فورًا؛ أثناء المشاهدة بعد مهلة قصيرة فلا يومض الشعار مع كل توقف لحظي
+        if (firstFrameShown && stage.visibility != View.VISIBLE) main.postDelayed(stageShow, 450) else stageShow.run()
+    }
+
+    private val stageShow = Runnable {
+        stage.show(beforeFirstFrame = !firstFrameShown)
+        stageShownAt = System.currentTimeMillis()
+        stageBaseBytes = torrentStats()?.totalDone ?: -1L
+        main.post(stageTick)
+    }
+
+    private val stageTick = object : Runnable {
+        override fun run() {
+            if (!::stage.isInitialized || stage.visibility != View.VISIBLE) return
+            val startup = !firstFrameShown
+            val elapsed = System.currentTimeMillis() - stageShownAt
+            val time = (elapsed / if (startup) 24000f else 12000f).coerceAtMost(1f) * 0.33f
+            val done = torrentStats()?.totalDone
+            if (done != null && stageBaseBytes < 0) stageBaseBytes = done
+            val data = if (done != null && stageBaseBytes >= 0) (done - stageBaseBytes) / (if (startup) 8f else 4f) / (1024 * 1024) else 0f
+            val ahead = if (::player.isInitialized && player.bufferedPosition > player.currentPosition) (player.bufferedPosition - player.currentPosition) / 2500f else 0f
+            stage.advance(maxOf(time, data, ahead))
+            main.postDelayed(this, 250)
+        }
+    }
 
     private fun buildUi() {
         root = FrameLayout(this).apply {
@@ -1056,6 +1103,11 @@ class PlayerActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(spinner, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
+        stage = LoadingStage(this, launch.title)
+        root.addView(stage, match())
+        val wide = resources.displayMetrics.widthPixels.coerceAtLeast(resources.displayMetrics.heightPixels)
+        stageImages.load(launch.backdrop ?: launch.poster, wide) { bmp -> if (bmp != null) stage.setBackdrop(bmp) }
+        stageImages.load(launch.logo, dp(520)) { bmp -> if (bmp != null) stage.setLogo(bmp) }
 
         controls = FrameLayout(this)
         buildTop()
@@ -1189,6 +1241,7 @@ class PlayerActivity : Activity() {
         }
         right.addView(qualityLabel)
         right.addView(iconButton(Glyph.Kind.SUBTITLES, desc = "الترجمة") { showSubtitles() })
+        right.addView(iconButton(Glyph.Kind.AUDIO, desc = "المسارات الصوتية") { showAudio() })
         right.addView(iconButton(Glyph.Kind.SPEED, desc = "السرعة") { showSpeed() })
         right.addView(iconButton(Glyph.Kind.UNLOCK, desc = "قفل الشاشة") { setLocked(true) })
         row.addView(right, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT or Gravity.CENTER_VERTICAL))
@@ -1372,7 +1425,8 @@ class PlayerActivity : Activity() {
 
     private fun showError(text: String) {
         hideError()
-        spinner.visibility = View.GONE
+        loading(false)
+        if (::stage.isInitialized) stage.hideNow()
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -1546,6 +1600,34 @@ class PlayerActivity : Activity() {
             if (others.isNotEmpty()) {
                 body.addView(sectionLabel("من سيرفر آخر"))
                 for (r in others) body.addView(sheetRow("${bucket(r.quality!!)}p", r.code) { switchTo(r) })
+            }
+        }
+    }
+
+    /** المسارات الصوتية المضمّنة في الملف (عربي/ياباني/إنجليزي…، دبلجة، تعليق المخرج). */
+    private fun showAudio() {
+        open(SheetKind.AUDIO, "المسارات الصوتية") { body ->
+            val tracks = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+                .flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { g to it } }
+            if (tracks.isEmpty()) {
+                body.addView(sheetRow("لا توجد مسارات صوتية بعد", "تظهر بعد أن يبدأ الفيديو"))
+                return@open
+            }
+            for ((index, pair) in tracks.withIndex()) {
+                val (g, i) = pair
+                val f = g.getTrackFormat(i)
+                val lang = f.language?.takeIf { it.isNotBlank() && it != "und" }?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) }
+                val name = listOfNotNull(f.label?.takeIf { it.isNotBlank() }, lang).distinct().joinToString(" · ").ifEmpty { "مسار ${index + 1}" }
+                val channels = when (f.channelCount) { 1 -> "أحادي"; 2 -> "ستيريو"; 6 -> "5.1"; 8 -> "7.1"; else -> null }
+                val codec = f.sampleMimeType?.substringAfter('/')?.uppercase()?.replace("MP4A-LATM", "AAC")
+                val on = g.isTrackSelected(i)
+                body.addView(sheetRow(name, listOfNotNull(channels, codec).joinToString(" · ").ifEmpty { null }, trailing = if (on) check() else null, selected = on) {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
+                        .build()
+                    sheet.close()
+                    message(name)
+                })
             }
         }
     }

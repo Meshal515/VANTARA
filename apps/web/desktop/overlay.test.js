@@ -110,15 +110,21 @@ it('desktop provides audio track menu and advanced settings instead of hiding ex
   const send=vi.fn();
   const view=createOverlayView(document,send);
   view.update({audio:[{id:1,label:'العربية',lang:'ar'},{id:2,label:'الإنجليزية',lang:'en'}]});
-  const audio=view.root.querySelector('[data-action="volume"].pp-desk');
+  const audio=view.root.querySelector('[data-action="audio"].pp-desk');
   expect(audio).not.toBeNull();
   expect(audio.hidden).toBe(false);
+  // بجانب الترجمة مباشرة كما في الـAPK
+  expect(audio.previousElementSibling.dataset.action).toBe('subtitles');
   audio.click();
   const sheet=view.root.querySelector('.pp-sheet');
   expect(sheet.dataset.kind).toBe('audio');
   [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإنجليزية')).click();
   expect(send).toHaveBeenCalledWith({name:'audio-select',value:2});
+  // مسار واحد يبقى ظاهرًا (يُعرف به لغة الصوت) ولا يتكرر في «المزيد»
+  view.update({audio:[{id:1,label:'jpn',lang:'jpn'}]});
+  expect(audio.hidden).toBe(false);
   view.open.more();
+  expect([...view.root.querySelector('.pp-sheet').querySelectorAll('button')].some(b=>b.textContent.includes('jpn'))).toBe(false);
   [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإعدادات المتقدمة')).click();
   expect(send).toHaveBeenCalledWith({name:'settings'});
 });

@@ -1907,6 +1907,8 @@ export function createCinema(deps) {
         total: m.type === 'series' ? eps.length : 1,
         position,
         poster: m.poster ?? null,
+        backdrop: m.background ?? null,
+        logo: m.logo ?? null,
         friends: [],
         copies: sheet.warm?.copies ?? sheet.found.copies,
         resume,
