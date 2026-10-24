@@ -96,6 +96,8 @@ class AnimeEnginePlugin : Plugin() {
                 candidate = call.getString("candidate"),
                 preferCode = call.getString("prefer"),
                 poster = call.getString("poster"),
+                backdrop = call.getString("backdrop"),
+                logo = call.getString("logo"),
                 friends = call.getArray("friends")?.toString(),
                 copies = call.getArray("copies")?.toString(),
                 quality = call.getInt("quality") ?: 1080,

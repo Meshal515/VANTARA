@@ -29,3 +29,28 @@ describe('البطل وهو ينطوي', () => {
     expect(f.collapsed).toBe(true);
   });
 });
+
+describe('العمق المربوط بالتمرير في CSS', () => {
+  it('لا يكتب transform على عنصر يحرّكه CSS (كانت الكتابة المتأخرة إطارًا سبب اهتزاز البنر)، ويبقى طيّ الترويسة', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const g = globalThis;
+    const saved = { window: g.window, getComputedStyle: g.getComputedStyle, requestAnimationFrame: g.requestAnimationFrame };
+    const node = (anim) => ({ style: {}, isConnected: true, offsetHeight: 460, classList: { toggle() {} }, anim });
+    const bg = node('aw-bg-depth'), head = node('aw-head-depth'), hero = node('none'), bar = node('none');
+    const toggled = [];
+    bar.offsetHeight = 60; bar.classList = { toggle: (c, on) => toggled.push([c, on]) };
+    g.window = { scrollY: 400, addEventListener() {}, removeEventListener() {} };
+    g.getComputedStyle = (n) => ({ animationName: n.anim });
+    g.requestAnimationFrame = (f) => f();
+    try {
+      bindCollapsingHero({ hero, bar, bg, head, active: () => true });
+      expect(bg.style.transform).toBeUndefined();
+      expect(head.style.transform).toBeUndefined();
+      expect(toggled.at(-1)).toEqual(['collapsed', true]);
+      // محرك بلا خط زمني للتمرير: يبقى المسار القديم
+      const bg2 = node('none');
+      bindCollapsingHero({ hero, bar, bg: bg2, head: null, active: () => true });
+      expect(bg2.style.transform).toContain('translate3d(0, 200.0px, 0)');
+    } finally { Object.assign(g, saved); }
+  });
+});

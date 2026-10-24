@@ -744,6 +744,8 @@ export function createAnime(deps) {
       if (state.view !== v) return;
       v.bg.append(img);
       v.heroShown = true;
+      // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
+      v.heroSrc = pick.rank < 2 ? pick.src : null;
       requestAnimationFrame(() => {
         img.classList.add('in');
         // ما تحتها يُزال بعد أن تغطيه
@@ -2080,7 +2082,7 @@ export function createAnime(deps) {
         poster: m.posterSmall ?? m.poster ?? null,
         // شاشة التحميل في المشغّل: شعار العمل وخلفيته العريضة (الغلاف إن لم توجد)
         logo: artOf(m)?.logo ?? null,
-        backdrop: artOf(m)?.fanart ?? m.banner ?? null,
+        backdrop: (state.view?.id === m.id ? state.view.heroSrc : null) ?? artOf(m)?.fanart ?? null,
         friends: (deps.friends?.() ?? []).map((f) => ({ userId: f.userId, displayName: f.displayName })),
         copies: sheet.copies ?? sheet.work.copies,
         malId: m.idMal ?? null,
