@@ -1009,6 +1009,20 @@
   background: var(--surface-1);
   overflow: hidden;
 }
+/* نفس عمق الأنمي مربوطًا بالتمرير على خيط الرسم (انظر anime.css) */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .v35 .cn-detail-art > .cn-img {
+      animation: cn-art-depth linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 62vw;
+    }
+  }
+}
+@keyframes cn-art-depth {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(0, 31vw, 0) scale(1.12); }
+}
 .v35 .cn-detail-art::after {
   content: '';
   position: absolute;

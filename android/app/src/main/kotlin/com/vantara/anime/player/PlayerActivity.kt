@@ -1106,7 +1106,8 @@ class PlayerActivity : Activity() {
         stage = LoadingStage(this, launch.title)
         root.addView(stage, match())
         val wide = resources.displayMetrics.widthPixels.coerceAtLeast(resources.displayMetrics.heightPixels)
-        stageImages.load(launch.backdrop ?: launch.poster, wide) { bmp -> if (bmp != null) stage.setBackdrop(bmp) }
+        // الخلفية العريضة نفسها التي تعرضها صفحة العمل؛ الغلاف الطولي مكبّرًا لا يُستعمل بديلًا
+        stageImages.load(launch.backdrop, wide) { bmp -> if (bmp != null) stage.setBackdrop(bmp) }
         stageImages.load(launch.logo, dp(520)) { bmp -> if (bmp != null) stage.setLogo(bmp) }
 
         controls = FrameLayout(this)

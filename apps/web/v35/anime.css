@@ -1568,6 +1568,40 @@
   padding-top: 32px;
 }
 
+/*
+ * العمق مع التمرير مربوط بالتمرير نفسه على خيط الرسم (scroll-driven): كان JavaScript يحرّك
+ * الخلفية بعد حدث scroll، والـWebView يمرّر الصفحة على خيط مستقل ويجمّع الأحداث، فتتأخر الخلفية
+ * إطارًا عن الصفحة وتبدو تطلع وتنزل. نفس القيم في collapse-hero.js (heroFrame)، وهو البديل حيث
+ * لا يدعم المحرك الخطّ الزمني للتمرير.
+ */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .v35 .aw-hero {
+      --aw-span: calc(clamp(380px, 112vw, 560px) - var(--top-h) - var(--safe-top));
+    }
+    .v35 .aw-bg {
+      animation: aw-bg-depth linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 var(--aw-span);
+    }
+    .v35 .aw-head {
+      animation: aw-head-depth linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 var(--aw-span);
+    }
+  }
+}
+@keyframes aw-bg-depth {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--aw-span) * 0.5), 0) scale(1.12); }
+}
+@keyframes aw-head-depth {
+  0% { transform: perspective(800px) translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
+  20% { opacity: 1; }
+  70% { opacity: 0; }
+  100% { transform: perspective(800px) translate3d(0, calc(var(--aw-span) * -0.18), 0) rotateX(14deg) scale(0.86); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .v35 .aw-bg-img,
   .v35 .an-mark-logo,

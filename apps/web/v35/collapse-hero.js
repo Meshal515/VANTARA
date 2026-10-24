@@ -38,14 +38,18 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
   let queued = false;
   let last = null;
   const still = reduced();
+  // عنصر يحرّكه CSS بخط زمني للتمرير (anime.css/cinema.css) لا يُكتب عليه transform: الكتابة
+  // من هنا متأخرة إطارًا عن التمرير وهي سبب الاهتزاز. يبقى هذا المسار للمحركات التي لا تدعمه.
+  const scrollDriven = (node) => !!node && (globalThis.getComputedStyle?.(node)?.animationName ?? 'none') !== 'none';
+  const cssBg = scrollDriven(bg), cssHead = scrollDriven(head);
   const frame = () => {
     queued = false;
     if (!active() || !hero.isConnected) return;
     const y = window.scrollY;
     const p = collapseProgress(y, hero.offsetHeight, bar.offsetHeight);
     const f = heroFrame(y, p, { still });
-    if (bg && f.bg) bg.style.transform = f.bg;
-    if (head) {
+    if (bg && f.bg && !cssBg) bg.style.transform = f.bg;
+    if (head && !cssHead) {
       if (f.head) head.style.transform = f.head;
       head.style.opacity = String(f.headOpacity);
     }
