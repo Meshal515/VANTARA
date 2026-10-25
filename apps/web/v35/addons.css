@@ -1045,3 +1045,8 @@
 .addon-row.addon-src[data-level="failed"] .addon-src-strip { opacity: 0.5; filter: grayscale(0.6); }
 /* اسم لاتيني (Team-X) في صفحة عربية: يبقى في بداية السطر لا يطفو لليسار */
 .addon-src .addon-row-main h3 { text-align: right; }
+
+/* صفحة إضافة واحدة: وحدها على الشاشة، و«رجوع» أعلاها */
+.v35 .addon-store--detail > :not(.addon-grid) {
+  display: none !important;
+}

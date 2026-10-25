@@ -706,3 +706,20 @@ it('shows disabled before configuration when both apply to an installed addon', 
   const view = renderAddonDetails({ addon: row('Disabled', { bundled: false, enabled: false, configuration: { required: true, configured: false } }), registry: {} });
   expect(view.querySelector('.addon-health').textContent).toBe('معطلة');
 });
+
+it("an addon page fills the store alone, and back returns one step to the list where it was", () => {
+  setup();
+  const addon = row("Torrentio", { id: "com.stremio.torrentio.addon", key: "https://torrentio.strem.fun|com.stremio.torrentio.addon", bundled: false, capabilities: ["streams"], contentTypes: ["movie"] });
+  const view = renderAddons({ registry: { list: () => [addon] } });
+  expect(view.back()).toBe(false);
+  click(view, "استكشاف");
+  click(view, "إدارة الإضافة المثبتة");
+  // صفحة الإضافة وحدها: رأس المتجر والمستودعات مخفية بالصنف، و«رجوع» أول ما فيها
+  expect(view.classList.contains("addon-store--detail")).toBe(true);
+  expect(view.querySelector(".addon-grid button")?.textContent).toBe("رجوع");
+  expect(view.back()).toBe(true);
+  expect(view.classList.contains("addon-store--detail")).toBe(false);
+  expect(view.textContent).toContain("Torrentio");
+  // لا خطوة أخرى داخل المتجر: الرجوع التالي يخرج من الإضافات (shell.goBack)
+  expect(view.back()).toBe(false);
+});

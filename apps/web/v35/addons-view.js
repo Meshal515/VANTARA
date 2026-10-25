@@ -774,7 +774,12 @@ export function renderAddons({
         `${a.name} ${a.description ?? ""}`.toLowerCase().includes(query))
     );
   }
+  // صفحة الإضافة تملأ الشاشة وحدها (رأس المتجر والمستودعات مخفية) فيكون «رجوع» أعلاها لا وسط الصفحة،
+  // والرجوع منها يعيد المتجر حيث كان المستخدم
+  let detailFrom = 0;
   function showDetails(a) {
+    if (!activeDetail) detailFrom = globalThis.scrollY ?? 0;
+    root.classList.add("addon-store--detail");
     activeDetail?.close?.();
     activeDetail = renderAddonDetails({
       addon: a,
@@ -784,10 +789,14 @@ export function renderAddons({
       onCheck,
     });
     cards.replaceChildren(activeDetail);
+    globalThis.scrollTo?.({ top: 0, behavior: "instant" });
   }
   function paint() {
+    const fromDetail = Boolean(activeDetail);
     activeDetail?.close?.();
     activeDetail = null;
+    root.classList.remove("addon-store--detail");
+    if (fromDetail) globalThis.requestAnimationFrame?.(() => globalThis.scrollTo?.({ top: detailFrom, behavior: "instant" }));
     cards.replaceChildren();
     for (const b of tabs.children)
       b.setAttribute(
@@ -1318,6 +1327,12 @@ export function renderAddons({
   }
   const defaultsChanged=()=>{paintDefaults();if(!closed&&root.isConnected&&!busy&&!activeDetail)paint();};
   if(defaults)document.addEventListener('vantara:addons-changed',defaultsChanged);
+  /** رجوع خطوة واحدة داخل المتجر (السهم العلوي وزر أندرويد): من صفحة إضافة إلى القائمة. */
+  root.back = () => {
+    if (!activeDetail) return false;
+    paint();
+    return true;
+  };
   root.close = () => {
     closed = true;
     clearTimeout(probeTimer);
