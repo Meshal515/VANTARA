@@ -64,3 +64,22 @@ test('التجزئة: أول كتابة (ClientHello) تصل على دفعتين
     stream.destroy();
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
+
+test('DoH يُسقَط بصمت: DNS النظام قبل مهلة الطلب (15 ث)، ولا يُعاد سؤال DoH مع كل طلب', async () => {
+  const asked = [];
+  const silent = (resolver, _host, type, { timeout }) => { asked.push(`${resolver.name}:${type}:${timeout}`); return new Promise((_, reject) => setTimeout(() => reject(new Error(`انتهت مهلة DoH ${resolver.name}`)), 30)); };
+  let clock = 0, system = 0;
+  const lookup = createUnblockingLookup({ resolvers: R, now: () => clock, dohTimeout: 2500, query: silent, system: async () => { system++; return [{ address: '93.184.216.34', family: 4 }]; } });
+  const started = Date.now();
+  assert.deepEqual(await lookup('torrentio.strem.fun'), [{ address: '93.184.216.34', family: 4 }]);
+  // الخادمان معًا، وA وحده: لا AAAA بعد مهلة (الأسوأ 2.5 ث بدل 16 ث)
+  assert.deepEqual(asked.sort(), ['A:A:2500', 'B:A:2500']);
+  assert.ok(Date.now() - started < 1000);
+  asked.length = 0;
+  assert.deepEqual(await lookup('kitsu.io'), [{ address: '93.184.216.34', family: 4 }]);
+  assert.deepEqual(asked, [], 'DoH المتعطل لا يُسأل مع كل طلب');
+  clock += 5 * 60_000 + 1;
+  await lookup('api.example.com');
+  assert.equal(asked.length, 2, 'بعد خمس دقائق يُجرَّب DoH من جديد');
+  assert.equal(system, 3);
+});

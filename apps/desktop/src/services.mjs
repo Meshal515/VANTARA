@@ -442,7 +442,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         return {text:await readResponse(response,limit),status,url:request.url,headers,location:response.headers.location??null};
       }
       throw new Error('عدد إعادة التوجيه أكبر من الحد');
-    } catch(e) {if(e.message?.includes('رابط')||e.message?.includes('حد')||e.message?.includes('حجم')||e.message?.includes('توجيه'))throw e;throw new Error(`تعذر جلب مورد HTTPS: ${describeNetError(e)}`);}
+    } catch(e) {
+      if(e.message?.includes('رابط')||e.message?.includes('حد')||e.message?.includes('حجم')||e.message?.includes('توجيه'))throw e;
+      // مهلة الطلب نفسها تقطع بإشارة الإلغاء، فكانت تظهر «ألغيت جلسة التشغيل» ولا جلسة هنا
+      if(controller.signal.aborted&&!closed)throw new Error(`تعذر جلب مورد HTTPS: انتهت المهلة (${Math.round(timeout/1000)} ث) — ${new URL(url).hostname}`);
+      throw new Error(`تعذر جلب مورد HTTPS: ${describeNetError(e)}`);
+    }
     finally{clearTimeout(timer);resourceControllers.delete(controller);}
   }
   async function makeProxy(state, target, headers={}, torrent=false) {
