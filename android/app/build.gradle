@@ -5,8 +5,10 @@ apply plugin: 'org.jetbrains.kotlin.plugin.serialization'
 
 // إصدار OkHttp في مكان واحد: التوحيد أدناه يقرأ منه، فلا يفترقان بالسهو.
 def okhttpVersion = '5.3.2'
-// Media3 1.5: آخر خط يقبل compileSdk 35 وminSdk 26 بلا ترقية AGP
-def media3Version = '1.5.1'
+// Media3 1.6.1: آخر خط يقبل compileSdk 35 وminSdk 26 بلا ترقية AGP. 1.5.1 كان يتوقف بخطأ
+// «Out of range: -46» عند أول حرف غير إنجليزي في ترجمة مدمجة (ASS/SRT) داخل MKV: peekCharacterAndSize
+// يحوّل البايت ≥128 إلى byte سالب ثم Chars.checkedCast يرفضه. أصلحته Google في 1.6.0.
+def media3Version = '1.6.1'
 
 // ───────────────────────────── التوقيع والإصدار ─────────────────────────────
 //

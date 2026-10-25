@@ -324,6 +324,9 @@ class TorrentThroughputDeviceTest {
                 .put("opens", opens).put("samples", samples)
             File(context.filesDir, "addon-proof/reads-$startMs.json").apply { parentFile!!.mkdirs() }.writeText(result.toString(2))
             println("READS start=${startMs / 1000}s readyMs=$ready frameMs=$frame bytesBeforeReadyKB=${result.optLong("bytesBeforeReadyKB")} opens=${opens.length()} error=${result.optString("error")} title=${choice.title.take(70)}")
+            // حلقة المستخدم: لا خطأ استخراج ويصل READY (كانت تتوقف بـ «Out of range» في Media3 1.5.1)
+            org.junit.Assert.assertEquals("player error at start=${startMs / 1000}s", "", result.optString("error"))
+            org.junit.Assert.assertTrue("READY at start=${startMs / 1000}s", ready > 0)
         }
     }
 }
