@@ -102,7 +102,8 @@ class LoadingStage(context: Context, private val title: String) : FrameLayout(co
         stopPulse()
         progress = 1f
         paint()
-        animate().alpha(0f).setStartDelay(120).setDuration(320).withEndAction { visibility = View.GONE; alpha = 1f }.start()
+        // 100% = الصورة الأولى ظاهرة تحته: يكتمل الشعار ويتلاشى خلال ~300ms، بلا وقوف
+        animate().alpha(0f).setStartDelay(60).setDuration(240).withEndAction { visibility = View.GONE; alpha = 1f }.start()
     }
 
     fun hideNow() { animate().cancel(); stopPulse(); visibility = View.GONE; alpha = 1f }

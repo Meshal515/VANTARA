@@ -171,7 +171,6 @@ class PlayerActivity : Activity() {
     private val stageImages by lazy { com.vantara.anime.player.together.TogetherImages(this, presenceClient) }
     private var firstFrameShown = false
     private var stageShownAt = 0L
-    private var stageBaseBytes = -1L
     private lateinit var pill: TextView
     private lateinit var level: LinearLayout
     private lateinit var levelText: TextView
@@ -1058,22 +1057,49 @@ class PlayerActivity : Activity() {
     private val stageShow = Runnable {
         stage.show(beforeFirstFrame = !firstFrameShown)
         stageShownAt = System.currentTimeMillis()
-        stageBaseBytes = torrentStats()?.totalDone ?: -1L
+        stageFloor = 0f; stageFloorAt = stageShownAt
         main.post(stageTick)
+    }
+
+    private var stageFloor = 0f
+    private var stageFloorAt = 0L
+
+    /**
+     * نسبة البدء من مراحل المشغّل الحقيقية لا من بايتات التورنت: كانت «كل 8MB = 100%» فتقف عند
+     * سقف 97% ثوانيَ والمشغّل ما زال ينتظر قطعته. 100% = أول صورة على الشاشة (finish).
+     * بيانات التورنت 15% · أول قطعة 35% · المسارات معروفة 60% · ثم ما خُزّن نحو حد البدء (1.5 ث) حتى 95%.
+     * بين مرحلتين زحف بطيء لا يبلغ المرحلة التالية، فلا تتجمد الشاشة ولا تَعِد بما لم يحدث.
+     */
+    private fun startupMilestone(): Pair<Float, Float> {
+        val torrent = current?.url?.startsWith("vantara-torrent:") == true
+        val t = if (torrent) torrentStats() else null
+        val tracks = ::player.isInitialized && (player.videoFormat != null || !player.currentTracks.isEmpty)
+        if (tracks) {
+            val buffered = if (::player.isInitialized) player.totalBufferedDuration.coerceAtLeast(0) else 0L
+            return 0.60f + 0.35f * (buffered / 1500f).coerceAtMost(1f) to 0.97f
+        }
+        if (!torrent) return 0.15f to 0.57f
+        if ((t?.firstPieceAt ?: 0L) > 0) return 0.35f to 0.57f
+        if (t?.metadata == true) return 0.15f to 0.32f
+        return 0.04f to 0.12f
     }
 
     private val stageTick = object : Runnable {
         override fun run() {
             if (!::stage.isInitialized || stage.visibility != View.VISIBLE) return
-            val startup = !firstFrameShown
-            val elapsed = System.currentTimeMillis() - stageShownAt
-            val time = (elapsed / if (startup) 24000f else 12000f).coerceAtMost(1f) * 0.33f
-            val done = torrentStats()?.totalDone
-            if (done != null && stageBaseBytes < 0) stageBaseBytes = done
-            val data = if (done != null && stageBaseBytes >= 0) (done - stageBaseBytes) / (if (startup) 8f else 4f) / (1024 * 1024) else 0f
-            val ahead = if (::player.isInitialized && player.bufferedPosition > player.currentPosition) (player.bufferedPosition - player.currentPosition) / 2500f else 0f
-            stage.advance(maxOf(time, data, ahead))
-            main.postDelayed(this, 250)
+            if (!firstFrameShown) {
+                val (floor, ceiling) = startupMilestone()
+                val now = System.currentTimeMillis()
+                if (floor > stageFloor) { stageFloor = floor; stageFloorAt = now }
+                val creep = (ceiling - stageFloor) * (1f - kotlin.math.exp(-(now - stageFloorAt) / 6000f))
+                stage.advance(maxOf(floor, stageFloor + creep))
+            } else {
+                val elapsed = System.currentTimeMillis() - stageShownAt
+                val time = (elapsed / 12000f).coerceAtMost(1f) * 0.33f
+                val ahead = if (::player.isInitialized && player.bufferedPosition > player.currentPosition) (player.bufferedPosition - player.currentPosition) / 2500f else 0f
+                stage.advance(maxOf(time, ahead))
+            }
+            main.postDelayed(this, 200)
         }
     }
 
