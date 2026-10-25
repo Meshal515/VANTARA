@@ -398,14 +398,8 @@ export function createAnime(deps) {
     if (air) blocks.append(air);
     else if (data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending' }) }));
     const cont = watching();
-    // نفس بطاقة «آخر المشاهدات» في مكتبتي لآخر 10 أعمال: الباقي في «الكل»
-    if (cont.length) {
-      const recent = rail('آخر المشاهدات', { cls: 'an-rail--history', more: () => openLibrary('history') });
-      const list = el('div', 'an-hc-list');
-      list.append(...cont.slice(0, HOME_HISTORY).map(historyCard));
-      recent.querySelector('.an-strip').replaceWith(list);
-      blocks.append(recent);
-    }
+    // نفس بطاقة «آخر المشاهدات» في مكتبتي، مصغّرة في شريط، لآخر 10 أعمال: الباقي في «الكل»
+    if (cont.length) blocks.append(rail('آخر المشاهدات', { cls: 'an-rail--history', items: cont.slice(0, HOME_HISTORY), card: historyCard, more: () => openLibrary('history') }));
     // «حلقات جديدة» صارت داخل جدول البث (أمس واليوم)؛ تبقى شريطًا فقط لمحفوظ قديم بلا جدول
     if (!air && data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {

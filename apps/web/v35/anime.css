@@ -2056,9 +2056,42 @@
   gap: 26px;
   padding-top: 6px;
 }
-.v35 .an-rail--history .an-hc-list {
-  padding: 0 var(--gutter);
-  gap: 22px;
+/* في شريط الرئيسية: نفس البطاقة بعرض ثابت ومقاسات أصغر */
+.v35 .an-rail--history .an-hc {
+  flex: none;
+  width: 264px;
+  scroll-snap-align: start;
+}
+.v35 .an-rail--history .an-hc-stage {
+  border-radius: 14px;
+}
+.v35 .an-rail--history .an-hc-chip {
+  top: 8px;
+  inset-inline-start: 8px;
+  padding: 4px 9px 5px;
+}
+.v35 .an-rail--history .an-hc-when {
+  display: none;
+}
+.v35 .an-rail--history .an-hc-play {
+  bottom: 10px;
+  inset-inline-start: 10px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  font-size: 12.5px;
+}
+.v35 .an-rail--history .an-hc-foot {
+  gap: 8px;
+  padding-inline: 2px 8px;
+}
+.v35 .an-rail--history .an-hc-poster {
+  width: 44px;
+  margin-top: -32px;
+  border-radius: 8px;
+}
+.v35 .an-rail--history .an-hc-title {
+  font-size: 13.5px;
+  -webkit-line-clamp: 1;
 }
 .v35 .an-hc {
   --art: var(--accent);
