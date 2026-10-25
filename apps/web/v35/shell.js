@@ -1280,7 +1280,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1325,7 +1325,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         icon: 'search',
         title: 'ما وصلنا للمصادر الحين',
         text: 'نحاول مرة ثانية بعد لحظة، أو المسها الحين.',
-        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber, readLanguage }) },
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber, readLanguage, expectedChapter }) },
       });
       setReadCta(null);
       return;
@@ -1355,9 +1355,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       tryWanted(full, settled);
+      if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show, requestedChapter: readNumber, arabicOnly: readLanguage==='ar' });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar' });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
@@ -2169,6 +2170,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     list.append(fragment);
     const parts = [list];
+    for(const source of w._lockedSources??[]){
+      const note=el('p','chapter-locked-note');
+      note.innerHTML=glyph('lock');
+      note.append(el('span',null,`في ${source.label} فصول مقفلة حتى الفصل ${source.lockedMax}`));
+      parts.unshift(note);
+    }
     const rest = rows.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
@@ -3086,7 +3093,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openUpdate(g) {
     if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });
     if (g.section === 'cinema') return openCinemaRef(g.kind === 'movie' ? g.work : `${g.work}:${g.season ?? 1}`, { title: g.title, cover: g.cover });
-    void openWork(workOfEvent(g),{readNumber:Number.isFinite(g.high)?g.high:null,readLanguage:'ar'});
+    // Keep the familiar work screen; a cached row must never auto-open before
+    // its current provider has responded. The target only forces fresh discovery.
+    void openWork(workOfEvent(g),{expectedChapter:Number.isFinite(g.high)?g.high:null,readLanguage:'ar'});
   }
   /** شريط الرئيسية: آخر التحديثات من الذاكرة (يُسأل كل دقيقتين ما دامت الرئيسية ظاهرة). */
   let updatesAskedAt = 0;

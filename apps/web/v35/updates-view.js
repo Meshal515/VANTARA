@@ -140,7 +140,9 @@ export function groupEvents(events, canonical = null) {
       out.push(group);
       continue;
     }
-    g.sources = [...new Map([...g.sources, ...(e.sources ?? [])].map((s) => [s.s, s])).values()];
+    const sources=new Map(g.sources.map(s=>[s.s,s]));
+    for(const s of e.sources??[])sources.set(s.s,{...s,...sources.get(s.s)});
+    g.sources=[...sources.values()];
     g.cover ??= e.cover;
     // نفس الفصل من مفتاحين قديمين (قبل التصحيح) لا يُعدّ مرتين
     const unit = `${e.season ?? ''}:${e.number}`;
@@ -190,7 +192,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   refresh.onclick = () => void api.refresh();
   older.onclick = () => void api.loadMore();
   more.append(older, refresh, status);
-  let inView = false, autoTimer = null, polling = false;
+  let inView = false, autoTimer = null, polling = false, headRevision = 0;
   const view = host.ownerDocument?.defaultView;
   const scrollRoot = scrollingParent(list, view);
   function controls() {
@@ -294,11 +296,12 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!host.isConnected || !host.classList.contains('up-feed')) { api.dispose(); return; }
     if (!state.polled || polling || state.loading || state.refreshing || !visible() || document.hidden) return;
     polling = true;
+    const revision=++headRevision;
     try {
       if (section === 'manga') await loadAliases();
       const requestedCursor = state.bridgeNext;
       const page = await timeline(section, { limit: 100, ...(requestedCursor ? { before: requestedCursor } : {}) });
-      if (!active() || !page || !Array.isArray(page.events)) return;
+      if (!active() || revision!==headRevision || !page || !Array.isArray(page.events)) return;
       if (requestedCursor && page.next === requestedCursor) return;
       const previous = new Set(state.events.map(e => e.id));
       if (requestedCursor) {
@@ -319,11 +322,12 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     async refresh() {
       if (!active() || state.loading || state.refreshing) return false;
       state.refreshing = true; controls(); status.textContent = '';
+      const revision=++headRevision;
       try {
         if (section === 'manga') await loadAliases();
-        if (!active()) return false;
+        if (!active() || revision!==headRevision) return false;
         const page = await timeline(section, { limit: 100 });
-        if (!active()) return false;
+        if (!active() || revision!==headRevision) return false;
         if (!page || !Array.isArray(page.events)) { error(); return false; }
         if (!state.events.length) { state.next = page.next; state.done = !page.next; }
         else if (!state.bridgeNext && page.next && !page.events.some(e => state.events.some(old => old.id === e.id))) {

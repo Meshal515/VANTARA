@@ -17,6 +17,13 @@ describe('v35 work shape', () => {
     expect(updated._work.editions.map(e=>[e.sourceId,e.manga.url])).toEqual([['ar.old','/moved'],['ar.new','/new']]);
     expect(saved._work.editions[0].manga.url).toBe('/old');
   });
+  it('carries a provider lock notice separately from readable chapters and removes a cleared notice',()=>{
+    const source='eu.kanade.tachiyomi.extension.ar.teamx';
+    const base={_work:{editions:[]}};
+    const w=withUpdateSources(base,{title:'Work',sources:[{s:source,u:'/series/LWW',lockedMax:251}]});
+    expect(w._lockedSources).toEqual([{sourceId:source,label:'Team X',lockedMax:251}]);
+    expect(withUpdateSources(w,{title:'Work',sources:[{s:source,u:'/series/LWW',lockedMax:null}]})._lockedSources).toEqual([]);
+  });
   it('opens the exact Arabic chapter rather than an English row with the same number',()=>{
     const w={_chapters:[{number:251,lang:'en',sourceId:'source@en'},{number:218,sourceId:'ar.old'},{number:251,sourceId:'ar.new'}]};
     expect(requestedChapterRow(w,251,{arabicOnly:true})?.sourceId).toBe('ar.new');

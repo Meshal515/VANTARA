@@ -26,6 +26,7 @@ interface Source {
   u?: string;
   t?: string;
   m?: string;
+  lockedMax?: number | null;
 }
 
 const MAX_EVENTS = 100;
@@ -105,9 +106,10 @@ export function parseReport(raw: unknown, now: number): Report | null {
   const cover = str(r.cover, 600);
   const s = r.source as Record<string, unknown> | undefined;
   const sid = str(s?.s, 120);
+  const lockedMax=num(s?.lockedMax);
   // u = رابط العمل في المصدر، t = اسمه هناك، m = حالة الإضافة (memo): ما يلزم لفتحه منه
   const source = sid && /^[\w.:@-]+$/.test(sid)
-    ? { s: sid, ...(str(s?.u, 500) ? { u: str(s?.u, 500)! } : {}), ...(str(s?.t, 200) ? { t: str(s?.t, 200)! } : {}), ...(str(s?.m, 500) ? { m: str(s?.m, 500)! } : {}) }
+    ? { s: sid, ...(str(s?.u, 500) ? { u: str(s?.u, 500)! } : {}), ...(str(s?.t, 200) ? { t: str(s?.t, 200)! } : {}), ...(str(s?.m, 500) ? { m: str(s?.m, 500)! } : {}), ...(s?.lockedMax===null?{lockedMax:null}:lockedMax!==null&&lockedMax>=0&&lockedMax<=100_000?{lockedMax}:{}) }
     : null;
   const seasoned = section === 'cinema' && kind === 'episode';
   const units: Unit[] = [];

@@ -10,7 +10,7 @@ const TEAMX = 'https://olympustaff.com';
 const TEAMX_SOURCE = 'eu.kanade.tachiyomi.extension.ar.teamx';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const DAY = 86_400_000;
-type Observation = { work: string; section: string; kind: string; title: string; cover?: string | null; source: { s: string; u?: string }; units: Array<{ number?: number; season?: number; publishedAt?: number }> };
+type Observation = { work: string; section: string; kind: string; title: string; cover?: string | null; source: { s: string; u?: string; lockedMax?:number|null }; units: Array<{ number?: number; season?: number; publishedAt?: number }> };
 type Fetcher = typeof fetch;
 class PartialScan extends Error {
   readonly cursor: number;
@@ -78,13 +78,18 @@ function correctionGroups(rows: TeamxCorrection[]) {
 }
 async function repairTeamxEvents(env: Env, corrections: TeamxCorrection[]) {
   if(!corrections.length)return;
-  const writes=correctionGroups(corrections).map(group=>env.DB.prepare(`UPDATE update_events SET sources=(
-    SELECT json_group_array(json(value)) FROM json_each(update_events.sources) WHERE json_extract(value,'$.s')<>?
-    ) WHERE section='manga' AND kind='chapter' AND (${group.map(c=>`(work=? AND number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ')})`)
-    .bind(TEAMX_SOURCE,...group.flatMap(c=>[c.work,...c.locked])));
-  for(const group of correctionGroups(corrections))writes.push(env.DB.prepare(`DELETE FROM update_events WHERE section='manga' AND kind='chapter'
+  // Delete only proven TeamX-only rows before stripping that provider from
+  // mixed rows. A pre-existing source-less/unknown observation stays intact.
+  const writes=correctionGroups(corrections).map(group=>env.DB.prepare(`DELETE FROM update_events WHERE section='manga' AND kind='chapter'
     AND (${group.map(c=>`(work=? AND number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ')})
-    AND json_array_length(sources)=0`).bind(...group.flatMap(c=>[c.work,...c.locked])));
+    AND EXISTS(SELECT 1 FROM json_each(sources) WHERE json_extract(value,'$.s')=?)
+    AND NOT EXISTS(SELECT 1 FROM json_each(sources) WHERE COALESCE(json_extract(value,'$.s'),'')<>?)`)
+    .bind(...group.flatMap(c=>[c.work,...c.locked]),TEAMX_SOURCE,TEAMX_SOURCE));
+  for(const group of correctionGroups(corrections))writes.push(env.DB.prepare(`UPDATE update_events SET sources=(
+    SELECT json_group_array(json(value)) FROM json_each(update_events.sources) WHERE COALESCE(json_extract(value,'$.s'),'')<>?
+    ) WHERE section='manga' AND kind='chapter' AND (${group.map(c=>`(work=? AND number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ')})
+    AND EXISTS(SELECT 1 FROM json_each(sources) WHERE json_extract(value,'$.s')=?)`)
+    .bind(TEAMX_SOURCE,...group.flatMap(c=>[c.work,...c.locked]),TEAMX_SOURCE));
   const baselines=correctionGroups(corrections.filter(c=>c.highestReadable!==null));
   const predicate=(group:TeamxCorrection[])=>group.map(c=>`(work=? AND max_number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ');
   for(const group of baselines)writes.push(env.DB.prepare(`UPDATE update_source_watermarks
@@ -131,7 +136,7 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
       const rows=teamxRows(html,now),units=readableTeamxUnits(rows),work=`ext:${normalizeTitle(card.title)}`;
       const locked=rows.filter(row=>row.locked).map(row=>row.number).slice(0,60);
       if(locked.length)corrections.push({work,locked,highestReadable:units.length?Math.max(...units.map(u=>u.number)):null});
-      if (units.length) reports.push({ work, section: 'manga', kind: 'chapter', title: card.title, cover: card.cover, source: { s: TEAMX_SOURCE, u: new URL(card.url).pathname }, units });
+      if (units.length) reports.push({ work, section: 'manga', kind: 'chapter', title: card.title, cover: card.cover, source: { s: TEAMX_SOURCE, u: new URL(card.url).pathname, lockedMax:locked.length?Math.max(...locked):null }, units });
     } catch { failures++; }
   }));
   await repairTeamxEvents(env,corrections);

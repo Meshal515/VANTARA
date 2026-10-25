@@ -401,12 +401,17 @@ export const isFiller = (sourceId) => String(sourceId ?? '').includes('@') || fi
 /** A clicked release contributes its provider even when this work is already saved. */
 export function withUpdateSources(base, group) {
   const editions=new Map((base._work?.editions??[]).map(e=>[e.sourceId,e]));
+  const locks=new Map((base._lockedSources??[]).map(s=>[s.sourceId,s]));
+  for(const s of group.sources??[])if(s?.s&&Object.prototype.hasOwnProperty.call(s,'lockedMax')){
+    if(Number.isFinite(s.lockedMax)&&s.lockedMax>=0)locks.set(s.s,{sourceId:s.s,label:sourceLabel({sourceId:s.s,label:s.s}),lockedMax:s.lockedMax});
+    else locks.delete(s.s);
+  }
   const incoming=(group.sources??[]).filter(s=>s?.s&&s.u).map(s=>{
     const old=editions.get(s.s);
     return {sourceId:s.s,label:old?.label??s.s,manga:{...old?.manga,url:s.u,title:s.t??group.title,thumbnailUrl:group.cover??old?.manga?.thumbnailUrl??null,memo:s.m??old?.manga?.memo??''}};
   });
   for(const e of incoming)editions.set(e.sourceId,e);
-  return {...base,_work:{...base._work,editions:[...editions.values()]},_updateEditions:incoming};
+  return {...base,_work:{...base._work,editions:[...editions.values()]},_updateEditions:incoming,_lockedSources:[...locks.values()]};
 }
 
 const arabicSource = id => /@ar$/.test(String(id)) || !isFiller(id);

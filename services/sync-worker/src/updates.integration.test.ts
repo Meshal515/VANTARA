@@ -23,6 +23,15 @@ const manga = (work: string, numbers: number[], s: string, dates: Record<number,
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 describe('Update Engine: خط الأساس', () => {
+  it('describes a locked higher chapter on its readable source without creating a chapter row for it, and clears the notice on unlock',async()=>{
+    const e=env();const raw=manga('ext:work',[218],'teamx',{218:NOW-H});
+    await observe(e,[{...raw,source:{...raw.source,lockedMax:251}}],NOW);
+    let events=(await list(e,'section=manga')).events;
+    expect(events.map(r=>r.number)).toEqual([218]);expect(events[0]?.sources).toEqual([expect.objectContaining({lockedMax:251})]);
+    await observe(e,[{...raw,source:{...raw.source,lockedMax:null}}],NOW+H);
+    events=(await list(e,'section=manga')).events;
+    expect(events[0]?.sources).toEqual([expect.objectContaining({lockedMax:null})]);
+  });
   it('accepts real canonical multi-word manga refs used by the app', async () => {
     const e = env();
     expect(await observe(e, [manga('ext:one piece', [1120], 'x', { 1120: NOW - H })], NOW)).toMatchObject({ accepted: 1, created: 1 });

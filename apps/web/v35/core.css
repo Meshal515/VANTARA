@@ -1283,6 +1283,16 @@ html,
 }
 
 /* الفصول: قائمةٌ كثيفة بفواصل، لا بطاقة لكل فصل */
+.v35 .chapter-locked-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  opacity: .75;
+}
+.v35 .chapter-locked-note svg { width: 16px; height: 16px; flex: none; }
 .v35 .chapter-list {
   margin: 0 calc(var(--gutter) * -1);
 }

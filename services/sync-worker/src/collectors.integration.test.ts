@@ -9,6 +9,12 @@ const setup = () => sqliteEnv({ VANTARA_SESSION_SECRET: 's'.repeat(40), VANTARA_
 const reply = (data: unknown) => Response.json(data);
 
 describe('server collectors', () => {
+  it('preserves a matching source-less historical event that TeamX never contributed',async()=>{
+    const {env}=setup();
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{work:'ext:work',section:'manga',kind:'chapter',title:'Work',source:null,units:[{number:251,publishedAt:NOW-H}]}]})}),env,NOW);
+    await collectTimelines(env,{now:NOW,scheduled:true,fetchImpl:(async input=>String(input).includes('/series/')?new Response(chapter(251,true)+chapter(218)):String(input).includes('olympus')?new Response('<div class="last-chapter"><div class="box"><a href="/series/LWW"><h3>Work</h3></a></div></div>'):Response.json({data:[]}))as typeof fetch});
+    expect(await env.DB.prepare('SELECT number,sources FROM update_events WHERE work=? AND number=251').bind('ext:work').first()).toMatchObject({number:251,sources:'[]'});
+  });
   const chapter = (number: number, locked = false, series = 'LWW') => `<div class="chapter-card" data-number="${number}" data-date="${(NOW-H)/1000}"><a class="chapter-link" href="${locked?'#':`/series/${series}/${number}`}" ${locked?'data-bs-toggle="modal" data-bs-target="#buyModel"':''}><div><span class="${locked?'locked':'unread'}"></span></div></a></div>`;
   it('reports only a real chapter link, excluding purchase modals even without the old lock badge', () => {
     const html=chapter(251,true)+chapter(250,true).replace('class="locked"','class="unread"')+chapter(218)+chapter(217).replace('/series/LWW/217','https://other.test/series/LWW/217');
