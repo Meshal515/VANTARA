@@ -1853,6 +1853,11 @@ class PlayerActivity : Activity() {
                 main.removeCallbacks(netTick); main.post(netTick)
                 sheet.refresh()
             })
+            val warmOn = settings.getBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, false)
+            body.addView(sheetRow("تسخين كامل على باقة الجوال", "قبل التشغيل: أول قطعة ونهاية الملف حتى 16MB لكل خيار. على Wi-Fi يعمل دائمًا", trailing = if (warmOn) check() else null, selected = warmOn) {
+                settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
+                sheet.refresh()
+            })
         }
         main.removeCallbacks(netTick); main.post(netTick)
     }
