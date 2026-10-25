@@ -4136,6 +4136,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** رجوع داخل الواجهة. يرجع `false` إن لم يبقَ شيء يُرجَع إليه. */
   function goBack() {
+    // داخل الإضافات: الرجوع خطوة واحدة (صفحة إضافة ← المتجر، مصدر ← المتجر) قبل مغادرة الإضافات كلها
+    if (currentPage() === 'utility') {
+      if (addonHubView?.back?.()) return true;
+      if (sourceView) { void openAddons(); return true; }
+    }
     const prev = state.stack.pop();
     if (prev) {
       showPage(prev, { push: false });
