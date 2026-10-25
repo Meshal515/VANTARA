@@ -69,7 +69,7 @@ docker compose -f infra/docker-compose.yml ps
 ```bash
 curl -s localhost:8080/api/setup/status          # {"needsSetup":true}
 curl -s -X POST localhost:8080/api/setup -H 'Content-Type: application/json' \
-  -d '{"username":"mishal","password":"<قوية>"}'
+  -d '{"username":"example_user_a","password":"<قوية>"}'
 ```
 
 > ⚠️ `POST /api/setup` **يتجاهل `displayName`**. اضبط الاسم العربي بعدها من
@@ -79,7 +79,7 @@ curl -s -X POST localhost:8080/api/setup -H 'Content-Type: application/json' \
 
 ```bash
 S=$(curl -s -X POST localhost:8080/auth/login -H 'Content-Type: application/json' \
-      -d '{"username":"mishal","password":"<قوية>"}' | jq -r .accessToken)
+      -d '{"username":"example_user_a","password":"<قوية>"}' | jq -r .accessToken)
 
 curl -s -X POST localhost:8080/api/tokens -H "Authorization: Bearer $S" \
   -H 'Content-Type: application/json' \
