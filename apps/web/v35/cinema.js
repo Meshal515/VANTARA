@@ -208,7 +208,10 @@ export function createCinema(deps) {
   const refOf = (id) => `cinema:${id}`;
   const isCinemaRef = (ref) => typeof ref === 'string' && ref.startsWith('cinema:');
   const descriptor = (m) => ({ seriesRef: refOf(m.id), seriesTitle: m.title ?? null, coverUrl: m.poster ?? null });
-  const TYPES_KEY = 'vantara.cinema.types.v1';
+  // v1 حفظ «فيلم» لمسلسلات: Cinemeta يردّ على /meta/movie/<معرّف مسلسل> بنسخة فيلم ناقصة
+  // (بلا ملصق ولا سنة ولا حلقات) فكانت تُقبل. تُرمى ويُتعلَّم النوع من جديد.
+  const TYPES_KEY = 'vantara.cinema.types.v2';
+  try { globalThis.localStorage?.removeItem('vantara.cinema.types.v1'); } catch {}
   const types = readJson(TYPES_KEY, {});
   const rememberType = (m) => {
     if (!m?.id || !m.type || types[m.id] === m.type) return;
@@ -425,15 +428,20 @@ export function createCinema(deps) {
   }
   /** يبدأ جلب التفاصيل مع أول لمسة، فتفتح الصفحة جاهزة غالبًا. */
   function prefetch(m) {
-    if (!m?.id || state.details.has(m.id)) return state.details.get(m.id);
-    // عمل من الحساب قد لا يُعرف نوعه على هذا الجهاز: فيلم أولًا ثم مسلسل
+    if (!m?.id) return undefined;
+    const known = m.type ?? types[m.id] ?? null;
+    // التفاصيل محفوظة بالنوع: نسخة «فيلم» لمعرّف مسلسل لا تُعطى لبطاقة مسلسل
+    const key = `${known ?? '?'}:${m.id}`;
+    if (state.details.has(key)) return state.details.get(key);
+    // نوع مجهول (عمل من الحساب): مسلسل أولًا. /meta/series لمعرّف فيلم يردّ بلا شيء،
+    // أما /meta/movie لمعرّف مسلسل فيردّ بفيلم ناقص فلا يصلح أن يكون الأول
     const tryType = (type) => fetchDetail(type, m.id).catch(() => null);
-    const p = (async () => (await tryType(m.type ?? types[m.id] ?? 'movie')) ?? (m.type ? null : await tryType('series')))().then((full) => {
+    const p = (async () => (known ? await tryType(known) : (await tryType('series')) ?? (await tryType('movie'))))().then((full) => {
       if (full) rememberType(full);
-      else state.details.delete(m.id);
+      else state.details.delete(key);
       return full;
     });
-    state.details.set(m.id, p);
+    state.details.set(key, p);
     return p;
   }
   const opener = (node, m, opts) => {
