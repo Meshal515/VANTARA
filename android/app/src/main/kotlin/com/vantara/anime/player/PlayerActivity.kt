@@ -54,6 +54,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.vantara.anime.AnimeEngine
+import com.vantara.app.BuildConfig
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.stream.Candidate
 import com.vantara.anime.stream.Container
@@ -201,6 +202,9 @@ class PlayerActivity : Activity() {
 
     // ───── الشبكة ─────
     @OptIn(UnstableApi::class) private val net = NetStats()
+    /** نسخة الاختبار فقط: ما طلبه المشغّل فعلًا ومتى (طلبات القراءة، القفزات، خط البدء). */
+    @OptIn(UnstableApi::class) private val diag = PlaybackDiagnostics()
+    private var videoDecoder: String? = null
     private var netChip: TextView? = null
     private val netTick = object : Runnable {
         override fun run() {
@@ -540,6 +544,9 @@ class PlayerActivity : Activity() {
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
+        if (BuildConfig.DEBUG) player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) { videoDecoder = decoderName }
+        })
         buildUi()
         attach(sessionId)
 
@@ -625,6 +632,7 @@ class PlayerActivity : Activity() {
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            if (BuildConfig.DEBUG) diag.state(state, player.currentPosition, player.totalBufferedDuration)
             sampleUsage()
             if (state == Player.STATE_BUFFERING) together?.onBuffering()
             if (state == Player.STATE_READY) together?.onReady()
@@ -666,6 +674,7 @@ class PlayerActivity : Activity() {
         }
 
         override fun onRenderedFirstFrame() {
+            if (BuildConfig.DEBUG) diag.firstFrame()
             firstFrameShown = true
             if (frameAt == 0L) {
                 frameAt = SystemClock.elapsedRealtime()
@@ -686,6 +695,7 @@ class PlayerActivity : Activity() {
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
+            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
                 watchStall()
@@ -711,7 +721,10 @@ class PlayerActivity : Activity() {
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
 
-        override fun onPlayerError(error: PlaybackException) = fail(error.errorCodeName)
+        override fun onPlayerError(error: PlaybackException) {
+            if (BuildConfig.DEBUG) diag.error("${error.errorCodeName}: ${error.cause ?: ""}")
+            fail(error.errorCodeName)
+        }
 
         override fun onTracksChanged(tracks: Tracks) {
             updateQualityLabel()
@@ -740,6 +753,7 @@ class PlayerActivity : Activity() {
         startedAt = System.currentTimeMillis()
         openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
         net.markStart()
+        if (BuildConfig.DEBUG) { diag.start(); videoDecoder = null }
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
@@ -783,7 +797,7 @@ class PlayerActivity : Activity() {
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
         val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
         // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)
-        return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net) } }
+        return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net); if (BuildConfig.DEBUG) it.addTransferListener(diag) } }
     }
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
@@ -1778,7 +1792,9 @@ class PlayerActivity : Activity() {
             val need = player.videoFormat?.bitrate?.takeIf { it > 0 }?.toLong()
             val buffered = player.totalBufferedDuration
             val t = torrentStats()
-            body.addView(metricRow("زمن الاستجابة", latency?.let { "$it ms" } ?: "لم يُقس بعد", when { latency == null -> Tone.TEXT_3; latency < 300 -> Tone.OK; latency < 800 -> Tone.WARN; else -> Tone.BAD }))
+            // في التورنت هو انتظار تجهيزه (بيانات الملف من المشاركين وفتح القارئ)، لا زمن استجابة سيرفر
+            val torrent = current?.url?.startsWith("vantara-torrent:") == true
+            body.addView(metricRow(if (torrent) "تجهيز التورنت" else "زمن الاستجابة", latency?.let { "$it ms" } ?: "لم يُقس بعد", when { latency == null -> Tone.TEXT_3; latency < 300 -> Tone.OK; latency < 800 -> Tone.WARN; else -> Tone.BAD }))
             body.addView(metricRow("السرعة الآن", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(bps)), Tone.TEXT))
             if (estimate > 0) body.addView(metricRow("تقدير المشغّل", String.format(java.util.Locale.US, "%.1f Mbps", estimate / 1_000_000.0), Tone.TEXT_2))
             body.addView(metricRow("جاهز أمامك", "${buffered / 1000} ثانية", if (buffered >= 15_000) Tone.OK else if (buffered >= 5_000) Tone.WARN else Tone.BAD))
@@ -1797,7 +1813,8 @@ class PlayerActivity : Activity() {
             }
             body.addView(metricRow("تسلسل البدء", startupLine(), Tone.TEXT_2))
             net.host?.let { body.addView(metricRow("السيرفر", it, Tone.TEXT_3)) }
-            body.addView(label(NetStats.verdict(latency, bps, need, buffered, t?.peers), 14f, Tone.TEXT, bold = true).apply { setPadding(0, dp(12), 0, dp(4)) })
+            body.addView(label(NetStats.verdict(latency, bps, need, buffered, t?.peers, torrent), 14f, Tone.TEXT, bold = true).apply { setPadding(0, dp(12), 0, dp(4)) })
+            if (BuildConfig.DEBUG) diagnosticsSection(body, t)
             val chipOn = netChip?.visibility == View.VISIBLE
             body.addView(sheetRow("إظهار القياس فوق الفيديو", "زمن الاستجابة · السرعة · الجاهز", trailing = if (chipOn) check() else null, selected = chipOn) {
                 val on = netChip?.visibility != View.VISIBLE
@@ -1808,6 +1825,34 @@ class PlayerActivity : Activity() {
             })
         }
         main.removeCallbacks(netTick); main.post(netTick)
+    }
+
+    /** نسخة الاختبار: الحكم من الأرقام، والتقرير الكامل، وزر نسخه للصقه في المحادثة. */
+    @OptIn(UnstableApi::class)
+    private fun diagnosticsSection(body: LinearLayout, t: com.vantara.addons.torrent.TorrentStats?) {
+        val url = current?.url
+        val facts = t?.let {
+            val blocks = if (it.waitingPiece >= 0 && url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).pieceBlocks(android.net.Uri.parse(url), it.waitingPiece) }.getOrNull() else null
+            PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks)
+        }
+        val f = player.videoFormat
+        val groups = player.currentTracks.groups
+        val p = PlaybackDiagnostics.PlayerFacts(
+            player.playbackState, player.currentPosition, player.totalBufferedDuration, player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L,
+            f?.containerMimeType, f?.let { listOfNotNull(it.sampleMimeType ?: it.codecs, if (it.width > 0) "${it.width}x${it.height}" else null).joinToString(" ") },
+            videoDecoder, groups.count { it.type == C.TRACK_TYPE_TEXT }, groups.count { it.type == C.TRACK_TYPE_AUDIO },
+        )
+        val report = diag.report(facts, p)
+        body.addView(label("تشخيص (نسخة الاختبار)", 13.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(0, dp(14), 0, dp(4)) })
+        body.addView(label(diag.verdict(facts, p), 14f, Tone.TEXT, bold = true).apply { setPadding(0, 0, 0, dp(6)) })
+        body.addView(label(report.lines().drop(1).dropLast(1).joinToString("\n"), 11.5f, Tone.TEXT_2).apply {
+            textDirection = View.TEXT_DIRECTION_RTL; setTextIsSelectable(true); setPadding(0, 0, 0, dp(8))
+        })
+        body.addView(sheetRow("نسخ التشخيص", "الصقه في المحادثة كما هو") {
+            val clip = getSystemService(android.content.ClipboardManager::class.java)
+            clip?.setPrimaryClip(android.content.ClipData.newPlainText("VANTARA diagnostics", report))
+            android.widget.Toast.makeText(this, "نُسخ التشخيص", android.widget.Toast.LENGTH_SHORT).show()
+        })
     }
 
     private fun metricRow(name: String, value: String, color: Int): View = LinearLayout(this).apply {

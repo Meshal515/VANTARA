@@ -66,13 +66,14 @@ class NetStats(private val now: () -> Long = { android.os.SystemClock.elapsedRea
          * الخلاصة للمستخدم بكلمات بسيطة. [needBps] معدل الفيديو المطلوب (بت/ث) إن عُرف.
          * [bufferedMs] المخزّن أمامك: 30 ث فأكثر = لا مشكلة الآن مهما كانت الأرقام.
          */
-        fun verdict(latencyMs: Long?, bytesPerSecond: Long, needBps: Long?, bufferedMs: Long, torrentPeers: Int? = null): String = when {
+        fun verdict(latencyMs: Long?, bytesPerSecond: Long, needBps: Long?, bufferedMs: Long, torrentPeers: Int? = null, torrent: Boolean = false): String = when {
             torrentPeers == 0 -> "لا مشاركين متصلين بعد: التورنت ينتظر السرب، جرّب نسخة بمشاركين أكثر"
             bufferedMs >= 30_000 -> "ممتاز: أمامك ${bufferedMs / 1000} ثانية جاهزة"
             needBps != null && needBps > 0 && bytesPerSecond * 8 < needBps * 0.9 && bytesPerSecond > 0 ->
                 "سرعتك الآن أقل من دقة الفيديو: اختر دقة أقل أو سيرفرًا آخر"
-            latencyMs != null && latencyMs > 1500 -> "السيرفر بطيء الاستجابة (${latencyMs} ms): جرّب سيرفرًا آخر"
-            latencyMs != null && latencyMs > 600 -> "الاستجابة متوسطة (${latencyMs} ms)"
+            // في التورنت «زمن الاستجابة» هو تجهيزه لا بطء سيرفر: نصيحة «جرّب سيرفرًا آخر» كانت مضللة
+            !torrent && latencyMs != null && latencyMs > 1500 -> "السيرفر بطيء الاستجابة (${latencyMs} ms): جرّب سيرفرًا آخر"
+            !torrent && latencyMs != null && latencyMs > 600 -> "الاستجابة متوسطة (${latencyMs} ms)"
             else -> "الشبكة جيدة"
         }
     }

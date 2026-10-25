@@ -183,7 +183,15 @@ class TorrentEngine internal constructor(
         val state = states[hash]
         return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
             state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
-            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L)
+            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
+            metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L)
+    }
+    /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
+    fun pieceBlocks(uri: Uri, piece: Int): Pair<Int, Int>? {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
+        if (!managerHolder.isInitialized() || piece < 0) return null
+        val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
+        return runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece }?.let { (it.finished() + it.writing()) to it.blocksInPiece() } }.getOrNull()
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
     /**
@@ -219,6 +227,7 @@ class TorrentEngine internal constructor(
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
             runCatching { handle.swig().set_max_connections(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
             val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
+            state.metadataReady()
             val selected = inspect(state, info, request)
             state.select(handle, selected, info)
             handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
@@ -292,6 +301,12 @@ class TorrentEngine internal constructor(
         /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
         @Volatile var firstPieceAt = 0L; private set
         val fileBytes: Long get() = file?.size ?: 0L
+        val pieceBytes: Int get() = pieceLength
+        /** للتشخيص: متى صارت بيانات التورنت جاهزة، وأي قطعة ينتظرها القارئ الآن ومنذ متى (elapsedRealtime). */
+        @Volatile var metadataAt = 0L; private set
+        @Volatile var waitingPiece = -1; private set
+        @Volatile var waitingSince = 0L; private set
+        fun metadataReady() { if (metadataAt == 0L) metadataAt = android.os.SystemClock.elapsedRealtime() }
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
         /**
          * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
@@ -496,10 +511,11 @@ class TorrentEngine internal constructor(
             var progressAt = start
             var checkedAt = 0L
             var done = -1L
-            synchronized(monitor) {
+            try { synchronized(monitor) {
                 while (true) {
                     checkCancelled(cancelled)
                     pieces[piece]?.let { return it }
+                    if (waitingPiece != piece) { waitingPiece = piece; waitingSince = android.os.SystemClock.elapsedRealtime() }
                     if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
                     if (evicted(piece)) rebuild()
                     if (failed.remove(piece)) throw IOException("Torrent piece read failed")
@@ -521,7 +537,7 @@ class TorrentEngine internal constructor(
                     }
                     try { monitor.wait(100) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent read interrupted") }
                 }
-            }
+            } } finally { if (waitingPiece == piece) waitingPiece = -1 }
         }
         /** إن اكتملت [piece] ولم تكن في الذاكرة: تُطلب قراءتها الآن (لا انتظار؛ تصل عبر received). */
         fun readAhead(piece: Int, file: TorrentFile, pieceLength: Int) = synchronized(monitor) {
