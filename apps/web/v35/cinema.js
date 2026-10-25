@@ -1020,6 +1020,8 @@ export function createCinema(deps) {
       w.run.prepared();
       // لقطة ثابتة: ما يصل أثناء النداء يُضاف بعده (`extend`) فلا يضيع ولا يتكرر
       const initial = [...found.copies];
+      // نفس ما يُعطى للمشغّل: يجهز من القرص قبل الضغط على تشغيل
+      engine.warmArt([m.background, m.logo]);
       try {
         const out = await engine.prepare({
           session,

@@ -22,6 +22,17 @@ const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugi
 
 export const available = () => bridge() !== null;
 
+/**
+ * بنر العمل وشعاره إلى كاش المشغّل الأصلي لحظة تجهيز السيرفرات، فتفتح شاشة التحميل بهما فورًا
+ * بدل سواد ثم بنر ثم شعار. APK أقدم بلا الطريقة يرفض النداء فيُتجاهل؛ لا شيء ينتظره.
+ */
+export function warmArt(urls) {
+  const list = [...new Set((urls ?? []).filter((u) => typeof u === 'string' && u.startsWith('https://')))];
+  const plugin = globalThis.Capacitor?.Plugins?.AnimeEngine;
+  if (!list.length || typeof plugin?.warmArt !== 'function') return;
+  try { void Promise.resolve(plugin.warmArt({ urls: list })).catch(() => {}); } catch { /* تحسين لا شرط */ }
+}
+
 let configured = null;
 const nativeAddonSessions = new Map();
 const addonDiscoverySessions = new Map();
