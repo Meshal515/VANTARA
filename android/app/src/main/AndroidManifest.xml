@@ -75,6 +75,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- تسخين التورنت قبل الضغط: يُنزّل أول قطعة على Wi-Fi فقط، لا على باقة الجوال (بلا سؤال للمستخدم) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- «تثبيت» في شاشة التحديث: يفتح مثبّت أندرويد، والنظام يطلب الموافقة -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- ترجمة الفصول مقدمًا: خدمة أمامية بإشعار تقدّم، والمعالج مستيقظ والشاشة مطفأة -->

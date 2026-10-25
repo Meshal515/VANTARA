@@ -78,6 +78,7 @@ data class TorrentStats(
     val firstPieceAt: Long = 0L, val fileBytes: Long = 0L,
     val pieceBytes: Int = 0, val metadataAt: Long = 0L, val waitingPiece: Int = -1, val waitingSince: Long = 0L,
     val mkvHead: String? = null, val mkvSkipped: Long = 0L,
+    val warmedAt: Long = 0L, val warmedPieces: Int = 0,
 )
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
@@ -174,6 +175,24 @@ object TorrentPrefetch {
         ranked.filter { seeders(it.second) != 0 }.distinctBy { it.first }.take(limit)
             .mapIndexed { index, (url, _) -> url to (index == 0 && !background) }
     fun edgesFit(pieceLength: Int, pieces: Int): Boolean = pieceLength > 0 && pieceLength.toLong() * pieces <= MAX_EDGE_BYTES
+    /** ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار. */
+    const val WARM_BUDGET = 16L * 1024 * 1024
+    /**
+     * القطع التي تُنزَّل قبل الضغط على تشغيل. الثواني الضائعة (11–16 ث على الجوال) كانت قبل أول
+     * قطعة: انتظار أن يسمح المشاركون بالتحميل. التسخين يبدأ هذا الانتظار والمستخدم يتصفح.
+     * أول قطعة أولًا ولو كانت كبيرة (كان «الطرفان معًا ≤12MB» يُسقط ملفات القطع 8MB كلها)،
+     * ثم الذيل (فهرس الحاوية) فيما تبقى. على شبكة محدودة (الجوال): لا قطع، بيانات واتصالات فقط.
+     */
+    fun warmPieces(edges: List<Int>, pieceLength: Int, unmetered: Boolean, budget: Long = WARM_BUDGET): List<Int> {
+        if (!unmetered || pieceLength <= 0 || edges.isEmpty() || pieceLength > budget) return emptyList()
+        val out = mutableListOf(edges.first())
+        var used = pieceLength.toLong()
+        for (piece in edges.drop(1).reversed()) {
+            if (used + pieceLength > budget) break
+            out += piece; used += pieceLength
+        }
+        return out
+    }
 }
 
 /**

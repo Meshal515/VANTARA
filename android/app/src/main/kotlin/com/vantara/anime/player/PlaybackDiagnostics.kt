@@ -31,6 +31,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val waitingBlocks: Pair<Int, Int>?,
         /** عناصر MKV العليا قبل أول Cluster كما مرّت بالقارئ، وما أُعطي أصفارًا بلا تنزيل. */
         val mkvHead: String? = null, val mkvSkipped: Long = 0L,
+        /** التسخين قبل الضغط: متى اكتملت بياناته (elapsedRealtime، 0 = لم يُسخَّن) وكم قطعة طلب. */
+        val warmedAt: Long = 0L, val warmedPieces: Int = 0,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -135,6 +137,11 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
                 if (needBps > 0) " · يحتاج الفيديو ${mbps(needBps)}" else "")
             if (t.waitingPiece >= 0) appendLine("ينتظر الآن: القطعة ${t.waitingPiece} منذ ${secs(nowMs - t.waitingSince)} ث" +
                 (t.waitingBlocks?.let { (d, n) -> " ($d/$n كتلة)" } ?: ""))
+            appendLine(when {
+                t.warmedAt <= 0 -> "التسخين المسبق: لم يُسخَّن هذا الخيار"
+                t.warmedAt <= openAt -> "التسخين المسبق: جاهز قبل التشغيل بـ ${secs(openAt - t.warmedAt)} ث · ${t.warmedPieces} قطعة"
+                else -> "التسخين المسبق: اكتمل بعد بدء التشغيل · ${t.warmedPieces} قطعة"
+            })
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }

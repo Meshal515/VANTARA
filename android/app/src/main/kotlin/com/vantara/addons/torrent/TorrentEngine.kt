@@ -35,6 +35,9 @@ class TorrentEngine internal constructor(
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
+    private val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
+    /** Wi-Fi أو إيثرنت (غير محسوبة). عند الشك: محدودة، فلا تُنزَّل قطع قبل الاختيار. */
+    private fun unmetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered == false }.getOrDefault(false)
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
     private val tickets = ConcurrentHashMap<String, Ticket>()
@@ -140,7 +143,9 @@ class TorrentEngine internal constructor(
         state.limitWhileWarm(handle)
         val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
         val selected = inspect(state, info, request)
-        state.prefetched(selected, info, fetchEdges && directory.usableSpace >= MIN_FREE_BYTES && TorrentPrefetch.edgesFit(info.pieceLength(), TorrentPolicy.edges(selected, info.pieceLength()).size))
+        val pieces = if (fetchEdges && directory.usableSpace >= MIN_FREE_BYTES)
+            TorrentPrefetch.warmPieces(TorrentPolicy.edges(selected, info.pieceLength()), info.pieceLength(), unmetered()) else emptyList()
+        state.prefetched(selected, info, pieces)
     }
     private fun saveDhtState(force: Boolean) {
         if (!managerHolder.isInitialized()) return
@@ -185,7 +190,8 @@ class TorrentEngine internal constructor(
             state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
             firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
             metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
-            mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L)
+            mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
+            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -221,8 +227,14 @@ class TorrentEngine internal constructor(
             }
             states.computeIfAbsent(request.infoHash) { State(request.infoHash) }.also { it.retain() }
         }
-        // صار تشغيلًا حقيقيًا (بعد retain، فلا يوقفه التسخين المنتهي): يخرج من عدّاد التسخين المسبق
-        synchronized(warming) { warming.remove(request.infoHash) }
+        // صار تشغيلًا حقيقيًا (بعد retain، فلا يوقفه التسخين المنتهي): يخرج من عدّاد التسخين المسبق.
+        // تسخين آخر يُنزّل قطعًا ولم يُختر يتوقف فلا يزاحم المختار. تسخين البيانات فقط (الخيار الثاني،
+        // الحلقة التالية) يبقى: لا يزاحم، وacquire يتكرر مع كل قفزة فلا يصح أن يقطعه.
+        val others = synchronized(warming) {
+            warming.remove(request.infoHash)
+            warming.keys.filter { (states[it]?.warmedPieces ?: 0) > 0 }.onEach { warming.remove(it) }
+        }
+        for (hash in others) states[hash]?.let { other -> runCatching { pruner.execute { runCatching { other.cool() } } } }
         return try {
             val handle = state.handle(stopped, request)
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
@@ -317,6 +329,9 @@ class TorrentEngine internal constructor(
         @Volatile var idleAt = System.currentTimeMillis(); private set
         /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
         @Volatile var firstPieceAt = 0L; private set
+        /** للتشخيص: متى اكتملت بيانات التورنت في التسخين المسبق، وكم قطعة طُلبت فيه. */
+        @Volatile var warmedAt = 0L; private set
+        @Volatile var warmedPieces = 0; private set
         /** بنية بداية ملف MKV كما مرّت بالقارئ؛ null لغير MKV. */
         @Volatile var head: MkvHead? = null; private set
         val fileBytes: Long get() = file?.size ?: 0L
@@ -373,11 +388,18 @@ class TorrentEngine internal constructor(
         fun limitWhileWarm(handle: TorrentHandle) = synchronized(monitor) {
             if (refs == 0) runCatching { handle.swig().set_max_connections(PREFETCH_CONNECTIONS) }
         }
-        fun prefetched(file: TorrentFile, info: TorrentInfo, fetchEdges: Boolean) = synchronized(monitor) {
+        fun prefetched(file: TorrentFile, info: TorrentInfo, pieces: List<Int>) = synchronized(monitor) {
             // المشغّل سبقنا إليه (أو أُعيد البناء): هو صاحب الأولويات الآن
             if (refs > 0) return@synchronized
             val current = torrent?.takeIf { it.isValid } ?: return@synchronized
-            select(current, file, info, fetchEdges)
+            select(current, file, info, fetchEdges = false)
+            // أول قطعة بموعد فوري ثم الذيل؛ المشغّل حين يفتح يضع أطرافه فوقها ويجد ما اكتمل جاهزًا
+            for ((piece, deadline) in TorrentPolicy.deadlines(pieces.take(1), pieces.drop(1))) {
+                current.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
+                current.setPieceDeadline(piece, deadline)
+                deadlined += piece
+            }
+            warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
             current.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             current.resume()
         }
