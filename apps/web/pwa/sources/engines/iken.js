@@ -9,11 +9,10 @@
  */
 
 import { parseHtml } from '../dom.js';
+import { ikenChapterLocked as locked } from '../../../lib/chapter-access.js';
 
 const PER_PAGE = 18;
 const STATUS = { ONGOING: 1, COMING_SOON: 1, MASS_RELEASED: 1, COMPLETED: 2, CANCELLED: 5, DROPPED: 5 };
-
-const locked = (c) => c.isLocked === true || c.isTimeLocked === true || c.isPermanentlyLocked === true || (c.chapterPurchased === false && Number(c.price ?? 0) !== 0);
 
 export const iken = {
   kind: 'iken',

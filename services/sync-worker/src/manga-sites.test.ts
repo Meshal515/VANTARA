@@ -11,6 +11,13 @@ const NOW = Date.UTC(2026, 9, 16, 10);
 
 /** عينات حية (16 أكتوبر 2026) من صفحات «آخر التحديثات» نفسها. */
 describe('server manga sites', () => {
+  it('does not advertise Iken time locks, permanent locks or unpurchased paid chapters', () => {
+    const works=ikenWorks({posts:[{id:1,slug:'work',postTitle:'Work',chapters:[
+      {number:6,isTimeLocked:true},{number:5,isPermanentlyLocked:true},{number:4,chapterPurchased:false,price:50},
+      {number:3,chapterPurchased:true,price:50},{number:2,price:0},
+    ]}]},NOW);
+    expect(works[0]?.units.map(u=>u.number)).toEqual([3,2]);
+  });
   it('reads Madara admin-ajax cards: title, path, cover and the two newest chapters', () => {
     const cards = madaraCards(fixture('madara-latest.html'), 'https://mangalik.net');
     expect(cards.length).toBe(3);

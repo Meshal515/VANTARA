@@ -10,6 +10,7 @@
  */
 import { decodeEntities, normalizeTitle, parseChapterNumber } from '../../../apps/web/lib/catalog.js';
 import { adultGenre, adultTitle } from '../../../apps/web/lib/adult-filter.js';
+import { ikenChapterLocked } from '../../../apps/web/lib/chapter-access.js';
 
 export type SiteUnit = { number: number; publishedAt?: number };
 export type SiteWork = { title: string; url: string; cover: string | null; units: SiteUnit[] };
@@ -71,7 +72,7 @@ export function madaraCards(html: string, base: string): SiteWork[] {
   return out;
 }
 
-type IkenPost = { id?: number; slug?: string; postTitle?: string; featuredImage?: string; isNovel?: boolean; seriesType?: string; genres?: Array<{ name?: string }>; chapters?: Array<{ number?: number; createdAt?: string; isLocked?: boolean }> };
+type IkenPost = { id?: number; slug?: string; postTitle?: string; featuredImage?: string; isNovel?: boolean; seriesType?: string; genres?: Array<{ name?: string }>; chapters?: Array<{ number?: number; createdAt?: string; isLocked?: boolean; isTimeLocked?: boolean; isPermanentlyLocked?: boolean; chapterPurchased?: boolean; price?: number }> };
 /** Iken (Azora): JSON بتاريخ رفع دقيق لكل فصل. */
 export function ikenWorks(body: { posts?: IkenPost[] }, now: number): SiteWork[] {
   return (body.posts ?? []).filter((p) => p.postTitle && p.slug && p.isNovel !== true && String(p.seriesType ?? '').toLowerCase() !== 'novel'
@@ -80,7 +81,7 @@ export function ikenWorks(body: { posts?: IkenPost[] }, now: number): SiteWork[]
     url: `${p.slug}#${p.id}`,
     cover: p.featuredImage && /^https?:\/\//.test(p.featuredImage) ? p.featuredImage : null,
     // الفصل المقفل (عملات أو وقت) لا يُقرأ في التطبيق: لا يُعلن تحديثًا
-    units: top((p.chapters ?? []).filter((c) => c.isLocked !== true).map((c) => {
+    units: top((p.chapters ?? []).filter((c) => !ikenChapterLocked(c)).map((c) => {
       const at = Date.parse(c.createdAt ?? '');
       return { number: Number(c.number), ...(Number.isFinite(at) && at <= now ? { publishedAt: at } : {}) };
     })),
