@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { nativeStore } from './native-runtime.js';
+import { createStore, SPACES } from '../pwa/cache/store.js';
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();});
 const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   vi.resetModules();
@@ -86,4 +88,27 @@ it('shows an extension installed from a repository right away, in any language, 
   const rows=a.registry.list().filter(x=>x.bundled);
   expect(rows.map(x=>x.sourceId)).toEqual(['eu.kanade.tachiyomi.extension.ar.azora','eu.kanade.tachiyomi.extension.en.asura#1']);
   expect(rows[1]).toMatchObject({user:true,contentTypes:['manga']});
+});
+
+it("APK addons move off the shared localStorage, keep installed addons, and drop the never-deleted response cache", async () => {
+  const data = new Map([
+    ["vantara.addons.native|state|addons.v1", JSON.stringify({ value: [{ id: "kept" }], expiresAt: 1e15 })],
+    ["vantara.addons.native|source|addon|[1]", "x".repeat(5000)],
+    ["vantara.addons.native|source|addon|[2]", "x".repeat(5000)],
+    ["vantara.sync.library", "{}"],
+  ]);
+  const storage = {
+    get length() { return data.size; },
+    key: (i) => [...data.keys()][i] ?? null,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: () => { throw Object.assign(new Error("full"), { name: "QuotaExceededError" }); },
+    removeItem: (k) => data.delete(k),
+  };
+  const store = nativeStore(storage, createStore({ indexedDB: null, spaces: { ...SPACES, state: { ttlMs: Infinity, maxBytes: 16 * 1024 * 1024, maxEntryBytes: 16 * 1024 * 1024 } } }));
+  expect((await store.get("state", "addons.v1")).value).toEqual([{ id: "kept" }]);
+  expect([...data.keys()]).toEqual(["vantara.sync.library"]);
+  // localStorage ممتلئ لا يمنع حفظ الإضافات بعد الآن
+  expect(await store.set("state", "addons.v1", [{ id: "kept" }, { id: "new", blob: "y".repeat(3 * 1024 * 1024) }])).toBe(true);
+  expect((await store.get("state", "addons.v1")).value).toHaveLength(2);
+  expect(store.failure()).toBe(null);
 });

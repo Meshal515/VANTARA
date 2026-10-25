@@ -70,6 +70,6 @@ export function getRuntime() {
   })();
 
   let addons = null;
-  runtime = { store, fetcher, registry, ready, ensureMedia, get addons() { return addons ??= createAddonRuntime({runtime, store:createStore({name:'vantara-addons',spaces:{...SPACES,state:{ttlMs:Infinity,maxBytes:16*1024*1024}}})}); } };
+  runtime = { store, fetcher, registry, ready, ensureMedia, get addons() { return addons ??= createAddonRuntime({runtime, store:createStore({name:'vantara-addons',spaces:{...SPACES,state:{ttlMs:Infinity,maxBytes:16*1024*1024,maxEntryBytes:16*1024*1024}}})}); } };
   return runtime;
 }

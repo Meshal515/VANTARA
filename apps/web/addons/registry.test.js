@@ -250,9 +250,23 @@ it("installs well beyond the old 100 limit, and a full storage rolls back with a
   expect(r.list()).toHaveLength(150);
   const set = store.set;
   store.set = async () => false;
-  await expect(r.install(await r.inspect("https://addon.test/full/manifest.json"))).rejects.toThrow("مساحة التخزين غير كافية");
+  await expect(r.install(await r.inspect("https://addon.test/full/manifest.json"))).rejects.toThrow("رفض التخزين الكتابة (سبب غير معروف)");
   expect(r.list()).toHaveLength(150);
   store.set = set;
+});
+it("names the measured reason instead of always blaming storage space", async () => {
+  // سجل أكبر من حد المدخل: الرسالة تذكر الحجم والحد
+  const tight = createStore({ indexedDB: null, spaces: { ...SPACES, state: { ttlMs: Infinity, maxBytes: 64 * 1024 } } });
+  const big = createAddonRegistry({ store: tight, transport: { json: async (url) => ({ ...raw(), id: `org.big.${new URL(url).pathname.split("/")[1]}`, description: "x".repeat(4000) }) } });
+  await big.ready;
+  await big.install(await big.inspect("https://addon.test/a0/manifest.json"));
+  await expect(big.install(await big.inspect("https://addon.test/a1/manifest.json"))).rejects.toThrow(/سجل الإضافات 0\.0\d?MB أكبر من حده 0\.0\d?MB/);
+  // ومساحة الإضافات في التطبيق يتسع سجلها للمساحة كلها لا لربعها
+  const roomy = createStore({ indexedDB: null, spaces: { ...SPACES, state: { ttlMs: Infinity, maxBytes: 64 * 1024, maxEntryBytes: 64 * 1024 } } });
+  const ok = createAddonRegistry({ store: roomy, transport: { json: async (url) => ({ ...raw(), id: `org.big.${new URL(url).pathname.split("/")[1]}`, description: "x".repeat(4000) }) } });
+  await ok.ready;
+  for (let i = 0; i < 3; i++) await ok.install(await ok.inspect(`https://addon.test/a${i}/manifest.json`));
+  expect(ok.list()).toHaveLength(3);
 });
 it('atomically replaces a configured addon host after review and preserves its old source key across reload',async()=>{
  const store=createStore({indexedDB:null}),transport={json:async()=>raw()},r=createAddonRegistry({store,transport});await r.ready;

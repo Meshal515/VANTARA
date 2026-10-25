@@ -1,31 +1,45 @@
 import { createAddonRuntime } from "./runtime.js";
 import { createNativeTransport } from "./native-transport.js";
+import { createStore, SPACES } from "../lib/idb-store.js";
 let runtime;
-function nativeStore(storage = globalThis.localStorage) {
-  const key = (space, k) => `vantara.addons.native|${space}|${k}`;
+// كانت الإضافات في APK تُحفظ في localStorage، ومعها كل رد بث وترجمة بمفتاح خاص لكل حلقة لا يُحذف أبدًا،
+// فيمتلئ localStorage المشترك مع الوقت ويُرفض حفظ الإضافات. الآن IndexedDB بحدود وكنس، وما في
+// localStorage يُنقل مرة عند أول قراءة ثم يُحذف، وردود الكاش القديمة تُحذف دون نقل.
+const LEGACY = "vantara.addons.native|";
+const ADDON_SPACES = { ...SPACES, state: { ttlMs: Infinity, maxBytes: 16 * 1024 * 1024, maxEntryBytes: 16 * 1024 * 1024 } };
+export function nativeStore(storage = globalThis.localStorage, store = createStore({ name: "vantara-addons", spaces: ADDON_SPACES })) {
+  const legacy = (space, k) => `${LEGACY}${space}|${k}`;
+  const drop = (k) => { try { storage?.removeItem?.(k); } catch { /* يُعاد في المرة القادمة */ } };
+  let cleaned = false;
+  const cleanCache = () => {
+    if (cleaned) return;
+    cleaned = true;
+    // ردود الكاش لها حد 30MB وتُكنس بعد هدوء الشاشة؛ مساحة الإضافات المثبتة لا تُكنس أبدًا
+    setTimeout(() => void store.sweep({ ns: "source" }).catch(() => {}), 15_000);
+    if (!storage) return;
+    try {
+      const old = [];
+      for (let i = 0; i < storage.length; i++) { const k = storage.key(i); if (k?.startsWith(`${LEGACY}source|`)) old.push(k); }
+      old.forEach(drop);
+    } catch { /* localStorage غير متاح */ }
+  };
   return {
+    failure: () => store.failure(),
     async get(space, k) {
-      try {
-        const row = JSON.parse(storage.getItem(key(space, k)));
-        return row
-          ? { value: row.value, stale: row.expiresAt < Date.now() }
-          : null;
-      } catch {
-        return null;
-      }
+      cleanCache();
+      const hit = await store.get(space, k);
+      if (hit || space !== "state") return hit;
+      let row = null;
+      try { row = JSON.parse(storage?.getItem(legacy(space, k))); } catch { return null; }
+      if (!row) return null;
+      if (await store.set(space, k, row.value)) drop(legacy(space, k));
+      return { value: row.value, stale: false };
     },
-    async set(space, k, value, { ttlMs = Infinity } = {}) {
-      try {
-        const text = JSON.stringify({
-          value,
-          expiresAt: Number.isFinite(ttlMs) ? Date.now() + ttlMs : 1e15,
-        });
-        if (text.length > 2 * 1024 * 1024) return false;
-        storage.setItem(key(space, k), text);
-        return true;
-      } catch {
-        return false;
-      }
+    async set(space, k, value, options) {
+      cleanCache();
+      const ok = await store.set(space, k, value, options);
+      if (ok && space === "state") drop(legacy(space, k));
+      return ok;
     },
   };
 }
