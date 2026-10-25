@@ -643,7 +643,8 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_READY) {
                 seekBudget.reset()
-                loading(false)
+                // قبل أول إطار: READY وحده لا يكمل الشعار (الشاشة قد تكون سوداء بعد)
+                if (StartupReveal.hideOnReady(firstFrameShown, player.currentTracks.containsType(C.TRACK_TYPE_VIDEO))) loading(false)
                 if (presenceActive) sendPresence()
                 if (!reportedStart) {
                     reportedStart = true
@@ -674,12 +675,13 @@ class PlayerActivity : Activity() {
 
         override fun onRenderedFirstFrame() {
             if (BuildConfig.DEBUG) diag.firstFrame()
+            val startup = !firstFrameShown
             firstFrameShown = true
             if (frameAt == 0L) {
                 frameAt = SystemClock.elapsedRealtime()
                 android.util.Log.i("VantaraStartup", startupLine())
             }
-            if (player.playbackState == Player.STATE_READY) loading(false)
+            if (StartupReveal.hideOnFirstFrame(startup, player.playbackState == Player.STATE_READY)) loading(false)
             usageStarted = true
             sampleUsage()
         }
@@ -749,6 +751,8 @@ class PlayerActivity : Activity() {
         current = c
         reportedStart = false
         firstFrameShown = false
+        // سيرفر جديد: الشعار يبدأ من الصفر لا من نسبة السيرفر السابق
+        if (::stage.isInitialized) stage.restart()
         startedAt = System.currentTimeMillis()
         openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
         net.markStart()
