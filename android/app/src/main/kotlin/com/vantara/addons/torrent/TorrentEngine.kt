@@ -503,10 +503,12 @@ class TorrentEngine internal constructor(
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
                     if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
                     // A 4K piece can be 16 MB: fail on a stalled swarm, not on a slow but moving one.
+                    // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
+                    // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
                     if (now - checkedAt >= ONE_SECOND_NS) {
                         checkedAt = now
-                        val total = runCatching { handle.status().totalDone() }.getOrDefault(done)
+                        val total = runCatching { handle.status().totalPayloadDownload() }.getOrDefault(done)
                         if (total > done) { if (done >= 0) progressAt = now; done = total }
                     }
                     if (TimeUnit.NANOSECONDS.toMillis(now - progressAt) >= PIECE_STALL_MS || TimeUnit.NANOSECONDS.toMillis(now - start) >= PIECE_MAX_WAIT_MS) {
