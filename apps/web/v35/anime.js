@@ -275,33 +275,6 @@ export function createAnime(deps) {
     return c;
   }
 
-  /** «آخر المشاهدات»: إطار عريض 16:9 بشريط التقدّم، العنوان سطرين، و«الحلقة 19 · باقي 22 د». */
-  function continueCard(w) {
-    const e = w.episodes?.[w.episode] ?? {};
-    const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
-    const c = asButton(el('div', 'an-cw'), `${w.title} — الحلقة ${w.episode}`);
-    tint(c, w.color);
-    const art = el('span', 'an-cw-art');
-    const src = w.banner ?? w.poster;
-    if (src) art.append(image(src, 'an-img', { position: w.banner ? 'center' : 'center 22%' }));
-    else art.append(el('b', 'an-cw-num', String(w.episode)));
-    art.append(el('span', 'an-cw-shade'));
-    const play = el('span', 'an-cw-play');
-    play.innerHTML = glyph('play', { size: 16, filled: true });
-    art.append(play);
-    if (ratio > 0 && !e.done) art.append(progress(ratio));
-    c.dataset.ref = `anime:${w.id}`;
-    const t = el('span', 'an-cw-title', w.title);
-    t.dir = 'auto';
-    // ⋮ يلي سطر الحلقة مباشرة (نصٌّ قصير دائمًا) فيبقى داخل بطاقته بوضوح، لا في
-    // طرفها قرب جارتها كما كان بجانب اسم طويل
-    const line = el('span', 'an-cw-line');
-    line.append(el('span', 'an-cw-sub', [`الحلقة ${w.episode}`, e.done ? 'شوهدت' : minutesLeft(e)].filter(Boolean).join(' · ')), moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
-    c.append(art, t, line);
-    c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color });
-    return c;
-  }
-
   /** الأنواع بطاقاتٍ بوجه أشهر شخصية في النوع، بلونه الخافت (لا نيون). */
   function genreRail() {
     const s = el('section', 'an-rail an-genres');
@@ -417,13 +390,16 @@ export function createAnime(deps) {
     return [...entries.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
   };
 
+  const HOME_HISTORY = 10;
+
   function renderHome(data) {
     const blocks = el('div', 'an-home');
     const air = data.week?.length ? airSchedule(data.week) : null;
     if (air) blocks.append(air);
     else if (data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending' }) }));
     const cont = watching();
-    if (cont.length) blocks.append(rail('آخر المشاهدات', { items: cont.slice(0, 12), card: continueCard, more: () => openLibrary('history') }));
+    // نفس بطاقة «آخر المشاهدات» في مكتبتي، مصغّرة في شريط، لآخر 10 أعمال: الباقي في «الكل»
+    if (cont.length) blocks.append(rail('آخر المشاهدات', { cls: 'an-rail--history', items: cont.slice(0, HOME_HISTORY), card: historyCard, more: () => openLibrary('history') }));
     // «حلقات جديدة» صارت داخل جدول البث (أمس واليوم)؛ تبقى شريطًا فقط لمحفوظ قديم بلا جدول
     if (!air && data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {
@@ -2130,13 +2106,12 @@ export function createAnime(deps) {
     saveWatch(all);
     if (signedIn()) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
     const ref = `anime:${w.id}`;
-    for (const node of deps.root?.querySelectorAll?.('.an-cw, .an-hc') ?? []) {
+    for (const node of deps.root?.querySelectorAll?.('.an-hc') ?? []) {
       if (node.dataset.ref !== ref) continue;
-      const strip = node.closest('.an-rail');
       node.remove();
-      // كان آخر بطاقة في الشريط: لا شريط فارغًا بعنوانه
-      if (strip && !strip.querySelector('.an-cw')) strip.remove();
     }
+    // الرئيسية تعرض آخر 10 أعمال: يأخذ التالي مكان المحذوف، ويختفي القسم إن فرغ السجل
+    if (state.home && q('animeHome')?.querySelector('.an-rail--history')) renderHome(state.home);
     if (state.libraryTab === 'history' && !watching().length) renderLibrary();
     toast('حُذف من آخر المشاهدات');
   }
