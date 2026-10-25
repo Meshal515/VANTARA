@@ -87,11 +87,14 @@ class TorrentThroughputDeviceTest {
         val rounds = InstrumentationRegistry.getArguments().getString("rounds")?.toIntOrNull() ?: 2
         for (round in 0 until rounds) for ((c, case) in cases.withIndex()) {
             val (name, choice, settings, duration) = case
-            val modes = if ((round + c) % 2 == 0) listOf(TorrentWindowMode.LEGACY, TorrentWindowMode.ADAPTIVE) else listOf(TorrentWindowMode.ADAPTIVE, TorrentWindowMode.LEGACY)
-            for (mode in modes) {
+            // -e compare window: نافذة المواعيد 12 قطعة (الإنتاج) مقابل 4، كلاهما بالترتيب القديم
+            val variants = if (args.getString("compare") == "window") listOf("w12" to (TorrentWindowMode.LEGACY to 12), "w4" to (TorrentWindowMode.LEGACY to 4))
+                else listOf("LEGACY" to (TorrentWindowMode.LEGACY to 12), "ADAPTIVE" to (TorrentWindowMode.ADAPTIVE to 12))
+            val order = if ((round + c) % 2 == 0) variants else variants.reversed()
+            for ((label, setup) in order) {
                 @Suppress("UNCHECKED_CAST")
-                val engine = TorrentEngine(context, sessionSettings = settings as () -> SettingsPack, windowMode = mode)
-                try { results.put(viewer(engine, choice as Choice, duration as Long).put("case", name).put("mode", mode.name).put("round", round)) } finally { engine.close() }
+                val engine = TorrentEngine(context, sessionSettings = settings as () -> SettingsPack, windowMode = setup.first, windowPieces = setup.second)
+                try { results.put(viewer(engine, choice as Choice, duration as Long).put("case", name).put("mode", label).put("round", round)) } finally { engine.close() }
                 out.writeText(JSONObject().put("results", results).toString(2))
                 Thread.sleep(3000)
             }

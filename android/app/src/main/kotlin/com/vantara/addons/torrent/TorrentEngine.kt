@@ -27,6 +27,8 @@ class TorrentEngine internal constructor(
     private val sessionSettings: () -> SettingsPack = ::streamingSettings,
     /** طريقة ترتيب القطع؛ انظر [TorrentWindowMode]. */
     private val windowMode: TorrentWindowMode = TorrentWindowMode.LEGACY,
+    /** عدد القطع ذات الموعد أمام موضع القراءة (للمقارنة في اختبار الجهاز). */
+    private val windowPieces: Int = 12,
     // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
@@ -399,7 +401,7 @@ class TorrentEngine internal constructor(
             }
         }
         fun prioritize(file: TorrentFile, position: Long, pieceLength: Int) = synchronized(monitor) {
-            val next = TorrentPolicy.window(file, position, pieceLength)
+            val next = TorrentPolicy.window(file, position, pieceLength, windowPieces)
             // رجوع لمنطقة فُرّغت من القرص: libtorrent يقرأها أصفارًا، فنعيد البناء أولًا
             if (next.isNotEmpty() && evicted(next.first())) rebuild()
             if (next == window) return@synchronized
