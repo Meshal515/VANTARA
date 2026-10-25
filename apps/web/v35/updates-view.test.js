@@ -8,6 +8,16 @@ const M = 60_000;
 const H = 60 * M;
 
 describe('آخر التحديثات', () => {
+  it('keeps current source links and an explicit cleared lock notice over older event metadata',()=>{
+    const rows=[{id:'new',work:'ext:w',section:'manga',number:218,at:200,sources:[{s:'x',u:'/current',lockedMax:null}]},{id:'old',work:'ext:w',section:'manga',number:217,at:100,sources:[{s:'x',u:'/old',lockedMax:251}]}];
+    expect(groupEvents(rows)[0].sources).toEqual([{s:'x',u:'/current',lockedMax:null}]);
+  });
+  it('drops a withdrawn chapter inside a refreshed head while keeping older loaded pages',()=>{
+    const visible=[{id:'locked251',at:300},{id:'readable218',at:200},{id:'historic',at:50}];
+    const incoming=[{id:'new',at:400,publishedAt:400},{id:'readable218',at:200,publishedAt:200}];
+    expect(reconcileTimelineRefresh(visible,incoming,500).map(e=>e.id)).toEqual(['new','readable218','historic']);
+    expect(reconcileTimelineRefresh(visible,[],500)).toEqual(visible);
+  });
   it('shows only real new publications live; discovery time never promotes historic backfill', () => {
     const ev = (id, publishedAt) => ({ id, work: id, at: publishedAt ?? NOW, publishedAt, firstSeenAt: NOW });
     const original = [ev('yesterday', NOW - 24 * H)];

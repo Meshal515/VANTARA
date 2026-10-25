@@ -30,6 +30,18 @@ it('releases loading after a thrown request and allows a successful retry', asyn
   expect(host.querySelectorAll('.up-card')).toHaveLength(1);
   expect(host.querySelector('.up-load-more').disabled).toBe(false);
 });
+it('discards an earlier poll that resolves after a newer manual refresh',async()=>{
+  let poll,release;
+  vi.spyOn(globalThis,'setInterval').mockImplementation(fn=>{poll=fn;return 0;});
+  const now=Date.now(),old={...event('old'),at:now-7200000,publishedAt:now-7200000};
+  const backfilled={...event('backfilled'),at:now-3600000,publishedAt:now-3600000};
+  timeline.mockResolvedValueOnce(page([old])).mockImplementationOnce(()=>new Promise(r=>{release=r;})).mockResolvedValueOnce(page([backfilled,old]));
+  mount();await vi.waitFor(()=>expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  const olderPoll=poll();await vi.waitFor(()=>expect(timeline).toHaveBeenCalledTimes(2));
+  await api.refresh();expect(host.querySelectorAll('.up-card')).toHaveLength(2);
+  release(page([old]));await olderPoll;
+  expect(host.querySelectorAll('.up-card')).toHaveLength(2);
+});
 
 it('keeps a grouped work card and its cover mounted when a newer chapter arrives', async () => {
   const art = vi.fn((target) => target.append(el('img')));

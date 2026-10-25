@@ -5,6 +5,7 @@
  */
 
 import { absAttr, attr, parseHtml, pathOf, q, qa, text } from '../dom.js';
+import { teamxChapterLink } from '../../../lib/chapter-access.js';
 
 const STATUS = { مستمرة: 1, 'قادم قريبًا': 1, مكتمل: 2, متوقف: 6 };
 const unthumb = (u) => String(u ?? '').replace('thumbnail_', '');
@@ -45,7 +46,7 @@ export const teamx = {
 
     function chaptersIn(doc) {
       return qa(doc, 'div.chapter-card')
-        .filter((el) => !q(el, 'span.locked'))
+        .filter((el) => teamxChapterLink(attr(q(el, 'a'), 'href'), base, Boolean(q(el, 'span.locked')) || attr(q(el,'a'),'data-bs-target')==='#buyModel'))
         .map((el) => {
           const n = attr(el, 'data-number');
           const title = text(q(el, 'div.chapter-info div.chapter-title'));

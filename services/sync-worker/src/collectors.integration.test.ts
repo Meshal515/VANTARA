@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectTimelines, teamxCards } from './collectors.ts';
+import { collectTimelines, teamxCards, teamxChapters } from './collectors.ts';
 import { sqliteEnv } from './test-d1.ts';
-import { handleUpdatesList } from './updates.ts';
+import { handleUpdatesList, handleUpdatesObserve } from './updates.ts';
 
 const NOW = Date.UTC(2026, 9, 1, 22);
 const H = 3_600_000;
@@ -9,6 +9,46 @@ const setup = () => sqliteEnv({ VANTARA_SESSION_SECRET: 's'.repeat(40), VANTARA_
 const reply = (data: unknown) => Response.json(data);
 
 describe('server collectors', () => {
+  it('preserves a matching source-less historical event that TeamX never contributed',async()=>{
+    const {env}=setup();
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{work:'ext:work',section:'manga',kind:'chapter',title:'Work',source:null,units:[{number:251,publishedAt:NOW-H}]}]})}),env,NOW);
+    await collectTimelines(env,{now:NOW,scheduled:true,fetchImpl:(async input=>String(input).includes('/series/')?new Response(chapter(251,true)+chapter(218)):String(input).includes('olympus')?new Response('<div class="last-chapter"><div class="box"><a href="/series/LWW"><h3>Work</h3></a></div></div>'):Response.json({data:[]}))as typeof fetch});
+    expect(await env.DB.prepare('SELECT number,sources FROM update_events WHERE work=? AND number=251').bind('ext:work').first()).toMatchObject({number:251,sources:'[]'});
+  });
+  const chapter = (number: number, locked = false, series = 'LWW') => `<div class="chapter-card" data-number="${number}" data-date="${(NOW-H)/1000}"><a class="chapter-link" href="${locked?'#':`/series/${series}/${number}`}" ${locked?'data-bs-toggle="modal" data-bs-target="#buyModel"':''}><div><span class="${locked?'locked':'unread'}"></span></div></a></div>`;
+  it('reports only a real chapter link, excluding purchase modals even without the old lock badge', () => {
+    const html=chapter(251,true)+chapter(250,true).replace('class="locked"','class="unread"')+chapter(218)+chapter(217).replace('/series/LWW/217','https://other.test/series/LWW/217');
+    expect(teamxChapters(html,NOW).map(c=>c.number)).toEqual([218]);
+  });
+  it('repairs old blocked-only events but preserves the same chapter from another Arabic source and its dates', async () => {
+    const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';
+    const report=(title:string,s:string,number:number)=>({work:`ext:${title.toLowerCase()}`,section:'manga',kind:'chapter',title,source:{s,u:'/series/LWW'},units:[{number,publishedAt:NOW-H}]});
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[report('The Long Way Of The Warrior',sid,251),report('The Long Way Of The Warrior','ar.other',251),report('Rise Of The Northern Shadow',sid,34),{...report('The Long Way Of The Warrior',sid,200),source:null}]})}),env,NOW);
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{...report('The Long Way Of The Warrior',sid,251),units:[{number:251}]}]})}),env,NOW);
+    const fetcher=(async(input:RequestInfo|URL)=>{
+      const url=String(input);
+      if(url.endsWith('/series/LWW'))return new Response(chapter(251,true)+chapter(218));
+      if(url.endsWith('/series/rise'))return new Response(chapter(34,true,'rise')+chapter(31,false,'rise'));
+      if(url==='https://olympustaff.com')return new Response('<div class="last-chapter"><div class="box"><a href="/series/LWW"><h3>The Long Way Of The Warrior</h3></a></div><div class="box"><a href="/series/rise"><h3>Rise Of The Northern Shadow</h3></a></div></div>');
+      return Response.json({data:[]});
+    })as typeof fetch;
+    await collectTimelines(env,{now:NOW,fetchImpl:fetcher,scheduled:true});
+    const body=await(await handleUpdatesList(new URL('https://x/v1/updates?section=manga'),env)).json()as{events:Array<{number:number;sources:Array<{s:string}>;at:number;firstSeenAt:number}>};
+    expect(body.events.some(e=>e.number===34)).toBe(false);
+    expect(body.events.find(e=>e.number===251)).toMatchObject({sources:[{s:'ar.other'}],at:NOW-H,firstSeenAt:NOW});
+    expect(body.events.map(e=>e.number)).toEqual(expect.arrayContaining([218,31,200]));
+    expect(await env.DB.prepare('SELECT max_number FROM update_watermarks WHERE work=?').bind('ext:rise of the northern shadow').first()).toMatchObject({max_number:31});
+    expect(await env.DB.prepare('SELECT max_number FROM update_watermarks WHERE work=?').bind('ext:the long way of the warrior').first()).toMatchObject({max_number:251});
+    expect(await env.DB.prepare('SELECT max_number FROM update_source_watermarks WHERE work=? AND source_id=?').bind('ext:the long way of the warrior',sid).first()).toMatchObject({max_number:218});
+  });
+  it('never withdraws a chapter merely because the provider request failed',async()=>{
+    const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{work:'ext:work',section:'manga',kind:'chapter',title:'Work',source:{s:sid},units:[{number:251,publishedAt:NOW-H}]}]})}),env,NOW);
+    const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try{await collectTimelines(env,{now:NOW,scheduled:true,fetchImpl:(async()=>new Response('offline',{status:503}))as typeof fetch});}finally{log.mockRestore();}
+    const body=await(await handleUpdatesList(new URL('https://x/v1/updates?section=manga'),env)).json()as{events:Array<{number:number}>};
+    expect(body.events[0]?.number).toBe(251);
+  });
   it('prepares manga, anime and cinema history without any app opening, preserving canonical firstSeenAt on rescan', async () => {
     const { env } = setup();
     const fetcher = (async (input: RequestInfo | URL) => {
@@ -90,7 +130,7 @@ describe('server collectors', () => {
     await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
       const url = String(input);
       if (url.includes('/series/work0')) return new Response('broken', { status: 503 });
-      if (url.includes('olympustaff.com/series/')) return new Response(`<div class="chapter-card" data-date="${(now-H)/1000}" data-number="1"></div>`);
+      if (url.includes('olympustaff.com/series/')) return new Response(`<div class="chapter-card" data-date="${(now-H)/1000}" data-number="1"><a href="/series/work/1"></a></div>`);
       if (url.includes('olympus')) return new Response('<div class="last-chapter">' + Array.from({ length: 16 }, (_, i) => `<div class="box"><a href="/series/work${i}"><h3>Work${i}</h3></a></div>`).join(''));
       return reply({ data: [] });
     }) as typeof fetch });
@@ -104,7 +144,11 @@ describe('server collectors', () => {
       const { env } = setup();
       let queries = 0;
       const prepare = env.DB.prepare.bind(env.DB);
-      env.DB.prepare = (sql: string) => { queries++; return prepare(sql); };
+      env.DB.prepare = (sql: string) => {
+        queries++;const statement=prepare(sql),bind=statement.bind.bind(statement);
+        statement.bind=(...values:unknown[])=>{expect(values.length).toBeLessThanOrEqual(100);return bind(...values);};
+        return statement;
+      };
       const now = NOW + ((slot - Math.floor(NOW / 60_000) % 4 + 4) % 4) * 60_000;
       await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
         const url = String(input);
@@ -112,7 +156,7 @@ describe('server collectors', () => {
         if (url.includes('admin-ajax') || url.includes('m_orderby')) return new Response(Array.from({ length: 20 }, (_, i) => `<div class="page-item-detail manga"><img src="https://c/${i}.jpg"><div class="post-title"><h3><a href="/manga/m${i}/">Madara${i}</a></h3></div><div class="list-chapter"><span class="chapter"><a href="/manga/m${i}/9/">9</a></span><span class="chapter"><a href="/manga/m${i}/8/">8</a></span></div></div>`).join(''));
         if (url.includes('api.azorafly')) return reply({ posts: Array.from({ length: 24 }, (_, i) => ({ id: i, slug: `a${i}`, postTitle: `Iken${i}`, chapters: [{ number: 5, createdAt: new Date(now - H).toISOString() }, { number: 4, createdAt: new Date(now - 2 * H).toISOString() }] })) });
         if (url.includes('meshmanga')) return reply({ results: Array.from({ length: 20 }, (_, i) => ({ serie_id: i + 1, title: `Swat${i}`, chapters: [{ chapter: '7', created_at: new Date(now - H).toISOString() }] })) });
-        if (url.includes('olympustaff.com/series/')) return new Response(Array.from({ length: 40 }, (_, i) => `<div class="chapter-card" data-date="${(now - (i+1)*60_000)/1000}" data-number="${400-i}"></div>`).join(''));
+        if (url.includes('olympustaff.com/series/')) return new Response(Array.from({ length: 40 }, (_, i) => `<div class="chapter-card" data-date="${(now - (i+1)*60_000)/1000}" data-number="${400-i}"><a href="${i<33?'#':`/series/work/${400-i}`}" ${i<33?'data-bs-target="#buyModel"':''}></a></div>`).join(''));
         if (url.includes('olympus')) return new Response('<div class="last-chapter">' + Array.from({ length: 24 }, (_, i) => `<div class="box"><a href="/series/work${i}"><h3>Work${i}</h3></a></div>`).join(''));
         if (url.includes('mangadex')) return reply({ data: Array.from({ length: 50 }, (_, i) => ({ attributes: { chapter: '1', publishAt: new Date(now-H).toISOString() }, relationships: [{ id: String(i), type: 'manga', attributes: { title: { en: `Dex${i}` } } }] })) });
         if (url.includes('anilist')) return reply({ data: { Page: { airingSchedules: Array.from({ length: 50 }, (_, i) => ({ episode: 1, airingAt: (now-H)/1000, media: { id: i+1, title: { english: `Anime${i}` } } })) } } });

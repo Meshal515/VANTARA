@@ -20,7 +20,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
@@ -1280,7 +1280,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1325,7 +1325,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         icon: 'search',
         title: 'ما وصلنا للمصادر الحين',
         text: 'نحاول مرة ثانية بعد لحظة، أو المسها الحين.',
-        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber }) },
+        action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work, { readNumber, readLanguage, expectedChapter }) },
       });
       setReadCta(null);
       return;
@@ -1334,13 +1334,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     let wanted = readNumber;
     const tryWanted = (w, final) => {
       if (wanted === null) return;
-      const row = w._chapters?.find((r) => r.number === wanted);
+      const row = requestedChapterRow(w,wanted,{arabicOnly:readLanguage==='ar'});
       if (row) {
         wanted = null;
         openChapter(w, row);
       } else if (final) {
-        wanted = null;
-        toast('هالفصل مو متوفر في مصادرنا الحين');
+        const number=wanted;wanted = null;
+        toast(readLanguage==='ar'?`الفصل ${number} غير متاح في المصادر العربية حاليًا؛ قد يكون مقفلًا عند المصدر`:'هالفصل مو متوفر في مصادرنا الحين');
       }
     };
     const show = (full, { settled }) => {
@@ -1355,9 +1355,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       tryWanted(full, settled);
+      if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar' });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
@@ -2169,6 +2170,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     list.append(fragment);
     const parts = [list];
+    for(const source of w._lockedSources??[]){
+      const note=el('p','chapter-locked-note');
+      note.innerHTML=glyph('lock');
+      note.append(el('span',null,`في ${source.label} فصول مقفلة حتى الفصل ${source.lockedMax}`));
+      parts.unshift(note);
+    }
     const rest = rows.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
@@ -3078,11 +3085,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   /** عمل مانجا من حدث: من الحساب إن عُرف، وإلا من مصادر الحدث نفسها. */
   function workOfEvent(g) {
-    const base = workFromRef(g.work, g.title, g.cover);
-    if (!base._work?.editions?.length) {
-      const editions = (g.sources ?? []).filter((x) => x.u).map((x) => ({ sourceId: x.s, label: x.s, manga: { url: x.u, title: x.t ?? g.title, thumbnailUrl: g.cover ?? null, memo: x.m ?? '' } }));
-      base._work = { ...base._work, editions };
-    }
+    const base = withUpdateSources(workFromRef(g.work,g.title,g.cover),g);
     // غلاف الحدث مرشّحٌ دائمًا بعد غلاف العمل: غلافٌ محفوظ قديم لا يُسقط البطاقة إلى حرف
     if (g.cover && base.bannerImage !== g.cover && !coverCandidates(base).some((c) => c.url === g.cover)) base.bannerImage = g.cover;
     return { ...base, _latestChapter: { chapterNumber: g.high }, _updateAt: g.at, _updatePublishedAt: g.publishedAt, _newCount: g.events?.length ?? 1 };
@@ -3090,7 +3093,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openUpdate(g) {
     if (g.section === 'anime') return openAnimeRef(g.work, { title: g.title, cover: g.cover });
     if (g.section === 'cinema') return openCinemaRef(g.kind === 'movie' ? g.work : `${g.work}:${g.season ?? 1}`, { title: g.title, cover: g.cover });
-    void openWork(workOfEvent(g));
+    // Keep the familiar work screen; a cached row must never auto-open before
+    // its current provider has responded. The target only forces fresh discovery.
+    void openWork(workOfEvent(g),{expectedChapter:Number.isFinite(g.high)?g.high:null,readLanguage:'ar'});
   }
   /** شريط الرئيسية: آخر التحديثات من الذاكرة (يُسأل كل دقيقتين ما دامت الرئيسية ظاهرة). */
   let updatesAskedAt = 0;

@@ -34,8 +34,17 @@ export function mergeTimelineEvents(visible, incoming, { enteredAt, now = Date.n
  * Reconcile newer pages without dropping older pages: those may be offscreen
  * and expensive to reload (especially covers on mobile PWA and WebView).
  */
+function retainOutsideHead(visible,incoming) {
+  const dated=incoming.filter(e=>Number.isFinite(e.at));
+  if(!dated.length)return visible;
+  const floor=dated.reduce((a,b)=>b.at<a.at||(b.at===a.at&&String(b.id)<String(a.id))?b:a);
+  const seen=new Set(incoming.map(e=>e.id));
+  // The returned head is authoritative down to its last SQL (at,id) cursor.
+  // Older pagination remains mounted; an empty/transient response erases nothing.
+  return visible.filter(e=>seen.has(e.id)||!Number.isFinite(e.at)||e.at<floor.at||(e.at===floor.at&&String(e.id)<String(floor.id)));
+}
 export function reconcileTimelineRefresh(visible, incoming, now = Date.now()) {
-  return mergeTimelineEvents(visible, incoming, { enteredAt: 0, now, refresh: true });
+  return mergeTimelineEvents(retainOutsideHead(visible,incoming), incoming, { enteredAt: 0, now, refresh: true });
 }
 
 /** Preserve the first visible card's screen position while newer cards are added above it. */
@@ -131,7 +140,9 @@ export function groupEvents(events, canonical = null) {
       out.push(group);
       continue;
     }
-    g.sources = [...new Map([...g.sources, ...(e.sources ?? [])].map((s) => [s.s, s])).values()];
+    const sources=new Map(g.sources.map(s=>[s.s,s]));
+    for(const s of e.sources??[])sources.set(s.s,{...s,...sources.get(s.s)});
+    g.sources=[...sources.values()];
     g.cover ??= e.cover;
     // نفس الفصل من مفتاحين قديمين (قبل التصحيح) لا يُعدّ مرتين
     const unit = `${e.season ?? ''}:${e.number}`;
@@ -181,7 +192,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   refresh.onclick = () => void api.refresh();
   older.onclick = () => void api.loadMore();
   more.append(older, refresh, status);
-  let inView = false, autoTimer = null, polling = false;
+  let inView = false, autoTimer = null, polling = false, headRevision = 0;
   const view = host.ownerDocument?.defaultView;
   const scrollRoot = scrollingParent(list, view);
   function controls() {
@@ -285,11 +296,12 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (!host.isConnected || !host.classList.contains('up-feed')) { api.dispose(); return; }
     if (!state.polled || polling || state.loading || state.refreshing || !visible() || document.hidden) return;
     polling = true;
+    const revision=++headRevision;
     try {
       if (section === 'manga') await loadAliases();
       const requestedCursor = state.bridgeNext;
       const page = await timeline(section, { limit: 100, ...(requestedCursor ? { before: requestedCursor } : {}) });
-      if (!active() || !page || !Array.isArray(page.events)) return;
+      if (!active() || revision!==headRevision || !page || !Array.isArray(page.events)) return;
       if (requestedCursor && page.next === requestedCursor) return;
       const previous = new Set(state.events.map(e => e.id));
       if (requestedCursor) {
@@ -298,7 +310,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       } else if (previous.size && page.next && !page.events.some(e => previous.has(e.id))) {
         state.bridgeKnown = previous; state.bridgeNext = page.next;
       }
-      state.events = mergeTimelineEvents(state.events, page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
+      state.events = mergeTimelineEvents(requestedCursor?state.events:retainOutsideHead(state.events,page.events), page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
       paintWithScrollAnchor(list, paint);
       controls();
     } catch { /* The existing timeline stays visible during a transient outage. */ }
@@ -310,11 +322,12 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     async refresh() {
       if (!active() || state.loading || state.refreshing) return false;
       state.refreshing = true; controls(); status.textContent = '';
+      const revision=++headRevision;
       try {
         if (section === 'manga') await loadAliases();
-        if (!active()) return false;
+        if (!active() || revision!==headRevision) return false;
         const page = await timeline(section, { limit: 100 });
-        if (!active()) return false;
+        if (!active() || revision!==headRevision) return false;
         if (!page || !Array.isArray(page.events)) { error(); return false; }
         if (!state.events.length) { state.next = page.next; state.done = !page.next; }
         else if (!state.bridgeNext && page.next && !page.events.some(e => state.events.some(old => old.id === e.id))) {

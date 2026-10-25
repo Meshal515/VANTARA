@@ -3,12 +3,14 @@ import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js
 import { handleUpdatesObserve } from './updates.ts';
 import { MANGA_SITES, readSite, siteReport } from './manga-sites.ts';
 import { adultGenre } from '../../../apps/web/lib/adult-filter.js';
+import { teamxChapterLink } from '../../../apps/web/lib/chapter-access.js';
 import type { Env } from './types.ts';
 
 const TEAMX = 'https://olympustaff.com';
+const TEAMX_SOURCE = 'eu.kanade.tachiyomi.extension.ar.teamx';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const DAY = 86_400_000;
-type Observation = { work: string; section: string; kind: string; title: string; cover?: string | null; source: { s: string; u?: string }; units: Array<{ number?: number; season?: number; publishedAt?: number }> };
+type Observation = { work: string; section: string; kind: string; title: string; cover?: string | null; source: { s: string; u?: string; lockedMax?:number|null }; units: Array<{ number?: number; season?: number; publishedAt?: number }> };
 type Fetcher = typeof fetch;
 class PartialScan extends Error {
   readonly cursor: number;
@@ -39,13 +41,70 @@ export function teamxCards(html: string) {
   }).filter((row): row is NonNullable<typeof row> => row !== null);
 }
 
+function teamxRows(html: string, now: number) {
+  const cards=[...html.matchAll(/<div\b[^>]*class=["'][^"']*\bchapter-card\b[^"']*["'][^>]*>/gi)];
+  return cards.map((card,i)=>{
+    const tag=card[0],raw=attr(tag,'data-number'),number=Number(raw),publishedAt=Number(attr(tag,'data-date'))*1000;
+    const block=html.slice(card.index!+tag.length,cards[i+1]?.index??html.length);
+    const link=/<a\b[^>]*href=["'][^"']*["'][^>]*>/i.exec(block)?.[0]??'';
+    const locked=[...block.matchAll(/<span\b[^>]*>/gi)].some(([span])=>attr(span,'class').split(/\s+/).includes('locked'))
+      || attr(link,'data-bs-target')==='#buyModel';
+    return {number,publishedAt,valid:raw!==''&&Number.isFinite(number)&&number>=0&&number<=100_000&&publishedAt>0&&publishedAt<=now,
+      locked,readable:teamxChapterLink(attr(link,'href'),TEAMX,locked)};
+  }).filter(row=>row.valid);
+}
 export function teamxChapters(html: string, now: number) {
-  return [...html.matchAll(/<div\b[^>]*class=["'][^"']*chapter-card[^"']*["'][^>]*>/gi)].map(([tag]) => {
-    const number = Number(attr(tag, 'data-number'));
-    const publishedAt = Number(attr(tag, 'data-date')) * 1000;
-    return { number, publishedAt };
-  }).filter((u) => Number.isFinite(u.number) && u.number >= 0 && u.publishedAt > 0 && u.publishedAt <= now)
-    .sort((a, b) => b.publishedAt - a.publishedAt).slice(0, 40);
+  return readableTeamxUnits(teamxRows(html,now));
+}
+function readableTeamxUnits(rows: ReturnType<typeof teamxRows>) {
+  return rows.filter(row=>row.readable).map(({number,publishedAt})=>({number,publishedAt}))
+    .sort((a,b)=>b.publishedAt-a.publishedAt).slice(0,40);
+}
+
+/** Correct only explicit locked observations; preserve other providers and event dates. */
+type TeamxCorrection = {work:string;locked:number[];highestReadable:number|null};
+function correctionGroups(rows: TeamxCorrection[]) {
+  const groups: TeamxCorrection[][]=[];
+  let group: TeamxCorrection[]=[],parameters=0;
+  for(const row of rows){
+    // A CASE pair plus this work and its chapter numbers; leave headroom under
+    // D1's 100-bound-parameter ceiling, independently of its query budget.
+    const cost=row.locked.length+3;
+    if(group.length&&parameters+cost>90){groups.push(group);group=[];parameters=0;}
+    group.push(row);parameters+=cost;
+  }
+  if(group.length)groups.push(group);
+  return groups;
+}
+async function repairTeamxEvents(env: Env, corrections: TeamxCorrection[]) {
+  if(!corrections.length)return;
+  // Delete only proven TeamX-only rows before stripping that provider from
+  // mixed rows. A pre-existing source-less/unknown observation stays intact.
+  const writes=correctionGroups(corrections).map(group=>env.DB.prepare(`DELETE FROM update_events WHERE section='manga' AND kind='chapter'
+    AND (${group.map(c=>`(work=? AND number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ')})
+    AND EXISTS(SELECT 1 FROM json_each(sources) WHERE json_extract(value,'$.s')=?)
+    AND NOT EXISTS(SELECT 1 FROM json_each(sources) WHERE COALESCE(json_extract(value,'$.s'),'')<>?)`)
+    .bind(...group.flatMap(c=>[c.work,...c.locked]),TEAMX_SOURCE,TEAMX_SOURCE));
+  for(const group of correctionGroups(corrections))writes.push(env.DB.prepare(`UPDATE update_events SET sources=(
+    SELECT json_group_array(json(value)) FROM json_each(update_events.sources) WHERE COALESCE(json_extract(value,'$.s'),'')<>?
+    ) WHERE section='manga' AND kind='chapter' AND (${group.map(c=>`(work=? AND number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ')})
+    AND EXISTS(SELECT 1 FROM json_each(sources) WHERE json_extract(value,'$.s')=?)`)
+    .bind(TEAMX_SOURCE,...group.flatMap(c=>[c.work,...c.locked]),TEAMX_SOURCE));
+  const baselines=correctionGroups(corrections.filter(c=>c.highestReadable!==null));
+  const predicate=(group:TeamxCorrection[])=>group.map(c=>`(work=? AND max_number IN (${c.locked.map(()=>'?').join(',')}))`).join(' OR ');
+  for(const group of baselines)writes.push(env.DB.prepare(`UPDATE update_source_watermarks
+    SET max_number=CASE work ${group.map(()=> 'WHEN ? THEN ?').join(' ')} ELSE max_number END
+    WHERE source_id=? AND (${predicate(group)})`)
+    .bind(...group.flatMap(c=>[c.work,c.highestReadable]),TEAMX_SOURCE,...group.flatMap(c=>[c.work,...c.locked])));
+  // Repair a poisoned maximum only when that maximum is explicitly locked.
+  // Other providers' dated history and undated source baselines remain evidence.
+  for(const group of baselines)writes.push(env.DB.prepare(`UPDATE update_watermarks SET max_number=MAX(
+    COALESCE((SELECT MAX(number) FROM update_events e WHERE e.work=update_watermarks.work AND e.kind='chapter'),0),
+    COALESCE((SELECT MAX(max_number) FROM update_source_watermarks s WHERE s.work=update_watermarks.work),0),
+    CASE work ${group.map(()=> 'WHEN ? THEN ?').join(' ')} ELSE max_number END)
+    WHERE section='manga' AND (${predicate(group)})`)
+    .bind(...group.flatMap(c=>[c.work,c.highestReadable]),...group.flatMap(c=>[c.work,...c.locked])));
+  await env.DB.batch(writes);
 }
 
 async function observe(env: Env, works: Observation[], now: number, budget = 80) {
@@ -68,14 +127,19 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
   const rotated = cards.slice(4);
   const selected = [...cards.slice(0, 4), ...Array.from({ length: Math.min(4, rotated.length) }, (_, i) => rotated[(cursor + i) % rotated.length]!)];
   const reports: Observation[] = [];
+  const corrections: TeamxCorrection[] = [];
   let failures = 0;
   // Two fetches at a time leave headroom for all other collectors.
   for (let i = 0; i < selected.length; i += 2) await Promise.all(selected.slice(i, i + 2).map(async (card) => {
     try {
-      const units = teamxChapters(await (await request(card.url, fetchImpl)).text(), now);
-      if (units.length) reports.push({ work: `ext:${normalizeTitle(card.title)}`, section: 'manga', kind: 'chapter', title: card.title, cover: card.cover, source: { s: 'eu.kanade.tachiyomi.extension.ar.teamx', u: new URL(card.url).pathname }, units });
+      const html=await (await request(card.url, fetchImpl)).text();
+      const rows=teamxRows(html,now),units=readableTeamxUnits(rows),work=`ext:${normalizeTitle(card.title)}`;
+      const locked=rows.filter(row=>row.locked).map(row=>row.number).slice(0,60);
+      if(locked.length)corrections.push({work,locked,highestReadable:units.length?Math.max(...units.map(u=>u.number)):null});
+      if (units.length) reports.push({ work, section: 'manga', kind: 'chapter', title: card.title, cover: card.cover, source: { s: TEAMX_SOURCE, u: new URL(card.url).pathname, lockedMax:locked.length?Math.max(...locked):null }, units });
     } catch { failures++; }
   }));
+  await repairTeamxEvents(env,corrections);
   await observe(env, reports, now);
   if (failures) throw new PartialScan(`${failures} chapter pages failed`, rotated.length ? (cursor + 4) % rotated.length : 0);
   return rotated.length ? (cursor + 4) % rotated.length : 0;
