@@ -67,17 +67,18 @@ class TorrentThroughputDeviceTest {
             runCatching { torrentio("movie/tt0468569", "4K", { "2160p" in it || "4k" in it.lowercase() }) }.getOrNull(),
             runCatching { torrentio("series/tt0903747:1:1", "1080p", { "1080p" in it }) }.getOrNull(),
         )
-        val variants = listOf(
-            "production" to variant(null, false),
-            "queue3" to variant(3, false),
-            "tcp" to variant(null, true),
-            "queue3+tcp" to variant(3, true),
+        // النافذة القديمة مقابل الجديدة، بسرعة الجوال الفعلية في لقطة المستخدم (6 Mbps ≈ 750KB/s) وبلا حد
+        val limited = { TorrentEngine.streamingSettings().downloadRateLimit(750 * 1024) }
+        val open = { TorrentEngine.streamingSettings() }
+        val variants = listOf<Triple<String, () -> SettingsPack, Boolean>>(
+            Triple("old@6Mbps", limited, true), Triple("new@6Mbps", limited, false),
+            Triple("old@open", open, true), Triple("new@open", open, false),
         )
         for ((i, choice) in choices.withIndex()) {
             // الترتيب يتناوب حتى لا يستفيد بديل واحد من سرب «دافئ»
             val order = variants.indices.map { variants[(it + i) % variants.size] }
-            for ((name, settings) in order) {
-                val engine = TorrentEngine(context, sessionSettings = settings)
+            for ((name, settings, legacy) in order) {
+                val engine = TorrentEngine(context, sessionSettings = settings, legacyWindow = legacy)
                 try { results.put(attempt(engine, choice).put("variant", name)) } finally { engine.close() }
                 out.writeText(JSONObject().put("results", results).toString(2))
                 Thread.sleep(3000)
