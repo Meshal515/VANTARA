@@ -71,10 +71,27 @@ class TorrentEngine internal constructor(
             }
             start(params)
             // Addons cannot turn trackers/peers into requests to local services.
-            swig().set_ip_filter(networkFilter())
+            swig().set_ip_filter(currentFilter())
         }
     }
     private val manager: SessionManager get() = managerHolder.value
+    /** مشاركون محجوبون مؤقتًا بالـhotswap (ip → حتى متى). */
+    private val swapped = ConcurrentHashMap<String, Long>()
+    private fun currentFilter(): ip_filter = networkFilter().apply {
+        val now = System.currentTimeMillis()
+        for ((ip, until) in swapped) if (until > now) runCatching { val a = Address(ip).swig(); add_rule(a, a, 1) }
+    }
+    /** يحجب [ips] مؤقتًا فينقطعون وتتحرر كتلهم، ثم يرفع الحجب بعد [TorrentHotswap.BAN_MS]. */
+    private fun hotswap(ips: List<String>) {
+        if (ips.isEmpty() || !managerHolder.isInitialized()) return
+        val until = System.currentTimeMillis() + TorrentHotswap.BAN_MS
+        for (ip in ips) swapped[ip] = until
+        runCatching { manager.swig().set_ip_filter(currentFilter()) }
+        runCatching { pruner.schedule({
+            val now = System.currentTimeMillis()
+            if (swapped.entries.removeIf { it.value <= now } && !shutdown.get()) runCatching { manager.swig().set_ip_filter(currentFilter()) }
+        }, TorrentHotswap.BAN_MS + 500, TimeUnit.MILLISECONDS) }
+    }
     private val pruner = Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "VantaraTorrentPrune").apply { isDaemon = true } }
     private val prefetcher = Executors.newFixedThreadPool(TorrentPrefetch.MAX) { task -> Thread(task, "VantaraTorrentWarm").apply { isDaemon = true } }
     /** hash → نهاية التسخين المسبق؛ لا يتجاوز [TorrentPrefetch.MAX] في أي وقت. */
@@ -194,7 +211,7 @@ class TorrentEngine internal constructor(
             firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
             metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
             mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
-            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0)
+            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -335,6 +352,8 @@ class TorrentEngine internal constructor(
         /** للتشخيص: متى اكتملت بيانات التورنت في التسخين المسبق، وكم قطعة طُلبت فيه. */
         @Volatile var warmedAt = 0L; private set
         @Volatile var warmedPieces = 0; private set
+        /** للتشخيص: كم مشاركًا بطيئًا حُجب مؤقتًا لتتحرر قطعة عالقة. */
+        @Volatile var swaps = 0
         /** بنية بداية ملف MKV كما مرّت بالقارئ؛ null لغير MKV. */
         @Volatile var head: MkvHead? = null; private set
         val fileBytes: Long get() = file?.size ?: 0L
@@ -555,6 +574,7 @@ class TorrentEngine internal constructor(
             val start = System.nanoTime()
             var progressAt = start
             var checkedAt = 0L
+            var swappedAt = 0L
             var done = -1L
             try { synchronized(monitor) {
                 while (true) {
@@ -575,6 +595,18 @@ class TorrentEngine internal constructor(
                         checkedAt = now
                         val total = runCatching { handle.status().totalPayloadDownload() }.getOrDefault(done)
                         if (total > done) { if (done >= 0) progressAt = now; done = total }
+                        // القطعة المنتظرة عالقة عند مشارك بطيء: يُحجب مؤقتًا فتُطلب كتلته من أسرع (TorrentHotswap)
+                        val waited = android.os.SystemClock.elapsedRealtime() - waitingSince
+                        if (waited >= TorrentHotswap.WAIT_MS && now - swappedAt >= 2 * ONE_SECOND_NS) {
+                            val victims = runCatching {
+                                val list = com.frostwire.jlibtorrent.swig.peer_info_vector()
+                                handle.swig().get_peer_info(list)
+                                TorrentHotswap.victims((0 until list.size).map { list.get(it).let { p ->
+                                    TorrentHotswap.Peer(p.getIp().address().to_string(), p.getDownloading_piece_index(), p.getPayload_down_speed())
+                                } }, piece, waited)
+                            }.getOrDefault(emptyList())
+                            if (victims.isNotEmpty()) { swappedAt = now; swaps += victims.size; hotswap(victims) }
+                        }
                     }
                     if (TimeUnit.NANOSECONDS.toMillis(now - progressAt) >= PIECE_STALL_MS || TimeUnit.NANOSECONDS.toMillis(now - start) >= PIECE_MAX_WAIT_MS) {
                         reading.remove(piece)

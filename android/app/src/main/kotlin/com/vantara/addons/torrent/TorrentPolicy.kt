@@ -78,7 +78,7 @@ data class TorrentStats(
     val firstPieceAt: Long = 0L, val fileBytes: Long = 0L,
     val pieceBytes: Int = 0, val metadataAt: Long = 0L, val waitingPiece: Int = -1, val waitingSince: Long = 0L,
     val mkvHead: String? = null, val mkvSkipped: Long = 0L,
-    val warmedAt: Long = 0L, val warmedPieces: Int = 0,
+    val warmedAt: Long = 0L, val warmedPieces: Int = 0, val swaps: Int = 0,
 )
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
@@ -289,5 +289,34 @@ object TorrentWindow {
         val room = maxOf(0L, freeBytes - RESERVE_FREE_BYTES) / 2.0
         val pieces = kotlin.math.ceil(minOf(want, room) / pieceLength).toInt()
         return pieces.coerceIn(MIN_AHEAD_PIECES, MAX_AHEAD_PIECES)
+    }
+}
+
+/**
+ * «hotswap» كما في torrent-stream (Stremio): القطعة التي ينتظرها المشغّل عالقة عند مشارك بطيء.
+ * libtorrent لا يعيد طلب كتلتها من غيره إلا بعد «متوسط زمن القطعة» أو في نهاية اللعبة (لا تأتي
+ * ونحن نطلب قطعًا كثيرة قدّام)، وjlibtorrent بلا إلغاء طلب عند مشارك بعينه. فيُحجب المشارك البطيء
+ * الذي يرسل هذه القطعة مؤقتًا: ينقطع، تتحرر كتلته، فتُطلب فورًا من مشارك أسرع.
+ */
+object TorrentHotswap {
+    data class Peer(val ip: String, val piece: Int, val bytesPerSecond: Int)
+    /** انتظار القطعة قبل التدخل: أقل من هذا يكتمل غالبًا وحده. */
+    const val WAIT_MS = 1_500L
+    const val BAN_MS = 60_000L
+    private const val SLOW_BPS = 16 * 1024
+    private const val MAX_VICTIMS = 2
+
+    /** من يُحجب الآن: يرسل [piece] أبطأ بكثير من غيره، وبقي من يأخذ مكانه أسرع منه. */
+    fun victims(peers: List<Peer>, piece: Int, waitedMs: Long): List<String> {
+        if (piece < 0 || waitedMs < WAIT_MS) return emptyList()
+        val others = peers.filter { it.piece != piece && it.bytesPerSecond > 0 }.map { it.bytesPerSecond }.sorted()
+        if (others.isEmpty()) return emptyList()
+        val typical = others[others.size / 2]
+        val fastest = others.last()
+        return peers.asSequence()
+            .filter { it.piece == piece && it.ip.isNotBlank() }
+            .filter { it.bytesPerSecond < maxOf(SLOW_BPS, typical / 4) && fastest >= maxOf(it.bytesPerSecond * 3, SLOW_BPS) }
+            .sortedBy { it.bytesPerSecond }
+            .map { it.ip }.distinct().take(MAX_VICTIMS).toList()
     }
 }
