@@ -1,688 +1,86 @@
-# 🔴🟥🔴 VANTARA MEDIA PLAN 🟢🟩🟢
+# VANTARA — استراتيجية المنتج والوسائط
 
-## 1. الهدف
+> **نوع الملف:** تعريف الأقسام واتجاه تطوير تجربة المحتوى، وليس سجل حالة تنفيذيًا. آخر مراجعة: 25 أكتوبر 2026. للتنفيذ الحالي راجع [حالة الميزات](docs/FEATURE_STATUS.md)، وللرؤية العامة [رؤية المنتج](docs/PRODUCT_VISION.md).
 
-VANTARA ليس قارئ مانغا فقط.
+## ما هو VANTARA؟
 
-VANTARA منصة Media خاصة بنا، وتتكون من ثلاثة أقسام رئيسية:
+**منصة ترفيهية عربية تجمع المانجا والأنمي والأفلام والمسلسلات مع تجربة خاصة للأصدقاء.**
 
-- VANTARA MANGA 🟣
-- VANTARA ANIME 🔵
-- VANTARA CINEMA 🟠
+بدل فرض مكتبة جاهزة أو الاعتماد على مجموعة ثابتة من المواقع، يتجه VANTARA إلى تمكين المستخدم من اختيار مصادر المحتوى وإضافاته، بينما يقدم التطبيق تجربة موحدة للاكتشاف والقراءة والمشاهدة وتنظيم المكتبة والتقدم والتفاعل.
 
-كل الأقسام تشترك في نفس:
-- الحسابات
-- الأصدقاء
-- التوصيات
-- التعليقات
-- التقييمات
-- النشاط
-- المكتبة
-- التقدم
-- الإشعارات
-- البحث العام
-- الهوية الأساسية للتطبيق
+## أقسام المنتج
 
-لكن لكل قسم محرك محتوى وهوية Accent خاصة به.
+| القسم | المحتوى | تجربة الاستخدام |
+| --- | --- | --- |
+| **Manga** | مانجا ومانهوا ومانها | البحث والتفاصيل والفصول والصور وقارئ المانجا وحفظ التقدم |
+| **Anime** | مسلسلات وأفلام أنمي | الأعمال والمواسم والحلقات والترجمات ومشغل الفيديو |
+| **Cinema** | الأفلام والمسلسلات | تصفح الأعمال والمواسم والحلقات والاختيار بين مصادر التشغيل |
 
----
+الواجهة والمكتبة والحسابات والمزامنة والميزات الاجتماعية مشتركة، لكن لا يجب أن يتطابق محرك قراءة الصور مع محرك تشغيل الفيديو. لا تحتاج الأقسام إلى تطبيقات مستقلة أو قواعد بيانات حسابات متكررة.
 
-# 2. أقسام VANTARA
+## الحالة الحالية
 
-## VANTARA MANGA 🟣
+- **التوزيع:** نسخ Android وWindows x64 وPWA، بقدرات تختلف حسب النظام.
+- **محركات العرض:** قارئ صور للمانجا؛ Media3 على Android؛ mpv على Windows؛ ووسائل تشغيل المتصفح على PWA.
+- **التورنت:** libtorrent على Android وrqbit على Windows. لا يدعم PWA التورنت التقليدي مباشرة.
+- **مصادر المحتوى:** خليط من مصادر مدمجة وإضافات؛ تحويل الأنمي والسينما إلى الاعتماد الأساسي على الإضافات **لم يكتمل بعد**.
+- **المانجا:** مصادر القراءة الحالية باقية وتعمل في مساراتها الحالية؛ تطوير نظام إضافات المانجا هدف تدريجي لا يبرر حذفها الآن.
+- **الحسابات والأصدقاء:** منظومة مزامنة ومجلس وتوصيات؛ التجربة الحالية خاصة، وليست شبكة اجتماعية عامة أو تسجيلًا مفتوحًا.
 
-يشمل:
-- Manga
-- Manhwa
-- Manhua
-- أي محتوى قراءة مصورة مشابه
+هذه معلومات عن المكونات الموجودة بالكود، لا تعني اختبار كل مصدر أو وسائط على كل جهاز. [تفصيل الحالة](docs/FEATURE_STATUS.md).
 
-اللون الرئيسي:
-Purple
+## الرؤية عند اكتمال التطوير
 
-الحالة:
-المحرك موجود بالفعل ولا يعاد بناؤه من الصفر.
+1. يحصل المستخدم على التطبيق بأقسامه ومحركاته وإعداداته، **دون محتوى خارجي مفروض أو حسابات شخصية جاهزة**.
+2. يختار إضافات المانجا والأنمي والسينما والترجمات ويعرف صلاحياتها وقدراتها قبل تثبيتها.
+3. تعرض الواجهة المكتبة والتقدم والبحث بطريقة موحدة رغم اختلاف المصدر والمنصة.
+4. تستخدم الفيديوهات التورنت عند مناسبته وتوفره، أو مسارات بث مدعومة عند الحاجة.
+5. يمكنه إنشاء دائرة أصدقاء خاصة ومشاركة الأعمال والدخول في جلسات مشاهدة أو قراءة بالدعوة.
+6. يستطيع تحديث الإضافات وتغييرها دون فقد بيانات حسابه أو المكتبة أو الهوية الصحيحة للعمل.
+7. تكون التجربة قابلة للتوسع خارج نطاق الاختبار الخاص بعد تدقيق الأمان والعزل والاختبارات الحية.
 
-المسار الحالي أثبت نجاح تشغيل Extensions داخل APK والوصول إلى:
-Search → Details → Chapters → Pages → Images.
+لا يوجد موعد إطلاق عام محدد. بعض عناصر هذه التجربة أهداف وليست ميزات منجزة.
 
----
+## استراتيجية المصادر والإضافات
 
-## VANTARA ANIME 🔵
+### الأنمي والسينما
 
-يشمل:
-- Anime Series
-- Anime Movies
-- OVA
-- ONA
-- Specials
-- المحتوى المتحرك الذي يعتمد لاحقًا ضمن هذا القسم
+**الإضافات أولًا**: الإضافة مسؤولة عن بيانات الكتالوج والحلقات والسيرفرات والترجمات بحسب قدراتها. يبقى VANTARA مسؤولًا عن التشغيل والهوية والمكتبة والتقدم وإدارة الفشل.
 
-اللون الرئيسي:
-Blue
+محركات المصادر المباشرة القديمة تُراجع وتُزال فقط بعد اكتمال بدائل الإضافات واجتياز اختبارات البحث والتفاصيل والتشغيل والقفز والترجمات وهجرة بيانات المكتبة.
 
-المحتوى يعتمد على Video Engine وليس Manga Engine.
+### المانجا
 
----
+**مصادر المانجا الحالية تبقى محفوظة.** نطوّر قدرة المستخدم على تثبيت إضافات قراءة خارجية وتحديثها وفحص حالتها، وندعم البحث والتفاصيل والفصول والصور. تقليل اعتماد التطبيق على المصادر المضمنة قرار لاحق مشروط بالاختبارات وعدم فقد التقدم.
 
-## VANTARA CINEMA 🟠
+[خطة انتقال المصادر](docs/SOURCES_TRANSITION.md) · [عقود الإضافات](docs/addons/CONTRACTS.md)
 
-يشمل:
-- Movies
-- TV Series
+## تشغيل الوسائط
 
-اللون الرئيسي:
-Orange
+| المنصة | المشغل | محرك التورنت | الحد |
+| --- | --- | --- | --- |
+| Android | Media3 | libtorrent عبر المحرك الأصلي | يعتمد دعم المعمارية على APK والمكتبات الأصلية |
+| Windows x64 | mpv | rqbit محلي | يحتاج اختبارات فعلية للأداء على Windows |
+| PWA | مشغل المتصفح | غير متاح مباشرة كتورنت TCP/UDP | يعتمد على الترميز وسياسة المصدر والمتصفح |
 
-يستخدم نفس Video Engine المستخدم في VANTARA ANIME، لكن Metadata وProviders قد تختلف.
+التورنت **وسيلة تشغيل لا طريقة وحيدة للمحتوى**. لا نَعِد بزمن ثابت لأول إطار أو وجود مصادر لكل عنوان.
 
----
+## المكتبة والتجربة الاجتماعية
 
-# 3. المبدأ المعماري
+يجمع المنتج المفضلة والمكتبة والتقدم والإشعارات والتوصيات والحضور والتفاعل ضمن صلاحيات الحساب. **النموذج المستهدف شخصي:** كل مستخدم يختار أصدقاءه، ولا يرى تلقائيًا جميع مستخدمي التطبيق أو تفاصيلهم.
 
-لا نبني ثلاثة تطبيقات.
+تحتاج إتاحة هذه الأنظمة للعامة إلى التحقق من فصل مجموعات الأصدقاء والصلاحيات على الخادم، لا إخفاء أسماء الأشخاص من واجهة المستخدم فقط.
 
-لدينا VANTARA واحد:
+## ما الذي نعدّه جاهزًا؟
 
-VANTARA
-├── Manga
-├── Anime
-└── Cinema
+- **المانجا:** بحث وتفاصيل ثم فصول وصور فعلية، وإكمال فصل وتقدم محفوظ.
+- **الفيديو:** عمل وحلقة/فيلم صحيحان، مسار صالح، أول إطار حقيقي، القفز والتشغيل المستمر.
+- **الإضافات:** تثبيت وقدرات صحيحة وصلاحيات واضحة وتحديث آمن وفشل لا يفسد المكتبة.
+- **الأصدقاء:** دعوات وصلاحيات وعزل بيانات مثبتة بين حسابات ومجموعات منفصلة.
+- **الإصدار:** اختبار ثم بناء ملف التثبيت واختباره ونشره فعليًا، لا مجرد دمج كود.
 
-وفوقها طبقة مشتركة:
-
-Shared VANTARA
-├── Accounts
-├── Friends
-├── Social
-├── Recommendations
-├── Comments
-├── Ratings
-├── Activity
-├── Library
-├── Progress
-├── Notifications
-└── Search
-
-المستخدم يستطيع مثلًا:
-- ترشيح مانغا لصديق.
-- ترشيح فيلم.
-- التعليق على أنمي.
-- مشاهدة نشاط صديقه.
-- معرفة تقدمه.
-- تقييم أي نوع من المحتوى.
-
-النظام الاجتماعي لا يتكرر لكل قسم.
+**القاعدة:** الكود والاختبارات تحدد ما هو موجود؛ وثائق الرؤية تحدد ما نريد بناءه.
 
 ---
 
-# 4. المحركات
-
-يوجد محركان رئيسيان فقط:
-
-## Manga Engine
-
-مسؤول عن:
-- Sources
-- Extensions
-- Search
-- Details
-- Chapters
-- Pages
-- Images
-- Reader
-
-ولا يتم خلطه مع Video Engine.
-
-## Video Engine
-
-يخدم:
-- VANTARA ANIME
-- VANTARA CINEMA
-
-مسؤول عن:
-- Providers
-- Media mapping
-- Episodes / Seasons
-- Stream resolving
-- Quality selection
-- Audio tracks
-- Subtitles
-- HLS / DASH / direct streams
-- Player
-- Fallback بين المصادر
-- Refresh للروابط المؤقتة
-
-الهدف ليس تخزين مكتبة فيديو ضخمة على سيرفر VANTARA.
-
-النموذج المفضل:
-
-Metadata
-→ Provider
-→ Resolve Stream
-→ VANTARA Player
-
-الفيديو يذهب إلى جهاز المستخدم من المصدر المناسب بدل تخزين تيرابايتات داخل VANTARA.
-
----
-
-# 5. لماذا هذا التصميم؟
-
-المشاريع التي دُرست أثبتت نماذج مختلفة:
-
-- Stremio يفصل Metadata عن Stream Providers.
-- Seanime يستخدم Online Streaming Providers ويحل Sources عند الطلب.
-- Jellyfin ممتاز للمكتبة المحلية والتشغيل من ملفات مملوكة للسيرفر.
-- VANTARA Manga أثبت أن تشغيل نظام Sources على الجهاز ممكن، لكنه كان أعقد بسبب Extensions وRuntime وHeaders وصفحات الفصول.
-
-لذلك Video Engine لا يعاد فيه اختراع Suwayomi أو Jellyfin كامل.
-
-نأخذ الفكرة الصحيحة فقط:
-Provider → Stream → Player.
-
----
-
-# 6. دليل من تاريخ VANTARA Manga
-
-رحلة Manga Engine واجهت مشاكل فعلية يجب ألا نكررها بلا سبب.
-
-أمثلة من تاريخ المستودع:
-
-- `607f8a6`
-  إضافة Runtime dependency مطلوبة لمصادر Keiyoushi.
-
-- `0b285d7`
-  إصلاح الحفاظ على Manga URL بعد details.
-
-- `8f0add0`
-  إصلاح timeouts وعمليات المصادر البطيئة وCloudflare والحالات التي كانت تبدو كأن التطبيق عالق.
-
-- `cce5ae7`
-  معالجة catalog pagination والوصول إلى نهاية حقيقية للمصدر.
-
-- `961f232`
-  إنشاء Capacitor bridge بين JavaScript ومحرك Android.
-
-- `ac04bd5`
-  نقل Extension Engine الحقيقي إلى تطبيق VANTARA:
-  search → chapters → pages → image.
-
-هذا التاريخ سبب مباشر لفصل Manga Engine عن Video Engine وعدم تكرار التعقيد بلا حاجة.
-
----
-
-# 7. المستودعات
-
-## VANTARA — PUBLIC PRIMARY
-
-منذ 2026-09-20 صار **VANTARA نفسه هو المستودع العام الأساسي** ومصدر الحقيقة
-للمنتج والـCI. لم يعد النموذج الحالي هو «Private product + Public lab».
-
-المستودع العام يحتوي على:
-- التطبيق
-- Social/Sync/Backend
-- Manga
-- Anime/Cinema عندما تبدأ
-- Integration code
-- CI/deploy workflows
-- Fixtures واختبارات آمنة للنشر
-
-وممنوع فيه دائمًا:
-- API secrets
-- Tokens
-- Private keys / signing keys
-- Production credentials
-- `.env`
-- بيانات مستخدمين خاصة
-- أي Secret داخل تاريخ Git
-
-الأسرار الإنتاجية تبقى خارج Git في GitHub/Cloudflare secrets أو البيئة المحلية.
-
-### Public Labs
-
-يمكن إنشاء Labs عامة منفصلة للتجارب الكبيرة أو المؤقتة، لكنها **اختيارية** وليست
-مكان الحقيقة النهائي. أي كود يدخل المنتج يعود إلى VANTARA عبر Branch + CI +
-Review.
-
-# 8. Workflow التطوير
-
-## المرحلة 1 — Branch / Experiment
-
-كل تغيير غير تافه يبدأ في Branch واضح النطاق داخل VANTARA أو Lab منفصل إذا كان
-التجريب يحتاج عزلة قوية.
-
-يتم تشغيل:
-- Build
-- Typecheck
-- Lint
-- Unit tests
-- Integration tests
-- Contract tests
-- Android build حيث ينطبق
-- Health/failure tests حيث ينطبق
-
-## المرحلة 2 — Stable Integration
-
-بعد نجاح الاختبارات والمراجعة، يدخل التغيير إلى `main`. الإنتاج لا ينشر من
-feature branch؛ Workflows الإنتاجية تعتمد على نجاح `VANTARA CI` على `main`
-وتنشر **نفس SHA الذي اختُبر**.
-
-## المرحلة 3 — Production Verification
-
-بعد CI الناجح:
-- Pages deploy
-- Sync Worker deploy + D1 migrations
-- live smoke/verification
-- Android debug artifact
-
-أي فشل هنا يعيد فتح التغيير حتى لو كانت unit tests خضراء.
-
-**Backend Freeze الحالي:** baseline
-`f7c27df61a2423026c794eac0eeba8d175fa7682`، والتفصيل في
-`docs/BACKEND_FREEZE.md`.
-
-# 9. قاعدة مهمة للـAI
-
-وجود Monorepo كبير لا يعني أن الـAI يعمل في كل شيء.
-
-كل مهمة يجب أن تحدد Scope واضحًا.
-
-مثال:
-
-"اعمل فقط على Video Engine وVANTARA Anime.
-لا تعدل Manga Engine أو Social أو Sync."
-
-كل Module يجب أن يملك:
-- README قصير
-- Purpose
-- Boundaries
-- Public API
-- Tests
-- Ownership
-
-ممنوع إنشاء ملفات ضخمة تجمع كل شيء.
-
----
-
-# 10. نظام الإبلاغ
-
-لدينا Report System منفصل عن Auto Checking.
-
-## User Report
-
-عندما يبلغ المستخدم عن مشكلة:
-
-1. يسجل البلاغ.
-2. يحفظ معلومات تشخيص آمنة.
-3. لا يرسل Secrets.
-4. AI يحاول إعادة إنتاج المشكلة.
-5. يصنفها:
-
-- Verified
-- Unverified
-- Duplicate
-- User/Error condition
-- Temporary failure
-
-إذا كانت Verified:
-
-### Low Risk
-
-مثال:
-- UI bug
-- mapping صغير
-- isolated provider bug
-- typo
-- logic bug واضح ومعزول
-
-المسار:
-
-Report
-→ Reproduce
-→ Branch
-→ Fix
-→ Tests
-→ CI
-→ PR
-→ Notify owner
-
-لا يوجد دمج مباشر إلى Stable.
-
-### High Risk
-
-مثل:
-- Authentication
-- Database
-- Sync
-- Social contracts
-- Security
-- Architecture
-- Cross-module changes
-- Migration
-- تغيير يحتمل كسر أجزاء أخرى
-
-AI:
-- يشخص المشكلة
-- يجمع الأدلة
-- يحدد الملفات المتأثرة
-- يقترح خطة
-- يبلغ المالك
-
-ولا يعدل تلقائيًا.
-
----
-
-# 11. Auto Checking
-
-الفحص الدوري مختلف عن البلاغات.
-
-مهمته مراقبة صحة VANTARA.
-
-يفحص مثلًا:
-
-## Manga
-- Source alive
-- Search
-- Details
-- Chapters
-- Pages
-- Images
-
-## Anime / Cinema
-- Provider alive
-- Metadata mapping
-- Episodes
-- Stream resolve
-- HLS/DASH
-- Audio
-- Subtitles
-- Playback compatibility
-- Latency
-
-## Backend
-- API
-- Sync
-- Worker
-- Database
-- Authentication health
-- Build status
-
----
-
-# 12. Auto Checking لا يعدل تلقائيًا افتراضيًا
-
-الفحص الدوري:
-
-Detect
-→ Confirm
-→ Issue
-→ Notify
-
-ولا يصبح:
-
-Detect
-→ Edit production automatically
-
-لأن المشكلة قد تكون:
-- Temporary outage
-- Rate limit
-- DNS
-- CDN failure
-- Cloudflare challenge
-- Maintenance
-
-يفضل تأكيد المشكلة بعد أكثر من فشل.
-
-مثال:
-
-08:00 FAIL
-12:00 FAIL
-16:00 FAIL
-
-→ Confirmed degradation
-→ Issue
-→ Notify owner
-
-أما:
-
-08:00 FAIL
-12:00 PASS
-
-→ Temporary incident
-→ Log only
-
----
-
-# 13. ما يسمح للـAuto System بفعله تلقائيًا
-
-مسموح:
-- Retry
-- Refresh expired URL
-- Re-resolve stream
-- Clear safe cache
-- Change health status
-- Fallback to another provider
-- إعادة تشغيل test/job آمن
-
-غير مسموح تلقائيًا:
-- DB migration
-- Auth changes
-- Sync contract changes
-- Security changes
-- Player architecture changes
-- Provider parser rewrite داخل المنتج الحقيقي
-- Merge إلى production
-
----
-
-# 14. VANTARA HEALTH
-
-كل أنظمة المراقبة تدخل تحت:
-
-VANTARA HEALTH
-
-ويحتوي على:
-
-- Reports
-- Auto Checks
-- Provider Health
-- Source Health
-- Backend Health
-- Build Health
-- Client Errors
-- Regression History
-
-واجهة الإدارة يمكن أن تعرض مثلًا:
-
-VANTARA HEALTH
-
-Manga       Healthy
-Anime       Healthy
-Cinema      Degraded
-Social      Healthy
-Sync        Healthy
-
-New reports: 2
-Broken providers: 1
-Critical: 0
-
----
-
-# 15. التقرير الآلي
-
-الاختبارات تنتج بيانات قابلة للقياس.
-
-مثال:
-
-{
-  "provider": "provider-x",
-  "streamResolve": false,
-  "httpStatus": 403,
-  "latencyMs": 820,
-  "timestamp": "..."
-}
-
-ثم AI يفسر البيانات.
-
-AI ليس مصدر الحقيقة.
-
-Scripts / CI / Logs هي الأدلة.
-AI يحللها ويربطها بالتاريخ ويقترح الإجراء.
-
----
-
-# 16. Correlation IDs
-
-كل خطأ مهم يجب أن يحمل معرفًا يمكن تتبعه.
-
-Report:
-→ correlationId
-→ request
-→ backend log
-→ provider attempt
-→ failure
-
-هذا موجود أصلًا كاتجاه داخل VANTARA ويجب الاستمرار عليه.
-
-الهدف:
-
-بدل:
-"الحلقة ما اشتغلت"
-
-نصل إلى:
-
-"Provider X فشل في resolveStream
-HTTP 403
-correlationId: ...
-بدأ بعد الإصدار ...
-Fallback Y نجح."
-
----
-
-# 17. هوية الأقسام
-
-الهوية الأساسية لـVANTARA ثابتة.
-
-الذي يتغير هو Accent.
-
-## Manga
-Purple
-
-## Anime
-Blue
-
-## Cinema
-Orange
-
-لا نصنع Design System جديد لكل قسم.
-
-نفس:
-- Navigation
-- Typography
-- Profiles
-- Friends
-- Cards
-- Motion
-- Social UI
-- Settings
-
-لكن:
-
-`--section-accent`
-
-يتغير حسب المجال.
-
----
-
-# 18. قاعدة البيانات والموديل
-
-الأنظمة المشتركة لا تربط نفسها بنوع واحد.
-
-بدل:
-
-`mangaId`
-
-نستخدم مفهومًا عامًا مثل:
-
-`mediaId`
-`mediaDomain`
-
-مثال:
-
-mediaDomain:
-- manga
-- anime
-- cinema
-
-Subtypes:
-
-Manga:
-- manga
-- manhwa
-- manhua
-
-Anime:
-- series
-- movie
-- ova
-- ona
-- special
-
-Cinema:
-- movie
-- series
-
-Social لا يحتاج أن يعرف تفاصيل المحرك.
-
----
-
-# 19. قاعدة أساسية
-
-Metadata ≠ Playback Source.
-
-Metadata يعرف:
-- الاسم
-- الغلاف
-- الوصف
-- النوع
-- السنة
-- الحلقات أو الفصول
-
-Playback Source يعرف:
-- أين يتم تشغيل المحتوى الآن؟
-
-عدم الفصل بين الاثنين خطأ معماري.
-
----
-
-# 20. القاعدة النهائية
-
-VANTARA Public Primary:
-المنتج الحقيقي ومصدر الحقيقة والـCI، Secretless by design.
-
-Public Labs:
-اختيارية للتجارب المعزولة، وليست مصدر الحقيقة النهائي.
-
-Manga Engine:
-مستقل ومستقر.
-
-Video Engine:
-مشترك بين Anime وCinema.
-
-Social:
-واحد لجميع أنواع Media.
-
-Reports:
-قد يصلح Low Risk عبر Branch + CI + PR.
-
-Periodic Checks:
-تكتشف وتؤكد وتبلغ، ولا تغير المنتج تلقائيًا افتراضيًا.
-
-Public:
-لا أسرار أبدًا.
-
-Production:
-لا Auto Merge من AI.
-
-كل تغيير كبير:
-Evidence → Test → Review → Integrate.
+للمطورين: [المعمارية](docs/ARCHITECTURE.md) · [دليل التطوير](docs/DEVELOPMENT.md) · [فهرس الوثائق](docs/README.md)
