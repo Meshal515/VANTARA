@@ -35,6 +35,9 @@ class TorrentEngine internal constructor(
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
+    private val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
+    /** Wi-Fi أو إيثرنت (غير محسوبة). عند الشك: محدودة، فلا تُنزَّل قطع قبل الاختيار. */
+    private fun unmetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered == false }.getOrDefault(false)
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
     private val tickets = ConcurrentHashMap<String, Ticket>()
@@ -140,7 +143,9 @@ class TorrentEngine internal constructor(
         state.limitWhileWarm(handle)
         val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
         val selected = inspect(state, info, request)
-        state.prefetched(selected, info, fetchEdges && directory.usableSpace >= MIN_FREE_BYTES && TorrentPrefetch.edgesFit(info.pieceLength(), TorrentPolicy.edges(selected, info.pieceLength()).size))
+        val pieces = if (fetchEdges && directory.usableSpace >= MIN_FREE_BYTES)
+            TorrentPrefetch.warmPieces(TorrentPolicy.edges(selected, info.pieceLength()), info.pieceLength(), unmetered()) else emptyList()
+        state.prefetched(selected, info, pieces)
     }
     private fun saveDhtState(force: Boolean) {
         if (!managerHolder.isInitialized()) return
@@ -183,7 +188,17 @@ class TorrentEngine internal constructor(
         val state = states[hash]
         return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
             state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
-            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L)
+            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
+            metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
+            mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
+            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0)
+    }
+    /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
+    fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
+        if (!managerHolder.isInitialized() || piece < 0) return null
+        val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
+        return runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece }?.let { (it.finished() + it.writing()) to it.blocksInPiece() } }.getOrNull()
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
     /**
@@ -212,13 +227,20 @@ class TorrentEngine internal constructor(
             }
             states.computeIfAbsent(request.infoHash) { State(request.infoHash) }.also { it.retain() }
         }
-        // صار تشغيلًا حقيقيًا (بعد retain، فلا يوقفه التسخين المنتهي): يخرج من عدّاد التسخين المسبق
-        synchronized(warming) { warming.remove(request.infoHash) }
+        // صار تشغيلًا حقيقيًا (بعد retain، فلا يوقفه التسخين المنتهي): يخرج من عدّاد التسخين المسبق.
+        // تسخين آخر يُنزّل قطعًا ولم يُختر يتوقف فلا يزاحم المختار. تسخين البيانات فقط (الخيار الثاني،
+        // الحلقة التالية) يبقى: لا يزاحم، وacquire يتكرر مع كل قفزة فلا يصح أن يقطعه.
+        val others = synchronized(warming) {
+            warming.remove(request.infoHash)
+            warming.keys.filter { (states[it]?.warmedPieces ?: 0) > 0 }.onEach { warming.remove(it) }
+        }
+        for (hash in others) states[hash]?.let { other -> runCatching { pruner.execute { runCatching { other.cool() } } } }
         return try {
             val handle = state.handle(stopped, request)
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
             runCatching { handle.swig().set_max_connections(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
             val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
+            state.metadataReady()
             val selected = inspect(state, info, request)
             state.select(handle, selected, info)
             handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
@@ -253,6 +275,16 @@ class TorrentEngine internal constructor(
         private val closed = AtomicBoolean(false)
         fun read(position: Long, target: ByteArray, offset: Int, count: Int): Int {
             if (closed.get()) throw InterruptedIOException("Torrent reader closed")
+            val head = state.head
+            // مرفقات MKV (خطوط الترجمة): Media3 يتخطاها بقراءتها كلها؛ نعطيه أصفارًا بلا تنزيل (MkvHead)
+            head?.skip?.let { range ->
+                if (position in range) {
+                    val n = minOf(count.toLong(), range.last + 1 - position).toInt()
+                    java.util.Arrays.fill(target, offset, offset + n, 0.toByte())
+                    head.skipped(n)
+                    return n
+                }
+            }
             val plan = TorrentPolicy.readAt(file, position, pieceLength, count) ?: return -1
             state.prioritize(file, position, pieceLength)
             val bytes = state.piece(plan.piece) { closed.get() || cancelled() }
@@ -260,6 +292,12 @@ class TorrentEngine internal constructor(
             // القطعة التالية تُقرأ من القرص إلى الذاكرة إن اكتملت، قبل أن يصل إليها المشغّل
             if (!legacyWindow) state.readAhead(plan.piece + 1, file, pieceLength)
             bytes.copyInto(target, offset, plan.offset, plan.offset + plan.length)
+            if (head != null) {
+                val before = head.skip
+                head.feed(position, target, offset, plan.length)
+                // عُرفت المرفقات للتو: النافذة تقفز إلى ما بعدها فلا تُنزَّل قطعها
+                head.skip?.takeIf { before == null }?.let { state.prioritize(file, it.last + 1, pieceLength) }
+            }
             return plan.length
         }
         fun close() { if (closed.compareAndSet(false, true)) state.drop() }
@@ -291,7 +329,18 @@ class TorrentEngine internal constructor(
         @Volatile var idleAt = System.currentTimeMillis(); private set
         /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
         @Volatile var firstPieceAt = 0L; private set
+        /** للتشخيص: متى اكتملت بيانات التورنت في التسخين المسبق، وكم قطعة طُلبت فيه. */
+        @Volatile var warmedAt = 0L; private set
+        @Volatile var warmedPieces = 0; private set
+        /** بنية بداية ملف MKV كما مرّت بالقارئ؛ null لغير MKV. */
+        @Volatile var head: MkvHead? = null; private set
         val fileBytes: Long get() = file?.size ?: 0L
+        val pieceBytes: Int get() = pieceLength
+        /** للتشخيص: متى صارت بيانات التورنت جاهزة، وأي قطعة ينتظرها القارئ الآن ومنذ متى (elapsedRealtime). */
+        @Volatile var metadataAt = 0L; private set
+        @Volatile var waitingPiece = -1; private set
+        @Volatile var waitingSince = 0L; private set
+        fun metadataReady() { if (metadataAt == 0L) metadataAt = android.os.SystemClock.elapsedRealtime() }
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
         /**
          * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
@@ -339,11 +388,18 @@ class TorrentEngine internal constructor(
         fun limitWhileWarm(handle: TorrentHandle) = synchronized(monitor) {
             if (refs == 0) runCatching { handle.swig().set_max_connections(PREFETCH_CONNECTIONS) }
         }
-        fun prefetched(file: TorrentFile, info: TorrentInfo, fetchEdges: Boolean) = synchronized(monitor) {
+        fun prefetched(file: TorrentFile, info: TorrentInfo, pieces: List<Int>) = synchronized(monitor) {
             // المشغّل سبقنا إليه (أو أُعيد البناء): هو صاحب الأولويات الآن
             if (refs > 0) return@synchronized
             val current = torrent?.takeIf { it.isValid } ?: return@synchronized
-            select(current, file, info, fetchEdges)
+            select(current, file, info, fetchEdges = false)
+            // أول قطعة بموعد فوري ثم الذيل؛ المشغّل حين يفتح يضع أطرافه فوقها ويجد ما اكتمل جاهزًا
+            for ((piece, deadline) in TorrentPolicy.deadlines(pieces.take(1), pieces.drop(1))) {
+                current.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
+                current.setPieceDeadline(piece, deadline)
+                deadlined += piece
+            }
+            warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
             current.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             current.resume()
         }
@@ -378,6 +434,7 @@ class TorrentEngine internal constructor(
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
                 selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
+                head = if (file.path.endsWith(".mkv", ignoreCase = true)) MkvHead() else null
                 this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }
@@ -496,10 +553,11 @@ class TorrentEngine internal constructor(
             var progressAt = start
             var checkedAt = 0L
             var done = -1L
-            synchronized(monitor) {
+            try { synchronized(monitor) {
                 while (true) {
                     checkCancelled(cancelled)
                     pieces[piece]?.let { return it }
+                    if (waitingPiece != piece) { waitingPiece = piece; waitingSince = android.os.SystemClock.elapsedRealtime() }
                     if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
                     if (evicted(piece)) rebuild()
                     if (failed.remove(piece)) throw IOException("Torrent piece read failed")
@@ -521,7 +579,7 @@ class TorrentEngine internal constructor(
                     }
                     try { monitor.wait(100) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent read interrupted") }
                 }
-            }
+            } } finally { if (waitingPiece == piece) waitingPiece = -1 }
         }
         /** إن اكتملت [piece] ولم تكن في الذاكرة: تُطلب قراءتها الآن (لا انتظار؛ تصل عبر received). */
         fun readAhead(piece: Int, file: TorrentFile, pieceLength: Int) = synchronized(monitor) {
