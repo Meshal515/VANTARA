@@ -247,4 +247,83 @@ class TorrentThroughputDeviceTest {
         org.junit.Assert.assertTrue("first frame without pressing play: $result", result.getLong("firstFrameMs") > 0)
         org.junit.Assert.assertTrue("resumed by itself after the buffering wait: $result", result.getLong("resumeAfterSeekMs") > 0)
     }
+
+    /**
+     * حلقة The Future Diary الأولى كما فتحها المستخدم (نفس الملف، سرب صغير)، بمشغّل ExoPlayer الحقيقي
+     * وإعداد التخزين نفسه: مرة من البداية ومرة من 5:01 (موضع لقطة المستخدم). يُسجَّل كل طلب قراءة من
+     * المشغّل (من أي بايت وكم قرأ)، والبايتات قبل READY، وهل الملف قابل للقفز، و«جاهز أمامك» كل ثانية.
+     */
+    @Test fun whatThePlayerReadsBeforeReady() {
+        assumeTrue("opt-in", InstrumentationRegistry.getArguments().getString("reads") == "1")
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val choice = listOf(2..8, 1..15).firstNotNullOfOrNull { range ->
+            runCatching { torrentio("series/kitsu:6266:1", "anime", { !Regex("(?i)batch|complete").containsMatchIn(it) }, range) }.getOrNull()
+        } ?: error("no torrent")
+        for (startMs in listOf(0L, 301_000L)) {
+            File(context.cacheDir, "torrent-streams").deleteRecursively()
+            val engine = TorrentEngine(context)
+            val uri = engine.register(TorrentRequest(choice.hash, choice.fileIdx, choice.sources))
+            val t0 = SystemClock.elapsedRealtime()
+            val opens = JSONArray()
+            val total = AtomicLong(0)
+            var ready = 0L; var frame = 0L; var bytesAtReady = -1L
+            val samples = JSONArray()
+            val consumer = HandlerThread("Frames").apply { start() }
+            val images = ImageReader.newInstance(320, 180, ImageFormat.PRIVATE, 3)
+            images.setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, Handler(consumer.looper))
+            var player: ExoPlayer? = null
+            val result = JSONObject().put("title", choice.title).put("startMs", startMs)
+            try {
+                instrumentation.runOnMainSync {
+                    val base = engine.dataSourceFactory(DefaultDataSource.Factory(context))
+                    val factory = DataSource.Factory {
+                        val inner = base.createDataSource()
+                        object : DataSource by inner {
+                            var at = 0L; var read = 0L; var entry: JSONObject? = null
+                            override fun open(dataSpec: DataSpec): Long {
+                                at = SystemClock.elapsedRealtime() - t0; read = 0
+                                val e = JSONObject().put("t", at).put("pos", dataSpec.position).put("len", dataSpec.length)
+                                synchronized(opens) { opens.put(e) }; entry = e
+                                return inner.open(dataSpec)
+                            }
+                            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                                val n = inner.read(buffer, offset, length)
+                                if (n > 0) { read += n; total.addAndGet(n.toLong()); entry?.put("read", read) }
+                                return n
+                            }
+                        }
+                    }
+                    val p = ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+                        .setLoadControl(com.vantara.anime.player.PlaybackBuffering.create(Runtime.getRuntime().maxMemory())).build()
+                    player = p; p.setVideoSurface(images.surface)
+                    p.addListener(object : Player.Listener {
+                        override fun onRenderedFirstFrame() { if (frame == 0L) frame = SystemClock.elapsedRealtime() - t0 }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (state == Player.STATE_READY && ready == 0L) { ready = SystemClock.elapsedRealtime() - t0; bytesAtReady = total.get() }
+                        }
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) { result.put("error", "${error.errorCodeName}: ${error.cause}") }
+                    })
+                    p.setMediaSource(DefaultMediaSourceFactory(factory).createMediaSource(MediaItem.fromUri(uri)), startMs)
+                    p.prepare(); p.playWhenReady = true
+                }
+                for (second in 1..100) {
+                    Thread.sleep(1000)
+                    instrumentation.runOnMainSync {
+                        val p = player!!
+                        samples.put("${second}s state=${p.playbackState} pos=${p.currentPosition / 1000}s ahead=${p.totalBufferedDuration / 1000}s read=${total.get() / 1024}KB seekable=${p.isCurrentMediaItemSeekable} dur=${p.duration / 1000}s video=${p.videoFormat?.sampleMimeType}")
+                    }
+                    engine.stats(uri)?.fileBytes?.takeIf { it > 0 }?.let { result.put("fileKB", it / 1024) }
+                    if (ready > 0 && SystemClock.elapsedRealtime() - t0 > ready + 15_000) break
+                }
+            } finally {
+                runCatching { instrumentation.runOnMainSync { player?.release() } }
+                images.close(); consumer.quitSafely(); engine.release(uri); engine.close()
+            }
+            result.put("readyMs", ready).put("firstFrameMs", frame).put("bytesBeforeReadyKB", if (bytesAtReady >= 0) bytesAtReady / 1024 else -1)
+                .put("opens", opens).put("samples", samples)
+            File(context.filesDir, "addon-proof/reads-$startMs.json").apply { parentFile!!.mkdirs() }.writeText(result.toString(2))
+            println("READS start=${startMs / 1000}s readyMs=$ready frameMs=$frame bytesBeforeReadyKB=${result.optLong("bytesBeforeReadyKB")} opens=${opens.length()} error=${result.optString("error")} title=${choice.title.take(70)}")
+        }
+    }
 }
