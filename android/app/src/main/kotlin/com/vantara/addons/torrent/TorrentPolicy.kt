@@ -77,6 +77,7 @@ data class TorrentStats(
     val state: String? = null, val paused: Boolean = false, val candidates: Int = 0, val known: Int = 0,
     val firstPieceAt: Long = 0L, val fileBytes: Long = 0L,
     val pieceBytes: Int = 0, val metadataAt: Long = 0L, val waitingPiece: Int = -1, val waitingSince: Long = 0L,
+    val mkvHead: String? = null, val mkvSkipped: Long = 0L,
 )
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 

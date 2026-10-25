@@ -109,7 +109,11 @@ class MkvSubtitleRegressionDeviceTest {
                         val p = player!!
                         samples.put("${second}s state=${p.playbackState} pos=${p.currentPosition / 1000}s ahead=${p.totalBufferedDuration / 1000}s read=${total.get() / 1024}KB seekable=${p.isCurrentMediaItemSeekable} dur=${p.duration / 1000}s video=${p.videoFormat?.sampleMimeType}")
                     }
-                    engine.stats(uri)?.fileBytes?.takeIf { it > 0 }?.let { result.put("fileKB", it / 1024) }
+                    engine.stats(uri)?.let { st ->
+                        st.fileBytes.takeIf { it > 0 }?.let { result.put("fileKB", it / 1024) }
+                        st.mkvHead?.let { result.put("mkvHead", it) }
+                        result.put("mkvSkippedKB", st.mkvSkipped / 1024)
+                    }
                     if (ready > 0 && SystemClock.elapsedRealtime() - t0 > ready + 15_000) break
                 }
             } finally {
@@ -119,7 +123,7 @@ class MkvSubtitleRegressionDeviceTest {
             result.put("readyMs", ready).put("firstFrameMs", frame).put("bytesBeforeReadyKB", if (bytesAtReady >= 0) bytesAtReady / 1024 else -1)
                 .put("opens", opens).put("samples", samples)
             File(context.filesDir, "addon-proof/reads-$startMs.json").apply { parentFile!!.mkdirs() }.writeText(result.toString(2))
-            println("READS start=${startMs / 1000}s readyMs=$ready frameMs=$frame bytesBeforeReadyKB=${result.optLong("bytesBeforeReadyKB")} opens=${opens.length()} error=${result.optString("error")} title=${choice.title.take(70)}")
+            println("READS start=${startMs / 1000}s readyMs=$ready frameMs=$frame bytesBeforeReadyKB=${result.optLong("bytesBeforeReadyKB")} opens=${opens.length()} skippedKB=${result.optLong("mkvSkippedKB")} head=${result.optString("mkvHead")} error=${result.optString("error")} title=${choice.title.take(70)}")
             // حلقة المستخدم: لا خطأ استخراج ويصل READY (كانت تتوقف بـ «Out of range» في Media3 1.5.1)
             org.junit.Assert.assertEquals("player error at start=${startMs / 1000}s", "", result.optString("error"))
             org.junit.Assert.assertTrue("READY at start=${startMs / 1000}s", ready > 0)

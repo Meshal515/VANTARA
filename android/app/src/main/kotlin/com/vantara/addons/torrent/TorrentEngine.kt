@@ -184,7 +184,8 @@ class TorrentEngine internal constructor(
         return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
             state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
             firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
-            metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L)
+            metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
+            mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -262,6 +263,16 @@ class TorrentEngine internal constructor(
         private val closed = AtomicBoolean(false)
         fun read(position: Long, target: ByteArray, offset: Int, count: Int): Int {
             if (closed.get()) throw InterruptedIOException("Torrent reader closed")
+            val head = state.head
+            // مرفقات MKV (خطوط الترجمة): Media3 يتخطاها بقراءتها كلها؛ نعطيه أصفارًا بلا تنزيل (MkvHead)
+            head?.skip?.let { range ->
+                if (position in range) {
+                    val n = minOf(count.toLong(), range.last + 1 - position).toInt()
+                    java.util.Arrays.fill(target, offset, offset + n, 0.toByte())
+                    head.skipped(n)
+                    return n
+                }
+            }
             val plan = TorrentPolicy.readAt(file, position, pieceLength, count) ?: return -1
             state.prioritize(file, position, pieceLength)
             val bytes = state.piece(plan.piece) { closed.get() || cancelled() }
@@ -269,6 +280,12 @@ class TorrentEngine internal constructor(
             // القطعة التالية تُقرأ من القرص إلى الذاكرة إن اكتملت، قبل أن يصل إليها المشغّل
             if (!legacyWindow) state.readAhead(plan.piece + 1, file, pieceLength)
             bytes.copyInto(target, offset, plan.offset, plan.offset + plan.length)
+            if (head != null) {
+                val before = head.skip
+                head.feed(position, target, offset, plan.length)
+                // عُرفت المرفقات للتو: النافذة تقفز إلى ما بعدها فلا تُنزَّل قطعها
+                head.skip?.takeIf { before == null }?.let { state.prioritize(file, it.last + 1, pieceLength) }
+            }
             return plan.length
         }
         fun close() { if (closed.compareAndSet(false, true)) state.drop() }
@@ -300,6 +317,8 @@ class TorrentEngine internal constructor(
         @Volatile var idleAt = System.currentTimeMillis(); private set
         /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
         @Volatile var firstPieceAt = 0L; private set
+        /** بنية بداية ملف MKV كما مرّت بالقارئ؛ null لغير MKV. */
+        @Volatile var head: MkvHead? = null; private set
         val fileBytes: Long get() = file?.size ?: 0L
         val pieceBytes: Int get() = pieceLength
         /** للتشخيص: متى صارت بيانات التورنت جاهزة، وأي قطعة ينتظرها القارئ الآن ومنذ متى (elapsedRealtime). */
@@ -393,6 +412,7 @@ class TorrentEngine internal constructor(
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
                 selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
+                head = if (file.path.endsWith(".mkv", ignoreCase = true)) MkvHead() else null
                 this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }

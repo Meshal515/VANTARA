@@ -29,6 +29,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val peers: Int, val seeds: Int, val downloadBps: Long, val fileBytes: Long, val pieceBytes: Int,
         val metadataAt: Long, val firstPieceAt: Long, val waitingPiece: Int, val waitingSince: Long,
         val waitingBlocks: Pair<Int, Int>?,
+        /** عناصر MKV العليا قبل أول Cluster كما مرّت بالقارئ، وما أُعطي أصفارًا بلا تنزيل. */
+        val mkvHead: String? = null, val mkvSkipped: Long = 0L,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -133,6 +135,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
                 if (needBps > 0) " · يحتاج الفيديو ${mbps(needBps)}" else "")
             if (t.waitingPiece >= 0) appendLine("ينتظر الآن: القطعة ${t.waitingPiece} منذ ${secs(nowMs - t.waitingSince)} ث" +
                 (t.waitingBlocks?.let { (d, n) -> " ($d/$n كتلة)" } ?: ""))
+            t.mkvHead?.let { appendLine("بداية الملف: $it") }
+            if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
         val firstByte = reads.firstOrNull { it.firstByteAt > 0 }?.firstByteAt ?: 0L
         appendLine("خط البدء: " + listOfNotNull(
