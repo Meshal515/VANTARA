@@ -12,7 +12,7 @@ import org.junit.Test
 class PlaybackBufferingTest {
     private fun parameters(bufferedMs: Long) = LoadControl.Parameters(
         PlayerId.UNSET, Timeline.EMPTY, MediaSource.MediaPeriodId(Any()),
-        180_000_000, bufferedMs * 1000, 1f, true, false, C.TIME_UNSET,
+        180_000_000, bufferedMs * 1000, 1f, true, false, C.TIME_UNSET, C.TIME_UNSET,
     )
     @Test fun `high bitrate buffer does not stop at five seconds after the old byte target`() {
         val control = PlaybackBuffering.create(512L * 1024 * 1024)
