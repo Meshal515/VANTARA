@@ -187,7 +187,7 @@ class TorrentEngine internal constructor(
             metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
-    fun pieceBlocks(uri: Uri, piece: Int): Pair<Int, Int>? {
+    fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
         if (!managerHolder.isInitialized() || piece < 0) return null
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
