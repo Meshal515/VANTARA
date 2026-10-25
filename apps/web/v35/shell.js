@@ -3967,6 +3967,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const MAIN_PAGES = ['home', 'library', 'discover', 'majlis'];
   const currentPage = () => root.querySelector('.page.active')?.id ?? 'home';
+  // موضع التمرير لكل صفحة غادرها المستخدم إلى أخرى: الرجوع يعيده حيث كان (الصفحة نفسها باقية
+  // في الذاكرة بعناصرها المحمّلة وفلاترها؛ كان showPage يصعد للأعلى دائمًا فيضيع المكان)
+  const scrollOf = new Map();
+  let scrollRestore = 0;
+  function restoreScroll(top) {
+    const run = ++scrollRestore;
+    window.scrollTo({ top, behavior: 'instant' });
+    // صفحة تُرسم بعد الإظهار (المكتبة، الرئيسية): نعيد المحاولة حين يكتمل طولها، ما لم يلمس المستخدم
+    let touched = false;
+    const stop = () => { touched = true; };
+    addEventListener('touchstart', stop, { once: true, passive: true });
+    addEventListener('wheel', stop, { once: true, passive: true });
+    for (const wait of [0, 120, 400]) setTimeout(() => {
+      if (run !== scrollRestore || touched || Math.abs(window.scrollY - top) < 2) return;
+      window.scrollTo({ top, behavior: 'instant' });
+    }, wait);
+  }
   function showPage(id, { push = true } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
@@ -3974,6 +3991,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       id = 'majlis';
     }
     const from = currentPage();
+    if (from !== id) scrollOf.set(from, window.scrollY);
     if(from === "utility" && id !== "utility")sourceView?.pause?.();
     if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
     // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
@@ -3995,7 +4013,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'library') inAnime ? anime.renderLibrary() : inCinema ? cinema.renderLibrary() : renderLibrary();
     if (id === 'discover') {
       if (inAnime) anime.showDiscover();
-      else if (inCinema) cinema.showDiscover();
+      // رجوع إلى قائمة السينما: تبقى كما تُركت (كان showList يعيد بناء الشبكة من الصفر فتضيع العناصر والموضع)
+      else if (inCinema) { if (push || !q('cinemaDiscover')?.childElementCount) cinema.showDiscover(); }
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
@@ -4034,7 +4053,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (id !== 'profile') profile?.hide();
     paintRail();
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
+    if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
+    else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
   }
   function navTo(id) {

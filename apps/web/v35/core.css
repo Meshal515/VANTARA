@@ -1772,6 +1772,9 @@ html,
   position: fixed;
   inset: 0;
   z-index: 120;
+  /* السحب على الخلفية المعتمة أو رأس القائمة لا يمرّر الصفحة خلفها */
+  touch-action: none;
+  overscroll-behavior: contain;
   background: rgba(0, 0, 0, 0.55);
   opacity: 0;
   pointer-events: none;
@@ -1781,6 +1784,7 @@ html,
   opacity: 1;
   pointer-events: auto;
 }
+
 .v35 .drawer {
   position: absolute;
   top: 0;
@@ -1871,6 +1875,9 @@ html,
 }
 .v35 .drawer-scroll {
   overflow: auto;
+  /* حافة القائمة لا تنقل التمرير إلى الصفحة خلفها (scroll chaining) */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   scrollbar-width: none;
   flex: 1;
 }
