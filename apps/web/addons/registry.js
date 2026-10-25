@@ -85,9 +85,19 @@ export function createAddonRegistry({
       }
     }
   })();
+  const mb = (n) => `${(n / 2 / 1024 / 1024).toFixed(1)}MB`;
+  // السبب كما قاسه المخزن: حجم السجل، أو امتلاء القرص، أو اسم خطأ IndexedDB كما هو
+  const storeFailure = (prefix) => {
+    const f = store.failure?.();
+    if (f?.reason === "too_large") return new Error(`${prefix}؛ سجل الإضافات ${mb(f.bytes)} أكبر من حده ${mb(f.limit)}`);
+    if (f?.reason === "quota" && f.top?.length)
+      return new Error(`${prefix}؛ localStorage ممتلئ (${mb(f.used)}، أكبرها: ${f.top.map(([k, n]) => `${k} ${mb(n)}`).join("، ")})`);
+    if (f?.reason === "quota") return new Error(`${prefix}؛ مساحة التخزين في الجهاز ممتلئة`);
+    return new Error(`${prefix}؛ رفض التخزين الكتابة (${f?.reason ?? "سبب غير معروف"})`);
+  };
   const save = async () => {
     if ((await store.set("state", STORAGE, [...entries.values()])) === false)
-      throw new Error("تعذر حفظ الإضافات؛ مساحة التخزين غير كافية");
+      throw storeFailure("تعذر حفظ الإضافات");
   };
   const view = (row) => { const addon = ({
     ...structuredClone({ ...row.manifest, baseUrl: undefined }),
@@ -238,7 +248,7 @@ export function createAddonRegistry({
       // Publish in memory only after the complete replacement is durable.
       const replacement = [...entries.values()].map(entry => entry === before ? next : entry);
       if ((await store.set("state", STORAGE, replacement)) === false)
-        throw new Error("تعذر حفظ إعادة التثبيت؛ احتُفظ بالإضافة السابقة");
+        throw storeFailure("تعذر حفظ إعادة التثبيت واحتُفظ بالإضافة السابقة");
       entries.set(key, next);
       health.reset(key);
       await flushHealth();

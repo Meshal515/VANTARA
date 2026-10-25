@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { nativeStore } from './native-runtime.js';
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();});
 const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   vi.resetModules();
@@ -86,4 +87,21 @@ it('shows an extension installed from a repository right away, in any language, 
   const rows=a.registry.list().filter(x=>x.bundled);
   expect(rows.map(x=>x.sourceId)).toEqual(['eu.kanade.tachiyomi.extension.ar.azora','eu.kanade.tachiyomi.extension.en.asura#1']);
   expect(rows[1]).toMatchObject({user:true,contentTypes:['manga']});
+});
+
+it("APK addon storage reports which localStorage keys filled the quota", async () => {
+  const data = new Map([["vantara.sync.library", "y".repeat(3000)], ["small", "1"]]);
+  const storage = {
+    get length() { return data.size; },
+    key: (i) => [...data.keys()][i] ?? null,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => { if (v.length > 100) throw Object.assign(new Error("full"), { name: "QuotaExceededError" }); data.set(k, v); },
+  };
+  const store = nativeStore(storage);
+  expect(await store.set("state", "addons.v1", ["z".repeat(200)])).toBe(false);
+  const f = store.failure();
+  expect(f.reason).toBe("quota");
+  expect(f.top[0]).toEqual(["vantara.sync.library", (20 + 3000) * 2]);
+  expect(await store.set("state", "addons.v1", [1])).toBe(true);
+  expect(store.failure()).toBe(null);
 });

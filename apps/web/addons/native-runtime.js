@@ -1,9 +1,25 @@
 import { createAddonRuntime } from "./runtime.js";
 import { createNativeTransport } from "./native-transport.js";
 let runtime;
-function nativeStore(storage = globalThis.localStorage) {
+// localStorage الكامل مشترك بين كل الشاشات؛ عند الرفض نقيس من يملؤه بدل افتراض السبب
+function heaviest(storage) {
+  const rows = [];
+  let used = 0;
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i) ?? "";
+      const size = (k.length + (storage.getItem(k)?.length ?? 0)) * 2;
+      used += size;
+      rows.push([k.slice(0, 48), size]);
+    }
+  } catch { /* القياس اختياري */ }
+  return { used, top: rows.sort((a, b) => b[1] - a[1]).slice(0, 3) };
+}
+export function nativeStore(storage = globalThis.localStorage) {
   const key = (space, k) => `vantara.addons.native|${space}|${k}`;
+  let lastFailure = null;
   return {
+    failure: () => lastFailure,
     async get(space, k) {
       try {
         const row = JSON.parse(storage.getItem(key(space, k)));
@@ -20,10 +36,17 @@ function nativeStore(storage = globalThis.localStorage) {
           value,
           expiresAt: Number.isFinite(ttlMs) ? Date.now() + ttlMs : 1e15,
         });
-        if (text.length > 2 * 1024 * 1024) return false;
+        if (text.length > 2 * 1024 * 1024) {
+          lastFailure = { reason: "too_large", bytes: text.length * 2, limit: 4 * 1024 * 1024 };
+          return false;
+        }
         storage.setItem(key(space, k), text);
+        lastFailure = null;
         return true;
-      } catch {
+      } catch (error) {
+        lastFailure = error?.name === "QuotaExceededError" || /quota/i.test(String(error?.message))
+          ? { reason: "quota", ...heaviest(storage) }
+          : { reason: error?.name || "unknown" };
         return false;
       }
     },

@@ -180,6 +180,8 @@ function deleteDb(factory, name) {
 export function createStore({ name = 'vantara-pwa', indexedDB = globalThis.indexedDB ?? null, now = () => Date.now(), spaces = SPACES, onRecover = () => {} } = {}) {
   let backendPromise = null;
   const lastTouch = new Map();
+  /** سبب آخر `set` فاشل، ليقول المستدعي للمستخدم ما حدث فعلًا بدل تخمين «المساحة». */
+  let lastFailure = null;
 
   async function connect() {
     if (!indexedDB) return memoryBackend();
@@ -259,13 +261,18 @@ export function createStore({ name = 'vantara-pwa', indexedDB = globalThis.index
   async function set(ns, key, value, { ttlMs } = {}) {
     const space = spaceOf(ns);
     const bytes = sizeOf(value);
-    // مدخل وحده أكبر من ربع المساحة لا يستحق أن يطرد غيره
-    if (!Number.isFinite(bytes) || bytes > space.maxBytes / 4) return false;
+    // مدخل وحده أكبر من ربع المساحة لا يستحق أن يطرد غيره، إلا مساحة تعلن حدًا خاصًا للمدخل
+    const limit = space.maxEntryBytes ?? space.maxBytes / 4;
+    if (!Number.isFinite(bytes) || bytes > limit) {
+      lastFailure = { reason: 'too_large', bytes, limit };
+      return false;
+    }
     const t = now();
     const ttl = ttlMs ?? space.ttlMs;
     const entry = { id: idOf(ns, key), ns, key, value, bytes, createdAt: t, accessedAt: t, expiresAt: Number.isFinite(ttl) ? t + ttl : Number.MAX_SAFE_INTEGER };
     try {
       await run((b) => b.put(entry));
+      lastFailure = null;
       return true;
     } catch (error) {
       if (error?.name === 'QuotaExceededError') {
@@ -273,11 +280,14 @@ export function createStore({ name = 'vantara-pwa', indexedDB = globalThis.index
         await sweep({ ns, target: 0.5 }).catch(() => {});
         try {
           await run((b) => b.put(entry));
+          lastFailure = null;
           return true;
-        } catch {
+        } catch (again) {
+          lastFailure = { reason: again?.name === 'QuotaExceededError' ? 'quota' : again?.name || 'unknown', bytes };
           return false;
         }
       }
+      lastFailure = { reason: error?.name || 'unknown', bytes };
       return false;
     }
   }
@@ -377,5 +387,5 @@ export function createStore({ name = 'vantara-pwa', indexedDB = globalThis.index
     }
   }
 
-  return { get, set, delete: remove, clear, sweep, usage, cached, backendKind: async () => (await backend()).kind };
+  return { get, set, delete: remove, clear, sweep, usage, cached, failure: () => lastFailure, backendKind: async () => (await backend()).kind };
 }
