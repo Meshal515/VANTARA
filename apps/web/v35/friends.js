@@ -452,8 +452,20 @@ export function createFriends(ctx) {
   function render() {
     const keepScroll = host.querySelector('.sx-strip')?.scrollLeft ?? 0;
     const parts = [];
+    // A full mirror resync can temporarily empty accounts, the room and the
+    // feed while the server is still returning pages. Preserve the last
+    // rendered social surface until real rows arrive; do not present this
+    // transient loading state as an empty room or lost membership.
+    const transientEmpty = !kit.memberIds().length
+      && !sync.rows('majlis_messages').length
+      && !sync.rows('recommendations').length
+      && !sync.rows('frames').length
+      && !sync.rows('activity').length;
+    if (transientEmpty && host.querySelector('.sx-door')) return;
     const currentIds = kit.friendIds();
-    friendOrder ??= currentIds.sort((a, b) => rank(a) - rank(b) || kit.nameOf(a).localeCompare(kit.nameOf(b), 'ar'));
+    if (friendOrder === null || (currentIds.length && !friendOrder.some(id => currentIds.includes(id)))) {
+      friendOrder = [...currentIds].sort((a, b) => rank(a) - rank(b) || kit.nameOf(a).localeCompare(kit.nameOf(b), 'ar'));
+    }
     const ids = friendOrder.filter(id => currentIds.includes(id));
 
     const friends = el('section', 'sx-section sx-friends');
