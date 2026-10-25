@@ -1,6 +1,6 @@
 import { createAddonRuntime } from "./runtime.js";
 import { createNativeTransport } from "./native-transport.js";
-import { createStore, SPACES } from "../pwa/cache/store.js";
+import { createStore, SPACES } from "../lib/idb-store.js";
 let runtime;
 // كانت الإضافات في APK تُحفظ في localStorage، ومعها كل رد بث وترجمة بمفتاح خاص لكل حلقة لا يُحذف أبدًا،
 // فيمتلئ localStorage المشترك مع الوقت ويُرفض حفظ الإضافات. الآن IndexedDB بحدود وكنس، وما في
