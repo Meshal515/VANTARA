@@ -13,6 +13,7 @@
 | كيف أعدل وأختبر؟ | [دليل التطوير](DEVELOPMENT.md) | [دروس الإصلاحات](VANTARA_LESSONS.md) |
 | كيف تعمل المصادر والإضافات؟ | [خطة الانتقال للإضافات](SOURCES_TRANSITION.md) | [عقود الإضافات](addons/CONTRACTS.md)، [محرك الأنمي](ANIME_ENGINE.md) |
 | ما قيود الويب؟ | [PWA](PWA.md) | [مراجعة وسيط جلب الويب](addons/rebuild/PWA-SERVER-FEEDBACK.md) |
+| كيف يستضيف المستخدم مساحته بلا تكلفة عليك؟ | [الاستضافة الذاتية والتحديثات](SELF_HOSTING_AND_UPDATES.md) | [الرؤية](PRODUCT_VISION.md) |
 | كيف يصدر التطبيق؟ | [التحديثات الموحدة](UNIFIED_UPDATES.md) | [سجل الإصدارات الفعلي](https://github.com/Meshal515/VANTARA/releases) |
 | كيف أنشر خدمة محددة؟ | [مكدس المحتوى المستضاف ذاتيًا](DEPLOY.md) | [التحديثات الموحدة](UNIFIED_UPDATES.md) |
 | كيف تعمل الغرف والمزامنة؟ | [تصميم Together](VANTARA_TOGETHER.md) | [حالة التحقق](FEATURE_STATUS.md)، [النظام الاجتماعي](VANTARA_SOCIAL_SYSTEM.md) |
