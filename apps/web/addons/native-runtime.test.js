@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { nativeStore } from './native-runtime.js';
+import { createStore, SPACES } from '../pwa/cache/store.js';
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();});
 const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   vi.resetModules();
@@ -89,19 +90,25 @@ it('shows an extension installed from a repository right away, in any language, 
   expect(rows[1]).toMatchObject({user:true,contentTypes:['manga']});
 });
 
-it("APK addon storage reports which localStorage keys filled the quota", async () => {
-  const data = new Map([["vantara.sync.library", "y".repeat(3000)], ["small", "1"]]);
+it("APK addons move off the shared localStorage, keep installed addons, and drop the never-deleted response cache", async () => {
+  const data = new Map([
+    ["vantara.addons.native|state|addons.v1", JSON.stringify({ value: [{ id: "kept" }], expiresAt: 1e15 })],
+    ["vantara.addons.native|source|addon|[1]", "x".repeat(5000)],
+    ["vantara.addons.native|source|addon|[2]", "x".repeat(5000)],
+    ["vantara.sync.library", "{}"],
+  ]);
   const storage = {
     get length() { return data.size; },
     key: (i) => [...data.keys()][i] ?? null,
     getItem: (k) => data.get(k) ?? null,
-    setItem: (k, v) => { if (v.length > 100) throw Object.assign(new Error("full"), { name: "QuotaExceededError" }); data.set(k, v); },
+    setItem: () => { throw Object.assign(new Error("full"), { name: "QuotaExceededError" }); },
+    removeItem: (k) => data.delete(k),
   };
-  const store = nativeStore(storage);
-  expect(await store.set("state", "addons.v1", ["z".repeat(200)])).toBe(false);
-  const f = store.failure();
-  expect(f.reason).toBe("quota");
-  expect(f.top[0]).toEqual(["vantara.sync.library", (20 + 3000) * 2]);
-  expect(await store.set("state", "addons.v1", [1])).toBe(true);
+  const store = nativeStore(storage, createStore({ indexedDB: null, spaces: { ...SPACES, state: { ttlMs: Infinity, maxBytes: 16 * 1024 * 1024, maxEntryBytes: 16 * 1024 * 1024 } } }));
+  expect((await store.get("state", "addons.v1")).value).toEqual([{ id: "kept" }]);
+  expect([...data.keys()]).toEqual(["vantara.sync.library"]);
+  // localStorage ممتلئ لا يمنع حفظ الإضافات بعد الآن
+  expect(await store.set("state", "addons.v1", [{ id: "kept" }, { id: "new", blob: "y".repeat(3 * 1024 * 1024) }])).toBe(true);
+  expect((await store.get("state", "addons.v1")).value).toHaveLength(2);
   expect(store.failure()).toBe(null);
 });

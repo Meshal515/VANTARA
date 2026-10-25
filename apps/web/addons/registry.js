@@ -90,8 +90,6 @@ export function createAddonRegistry({
   const storeFailure = (prefix) => {
     const f = store.failure?.();
     if (f?.reason === "too_large") return new Error(`${prefix}؛ سجل الإضافات ${mb(f.bytes)} أكبر من حده ${mb(f.limit)}`);
-    if (f?.reason === "quota" && f.top?.length)
-      return new Error(`${prefix}؛ localStorage ممتلئ (${mb(f.used)}، أكبرها: ${f.top.map(([k, n]) => `${k} ${mb(n)}`).join("، ")})`);
     if (f?.reason === "quota") return new Error(`${prefix}؛ مساحة التخزين في الجهاز ممتلئة`);
     return new Error(`${prefix}؛ رفض التخزين الكتابة (${f?.reason ?? "سبب غير معروف"})`);
   };
