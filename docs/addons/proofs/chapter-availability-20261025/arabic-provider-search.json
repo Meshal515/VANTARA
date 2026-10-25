@@ -1,0 +1,60 @@
+[
+  {
+    "source": "mangalik.net",
+    "status": 200,
+    "finalUrl": "https://mangalik.net/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [
+      "https://mangalik.net/manga/the-long-way-of-the-warrior/",
+      "https://mangalik.net/manga/the-long-way-of-the-warrior/218/"
+    ],
+    "challenge": false
+  },
+  {
+    "source": "starzmanga.com",
+    "status": 200,
+    "finalUrl": "https://starzmanga.com/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [
+      "https://starzmanga.com/manga/the-long-way-of-the-warrior/",
+      "https://starzmanga.com/manga/the-long-way-of-the-warrior/218/"
+    ],
+    "challenge": false
+  },
+  {
+    "source": "sparkmanga.net",
+    "status": 200,
+    "finalUrl": "https://sparkmanga.net/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [
+      "https://sparkmanga.net/manga/the-long-way-of-the-warrior/",
+      "https://sparkmanga.net/manga/the-long-way-of-the-warrior/218/"
+    ],
+    "challenge": false
+  },
+  {
+    "source": "link-manga.net",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "source": "manga-lionz.org",
+    "status": 200,
+    "finalUrl": "https://manga-lionz.org/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [
+      "https://manga-lionz.org/manga/the-long-way-of-the-warrior/",
+      "https://manga-lionz.org/manga/the-long-way-of-the-warrior/218/"
+    ],
+    "challenge": false
+  },
+  {
+    "source": "3asq.online",
+    "status": 200,
+    "finalUrl": "https://3asq.online/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [],
+    "challenge": false
+  },
+  {
+    "source": "hizomanga.net",
+    "status": 200,
+    "finalUrl": "https://hizomanga.net/?s=The+Long+Way+Of+The+Warrior&post_type=wp-manga",
+    "links": [],
+    "challenge": false
+  }
+]

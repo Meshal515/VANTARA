@@ -34,8 +34,17 @@ export function mergeTimelineEvents(visible, incoming, { enteredAt, now = Date.n
  * Reconcile newer pages without dropping older pages: those may be offscreen
  * and expensive to reload (especially covers on mobile PWA and WebView).
  */
+function retainOutsideHead(visible,incoming) {
+  const dated=incoming.filter(e=>Number.isFinite(e.at));
+  if(!dated.length)return visible;
+  const floor=dated.reduce((a,b)=>b.at<a.at||(b.at===a.at&&String(b.id)<String(a.id))?b:a);
+  const seen=new Set(incoming.map(e=>e.id));
+  // The returned head is authoritative down to its last SQL (at,id) cursor.
+  // Older pagination remains mounted; an empty/transient response erases nothing.
+  return visible.filter(e=>seen.has(e.id)||!Number.isFinite(e.at)||e.at<floor.at||(e.at===floor.at&&String(e.id)<String(floor.id)));
+}
 export function reconcileTimelineRefresh(visible, incoming, now = Date.now()) {
-  return mergeTimelineEvents(visible, incoming, { enteredAt: 0, now, refresh: true });
+  return mergeTimelineEvents(retainOutsideHead(visible,incoming), incoming, { enteredAt: 0, now, refresh: true });
 }
 
 /** Preserve the first visible card's screen position while newer cards are added above it. */
@@ -298,7 +307,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       } else if (previous.size && page.next && !page.events.some(e => previous.has(e.id))) {
         state.bridgeKnown = previous; state.bridgeNext = page.next;
       }
-      state.events = mergeTimelineEvents(state.events, page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
+      state.events = mergeTimelineEvents(requestedCursor?state.events:retainOutsideHead(state.events,page.events), page.events, { enteredAt: state.enteredAt, now: page.snapshotAt ?? Date.now() });
       paintWithScrollAnchor(list, paint);
       controls();
     } catch { /* The existing timeline stays visible during a transient outage. */ }

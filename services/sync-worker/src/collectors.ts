@@ -54,7 +54,10 @@ function teamxRows(html: string, now: number) {
   }).filter(row=>row.valid);
 }
 export function teamxChapters(html: string, now: number) {
-  return teamxRows(html,now).filter(row=>row.readable).map(({number,publishedAt})=>({number,publishedAt}))
+  return readableTeamxUnits(teamxRows(html,now));
+}
+function readableTeamxUnits(rows: ReturnType<typeof teamxRows>) {
+  return rows.filter(row=>row.readable).map(({number,publishedAt})=>({number,publishedAt}))
     .sort((a,b)=>b.publishedAt-a.publishedAt).slice(0,40);
 }
 
@@ -97,8 +100,8 @@ async function teamx(env: Env, now: number, fetchImpl: Fetcher, cursor: number) 
   for (let i = 0; i < selected.length; i += 2) await Promise.all(selected.slice(i, i + 2).map(async (card) => {
     try {
       const html=await (await request(card.url, fetchImpl)).text();
-      const units=teamxChapters(html,now),work=`ext:${normalizeTitle(card.title)}`;
-      const locked=teamxRows(html,now).filter(row=>row.locked).map(row=>row.number).slice(0,60);
+      const rows=teamxRows(html,now),units=readableTeamxUnits(rows),work=`ext:${normalizeTitle(card.title)}`;
+      const locked=rows.filter(row=>row.locked).map(row=>row.number).slice(0,60);
       if(locked.length)corrections.push({work,locked});
       if (units.length) reports.push({ work, section: 'manga', kind: 'chapter', title: card.title, cover: card.cover, source: { s: TEAMX_SOURCE, u: new URL(card.url).pathname }, units });
     } catch { failures++; }

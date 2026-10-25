@@ -17,7 +17,7 @@ describe('server collectors', () => {
   it('repairs old blocked-only events but preserves the same chapter from another Arabic source and its dates', async () => {
     const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';
     const report=(title:string,s:string,number:number)=>({work:`ext:${title.toLowerCase()}`,section:'manga',kind:'chapter',title,source:{s,u:'/series/LWW'},units:[{number,publishedAt:NOW-H}]});
-    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[report('The Long Way Of The Warrior',sid,251),report('The Long Way Of The Warrior','ar.other',251),report('Rise Of The Northern Shadow',sid,34)]})}),env,NOW);
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[report('The Long Way Of The Warrior',sid,251),report('The Long Way Of The Warrior','ar.other',251),report('Rise Of The Northern Shadow',sid,34),{...report('The Long Way Of The Warrior',sid,200),source:null}]})}),env,NOW);
     const fetcher=(async(input:RequestInfo|URL)=>{
       const url=String(input);
       if(url.endsWith('/series/LWW'))return new Response(chapter(251,true)+chapter(218));
@@ -29,7 +29,15 @@ describe('server collectors', () => {
     const body=await(await handleUpdatesList(new URL('https://x/v1/updates?section=manga'),env)).json()as{events:Array<{number:number;sources:Array<{s:string}>;at:number;firstSeenAt:number}>};
     expect(body.events.some(e=>e.number===34)).toBe(false);
     expect(body.events.find(e=>e.number===251)).toMatchObject({sources:[{s:'ar.other'}],at:NOW-H,firstSeenAt:NOW});
-    expect(body.events.map(e=>e.number)).toEqual(expect.arrayContaining([218,31]));
+    expect(body.events.map(e=>e.number)).toEqual(expect.arrayContaining([218,31,200]));
+  });
+  it('never withdraws a chapter merely because the provider request failed',async()=>{
+    const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{work:'ext:work',section:'manga',kind:'chapter',title:'Work',source:{s:sid},units:[{number:251,publishedAt:NOW-H}]}]})}),env,NOW);
+    const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try{await collectTimelines(env,{now:NOW,scheduled:true,fetchImpl:(async()=>new Response('offline',{status:503}))as typeof fetch});}finally{log.mockRestore();}
+    const body=await(await handleUpdatesList(new URL('https://x/v1/updates?section=manga'),env)).json()as{events:Array<{number:number}>};
+    expect(body.events[0]?.number).toBe(251);
   });
   it('prepares manga, anime and cinema history without any app opening, preserving canonical firstSeenAt on rescan', async () => {
     const { env } = setup();
@@ -134,7 +142,7 @@ describe('server collectors', () => {
         if (url.includes('admin-ajax') || url.includes('m_orderby')) return new Response(Array.from({ length: 20 }, (_, i) => `<div class="page-item-detail manga"><img src="https://c/${i}.jpg"><div class="post-title"><h3><a href="/manga/m${i}/">Madara${i}</a></h3></div><div class="list-chapter"><span class="chapter"><a href="/manga/m${i}/9/">9</a></span><span class="chapter"><a href="/manga/m${i}/8/">8</a></span></div></div>`).join(''));
         if (url.includes('api.azorafly')) return reply({ posts: Array.from({ length: 24 }, (_, i) => ({ id: i, slug: `a${i}`, postTitle: `Iken${i}`, chapters: [{ number: 5, createdAt: new Date(now - H).toISOString() }, { number: 4, createdAt: new Date(now - 2 * H).toISOString() }] })) });
         if (url.includes('meshmanga')) return reply({ results: Array.from({ length: 20 }, (_, i) => ({ serie_id: i + 1, title: `Swat${i}`, chapters: [{ chapter: '7', created_at: new Date(now - H).toISOString() }] })) });
-        if (url.includes('olympustaff.com/series/')) return new Response(Array.from({ length: 40 }, (_, i) => `<div class="chapter-card" data-date="${(now - (i+1)*60_000)/1000}" data-number="${400-i}"><a href="/series/work/${400-i}"></a></div>`).join(''));
+        if (url.includes('olympustaff.com/series/')) return new Response(Array.from({ length: 40 }, (_, i) => `<div class="chapter-card" data-date="${(now - (i+1)*60_000)/1000}" data-number="${400-i}"><a href="${i<10?'#':`/series/work/${400-i}`}" ${i<10?'data-bs-target="#buyModel"':''}></a></div>`).join(''));
         if (url.includes('olympus')) return new Response('<div class="last-chapter">' + Array.from({ length: 24 }, (_, i) => `<div class="box"><a href="/series/work${i}"><h3>Work${i}</h3></a></div>`).join(''));
         if (url.includes('mangadex')) return reply({ data: Array.from({ length: 50 }, (_, i) => ({ attributes: { chapter: '1', publishAt: new Date(now-H).toISOString() }, relationships: [{ id: String(i), type: 'manga', attributes: { title: { en: `Dex${i}` } } }] })) });
         if (url.includes('anilist')) return reply({ data: { Page: { airingSchedules: Array.from({ length: 50 }, (_, i) => ({ episode: 1, airingAt: (now-H)/1000, media: { id: i+1, title: { english: `Anime${i}` } } })) } } });

@@ -8,6 +8,12 @@ const M = 60_000;
 const H = 60 * M;
 
 describe('آخر التحديثات', () => {
+  it('drops a withdrawn chapter inside a refreshed head while keeping older loaded pages',()=>{
+    const visible=[{id:'locked251',at:300},{id:'readable218',at:200},{id:'historic',at:50}];
+    const incoming=[{id:'new',at:400,publishedAt:400},{id:'readable218',at:200,publishedAt:200}];
+    expect(reconcileTimelineRefresh(visible,incoming,500).map(e=>e.id)).toEqual(['new','readable218','historic']);
+    expect(reconcileTimelineRefresh(visible,[],500)).toEqual(visible);
+  });
   it('shows only real new publications live; discovery time never promotes historic backfill', () => {
     const ev = (id, publishedAt) => ({ id, work: id, at: publishedAt ?? NOW, publishedAt, firstSeenAt: NOW });
     const original = [ev('yesterday', NOW - 24 * H)];
