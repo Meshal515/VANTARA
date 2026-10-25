@@ -20,6 +20,9 @@ class NetStats(private val now: () -> Long = { android.os.SystemClock.elapsedRea
     private val window = ArrayDeque<LongArray>() // [وقت، بايتات]
     @Volatile var host: String? = null; private set
     @Volatile var requests = 0; private set
+    /** أول بايت فيديو وصل للمشغّل منذ [markStart] (بساعة [now])، لتسلسل البدء. */
+    @Volatile var firstByteAt = 0L; private set
+    fun markStart() { firstByteAt = 0L }
 
     @Synchronized override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
         if (isNetwork) opening[source] = now()
@@ -35,6 +38,7 @@ class NetStats(private val now: () -> Long = { android.os.SystemClock.elapsedRea
     @Synchronized override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
         if (!isNetwork || bytesTransferred <= 0) return
         val t = now()
+        if (firstByteAt == 0L) firstByteAt = t
         window.addLast(longArrayOf(t, bytesTransferred.toLong()))
         trim(t)
     }

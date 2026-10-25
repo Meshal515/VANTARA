@@ -22,7 +22,18 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One native session; requests only register tickets. Network/metadata/pieces run on Media3's loader. */
-class TorrentEngine internal constructor(context: Context, private val sessionSettings: () -> SettingsPack = ::streamingSettings, private val networkFilter: () -> ip_filter = ::publicNetworkFilter) : AutoCloseable {
+class TorrentEngine internal constructor(
+    context: Context,
+    private val sessionSettings: () -> SettingsPack = ::streamingSettings,
+    /**
+     * النافذة القديمة (قدّام الأندر أولًا، مسح المواعيد كلها، بلا تجهيز القطعة التالية) هي الإنتاج.
+     * الجديدة (false) أسرع بلا حد (4K: 39.5 مقابل 29.3 MB/s) لكن أول بايت على 6 Mbps جاء أبطأ في
+     * قياس واحد (1080p: 46.6 مقابل 24.5 ث)، فتبقى للاختبار حتى يثبتها قياس مكرر.
+     */
+    private val legacyWindow: Boolean = true,
+    // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
+    private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
+) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
@@ -169,8 +180,10 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null
         val flags = runCatching { handle.flags() }.getOrNull()
+        val state = states[hash]
         return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
-            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers())
+            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
+            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L)
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
     /**
@@ -210,6 +223,9 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             state.select(handle, selected, info)
             handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
             handle.unsetFlags(TorrentFlags.STOP_WHEN_READY)
+            // ما قدّام النافذة يُنزَّل الأقرب فالأبعد (لا الأندر أولًا): بسرعة أقل من معدل الفيديو كان
+            // التحميل يتوزع على قطع بعيدة متفرقة والقطعة التي يقف عليها المشغّل تتأخر («جاهز أمامك 0»)
+            if (!legacyWindow) handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
             handle.resume()
             Lease(state, selected, info.pieceLength(), stopped)
         } catch (error: Throwable) {
@@ -241,6 +257,8 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             state.prioritize(file, position, pieceLength)
             val bytes = state.piece(plan.piece) { closed.get() || cancelled() }
             if (plan.offset + plan.length > bytes.size) throw IOException("Verified piece shorter than selected file range")
+            // القطعة التالية تُقرأ من القرص إلى الذاكرة إن اكتملت، قبل أن يصل إليها المشغّل
+            if (!legacyWindow) state.readAhead(plan.piece + 1, file, pieceLength)
             bytes.copyInto(target, offset, plan.offset, plan.offset + plan.length)
             return plan.length
         }
@@ -256,6 +274,8 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         private var edgesWanted = false
         private var torrent: TorrentHandle? = null
         private var window = emptyList<Int>()
+        /** القطع التي لها موعد الآن: يُعدَّل الفرق فقط حين تتحرك النافذة، لا تُمسح كلها وتُعاد. */
+        private var deadlined = HashSet<Int>()
         // النافذة المتحركة: الملف المختار، القطع المطلوبة قدّام النافذة، والمدى المفرّغ من القرص
         private var file: TorrentFile? = null
         private var pieceLength = 0
@@ -269,6 +289,9 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         private val failed = HashSet<Int>()
         private var memoryBytes = 0
         @Volatile var idleAt = System.currentTimeMillis(); private set
+        /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
+        @Volatile var firstPieceAt = 0L; private set
+        val fileBytes: Long get() = file?.size ?: 0L
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
         /**
          * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
@@ -289,7 +312,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         private fun pauseIfStillIdle(since: Long) = synchronized(monitor) {
             if (refs != 0 || idleAt != since) return@synchronized
             torrent?.takeIf { it.isValid }?.let { handle ->
-                handle.pause(); handle.clearPieceDeadlines()
+                handle.pause(); handle.clearPieceDeadlines(); deadlined.clear()
                 window.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 aheadRange.forEach { handle.piecePriority(it, Priority.IGNORE) }
             }
@@ -354,7 +377,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
-                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false
+                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
                 this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }
@@ -366,6 +389,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
                 for ((piece, deadline) in TorrentPolicy.deadlines(edges.take(1), edges.drop(1))) {
                     handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
                     handle.setPieceDeadline(piece, deadline)
+                    deadlined += piece
                 }
                 edgesWanted = true
             }
@@ -377,13 +401,26 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             if (next == window) return@synchronized
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             val handle = torrent ?: throw IOException("Torrent session ended")
-            handle.clearPieceDeadlines()
             window.filterNot { it in next }.forEach { handle.piecePriority(it, Priority.IGNORE) }
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
-            for ((piece, deadline) in TorrentPolicy.deadlines(next, pending)) {
-                handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
-                handle.setPieceDeadline(piece, deadline)
+            val wanted = TorrentPolicy.deadlines(next, pending)
+            if (legacyWindow) {
+                handle.clearPieceDeadlines()
+                for ((piece, deadline) in wanted) {
+                    handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
+                    handle.setPieceDeadline(piece, deadline)
+                }
+            } else {
+                // الفرق فقط: مسح كل المواعيد ثم إعادتها عند كل قطعة كان يلغي طلبات القطع الجارية عند المشاركين
+                val keep = wanted.mapTo(HashSet()) { it.first }
+                for (piece in deadlined) if (piece !in keep) handle.resetPieceDeadline(piece)
+                for ((piece, deadline) in wanted) {
+                    if (piece in deadlined && deadline != 0) continue
+                    handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
+                    if (piece !in deadlined) handle.setPieceDeadline(piece, deadline)
+                }
+                deadlined = keep
             }
             extendAhead(handle, file, pieceLength, next)
             window = next
@@ -440,6 +477,8 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             val handle = TorrentHandle(added)
             handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
             handle.unsetFlags(TorrentFlags.STOP_WHEN_READY)
+            if (!legacyWindow) handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            deadlined.clear()
             val info = handle.torrentFile()
             if (info != null && info.isValid) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
@@ -468,10 +507,12 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
                     if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
                     // A 4K piece can be 16 MB: fail on a stalled swarm, not on a slow but moving one.
+                    // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
+                    // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
                     if (now - checkedAt >= ONE_SECOND_NS) {
                         checkedAt = now
-                        val total = runCatching { handle.status().totalDone() }.getOrDefault(done)
+                        val total = runCatching { handle.status().totalPayloadDownload() }.getOrDefault(done)
                         if (total > done) { if (done >= 0) progressAt = now; done = total }
                     }
                     if (TimeUnit.NANOSECONDS.toMillis(now - progressAt) >= PIECE_STALL_MS || TimeUnit.NANOSECONDS.toMillis(now - start) >= PIECE_MAX_WAIT_MS) {
@@ -482,6 +523,12 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
                 }
             }
         }
+        /** إن اكتملت [piece] ولم تكن في الذاكرة: تُطلب قراءتها الآن (لا انتظار؛ تصل عبر received). */
+        fun readAhead(piece: Int, file: TorrentFile, pieceLength: Int) = synchronized(monitor) {
+            if (refs == 0 || piece > ((file.offset + file.size - 1) / pieceLength).toInt() || pieces.containsKey(piece) || piece in reading || evicted(piece)) return@synchronized
+            val handle = torrent?.takeIf { it.isValid } ?: return@synchronized
+            if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
+        }
         fun reading(piece: Int): Boolean = synchronized(monitor) { piece in reading }
         fun received(piece: Int, bytes: ByteArray) = synchronized(monitor) {
             if (!reading.remove(piece)) return@synchronized
@@ -489,6 +536,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
                 val first = pieces.entries.first(); memoryBytes -= first.value.size; pieces.remove(first.key)
             }
             pieces.put(piece, bytes)?.let { memoryBytes -= it.size }; memoryBytes += bytes.size
+            if (firstPieceAt == 0L) firstPieceAt = android.os.SystemClock.elapsedRealtime()
             monitor.notifyAll()
         }
         fun readFailed(piece: Int) = synchronized(monitor) { reading.remove(piece); failed.add(piece); monitor.notifyAll() }
@@ -583,6 +631,11 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             settings.setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 0)
             settings.setBoolean(settings_pack.bool_types.piece_extent_affinity.swigValue(), false)
             // مشاركون خلف NAT لا يصلون إلا باتصال داخل: افتح المنفذ تلقائيًا حيث يسمح الراوتر
+            // TCP وحده كما Stremio (torrent-stream): uTP يتراجع مع كل تذبذب في تأخير الشبكة. قيس على
+            // المحاكي بأسراب Torrentio حقيقية (TorrentThroughputDeviceTest): بلا uTP تضاعف ما يصل
+            // للمشغّل في كل المقارنات الثماني — 4K من 18.5 إلى 39 MB/s، و1080p من 5.8 إلى 13.7 MB/s.
+            settings.setBoolean(settings_pack.bool_types.enable_outgoing_utp.swigValue(), false)
+            settings.setBoolean(settings_pack.bool_types.enable_incoming_utp.swigValue(), false)
             settings.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
             settings.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
             return settings
