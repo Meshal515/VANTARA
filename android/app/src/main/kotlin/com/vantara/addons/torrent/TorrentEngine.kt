@@ -25,9 +25,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class TorrentEngine internal constructor(
     context: Context,
     private val sessionSettings: () -> SettingsPack = ::streamingSettings,
-    private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
     /** للمقارنة في اختبار الجهاز فقط: النافذة القديمة (قدّام عشوائي، مسح المواعيد كلها، بلا تجهيز القطعة التالية). */
     private val legacyWindow: Boolean = false,
+    // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
+    private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
     private val directory = File(context.cacheDir, "torrent-streams").apply { mkdirs() }
     private val shutdown = AtomicBoolean(false)
