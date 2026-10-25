@@ -8,15 +8,21 @@
 
 | أبحث عن | ابدأ بـ | بعدها |
 | --- | --- | --- |
-| ما هو التطبيق؟ | [README الرئيسي](../README.md) | [حالة الميزات](FEATURE_STATUS.md) |
+| ما هو التطبيق؟ | [README الرئيسي](../README.md) | [رؤية المنتج](PRODUCT_VISION.md)، [حالة الميزات](FEATURE_STATUS.md) |
 | كيف تتصل المنصات؟ | [المعمارية الحالية](ARCHITECTURE.md) | [ملكية البيانات](VANTARA_DATA_OWNERSHIP.md)، [النقل](VANTARA_TRANSPORT.md) |
 | كيف أعدل وأختبر؟ | [دليل التطوير](DEVELOPMENT.md) | [دروس الإصلاحات](VANTARA_LESSONS.md) |
-| كيف تعمل المصادر والإضافات؟ | [عقود الإضافات](addons/CONTRACTS.md) | [محرك الأنمي](ANIME_ENGINE.md)، [وثائق التورنت لأندرويد](addons/rebuild/native-torrent/ENGINE.md) |
+| كيف تعمل المصادر والإضافات؟ | [خطة الانتقال للإضافات](SOURCES_TRANSITION.md) | [عقود الإضافات](addons/CONTRACTS.md)، [محرك الأنمي](ANIME_ENGINE.md) |
 | ما قيود الويب؟ | [PWA](PWA.md) | [مراجعة وسيط جلب الويب](addons/rebuild/PWA-SERVER-FEEDBACK.md) |
 | كيف يصدر التطبيق؟ | [التحديثات الموحدة](UNIFIED_UPDATES.md) | [سجل الإصدارات الفعلي](https://github.com/Meshal515/VANTARA/releases) |
 | كيف أنشر خدمة محددة؟ | [مكدس المحتوى المستضاف ذاتيًا](DEPLOY.md) | [التحديثات الموحدة](UNIFIED_UPDATES.md) |
 | كيف تعمل الغرف والمزامنة؟ | [تصميم Together](VANTARA_TOGETHER.md) | [حالة التحقق](FEATURE_STATUS.md)، [النظام الاجتماعي](VANTARA_SOCIAL_SYSTEM.md) |
 | أين الخطة؟ | [الخارطة](VANTARA_ROADMAP.md) | [الخطة التاريخية الكبرى](VANTARA_MASTER_PLAN.md) |
+
+## للمساهمة والأمان
+
+- [دليل المساهمة](../CONTRIBUTING.md) للمطورين الذين يريدون المساعدة في الإضافات والأداء والعربية والتوافق.
+- [الإبلاغ الأمني](../SECURITY.md) لحماية الحسابات والأسرار والبلاغات الحساسة.
+- [رؤية مجموعات الأصدقاء والاستضافة المقترحة](PRODUCT_VISION.md) تصف المستقبل ولا تدّعي توافره حاليًا.
 
 ## طبقات الوثائق وما حجيتها
 
