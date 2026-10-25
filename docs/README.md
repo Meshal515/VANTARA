@@ -16,7 +16,8 @@
 | كيف يصدر التطبيق؟ | [التحديثات الموحدة](UNIFIED_UPDATES.md) | [سجل الإصدارات الفعلي](https://github.com/Meshal515/VANTARA/releases) |
 | كيف أنشر خدمة محددة؟ | [مكدس المحتوى المستضاف ذاتيًا](DEPLOY.md) | [التحديثات الموحدة](UNIFIED_UPDATES.md) |
 | كيف تعمل الغرف والمزامنة؟ | [تصميم Together](VANTARA_TOGETHER.md) | [حالة التحقق](FEATURE_STATUS.md)، [النظام الاجتماعي](VANTARA_SOCIAL_SYSTEM.md) |
-| أين الخطة؟ | [الخارطة](VANTARA_ROADMAP.md) | [الخطة التاريخية الكبرى](VANTARA_MASTER_PLAN.md) |
+| أين الخطة؟ | [رؤية المنتج](PRODUCT_VISION.md)، [انتقال مصادر الفيديو](SOURCES_TRANSITION.md) | [الخارطة](VANTARA_ROADMAP.md)، [الخطة التاريخية الكبرى](VANTARA_MASTER_PLAN.md) |
+| كيف نتأكد من سلامة المستودع؟ | [فحص المستودع الأولي](REPOSITORY_REVIEW.md) | [سياسة الأمان](../SECURITY.md) |
 
 ## للمساهمة والأمان
 
