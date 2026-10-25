@@ -1,3 +1,5 @@
+> **توثيق تجربة تاريخية:** معرّفات الحسابات المستخدمة في الأمثلة محايدة؛ النتائج والتوقيتات تخصّ بيئة التجربة الأصلية وتاريخها ولا تمثل اختبارًا آنيًا للمنتج.
+
 # VANTARA Spike — نتائج حقيقية مُقاسة
 
 > **ما هذا الملف وما ليس به.** سجلّ قياسٍ من 2026‑09‑16، صالحٌ كدليل على ما
@@ -8,7 +10,7 @@
 
 > **البيئة:** حاوية سحابية، 4 vCPU، 15 GB RAM، لا GPU، Docker storage-driver = `vfs`،
 > وخلفها وسيط TLS يعترض الشهادات (MITM).
-> **تحذير:** كل رقم زمني هنا **غير صالح** كمرجع لجهاز مشعل. الأرقام الوظيفية (يعمل/لا يعمل) صالحة.
+> **تحذير:** كل رقم زمني هنا **غير صالح** كمرجع لجهاز صاحب الاختبار. الأرقام الوظيفية (يعمل/لا يعمل) صالحة.
 > **التاريخ:** 2026-09-16
 
 ---
@@ -19,11 +21,11 @@
 |---|---|
 | 1. تشغيل Uchiyomi كما هو | ✅ **نجح** — 9 ثوانٍ حتى healthy |
 | 2. Suwayomi المدمج | ✅ **نجح** — `suwayomi: connected on retry` |
-| 3. الحسابات الثلاثة من النظام | ✅ **نجح** — بأسماء عربية |
+| 3. حسابات التجربة من النظام | ✅ **نجح** — بأسماء عربية |
 | 4. مصادر عربية حقيقية | ⚠️ **جزئي** — 2 من 5 كاملة، والتفاصيل أدناه |
 | 5. دمج نفس العمل من مصدرين | ✅ **موجود upstream** — `search-all` يجمّع تلقائيًا |
 | 6. مصدر حقيقة التقدم | ✅ محسوم بالـAPI — انظر §5 |
-| 7–8. XianScan + الزمن | ⏳ **لم يُنفّذ هنا** — يحتاج جهاز مشعل (§7) |
+| 7–8. XianScan + الزمن | ⏳ **لم يُنفّذ هنا** — يحتاج جهاز صاحب الاختبار (§7) |
 | 9. الرسم العربي | ✅ **محسوم بالبكسل** — §7.5 |
 
 ---
@@ -57,12 +59,12 @@ POST /api/admin/users          → بقية الحسابات
 
 | username | display_name | role |
 |---|---|---|
-| mishal | mishal | admin |
-| mansour | **منصور** | user |
-| dahmi | **دحمي** | user |
+| example_user_a | example_user_a | admin |
+| example_user_b | **عضو ب** | user |
+| example_user_c | **عضو ج** | user |
 
 **ملاحظتان:**
-1. `POST /api/setup` **يتجاهل `displayName`** — رجع `"mishal"` بدل `"مشعل"`. الإصلاح: `PATCH /api/admin/users/{id}` بعده. (خلل صغير في upstream يستحق issue.)
+1. `POST /api/setup` **يتجاهل `displayName`** — رجع `"example_user_a"` بدل `"صاحب الاختبار"`. الإصلاح: `PATCH /api/admin/users/{id}` بعده. (خلل صغير في upstream يستحق issue.)
 2. المصادقة **Bearer JWT قصير العمر (900 ثانية)** + refresh. الكوكيز لا تعمل مع `/auth/me`.
    → `SourceAdapter` عندنا يحتاج **API token** (`uy_…`) بنطاق، لا جلسة مستخدم.
 
@@ -216,7 +218,7 @@ Presence · Send/Recommend · Activity Feed · تعليقات بردود وتف�
 2. **لا GPU + 4 vCPU + `vfs`** — أي زمن نقيسه هنا مضلّل، وقياس الزمن هو **كامل الهدف**
    من الخطوة 8.
 
-**الخطوتان 7 و8 تُنفَّذان على جهاز مشعل، ولا تُفوَّضان.** انظر `SPIKE.md`.
+**الخطوتان 7 و8 تُنفَّذان على جهاز صاحب الاختبار، ولا تُفوَّضان.** انظر `SPIKE.md`.
 
 ---
 
@@ -307,7 +309,7 @@ curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-
 docker compose up -d
 # افتح http://localhost:8080 وأنشئ حساب المدير
 TOK=$(curl -s -X POST localhost:8080/auth/login -H 'Content-Type: application/json' \
-  -d '{"username":"mishal","password":"..."}' | jq -r .accessToken)
+  -d '{"username":"example_user_a","password":"..."}' | jq -r .accessToken)
 A="Authorization: Bearer $TOK"
 curl -X POST -H "$A" -H 'Content-Type: application/json' localhost:8080/api/admin/extensions/repos \
   -d '{"url":"https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"}'
