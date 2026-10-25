@@ -38,6 +38,9 @@ class TorrentEngine internal constructor(
     private val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
     /** Wi-Fi أو إيثرنت (غير محسوبة). عند الشك: محدودة، فلا تُنزَّل قطع قبل الاختيار. */
     private fun unmetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered == false }.getOrDefault(false)
+    private val playerPrefs = context.applicationContext.getSharedPreferences(TorrentPrefetch.PREFS, Context.MODE_PRIVATE)
+    /** Wi-Fi، أو باقة جوال فعّل لها المستخدم التسخين الكامل بنفسه. */
+    private fun warmPiecesAllowed(): Boolean = unmetered() || runCatching { playerPrefs.getBoolean(TorrentPrefetch.WARM_ON_METERED, false) }.getOrDefault(false)
     private val shutdown = AtomicBoolean(false)
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
     private val tickets = ConcurrentHashMap<String, Ticket>()
@@ -144,7 +147,7 @@ class TorrentEngine internal constructor(
         val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
         val selected = inspect(state, info, request)
         val pieces = if (fetchEdges && directory.usableSpace >= MIN_FREE_BYTES)
-            TorrentPrefetch.warmPieces(TorrentPolicy.edges(selected, info.pieceLength()), info.pieceLength(), unmetered()) else emptyList()
+            TorrentPrefetch.warmPieces(TorrentPolicy.edges(selected, info.pieceLength()), info.pieceLength(), warmPiecesAllowed()) else emptyList()
         state.prefetched(selected, info, pieces)
     }
     private fun saveDhtState(force: Boolean) {

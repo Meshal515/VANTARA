@@ -175,6 +175,9 @@ object TorrentPrefetch {
         ranked.filter { seeders(it.second) != 0 }.distinctBy { it.first }.take(limit)
             .mapIndexed { index, (url, _) -> url to (index == 0 && !background) }
     fun edgesFit(pieceLength: Int, pieces: Int): Boolean = pieceLength > 0 && pieceLength.toLong() * pieces <= MAX_EDGE_BYTES
+    /** «تسخين كامل على باقة الجوال» في ورقة الشبكة بالمشغّل: مقفل افتراضيًا، والمستخدم يفعّله لنفسه. */
+    const val PREFS = "vantara.player"
+    const val WARM_ON_METERED = "warmOnMetered"
     /** ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار. */
     const val WARM_BUDGET = 16L * 1024 * 1024
     /**
