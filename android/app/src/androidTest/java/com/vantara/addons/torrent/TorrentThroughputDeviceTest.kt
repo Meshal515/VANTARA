@@ -77,13 +77,13 @@ class TorrentThroughputDeviceTest {
         val limited = { TorrentEngine.streamingSettings().downloadRateLimit(750 * 1024) }
         val open = { TorrentEngine.streamingSettings() }
         // (الحالة، الاختيار، الإعدادات، مدة الفيلم)
-        val cases = listOfNotNull(
+        val cases: List<List<Any>> = listOfNotNull(
             big1080?.let { listOf("big@6Mbps", it, limited, 9_120_000L) },
             big4k?.let { listOf("big@open", it, open, 9_120_000L) },
             small?.let { listOf("small@open", it, open, 9_000_000L) },
         )
         for (round in 0 until 2) for ((c, case) in cases.withIndex()) {
-            @Suppress("UNCHECKED_CAST") val (name, choice, settings, duration) = case as List<Any>
+            val (name, choice, settings, duration) = case
             val modes = if ((round + c) % 2 == 0) listOf(TorrentWindowMode.LEGACY, TorrentWindowMode.ADAPTIVE) else listOf(TorrentWindowMode.ADAPTIVE, TorrentWindowMode.LEGACY)
             for (mode in modes) {
                 @Suppress("UNCHECKED_CAST")
