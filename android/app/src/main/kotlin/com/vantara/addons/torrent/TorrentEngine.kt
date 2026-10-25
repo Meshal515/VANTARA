@@ -25,8 +25,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 class TorrentEngine internal constructor(
     context: Context,
     private val sessionSettings: () -> SettingsPack = ::streamingSettings,
-    /** للمقارنة في اختبار الجهاز فقط: النافذة القديمة (قدّام عشوائي، مسح المواعيد كلها، بلا تجهيز القطعة التالية). */
-    private val legacyWindow: Boolean = false,
+    /**
+     * النافذة القديمة (قدّام الأندر أولًا، مسح المواعيد كلها، بلا تجهيز القطعة التالية) هي الإنتاج.
+     * الجديدة (false) أسرع بلا حد (4K: 39.5 مقابل 29.3 MB/s) لكن أول بايت على 6 Mbps جاء أبطأ في
+     * قياس واحد (1080p: 46.6 مقابل 24.5 ث)، فتبقى للاختبار حتى يثبتها قياس مكرر.
+     */
+    private val legacyWindow: Boolean = true,
     // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
