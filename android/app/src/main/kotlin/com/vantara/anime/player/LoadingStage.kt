@@ -61,7 +61,8 @@ class LoadingStage(context: Context, private val title: String) : FrameLayout(co
         paint()
     }
 
-    fun setBackdrop(bmp: Bitmap) { backdrop.setImageBitmap(bmp); if (startup) backdrop.animate().alpha(1f).setDuration(380).start() }
+    // من كاش القرص تصل خلال جزء من الثانية: ظهور سريع بدل تلاشٍ طويل يبان كتأخير
+    fun setBackdrop(bmp: Bitmap) { backdrop.setImageBitmap(bmp); if (startup) backdrop.animate().alpha(1f).setDuration(160).start() }
 
     fun setLogo(bmp: Bitmap) {
         logo.setImageBitmap(bmp)
@@ -85,9 +86,13 @@ class LoadingStage(context: Context, private val title: String) : FrameLayout(co
         animate().cancel()
         alpha = 1f
         visibility = View.VISIBLE
+        // العنوان نصًا بديل الشعار فقط إن لم يصل: نصف ثانية للشعار من الكاش قبل كتابته، فلا يومض النص ثم يُستبدل
+        removeCallbacks(revealName)
+        if (startup && mark.visibility != View.VISIBLE) { name.visibility = View.INVISIBLE; postDelayed(revealName, 500) }
         paint()
         if (startup) stopPulse() else startPulse()
     }
+    private val revealName = Runnable { if (mark.visibility != View.VISIBLE) name.visibility = View.VISIBLE }
 
     /** بداية تشغيل جديدة (تبديل سيرفر) والشاشة ظاهرة أصلًا: النسبة من الصفر. */
     fun restart() { progress = 0f; paint() }

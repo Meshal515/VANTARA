@@ -65,6 +65,18 @@ class AnimeEnginePlugin : Plugin() {
         com.vantara.anime.player.PlaybackEvents.events = { name, data -> notifyListeners(name, JSObject(data.toString())) }
     }
 
+    /**
+     * بنر العمل وشعاره إلى كاش القرص من صفحة العمل (لحظة تجهيز السيرفرات)، فتفتح شاشة تحميل
+     * المشغّل بهما فورًا بدل سواد ثم بنر ثم شعار. `{ urls: [backdrop, logo] }`.
+     */
+    @PluginMethod
+    fun warmArt(call: PluginCall) {
+        val list = call.getArray("urls")
+        val urls = (0 until (list?.length() ?: 0)).mapNotNull { list?.optString(it)?.takeIf { s -> s.isNotBlank() } }
+        com.vantara.anime.player.StageArt.warm(context, http, urls)
+        call.resolve()
+    }
+
     /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
     @PluginMethod
     fun outbox(call: PluginCall) {

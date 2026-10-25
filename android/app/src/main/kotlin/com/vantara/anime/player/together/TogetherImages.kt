@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit
  * فشل التحميل؟ يبقى الحرف الملوّن — لا شيء ينكسر.
  */
 class TogetherImages(private val context: Context, http: OkHttpClient) {
-    private val client = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).build()
+    // كاش القرص المشترك مع التجهيز المسبق من صفحة العمل (StageArt): البنر والشعار فوريان
+    private val client = com.vantara.anime.player.StageArt.client(context, http).newBuilder().callTimeout(12, TimeUnit.SECONDS).build()
     private val cache = object : LruCache<String, Bitmap>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
