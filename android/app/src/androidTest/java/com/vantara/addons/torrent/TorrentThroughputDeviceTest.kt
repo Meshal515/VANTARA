@@ -36,11 +36,11 @@ import java.util.concurrent.atomic.AtomicLong
 class TorrentThroughputDeviceTest {
     private data class Choice(val label: String, val hash: String, val fileIdx: Int?, val sources: List<String>, val title: String)
 
-    private fun torrentio(path: String, label: String, test: (String) -> Boolean): Choice? {
+    private fun torrentio(path: String, label: String, test: (String) -> Boolean, seeds: IntRange = 1..Int.MAX_VALUE): Choice? {
         val c = URL("https://torrentio.strem.fun/stream/$path.json").openConnection() as HttpURLConnection
         c.setRequestProperty("User-Agent", "Mozilla/5.0"); c.connectTimeout = 15000; c.readTimeout = 15000
         val streams = JSONObject(c.inputStream.bufferedReader().readText()).optJSONArray("streams") ?: JSONArray()
-        return (0 until streams.length()).map { streams.getJSONObject(it) }.filter { it.has("infoHash") && test(it.optString("title")) }
+        return (0 until streams.length()).map { streams.getJSONObject(it) }.filter { it.has("infoHash") && test(it.optString("title")) && (TorrentPrefetch.seeders(it.optString("title")) ?: 0) in seeds }
             .maxByOrNull { TorrentPrefetch.seeders(it.optString("title")) ?: 0 }?.let { s ->
                 val sources = s.optJSONArray("sources")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
                 Choice(label, s.getString("infoHash"), if (s.has("fileIdx")) s.getInt("fileIdx") else null, sources, s.optString("title").lineSequence().first().take(80) + " " + (s.optString("title").lines().firstOrNull { "👤" in it } ?: ""))
@@ -57,46 +57,56 @@ class TorrentThroughputDeviceTest {
         }
     }
 
-    @Test fun deliveredThroughputProductionVersusAlternatives() {
+    /**
+     * القديم مقابل المتكيّف كما يعيشه المشاهد: مشغّل محاكى يستهلك بمعدل الفيديو الفعلي (حجم الملف ÷
+     * مدته) ويملأ مخزونًا حتى 120 ث، يبدأ عند 1.5 ث ويستأنف بعد التوقف عند 3 ث (كإعداد ExoPlayer
+     * عندنا). يُقاس: متى بدأ، كم مرة توقف، كم ثانية توقف، ومتوسط «جاهز أمامك». ثلاث حالات: سرب كبير
+     * على 6 Mbps، سرب كبير بلا حد، وسرب صغير (2–8 زارعين) بلا حد كلقطة المستخدم. كل حالة مرتين.
+     */
+    @Test fun adaptiveVersusLegacyAsTheViewerSeesIt() {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("opt-in", args.getString("throughput") == "1")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val out = File(context.filesDir, "addon-proof/throughput.json").apply { parentFile!!.mkdirs() }
         val results = JSONArray()
-        val choices = listOfNotNull(
-            runCatching { torrentio("movie/tt0468569", "4K", { "2160p" in it || "4k" in it.lowercase() }) }.getOrNull(),
-            runCatching { torrentio("series/tt0903747:1:1", "1080p", { "1080p" in it }) }.getOrNull(),
-        )
-        // النافذة القديمة مقابل الجديدة، بسرعة الجوال الفعلية في لقطة المستخدم (6 Mbps ≈ 750KB/s) وبلا حد
+        val big4k = runCatching { torrentio("movie/tt0468569", "big-4K", { "2160p" in it || "4k" in it.lowercase() }) }.getOrNull()
+        val big1080 = runCatching { torrentio("movie/tt0468569", "big-1080p", { "1080p" in it }) }.getOrNull()
+        val small = listOf("movie/tt0468569", "movie/tt0111161", "movie/tt1375666").firstNotNullOfOrNull { path ->
+            runCatching { torrentio(path, "small-1080p", { "1080p" in it || "720p" in it }, 2..8) }.getOrNull()
+        }
         val limited = { TorrentEngine.streamingSettings().downloadRateLimit(750 * 1024) }
         val open = { TorrentEngine.streamingSettings() }
-        val variants = listOf<Triple<String, () -> SettingsPack, Boolean>>(
-            Triple("old@6Mbps", limited, true), Triple("new@6Mbps", limited, false),
-            Triple("old@open", open, true), Triple("new@open", open, false),
+        // (الحالة، الاختيار، الإعدادات، مدة الفيلم)
+        val cases = listOfNotNull(
+            big1080?.let { listOf("big@6Mbps", it, limited, 9_120_000L) },
+            big4k?.let { listOf("big@open", it, open, 9_120_000L) },
+            small?.let { listOf("small@open", it, open, 9_000_000L) },
         )
-        for ((i, choice) in choices.withIndex()) {
-            // الترتيب يتناوب حتى لا يستفيد بديل واحد من سرب «دافئ»
-            val order = variants.indices.map { variants[(it + i) % variants.size] }
-            for ((name, settings, legacy) in order) {
-                val engine = TorrentEngine(context, sessionSettings = settings, legacyWindow = legacy)
-                try { results.put(attempt(engine, choice).put("variant", name)) } finally { engine.close() }
+        for (round in 0 until 2) for ((c, case) in cases.withIndex()) {
+            @Suppress("UNCHECKED_CAST") val (name, choice, settings, duration) = case as List<Any>
+            val modes = if ((round + c) % 2 == 0) listOf(TorrentWindowMode.LEGACY, TorrentWindowMode.ADAPTIVE) else listOf(TorrentWindowMode.ADAPTIVE, TorrentWindowMode.LEGACY)
+            for (mode in modes) {
+                @Suppress("UNCHECKED_CAST")
+                val engine = TorrentEngine(context, sessionSettings = settings as () -> SettingsPack, windowMode = mode)
+                try { results.put(viewer(engine, choice as Choice, duration as Long).put("case", name).put("mode", mode.name).put("round", round)) } finally { engine.close() }
                 out.writeText(JSONObject().put("results", results).toString(2))
                 Thread.sleep(3000)
             }
         }
         for (r in 0 until results.length()) {
             val o = results.getJSONObject(r)
-            println("THROUGHPUT ${o.optString("label")} ${o.optString("variant")} firstByteMs=${o.optLong("firstByteMs")} avgKBps=${o.optLong("avgKBps")} last30KBps=${o.optLong("last30KBps")} peers=${o.optString("peers")} ${o.optString("failure")}")
+            println("VIEWER ${o.optString("case")} r${o.optInt("round")} ${o.optString("mode").padEnd(8)} startMs=${o.optLong("startMs")} stalls=${o.optInt("stalls")} stalledS=${o.optLong("stalledMs") / 1000} avgAheadS=${o.optLong("avgAheadMs") / 1000} torrentKBps=${o.optLong("torrentKBps")} needKBps=${o.optLong("needKBps")} peers=${o.optString("peers")} ${o.optString("failure")}")
         }
     }
 
-    private fun attempt(engine: TorrentEngine, choice: Choice): JSONObject {
+    private fun viewer(engine: TorrentEngine, choice: Choice, durationMs: Long): JSONObject {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         File(context.cacheDir, "torrent-streams").deleteRecursively()
         val uri = engine.register(TorrentRequest(choice.hash, choice.fileIdx, choice.sources))
-        val result = JSONObject().put("label", choice.label).put("title", choice.title)
+        val result = JSONObject().put("title", choice.title)
         val delivered = AtomicLong(0)
-        val firstByte = AtomicLong(-1)
+        val consumed = AtomicLong(0)
+        val videoRate = AtomicLong(0) // بايت/ث للفيديو، يُعرف بعد اختيار الملف
         val begun = SystemClock.elapsedRealtime()
         val source = engine.dataSourceFactory(DefaultDataSource.Factory(context)).createDataSource()
         val reader = Thread {
@@ -104,38 +114,58 @@ class TorrentThroughputDeviceTest {
                 source.open(DataSpec(uri))
                 val buffer = ByteArray(256 * 1024)
                 while (!Thread.currentThread().isInterrupted) {
+                    // مخزون المشغّل ممتلئ (120 ث): يتوقف عن الطلب كما يفعل ExoPlayer
+                    if (videoRate.get() > 0 && delivered.get() - consumed.get() >= videoRate.get() * 120) { Thread.sleep(50); continue }
                     val n = source.read(buffer, 0, buffer.size)
                     if (n < 0) break
-                    if (firstByte.get() < 0) firstByte.set(SystemClock.elapsedRealtime() - begun)
                     delivered.addAndGet(n.toLong())
                 }
             }.onFailure { if (!Thread.currentThread().isInterrupted) result.put("failure", it.toString()) }
         }.apply { start() }
+        var playing = false
+        var startMs = -1L
+        var stalls = 0
+        var stalledMs = 0L
+        var aheadSum = 0L
+        var aheadSamples = 0
+        val torrentRates = ArrayList<Long>()
         val timeline = JSONArray()
-        val perSecond = ArrayList<Long>()
-        var last = 0L
-        val seconds = 75
+        val seconds = 120
         try {
-            for (second in 1..seconds) {
-                Thread.sleep(1000)
-                // نافذة قدّام كما يحسبها المشغّل لفيلم ساعتين
-                engine.playback(uri, 1, 2 * 3600_000L)
-                val now = delivered.get()
-                perSecond += now - last; last = now
-                val s = engine.stats(uri)
-                timeline.put("${second}s delivered=${(now - (perSecond.dropLast(1).sum())) / 1024}KB rate=${(s?.downloadBytesPerSecond ?: 0) / 1024}KB peers=${s?.peers} seeds=${s?.seeds}")
-                if (second == seconds) result.put("peers", "${s?.peers}/${s?.seeds}")
+            for (tick in 1..seconds * 4) {
+                Thread.sleep(250)
+                if (videoRate.get() == 0L) engine.stats(uri)?.fileBytes?.takeIf { it > 0 }?.let { videoRate.set(it * 1000 / durationMs) }
+                val rate = videoRate.get()
+                if (rate == 0L) continue
+                if (playing) {
+                    val step = rate / 4
+                    val room = delivered.get() - consumed.get()
+                    consumed.addAndGet(minOf(step, room))
+                    if (room <= step) { playing = false; stalls++ }
+                } else {
+                    val bufferedMs = (delivered.get() - consumed.get()) * 1000 / rate
+                    if (bufferedMs >= if (startMs < 0) 1_500 else 3_000) { playing = true; if (startMs < 0) startMs = SystemClock.elapsedRealtime() - begun }
+                }
+                if (!playing && startMs >= 0) stalledMs += 250
+                if (tick % 4 == 0) {
+                    val aheadMs = (delivered.get() - consumed.get()) * 1000 / rate
+                    if (startMs >= 0) { aheadSum += aheadMs; aheadSamples++ }
+                    engine.playback(uri, consumed.get() * 1000 / rate, durationMs, aheadMs)
+                    val s = engine.stats(uri)
+                    torrentRates += (s?.downloadBytesPerSecond ?: 0) / 1024
+                    timeline.put("${tick / 4}s ahead=${aheadMs / 1000}s playing=$playing torrent=${(s?.downloadBytesPerSecond ?: 0) / 1024}KB peers=${s?.peers}")
+                    if (tick == seconds * 4) result.put("peers", "${s?.peers}/${s?.seeds}")
+                }
             }
         } finally {
             reader.interrupt(); runCatching { source.close() }; reader.join(5000); engine.release(uri)
         }
-        val from = (firstByte.get() / 1000).toInt().coerceIn(0, seconds - 1)
-        val active = perSecond.drop(from)
-        return result.put("firstByteMs", firstByte.get())
-            .put("avgKBps", if (active.isEmpty()) 0 else active.sum() / active.size / 1024)
-            .put("last30KBps", perSecond.takeLast(30).sum() / 30 / 1024)
-            .put("deliveredMB", delivered.get() / (1024 * 1024))
-            .put("timeline", timeline)
+        // لم يبدأ أبدًا: كل المدة توقف
+        if (startMs < 0) stalledMs = seconds * 1000L
+        return result.put("startMs", startMs).put("stalls", stalls).put("stalledMs", stalledMs)
+            .put("avgAheadMs", if (aheadSamples == 0) 0 else aheadSum / aheadSamples)
+            .put("torrentKBps", if (torrentRates.isEmpty()) 0 else torrentRates.drop(10).average().toLong())
+            .put("needKBps", videoRate.get() / 1024).put("timeline", timeline)
     }
 
     /**

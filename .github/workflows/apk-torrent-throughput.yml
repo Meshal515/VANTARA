@@ -60,6 +60,6 @@ jobs:
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -r -e startup 1 -e throughput 1 -e class com.vantara.addons.torrent.TorrentThroughputDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tail -20
-            adb logcat -d -s System.out | grep -E 'THROUGHPUT|STARTUP' || true
+            adb logcat -d -s System.out | grep -E 'VIEWER|STARTUP' || true
             adb exec-out run-as com.vantara.app.debug cat files/addon-proof/throughput.json > throughput.json || true
             echo "TP-BEGIN"; cat throughput.json; echo "TP-END"

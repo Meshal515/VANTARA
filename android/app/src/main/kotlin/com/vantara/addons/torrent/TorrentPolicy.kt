@@ -267,3 +267,20 @@ object TorrentWindow {
         return pieces.coerceIn(MIN_AHEAD_PIECES, MAX_AHEAD_PIECES)
     }
 }
+
+/**
+ * ترتيب القطع:
+ *  - LEGACY: ما قدّام النافذة الأندر أولًا ومواعيد تُمسح وتُعاد (الإنتاج حتى الآن).
+ *  - FOCUSED: الأقرب فالأبعد (SEQUENTIAL_DOWNLOAD)، المواعيد بالفرق، والقطعة التالية في الذاكرة.
+ *  - ADAPTIVE: مركّز حين يكون السرب صغيرًا أو المخزون أمام المشغّل قليلًا، وإلا كالقديم.
+ *    سرب صغير: كل مشارك ينشغل بقطعة بعيدة يأخذ جزءًا كبيرًا من السرعة من القطعة المطلوبة الآن.
+ */
+enum class TorrentWindowMode {
+    LEGACY, FOCUSED, ADAPTIVE;
+    companion object {
+        const val FEW_PEERS = 12
+        const val LOW_BUFFER_MS = 30_000L
+        /** [bufferedMs] سالب = غير معروف (قبل أول تقرير من المشغّل): يُعامل كمخزون فارغ. */
+        fun focus(peers: Int, bufferedMs: Long): Boolean = peers < FEW_PEERS || bufferedMs < LOW_BUFFER_MS
+    }
+}

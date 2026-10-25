@@ -25,12 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class TorrentEngine internal constructor(
     context: Context,
     private val sessionSettings: () -> SettingsPack = ::streamingSettings,
-    /**
-     * النافذة القديمة (قدّام الأندر أولًا، مسح المواعيد كلها، بلا تجهيز القطعة التالية) هي الإنتاج.
-     * الجديدة (false) أسرع بلا حد (4K: 39.5 مقابل 29.3 MB/s) لكن أول بايت على 6 Mbps جاء أبطأ في
-     * قياس واحد (1080p: 46.6 مقابل 24.5 ث)، فتبقى للاختبار حتى يثبتها قياس مكرر.
-     */
-    private val legacyWindow: Boolean = true,
+    /** طريقة ترتيب القطع؛ انظر [TorrentWindowMode]. */
+    private val windowMode: TorrentWindowMode = TorrentWindowMode.LEGACY,
     // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
@@ -190,11 +186,11 @@ class TorrentEngine internal constructor(
      * موضع المشاهدة من المشغّل (كل بضع ثوانٍ): يحرّك النافذة على القرص — يفرّغ ما خلف آخر
      * 50 ثانية ويحدد كم يُنزَّل قدّام حسب المساحة الحرة.
      */
-    fun playback(uri: Uri, positionMs: Long, durationMs: Long) {
+    fun playback(uri: Uri, positionMs: Long, durationMs: Long, bufferedMs: Long = -1) {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
         val state = states[hash] ?: return
         // خارج خيط الواجهة: التفريغ قراءة/كتابة على القرص
-        if (!shutdown.get()) runCatching { pruner.execute { runCatching { state.playback(positionMs, durationMs) } } }
+        if (!shutdown.get()) runCatching { pruner.execute { runCatching { state.playback(positionMs, durationMs, bufferedMs) } } }
     }
 
     internal fun acquire(uri: Uri, cancelled: () -> Boolean): Lease {
@@ -225,7 +221,7 @@ class TorrentEngine internal constructor(
             handle.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             // ما قدّام النافذة يُنزَّل الأقرب فالأبعد (لا الأندر أولًا): بسرعة أقل من معدل الفيديو كان
             // التحميل يتوزع على قطع بعيدة متفرقة والقطعة التي يقف عليها المشغّل تتأخر («جاهز أمامك 0»)
-            if (!legacyWindow) handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            state.applyFocus(handle)
             handle.resume()
             Lease(state, selected, info.pieceLength(), stopped)
         } catch (error: Throwable) {
@@ -258,7 +254,7 @@ class TorrentEngine internal constructor(
             val bytes = state.piece(plan.piece) { closed.get() || cancelled() }
             if (plan.offset + plan.length > bytes.size) throw IOException("Verified piece shorter than selected file range")
             // القطعة التالية تُقرأ من القرص إلى الذاكرة إن اكتملت، قبل أن يصل إليها المشغّل
-            if (!legacyWindow) state.readAhead(plan.piece + 1, file, pieceLength)
+            if (state.focused) state.readAhead(plan.piece + 1, file, pieceLength)
             bytes.copyInto(target, offset, plan.offset, plan.offset + plan.length)
             return plan.length
         }
@@ -274,6 +270,14 @@ class TorrentEngine internal constructor(
         private var edgesWanted = false
         private var torrent: TorrentHandle? = null
         private var window = emptyList<Int>()
+        /** مركّز: القريب بالترتيب، المواعيد بالفرق، والقطعة التالية في الذاكرة. يحدده [TorrentWindowMode]. */
+        @Volatile var focused = windowMode != TorrentWindowMode.LEGACY; private set
+        private var sequential: Boolean? = null
+        fun applyFocus(handle: TorrentHandle) = synchronized(monitor) {
+            if (sequential == focused) return@synchronized
+            if (focused) handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else handle.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            sequential = focused
+        }
         /** القطع التي لها موعد الآن: يُعدَّل الفرق فقط حين تتحرك النافذة، لا تُمسح كلها وتُعاد. */
         private var deadlined = HashSet<Int>()
         // النافذة المتحركة: الملف المختار، القطع المطلوبة قدّام النافذة، والمدى المفرّغ من القرص
@@ -405,8 +409,8 @@ class TorrentEngine internal constructor(
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
             val wanted = TorrentPolicy.deadlines(next, pending)
-            if (legacyWindow) {
-                handle.clearPieceDeadlines()
+            if (!focused) {
+                handle.clearPieceDeadlines(); deadlined.clear()
                 for ((piece, deadline) in wanted) {
                     handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
                     handle.setPieceDeadline(piece, deadline)
@@ -436,9 +440,14 @@ class TorrentEngine internal constructor(
             aheadRange = range
         }
 
-        fun playback(positionMs: Long, durationMs: Long) = synchronized(monitor) {
+        fun playback(positionMs: Long, durationMs: Long, bufferedMs: Long) = synchronized(monitor) {
             val file = file ?: return@synchronized
             if (refs == 0 || pieceLength <= 0 || durationMs <= 0) return@synchronized
+            if (windowMode == TorrentWindowMode.ADAPTIVE) torrent?.takeIf { it.isValid }?.let { handle ->
+                val peers = runCatching { handle.status().numPeers() }.getOrDefault(0)
+                focused = TorrentWindowMode.focus(peers, bufferedMs)
+                applyFocus(handle)
+            }
             ahead = TorrentWindow.aheadPieces(file, pieceLength, durationMs, directory.usableSpace)
             val keep = TorrentWindow.keepFrom(file, pieceLength, positionMs, durationMs) ?: return@synchronized
             // لا نقترب أبدًا مما يقرؤه المشغّل الآن
@@ -477,8 +486,8 @@ class TorrentEngine internal constructor(
             val handle = TorrentHandle(added)
             handle.unsetFlags(TorrentFlags.AUTO_MANAGED)
             handle.unsetFlags(TorrentFlags.STOP_WHEN_READY)
-            if (!legacyWindow) handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
             deadlined.clear()
+            sequential = null; applyFocus(handle)
             val info = handle.torrentFile()
             if (info != null && info.isValid) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))

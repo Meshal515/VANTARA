@@ -631,6 +631,8 @@ class PlayerActivity : Activity() {
             if (state == Player.STATE_BUFFERING) {
                 loading(true)
                 watchStall()
+                // المخزون نفد الآن: التورنت يعرف فورًا لا بعد 5 ث
+                torrentWindow()
             } else {
                 main.removeCallbacks(stallWatchdog)
             }
@@ -1746,7 +1748,7 @@ class PlayerActivity : Activity() {
     private fun torrentWindow() {
         val url = current?.url?.takeIf { it.startsWith("vantara-torrent:") } ?: return
         val duration = player.duration.takeIf { it > 0 && it != androidx.media3.common.C.TIME_UNSET } ?: return
-        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).playback(android.net.Uri.parse(url), player.currentPosition, duration) }
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).playback(android.net.Uri.parse(url), player.currentPosition, duration, player.totalBufferedDuration) }
     }
 
     private fun torrentStats() = current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let {
@@ -1778,7 +1780,9 @@ class PlayerActivity : Activity() {
             val need = player.videoFormat?.bitrate?.takeIf { it > 0 }?.toLong()
             val buffered = player.totalBufferedDuration
             val t = torrentStats()
-            body.addView(metricRow("زمن الاستجابة", latency?.let { "$it ms" } ?: "لم يُقس بعد", when { latency == null -> Tone.TEXT_3; latency < 300 -> Tone.OK; latency < 800 -> Tone.WARN; else -> Tone.BAD }))
+            // في التورنت هو انتظار تجهيزه (بيانات الملف من المشاركين وفتح القارئ)، لا زمن استجابة شبكة
+            val latencyName = if (current?.url?.startsWith("vantara-torrent:") == true) "تجهيز التورنت" else "زمن الاستجابة"
+            body.addView(metricRow(latencyName, latency?.let { "$it ms" } ?: "لم يُقس بعد", when { latency == null -> Tone.TEXT_3; latency < 300 -> Tone.OK; latency < 800 -> Tone.WARN; else -> Tone.BAD }))
             body.addView(metricRow("السرعة الآن", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(bps)), Tone.TEXT))
             if (estimate > 0) body.addView(metricRow("تقدير المشغّل", String.format(java.util.Locale.US, "%.1f Mbps", estimate / 1_000_000.0), Tone.TEXT_2))
             body.addView(metricRow("جاهز أمامك", "${buffered / 1000} ثانية", if (buffered >= 15_000) Tone.OK else if (buffered >= 5_000) Tone.WARN else Tone.BAD))
