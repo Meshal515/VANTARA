@@ -71,8 +71,10 @@ class TorrentThroughputDeviceTest {
         val results = JSONArray()
         val big4k = runCatching { torrentio("movie/tt0468569", "big-4K", { "2160p" in it || "4k" in it.lowercase() }) }.getOrNull()
         val big1080 = runCatching { torrentio("movie/tt0468569", "big-1080p", { "1080p" in it }) }.getOrNull()
-        val small = listOf("movie/tt0468569", "movie/tt0111161", "movie/tt1375666").firstNotNullOfOrNull { path ->
-            runCatching { torrentio(path, "small-1080p", { "1080p" in it || "720p" in it }, 2..8) }.getOrNull()
+        // سرب صغير كلقطة المستخدم: حلقة The Future Diary الأولى (Kitsu 6266) بأقل عدد زارعين صالح، لا حزمة
+        // أفلام (حزمة بـ8 زارعين لم تجلب بيانات الملف في 45 ث فلم تُقس الحالة)
+        val small = listOf(2..8, 1..15).firstNotNullOfOrNull { range ->
+            runCatching { torrentio("series/kitsu:6266:1", "small-anime", { !Regex("(?i)batch|complete|\\b01\\s*-\\s*26\\b").containsMatchIn(it) }, range) }.getOrNull()
         }
         val limited = { TorrentEngine.streamingSettings().downloadRateLimit(750 * 1024) }
         val open = { TorrentEngine.streamingSettings() }
@@ -80,9 +82,10 @@ class TorrentThroughputDeviceTest {
         val cases: List<List<Any>> = listOfNotNull(
             big1080?.let { listOf("big@6Mbps", it, limited, 9_120_000L) },
             big4k?.let { listOf("big@open", it, open, 9_120_000L) },
-            small?.let { listOf("small@open", it, open, 9_000_000L) },
-        )
-        for (round in 0 until 2) for ((c, case) in cases.withIndex()) {
+            small?.let { listOf("small@open", it, open, 1_440_000L) },
+        ).filter { InstrumentationRegistry.getArguments().getString("viewerCases")?.split(',')?.contains(it[0]) ?: true }
+        val rounds = InstrumentationRegistry.getArguments().getString("rounds")?.toIntOrNull() ?: 2
+        for (round in 0 until rounds) for ((c, case) in cases.withIndex()) {
             val (name, choice, settings, duration) = case
             val modes = if ((round + c) % 2 == 0) listOf(TorrentWindowMode.LEGACY, TorrentWindowMode.ADAPTIVE) else listOf(TorrentWindowMode.ADAPTIVE, TorrentWindowMode.LEGACY)
             for (mode in modes) {
