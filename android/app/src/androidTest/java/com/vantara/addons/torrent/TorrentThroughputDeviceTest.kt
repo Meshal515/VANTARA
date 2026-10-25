@@ -1,6 +1,16 @@
 package com.vantara.addons.torrent
 
+import android.graphics.ImageFormat
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.SystemClock
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.TransferListener
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -125,5 +135,82 @@ class TorrentThroughputDeviceTest {
             .put("last30KBps", perSecond.takeLast(30).sum() / 30 / 1024)
             .put("deliveredMB", delivered.get() / (1024 * 1024))
             .put("timeline", timeline)
+    }
+
+    /**
+     * تسلسل بدء حقيقي بإعدادات الإنتاج: أول قطعة ← أول بايت للمشغّل ← READY ← أول إطار، بلا
+     * ضغط تشغيل (play مرة واحدة كما يفعل المشغّل عند الفتح). ثم قفزة لمنتصف الفيلم تفرض انتظار
+     * تحميل، ويُثبت أن التشغيل يستأنف وحده (isPlaying) دون استدعاء play مرة أخرى.
+     */
+    @Test fun startupTimelineAndAutoResume() {
+        assumeTrue("opt-in", InstrumentationRegistry.getArguments().getString("startup") == "1")
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val choice = listOf("movie/tt0468569", "movie/tt0111161").firstNotNullOfOrNull { path ->
+            runCatching { torrentio(path, "1080p x264", { "1080p" in it && "x265" !in it.lowercase() && "hevc" !in it.lowercase() && "10bit" !in it.lowercase() }) }.getOrNull()
+        } ?: error("no torrent")
+        File(context.cacheDir, "torrent-streams").deleteRecursively()
+        val engine = TorrentEngine(context)
+        val uri = engine.register(TorrentRequest(choice.hash, choice.fileIdx, choice.sources))
+        val t0 = SystemClock.elapsedRealtime()
+        var firstByte = 0L; var ready = 0L; var frame = 0L
+        val events = JSONArray()
+        val consumer = HandlerThread("Frames").apply { start() }
+        val images = ImageReader.newInstance(320, 180, ImageFormat.PRIVATE, 3)
+        images.setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, Handler(consumer.looper))
+        var player: ExoPlayer? = null
+        val bytes = object : TransferListener {
+            override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, n: Int) { if (firstByte == 0L && n > 0) firstByte = SystemClock.elapsedRealtime() }
+            override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+        }
+        val result = JSONObject().put("title", choice.title)
+        try {
+            instrumentation.runOnMainSync {
+                val base = engine.dataSourceFactory(DefaultDataSource.Factory(context))
+                val factory = DataSource.Factory { base.createDataSource().also { it.addTransferListener(bytes) } }
+                val p = ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+                    .setLoadControl(com.vantara.anime.player.PlaybackBuffering.create(Runtime.getRuntime().maxMemory())).build()
+                player = p; p.setVideoSurface(images.surface)
+                p.addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() { if (frame == 0L) frame = SystemClock.elapsedRealtime() }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        val name = mapOf(1 to "IDLE", 2 to "BUFFERING", 3 to "READY", 4 to "ENDED")[state]
+                        events.put("+${SystemClock.elapsedRealtime() - t0}ms $name pos=${p.currentPosition / 1000}s")
+                        if (state == Player.STATE_READY && ready == 0L) ready = SystemClock.elapsedRealtime()
+                    }
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) { events.put("error ${error.errorCodeName}") }
+                })
+                p.setMediaItem(MediaItem.fromUri(uri)); p.prepare(); p.playWhenReady = true
+            }
+            val deadline = t0 + 90_000
+            while (frame == 0L && SystemClock.elapsedRealtime() < deadline) Thread.sleep(200)
+            Thread.sleep(5000)
+            val piece = engine.stats(uri)?.firstPieceAt ?: 0L
+            fun rel(t: Long) = if (t > 0) t - t0 else -1
+            result.put("firstPieceMs", rel(piece)).put("firstByteMs", rel(firstByte)).put("readyMs", rel(ready)).put("firstFrameMs", rel(frame))
+            // قفزة لمنتصف الفيلم: انتظار تحميل ثم استئناف تلقائي
+            var seekAt = 0L
+            instrumentation.runOnMainSync { player!!.seekTo(player!!.duration / 2); seekAt = SystemClock.elapsedRealtime() }
+            var resumedAt = 0L
+            while (SystemClock.elapsedRealtime() - seekAt < 90_000) {
+                Thread.sleep(250)
+                var playing = false
+                instrumentation.runOnMainSync { playing = player!!.isPlaying && player!!.currentPosition > player!!.duration / 2 }
+                if (playing) { resumedAt = SystemClock.elapsedRealtime(); break }
+            }
+            var playWhenReady = false
+            instrumentation.runOnMainSync { playWhenReady = player!!.playWhenReady }
+            result.put("resumeAfterSeekMs", if (resumedAt > 0) resumedAt - seekAt else -1).put("playWhenReady", playWhenReady)
+        } finally {
+            runCatching { instrumentation.runOnMainSync { player?.release() } }
+            images.close(); consumer.quitSafely(); engine.release(uri); engine.close()
+        }
+        result.put("events", events)
+        println("STARTUP ${result.toString().take(3500)}")
+        File(context.filesDir, "addon-proof/startup.json").apply { parentFile!!.mkdirs() }.writeText(result.toString(2))
+        org.junit.Assert.assertTrue("first frame without pressing play: $result", result.getLong("firstFrameMs") > 0)
+        org.junit.Assert.assertTrue("resumed by itself after the buffering wait: $result", result.getLong("resumeAfterSeekMs") > 0)
     }
 }

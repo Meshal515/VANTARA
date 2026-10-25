@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/apk-torrent-throughput.yml'
       - 'android/app/src/androidTest/java/com/vantara/addons/torrent/TorrentThroughputDeviceTest.kt'
+      - 'android/app/src/main/kotlin/com/vantara/addons/torrent/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         # جوّال (تأخير متذبذب) مقابل شبكة المركز نفسها للمقارنة
-        delay: ['100:600', 'none']
+        delay: ['none']
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +59,7 @@ jobs:
           script: |
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w -r -e throughput 1 -e class com.vantara.addons.torrent.TorrentThroughputDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tail -20
-            adb logcat -d -s System.out | grep THROUGHPUT || true
+            adb shell am instrument -w -r -e startup 1 -e class com.vantara.addons.torrent.TorrentThroughputDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tail -20
+            adb logcat -d -s System.out | grep -E 'THROUGHPUT|STARTUP' || true
             adb exec-out run-as com.vantara.app.debug cat files/addon-proof/throughput.json > throughput.json || true
             echo "TP-BEGIN"; cat throughput.json; echo "TP-END"

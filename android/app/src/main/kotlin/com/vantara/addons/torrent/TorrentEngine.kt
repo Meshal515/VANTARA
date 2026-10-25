@@ -169,8 +169,10 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null
         val flags = runCatching { handle.flags() }.getOrNull()
+        val state = states[hash]
         return TorrentStats(status.numPeers(), status.numSeeds(), status.downloadPayloadRate().toLong(), status.totalDone(), handle.torrentFile()?.isValid == true,
-            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers())
+            state = status.state().name, paused = flags?.and_(TorrentFlags.PAUSED)?.nonZero() == true, candidates = status.connectCandidates(), known = status.listPeers(),
+            firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L)
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
     /**
@@ -269,6 +271,9 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
         private val failed = HashSet<Int>()
         private var memoryBytes = 0
         @Volatile var idleAt = System.currentTimeMillis(); private set
+        /** أول قطعة سُلّمت للقارئ (elapsedRealtime)، لتسلسل البدء في لوحة الشبكة. */
+        @Volatile var firstPieceAt = 0L; private set
+        val fileBytes: Long get() = file?.size ?: 0L
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
         /**
          * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
@@ -354,7 +359,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
-                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false
+                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
                 this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
                 if (!metadata.isFile) runCatching { metadata.writeBytes(info.bencode()) }
@@ -489,6 +494,7 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
                 val first = pieces.entries.first(); memoryBytes -= first.value.size; pieces.remove(first.key)
             }
             pieces.put(piece, bytes)?.let { memoryBytes -= it.size }; memoryBytes += bytes.size
+            if (firstPieceAt == 0L) firstPieceAt = android.os.SystemClock.elapsedRealtime()
             monitor.notifyAll()
         }
         fun readFailed(piece: Int) = synchronized(monitor) { reading.remove(piece); failed.add(piece); monitor.notifyAll() }
@@ -583,6 +589,11 @@ class TorrentEngine internal constructor(context: Context, private val sessionSe
             settings.setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 0)
             settings.setBoolean(settings_pack.bool_types.piece_extent_affinity.swigValue(), false)
             // مشاركون خلف NAT لا يصلون إلا باتصال داخل: افتح المنفذ تلقائيًا حيث يسمح الراوتر
+            // TCP وحده كما Stremio (torrent-stream): uTP يتراجع مع كل تذبذب في تأخير الشبكة. قيس على
+            // المحاكي بأسراب Torrentio حقيقية (TorrentThroughputDeviceTest): بلا uTP تضاعف ما يصل
+            // للمشغّل في كل المقارنات الثماني — 4K من 18.5 إلى 39 MB/s، و1080p من 5.8 إلى 13.7 MB/s.
+            settings.setBoolean(settings_pack.bool_types.enable_outgoing_utp.swigValue(), false)
+            settings.setBoolean(settings_pack.bool_types.enable_incoming_utp.swigValue(), false)
             settings.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
             settings.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
             return settings

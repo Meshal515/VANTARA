@@ -409,6 +409,10 @@ class PlayerActivity : Activity() {
 
     private var preferCode: String? = null
     private var startedAt = 0L
+    /** تسلسل البدء (elapsedRealtime): فتح → أول قطعة → أول بايت للمشغّل → READY → أول إطار. */
+    private var openAt = 0L
+    private var readyAt = 0L
+    private var frameAt = 0L
     private var reportedStart = false
     private var expanded = false
     private var waiting: Job? = null
@@ -636,6 +640,7 @@ class PlayerActivity : Activity() {
                 if (presenceActive) sendPresence()
                 if (!reportedStart) {
                     reportedStart = true
+                    readyAt = SystemClock.elapsedRealtime()
                     main.removeCallbacks(startupWatchdog)
                     attemptEnd("ok")
                     current?.let { c -> playStat("server", codeOf(c) ?: c.server, "ok", ms = System.currentTimeMillis() - startedAt) }
@@ -662,6 +667,10 @@ class PlayerActivity : Activity() {
 
         override fun onRenderedFirstFrame() {
             firstFrameShown = true
+            if (frameAt == 0L) {
+                frameAt = SystemClock.elapsedRealtime()
+                android.util.Log.i("VantaraStartup", startupLine())
+            }
             if (player.playbackState == Player.STATE_READY) loading(false)
             usageStarted = true
             sampleUsage()
@@ -729,6 +738,8 @@ class PlayerActivity : Activity() {
         reportedStart = false
         firstFrameShown = false
         startedAt = System.currentTimeMillis()
+        openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
+        net.markStart()
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
@@ -1742,6 +1753,15 @@ class PlayerActivity : Activity() {
         runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).stats(android.net.Uri.parse(it)) }.getOrNull()
     }
 
+    /** «قطعة +2.1 · بايت +2.2 · جاهز +3.0 · إطار +3.1 ث» من لحظة فتح المصدر؛ «—» لما لم يحدث بعد. */
+    private fun startupLine(): String {
+        fun at(t: Long) = if (t >= openAt && openAt > 0) String.format(java.util.Locale.US, "+%.1f", (t - openAt) / 1000.0) else "—"
+        val piece = torrentStats()?.firstPieceAt ?: 0L
+        val parts = listOfNotNull(if (current?.url?.startsWith("vantara-torrent:") == true) "قطعة ${at(piece)}" else null,
+            "بايت ${at(net.firstByteAt)}", "جاهز ${at(readyAt)}", "إطار ${at(frameAt)}")
+        return parts.joinToString(" · ") + " ث"
+    }
+
     private fun netSummary(): String {
         val ms = net.latencyMs()?.let { "$it ms" } ?: "— ms"
         val speed = String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(net.bytesPerSecond()))
@@ -1768,8 +1788,14 @@ class PlayerActivity : Activity() {
             }
             if (t != null) {
                 body.addView(metricRow("مشاركون متصلون", "${t.peers} (زارعون ${t.seeds})", if (t.peers > 0) Tone.OK else Tone.BAD))
-                body.addView(metricRow("تحميل التورنت", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(t.downloadBytesPerSecond)), Tone.TEXT))
+                // ما يحتاجه الفيديو (حجم الملف ÷ مدته): تحميل أقل منه = «جاهز أمامك» ينفد مهما فعل المشغّل
+                val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET }
+                val needBps = if (duration != null && t.fileBytes > 0) t.fileBytes * 1000 / duration else 0L
+                val tone = if (needBps == 0L) Tone.TEXT else if (t.downloadBytesPerSecond >= needBps * 12 / 10) Tone.OK else if (t.downloadBytesPerSecond >= needBps) Tone.WARN else Tone.BAD
+                body.addView(metricRow("تحميل التورنت", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(t.downloadBytesPerSecond)), tone))
+                if (needBps > 0) body.addView(metricRow("يحتاج الفيديو", String.format(java.util.Locale.US, "%.1f Mbps", NetStats.mbps(needBps)), Tone.TEXT_2))
             }
+            body.addView(metricRow("تسلسل البدء", startupLine(), Tone.TEXT_2))
             net.host?.let { body.addView(metricRow("السيرفر", it, Tone.TEXT_3)) }
             body.addView(label(NetStats.verdict(latency, bps, need, buffered, t?.peers), 14f, Tone.TEXT, bold = true).apply { setPadding(0, dp(12), 0, dp(4)) })
             val chipOn = netChip?.visibility == View.VISIBLE

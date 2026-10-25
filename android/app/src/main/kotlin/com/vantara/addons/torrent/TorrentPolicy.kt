@@ -75,6 +75,7 @@ data class TorrentFile(val index: Int, val path: String, val size: Long, val off
 data class TorrentStats(
     val peers: Int, val seeds: Int, val downloadBytesPerSecond: Long, val totalDone: Long, val metadata: Boolean,
     val state: String? = null, val paused: Boolean = false, val candidates: Int = 0, val known: Int = 0,
+    val firstPieceAt: Long = 0L, val fileBytes: Long = 0L,
 )
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
