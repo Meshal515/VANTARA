@@ -19,6 +19,9 @@ export const DOH_RESOLVERS = Object.freeze([
   Object.freeze({ name: 'Google', host: '8.8.8.8', path: '/resolve' }),
 ]);
 const TTL_MS = 10 * 60_000;
+/** مهلة سؤال DoH الواحد، وفترة تخطيه بعد أن تتعطل كل خوادمه. */
+const DOH_TIMEOUT_MS = 2500;
+const DOH_DOWN_MS = 5 * 60_000;
 // الدالة الأصلية لحظة التحميل: استبدال https.request لاحقًا (اختبارات fixture) لا يمس استعلام DNS.
 const originalRequest = https.request;
 export const SPLIT_OFFSET = 5;
@@ -64,19 +67,28 @@ export function dohQuery(resolver, name, type, { timeout = 4000, request = origi
  * محلّل يفضّل DoH (مثل عميل مشغل الـAPK: AnimeDns(preferDoh = { true })) ثم DNS النظام.
  * IPv4 أولًا؛ IPv6 فقط إن لم يوجد IPv4 (جهاز بلا مسار IPv6 يفشل عليه فورًا).
  */
-export function createUnblockingLookup({ query = dohQuery, system = host => dns.lookup(host, { all: true, verbatim: true }), resolvers = DOH_RESOLVERS, now = Date.now } = {}) {
+export function createUnblockingLookup({ query = dohQuery, system = host => dns.lookup(host, { all: true, verbatim: true }), resolvers = DOH_RESOLVERS, now = Date.now, dohTimeout = DOH_TIMEOUT_MS } = {}) {
   const cache = new Map();
+  // كل الخوادم تعطلت (مهلة أو قطع): لا يُعاد سؤالها مع كل طلب حتى تمرّ الفترة
+  let dohDownUntil = 0;
+  // الخادمان معًا وأول إجابة صالحة تُعتمد. كانا بالتتابع، ولكل سؤال (A ثم AAAA) 4 ث: شبكة
+  // تُسقط 1.1.1.1 و8.8.8.8 بصمت تأخذ 16 ث قبل DNS النظام، وطلب المورد مهلته 15 ث فيُقطع
+  // وهو ما زال يحلّ الاسم («ألغيت جلسة التشغيل» عند إضافة Torrentio وجلب مصادر التورنت).
+  async function ask(resolver, host) {
+    let found = await query(resolver, host, 'A', { timeout: dohTimeout });
+    // AAAA فقط إن ردّ الخادم بلا IPv4؛ خادم لا يردّ لا يُسأل مرة ثانية
+    if (!found.length) found = await query(resolver, host, 'AAAA', { timeout: dohTimeout });
+    if (found.length && !isSinkhole(found)) return found;
+    throw Object.assign(new Error(`DoH ${resolver.name}: بلا عنوان عام`), { answered: true });
+  }
   async function viaDoh(host) {
-    let last;
-    for (const resolver of resolvers) {
-      try {
-        let found = await query(resolver, host, 'A');
-        if (!found.length) found = await query(resolver, host, 'AAAA');
-        if (found.length && !isSinkhole(found)) return found;
-        last = new Error(`DoH ${resolver.name}: بلا عنوان عام`);
-      } catch (e) { last = e; }
+    if (dohDownUntil > now()) throw new Error('DoH متعطل على هذه الشبكة');
+    try { return await Promise.any(resolvers.map(resolver => ask(resolver, host))); }
+    catch (e) {
+      const errors = e.errors ?? [e];
+      if (errors.every(error => !error.answered)) dohDownUntil = now() + DOH_DOWN_MS;
+      throw errors.at(-1) ?? new Error('DoH بلا نتيجة');
     }
-    throw last ?? new Error('DoH بلا نتيجة');
   }
   return async function lookup(host) {
     const key = host.toLowerCase(), hit = cache.get(key);
