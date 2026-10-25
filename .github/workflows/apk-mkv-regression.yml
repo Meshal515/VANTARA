@@ -1,0 +1,66 @@
+name: APK subtitled MKV regression
+# انحدار المشغّل: حلقة MKV بترجمة مدمجة غير إنجليزية من تورنت حقيقي تصل READY من البداية ومن 5:01
+# بلا خطأ (Media3 1.5.1 كان يتوقف بـ «Out of range»). لا ينشر شيئًا.
+on:
+  push:
+    branches: ['claude/manga-translation-system-9a2zjl', 'claude/media3-1.6.1-clean']
+    paths:
+      - '.github/workflows/apk-mkv-regression.yml'
+      - 'android/app/build.gradle'
+      - 'android/app/src/androidTest/java/com/vantara/addons/torrent/MkvSubtitleRegressionDeviceTest.kt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apk-mkv-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mkv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec cap sync android
+      - name: Build emulator APKs
+        run: |
+          cat > "$RUNNER_TEMP/x86.gradle" <<'GRADLE'
+          allprojects { afterEvaluate { p -> if (p.plugins.hasPlugin('com.android.application')) { p.android.defaultConfig.ndk.abiFilters.clear(); p.android.defaultConfig.ndk.abiFilters.add('x86_64') } } }
+          GRADLE
+          cd android
+          ./gradlew -I "$RUNNER_TEMP/x86.gradle" :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Subtitled MKV on the emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            mkdir -p mkv-regression
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r -e mkvRegression 1 -e class com.vantara.addons.torrent.MkvSubtitleRegressionDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
+            for f in $(adb shell run-as com.vantara.app.debug ls files/addon-proof | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/addon-proof/$f" > "mkv-regression/$f"; done
+            adb logcat -d -s System.out | grep READS || true
+            ls -la mkv-regression
+            grep -q "OK (1 test)" mkv-regression/instrumentation.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apk-mkv-regression
+          path: mkv-regression/
+          if-no-files-found: warn
