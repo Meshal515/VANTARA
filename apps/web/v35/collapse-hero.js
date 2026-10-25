@@ -99,13 +99,19 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     queued = true;
     requestAnimationFrame(frame);
   };
-  const onTouchStart = () => {
+  let startY = 0;
+  const onTouchStart = (e) => {
     touching = true;
     moved = false;
+    startY = e?.touches?.[0]?.clientY ?? 0;
     handBack();
   };
-  const onTouchEnd = () => {
+  const onTouchEnd = (e) => {
     touching = false;
+    // الزحلقة السريعة: الـWebView يمرّر على خيط آخر وحدث scroll يصل الصفحة بعد رفع الإصبع،
+    // فالحكم بحركة الإصبع نفسها (كانت تفوت زحلقة من كل خمس تقريبًا فيتجمّد الانزلاق)
+    const endY = e?.changedTouches?.[0]?.clientY;
+    if (endY != null && Math.abs(endY - startY) > 6) moved = true;
     if (!moved || !cssNodes.length || !active() || !hero.isConnected) return;
     handed = true;
     frame();

@@ -86,6 +86,12 @@ describe('العمق المربوط بالتمرير في CSS', () => {
       expect(head.style.opacity).toBe('');
       unbind();
       expect(Object.keys(on)).toEqual([]);
+      // زحلقة سريعة: حدث scroll يصل بعد رفع الإصبع، والتسليم يحدث بحركة الإصبع وحدها
+      const bg3 = node('aw-bg-depth');
+      bindCollapsingHero({ hero, bar, bg: bg3, head: null, active: () => true });
+      on.touchstart({ touches: [{ clientY: 700 }] });
+      on.touchend({ changedTouches: [{ clientY: 520 }] });
+      expect(bg3.style.animation).toBe('none');
     } finally { Object.assign(g, saved); }
   });
 });
