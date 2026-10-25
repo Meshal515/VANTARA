@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, isWestern, isWesternManga, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work } from './works.js';
+import { STATUS_BY_SMANGA, detailFields, editionRows, isFiller, isWestern, isWesternManga, localizeFiller, seriesRefOf, sourceLabel, sourceRank, toV35Work, withUpdateSources, requestedChapterRow } from './works.js';
 import { mergeChapters } from '../lib/catalog.js';
 import * as listing from './works.js';
 
@@ -11,6 +11,18 @@ import * as listing from './works.js';
  * نفس الشكل من نفس الحقائق — ولا يخترع ما لم يقله المصدر (تقييم، شعبية).
  */
 describe('v35 work shape', () => {
+  it('keeps the clicked update source alongside saved editions and gives its current link priority',()=>{
+    const saved={id:'ext:work',_work:{key:'work',editions:[{sourceId:'ar.old',manga:{title:'Work',url:'/old'}}]}};
+    const updated=withUpdateSources(saved,{title:'Work',sources:[{s:'ar.new',u:'/new'},{s:'ar.old',u:'/moved'}]});
+    expect(updated._work.editions.map(e=>[e.sourceId,e.manga.url])).toEqual([['ar.old','/moved'],['ar.new','/new']]);
+    expect(saved._work.editions[0].manga.url).toBe('/old');
+  });
+  it('opens the exact Arabic chapter rather than an English row with the same number',()=>{
+    const w={_chapters:[{number:251,lang:'en',sourceId:'source@en'},{number:218,sourceId:'ar.old'},{number:251,sourceId:'ar.new'}]};
+    expect(requestedChapterRow(w,251,{arabicOnly:true})?.sourceId).toBe('ar.new');
+    expect(requestedChapterRow(w,250,{arabicOnly:true})).toBeNull();
+    expect(requestedChapterRow({_chapters:[w._chapters[0]]},251,{arabicOnly:true})).toBeNull();
+  });
   const work = {
     key: 'ون بيس',
     title: 'ون بيس',

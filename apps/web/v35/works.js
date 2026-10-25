@@ -397,6 +397,22 @@ export async function cachedWorkChapterCount(v35work) {
  * العربي بنفس الرقم يغلبه متى نزل. ويظهر في المصادر بعد العربي، بوسم «إنجليزي».
  */
 export const isFiller = (sourceId) => String(sourceId ?? '').includes('@') || fillerIds.has(String(sourceId ?? ''));
+
+/** A clicked release contributes its provider even when this work is already saved. */
+export function withUpdateSources(base, group) {
+  const editions=new Map((base._work?.editions??[]).map(e=>[e.sourceId,e]));
+  const incoming=(group.sources??[]).filter(s=>s?.s&&s.u).map(s=>{
+    const old=editions.get(s.s);
+    return {sourceId:s.s,label:old?.label??s.s,manga:{...old?.manga,url:s.u,title:s.t??group.title,thumbnailUrl:group.cover??old?.manga?.thumbnailUrl??null,memo:s.m??old?.manga?.memo??''}};
+  });
+  for(const e of incoming)editions.set(e.sourceId,e);
+  return {...base,_work:{...base._work,editions:[...editions.values()]},_updateEditions:incoming};
+}
+
+const arabicSource = id => /@ar$/.test(String(id)) || !isFiller(id);
+export function requestedChapterRow(work,number,{arabicOnly=false}={}) {
+  return work?._chapters?.find(row=>row.number===number&&(!arabicOnly||(/@ar$/.test(String(row.sourceId))||(row.lang!=='en'&&arabicSource(row.sourceId)))))??null;
+}
 /** أسماء المصادر المعروفة حين لا يحمل المصدر اسمًا (حزمة بلا name، أو نسخة من الخادم بلا label). */
 const KNOWN_NAMES = {
   teamx: 'Team X', mangaswat: 'MangaSwat', manga3asq: '3asq', mangastarz: 'Manga Starz', mangaspark: 'MangaSpark',
@@ -921,12 +937,13 @@ const loading = new Map();
  * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
  * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
  */
-export async function loadWork(v35work, { onUpdate = () => {}, discover = true } = {}) {
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false } = {}) {
   const id = String(v35work.id);
   const cached = await readWork(id);
   let editions = unionEditions(
     (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => c.sourceId === e.sourceId)?.chapters ?? null })),
     cached?.editions,
+    (v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
   );
   let detail = cached?.detail ?? null;
   const failed = new Map();
@@ -992,10 +1009,11 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
   const askedBefore = cached ? cached.discoveredSources ?? [] : sourceIds;
   const newSource = sourceIds.some((sid) => !askedBefore.includes(sid));
   const due = discover && available() && (newSource || Date.now() - (cached?.discoveredAt ?? 0) > REDISCOVER_MS);
-  const discovery = due
-    ? (async () => {
+  const target=Number.isFinite(requestedChapter)&&requestedChapter>=0?requestedChapter:null;
+  const hasTarget=()=>target!==null&&editions.some(e=>(!arabicOnly||arabicSource(e.sourceId))&&(e.chapters??[]).some(c=>chapterNumberOf(c)===target));
+  const discoverMore = async (options = {}) => {
         try {
-          const found = (await discoverEditions(assemble(v35work, editions, detail))).filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
+          const found = (await discoverEditions(assemble(v35work, editions, detail), options)).filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
           if (found.length) {
             editions = unionEditions(editions, found.map((e) => ({ ...e, chapters: null })));
             await refresh(found);
@@ -1005,10 +1023,13 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true }
           // الاكتشاف تكميلي: ما عندنا يبقى
           return false;
         }
-      })()
-    : Promise.resolve(false);
+      };
+  const discovery = due ? discoverMore({refresh:target!==null&&!hasTarget()}) : Promise.resolve(false);
 
   await Promise.all([refresh(editions), discovery]);
+  // An update names a particular chapter. A recent broad discovery must not
+  // prevent searching other Arabic providers when that chapter is still absent.
+  if(discover&&!due&&available()&&target!==null&&!hasTarget())await discoverMore({refresh:true,arabicOnly});
   held = false;
   const full = emit(true);
   const discoveredNow = await discovery;
@@ -1101,15 +1122,16 @@ export function matchingWork(items, saved) {
  * يردّ خلال 15 ثانية يُتجاوز بلا أن يؤخّر غيره.
  * @returns {Promise<Array<{sourceId, label, manga}>>}
  */
-export function discoverEditions(v35work) {
-  const key = v35work.id;
+export function discoverEditions(v35work, { refresh = false, arabicOnly = false } = {}) {
+  const key = arabicOnly?`${v35work.id}|ar`:v35work.id;
+  if(refresh)discovered.delete(key);
   if (discovered.has(key)) return discovered.get(key);
   const promise = (async () => {
     await loadAliases();
     const variants = titleVariants(v35work);
     if (!variants.length) return [];
     const known = new Set((v35work._work?.editions ?? []).map((e) => e.sourceId));
-    const others = (await sources()).filter((s) => !known.has(s.id));
+    const others = (await sources()).filter((s) => !known.has(s.id)&&(!arabicOnly||arabicSource(s.id)));
     // العنوان كما يُكتب أولًا (بعض المواقع تطابق النص حرفيًّا)، ثم بلا رموز،
     // ثم عنوان النسخة الثانية إن اختلف — ثلاثة أسئلة على الأكثر لكل مصدر
     const queries = [...new Set([variants[0].trim(), normalizeTitle(variants[0]), variants[1]?.trim()].filter(Boolean))].slice(0, 3);
