@@ -91,7 +91,8 @@ class ArabSeedSiteTest {
     }
 
     @Test fun `a movie resolves to direct files in every quality without a browser`() = runBlocking {
-        val asked = mutableListOf<String>()
+        // طلبات الجودات تخرج بالتوازي على خيوط OkHttp: قائمة غير متزامنة تضيّع إضافة أحيانًا فيفشل العدّ
+        val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val r = chain.request()
             val url = r.url.toString()
