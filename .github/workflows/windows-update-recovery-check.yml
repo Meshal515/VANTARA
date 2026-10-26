@@ -1,0 +1,145 @@
+name: Windows update recovery verification
+on:
+  push:
+    branches: [fix/windows-update-release-parity-20261026]
+    paths:
+      - '.github/workflows/windows-update-recovery-check.yml'
+      - 'tools/windows-update-recovery.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-update-recovery-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # CI fixture only; production run number is resolved by manual Stable release.
+  VERSION: '0.4.214'
+jobs:
+  video-host:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compile the embedded Windows video host
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - name: Embed original VANTARA artwork in pinned Electron executable
+        shell: pwsh
+        run: |
+          $zip=Join-Path $env:RUNNER_TEMP 'electron.zip'
+          Invoke-WebRequest 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'){throw 'Electron checksum mismatch'}
+          $electron=Join-Path $env:RUNNER_TEMP 'electron'
+          Expand-Archive $zip $electron
+          ./tools/brand-windows-executable.ps1 -InputExe (Join-Path $electron 'electron.exe') -OutputExe 'apps/desktop/native/VANTARA.exe'
+          node tools/windows-icon-resources.mjs apps/desktop/native/VANTARA.exe apps/desktop/assets/vantara.ico
+          if($LASTEXITCODE -ne 0){throw 'Executable artwork verification failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-check-video-host
+          path: |
+            apps/desktop/native/vantara-video-host.exe
+            apps/desktop/native/VANTARA.exe
+          if-no-files-found: error
+  build:
+    needs: [video-host]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - name: Stamp the CI recovery version into desktop
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,json,pathlib,re
+          version=os.environ['VERSION']
+          path=pathlib.Path('apps/desktop/package.json')
+          data=json.loads(path.read_text())
+          data['version']=version
+          path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          path=pathlib.Path('apps/desktop/preload.cjs')
+          path.write_text(re.sub(r"version: '[^']+'", "version: '"+version+"'", path.read_text(),count=1))
+          path=pathlib.Path('apps/desktop/windows.nsi')
+          text=path.read_text()
+          text=re.sub(r'VIProductVersion "[^"]+"', 'VIProductVersion "'+version+'.0"', text, count=1)
+          text=re.sub(r'(VIAddVersionKey "FileVersion" )"[^"]+"',r'\g<1>"'+version+'"',text,count=1)
+          text=re.sub(r'("DisplayVersion" )"[^"]+"',r'\g<1>"'+version+'"',text,count=1)
+          path.write_text(text)
+          path=pathlib.Path('apps/web/lib/config.js')
+          path.write_text(path.read_text().replace('__VANTARA_VERSION__',version))
+          PY
+      - name: Test desktop code and install packaging tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis 7zip
+          node --test apps/desktop/security.test.cjs apps/desktop/first-party.test.cjs apps/desktop/profile.test.cjs apps/desktop/src/services.test.mjs apps/desktop/src/resource.test.mjs
+          node --check apps/desktop/main.cjs
+          node --check apps/web/desktop/update-check.js
+          pnpm exec vitest run apps/web/desktop/update-check.test.js apps/web/lib/updater.test.js
+      - uses: actions/download-artifact@v4
+        with:
+          name: update-check-video-host
+          path: ${{ runner.temp }}/video-host
+      - name: Build release Windows binaries
+        run: |
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/stable" --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe"
+          test -s "$RUNNER_TEMP/stable/VANTARA-$VERSION-Windows-x64-Setup.exe"
+          (cd "$RUNNER_TEMP/stable" && sha256sum -c SHA256SUMS.txt)
+          printf '%s\n' "$VERSION" > "$RUNNER_TEMP/stable/VERSION.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-check-windows-files
+          path: |
+            ${{ runner.temp }}/stable/*-Setup.exe
+            ${{ runner.temp }}/stable/*-x64.zip
+            ${{ runner.temp }}/stable/SHA256SUMS.txt
+            ${{ runner.temp }}/stable/VERSION.txt
+          compression-level: 0
+          if-no-files-found: error
+
+  verify:
+    needs: [build]
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: update-check-windows-files
+          path: ${{ runner.temp }}/stable
+      - name: Install the actual 209 release and exercise the recovery update
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $folder=Join-Path $env:RUNNER_TEMP 'stable'
+          $baseline=Join-Path $env:RUNNER_TEMP 'baseline'
+          New-Item -ItemType Directory -Path $baseline -Force | Out-Null
+          gh release download stable-209 --repo "$env:GITHUB_REPOSITORY" --dir $baseline --pattern 'vantara-update.json' --pattern 'VANTARA-0.0.209-Windows-x64-Setup.exe'
+          if($LASTEXITCODE -ne 0){throw 'Baseline download failed'}
+          $manifest=Get-Content (Join-Path $baseline 'vantara-update.json') | ConvertFrom-Json
+          $old=Join-Path $baseline 'VANTARA-0.0.209-Windows-x64-Setup.exe'
+          if($manifest.desktop.version -ne '0.0.209' -or $manifest.desktop.url -ne 'https://github.com/Meshal515/VANTARA/releases/download/stable-209/VANTARA-0.0.209-Windows-x64-Setup.exe'){throw 'Unexpected baseline identity'}
+          if((Get-FileHash $old -Algorithm SHA256).Hash.ToLower() -ne $manifest.desktop.sha256 -or (Get-Item $old).Length -ne $manifest.desktop.size){throw 'Baseline integrity mismatch'}
+          node tools/windows-update-recovery.mjs $old (Join-Path $folder "VANTARA-$env:VERSION-Windows-x64-Setup.exe") $env:VERSION (Join-Path $folder 'windows-update-recovery.json')
+          if($LASTEXITCODE -ne 0){throw 'Windows update recovery failed'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-update-recovery-evidence
+          path: ${{ runner.temp }}/stable/windows-update-recovery.json
+          if-no-files-found: warn
