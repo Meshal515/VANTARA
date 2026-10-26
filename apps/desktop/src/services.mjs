@@ -482,7 +482,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const parentAbort=()=>abort.abort();state.controller.signal.addEventListener('abort',parentAbort,{once:true});
       try {
         if(torrent){
-          if(state.replayEntry){
+          if(state.replayEntry&&!state.suppressReplayRead){
             reader.source='cache';
             replay=await sendReplayPrefix({entry:state.replayEntry,req,res,signal:abort.signal,onBytes:demandBytes});
             if(replay.complete)return;
@@ -1034,7 +1034,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           // No cached bytes or account-owned data are deleted.
           const head=await reusableStartupReplay(state.replayEntry);assertSession(state);
           state.trace.record('replay-preflight',{mode:head.usable?'verified-head':'engine-required',requiredBytes:head.requiredBytes,verifiedBytes:head.verifiedBytes});
-          if(!head.usable)state.replayEntry=null;
+          // The engine may re-attach the same replay descriptor via remember().
+          // Retain a session-wide read guard, not only a nullable entry pointer.
+          // Cache writes are still allowed after the engine verifies real bytes.
+          if(!head.usable){state.suppressReplayRead=true;state.replayEntry=null;}
         }
         state.trace.record('replay-lookup',{mode:state.replayEntry?'replay-descriptor':'cold'});
         assertSession(state);

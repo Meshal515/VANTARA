@@ -204,6 +204,11 @@ test('sparse 256 KiB replay for a large video does not masquerade as a warm-read
   assert.equal(stage?.verifiedBytes,256*1024);
   const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(requests.some(x=>x.url.startsWith('/torrents?')),'playback must use the verified engine instead of the sparse shortcut');
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const url=commands.find(m=>m.command[0]==='loadfile').command[1];
+  const response=await fetch(url,{headers:{Range:'bytes=0-3'},signal:AbortSignal.timeout(4000)});
+  assert.equal(response.status,206);
+  assert.equal(await response.text(),'abcd','a rejected replay must never be served again after remember()');
 });
 
 test('verified replay serves the exact selected range while fresh magnet discovery is still blocked',async t=>{
