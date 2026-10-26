@@ -4,6 +4,7 @@ import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
 import { inspectMp4Index } from './mp4-bootstrap.mjs';
+import { libtorrentCommand, isolatedPythonEnvironment } from './libtorrent-engine.mjs';
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
@@ -353,8 +354,9 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentBackend='rqbit'}) {
   if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
+  if(!['rqbit','libtorrent'].includes(torrentBackend)||torrentBackend==='libtorrent'&&(!binaries.libtorrentPython||!binaries.libtorrentScript))throw new Error('محرك التورنت المطلوب غير مرفق');
   let current=null,closed=false;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
   const lookup=dnsOverHttps?unblockingLookup:systemLookup;
@@ -652,6 +654,26 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
    * واحدة بلا حفظ DHT وبمنافذ جديدة، أي كما كان المحرك قبل هذا التعديل.
    */
   async function launchEngine(state,dir,env,options) {
+    if(torrentBackend==='libtorrent'){
+      const apiPort=await port();let listenPort=await port();
+      while(listenPort===apiPort)listenPort=await port();
+      const command=libtorrentCommand({python:binaries.libtorrentPython,script:binaries.libtorrentScript,apiPort,listenPort,dir,stateDir:join(userData,'engine-libtorrent')});
+      assertSession(state);state.api=`http://127.0.0.1:${apiPort}`;
+      let exited=false;
+      child(state,command.executable,command.args,isolatedPythonEnvironment(env),message=>{if(state.engineReady)void fail(state,message);else exited=true;});
+      const deadline=Date.now()+15000;
+      while(!exited&&Date.now()<deadline){
+        assertSession(state);
+        try{
+          const reply=await localJSON(state.api,'/',{...options,timeout:1000});
+          if(reply.engine!=='libtorrent'||reply.api!==1)throw new Error('واجهة محرك التورنت غير متوافقة');
+          if(exited)break;state.engineReady=true;state.trace.record('engine-backend',{engine:'libtorrent',version:reply.version});return;
+        }catch{if(!exited)await sleep(50,state.controller.signal);}
+      }
+      // Selecting a backend is explicit; silently retrying another engine could
+      // double network/storage activity and turn a failed comparison into false evidence.
+      throw new Error('لم يبدأ محرك libtorrent؛ المحرك الافتراضي لم يتغير');
+    }
     for(const dhtPersistence of [true,false]) {
       const apiPort=await port();let listenPort=await port();
       while(listenPort===apiPort)listenPort=await port();

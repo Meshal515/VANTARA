@@ -1,0 +1,117 @@
+name: Windows libtorrent parity evidence (no release)
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/windows-update-release-parity-20261026']
+    paths:
+      - 'apps/desktop/native/libtorrent/**'
+      - 'apps/desktop/src/libtorrent-engine*'
+      - 'tools/bundle-windows-libtorrent*'
+      - 'tools/libtorrent-fixture*'
+      - 'tools/torrent-startup-benchmark.mjs'
+      - '.github/workflows/windows-libtorrent-parity-check.yml'
+permissions:
+  contents: read
+concurrency:
+  group: windows-libtorrent-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-comparison:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bundle the pinned embedded interpreter and official libtorrent wheel
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'vantara-libtorrent-parity'
+          $native=Join-Path $dir 'native'
+          node tools/bundle-windows-libtorrent.mjs "--output=$native" "--cache=$dir/cache"
+          if($LASTEXITCODE -ne 0){throw 'Pinned native bundle failed'}
+          "PARITY_ROOT=$dir" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_PYTHON=$native/python/python.exe" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_SERVER=$native/server.py" | Out-File -Append $env:GITHUB_ENV
+          & "$native/python/python.exe" -I -c 'import sys,libtorrent; assert sys.flags.isolated; assert libtorrent.__version__.startswith("2.0.13"); print(libtorrent.__version__,sys.version)'
+          if($LASTEXITCODE -ne 0){throw 'Official wheel cannot load on Windows'}
+      - name: Check native swarm integrity, cancellation, disk reserve and authenticated IPC
+        shell: pwsh
+        run: |
+          & $env:PARITY_PYTHON -I apps/desktop/native/libtorrent/server_test.py
+          if($LASTEXITCODE -ne 0){throw 'Native swarm regression failed'}
+          node --test apps/desktop/src/libtorrent-engine.test.mjs tools/bundle-windows-libtorrent.test.mjs tools/torrent-startup-benchmark.test.mjs
+          if($LASTEXITCODE -ne 0){throw 'Backend launch or build regression failed'}
+      - name: Download the same checksum-pinned rqbit, mpv and FFmpeg used by the Windows gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function Fetch-Pinned([string]$Url,[string]$Name,[string]$Hash) {
+            $file=Join-Path $env:PARITY_ROOT $Name
+            Invoke-WebRequest $Url -OutFile $file
+            if((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $Hash){throw "Checksum mismatch: $Name"}
+            return $file
+          }
+          $rqbit=Fetch-Pinned 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe' 'rqbit.exe' '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea'
+          $archive=Fetch-Pinned 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-x86_64-20261014-git-ec38361c56.7z' 'mpv.7z' 'ab6236a2b78a3e9e93a156c1f638d3182ee906006d019c15d1b7b056a7c9a4c5'
+          $mpvDir=Join-Path $env:PARITY_ROOT 'mpv'
+          & 7z x -y "-o$mpvDir" $archive | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'MPV archive failed'}
+          $mpv=Get-ChildItem $mpvDir -Recurse -File -Filter mpv.exe | Select-Object -First 1
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $electronDir=Join-Path $env:PARITY_ROOT 'electron'
+          Expand-Archive $electron -DestinationPath $electronDir
+          Copy-Item (Join-Path $electronDir 'vulkan-1.dll') (Join-Path $mpv.DirectoryName 'vulkan-1.dll')
+          & $mpv.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'Pinned MPV cannot start'}
+          $ffmpegZip=Fetch-Pinned 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip' 'ffmpeg.zip' '46e480b5509ce50061158621cac3d1930836475fadf60c72da9aca15fd830620'
+          $ffmpegDir=Join-Path $env:PARITY_ROOT 'ffmpeg'
+          Expand-Archive $ffmpegZip -DestinationPath $ffmpegDir
+          $ffmpeg=Get-ChildItem $ffmpegDir -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $mpv -or -not $ffmpeg){throw 'Missing media executable'}
+          "PARITY_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_FFMPEG=$($ffmpeg.FullName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Compare actual rendered frames across both clients and both seed engines
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $failed=$false
+          $fixtures=$null
+          foreach($seed in @('rqbit','libtorrent')){
+            foreach($engine in @('rqbit','libtorrent')){
+              $out=Join-Path $env:PARITY_ROOT "runs/$seed-$engine"
+              $arguments=@('tools/torrent-startup-benchmark.mjs','--service-module','apps/desktop/src/services.mjs','--rqbit',$env:PARITY_RQBIT,'--mpv',$env:PARITY_MPV,'--ffmpeg',$env:PARITY_FFMPEG,'--torrent-backend',$engine,'--libtorrent-python',$env:PARITY_PYTHON,'--libtorrent-script',$env:PARITY_SERVER,'--seed-engine',$seed,'--output',$out,'--runs','3','--kinds','mp4,late-moov,mkv','--modes','cold,warm,restart,partial','--stable-seconds','2','--timeout-ms','30000')
+              if($fixtures){$arguments+=@('--fixtures-from',$fixtures)}
+              & node @arguments
+              if($LASTEXITCODE -ne 0){$failed=$true}
+              if(-not $fixtures){$fixtures=Join-Path $out 'seed'}
+            }
+          }
+          if($failed){throw 'One or more actual Windows playback comparisons failed; do not switch engine'}
+      - name: Record evidence without publishing or changing the default engine
+        if: always()
+        shell: pwsh
+        run: |
+          '### Owned-swarm Windows comparison; no public-network claim' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| Seeder / Client | Fixture | Cache | Successful | Failed | Median ms | P95 ms |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| --- | --- | --- | ---: | ---: | ---: | ---: |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem "$env:PARITY_ROOT/runs/*/results.json" -ErrorAction SilentlyContinue | ForEach-Object {
+            $report=Get-Content $_.FullName -Raw | ConvertFrom-Json
+            foreach($row in $report.summaries){
+              "| $($_.Directory.Name) | $($row.fixture) | $($row.mode) | $($row.successful) | $($row.failed) | $($row.medianMs) | $($row.p95Ms) |" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-libtorrent-parity-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/
+            ${{ runner.temp }}/vantara-libtorrent-parity/native/LIBTORRENT-MANIFEST.json
+          if-no-files-found: warn
