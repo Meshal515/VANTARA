@@ -29,12 +29,14 @@ import {
 import { createAccountStore } from './account-store.js';
 import { accountWithIdentity, withIdentity } from './identity.js';
 import { PROJECTIONS, projectQueue } from './optimistic.js';
+import { createSessionStore, SESSION_RECORD_KEY, storedSession } from './session-store.js';
 
 const TOKEN_KEY = 'vantara.token';
 const USER_KEY = 'vantara.user';
 const CURSOR_KEY = 'vantara.cursor';
 const QUEUE_KEY = 'vantara.queue';
 const MIRROR_KEY = 'vantara.mirror';
+const CACHE_OWNER_KEY = 'vantara.cache.owner.v1';
 // A verified server snapshot, not a local delta cursor, establishes mirror completeness.
 const MIRROR_AUDIT_KEY = 'vantara.mirror.audit.v1';
 const MIRROR_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -199,11 +201,21 @@ async function deviceProof(deviceIdProvider) {
 
 export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId }) {
   const listeners = new Set();
-  let token = localStorage.getItem(TOKEN_KEY) ?? null;
-  let user = accountWithIdentity(readJson(USER_KEY, null));
+  const sessionStore = createSessionStore();
+  let currentSession = storedSession();
+  let sessionClock = currentSession?.savedAt ?? 0;
+  const legacyUser = readJson(USER_KEY, null);
+  const taggedOwner = readJson(CACHE_OWNER_KEY, null);
+  let localCacheOwner = typeof taggedOwner === 'string' ? taggedOwner : legacyUser?.userId ?? null;
+  let localOwnerTagged = typeof taggedOwner === 'string';
+  if (localCacheOwner && !localOwnerTagged) localOwnerTagged = writeJson(CACHE_OWNER_KEY, localCacheOwner);
+  let dataOwner = localCacheOwner;
+  let token = currentSession ? currentSession.token ?? null : localStorage.getItem(TOKEN_KEY) ?? null;
+  let user = accountWithIdentity(currentSession ? currentSession.user ?? null : legacyUser);
   let accountsLimit = 10;
   let deletingHere = false;
   let pinGrant = (() => {
+    if (currentSession) return token && user?.userId ? currentSession.pinGrant ?? null : null;
     try {
       // Do not resurrect a grant after a logout, account switch or reset.
       const saved = JSON.parse(localStorage.getItem(PIN_GRANT_KEY) || 'null');
@@ -232,6 +244,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let cursor = Number(localStorage.getItem(CURSOR_KEY) ?? '0') || 0;
   let queue = readJson(QUEUE_KEY, []);
   let mirror = readJson(MIRROR_KEY, {});
+  const localCacheInitiallyEmpty = cursor === 0 && queue.length === 0 && Object.keys(mirror).length === 0;
   // ترقية المرآة القديمة: الصفوف الاجتماعية السابقة كانت مختلطة بسجل المالك.
   // لا نعرضها قبل أن يعيد الخادم إرسال projection الحالي وصلاحية كل حساب.
   if (localStorage.getItem('vantara.public-views.v1') !== '1') {
@@ -274,6 +287,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let pulling = false;
   let pullAgain = false;
   let sessionGeneration = 0;
+  let loginAttempt = 0;
   let pushing = false;
   let pushWaiters = [];
 
@@ -306,6 +320,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   /** هل نجح آخر حفظ محلي. كتابة لا تُحفظ ليست كتابة دائمة. */
   let durable = true;
   let overflowing = false;
+  let sessionStorageFailed = false;
 
   const emit = (tables) => {
     for (const listener of listeners) {
@@ -318,29 +333,95 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   };
 
   const accountStore = createAccountStore();
-  // Writes are serialized so a slow older snapshot/queue cannot replace a newer
-  // record. Capture the account and payload before crossing an async boundary.
+  // The old local cache has one owner. Never relabel its queue by changing auth.
+  // Other accounts use the existing account-scoped IDB/native recovery copies.
+  const writeLocalCache = (key, value) => dataOwner && dataOwner === localCacheOwner ? writeJson(key, value) : false;
+  const writeLegacyUser = () => {
+    if (localOwnerTagged || user?.userId === localCacheOwner) writeJson(USER_KEY, user);
+  };
   let storageWrites = Promise.resolve();
-  const storeCopy = (kind, value) => {
-    const ownerId = user?.userId;
+  const storeCopy = (kind, value, ownerId = dataOwner) => {
     const captured = JSON.parse(JSON.stringify(value));
     const result = storageWrites.then(() => accountStore.write(kind, ownerId, captured));
     storageWrites = result.catch(() => false);
     return result;
   };
-  const persistMirror = () => writeJson(MIRROR_KEY, mirror);
   let lastAudit = readJson(MIRROR_AUDIT_KEY, null);
+  const checkpointOwner = () => {
+    const ownerId = dataOwner;
+    if (!ownerId) return Promise.resolve();
+    const snapshot = { mirror: JSON.parse(JSON.stringify(mirror)), cursor, auditedAt: lastAudit?.userId === ownerId ? lastAudit.at : null };
+    const ops = JSON.parse(JSON.stringify(queue));
+    const result = storageWrites.then(async () => {
+      const [saved, pending] = await Promise.all([accountStore.read('snapshot', ownerId), accountStore.read('queue', ownerId)]);
+      const merged = new Map([...(pending?.ops ?? []), ...ops].map(op => [op.opId, op]));
+      await Promise.all([
+        saved?.cursor > snapshot.cursor ? Promise.resolve(true) : accountStore.write('snapshot', ownerId, snapshot),
+        accountStore.write('queue', ownerId, { ops: [...merged.values()] }),
+      ]);
+    });
+    storageWrites = result.catch(() => false);
+    return result;
+  };
+  const detachData = (ownerId) => {
+    // Initialize absent metadata only; retain an older owner's existing cursor.
+    if (localStorage.getItem(CURSOR_KEY) === null) writeJson(CURSOR_KEY, 0);
+    dataOwner = ownerId;
+    cursor = 0;
+    mirror = {};
+    queue = [];
+    quarantine = [];
+    landing = [];
+    attemptsOf.clear();
+    nextPushAt = 0;
+    overflowing = false;
+    refreshOverlay();
+  };
+  const selectOwner = async (ownerId, generation) => {
+    if (dataOwner === ownerId) return;
+    await checkpointOwner();
+    if (disposed || sessionGeneration !== generation) throw Object.assign(new Error('stale_session'), { stale: true });
+    // Read the destination before changing ownership. Logout during this await
+    // must checkpoint the loaded source, never an empty placeholder for B.
+    const [saved, pending] = await Promise.all([accountStore.read('snapshot', ownerId), accountStore.read('queue', ownerId)]);
+    await checkpointOwner();
+    if (disposed || sessionGeneration !== generation) throw Object.assign(new Error('stale_session'), { stale: true });
+    detachData(ownerId);
+    if (ownerId && !localCacheOwner && localCacheInitiallyEmpty && writeJson(CACHE_OWNER_KEY, ownerId)) {
+      localCacheOwner = ownerId;
+      localOwnerTagged = true;
+    }
+    if (saved?.mirror && Number.isSafeInteger(saved.cursor) && saved.cursor >= 0) { mirror = saved.mirror; cursor = saved.cursor; }
+    if (Array.isArray(pending?.ops)) queue = pending.ops;
+    refreshOverlay();
+  };
+  // Restore before the account gate or a new login. A late disk read must never
+  // replace a newer login/logout, and a logout tombstone beats older credentials.
+  const restoringGeneration = sessionGeneration;
+  const sessionReady = sessionStore.read().then(saved => {
+    // Track disk's clock even when logout invalidates the pending auth restore.
+    sessionClock = Math.max(sessionClock, saved?.savedAt ?? 0);
+    if (disposed || sessionGeneration !== restoringGeneration || !saved || saved.savedAt <= (currentSession?.savedAt ?? -1)) return;
+    currentSession = saved;
+    token = saved.token ?? null;
+    user = accountWithIdentity(saved.user ?? null);
+    pinGrant = token && user?.userId ? saved.pinGrant ?? null : null;
+    refreshOverlay();
+  });
+  const persistMirror = () => writeLocalCache(MIRROR_KEY, mirror);
   const commitMirror = async (snapshot, nextCursor, auditedAt = lastAudit?.userId === user?.userId ? lastAudit.at : null) => {
-    const localSaved = writeJson(MIRROR_KEY, snapshot);
+    const localSaved = writeLocalCache(MIRROR_KEY, snapshot);
     const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt });
     return localSaved || independentSaved;
   };
-  const recoveryOwner = user?.userId;
-  const recoveryToken = token;
-  const recoveryGeneration = sessionGeneration;
-  const recovered = Promise.all([
-    accountStore.read('snapshot', recoveryOwner), accountStore.read('queue', recoveryOwner),
-  ]).then(([saved, pending]) => {
+  const recovered = sessionReady.then(async () => {
+    const recoveryOwner = user?.userId;
+    const recoveryToken = token;
+    const recoveryGeneration = sessionGeneration;
+    await selectOwner(recoveryOwner ?? null, recoveryGeneration);
+    const [saved, pending] = await Promise.all([
+      accountStore.read('snapshot', recoveryOwner), accountStore.read('queue', recoveryOwner),
+    ]);
     if (disposed || user?.userId !== recoveryOwner || token !== recoveryToken || sessionGeneration !== recoveryGeneration) return;
     if (saved?.mirror && Number.isSafeInteger(saved.cursor) && saved.cursor >= cursor) {
       mirror = saved.mirror;
@@ -363,7 +444,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   let queueSaveVersion = 0;
   const persistQueue = () => {
     refreshOverlay();
-    const localSaved = writeJson(QUEUE_KEY, queue);
+    const localSaved = writeLocalCache(QUEUE_KEY, queue);
     durable = localSaved;
     const version = ++queueSaveVersion;
     const generation = sessionGeneration;
@@ -375,7 +456,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return localSaved;
   };
 
-  const persistQuarantine = () => writeJson(QUARANTINE_KEY, quarantine);
+  const persistQuarantine = () => writeLocalCache(QUARANTINE_KEY, quarantine);
 
   /** ينسى عدّ المحاولات لعمليات لم تبقَ في الطابور (ضُغطت أو استقرّت). */
   const pruneAttempts = () => {
@@ -400,17 +481,20 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   async function sessionPayload(userId, extra = {}, signal) {
     if (!signal) return withSyncDeadline((deadline) => sessionPayload(userId, extra, deadline));
+    let proof;
+    try { proof = await deviceProof(deviceIdProvider); }
+    catch (error) { throw Object.assign(error, { code: 'device_storage_unavailable' }); }
     const response = await fetch(`${baseUrl}/v1/session`, {
       signal,
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         userId,
-        ...(await deviceProof(deviceIdProvider)),
+        ...proof,
         ...(pinGrant && extra.pin === undefined ? { pinGrant } : {}),
         ...extra,
       }),
-    });
+    }).catch(error => { throw Object.assign(error, { stage: 'session_transport' }); });
     if (!response.ok) {
       // PIN: سبب الرفض ومعه طول الرمز ووقت انتهاء القفل
       if (response.status === 401 || response.status === 429) {
@@ -431,7 +515,11 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       error.code = (await response.json().catch(() => null))?.error ?? null;
       throw error;
     }
-    return response.json();
+    const payload = await response.json().catch(() => null);
+    if (typeof payload?.token !== 'string' || !payload.token || payload?.user?.userId !== userId) {
+      throw Object.assign(new Error('invalid_session_response'), { status: 502, code: 'session_invalid_response' });
+    }
+    return payload;
   }
 
   /** جهاز جديد يطلب الاعتماد: رمز يُعرض على الشاشة ويعتمده المالك. */
@@ -487,7 +575,24 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return response.json();
   }
 
-  function persistSession(payload) {
+  async function saveSessionRecord(signedOut = false) {
+    const generation = sessionGeneration;
+    const contents = signedOut ? { signedOut: true } : { token, user, pinGrant };
+    await sessionReady;
+    if (generation !== sessionGeneration) return false;
+    sessionClock = Math.max(Date.now(), sessionClock + 1, (currentSession?.savedAt ?? 0) + 1);
+    currentSession = { savedAt: sessionClock, ...contents };
+    const primary = writeJson(SESSION_RECORD_KEY, currentSession);
+    const backup = await sessionStore.write(currentSession);
+    sessionStorageFailed = !primary && !backup;
+    return !sessionStorageFailed;
+  }
+
+  async function persistSession(payload) {
+    const generation = sessionGeneration;
+    const attempt = loginAttempt;
+    await selectOwner(payload.user?.userId ?? null, generation);
+    if (generation !== sessionGeneration || attempt !== loginAttempt || dataOwner !== payload.user?.userId || disposed) throw Object.assign(new Error('stale_session'), { stale: true });
     token = payload.token;
     user = accountWithIdentity(payload.user);
     if (payload.pinGrant) keepGrant(payload.pinGrant);
@@ -505,11 +610,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
     refreshOverlay();
     sessionGeneration += 1;
-    localStorage.setItem(TOKEN_KEY, token);
-    writeJson(USER_KEY, user);
+    // Failure to cache an already-issued session is a local storage failure,
+    // not a network failure. Keep both the current session and existing data.
+    if (localOwnerTagged || user?.userId === localCacheOwner) {
+      try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+      writeLegacyUser();
+    }
+    await saveSessionRecord();
   }
 
   async function refreshSession() {
+    await recovered;
     if (!user?.userId) {
       const error = new Error('unauthorized');
       error.status = 401;
@@ -523,7 +634,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       if (sessionGeneration !== refreshGeneration || user?.userId !== refreshUserId) {
         throw Object.assign(new Error('stale_session'), { stale: true });
       }
-      persistSession(payload);
+      await persistSession(payload);
       emit(['session']);
       return payload;
     } catch (error) {
@@ -539,8 +650,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       if (error?.code === 'pin_required' && user) {
         keepGrant(null);
         user = { ...user, pinDigits: error.digits ?? user.pinDigits ?? 4 };
-        writeJson(USER_KEY, user);
+        writeLegacyUser();
       }
+      await saveSessionRecord();
       emit(['session']);
       throw error;
     }
@@ -581,6 +693,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       } else {
         token = null;
         localStorage.removeItem(TOKEN_KEY);
+        await saveSessionRecord();
         emit(['session']);
       }
       const error = new Error('unauthorized');
@@ -750,13 +863,22 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
   async function signIn(userId, { pin } = {}) {
+    const attempt = ++loginAttempt;
+    await recovered;
+    const generation = sessionGeneration;
+    const current = () => attempt === loginAttempt && generation === sessionGeneration && !disposed;
+    const stale = () => Object.assign(new Error('stale_session'), { stale: true });
     const previousId = user?.userId ?? null;
     // إذن PIN يخص حسابه: الدخول لحساب آخر يبدأ بلا إذن
-    if (previousId !== userId) keepGrant(null);
+    if (previousId !== userId) {
+      keepGrant(null);
+      if (previousId) await saveSessionRecord();
+    }
     let payload;
     try {
       payload = await sessionPayload(userId, pin === undefined ? {} : { pin });
     } catch (error) {
+      if (!current()) throw stale();
       // التثبيت النظيف يمسح credential. إذا كان هذا Android نفسه سبق اعتماده
       // ندوّر السر مرة واحدة؛ جهاز جديد فعليًا يبقى device_untrusted فتظهر
       // له شاشة الاعتماد الحالية بلا تغيير.
@@ -765,8 +887,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       if (!recovery?.recovered) throw error;
       payload = await sessionPayload(userId);
     }
-    persistSession(payload);
-    if (previousId && previousId !== user.userId) resetAll();
+    if (!current()) throw stale();
+    await persistSession(payload);
+    if (attempt !== loginAttempt || sessionGeneration !== generation + 1 || !token || user?.userId !== userId) throw stale();
     emit(['session']);
     return user;
   }
@@ -799,14 +922,20 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   function signOut() {
+    const checkpoint = checkpointOwner();
+    loginAttempt += 1;
     keepGrant(null);
     sessionGeneration += 1;
     token = null;
     user = null;
+    // Explicit logout invalidates credentials only. Removing the larger old
+    // record also reserves room for its small tombstone under string quota.
+    localStorage.removeItem(SESSION_RECORD_KEY);
     localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    resetAll();
+    if (localOwnerTagged) localStorage.removeItem(USER_KEY);
+    detachData(null);
     emit(['session']);
+    return Promise.all([checkpoint, saveSessionRecord(true)]).then(([, saved]) => saved);
   }
 
   async function logoutDevice() {
@@ -814,13 +943,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     // ندّعي نجاح logout؛ يستطيع المستخدم إعادة المحاولة أو اختيار signOut محليًا.
     if (token) await request('/v1/device/logout', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
-    signOut();
+    await signOut();
   }
 
   async function logoutAll() {
     if (token) await request('/v1/device/logout-all', { method: 'POST' }, false);
     localStorage.removeItem(DEVICE_CREDENTIAL_KEY);
-    signOut();
+    await signOut();
   }
 
   /**
@@ -835,7 +964,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     mirror = {};
     landing = [];
     valuesCache = new Map();
-    localStorage.setItem(CURSOR_KEY, '0');
+    writeLocalCache(CURSOR_KEY, 0);
     persistMirror();
   }
 
@@ -865,7 +994,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   async function auditMirror({ force = false } = {}) {
     if (auditingMirror) return auditCompletion;
     const ownerId = user?.userId;
-    if (!token || !ownerId || disposed || auditingMirror || Date.now() < nextAuditAttemptAt) return;
+    if (!token || !ownerId || dataOwner !== ownerId || disposed || auditingMirror || Date.now() < nextAuditAttemptAt) return;
     const savedAudit = lastAudit;
     const missingOwner = cursor > 0 && !mirror.accounts?.[ownerId];
     const due = missingOwner || savedAudit?.userId !== ownerId ||
@@ -885,7 +1014,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       for (let page = 0; page < MAX_MIRROR_AUDIT_PAGES; page += 1) {
         const continuation = snapshotCursor === 0 && skippedInitialZero ? '&afterZero=1' : '';
         const payload = await request(`/v1/sync?since=${snapshotCursor}${continuation}`);
-        if (disposed || user?.userId !== ownerId ||
+        if (disposed || dataOwner !== ownerId || user?.userId !== ownerId ||
             sessionGeneration !== generation || token !== tokenAtStart) return;
         if (!payload || payload.reset || !payload.changes || typeof payload.changes !== 'object') {
           throw new Error('mirror_audit_invalid_response');
@@ -921,17 +1050,17 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         const restored = Object.values(snapshot[table] ?? {}).filter((row) => row.user_id === ownerId).length;
         if (previous > restored) throw new Error('mirror_audit_shrank_' + table);
       }
-      if (disposed || user?.userId !== ownerId ||
+      if (disposed || dataOwner !== ownerId || user?.userId !== ownerId ||
           sessionGeneration !== generation || token !== tokenAtStart) return;
       // localStorage.setItem replaces the whole value atomically. A quota error
       // leaves the old backup intact. Advance the cursor ONLY after this succeeds.
       if (!await commitMirror(snapshot, snapshotCursor, Date.now())) throw new Error('mirror_audit_storage_full');
-      if (disposed || user?.userId !== ownerId || sessionGeneration !== generation || token !== tokenAtStart) return;
+      if (disposed || dataOwner !== ownerId || user?.userId !== ownerId || sessionGeneration !== generation || token !== tokenAtStart) return;
       mirror = snapshot;
       cursor = snapshotCursor;
       landing = landing.filter((item) => item.rev > cursor);
       refreshOverlay(); // Unsynced local edits remain visible over the restored snapshot.
-      writeJson(CURSOR_KEY, cursor);
+      writeLocalCache(CURSOR_KEY, cursor);
       lastAudit = { userId: ownerId, at: Date.now() };
       writeJson(MIRROR_AUDIT_KEY, lastAudit);
       lastSyncAt = Date.now();
@@ -943,6 +1072,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // Changes committed after the snapshot are fetched by the ordinary delta.
       queueMicrotask(() => void pull());
     } catch (error) {
+      if (dataOwner !== ownerId || user?.userId !== ownerId || sessionGeneration !== generation) return;
       nextAuditAttemptAt = Date.now() + MIRROR_AUDIT_RETRY_MS;
       auditFailure = error?.message ?? 'mirror_audit_failed';
       lastError = { status: 0, at: Date.now(), code: auditFailure };
@@ -966,7 +1096,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    */
   async function pull() {
     await recovered;
-    if (!token || disposed) return;
+    if (!token || disposed || dataOwner !== user?.userId) return;
     if (pulling) {
       pullAgain = true;
       return;
@@ -984,7 +1114,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         if (!payload) break;
 
         // رد بدأ تحت حساب/جلسة أقدم لا يملك حق لمس مرآة الحساب الحالي.
-        if (generation !== sessionGeneration || pullUserId !== (user?.userId ?? null)) {
+        if (generation !== sessionGeneration || dataOwner !== pullUserId || pullUserId !== (user?.userId ?? null)) {
           pullAgain = true;
           break;
         }
@@ -1025,7 +1155,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
         const nextCursor = Number(payload.cursor ?? cursor) || cursor;
         if (!await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
-        if (generation !== sessionGeneration || pullUserId !== (user?.userId ?? null)) break;
+        if (generation !== sessionGeneration || dataOwner !== pullUserId || pullUserId !== (user?.userId ?? null)) break;
         if (payload.more && nextCursor === 0) {
           if (skippedInitialZero) throw new Error('mirror_delta_stalled_zero');
           skippedInitialZero = true;
@@ -1037,7 +1167,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         // سحبٌ أسبق من الكتابة لا يُرجع القلب ولا نقطة الإشعار
         if (landing.length) landing = landing.filter((l) => l.rev > cursor);
         refreshOverlay();
-        writeJson(CURSOR_KEY, cursor);
+        writeLocalCache(CURSOR_KEY, cursor);
         if (touched.length > 0) emit(touched);
         lastSyncAt = Date.now();
         writeJson('vantara.lastSync', lastSyncAt);
@@ -1059,6 +1189,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       // and immediately whenever even the owner's account row is missing.
       if (!backlog) void auditMirror();
     } catch (error) {
+      if (generation !== sessionGeneration || dataOwner !== pullUserId || pullUserId !== user?.userId) return;
       lastError = { status: error?.status ?? 0, at: Date.now(), correlationId: error?.correlationId ?? null, code: error?.message === 'mirror_storage_full' ? 'mirror_storage_full' : null };
       if (error?.message === 'mirror_storage_full') auditFailure = 'mirror_storage_full';
       emit(['sync']);
@@ -1080,6 +1211,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    * يمنع احتساب الفصل مرتين بعد انقطاع.
    */
   function enqueue(kind, payload = {}, { opId = crypto.randomUUID(), requireDurable = false } = {}) {
+    if (user?.userId && dataOwner !== user.userId) throw Object.assign(new Error('stale_session'), { stale: true });
     const existing = queue.find((op) => op.opId === opId);
     if (existing) {
       if (!persistQueue() && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
@@ -1141,7 +1273,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    */
   async function push({ force = false } = {}) {
     await recovered;
-    if (!token || queue.length === 0) return;
+    if (!token || queue.length === 0 || dataOwner !== user?.userId) return;
     if (pushing) {
       // طلب أثناء إرسال جارٍ لا يُهمل: الدفعة الحالية قد لا تحمل آخر عملية
       pushAgain = true;
@@ -1150,6 +1282,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
     if (!force && Date.now() < nextPushAt) return;
     if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    const pushOwner = user?.userId;
+    // A same-account token renewal may advance sessionGeneration mid-request.
+    // An explicit login/unlock/logout still invalidates the old queue attempt.
+    const attemptAtStart = loginAttempt;
+    const ownsQueue = () => dataOwner === pushOwner && user?.userId === pushOwner && loginAttempt === attemptAtStart;
 
     pushing = true;
     try {
@@ -1162,11 +1300,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       }
 
       while (queue.length > 0) {
+        if (!ownsQueue()) return;
         let batch = queue.slice(0, MAX_PUSH_BATCH);
         let payload;
         try {
           payload = await request('/v1/ops', { method: 'POST', body: { ops: batch } });
         } catch (error) {
+          if (!ownsQueue()) return;
           let effectiveError = error;
           const initialStatus = error?.status ?? 0;
 
@@ -1188,6 +1328,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           }
 
           if (effectiveError) {
+            if (!ownsQueue()) return;
             const status = effectiveError?.status ?? 0;
             lastError = { status, at: Date.now(), correlationId: effectiveError?.correlationId ?? null };
             const verdict = classifyFailure(status);
@@ -1206,6 +1347,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           }
         }
 
+        if (!ownsQueue()) return;
         const settled = new Set([...(payload?.applied ?? []), ...(payload?.skipped ?? [])]);
         // استجابة ناجحة لا تذكر عملية تعني أن الخادم رفضها عند التحليل — لا
         // تصلح بإعادة الإرسال. تُعزل حالًا بدل أن تُحاول إلى الأبد.
@@ -1277,6 +1419,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       overflowing,
       now: Date.now(),
     });
+    if (sessionStorageFailed) return { ...result, state: 'degraded', message: 'دخلت حسابك، لكن تعذّر حفظ الجلسة على الجهاز. بياناتك القديمة محفوظة', lastError: { ...(result.lastError ?? {}), code: 'session_storage_full' } };
     return auditFailure
       ? {
           ...result, state: 'degraded',
@@ -1389,8 +1532,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** فتح حساب عليه PIN بعد أن أُغلق التطبيق (الجلسة موجودة والإذن لا). */
   async function unlock(pin) {
-    const payload = await sessionPayload(user.userId, { pin });
-    persistSession(payload);
+    const attempt = ++loginAttempt;
+    await recovered;
+    const generation = sessionGeneration;
+    const owner = user?.userId;
+    const payload = await sessionPayload(owner, { pin });
+    if (attempt !== loginAttempt || generation !== sessionGeneration || user?.userId !== owner || disposed) throw Object.assign(new Error('stale_session'), { stale: true });
+    await persistSession(payload);
+    if (attempt !== loginAttempt || sessionGeneration !== generation + 1 || user?.userId !== owner || !token) throw Object.assign(new Error('stale_session'), { stale: true });
     emit(['session']);
     return user;
   }
@@ -1398,7 +1547,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   function rememberPinDigits(digits) {
     if (!user) return;
     user = { ...user, pinDigits: digits ?? null };
-    writeJson(USER_KEY, user);
+    writeLegacyUser();
     emit(['session']);
   }
 
@@ -1407,6 +1556,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (out.ok) {
       keepGrant(out.data?.pinGrant);
       rememberPinDigits(out.data?.digits ?? pin.length);
+      await saveSessionRecord();
     }
     return out;
   }
@@ -1416,6 +1566,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (out.ok) {
       keepGrant(null);
       rememberPinDigits(null);
+      await saveSessionRecord();
     }
     return out;
   }
@@ -1444,7 +1595,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       await new Promise((resolve) => setTimeout(resolve, Math.min(wait + 150, 5_000)));
     }
     deletingHere = false;
-    signOut();
+    await signOut();
     return out;
   }
 
@@ -1559,6 +1710,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   return {
+    ready: recovered,
     /** يوقف مؤقّتات هذا العميل المؤجّلة؛ لا يمسّ الطابور المحفوظ. */
     dispose() {
       disposed = true;

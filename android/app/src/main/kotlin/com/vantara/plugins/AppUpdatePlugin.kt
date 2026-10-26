@@ -377,7 +377,7 @@ class AppUpdatePlugin : Plugin() {
                     }
                 }
             }
-            return WebBundleState(prefs(PREFS), prefs(CAP_PREFS), { File(it, "index.html").isFile }, BuildConfig.VANTARA_NATIVE)
+            return WebBundleState(prefs(PREFS), prefs(CAP_PREFS), { File(it, "index.html").isFile }, BuildConfig.VANTARA_NATIVE, BuildConfig.VERSION_NAME)
         }
     }
 }

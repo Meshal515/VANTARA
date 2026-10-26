@@ -26,6 +26,7 @@ class WebBundleState(
     private val cap: KeyValue,
     private val exists: (String) -> Boolean,
     private val native: String,
+    private val bundledVersion: String? = null,
 ) {
     interface KeyValue {
         fun get(key: String): String?
@@ -48,6 +49,11 @@ class WebBundleState(
             cap.put(CAP_PATH, "")
             return Boot.Reset
         }
+        // An APK can embed newer web without changing the native fingerprint.
+        // Never let an old downloaded bundle hide that newer bundled code.
+        forgetOlderBundle(GOOD, GOOD_VERSION)
+        forgetOlderBundle(TRIAL, TRIAL_VERSION, TRIAL_BOOTS)
+        forgetOlderBundle(STAGED, STAGED_VERSION, STAGED_MANUAL)
         val trial = own.get(TRIAL)
         if (trial != null) {
             val version = own.get(TRIAL_VERSION) ?: ""
@@ -68,7 +74,7 @@ class WebBundleState(
 
     /** حزمة تحققت: الطلب اليدوي وحده يسمح بإكمالها في الإقلاع التالي. */
     fun stage(path: String, version: String, bundleNative: String, userInitiated: Boolean = false): Boolean {
-        if (bundleNative != native || version in bad()) return false
+        if (bundleNative != native || version in bad() || olderThanBundled(version)) return false
         own.put(STAGED, path)
         own.put(STAGED_VERSION, version)
         own.put(STAGED_MANUAL, userInitiated.toString())
@@ -112,7 +118,7 @@ class WebBundleState(
         own.put(TRIAL, null)
         own.put(TRIAL_VERSION, null)
         own.put(TRIAL_BOOTS, null)
-        val good = own.get(GOOD)?.takeIf(exists) ?: ""
+        val good = own.get(GOOD)?.takeIf { exists(it) && !olderThanBundled(own.get(GOOD_VERSION)) } ?: ""
         if (good.isEmpty()) {
             own.put(GOOD, null)
             own.put(GOOD_VERSION, null)
@@ -145,6 +151,32 @@ class WebBundleState(
     private fun clearAll(keepBad: Boolean) {
         for (k in listOf(STAGED, STAGED_VERSION, STAGED_MANUAL, TRIAL, TRIAL_VERSION, TRIAL_BOOTS, GOOD, GOOD_VERSION)) own.put(k, null)
         if (!keepBad) own.put(BAD, null)
+    }
+
+    private fun forgetOlderBundle(pathKey: String, versionKey: String, vararg otherKeys: String) {
+        if (!olderThanBundled(own.get(versionKey))) return
+        val previous = own.get(pathKey)
+        own.put(pathKey, null)
+        own.put(versionKey, null)
+        for (key in otherKeys) own.put(key, null)
+        if (previous != null && cap.get(CAP_PATH) == previous) {
+            cap.put(CAP_PATH, own.get(GOOD)?.takeIf(exists) ?: "")
+        }
+    }
+
+    /** Stable versions are numeric. Unknown local/debug labels never evict web. */
+    private fun olderThanBundled(version: String?): Boolean {
+        fun components(value: String?): List<Long>? {
+            if (value == null || !value.matches(Regex("[0-9]+(?:\\.[0-9]+){0,3}"))) return null
+            return value.split('.').map { it.toLongOrNull() ?: return null }
+        }
+        val candidate = components(version) ?: return false
+        val bundled = components(bundledVersion) ?: return false
+        for (index in 0 until maxOf(candidate.size, bundled.size)) {
+            val comparison = (candidate.getOrElse(index) { 0L }).compareTo(bundled.getOrElse(index) { 0L })
+            if (comparison != 0) return comparison < 0
+        }
+        return false
     }
 
     companion object {
