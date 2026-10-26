@@ -49,10 +49,11 @@ export function createDesktopTransport(bridge = globalThis.VantaraDesktop) {
   } };
 }
 
-export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, storage = globalThis.localStorage, definitions = null } = {}) {
+export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, storage = globalThis.localStorage, definitions = null, onSourcesChanged = null } = {}) {
   const store = createDesktopStore(storage);
   const fetcher=createDesktopFetcher(bridge);
   const runtime = { runtimeName:'desktop',native:false,torrentSupported:true,addonStreams:true,registry:{list:()=>[],def:()=>null,source:()=>null},store,addonStore:store,fetcher,ensureMedia:async()=>null };
+  runtime.setOnSourcesChanged = listener => { onSourcesChanged = typeof listener === 'function' ? listener : null; };
   runtime.ready=(async()=>{
     const modules=await loadDesktopSources({VantaraDesktop:bridge});
     if(!modules)return;
@@ -60,17 +61,37 @@ export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, stora
     runtime.store=modules.createStore({name:'vantara-desktop-sources'});
     runtime.registry=modules.createRegistry({engines:modules.engines,store:runtime.store,ctx:{fetch:fetcher,hosts:modules.createHostResolver(fetcher)}});
     await runtime.registry.init(defs.map(def=>def.edge==='challenge'?{...def,edge:undefined}:def));
+    // init keeps the last working source until its replacement passes a real probe.
+    // Without this maintenance Windows retained pending definitions across every restart.
+    const pending = Object.entries(runtime.registry.status()).filter(([, entry]) => entry.candidate?.status === 'pending').map(([id]) => id);
+    if (pending.length) {
+      const timer = setTimeout(() => {
+        void (async () => {
+          for (const id of pending) {
+            const results = await runtime.registry.verifyPending({ only: id });
+            if (!results.some(result => result.kind === 'candidate' && result.ok)) continue;
+            await runtime.addons.reloadSources();
+            // The view may close while verification runs; its listener never owns source state.
+            try { if (typeof onSourcesChanged === 'function') await onSourcesChanged(); } catch { /* keep the verified source */ }
+          }
+        })().catch(() => {});
+      }, 15000);
+      timer.unref?.();
+    }
   })();
   runtime.addons = createAddonRuntime({ runtime, store, transport: createDesktopTransport(bridge) });
   return runtime;
 }
 // صاحب سجل واحد لكل سياق renderer؛ السياقات المحقونة في الاختبارات مستقلة.
 const runtimes = new WeakMap();
-export function getRuntime(g = globalThis) {
+export function getRuntime(g = globalThis, { onSourcesChanged } = {}) {
   const bridge = g.VantaraDesktop;
   const existing = runtimes.get(g);
-  if (existing && existing.bridge === bridge) return existing.runtime;
-  const runtime = createDesktopRuntime({ bridge: bridge ?? null, storage: g.localStorage ?? null });
+  if (existing && existing.bridge === bridge) {
+    if (typeof onSourcesChanged === 'function') existing.runtime.setOnSourcesChanged(onSourcesChanged);
+    return existing.runtime;
+  }
+  const runtime = createDesktopRuntime({ bridge: bridge ?? null, storage: g.localStorage ?? null, onSourcesChanged });
   runtimes.set(g, { bridge, runtime });
   return runtime;
 }
