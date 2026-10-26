@@ -363,6 +363,9 @@ test('stable Android main APK workflow is CI-gated and release-signed', () => {
   assert.match(workflow, /github\.ref\s*==\s*['"]refs\/heads\/main['"]/m, 'release workflow must run from main');
   assert.match(workflow, /git merge-base --is-ancestor HEAD origin\/main/m, 'selected source must belong to main');
   assertCommitHasSuccessfulCi(workflow, '$SOURCE_SHA', 'manual Stable');
+  assert.doesNotMatch(workflow, /github\.event\.workflow_run\.head_sha/, 'manual releases cannot inherit a SHA from a workflow_run event');
+  assert.match(workflow, /echo "sha=\$SOURCE_SHA" >> "\$GITHUB_OUTPUT"/, 'the checked-out verified source must be exported for publication');
+  assert.equal((workflow.match(/HEAD_SHA:\s*\$\{\{ steps\.release_source\.outputs\.sha \}\}/g) ?? []).length, 2, 'both packaging and tag publication must use the verified source');
   assert.match(workflow, /ANDROID_KEYSTORE_BASE64:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_BASE64 \}\}/m);
   assert.match(workflow, /ANDROID_KEYSTORE_PASSWORD:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_PASSWORD \}\}/m);
   assert.match(workflow, /:app:assembleRelease|assembleRelease/m, 'stable main APK must be a release build');

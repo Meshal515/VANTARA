@@ -39,6 +39,7 @@ jobs:
 
       # Explicit release only; no signing or Cloudflare secrets before this gate.
       - name: Require current main and successful CI for the exact release source
+        id: release_source
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -50,6 +51,7 @@ jobs:
           test "$SOURCE_SHA" = "$(git rev-parse origin/main)" || { echo 'Release source must be current main'; exit 1; }
           passed=$(gh run list --workflow 'VANTARA CI' --commit "$SOURCE_SHA" --event push --branch main --status completed --limit 20 --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')
           test "$passed" -gt 0 || { echo 'Exact release source has no successful main CI'; exit 1; }
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -220,7 +222,7 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.code }}
           NATIVE: ${{ steps.native.outputs.fingerprint }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.release_source.outputs.sha }}
         run: |
           set -euo pipefail
           tag="stable-${VERSION_CODE}"
@@ -237,7 +239,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.bundle.outputs.tag }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.release_source.outputs.sha }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
