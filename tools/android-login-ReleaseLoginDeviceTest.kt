@@ -37,7 +37,7 @@ class ReleaseLoginDeviceTest {
                 val resumed = async("""
                     const info=await (await fetch('http://localhost:8765/__fixture/info')).json();
                     const id=await Capacitor.Plugins.SystemUi.deviceId();
-                    const store=(await import('/lib/session-store.js')).createSessionStore();
+                    const store=(await import(new URL('/lib/session-store.js',location.href).href)).createSessionStore();
                     const saved=await store.read();
                     const renew=await fetch('http://localhost:8765/v1/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:info.userId,deviceId:localStorage.getItem('vantara.device.id'),deviceCredential:localStorage.getItem('vantara.device.credential'),pinGrant:saved?.pinGrant})});
                     const proof=await (await fetch('http://localhost:8765/__fixture/proof')).json();
@@ -127,7 +127,7 @@ class ReleaseLoginDeviceTest {
                 waitFor("home after successful PIN with localStorage still full", 30_000) { bool("!!document.querySelector('.v35') && !document.querySelector('.vpin')") }
                 val verified = async("""
                     const info=await (await fetch('http://localhost:8765/__fixture/info')).json();
-                    const store=(await import('/lib/account-store.js')).createAccountStore();
+                    const store=(await import(new URL('/lib/account-store.js',location.href).href)).createAccountStore();
                     let proof,snapshot;
                     for(let n=0;n<45;n++){
                       proof=await (await fetch('http://localhost:8765/__fixture/proof')).json();snapshot=await store.read('snapshot',info.userId);
