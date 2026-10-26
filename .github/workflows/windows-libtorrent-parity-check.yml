@@ -141,6 +141,11 @@ jobs:
               foreach($row in $report.runs){if($row.audioEvidence.params.samplerate -ne 48000 -or -not $row.realtimePlaybackVerified){throw 'Missing actual PCM or stable playback proof'}}
             }else{
               if($nativeExit -eq 0 -or $passed -ne 0 -or @($report.runs).Count -ne 1 -or $report.runs[0].startPlaybackError -notmatch 'رفض محرك التورنت الطلب'){throw "Expected explicit torrent-protocol rejection was not reproduced: $($case.name)"}
+              # An intentionally rejected protocol is PASS if and only if validated
+              # above. Preserve the observed nativeExit in evidence; clear the
+              # shell's last process status so this negative-control case does not
+              # falsely fail the whole GitHub step.
+              $global:LASTEXITCODE=0
             }
             $protocolResults+=@{name=$case.name;expectedSuccess=$case.expected;actualSuccessful=$passed;nativeExit=$nativeExit;infoHash=$referenceHash;report=(Join-Path $out 'results.json')}
           }

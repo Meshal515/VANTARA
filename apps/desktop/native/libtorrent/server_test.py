@@ -34,7 +34,11 @@ def port():
 class PolicyTests(unittest.TestCase):
     def test_current_piece_precedes_interleaved_readers_without_speculative_tail(self):
         w = backend.piece_window(0, 100000, 0, 1024, 7 * 1024)
-        self.assertEqual(tuple(range(7, 19)), w)
+        self.assertEqual(tuple(range(7, 71)), w)
+        # 256 KiB torrent pieces now retain up to 16 MiB ahead of the reader.
+        self.assertEqual(len(backend.piece_window(0, 256*1024*500, 0, 256*1024, 0)), 64)
+        # Large pieces must NOT allocate an unbounded number of requests.
+        self.assertEqual(len(backend.piece_window(0, 32*1024*1024*20, 0, 32*1024*1024, 0)), 1)
         deadlines = backend.deadlines([w, (90, 91, 92)])
         self.assertEqual(0, deadlines[7])
         self.assertEqual(0, deadlines[90])

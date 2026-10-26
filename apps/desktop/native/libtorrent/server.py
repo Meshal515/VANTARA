@@ -29,7 +29,11 @@ MAX_METADATA = 8 * MIB
 MAX_PIECES = 1_000_000
 MAX_PIECE_BYTES = 32 * MIB
 MEMORY_BYTES = 64 * MIB
-WINDOW_PIECES = 12
+WINDOW_PIECES = 64
+# Request enough verified sequential pieces to sustain ~24 Mbps 4K playback.
+# The previous 12 x 256 KiB lookahead covered only ~1 second of video.
+# Cap demand to 16 MiB and 64 pieces, keeping prioritization bounded on large torrents.
+WINDOW_LOOKAHEAD_BYTES = 16 * MIB
 MIN_FREE = 512 * MIB
 METADATA_TTL = 7 * 86400
 MAX_METADATA_FILES = 32
@@ -72,7 +76,8 @@ def piece_window(index, file_length, file_offset, piece_length, position):
         raise ValueError("invalid read position")
     first = (file_offset + position) // piece_length
     last = (file_offset + file_length - 1) // piece_length
-    return tuple(range(first, min(first + WINDOW_PIECES, last + 1)))
+    count = min(WINDOW_PIECES, max(1, (WINDOW_LOOKAHEAD_BYTES + piece_length - 1) // piece_length))
+    return tuple(range(first, min(first + count, last + 1)))
 
 
 def deadlines(windows):
