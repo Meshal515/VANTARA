@@ -42,8 +42,10 @@ def inject_owned_peer():
         # A single peer injection is insufficient if its first connection
         # fails while resolving metadata. DHT and trackers are disabled in
         # these owned-loopback fixtures, so nobody else can reconnect.
-        # Retry only until metadata is verified, at most once every 2 seconds.
-        if handle.has_metadata():
+        # A restart can load metadata from disk with zero connected peers.
+        # Partial replay then needs missing pieces, so metadata alone cannot
+        # suppress injection. Keep retries bounded and stop once connected.
+        if handle.has_metadata() and handle.status().num_peers > 0:
             continue
         now = time.monotonic()
         if now - last_attempt < 2.0:
