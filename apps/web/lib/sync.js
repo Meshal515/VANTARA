@@ -352,12 +352,13 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!ownerId) return Promise.resolve();
     const snapshot = { mirror: JSON.parse(JSON.stringify(mirror)), cursor, auditedAt: lastAudit?.userId === ownerId ? lastAudit.at : null };
     const ops = JSON.parse(JSON.stringify(queue));
+    const isolated = JSON.parse(JSON.stringify(quarantine));
     const result = storageWrites.then(async () => {
       const [saved, pending] = await Promise.all([accountStore.read('snapshot', ownerId), accountStore.read('queue', ownerId)]);
       const merged = new Map([...(pending?.ops ?? []), ...ops].map(op => [op.opId, op]));
       await Promise.all([
         saved?.cursor > snapshot.cursor ? Promise.resolve(true) : accountStore.write('snapshot', ownerId, snapshot),
-        accountStore.write('queue', ownerId, { ops: [...merged.values()] }),
+        accountStore.write('queue', ownerId, { ops: [...merged.values()], quarantine: [...new Map([...(pending?.quarantine ?? []), ...isolated].map(entry => [entry.op?.opId, entry])).values()].slice(-MAX_QUARANTINE) }),
       ]);
     });
     storageWrites = result.catch(() => false);
@@ -393,6 +394,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
     if (saved?.mirror && Number.isSafeInteger(saved.cursor) && saved.cursor >= 0) { mirror = saved.mirror; cursor = saved.cursor; }
     if (Array.isArray(pending?.ops)) queue = pending.ops;
+    if (Array.isArray(pending?.quarantine)) quarantine = pending.quarantine.slice(-MAX_QUARANTINE);
     refreshOverlay();
   };
   // Restore before the account gate or a new login. A late disk read must never
@@ -435,6 +437,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       const known = new Set(queue.map((op) => op.opId));
       queue.push(...pending.ops.filter((op) => !known.has(op.opId)));
     }
+    if (Array.isArray(pending?.quarantine)) quarantine = [...new Map([...quarantine, ...pending.quarantine].map(entry => [entry.op?.opId, entry])).values()].slice(-MAX_QUARANTINE);
     refreshOverlay();
     emit([...Object.keys(KEYS), 'sync']);
   }).catch(() => {});
@@ -448,7 +451,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     durable = localSaved;
     const version = ++queueSaveVersion;
     const generation = sessionGeneration;
-    void storeCopy('queue', { ops: queue }).then((saved) => {
+    void storeCopy('queue', { ops: queue, quarantine }).then((saved) => {
       if (disposed || generation !== sessionGeneration || version !== queueSaveVersion) return;
       durable = localSaved || saved;
       emit(['sync']);

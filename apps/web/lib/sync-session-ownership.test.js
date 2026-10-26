@@ -89,6 +89,20 @@ it('restores B mirror and queue using B cursor even when A legacy cursor was hig
   expect(await store.read('queue', A.userId)).toMatchObject({ userId: A.userId, ops: [A_OP] });
 });
 
+it('preserves B quarantined writes when its local cache still belongs to A', async () => {
+  const { open } = await fixture();
+  const store = createAccountStore();
+  const rejectedOp = { opId: 'B-rejected-edit', kind: 'favorite.set', payload: { seriesRef: 'B-title', member: true }, at: 2 };
+  await store.write('queue', B.userId, { ops: [rejectedOp] });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'invalid_operation' }, { status: 422 })));
+  const sync = await open();
+  await sync.push({ force: true });
+  expect(sync.quarantined).toBe(1);
+  await vi.waitFor(async () => expect(await store.read('queue', B.userId)).toMatchObject({ ops: [] }));
+  const reopened = await open();
+  expect(reopened.quarantined).toBe(1);
+});
+
 it('keeps logout newer than an unread session backup when the clock moves back and IDB writes fail', async () => {
   vi.spyOn(Date, 'now').mockReturnValue(200);
   try {
