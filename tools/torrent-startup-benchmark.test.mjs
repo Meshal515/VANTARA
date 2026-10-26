@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
-import { framePixels, summarize, main, assessPlaybackProgress, createUtpFixtureRelay } from './torrent-startup-benchmark.mjs';
+import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay } from './torrent-startup-benchmark.mjs';
 
 test('frame proof rejects black output and accepts authored colored rendered pixels',()=>{
   assert.equal(framePixels(Buffer.alloc(1200)).nonblack,false);
@@ -24,6 +24,14 @@ test('software-only host comparison never passes a stopped video or exempts a no
   assert.equal(assessPlaybackProgress(sample,{...baseline,toSeconds:0}).passed,false);
   assert.equal(assessPlaybackProgress({...sample,toSeconds:2}).kind,'realtime');
   assert.equal(assessPlaybackProgress({...sample,toSeconds:2}).passed,true);
+});
+
+test('first decoded frame is not considered moving video while the player is buffering or paused',()=>{
+  assert.equal(playbackHasActuallyStarted({position:0,paused:false,buffering:false}),false);
+  assert.equal(playbackHasActuallyStarted({position:0.5,paused:false,buffering:true}),false);
+  assert.equal(playbackHasActuallyStarted({position:0.5,paused:true,buffering:false}),false);
+  assert.equal(playbackHasActuallyStarted({position:1,paused:false,buffering:false}),true);
+  assert.equal(playbackHasActuallyStarted({position:NaN,paused:false,buffering:false}),false);
 });
 
 test('benchmark rejects unknown warmup strategies and invalid piece sizes before launching tools',async()=>{

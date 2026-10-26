@@ -149,6 +149,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $highResolutionResults=@()
+          $highResolutionFailures=@()
           foreach($format in @(@{name='1080p-h264';size='1920x1080';width=1920;height=1080;codec='libx264'},@{name='2160p-hevc10-pq';size='3840x2160';width=3840;height=2160;codec='libx265'})){
             $source=Join-Path $env:PARITY_ROOT "high-resolution-fixtures/$($format.name)"
             New-Item -ItemType Directory -Path $source -Force | Out-Null
@@ -162,20 +163,23 @@ jobs:
             foreach($engine in @('rqbit','libtorrent')){
               $out=Join-Path $env:PARITY_ROOT "runs/high-resolution/$($format.name)-$engine"
               & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $env:PARITY_RQBIT --mpv $env:PARITY_MPV --ffmpeg $env:PARITY_FFMPEG --torrent-backend $engine --libtorrent-python $env:PARITY_PYTHON --libtorrent-script $env:PARITY_SERVER --seed-engine libtorrent --fixtures-from $source --verify-audio true --output $out --runs 5 --kinds mp4 --modes cold,warm --stable-seconds 10 --timeout-ms 30000
-              if($LASTEXITCODE -ne 0){throw 'High-resolution frame, stability or seek check failed'}
+              $benchmarkExit=$LASTEXITCODE
+              if(-not (Test-Path (Join-Path $out 'results.json'))){$highResolutionFailures+=@{format=$format.name;engine=$engine;reason='Missing benchmark evidence'};continue}
               $report=Get-Content (Join-Path $out 'results.json') -Raw | ConvertFrom-Json
               if(-not $referenceHash){$referenceHash=$report.fixtures[0].infoHash}
               if($report.fixtures[0].infoHash -ne $referenceHash){throw 'High-resolution engine comparison changed torrent identity'}
               if(@($report.runs).Count -ne 10){throw 'Expected five cold and five warm samples'}
-              foreach($row in $report.runs){
-                $decoded=$row.renderedProof.decodedParams
+              $bad=@($report.runs | Where-Object {
+                $row=$_; $decoded=$row.renderedProof.decodedParams
                 $motion=$row.stablePlayback.toSeconds-$row.stablePlayback.fromSeconds
-                if(-not $row.ok -or -not $row.realtimePlaybackVerified -or $decoded.w -ne $format.width -or $decoded.h -ne $format.height -or $row.audioEvidence.params.samplerate -ne 48000 -or $motion -lt 9){throw 'Actual high-resolution decoding or ten-second playback proof missing'}
-              }
-              $highResolutionResults+=@{format=$format.name;engine=$engine;infoHash=$referenceHash;samples=10;summaries=$report.summaries}
+                -not $row.ok -or -not $row.realtimePlaybackVerified -or $decoded.w -ne $format.width -or $decoded.h -ne $format.height -or $row.audioEvidence.params.samplerate -ne 48000 -or $motion -lt 9
+              })
+              if($benchmarkExit -ne 0 -or $bad.Count){$highResolutionFailures+=@{format=$format.name;engine=$engine;reason='Real-time playback/seek/codec acceptance failed';failedRuns=$bad.Count}}
+              $highResolutionResults+=@{format=$format.name;engine=$engine;infoHash=$referenceHash;samples=10;accepted=($benchmarkExit -eq 0 -and $bad.Count -eq 0);summaries=$report.summaries}
             }
           }
           $highResolutionResults | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/high-resolution-summary.json')
+          if($highResolutionFailures.Count){$highResolutionFailures | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/high-resolution-failures.json');throw 'Unresolved 1080p/4K proof failure(s) — see high-resolution-failures.json; Stable remains blocked'}
 
       - name: Record evidence without publishing or changing the default engine
         if: always()

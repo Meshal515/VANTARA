@@ -33,6 +33,11 @@ export function summarize(rows){
   const values=rows.filter(r=>r.ok&&Number.isFinite(r.firstRenderedMs)).map(r=>r.firstRenderedMs).sort((a,b)=>a-b),n=values.length;
   return {successful:n,failed:rows.length-n,minMs:values[0]??null,medianMs:n?(values[Math.floor((n-1)/2)]+values[Math.ceil((n-1)/2)])/2:null,p95Ms:n?values[Math.ceil(n*.95)-1]:null,maxMs:values.at(-1)??null};
 }
+export function playbackHasActuallyStarted({position, paused, buffering}={}) {
+  // A rendered still/screenshot does not certify video playback. Never count
+  // paused or paused-for-cache mpv output as a running stream.
+  return Number.isFinite(position)&&position>0.05&&paused===false&&buffering===false;
+}
 export function assessPlaybackProgress(sample,baseline){
   const localRate=baseline?.observedSeconds>0?(baseline.toSeconds-baseline.fromSeconds)/baseline.observedSeconds:NaN;
   const constrained=baseline?.softwareAdapter===true&&Number.isFinite(localRate)&&localRate>=.05&&localRate<.6;
@@ -142,7 +147,7 @@ async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,au
   const info={name,length:bytes.length,'piece length':pieceLength,pieces:Buffer.concat(pieces)},torrent=encode({info});
   return {name,path,kind,bytes:bytes.length,infoHash:sha(encode(info)).toString('hex'),fileIdx:0,pieceLength,torrent,syntheticPaddingBytes:kind==='late-moov'?paddingMiB*1024*1024:0};
 }
-function parse(argv){const options={runs:5,kinds:'mp4,late-moov,mkv',modes:'cold,warm,restart,partial,newsource,nocache',stableSeconds:2,paddingMiB:32,pieceLength:256*1024,torrentWarmup:'container',timeoutMs:45000};for(let i=0;i<argv.length;i++){assert.ok(argv[i].startsWith('--'),`Unexpected ${argv[i]}`);const key=argv[i].slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());options[key]=argv[++i];}for(const key of ['runs','stableSeconds','paddingMiB','pieceLength','timeoutMs'])options[key]=Number(options[key]);for(const key of ['serviceModule','rqbit','mpv'])assert.ok(options[key],`--${key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())} is required`);assert.ok(options.runs>=1&&options.runs<=100);assert.ok(['demand','both','container'].includes(options.torrentWarmup),'--torrent-warmup must be demand, both or container');assert.ok(Number.isSafeInteger(options.pieceLength)&&options.pieceLength>=16384&&options.pieceLength<=16*1024*1024&&(options.pieceLength&(options.pieceLength-1))===0,'--piece-length must be a power of two from 16 KiB to 16 MiB');return options;}
+function parse(argv){const options={runs:5,kinds:'mp4,late-moov,mkv',modes:'cold,warm,restart,partial,newsource,nocache',stableSeconds:2,firstMotionTimeoutMs:6000,paddingMiB:32,pieceLength:256*1024,torrentWarmup:'container',timeoutMs:45000};for(let i=0;i<argv.length;i++){assert.ok(argv[i].startsWith('--'),`Unexpected ${argv[i]}`);const key=argv[i].slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());options[key]=argv[++i];}for(const key of ['runs','stableSeconds','firstMotionTimeoutMs','paddingMiB','pieceLength','timeoutMs'])options[key]=Number(options[key]);for(const key of ['serviceModule','rqbit','mpv'])assert.ok(options[key],`--${key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())} is required`);assert.ok(options.runs>=1&&options.runs<=100);assert.ok(Number.isFinite(options.firstMotionTimeoutMs)&&options.firstMotionTimeoutMs>=1000&&options.firstMotionTimeoutMs<=15000,'Invalid first motion deadline');assert.ok(['demand','both','container'].includes(options.torrentWarmup),'--torrent-warmup must be demand, both or container');assert.ok(Number.isSafeInteger(options.pieceLength)&&options.pieceLength>=16384&&options.pieceLength<=16*1024*1024&&(options.pieceLength&(options.pieceLength-1))===0,'--piece-length must be a power of two from 16 KiB to 16 MiB');return options;}
 
 export async function main(argv=process.argv.slice(2)){
   const options=parse(argv),root=resolve(options.output??await fs.mkdtemp(join(tmpdir(),'vantara-torrent-benchmark-')));await fs.mkdir(root,{recursive:true});
@@ -226,7 +231,24 @@ export async function main(argv=process.argv.slice(2)){
           if(options.verifyAudio==='true'){
             run.audioEvidence=await until(async()=>{const params=await connection.send(['get_property','audio-params']).catch(()=>null);return params?.samplerate>0?{params,sink:'null (decoded PCM; physical speaker output not measured)'}:null;},5000);
           }
-          const before=await connection.send(['get_property','time-pos']);const stableStarted=performance.now();await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);
+          // mpv may decode a frame while still paused for cache; don't sample
+          // playback rate inside that initial buffer wait. Never waive the rate
+          // threshold: require actual forward motion within a separate,
+          // bounded startup limit or fail the case.
+          const proofStart=performance.now();
+          const startedMotion=await until(async()=>{
+            const [position,paused,buffering]=await Promise.all([
+              connection.send(['get_property','time-pos']),
+              connection.send(['get_property','pause']),
+              connection.send(['get_property','paused-for-cache'])
+            ]);
+            if(!playbackHasActuallyStarted({position,paused,buffering}))return null;
+            return {position,paused,buffering};
+          },options.firstMotionTimeoutMs);
+          run.firstMovingFrameMs=performance.now()-run.startedAt;
+          run.firstMotionWaitMs=performance.now()-proofStart;
+          const before=startedMotion.position;
+          const stableStarted=performance.now();await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);
           const local=options.stabilityBaseline==='local'?report.localPlayerProbe?.find(r=>r.label==='default'):null;
           const sample={fromSeconds:before,toSeconds:after,observedSeconds:(performance.now()-stableStarted)/1000,frameToleranceSeconds:1/(await connection.send(['get_property','container-fps']))};
           const assessment=assessPlaybackProgress(sample,local?{fromSeconds:local.before?.['time-pos'],toSeconds:local.after?.['time-pos'],observedSeconds:local.observedSeconds,softwareAdapter:local.softwareAdapter}:null);
