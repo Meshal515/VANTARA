@@ -1,0 +1,45 @@
+name: Windows StageArt and Playback Contract
+on:
+  push:
+    branches: ['chatgpt/windows-stage-and-torrent-migration-20261026']
+    paths:
+      - 'apps/web/desktop/**'
+      - 'apps/desktop/src/services.mjs'
+      - '.github/workflows/windows-stage-parity.yml'
+  pull_request:
+    paths:
+      - 'apps/web/desktop/**'
+      - 'apps/desktop/src/services.mjs'
+      - '.github/workflows/windows-stage-parity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-stage-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  stage-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Parse desktop runtime and verify native service boundaries
+        run: |
+          node --check apps/desktop/src/services.mjs
+          node --check apps/web/desktop/engine.js
+          node --check apps/web/desktop/loading-stage.js
+          node --check apps/web/desktop/overlay.js
+          node --check apps/web/desktop/player.js
+      - name: Windows player, artwork and source contracts
+        run: pnpm exec vitest run apps/web/desktop/loading-stage.test.js apps/web/desktop/overlay.test.js apps/web/desktop/player.test.js apps/web/desktop/engine.test.js
+      - name: Native host and torrent service tests
+        run: node --test apps/desktop/src/services.test.mjs apps/desktop/video-host.test.cjs
