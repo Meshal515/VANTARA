@@ -101,7 +101,7 @@ async function localPlayerProbe(mpv,file,root,nativeEnv){
     row.softwareAdapter=/Using a software adapter/.test(await fs.readFile(join(root,`local-${label}.log`),'utf8').catch(()=>''));
   }
   await fs.writeFile(join(root,'local-player-probe.json'),JSON.stringify(results,null,2));
-  console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current']}))}));
+  console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current'],softwareAdapter:r.softwareAdapter}))}));
   return results;
 }
 async function diskBytes(directory){let logical=0,allocated=0,files=0;try{for(const entry of await fs.readdir(directory,{withFileTypes:true})){const path=join(directory,entry.name);if(entry.isDirectory()){const c=await diskBytes(path);logical+=c.logicalBytes;allocated+=c.allocatedBytes??0;files+=c.files;}else if(entry.isFile()){const s=await fs.stat(path);logical+=s.size;allocated+=(s.blocks??0)*512;files++;}}}catch{}return {logicalBytes:logical,allocatedBytes:process.platform==='win32'?null:allocated,files};}
