@@ -167,6 +167,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   });
   // النسخة المحمولة (ZIP) لا مثبّت لها: تبقى على فتح صفحة التنزيل
   register('download-update', async (update) => {
+    update = updater.assertForwardUpdate(update, appVersion);
     if (portable || process.platform !== 'win32') return { ready: false, manual: true };
     if (pendingUpdate?.version === update?.version) return { ready: true, version: pendingUpdate.version };
     const file = await updater.downloadUpdate({

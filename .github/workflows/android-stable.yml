@@ -1,13 +1,15 @@
 name: Android stable APK
 
 # نسخة التجربة اليومية الحقيقية لمشعل والعيال: نفس مفتاح التوقيع في كل بناء.
-# لا push ولا workflow_dispatch هنا؛ workflow_run يُقرأ من default branch ولا
-# يحصل على أسرار التوقيع إلا بعد نجاح CI على main.
+# إنشاء Stable يدوي فقط منmain، بعد التحقق منCIلنفسSHAوقبل أسرارالتوقيع.
+# عائلة0.4 تتجاوز قناةWindowsالقديمة0.3.18 وتوحّد رقم المنصات.
 on:
-  workflow_run:
-    workflows: ['VANTARA CI']
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact current main SHA with successful VANTARA CI (blank uses dispatch SHA)'
+        required: false
+        type: string
 
 permissions:
   # contents: write لنشر الإصدار الذي يقرؤه «يوجد تحديث جديد» في التطبيق
@@ -24,7 +26,7 @@ env:
 
 jobs:
   apk:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -32,8 +34,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # نبني بالضبط الـSHA الذي اجتاز CI، لا HEAD أحدث وصل أثناء الانتظار.
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
+
+      # Explicit release only; no signing or Cloudflare secrets before this gate.
+      - name: Require current main and successful CI for the exact release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA=$(git rev-parse HEAD)
+          git fetch origin main:refs/remotes/origin/main --force
+          git merge-base --is-ancestor HEAD origin/main
+          test "$SOURCE_SHA" = "$(git rev-parse origin/main)" || { echo 'Release source must be current main'; exit 1; }
+          passed=$(gh run list --workflow 'VANTARA CI' --commit "$SOURCE_SHA" --event push --branch main --status completed --limit 20 --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')
+          test "$passed" -gt 0 || { echo 'Exact release source has no successful main CI'; exit 1; }
 
       - uses: pnpm/action-setup@v4
         with:
@@ -68,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           # هذا الـworkflow وحده متزايد دائمًا؛ يكفي لتحديثات القناة المستقرة.
-          echo "name=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "name=0.4.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       # بصمة كل ما يُبنى في الـAPK ولا تحمله الواجهة (Kotlin، Manifest،

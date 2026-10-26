@@ -1,5 +1,7 @@
-/** قناة ويندوز مستقلة: لا تختلط بإصدارات APK التي لا تحتوي مثبت ويندوز. */
-export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/download/windows-channel/desktop-update.json';
+/** Prefer the unified release; the pointer retains the last verified Windows build. */
+export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/latest/download/vantara-update.json';
+export const WINDOWS_POINTER_URL = 'https://github.com/Meshal515/VANTARA/releases/download/windows-channel/desktop-update.json';
+const stableCode = version => /^0\.(?:0|4)\.(\d+)$/.exec(String(version ?? ''))?.[1];
 
 export function newerVersion(candidate, installed) {
   const parse = value => {
@@ -26,6 +28,7 @@ function validatedRelease(manifest) {
   if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.search || url.hash || url.username || url.password) return null;
   const tag = channel ? `windows-v${entry.version}` : `stable-${manifest.versionCode}`;
   if (!channel && (!Number.isSafeInteger(manifest.versionCode) || manifest.versionCode <= 0)) return null;
+  if (!channel && Number(stableCode(entry.version)) !== manifest.versionCode) return null;
   if (url.pathname !== `/Meshal515/VANTARA/releases/download/${tag}/VANTARA-${entry.version}-Windows-x64-Setup.exe`) return null;
   return {version:entry.version,url:url.href,sha256:entry.sha256,size:entry.size,
     notes:(Array.isArray(channel ? entry.notes : manifest.changelog) ? (channel ? entry.notes : manifest.changelog) : []).slice(0,4).map(String)};
@@ -35,18 +38,30 @@ export function desktopUpdateFromManifest(manifest, installed) {
   const entry = validatedRelease(manifest);
   // إصدار مجهول (0.0.0 حين لا يصل رقم الإصدار للواجهة) ليس «أقدم»: كان سيعرض التحديث نفسه بعد كل تثبيت
   if (!/^\d+\.\d+\.\d+(?:-preview\.\d+)?$/.test(installed ?? '') || installed === '0.0.0') return null;
+  const installedCode = stableCode(installed);
+  if (installedCode !== undefined) {
+    if (manifest?.format !== 2 || Number(manifest.versionCode) <= Number(installedCode)) return null;
+    return entry;
+  }
+  // Explicit migration from the retired standalone lineage into verified Stable.
+  if (entry && manifest?.format === 2) return entry;
   const legacyPreview = manifest?.format === 2 && /^\d+\.\d+\.\d+-preview\.\d+$/.test(installed ?? '');
   return entry && (newerVersion(entry.version, installed) || legacyPreview) ? entry : null;
 }
 
-export async function checkDesktopUpdate(bridge, {url=MANIFEST_URL} = {}) {
+export async function checkDesktopUpdate(bridge, {url} = {}) {
   if(!bridge?.requestResource) throw new Error('جسر تحديث ويندوز غير متاح');
-  const result=await bridge.requestResource({url,json:true,limit:256*1024,timeout:20000});
-  if(result.status!==200||typeof result.text!=='string')throw new Error('تعذر قراءة تحديث فانتارا');
-  let data;
-  try {data=JSON.parse(result.text);} catch{throw new Error('بيان التحديث غير صالح');}
-  if (!validatedRelease(data)) throw new Error('بيان تحديث ويندوز غير متاح أو غير صالح');
-  return desktopUpdateFromManifest(data,bridge.version);
+  for (const source of url ? [url] : [MANIFEST_URL,WINDOWS_POINTER_URL]) {
+    try {
+      const result=await bridge.requestResource({url:source,json:true,limit:256*1024,timeout:20000});
+      if(result.status!==200||typeof result.text!=='string')continue;
+      const data=JSON.parse(result.text);
+      if (!validatedRelease(data)) continue;
+      if(data.format===1 && (source===MANIFEST_URL || stableCode(bridge.version)!==undefined))continue;
+      return desktopUpdateFromManifest(data,bridge.version);
+    } catch { /* A missing Windows asset does not authorize an old lineage. */ }
+  }
+  throw new Error('تعذر قراءة بيان تحديث ويندوز؛ قد لا يكون مثبت الإصدار الجديد جاهزًا بعد');
 }
 
 export function startDesktopUpdateWatch({bridge=globalThis.VantaraDesktop,doc=globalThis.document} = {}) {

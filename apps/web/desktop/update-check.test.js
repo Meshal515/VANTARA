@@ -43,6 +43,24 @@ test('Windows accepts only the matching stable platform metadata',()=>{
 
 const windowsRelease = {format:1,product:'VANTARA',platform:'win32-x64',installer:'nsis',version:'0.2.3',sha256:'b'.repeat(64),size:240000000,
   url:'https://github.com/Meshal515/VANTARA/releases/download/windows-v0.2.3/VANTARA-0.2.3-Windows-x64-Setup.exe',notes:['الغرف والتوقيت']};
+test('unified Stable never offers an older standalone Windows lineage',()=>{
+  const old={...windowsRelease,version:'0.3.18',url:windowsRelease.url.replaceAll('0.2.3','0.3.18')};
+  assert.equal(desktopUpdateFromManifest(old,'0.0.209'),null);
+  assert.equal(desktopUpdateFromManifest(old,'0.0.213'),null);
+});
+test('the shipped updater discovers the verified Stable installer before a stale legacy pointer',async()=>{
+  const stable={...release,versionName:'0.0.213',versionCode:213,desktop:{...release.desktop,version:'0.0.213',url:release.desktop.url.replaceAll('140','213')}};
+  const old={...windowsRelease,version:'0.3.18',url:windowsRelease.url.replaceAll('0.2.3','0.3.18')};
+  const bridge={version:'0.0.209',requestResource:async({url})=>({status:200,text:JSON.stringify(url.includes('releases/latest/')?stable:old)})};
+  assert.equal((await checkDesktopUpdate(bridge))?.version,'0.0.213');
+});
+test('APK ahead of Windows falls back only to the last completed unified Windows release',async()=>{
+  const next={...release,versionCode:141,versionName:'0.0.141',desktop:null};
+  const bridge={version:'0.0.139',requestResource:async({url})=>({status:200,text:JSON.stringify(url.includes('releases/latest/')?next:release)})};
+  assert.equal((await checkDesktopUpdate(bridge))?.version,'0.0.140');
+  assert.equal(await checkDesktopUpdate({...bridge,version:'0.0.140'}),null);
+  assert.equal(desktopUpdateFromManifest({...release,versionCode:141,desktop:{...release.desktop,url:release.desktop.url.replace('stable-140','stable-141')}},'0.0.139'),null);
+});
 test('Windows has a dedicated versioned installer channel independent of Android latest',()=>{
   assert.equal(desktopUpdateFromManifest(windowsRelease,'0.1.0-preview.8')?.version,'0.2.3');
   assert.equal(desktopUpdateFromManifest(windowsRelease,'0.2.3'),null);
@@ -97,7 +115,7 @@ test('Windows boot and resume never check, download or show an update', async ()
   const {document}=parseHTML('<html><body></body></html>');
   document.visibilityState='visible';
   let queries=0,downloads=0;
-  const bridge={version:'0.2.2',requestResource:async()=>{queries++;return {status:200,text:JSON.stringify(windowsRelease)};},openUpdatePage:async()=>true,
+  const bridge={version:'0.0.139',requestResource:async()=>{queries++;return {status:200,text:JSON.stringify(release)};},openUpdatePage:async()=>true,
     downloadUpdate:async()=>{downloads++;return {ready:true};}};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
   try {

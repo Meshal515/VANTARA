@@ -358,7 +358,11 @@ test('signed Android release workflow is tag-only, main-only, and CI-verified', 
 
 test('stable Android main APK workflow is CI-gated and release-signed', () => {
   const workflow = read('.github/workflows/android-stable.yml');
-  assertCiGatedProductionWorkflow('.github/workflows/android-stable.yml');
+  assert.match(workflow, /workflow_dispatch\s*:/m, 'Stable requires an explicit manual release');
+  assert.doesNotMatch(workflow, /^\s*(?:workflow_run|push)\s*:/m, 'merging main must never create Stable');
+  assert.match(workflow, /github\.ref\s*==\s*['"]refs\/heads\/main['"]/m, 'release workflow must run from main');
+  assert.match(workflow, /git merge-base --is-ancestor HEAD origin\/main/m, 'selected source must belong to main');
+  assertCommitHasSuccessfulCi(workflow, '$SOURCE_SHA', 'manual Stable');
   assert.match(workflow, /ANDROID_KEYSTORE_BASE64:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_BASE64 \}\}/m);
   assert.match(workflow, /ANDROID_KEYSTORE_PASSWORD:\s*\$\{\{ secrets\.ANDROID_KEYSTORE_PASSWORD \}\}/m);
   assert.match(workflow, /:app:assembleRelease|assembleRelease/m, 'stable main APK must be a release build');
