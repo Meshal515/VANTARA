@@ -1,3 +1,5 @@
+> **سجل إصلاحات وقرارات تاريخي**. الأسماء في أمثلة الاختبارات محايدة، والخطة لا تمثل وحدها حالة المنتج الحالية. راجع [الرؤية](PRODUCT_VISION.md) و[حالة الميزات](FEATURE_STATUS.md).
+
 # VANTARA — Master Repair, Verification & Redesign Plan
 
 > **الحالة:** المصدر الرسمي لخطة إصلاح VANTARA وإعادة تصميمه.  
@@ -91,7 +93,7 @@
 | ID | الحالة | المشكلة | الأثر | Patch |
 |---|---|---|---|---|
 | BE-P0-01 | 🧪 | نظاما Login منفصلان: Worker يعرف المستخدم وContent API لا يعرفه | الدخول ينجح ظاهريًا ثم المكتبة/الفصول تفشل | B2 · **منفَّذ:** access token v2 يُصدره الـWorker (`mintIdentityToken`) ويقبله الـAPI (`lib/context.ts:52` + `context.identity.test.ts`) بسرّ مشترك `VANTARA_IDENTITY_SECRET` |
-| BE-P0-02 | 🧪 | `/v1/session` في Sync Worker يصدر Session بمجرد اختيار userId بلا إثبات جهاز موثوق | من يعرف Worker URL يستطيع انتحال أحد الحسابات الثلاثة | B2 · **منفَّذ:** `secure-index.ts:150` يردّ `device_proof_required` 401 بلا `deviceCredential`، ويطابق `trusted_devices` ببصمة مملّحة بـ`VANTARA_DEVICE_PEPPER` ويحترم `revoked_at` |
+| BE-P0-02 | 🧪 | `/v1/session` في Sync Worker يصدر Session بمجرد اختيار userId بلا إثبات جهاز موثوق | من يعرف Worker URL يستطيع انتحال أحد حسابات التجربة | B2 · **منفَّذ:** `secure-index.ts:150` يردّ `device_proof_required` 401 بلا `deviceCredential`، ويطابق `trusted_devices` ببصمة مملّحة بـ`VANTARA_DEVICE_PEPPER` ويحترم `revoked_at` |
 | BE-P0-03 | 🧪 | افتراض أن Worker URL سري بينما يُحقن في الواجهة/التطبيق | ينسف الافتراض الأمني الحالي | B2 · **سقط الافتراض بالبناء:** معرفة العنوان لم تعد تكفي — يلزم اقتران جهاز غير ملغى (`/v1/device/pair`) |
 | BE-P0-04 | 🧪 | Pages/APK origin لا يطابق نموذج Content API الحالي المعتمد على same-origin/Cookie | طلبات API الخارجية تفشل أو تصبح هشة | B3 |
 | BE-P0-05 | 🧪 | Cookie `SameSite=Lax` ليس نموذجًا مناسبًا لـAPK `https://localhost` → API خارجي | جلسة المحتوى لا تنتقل بصورة موثوقة | B3 |
@@ -264,7 +266,7 @@
 **الحالة:** 🧪 — بنوده الثلاثة منفَّذة في الكود (انظر أعمدة الأدلة في الجدول)،
 و`ci.yml` يشغّل `infra/test-db-bootstrap.sh` على كل دفعة. **والبوابة نفسها لم
 تُجتَز:** نصّها `docker compose up` على بيئة نظيفة، ولا Docker في بيئة الـCI
-هذه ولا جهاز. تُرفع إلى ✅ بعد تشغيل حقيقي على جهاز مشعل + Peer Review.
+هذه ولا جهاز. تُرفع إلى ✅ بعد تشغيل حقيقي على جهاز عضو أ + Peer Review.
 
 ---
 
@@ -489,7 +491,7 @@ case 'recommendations':
 - أنواع يمكن التحكم فيها: توصيات، ردود/تعليقات، تفاعلات، أحداث مهمة.
 - لا Firebase/FCM، لا Android push permission، لا تنبيه والجوال مغلق.
 
-**مثال قبول:** دحمي يرسل توصية → إذا VANTARA مفتوح عند مشعل يظهر تنبيه جانبي صغير → إذا تعطلت التنبيهات المنبثقة لا يظهر Toast لكن يبقى العنصر في Inbox.
+**مثال قبول:** عضو ج يرسل توصية → إذا VANTARA مفتوح عند عضو أ يظهر تنبيه جانبي صغير → إذا تعطلت التنبيهات المنبثقة لا يظهر Toast لكن يبقى العنصر في Inbox.
 
 **الحالة:** 🧪 — نُفّذ على `claude/dreamy-faraday-w9rtsp`، بانتظار Peer Review من ChatGPT.
 
@@ -612,7 +614,7 @@ case 'recommendations':
 
 1. **بوابة E2E أعلاه** — لم تُشغَّل مرة واحدة على مسار حقيقي. لا خادم
    Uchiyomi حيّ ولا جهاز في بيئة العمل هذه. وقد صار ممكنًا الآن: الـAPK
-   يعمل على جهاز مشعل.
+   يعمل على جهاز عضو أ.
 2. **Peer Review** — سبعة باتشات عند 🧪، والبروتوكول §1 يمنع المنفِّذ من
    اعتماد عمله.
 3. **`INV-01` … `INV-05`** — خمس مراجعات لم تُفتح (allowBackup، FileProvider،
@@ -700,9 +702,9 @@ case 'recommendations':
 
 | الجهاز | المستخدم | الوزن في القياس |
 |---|---|---|
-| Galaxy **Tab A9** | منصور | **الجهاز المرجعي** — الأضعف، وعليه يُقاس |
-| Galaxy **A73** | دحمي | متوسط |
-| **S23 Ultra** | مشعل | الأقوى — **لا يُقاس عليه** |
+| Galaxy **Tab A9** | عضو ب | **الجهاز المرجعي** — الأضعف، وعليه يُقاس |
+| Galaxy **A73** | عضو ج | متوسط |
+| **S23 Ultra** | عضو أ | الأقوى — **لا يُقاس عليه** |
 
 وقاعدة المالك: «التصميم لا يفترض قوة S23 Ultra». وترجمتها العملية: **رقمٌ لا
 يُقاس على Tab A9 ليس رقمًا.** الـS23 Ultra يخفي التقطيع، والجهاز الأضعف هو
@@ -765,7 +767,7 @@ FlareSolverr. فهي **صفة زمن تشغيل، لا صفة مصدر**. تُح
 
 المرجع البصري يحدد: التكوين، المسافات، الأحجام، الأغلفة، الخطوط، التسلسل البصري، كثافة المعلومات، القوائم، الفصول، التبويبات، الأزرار، البانرات، التنقل السفلي، الداكن، البساطة والحركة.
 
-ولا يحدد: login، الحسابات الثلاثة، sessions، sync، Cloudflare، Content API، DB، sources، chapter discovery، fallback، reader behavior، progress، friends، activity، notifications architecture.
+ولا يحدد: login، حسابات التجربة، sessions، sync، Cloudflare، Content API، DB، sources، chapter discovery، fallback، reader behavior، progress، friends، activity، notifications architecture.
 
 **الفلسفة:** لو نفس المصمم الذي صمم المرجع صمم VANTARA بكل ميزاته الحالية، كيف سيخفي التعقيد ويعرضه بهدوء؟
 

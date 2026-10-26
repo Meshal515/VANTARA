@@ -165,8 +165,8 @@ Everyone may see the recommendation card and recipient response states.
 
 Examples:
 
-- `NGM — قبل · سأشاهده لاحقًا`
-- `Mansour — رفض`
+- `عضو ج — قبل · سأشاهده لاحقًا`
+- `Member B — رفض`
 
 Only actual recipients may mutate their own recommendation state.
 
