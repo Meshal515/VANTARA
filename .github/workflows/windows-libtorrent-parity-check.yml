@@ -111,6 +111,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          # A deliberately unsupported protocol exits 1; capture that exit code
+          # and verify the actual rejection instead of aborting PowerShell early.
+          $PSNativeCommandUseErrorActionPreference=$false
           $fixtureSource=$null
           $referenceHash=$null
           $protocolResults=@()
@@ -137,7 +140,7 @@ jobs:
               if($nativeExit -ne 0 -or $passed -ne 6){throw "Protocol playback failed: $($case.name)"}
               foreach($row in $report.runs){if($row.audioEvidence.params.samplerate -ne 48000 -or -not $row.realtimePlaybackVerified){throw 'Missing actual PCM or stable playback proof'}}
             }else{
-              if($nativeExit -eq 0 -or $passed -ne 0 -or @($report.runs).Count -ne 1){throw "Expected unsupported protocol was not reproduced: $($case.name)"}
+              if($nativeExit -eq 0 -or $passed -ne 0 -or @($report.runs).Count -ne 1 -or $report.runs[0].startPlaybackError -notmatch 'رفض محرك التورنت الطلب'){throw "Expected explicit torrent-protocol rejection was not reproduced: $($case.name)"}
             }
             $protocolResults+=@{name=$case.name;expectedSuccess=$case.expected;actualSuccessful=$passed;nativeExit=$nativeExit;infoHash=$referenceHash;report=(Join-Path $out 'results.json')}
           }
