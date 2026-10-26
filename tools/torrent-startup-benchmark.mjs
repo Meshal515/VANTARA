@@ -114,6 +114,19 @@ async function replayState(userData,fixture,trim=false){
   }return {entries:states,partialFixtureTrimmed:trim,available:states.length>0};
 }
 async function processMetrics(children){
+  if(process.platform==='win32'){
+    const active=children.filter(({child})=>Number.isSafeInteger(child.pid)&&child.pid>0);
+    if(!active.length)return {available:false,reason:'No live benchmark child processes'};
+    try{
+      // Only Node-assigned integer PIDs enter the script; no paths, titles,
+      // torrents or user-controlled shell text. Sampling follows timing/seek checks.
+      const ids=active.map(({child})=>child.pid).join(',');
+      const script=`$taskProcessIds=@(${ids}); $taskRows=@(Get-Process -Id $taskProcessIds -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{pid=$_.Id;cpuSeconds=$_.TotalProcessorTime.TotalSeconds;rssBytes=$_.WorkingSet64;peakRssBytes=$_.PeakWorkingSet64} }); ConvertTo-Json -InputObject $taskRows -Compress`;
+      const data=JSON.parse(cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:10000}));
+      const rows=(Array.isArray(data)?data:[data]).filter(row=>row&&Number.isSafeInteger(row.pid)&&Number.isFinite(row.rssBytes)&&Number.isFinite(row.cpuSeconds));
+      return {available:rows.length>0,cpuUnit:'seconds since process start; reused engine totals are cumulative',processes:rows.map(row=>({...row,role:active.find(({child})=>child.pid===row.pid)?.role??'unknown'}))};
+    }catch{return {available:false,reason:'Windows process sampler failed'};}
+  }
   if(process.platform!=='linux')return {available:false,reason:'Process CPU/RSS collection implemented for Linux only'};
   const rows=[];for(const {child,role} of children){try{const text=await fs.readFile(`/proc/${child.pid}/stat`,'utf8'),fields=text.slice(text.lastIndexOf(')')+2).split(' '),status=await fs.readFile(`/proc/${child.pid}/status`,'utf8');rows.push({role,pid:child.pid,cpuTicks:Number(fields[11])+Number(fields[12]),rssBytes:Number(/VmRSS:\s+(\d+)/.exec(status)?.[1]??0)*1024});}catch{}}
   return {available:true,cpuTickUnit:'OS scheduler ticks; not converted to seconds',processes:rows};
