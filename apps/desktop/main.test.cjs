@@ -59,7 +59,7 @@ test('نافذة Windows تقلع الواجهة الأصلية مع sandbox و�
   const previousTimer = globalThis.setTimeout;
   globalThis.setTimeout = (fn, delay, ...args) => delay === 12000 ? (reportTimer = fn, 0) : previousTimer(fn, delay, ...args);
   const electron = {
-    app: { setName() {}, requestSingleInstanceLock: () => true, on() {}, whenReady: async () => {}, getPath: () => os.tmpdir(), quit() {}, exit(code) { finish(Promise.reject(new Error(`exit ${code}`))); } },
+    app: { isPackaged:false, setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => true, on() {}, whenReady: async () => {}, getPath: () => os.tmpdir(), quit() {}, exit(code) { finish(Promise.reject(new Error(`exit ${code}`))); } },
     protocol: { registerSchemesAsPrivileged() {}, handle() {} },
     ipcMain: { handle(name,fn) { handlers.set(name,fn); } },
     net: {},
