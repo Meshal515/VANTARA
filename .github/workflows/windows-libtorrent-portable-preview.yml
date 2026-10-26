@@ -1,0 +1,143 @@
+name: VANTARA Windows libtorrent Portable Preview (unpublished)
+on:
+  push:
+    branches: ['chatgpt/windows-libtorrent-preview-activation-20261026']
+    paths:
+      - '.github/workflows/windows-libtorrent-portable-preview.yml'
+      - 'apps/desktop/torrent-preview*'
+      - 'apps/desktop/main.cjs'
+      - 'apps/desktop/native/libtorrent/**'
+      - 'tools/bundle-windows-libtorrent.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-libtorrent-portable-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native video HWND
+        shell: pwsh
+        run: ./tools/build-video-host.ps1
+      - name: Brand pinned Electron with original VANTARA icon
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'electron.zip'
+          Invoke-WebRequest 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'){throw 'Electron checksum mismatch'}
+          $electron=Join-Path $env:RUNNER_TEMP 'electron'
+          Expand-Archive $zip $electron
+          ./tools/brand-windows-executable.ps1 -InputExe (Join-Path $electron 'electron.exe') -OutputExe 'apps/desktop/native/VANTARA.exe'
+          node tools/windows-icon-resources.mjs apps/desktop/native/VANTARA.exe apps/desktop/assets/vantara.ico
+          if($LASTEXITCODE -ne 0){throw 'Branded executable verification failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: internal-libtorrent-preview-native-host
+          path: |
+            apps/desktop/native/vantara-video-host.exe
+            apps/desktop/native/VANTARA.exe
+          if-no-files-found: error
+
+  build:
+    needs: host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - name: Test services and explicit backend selection
+        run: |
+          node --test apps/desktop/torrent-preview.test.cjs apps/desktop/src/torrent-replay-startup.test.mjs apps/desktop/src/services.test.mjs
+          node --check apps/desktop/main.cjs
+          node --check tools/build-windows.mjs
+      - name: Install isolated packaging tools
+        run: sudo apt-get update && sudo apt-get install -y nsis 7zip
+      - uses: actions/download-artifact@v4
+        with:
+          name: internal-libtorrent-preview-native-host
+          path: ${{ runner.temp }}/host
+      - name: Build portable app with optional pinned libtorrent worker
+        run: |
+          set -euo pipefail
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/libtorrent-preview" --video-host="$RUNNER_TEMP/host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/host/VANTARA.exe" --libtorrent=true
+          (cd "$RUNNER_TEMP/libtorrent-preview" && sha256sum -c SHA256SUMS.txt)
+          zipfile="$(find "$RUNNER_TEMP/libtorrent-preview" -maxdepth 1 -name 'VANTARA-*-Windows-x64.zip' -print -quit)"
+          test -n "$zipfile" && test -s "$zipfile"
+          (cd "$RUNNER_TEMP/libtorrent-preview" && sha256sum "$(basename "$zipfile")" > PORTABLE-SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-windows-libtorrent-portable-unsigned
+          path: |
+            ${{ runner.temp }}/libtorrent-preview/*-x64.zip
+            ${{ runner.temp }}/libtorrent-preview/PORTABLE-SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-windows-libtorrent-portable-unsigned
+          path: ${{ runner.temp }}/preview
+      - name: Verify real portable Windows launcher and native libtorrent module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'preview'
+          $archive=Get-ChildItem $dir -Filter 'VANTARA-*-Windows-x64.zip' -File | Select-Object -First 1
+          if(-not $archive){throw 'Candidate preview portable ZIP missing'}
+          $expected=Get-Content (Join-Path $dir 'PORTABLE-SHA256SUMS.txt')
+          $expectedHash=(Get-Content (Join-Path $dir 'PORTABLE-SHA256SUMS.txt') | Select-Object -First 1).Split(' ')[0]
+          if($expectedHash -ne (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLower()){throw 'Candidate ZIP digest mismatch'}
+          $expanded=Join-Path $dir 'unpacked'
+          Expand-Archive $archive.FullName $expanded
+          $portable=Join-Path $expanded 'VANTARA-Windows-x64'
+          $native=Join-Path $portable 'resources/app/native'
+          $worker=Join-Path $native 'libtorrent'
+          $manifest=Get-Content (Join-Path $worker 'LIBTORRENT-MANIFEST.json') -Raw | ConvertFrom-Json
+          if($manifest.engine -ne 'libtorrent' -or $manifest.version -ne '2.0.13' -or $manifest.default -ne $false){throw 'Unexpected native worker manifest'}
+          $python=Join-Path $worker 'python/python.exe'
+          & $python -I -c 'import libtorrent; assert libtorrent.__version__.startswith("2.0.13"); print("windows-native-libtorrent-ok")'
+          if($LASTEXITCODE -ne 0){throw 'Bundled native Windows libtorrent did not load'}
+          node -e 'const p=require(process.argv[1]);const c=p.selectTorrentPreview({argv:["--vantara-torrent-preview=libtorrent"],platform:"win32",packaged:true,nativeDir:process.argv[2]});if(c.torrentBackend!=="libtorrent")process.exit(1);console.log("explicit-preview-selection-ok")' (Join-Path $portable 'resources/app/torrent-preview.cjs') $native
+          if($LASTEXITCODE -ne 0){throw 'Bundled preview backend selection failed'}
+          node tools/windows-native-smoke.mjs $native (Join-Path $dir 'native-video-report.json')
+          if($LASTEXITCODE -ne 0){throw 'Native MPV HWND playback smoke failed'}
+          $report=Join-Path $dir 'preview-boot-report.json'
+          $exe=Join-Path $portable 'VANTARA.exe'
+          $app=Start-Process -FilePath $exe -ArgumentList @('--vantara-torrent-preview=libtorrent',"--smoke-report=$report") -PassThru
+          if(-not $app.WaitForExit(90000)){$app.Kill();throw 'Portable preview boot timed out'}
+          if(-not (Test-Path $report)){throw 'No application boot report'}
+          $boot=Get-Content $report -Raw | ConvertFrom-Json
+          if($boot.url -ne 'vantara://app/index.html' -or -not $boot.hasBridge -or -not $boot.gate){throw 'Real application UI did not start'}
+      - name: Upload verified portable preview only (no release or installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: VERIFIED-Windows-libTorrent-Portable-experimental
+          path: |
+            ${{ runner.temp }}/preview/*-x64.zip
+            ${{ runner.temp }}/preview/PORTABLE-SHA256SUMS.txt
+            ${{ runner.temp }}/preview/*report.json
+          compression-level: 0
+          if-no-files-found: error
