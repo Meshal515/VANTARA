@@ -81,8 +81,8 @@ jobs:
             "$signer" verify --print-certs "$app" > "$RUNNER_TEMP/app-cert"
             "$signer" verify --print-certs "$test" > "$RUNNER_TEMP/test-cert"
             cat "$RUNNER_TEMP/app-cert" "$RUNNER_TEMP/test-cert"
-            app_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/app-cert")"
-            test_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert")"
+            app_cert="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/app-cert" | sort -u)"
+            test_cert="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert" | sort -u)"
             test -n "$app_cert" && test "$app_cert" = "$test_cert"
           done
       - name: Start the real secure worker with isolated in-memory fixture data
