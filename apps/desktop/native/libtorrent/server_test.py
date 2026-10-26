@@ -70,7 +70,8 @@ class SwarmTests(unittest.TestCase):
         cls.magnet = f"magnet:?xt=urn:btih:{cls.info.info_hashes().v1}"
         cls.seed_port = port()
         cls.seeder = lt.session({"listen_interfaces": f"127.0.0.1:{cls.seed_port}",
-            "enable_dht": False, "enable_lsd": False, "enable_upnp": False, "enable_natpmp": False})
+            "enable_dht": False, "enable_lsd": False, "enable_upnp": False, "enable_natpmp": False,
+            "allow_multiple_connections_per_ip": True, "seeding_outgoing_connections": False})
         params = lt.add_torrent_params()
         params.ti, params.save_path = cls.info, str(cls.seed_root)
         params.flags &= ~lt.torrent_flags.auto_managed
@@ -202,6 +203,48 @@ class SwarmTests(unittest.TestCase):
                 next(read)
         self.assertEqual({}, self.engine.readers)
         self.assertEqual({}, self.engine.priorities)
+
+    def test_delete_waits_for_disk_ack_before_readding_the_same_path(self):
+        self.add_with_peer()
+        self.assertEqual(self.data[:128], self.request("GET", "/torrents/0/stream/0", headers={"Range": "bytes=0-127"})[2])
+        metadata = next((self.case / "state").glob("*.torrent"))
+        metadata_bytes = metadata.read_bytes()
+        original = self.engine.session
+        queued = threading.Event()
+        old_handle = self.engine.handle
+
+        class DelayedDeletion:
+            def __getattr__(self, name):
+                return getattr(original, name)
+
+            def remove_torrent(self, *_):
+                queued.set()  # Hold the real disk operation until the test releases it.
+
+        self.engine.session = DelayedDeletion()
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            deletion = pool.submit(self.request, "POST", "/torrents/0/delete", "")
+            self.assertTrue(queued.wait(2))
+            addition = pool.submit(self.request, "POST", "/torrents?only_files=0", self.magnet)
+            time.sleep(0.1)
+            self.assertFalse(deletion.done(), "delete must not acknowledge a queued operation")
+            self.assertFalse(addition.done(), "add must wait until old files cannot be deleted later")
+            original.remove_torrent(old_handle, lt.options_t.delete_files)
+            self.assertEqual(200, deletion.result(timeout=5)[0])
+            self.assertEqual(200, addition.result(timeout=5)[0])
+        self.assertEqual(metadata_bytes, metadata.read_bytes(), "deleting stream data must preserve metadata")
+        self.assertEqual(0, self.engine.piece_bytes)
+        self.engine.handle.connect_peer(("127.0.0.1", self.seed_port))
+        self.assertEqual(self.data[:128], self.request("GET", "/torrents/0/stream/0", headers={"Range": "bytes=0-127"})[2])
+
+    def test_failed_metadata_replace_preserves_old_record_and_removes_its_temp_file(self):
+        self.add_with_peer()
+        metadata = next((self.case / "state").glob("*.torrent"))
+        previous = metadata.read_bytes()
+        with patch.object(backend.os, "replace", side_effect=OSError("owned fixture disk failure")):
+            with self.assertRaises(OSError):
+                self.engine._save_metadata()
+        self.assertEqual(previous, metadata.read_bytes())
+        self.assertEqual([], list((self.case / "state").glob("*.tmp")))
 
 
 if __name__ == "__main__":

@@ -128,6 +128,8 @@ class Engine:
         self.piece_bytes = 0
         self.pending = set()
         self.error = None
+        self.deleting_hash = None
+        self.delete_result = None
         self.first_useful_piece_at = None
         self.started_at = time.monotonic()
         settings = {
@@ -191,7 +193,11 @@ class Engine:
                                 self.piece_bytes -= len(previous)
                         else:
                             self.error = "verified piece read failed"
-                    elif isinstance(alert, (lt.torrent_error_alert, lt.file_error_alert)):
+                    elif isinstance(alert, lt.torrent_deleted_alert) and str(alert.info_hashes.v1) == self.deleting_hash:
+                        self.delete_result = "success"
+                    elif isinstance(alert, lt.torrent_delete_failed_alert) and str(alert.info_hashes.v1) == self.deleting_hash:
+                        self.delete_result = "failed"
+                    elif isinstance(alert, (lt.torrent_error_alert, lt.file_error_alert)) and alert.handle == self.handle:
                         self.error = "torrent storage or engine error"
                     self.changed.notify_all()
 
@@ -205,8 +211,11 @@ class Engine:
             return
         target = self._metadata_path(self.hash)
         temp = target.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        temp.write_bytes(blob)
-        os.replace(temp, target)
+        try:
+            temp.write_bytes(blob)
+            os.replace(temp, target)
+        finally:
+            temp.unlink(missing_ok=True)
         entries = sorted(self.state_dir.glob("*.torrent"), key=lambda p: p.stat().st_mtime, reverse=True)
         for i, entry in enumerate(entries):
             if i >= MAX_METADATA_FILES or time.time() - entry.stat().st_mtime > METADATA_TTL:
@@ -217,6 +226,8 @@ class Engine:
         if index is not None and (type(index) is not int or index < 0):
             raise ValueError("invalid file index")
         with self.add_lock:
+            if self.deleting_hash is not None:
+                raise OSError("previous torrent deletion has not completed")
             if self.hash and self.hash != info_hash:
                 raise ValueError("one torrent per playback session")
             if self.handle is None:
@@ -354,6 +365,33 @@ class Engine:
                 bits[i // 8] |= 1 << (7 - i % 8)
         return bytes(bits)
 
+    def remove(self):
+        # remove_torrent(delete_files) only queues disk deletion. Reusing the
+        # same save path before torrent_deleted_alert can erase new data later.
+        # Serialize add/delete and fail closed if that acknowledgement is lost.
+        with self.add_lock:
+            with self.changed:
+                if self.handle is None:
+                    return
+                self.deleting_hash = self.hash
+                self.delete_result = None
+                self.readers.clear()
+                self.changed.notify_all()
+                self.session.remove_torrent(self.handle, lt.options_t.delete_files)
+                deadline = time.monotonic() + 10
+                while self.delete_result is None:
+                    if self.closed.is_set() or time.monotonic() >= deadline:
+                        raise TimeoutError("torrent deletion acknowledgement unavailable")
+                    self.changed.wait(0.05)
+                if self.delete_result != "success":
+                    raise OSError("torrent deletion failed")
+                self.handle = self.info = self.hash = self.index = self.files = None
+                self.pieces.clear()
+                self.piece_bytes = 0
+                self.pending.clear()
+                self.priorities.clear()
+                self.error = self.deleting_hash = self.delete_result = None
+
     def close(self):
         self.closed.set()
         with self.changed:
@@ -462,11 +500,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.response(200, {})
             if self.command == "POST" and action == "delete":
                 # Session teardown owns directory deletion; do not follow HTTP paths.
-                engine.session.remove_torrent(engine.handle, lt.options_t.delete_files)
-                engine.handle = engine.info = engine.hash = engine.index = None
-                engine.pieces.clear()
-                engine.piece_bytes = 0
-                engine.priorities.clear()
+                engine.remove()
                 return self.response(200, {})
             if self.command not in ("GET", "HEAD") or not action.startswith("stream/"):
                 return self.response(405, {"error": "method not allowed"})
