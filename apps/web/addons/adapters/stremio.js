@@ -68,7 +68,7 @@ export function createStremioAdapter({ manifest, manifestUrl, transport, runtime
   async function streams({ type, videoId, extra = {}, signal, onResult }) {
     const out = await request("stream", { type, id: videoId, extra, signal });
     const entries = items(out.streams, "stream", (item) =>
-      ["url", "infoHash", "ytId", "externalUrl", "nzbUrl"].some((key) => typeof item[key] === "string" && item[key].trim().length) ||
+      ["url", "infoHash", "magnet", "ytId", "externalUrl", "nzbUrl"].some((key) => typeof item[key] === "string" && item[key].trim().length) ||
       ["rarUrls", "zipUrls", "7zipUrls", "tgzUrls", "tarUrls"].some((key) => Array.isArray(item[key]) && item[key].length) ? item : null);
     const list = normalizeStreams(entries, { addonKey: manifest.key, runtimeName, torrentSupported });
     onResult?.(list);

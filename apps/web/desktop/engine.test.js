@@ -113,6 +113,27 @@ it('يجهز route دون autoplay ثم يمرر normalized candidate المخت
   await f.engine.play({ session: 's', candidate: choice.candidate, title: 'عنوان', animeId: 'tt123:2', episode: 1, position: 12500 });
   expect(f.starts[0]).toMatchObject({ session: 's', candidate: { ...f.stream, id: choice.candidate }, position: 12500, title: 'عنوان' });
 });
+it('يقبل magnet المصدر ويحافظ على الملف والمتتبعات والترجمات عند تشغيل ويندوز', async () => {
+  const f = fixture();
+  const hash = '0123456789abcdef0123456789abcdef01234567';
+  const magnet = 'magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH&tr=udp%3A%2F%2Ftracker.example.com%3A80';
+  f.source.streams = async () => [{
+    url: magnet, fileIdx: 3, sources: ['tracker:https://tracker.example.com/announce'],
+    subtitles: [{id:'ar',lang:'ar',url:'https://cdn.test/ar.vtt'}], quality: 2160,
+  }];
+  await prepared(f);
+  const best = await f.engine.best({session:'s'});
+  expect(best.candidate).toBeTruthy();
+  await f.engine.play({session:'s',candidate:best.candidate});
+  expect(f.starts).toMatchObject([{candidate:{
+    infoHash:hash,fileIdx:3,type:'torrent',sources:['tracker:https://tracker.example.com/announce'],
+    subtitles:[{lang:'ar',url:'https://cdn.test/ar.vtt'}],quality:2160,
+  }}]);
+  expect(f.starts[0].candidate.url).toBeUndefined();
+  expect(new URL(f.starts[0].candidate.magnet).searchParams.get('xt')).toBe(`urn:btih:${hash}`);
+  expect(new URL(f.starts[0].candidate.magnet).searchParams.get('tr')).toBe('udp://tracker.example.com:80');
+  await f.engine.closeSession({session:'s'});
+});
 it('يربط تقدم ms بالسياق وينظف الجلسة مرة واحدة ويمنع الأحداث المتأخرة', async () => {
   const f = fixture(), progress = [];
   f.engine.addListener('playback', e => progress.push(e));

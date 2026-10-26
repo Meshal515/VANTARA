@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { installDesktopBridges, renderInstallPreview } from './boot.js';
-afterEach(() => vi.unstubAllGlobals());
+import * as desktopRuntime from './runtime.js';
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it('يركب جسر AnimeEngine وAddonFabric قبل التطبيق دون اختلاق Capacitor', async () => {
   const callbacks = [];
   const g = { VantaraDesktop: { platform: 'windows', requestResource: async () => ({}), startPlayback: async () => ({ started: true }), onEvent: fn => { callbacks.push(fn); return () => {}; } } };
@@ -12,6 +13,26 @@ it('يركب جسر AnimeEngine وAddonFabric قبل التطبيق دون اخ�
   expect(g.VantaraWeb).toBeUndefined();
   expect(installDesktopBridges({})).toBeNull();
   expect(installDesktopBridges(g)).toBe(bridges);
+});
+it('يعلن فقط قدرات مصادر ويندوز ولا يدعي دعم مستودعات APK أو DEX', () => {
+  const g = { VantaraDesktop: { platform:'windows',requestResource:async()=>({}),startPlayback:async()=>({started:true}),onEvent:()=>()=>{} } };
+  const plugin = installDesktopBridges(g).ExtensionEngine;
+  for (const method of ['sources','prepare','search','series','chapters','pages','image','cover','sites','addSite','removeSite'])
+    expect(plugin[method]).toBeTypeOf('function');
+  for (const method of ['addRepo','repos','repoIndex','installExtension','uninstallExtension','removeRepo','then'])
+    expect(plugin[method]).toBeUndefined();
+});
+it('يوصل تحديث المصدر المعتمد إلى document لتتجدد بطاقة الإضافات المفتوحة', () => {
+  const { document } = parseHTML('<html><body></body></html>');
+  const changed = vi.fn(); document.addEventListener('vantara:addons-changed',changed);
+  const runtimeFor = vi.spyOn(desktopRuntime,'getRuntime').mockReturnValue({});
+  const g = { document,VantaraDesktop:{platform:'windows',requestResource:async()=>({}),startPlayback:async()=>({started:true}),onEvent:()=>()=>{}} };
+  const bridges = installDesktopBridges(g);
+  bridges.SourceRuntime.getRuntime();
+  const options = runtimeFor.mock.calls.at(-1)?.[1];
+  expect(options?.onSourcesChanged).toBeTypeOf('function');
+  options.onSourcesChanged();
+  expect(changed).toHaveBeenCalledTimes(1);
 });
 it('يعرض preview من رابط التثبيت ولا يحفظ إلا بضغط المستخدم ولا يكشف الرابط المعد', async () => {
   const { document } = parseHTML('<html><body></body></html>');

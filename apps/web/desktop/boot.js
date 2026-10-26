@@ -7,6 +7,8 @@ import { startDesktopUpdateWatch } from './update-check.js';
 import { installDesktopPlayer } from './player.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
+// Data adapters available on Windows. APK/Dex repository methods require Android.
+const extensionMethods = new Set(['sources','prepare','popular','latest','catalogue','search','genre','series','chapters','pages','image','cover','sites','addSite','removeSite','clearImageCache']);
 function element(document, tag, text, cls) {
   const node = document.createElement(tag);
   if (text != null) node.textContent = text;
@@ -41,12 +43,16 @@ export async function renderInstallPreview({ document = globalThis.document, reg
 export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
-  const getRuntime = () => runtimeFor(g);
+  const onSourcesChanged = () => {
+    const EventType = g.document?.defaultView?.CustomEvent ?? g.CustomEvent ?? globalThis.CustomEvent;
+    if (g.document?.dispatchEvent && EventType) g.document.dispatchEvent(new EventType('vantara:addons-changed'));
+  };
+  const getRuntime = () => runtimeFor(g, { onSourcesChanged });
   installFirstPartyTransport(g);
   const engine = createDesktopEngine({ bridge: g.VantaraDesktop, getRuntime });
   installDesktopPlayer({g,bridge:g.VantaraDesktop,engine});
   let modules;
-  const ExtensionEngine=new Proxy({}, {get(_,method){if(method==='then')return undefined;return async args=>{
+  const ExtensionEngine=new Proxy({}, {get(_,method){if(!extensionMethods.has(method))return undefined;return async args=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;
     if(['image','cover'].includes(method)){
       const source=runtime.addons.sources.source(args.sourceId);
@@ -62,7 +68,7 @@ export function installDesktopBridges(g = globalThis) {
   };}});
   g.VantaraDesktopBridges = Object.freeze({ AnimeEngine:engine,ExtensionEngine,SourceRuntime:{getRuntime},AddonFabric:{runtime:async()=>({getRuntime})} });
   if(g.document&&g.location?.protocol==='vantara:'){
-    const defaults=startDesktopDefaultAddons({runtime:getRuntime(),onStatus:()=>g.document.dispatchEvent(new CustomEvent('vantara:addons-changed'))});
+    const defaults=startDesktopDefaultAddons({runtime:getRuntime(),onStatus:onSourcesChanged});
     g.VantaraDesktopDefaults=defaults;
   }
   // أخطاء native تظهر أيضًا في واجهة الحسابات الحالية؛ لا تعتمد على toast الشاشة.

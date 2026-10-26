@@ -32,6 +32,21 @@ function validUpdate(update) {
   return { version, sha256, size, url: officialInstallerUrl(update?.url) };
 }
 
+/** Check again in the main process; a renderer cannot authorize a rollback. */
+function assertForwardUpdate(update, installed) {
+  if (!/^\d+\.\d+\.\d+(?:-preview\.\d+)?$/.test(installed ?? '') || installed === '0.0.0') throw new Error('إصدار التطبيق المثبت غير معروف');
+  const next = validUpdate(update);
+  const parsed = new URL(next.url);
+  const match = /\/download\/(stable-(\d+)|windows-v([^/]+))\/VANTARA-([^/]+)-Windows-x64-Setup\.exe$/.exec(parsed.pathname);
+  if (!match || match[4] !== next.version || (match[3] && match[3] !== next.version)) throw new Error('هوية مثبت التحديث لا تطابق الإصدار');
+  const code = value => /^0\.(?:0|4)\.(\d+)$/.exec(String(value ?? ''))?.[1];
+  const installedCode = code(installed);
+  if (match[2]) {
+    if (code(next.version) !== match[2] || (installedCode !== undefined && Number(match[2]) <= Number(installedCode))) throw new Error('رفض تحديث أقدم من Stable المثبتة');
+  } else if (installedCode !== undefined || !newer(next.version, installed)) throw new Error('رفض العودة إلى قناة ويندوز القديمة');
+  return next;
+}
+
 function hashFile(file) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
@@ -110,4 +125,4 @@ function attemptFailed(attempt, installed) {
   return !!attempt && typeof attempt.version === 'string' && newer(attempt.version, installed);
 }
 
-module.exports = { officialInstallerUrl, validUpdate, downloadUpdate, installCommand, attemptFailed, newer, hashFile };
+module.exports = { officialInstallerUrl, validUpdate, assertForwardUpdate, downloadUpdate, installCommand, attemptFailed, newer, hashFile };

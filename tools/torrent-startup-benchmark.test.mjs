@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { framePixels, summarize, main, assessPlaybackProgress } from './torrent-startup-benchmark.mjs';
+import dgram from 'node:dgram';
+import { framePixels, summarize, main, assessPlaybackProgress, createUtpFixtureRelay } from './torrent-startup-benchmark.mjs';
 
 test('frame proof rejects black output and accepts authored colored rendered pixels',()=>{
   assert.equal(framePixels(Buffer.alloc(1200)).nonblack,false);
@@ -29,4 +30,26 @@ test('benchmark rejects unknown warmup strategies and invalid piece sizes before
   const required=['--service-module','unused','--rqbit','unused','--mpv','unused'];
   await assert.rejects(main([...required,'--torrent-warmup','head-typo']),/torrent-warmup/);
   await assert.rejects(main([...required,'--piece-length','12345']),/piece-length/);
+});
+
+test('uTP-only comparisons cannot silently use a TCP seeder or an unsupported transport',async()=>{
+  const required=['--service-module','unused','--rqbit','unused','--mpv','unused'];
+  await assert.rejects(main([...required,'--seed-transport','utp']),/uTP-only fixture requires libtorrent seeder/);
+  await assert.rejects(main([...required,'--seed-transport','udp-typo']),/Unsupported fixture seed transport/);
+  await assert.rejects(main([...required,'--native-transport','tcp-typo']),/Unsupported fixture native transport/);
+  await assert.rejects(main([...required,'--rqbit-transport','udp-typo']),/Unsupported fixture rqbit transport/);
+  await assert.rejects(main([...required,'--seed-encryption','mse']),/MSE fixture requires libtorrent seeder/);
+  await assert.rejects(main([...required,'--seed-encryption','unknown']),/Unsupported fixture encryption/);
+});
+
+test('UDP-only owned relay verifies TCP rejection and forwards datagrams in both directions',async t=>{
+  const seed=dgram.createSocket('udp4'),client=dgram.createSocket('udp4');
+  t.after(()=>{seed.close();client.close();});
+  await new Promise(r=>seed.bind(0,'127.0.0.1',r));
+  seed.on('message',(bytes,from)=>{assert.equal(bytes.toString(),'owned request');seed.send(Buffer.from('owned reply'),from.port,from.address);});
+  const relay=await createUtpFixtureRelay(seed.address().port);t.after(()=>relay.close());
+  assert.equal(relay.proof.tcpConnectRejected,true);
+  const response=new Promise(r=>client.once('message',bytes=>r(bytes.toString())));
+  client.send(Buffer.from('owned request'),relay.port,'127.0.0.1');
+  assert.equal(await response,'owned reply');
 });

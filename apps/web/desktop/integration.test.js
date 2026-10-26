@@ -3,13 +3,17 @@ import { installDesktopBridges } from './boot.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import * as anime from '../lib/anime-engine.js';
 afterEach(() => vi.unstubAllGlobals());
-it('يوصل هوية IMDb الدقيقة عبر registry وStremio وAnimeEngine إلى native بعد الاختيار فقط', async () => {
+it.each([
+  { label: 'Torrentio hash', torrent: { infoHash: 'c'.repeat(40), fileIdx: 0 }, hash: 'c'.repeat(40) },
+  { label: 'Base32 magnet URL', torrent: { url: 'magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH&tr=udp%3A%2F%2Ftracker.example.com%3A80', fileIdx: 3 }, hash: '0123456789abcdef0123456789abcdef01234567' },
+  { label: 'native magnet field', torrent: { magnet: `magnet:?xt=urn:btih:${'d'.repeat(40)}`, fileIdx: 7 }, hash: 'd'.repeat(40) },
+])('يوصل هوية IMDb الدقيقة عبر registry وStremio وAnimeEngine إلى native بعد الاختيار فقط: $label', async ({torrent, hash}) => {
   const requests = [], starts = [], storage = new Map();
   const bridge = {
     platform: 'windows', version: '0.1.0-preview.1',
     requestResource: async args => {
       requests.push(args);
-      const body = args.url.includes('/stream/') ? { streams: [{ infoHash: 'c'.repeat(40), fileIdx: 0, name: 'Torrentio 2160p HDR', title: 'release.mkv', sources: ['tracker:udp://tracker.test:80'] }] }
+      const body = args.url.includes('/stream/') ? { streams: [{ ...torrent, name: 'Torrentio 2160p HDR', title: 'release.mkv', sources: ['tracker:udp://tracker.test:80'], subtitles: [{id:'ar',lang:'ar',url:'https://cdn.test/ar.vtt'}] }] }
         : { id: 'org.torrentio', name: 'Torrentio', version: '1.0.0', types: ['movie', 'series'], resources: ['stream'], catalogs: [] };
       return { text: JSON.stringify(body), status: 200 };
     },
@@ -17,6 +21,7 @@ it('يوصل هوية IMDb الدقيقة عبر registry وStremio وAnimeEngin
     stopPlayback: async () => {}, playbackCommand: async () => {}, onEvent: () => () => {},
   };
   vi.stubGlobal('VantaraDesktop', bridge);
+  vi.stubGlobal('VantaraDesktopBridges', undefined);
   vi.stubGlobal('localStorage', { getItem: key => storage.get(key) ?? null, setItem: (key,val) => storage.set(key,val) });
   vi.stubGlobal('fetch', async () => ({ json: async () => ({ sources: [] }) }));
   installDesktopBridges();
@@ -33,6 +38,10 @@ it('يوصل هوية IMDb الدقيقة عبر registry وStremio وAnimeEngin
   expect(starts).toEqual([]);
   const candidate = await anime.pick(prepared.session, snapshot.routes[0].id);
   await anime.open({ session: prepared.session, candidate, title: 'Fight Club', animeId: 'tt0137523', episode: 1, position: 42000 });
-  expect(starts).toMatchObject([{ position: 42000, candidate: { infoHash: 'c'.repeat(40), type: 'torrent', fileIdx: 0, quality: 2160, hdr: true, addonKey: 'https://torrentio.test|org.torrentio' } }]);
+  expect(starts).toMatchObject([{ position: 42000, candidate: { infoHash: hash, type: 'torrent', fileIdx: torrent.fileIdx, quality: 2160, hdr: true, addonKey: 'https://torrentio.test|org.torrentio', sources: ['tracker:udp://tracker.test:80'], subtitles: [{lang:'ar',url:'https://cdn.test/ar.vtt'}] } }]);
+  if (torrent.url || torrent.magnet) {
+    expect(new URL(starts[0].candidate.magnet).searchParams.get('xt')).toBe(`urn:btih:${hash}`);
+    expect(starts[0].candidate.url).toBeUndefined();
+  }
   await anime.closeSession(prepared.session);
 });

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { verifyWindowsIcon, verifyElectronPayload } from './windows-icon-resources.mjs';
+import { bundleWindowsLibtorrent } from './bundle-windows-libtorrent.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argument = (name, fallback) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -17,6 +18,7 @@ const app = path.join(portable, 'resources', 'app');
 const native = path.join(app, 'native');
 const videoHost = path.resolve(argument('video-host',path.join(repo,'apps/desktop/native/vantara-video-host.exe')));
 const brandedExe = argument('branded-exe');
+const includeLibtorrent = argument('libtorrent','false')==='true';
 const icon = path.join(repo, 'apps/desktop/assets/vantara.ico');
 // A Windows build must contain the real child-window host; never fall back to
 // an external mpv window when CI forgot its Windows-compiled companion.
@@ -95,9 +97,12 @@ for (const name of ['vcruntime140.dll', 'vcruntime140_1.dll']) await fs.copyFile
 await fs.copyFile(path.join(vcExtract, 'u31'), path.join(native, 'MICROSOFT-VC-RUNTIME-LICENSE.rtf'));
 await fs.cp(path.join(repo, 'apps', 'desktop'), app, {
   recursive: true,
-  filter: filename => !/(?:^|[/\\])node_modules(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|windows\.nsi$/.test(filename),
+  filter: filename => !/(?:^|[/\\])(?:node_modules|__pycache__)(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|_test\.py$|windows\.nsi$/.test(filename),
 });
 await fs.copyFile(videoHost,path.join(native,'vantara-video-host.exe'));
+// Verification builds explicitly opt in. Production's engine selection stays
+// unchanged until this pinned wheel passes the same swarm gate on Windows.
+const libtorrentManifest=includeLibtorrent?await bundleWindowsLibtorrent({outputDir:path.join(native,'libtorrent'),cache}):null;
 await fs.cp(path.join(repo, 'apps', 'web'), path.join(app, 'web'), {
   recursive: true,
   filter: filename => !/\.test\.js$|(?:^|[/\\])node_modules(?:[/\\]|$)/.test(filename),
@@ -126,10 +131,11 @@ for (const source of sourceDownloads) {
   source.sha256 = sha256(bytes);
 }
 await fs.writeFile(path.join(portable, 'THIRD-PARTY-NOTICES.txt'), `VANTARA Windows ${version}\n\nElectron 44.7.2: MIT and Chromium notices in LICENSES.chromium.html and LICENSE.\nrqbit 9.0.1: Apache-2.0. Corresponding source in SOURCES/rqbit-v9.0.1-source.tar.gz.\nmpv Windows build 20261014: mpv/FFmpeg and bundled library notices accompany native/mpv.exe; build and mpv sources in SOURCES.\nPinned upstream build references and binary SHA-256 are in BUILD-MANIFEST.json.\nVANTARA application source repository: https://github.com/Meshal515/VANTARA\n`);
+if(libtorrentManifest)await fs.appendFile(path.join(portable,'THIRD-PARTY-NOTICES.txt'),'Optional libtorrent2.0/Python backend: resources/app/native/libtorrent/THIRD-PARTY-NOTICES.txt and LIBTORRENT-MANIFEST.json. Not selected by default.\n');
 await fs.writeFile(path.join(portable, 'ابدأ-هنا.txt'), `VANTARA لويندوز — نسخة معاينة ${version}\n\nشغّل VANTARA.exe من هذا المجلد؛ لا تنقل الملف التنفيذي وحده. النسخة المحمولة تحفظ بياناتها وملفات التورنت في VANTARA-data بجوار البرنامج، لذلك فكها على القرص ذي المساحة الكافية مثل E.\nمن الإضافات أضف رابط Torrentio المعدّ. يمكن إكمال الإعداد داخل نافذة التطبيق؛ زر تثبيت Stremio يعيد رابط الإضافة إلى VANTARA.\nاختر الفيلم أو الحلقة ثم اختر مصدر التشغيل بنفسك.\nمحرك التورنت والمشغل مرفقان؛ لا يلزم تثبيت برامج منفصلة.\nيفحص VANTARA الأقراص الثابتة القابلة للكتابة ويختار القرص صاحب المساحة الفارغة الأكبر لكاش التورنت تلقائيًا. الكاش نافذة متحركة: يحمّل قدّام بقدر المساحة الحرة، ويبقي 50 ثانية ورا فقط ويفرّغ ما قبلها من القرص، ويوقف التنزيل مؤقتًا إذا اقتربت المساحة من الحد ثم يستأنف مع تقدّم المشاهدة. الرجوع لجزء مفرَّغ يعيد تنزيله من نفس اللحظة. كل ملفات الجلسة تُحذف بعد إغلاق المشغل. فيلم 40GB لا يحتاج 40GB فاضية.\nالمكتبة والحسابات متاحة من قائمة VANTARA، والدخول يتبع اقتران الجهاز الحالي.\nالرفيق والترجمة بالذكاء الاصطناعي خارج نسخة ويندوز؛ ترجمات الفيديو العادية مدعومة. استخدم واجهة الغرفة الأصلية للمشاهدة المشتركة واختيار مصدرك؛ وجود مزود لا يضمن توفر كل حلقة.\nهذه حزمة معاينة غير موقعة، ولم يدع الفريق تجربة جهاز ويندوز دون دليل مرفق.\n`);
 const configFile=path.join(app,'web/lib/config.js');
 await fs.writeFile(configFile,(await fs.readFile(configFile,'utf8')).replace('__VANTARA_VERSION__',version));
-await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: 'VANTARA', version, sourceSha:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(), platform: 'win32-x64', builtAt: new Date().toISOString(), signed: false, artifacts, binaries, icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
+await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: 'VANTARA', version, sourceSha:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(), platform: 'win32-x64', builtAt: new Date().toISOString(), signed: false, artifacts, binaries, ...(libtorrentManifest?{optionalLibtorrent:libtorrentManifest}:{}), icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
 const zip = path.join(output, `VANTARA-${version}-Windows-x64.zip`);
 run('python3', ['-c', 'import sys,zipfile,pathlib; root=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED,compresslevel=6); [z.write(p, str(pathlib.Path(root.name)/p.relative_to(root))) for p in sorted(root.rglob("*")) if p.is_file()]; z.close()', portable, zip]);
 const installer = path.join(output, `VANTARA-${version}-Windows-x64-Setup.exe`);

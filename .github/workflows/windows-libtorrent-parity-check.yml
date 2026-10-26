@@ -1,0 +1,189 @@
+name: Windows libtorrent parity evidence (no release)
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/windows-update-release-parity-20261026']
+    paths:
+      - 'apps/desktop/native/libtorrent/**'
+      - 'apps/desktop/src/libtorrent-engine*'
+      - 'tools/bundle-windows-libtorrent*'
+      - 'tools/libtorrent-fixture*'
+      - 'tools/torrent-startup-benchmark.mjs'
+      - '.github/workflows/windows-libtorrent-parity-check.yml'
+permissions:
+  contents: read
+concurrency:
+  group: windows-libtorrent-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-comparison:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bundle the pinned embedded interpreter and official libtorrent wheel
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'vantara-libtorrent-parity'
+          $native=Join-Path $dir 'native'
+          node tools/bundle-windows-libtorrent.mjs "--output=$native" "--cache=$dir/cache"
+          if($LASTEXITCODE -ne 0){throw 'Pinned native bundle failed'}
+          "PARITY_ROOT=$dir" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_PYTHON=$native/python/python.exe" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_SERVER=$native/server.py" | Out-File -Append $env:GITHUB_ENV
+          & "$native/python/python.exe" -I -c 'import sys,libtorrent; assert sys.flags.isolated; assert libtorrent.__version__.startswith("2.0.13"); print(libtorrent.__version__,sys.version)'
+          if($LASTEXITCODE -ne 0){throw 'Official wheel cannot load on Windows'}
+      - name: Check native swarm integrity, cancellation, disk reserve and authenticated IPC
+        shell: pwsh
+        run: |
+          & $env:PARITY_PYTHON -I apps/desktop/native/libtorrent/server_test.py
+          if($LASTEXITCODE -ne 0){throw 'Native swarm regression failed'}
+          node --test apps/desktop/src/libtorrent-engine.test.mjs tools/bundle-windows-libtorrent.test.mjs tools/torrent-startup-benchmark.test.mjs
+          if($LASTEXITCODE -ne 0){throw 'Backend launch or build regression failed'}
+      - name: Download the same checksum-pinned rqbit, mpv and FFmpeg used by the Windows gate
+        id: native_tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function Fetch-Pinned([string]$Url,[string]$Name,[string]$Hash) {
+            $file=Join-Path $env:PARITY_ROOT $Name
+            Invoke-WebRequest $Url -OutFile $file
+            if((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $Hash){throw "Checksum mismatch: $Name"}
+            return $file
+          }
+          $rqbit=Fetch-Pinned 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe' 'rqbit.exe' '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea'
+          $archive=Fetch-Pinned 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-x86_64-20261014-git-ec38361c56.7z' 'mpv.7z' 'ab6236a2b78a3e9e93a156c1f638d3182ee906006d019c15d1b7b056a7c9a4c5'
+          $mpvDir=Join-Path $env:PARITY_ROOT 'mpv'
+          & 7z x -y "-o$mpvDir" $archive | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'MPV archive failed'}
+          $mpv=Get-ChildItem $mpvDir -Recurse -File -Filter mpv.exe | Select-Object -First 1
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $electronDir=Join-Path $env:PARITY_ROOT 'electron'
+          Expand-Archive $electron -DestinationPath $electronDir
+          Copy-Item (Join-Path $electronDir 'vulkan-1.dll') (Join-Path $mpv.DirectoryName 'vulkan-1.dll')
+          & $mpv.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'Pinned MPV cannot start'}
+          $ffmpegZip=Fetch-Pinned 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-26-14-25/ffmpeg-n8.1.3-24-g92611900bb-win64-lgpl-shared-8.1.zip' 'ffmpeg.zip' '96afe9bee66012f4cbc336a473f0b595060d73bdc5efe4331d55101500d0a93e'
+          $ffmpegDir=Join-Path $env:PARITY_ROOT 'ffmpeg'
+          Expand-Archive $ffmpegZip -DestinationPath $ffmpegDir
+          $ffmpeg=Get-ChildItem $ffmpegDir -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $mpv -or -not $ffmpeg){throw 'Missing media executable'}
+          "PARITY_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "PARITY_FFMPEG=$($ffmpeg.FullName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Compare actual rendered frames across both clients and both seed engines
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $failed=$false
+          $fixtures=$null
+          foreach($seed in @('rqbit','libtorrent')){
+            foreach($engine in @('rqbit','libtorrent')){
+              $out=Join-Path $env:PARITY_ROOT "runs/$seed-$engine"
+              $arguments=@('tools/torrent-startup-benchmark.mjs','--service-module','apps/desktop/src/services.mjs','--rqbit',$env:PARITY_RQBIT,'--mpv',$env:PARITY_MPV,'--ffmpeg',$env:PARITY_FFMPEG,'--torrent-backend',$engine,'--libtorrent-python',$env:PARITY_PYTHON,'--libtorrent-script',$env:PARITY_SERVER,'--seed-engine',$seed,'--output',$out,'--runs','3','--kinds','mp4,late-moov,mkv','--modes','cold,warm,restart,partial','--stable-seconds','2','--timeout-ms','30000')
+              if($fixtures){$arguments+=@('--fixtures-from',$fixtures)}
+              & node @arguments
+              if($LASTEXITCODE -ne 0){$failed=$true}
+              if(-not $fixtures){$fixtures=Join-Path $out 'seed'}
+            }
+          }
+          if($failed){throw 'One or more actual Windows playback comparisons failed; do not switch engine'}
+      - name: Verify uTP and mandatory MSE with decoded audio on the same owned source
+        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixtureSource=$null
+          $referenceHash=$null
+          $protocolResults=@()
+          $cases=@(
+            @{name='utp-native';engine='libtorrent';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$true},
+            @{name='utp-tcp-only-expected-failure';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$false},
+            @{name='utp-rqbit-both';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='both';expected=$true},
+            @{name='mse-native';engine='libtorrent';transport='both';encryption='mse';rqbit='tcp';expected=$true},
+            @{name='mse-rqbit-expected-failure';engine='rqbit';transport='both';encryption='mse';rqbit='both';expected=$false}
+          )
+          foreach($case in $cases){
+            $out=Join-Path $env:PARITY_ROOT "runs/protocol/$($case.name)"
+            $samples=if($case.expected){'3'}else{'1'}
+            $modes=if($case.expected){'cold,warm'}else{'cold'}
+            $arguments=@('tools/torrent-startup-benchmark.mjs','--service-module','apps/desktop/src/services.mjs','--rqbit',$env:PARITY_RQBIT,'--mpv',$env:PARITY_MPV,'--ffmpeg',$env:PARITY_FFMPEG,'--torrent-backend',$case.engine,'--libtorrent-python',$env:PARITY_PYTHON,'--libtorrent-script',$env:PARITY_SERVER,'--seed-engine','libtorrent','--seed-transport',$case.transport,'--seed-encryption',$case.encryption,'--rqbit-transport',$case.rqbit,'--fixture-audio','true','--verify-audio','true','--output',$out,'--runs',$samples,'--kinds','mp4','--modes',$modes,'--stable-seconds','2','--timeout-ms','12000')
+            if($fixtureSource){$arguments+=@('--fixtures-from',$fixtureSource)}
+            & node @arguments
+            $nativeExit=$LASTEXITCODE
+            $report=Get-Content (Join-Path $out 'results.json') -Raw | ConvertFrom-Json
+            if(-not $referenceHash){$referenceHash=$report.fixtures[0].infoHash;$fixtureSource=Join-Path $out 'seed'}
+            if($report.fixtures[0].infoHash -ne $referenceHash -or $report.fixtures[0].fileIdx -ne 0){throw 'Protocol fixtures must use the exact same torrent and file'}
+            $passed=@($report.runs | Where-Object {$_.ok}).Count
+            if($case.expected){
+              if($nativeExit -ne 0 -or $passed -ne 6){throw "Protocol playback failed: $($case.name)"}
+              foreach($row in $report.runs){if($row.audioEvidence.params.samplerate -ne 48000 -or -not $row.realtimePlaybackVerified){throw 'Missing actual PCM or stable playback proof'}}
+            }else{
+              if($nativeExit -eq 0 -or $passed -ne 0 -or @($report.runs).Count -ne 1){throw "Expected unsupported protocol was not reproduced: $($case.name)"}
+            }
+            $protocolResults+=@{name=$case.name;expectedSuccess=$case.expected;actualSuccessful=$passed;nativeExit=$nativeExit;infoHash=$referenceHash;report=(Join-Path $out 'results.json')}
+          }
+          $protocolResults | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/protocol-summary.json')
+
+      - name: Measure real 1080p and 4K HEVC playback for five cold and warm samples
+        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $highResolutionResults=@()
+          foreach($format in @(@{name='1080p-h264';size='1920x1080';width=1920;height=1080;codec='libx264'},@{name='2160p-hevc10-pq';size='3840x2160';width=3840;height=2160;codec='libx265'})){
+            $source=Join-Path $env:PARITY_ROOT "high-resolution-fixtures/$($format.name)"
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            $video=Join-Path $source 'authored-mp4.mp4'
+            $encode=@('-hide_banner','-loglevel','error','-y','-f','lavfi','-i',"testsrc2=size=$($format.size):rate=24",'-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','24','-c:v',$format.codec,'-preset','ultrafast','-threads','2')
+            if($format.codec -eq 'libx265'){$encode+=@('-pix_fmt','yuv420p10le','-b:v','24M','-maxrate','32M','-bufsize','48M','-x265-params','pools=2:frame-threads=2:hdr10=1:repeat-headers=1','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc')}else{$encode+=@('-pix_fmt','yuv420p','-crf','23')}
+            $encode+=@('-c:a','aac','-b:a','96k','-movflags','+faststart',$video)
+            & $env:PARITY_FFMPEG @encode
+            if($LASTEXITCODE -ne 0){throw 'Owned high-resolution fixture encoding failed'}
+            $referenceHash=$null
+            foreach($engine in @('rqbit','libtorrent')){
+              $out=Join-Path $env:PARITY_ROOT "runs/high-resolution/$($format.name)-$engine"
+              & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $env:PARITY_RQBIT --mpv $env:PARITY_MPV --ffmpeg $env:PARITY_FFMPEG --torrent-backend $engine --libtorrent-python $env:PARITY_PYTHON --libtorrent-script $env:PARITY_SERVER --seed-engine libtorrent --fixtures-from $source --verify-audio true --output $out --runs 5 --kinds mp4 --modes cold,warm --stable-seconds 10 --timeout-ms 30000
+              if($LASTEXITCODE -ne 0){throw 'High-resolution frame, stability or seek check failed'}
+              $report=Get-Content (Join-Path $out 'results.json') -Raw | ConvertFrom-Json
+              if(-not $referenceHash){$referenceHash=$report.fixtures[0].infoHash}
+              if($report.fixtures[0].infoHash -ne $referenceHash){throw 'High-resolution engine comparison changed torrent identity'}
+              if(@($report.runs).Count -ne 10){throw 'Expected five cold and five warm samples'}
+              foreach($row in $report.runs){
+                $decoded=$row.renderedProof.decodedParams
+                $motion=$row.stablePlayback.toSeconds-$row.stablePlayback.fromSeconds
+                if(-not $row.ok -or -not $row.realtimePlaybackVerified -or $decoded.w -ne $format.width -or $decoded.h -ne $format.height -or $row.audioEvidence.params.samplerate -ne 48000 -or $motion -lt 9){throw 'Actual high-resolution decoding or ten-second playback proof missing'}
+              }
+              $highResolutionResults+=@{format=$format.name;engine=$engine;infoHash=$referenceHash;samples=10;summaries=$report.summaries}
+            }
+          }
+          $highResolutionResults | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/high-resolution-summary.json')
+
+      - name: Record evidence without publishing or changing the default engine
+        if: always()
+        shell: pwsh
+        run: |
+          '### Owned-swarm Windows comparison; no public-network claim' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| Seeder / Client | Fixture | Cache | Successful | Failed | Median ms | P95 ms |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '| --- | --- | --- | ---: | ---: | ---: | ---: |' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem "$env:PARITY_ROOT/runs" -Recurse -File -Filter results.json -ErrorAction SilentlyContinue | ForEach-Object {
+            $report=Get-Content $_.FullName -Raw | ConvertFrom-Json
+            foreach($row in $report.summaries){
+              "| $($_.Directory.Name) | $($row.fixture) | $($row.mode) | $($row.successful) | $($row.failed) | $($row.medianMs) | $($row.p95Ms) |" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-libtorrent-parity-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/
+            ${{ runner.temp }}/vantara-libtorrent-parity/native/LIBTORRENT-MANIFEST.json
+          if-no-files-found: warn

@@ -11,6 +11,18 @@ const bytes = Buffer.from('VANTARA installer bytes '.repeat(5000));
 const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
 const url = 'https://github.com/Meshal515/VANTARA/releases/download/windows-v0.2.5/VANTARA-0.2.5-Windows-x64-Setup.exe';
 const update = { version: '0.2.5', url, sha256, size: bytes.length };
+
+test('main process refuses old Windows lineage and enforces Stable order independently',()=>{
+  const {assertForwardUpdate}=require('./updater.cjs');
+  assert.throws(()=>assertForwardUpdate(update,'0.0.209'),/القديمة/);
+  const stable={...update,version:'0.4.214',url:'https://github.com/Meshal515/VANTARA/releases/download/stable-214/VANTARA-0.4.214-Windows-x64-Setup.exe'};
+  assert.equal(assertForwardUpdate(stable,'0.0.213').version,'0.4.214');
+  assert.equal(assertForwardUpdate(stable,'0.3.18').version,'0.4.214');
+  assert.throws(()=>assertForwardUpdate(stable,'0.4.214'),/أقدم/);
+  assert.throws(()=>assertForwardUpdate(stable,'0.4.215'),/أقدم/);
+  assert.throws(()=>assertForwardUpdate({...stable,version:'0.4.215'},'0.0.209'),/هوية/);
+  assert.throws(()=>assertForwardUpdate(stable,'0.0.0'),/معروف/);
+});
 const fetchOf = (body, status = 200) => async () => new Response(body, { status });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vantara-update-'));
 

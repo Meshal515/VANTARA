@@ -143,3 +143,17 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
  view.update({position:1000,subtitles:structuredClone(tracks),subtitleDelay:0});
  expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
 });
+
+
+it('renders Android-like banner and logo above native MPV until ready, then shades buffering',()=>{
+ const {view}=fixture();
+ view.update({title:'فيلم التجربة',ready:false,banner:'https://art.example/banner.webp',logo:'https://art.example/logo.png'});
+ const stage=view.root.querySelector('.v-stage');
+ expect(stage).toBeTruthy();expect(stage.hidden).toBe(false);
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/banner.webp');
+ expect(stage.querySelector('.v-stage__logo--base').getAttribute('src')).toBe('https://art.example/logo.png');
+ view.update({title:'فيلم التجربة',ready:true,banner:'https://art.example/banner.webp',logo:'https://art.example/logo.png'});
+ expect(stage.hidden).toBe(true);
+ view.update({title:'فيلم التجربة',ready:true,buffering:true,banner:'https://art.example/banner.webp',logo:'https://art.example/logo.png'});
+ expect(stage.hidden).toBe(false);expect(stage.dataset.mode).toBe('buffering');
+});

@@ -1,0 +1,44 @@
+name: Windows jlibtorrent Native Bootstrap
+on:
+  push:
+    branches: ['chatgpt/windows-stage-and-torrent-migration-20261026']
+    paths:
+      - 'apps/desktop/native-torrent/**'
+      - '.github/workflows/windows-jlibtorrent-native-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jlibtorrent-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-probe:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download the exact Android version of jlibtorrent for Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '2.0.12.9'
+          $base = 'https://dl.frostwire.com/maven/com/frostwire'
+          foreach ($name in @('jlibtorrent', 'jlibtorrent-windows')) {
+            $url = "$base/$name/$version/$name-$version.jar"
+            Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP/$name.jar"
+            if ((Get-Item "$env:RUNNER_TEMP/$name.jar").Length -lt 10240) { throw "Unexpectedly small $name binary" }
+          }
+      - name: Verify Windows JNI can start and stop a real libtorrent session
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cp = "$env:RUNNER_TEMP/jlibtorrent.jar;$env:RUNNER_TEMP/jlibtorrent-windows.jar"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/classes" | Out-Null
+          javac -encoding UTF-8 -cp $cp -d "$env:RUNNER_TEMP/classes" apps/desktop/native-torrent/JlibtorrentNativeProbe.java
+          if ($LASTEXITCODE -ne 0) { throw 'Windows JNI compile failed' }
+          java -cp "$env:RUNNER_TEMP/classes;$cp" JlibtorrentNativeProbe
+          if ($LASTEXITCODE -ne 0) { throw 'libtorrent native bootstrap failed' }

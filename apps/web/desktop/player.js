@@ -3,6 +3,7 @@ import { glyph } from '../v35/icons.js';
 import { createServerSheet } from '../v35/server-sheet.js';
 import { createDesktopLobby, openDesktopRoomEntry } from './lobby.js';
 import { createOverlayLink } from './overlay-link.js';
+import { createDesktopLoadingStage } from './loading-stage.js';
 const safeMessage=value=>String(value??'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi,'[رابط الخدمة]');
 const clock=ms=>{const s=Math.max(0,Math.floor((ms??0)/1000));return `${Math.floor(s/3600)?`${Math.floor(s/3600)}:`:''}${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;};
 /** Real native video occupies .desktop-player-video. Chromium controls live in
@@ -12,8 +13,16 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const doc=g.document;
   let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,sourceRevision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
+  let stage=null,stageSeed=null;
   let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA',subtitleCommandRevision=0;
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
+  // Preparing artwork remains usable while the asynchronous player state is incomplete.
+  const artworkSnapshot=()=>{
+    const info=playerInfo??{},media=info.media??{},seed=stageSeed??{};
+    return {banner:info.banner??info.backdrop??media.banner??media.backdrop??seed.banner??info.poster??media.poster??seed.poster??null,
+      logo:info.logo??media.logo??seed.logo??null,poster:info.poster??media.poster??seed.poster??null};
+  };
+  const renderStage=()=>stage?.update({...playerInfo,...artworkSnapshot(),title:playerInfo?.title??titleText,ready,buffering,status:{error:failed}});
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
   const command=async(name,value)=>{if(!session)return;if(!ready){if(!failed)tell('انتظر بدء الفيديو…');return;}const id=session,rev=revision,subtitleChoice=['subtitle-select','subtitle-off','subtitle-load'].includes(name),choice=subtitleChoice?++subtitleCommandRevision:0;try{if(engine.playerCommand)await engine.playerCommand({session:id,command:name,value});else await bridge.playbackCommand({session:id,command:name,value});}catch(error){if(session===id&&revision===rev&&(!subtitleChoice||choice===subtitleCommandRevision))tell(error.message,true);}};
   const viewport=(hidden=false)=>{
@@ -22,7 +31,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const width=g.innerWidth??doc.documentElement.clientWidth,height=g.innerHeight??doc.documentElement.clientHeight;
     if(!Number.isFinite(width)||!width||!Number.isFinite(height)||!height)return;
     const id=session,rev=revision;
-    void bridge.playerViewport({session:id,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>{if(session===id&&revision===rev)tell(error.message,true);});
+    void bridge.playerViewport({session:id,x:Math.max(0,rect.x??rect.left),y:Math.max(0,rect.y??rect.top),width:Math.max(0,rect.width),height:Math.max(0,rect.height),viewportWidth:width,viewportHeight:height,hidden:hidden||(!ready&&!link?.active)||!!roomState?.visible||!!roomModal||!!settings&&!settings.hidden}).catch(error=>{if(session===id&&revision===rev)tell(error.message,true);});
   };
   const refreshSkip=()=>{
     const segment=activeSegment(skipResult?.timings,position);
@@ -40,7 +49,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     try{cleanup?.();}catch{}
     serverSheet=null;viewport();
   };
-  const dismiss=()=>{link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
+  const dismiss=()=>{stage?.close();stage=null;stageSeed=null;link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
   const close=async()=>{const id=session;if(!id)return;engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action,'aria-label':label,title:label});b.onclick=fn;return b;};
   const iconButton=(label,action,icon,fn)=>{const b=button(label,action,fn);b.innerHTML=action==='fullscreen'?'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>':glyph(icon,{size:24});return b;};
@@ -61,6 +70,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const code=server?.code??null,q=Number(server?.quality)||null;
     return {title:info.title??titleText,subtitle:movie?'فيلم':`الحلقة ${info.episode??''}`,
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
+      ...artworkSnapshot(),
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
       sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
       skip:skipLabel,net:netInfo,people:overlayPeople(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
@@ -100,7 +110,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   };
   const showSettings=()=>{settings.hidden=false;viewport();settings.querySelector('button')?.focus?.();};
 
-  function ensureStyles(){for(const [id,path]of [['desktop-shared-player-style','../pwa/player/player.css'],['desktop-player-style','./player.css'],['desktop-server-style','../v35/server-sheet.css']])if(!doc.getElementById(id)){const link=node('link',null,{id,rel:'stylesheet',href:new URL(path,import.meta.url).href});doc.head.append(link);}}
+  function ensureStyles(){for(const [id,path]of [['desktop-shared-player-style','../pwa/player/player.css'],['desktop-player-style','./player.css'],['desktop-stage-style','./loading-stage.css'],['desktop-server-style','../v35/server-sheet.css']])if(!doc.getElementById(id)){const link=node('link',null,{id,rel:'stylesheet',href:new URL(path,import.meta.url).href});doc.head.append(link);}}
   function stepper(input){const wrap=node('div',null,{class:'desktop-player-step',dir:'ltr'});const change=delta=>{input.value=String(Math.max(Number(input.min),Math.min(Number(input.max),Number(input.value)+delta)));input.dispatchEvent(new doc.defaultView.Event('change'));};wrap.append(button('−','timing-minus',()=>change(-.5)),input,button('+','timing-plus',()=>change(.5)));return wrap;}
   function showSheet(build,full=false) {
     closeRoomSheet();
@@ -127,19 +137,19 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     },true);
   }
   async function refreshServers(){const ui=serverSheet,id=session;if((!ui&&!overlayServers)||!id)return;try{const data=await engine.routes({session:id});if(session!==id)return;if(ui&&serverSheet===ui)ui.update({routes:data.routes,settled:data.done,status:{text:data.done?'':'نجلب السيرفرات…',spin:!data.done}});if(overlayServers){overlayRoutes=data.routes;overlayRoutesDone=!!data.done;link?.push(true);}}catch(error){if(session===id)tell(error.message,true);}}
-  async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;playerInfo=state;if(nextEpisode){nextEpisode.hidden=!(state.total>1);nextEpisode.disabled=state.canChangeEpisode===false||Number(state.episode)>=state.total;nextEpisode.onclick=()=>void episode(Number(state.episode)+1);}if(episodeSelect){episodeSelect.parentElement.hidden=!(state.total>1);episodeSelect.disabled=state.canChangeEpisode===false;episodeSelect.replaceChildren();for(let n=1;n<=Math.min(3000,state.total||0);n++){const o=node('option',`الحلقة ${n}`,{value:n});if(n===Number(state.episode))o.selected=true;episodeSelect.append(o);}}if(speed)speed.disabled=!!state.synced;refreshSkip();panel.dataset.tone=state.section==='cinema'||state.media?.kind==='cinema'?'cinema':'anime';const heading=panel.querySelector('header h2');if(heading)heading.textContent=state.title??heading.textContent;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;
+  async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;playerInfo=state;renderStage();if(nextEpisode){nextEpisode.hidden=!(state.total>1);nextEpisode.disabled=state.canChangeEpisode===false||Number(state.episode)>=state.total;nextEpisode.onclick=()=>void episode(Number(state.episode)+1);}if(episodeSelect){episodeSelect.parentElement.hidden=!(state.total>1);episodeSelect.disabled=state.canChangeEpisode===false;episodeSelect.replaceChildren();for(let n=1;n<=Math.min(3000,state.total||0);n++){const o=node('option',`الحلقة ${n}`,{value:n});if(n===Number(state.episode))o.selected=true;episodeSelect.append(o);}}if(speed)speed.disabled=!!state.synced;refreshSkip();panel.dataset.tone=state.section==='cinema'||state.media?.kind==='cinema'?'cinema':'anime';const heading=panel.querySelector('header h2');if(heading)heading.textContent=state.title??heading.textContent;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;
       if(timing){timing.disabled=!state.together||typeof engine.setVideoOffset!=='function';timing.value=String((state.videoOffsetMs??0)/1000);}
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){revision++;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
-    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
+    if(panel&&session===event.session){stageSeed={banner:event.banner??null,logo:event.logo??null,poster:event.poster??null};playerInfo=null;titleText=event.title??titleText;revision++;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;buffering=false;renderStage();viewport();tell('');void sources();return;}
+    dismiss();stageSeed={banner:event.banner??null,logo:event.logo??null,poster:event.poster??null};previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
     header.append(iconButton('شاهد مع أصدقائك','room','users',()=>engine.openPlayerRoom?.({session})),iconButton('ملء الشاشة','fullscreen','sidebar',async()=>{const enabled=!fullscreen,id=session;try{await bridge.playerFullscreen({enabled});fullscreen=enabled;viewport();}catch(error){if(session===id)tell(error.message,true);}link?.push(true);}));
     header.append(iconButton('خيارات المشغل','menu','more',showSettings));
-    video=node('div',null,{class:'desktop-player-video','aria-label':'الفيديو'});video.append(node('div','يجهز الفيديو…',{class:'desktop-player-placeholder'}));
+    video=node('div',null,{class:'desktop-player-video','aria-label':'الفيديو'});stage=createDesktopLoadingStage(doc);renderStage();video.append(stage.element);
     const controls=node('div',null,{class:'desktop-player-controls'}),row=node('div',null,{class:'desktop-player-row'});
     pause=button('إيقاف مؤقت','pause',()=>void command('pause',!paused));
     seek=node('input',null,{type:'range',min:0,max:1,step:1000,'aria-label':'موضع الفيديو','data-control':'seek',class:'desktop-player-seek'});seek.onchange=()=>void command('seek',Number(seek.value));
@@ -195,14 +205,14 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='window/fullscreen'){fullscreen=event.enabled===true;viewport();g.requestAnimationFrame?.(()=>viewport());link?.push(true);return;}
     if(event.type==='playback/preparing')open(event);
     if(event.session!==session)return;
-    if(event.type==='playback/ready'){ready=true;failed=false;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
+    if(event.type==='playback/ready'){ready=true;failed=false;buffering=false;renderStage();viewport();tell('');update();}
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')keyboard({key:'Escape',target:{},preventDefault(){}});}
-    if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;if(Number.isFinite(event.downloadSpeed)||Number.isFinite(event.peers))netInfo={kbps:Number.isFinite(event.downloadSpeed)?event.downloadSpeed/1024:netInfo?.kbps??null,peers:Number.isFinite(event.peers)?event.peers:netInfo?.peers??null};if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
+    if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;if(Number.isFinite(event.downloadSpeed)||Number.isFinite(event.peers))netInfo={kbps:Number.isFinite(event.downloadSpeed)?event.downloadSpeed/1024:netInfo?.kbps??null,peers:Number.isFinite(event.peers)?event.peers:netInfo?.peers??null};if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;renderStage();update();if(!failed){if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}}
     // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
     if(event.type==='playback/stage'||event.type==='playback/retrying')return;
     if(event.type==='playback/subtitles'){subtitleTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(subtitles,event.tracks??[],true);if(event.message)tell(event.message,true);}
     if(event.type==='playback/audio'){audioTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(audio,event.tracks??[]);}
-    if(event.type==='playback/error'){ready=false;failed=true;tell(event.message,true);viewport();update();}
+    if(event.type==='playback/error'){ready=false;failed=true;renderStage();tell(event.message,true);viewport();update();}
     if(event.type==='playback/closed'){if(failed||roomState?.visible&&roomState.failed){viewport();return;}viewport(true);dismiss();if(fullscreen){fullscreen=false;void bridge.playerFullscreen({enabled:false});}}
   });
   const routeListener=engine.addListener?.('route',event=>{if(event?.session&&event.session!==session)return;void sources();void refreshServers();});

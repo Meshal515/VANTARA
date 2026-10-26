@@ -1,0 +1,2285 @@
+{
+  "date": "2026-10-26",
+  "network": "Only authored loopback fixtures, same infoHash and fileIdx; no user torrent downloaded",
+  "evidence": "Actual nonblack mpv window screenshot, verified video stream; AAC48kHz decoded to null sink (physical speakers not measured); two seconds stable progress and seeks12→2",
+  "limitations": [
+    "Linux/Xvfb only; actual Windows transport gate pending",
+    "n3 for successful transport cohorts, n1 for known negative controls; empirical P95 is max sample",
+    "User movie transport capabilities not measured; none of these gaps is established as its root cause",
+    "Do not enable rqbit flag alone as a universal fix: the accepted-TCP/refused-handshake case still fails",
+    "Truthful injected flags do not fix all libtorrent partial-cache stalls; do not cut over before correcting and measuring session retention"
+  ],
+  "sources": {
+    "rqbitCurrentRelease": "https://github.com/ikatson/rqbit/releases/tag/v9.0.1",
+    "rqbitSocketRace": "https://github.com/ikatson/rqbit/blob/v9.0.1/crates/librqbit/src/stream_connect.rs",
+    "rqbitTcpUtpWaitFix": "https://github.com/ikatson/rqbit/pull/398",
+    "rqbitOpenMseSupport": "https://github.com/ikatson/rqbit/pull/633",
+    "libtorrentConnectPeerDefaults": "https://github.com/arvidn/libtorrent/blob/v2.0.13/include/libtorrent/torrent_handle.hpp"
+  },
+  "reports": [
+    {
+      "name": "vantara-native-utp-matrix",
+      "platform": "linux",
+      "backend": "libtorrent",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "seedEngine": "libtorrent",
+        "seedTransport": "utp",
+        "nativeTransport": "utp",
+        "fixtureAudio": "true",
+        "verifyAudio": "true"
+      },
+      "seedSettings": null,
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 1072.0410169999996,
+          "medianMs": 1104.474044999999,
+          "p95Ms": 1396.714836,
+          "maxMs": 1396.714836
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 477.7901949999996,
+          "medianMs": 489.48129399999925,
+          "p95Ms": 500.62355000000025,
+          "maxMs": 500.62355000000025
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1396.714836,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.125,
+            "observedSeconds": 2.001148037,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006888222,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 38.707994999999755
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 47.96258900000066
+            }
+          ],
+          "renderedScreenshotSha256": "8337b4318cb36a405fad039fa2baa3e164ba7832501e521f3e5403fe9075c174"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 477.7901949999996,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0002518879999998,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2001511327999999,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.1963859999996203
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 41.883248000000094
+            }
+          ],
+          "renderedScreenshotSha256": "fcf1a6e17abac8b60316dade395bc746389c929b3c9c64026f971939943066cb"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1104.474044999999,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0004823190000005,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2002893914000003,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8399630000003526
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 53.136194999999134
+            }
+          ],
+          "renderedScreenshotSha256": "17a6c393b3896b9ffb9e3390a256235c41cac155726f07d20cb7e9d644c6c10f"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 489.48129399999925,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0007862530000002,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004717518,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.905640000000858
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 49.30499400000008
+            }
+          ],
+          "renderedScreenshotSha256": "dca1e7ead88b7fcb2dc82016d2682db155bf153d1a99dfe5f85f5d51c5f56110"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1072.0410169999996,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 2,
+            "observedSeconds": 2.0010513040000006,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006307824000004,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.274185000002035
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 56.947228999997606
+            }
+          ],
+          "renderedScreenshotSha256": "0cc6a7db7ed4cdff1b2cb1e57ab6ac9ae75200b2f73a9b2b238cb7be2da637f2"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 500.62355000000025,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 1.999563323000002,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1997379938000012,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6655729999984032
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 60.25065600000016
+            }
+          ],
+          "renderedScreenshotSha256": "a2d80b54247d128d323d5912475227d1f477bd72c8c460c75d97c38693d85c8c"
+        }
+      ]
+    },
+    {
+      "name": "vantara-rqbit-tcp-vs-utp-seed",
+      "platform": "linux",
+      "backend": "rqbit",
+      "options": {
+        "runs": 1,
+        "modes": "cold",
+        "stableSeconds": 2,
+        "timeoutMs": 8000,
+        "seedEngine": "libtorrent",
+        "seedTransport": "utp",
+        "verifyAudio": "true"
+      },
+      "seedSettings": null,
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 0,
+          "failed": 1,
+          "minMs": null,
+          "medianMs": null,
+          "p95Ms": null,
+          "maxMs": null
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        }
+      ]
+    },
+    {
+      "name": "vantara-rqbit-utp-matrix",
+      "platform": "linux",
+      "backend": "rqbit",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "rqbitTransport": "utp",
+        "seedEngine": "libtorrent",
+        "seedTransport": "utp",
+        "verifyAudio": "true"
+      },
+      "seedSettings": null,
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 544.4017670000003,
+          "medianMs": 624.713941,
+          "p95Ms": 708.874333,
+          "maxMs": 708.874333
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 490.09743400000025,
+          "medianMs": 495.060531000001,
+          "p95Ms": 503.97134600000027,
+          "maxMs": 503.97134600000027
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 708.874333,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.001045475,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006272850000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 2.415635000000293
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 50.879589000000124
+            }
+          ],
+          "renderedScreenshotSha256": "43d99f7e3b743c222210590d6dc6483624cada9be34f6a066cc41cc17c249991"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 490.09743400000025,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0005091800000003,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003055080000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.007684000000154
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 83.6410420000002
+            }
+          ],
+          "renderedScreenshotSha256": "445103082d14c6acda2a6ca3f0baf77eca98dc801788c6277c3140831fb34960"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 544.4017670000003,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0015839259999995,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2009503555999996,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8994829999992362
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 32.65783899999951
+            }
+          ],
+          "renderedScreenshotSha256": "dca1e7ead88b7fcb2dc82016d2682db155bf153d1a99dfe5f85f5d51c5f56110"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 495.060531000001,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0000668590000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000401154000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.1635870000009163
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 58.37550100000044
+            }
+          ],
+          "renderedScreenshotSha256": "445103082d14c6acda2a6ca3f0baf77eca98dc801788c6277c3140831fb34960"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 624.713941,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0004493,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.20026958,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 2.307063999998718
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 58.420295000001715
+            }
+          ],
+          "renderedScreenshotSha256": "17a6c393b3896b9ffb9e3390a256235c41cac155726f07d20cb7e9d644c6c10f"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 503.97134600000027,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0008487460000013,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005092476000008,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6650929999996151
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 47.672426000000996
+            }
+          ],
+          "renderedScreenshotSha256": "83fe14d13aa6aa892c6a4b6956999c2f0689da0f32a6a3d07268da9bddcc01fd"
+        }
+      ]
+    },
+    {
+      "name": "vantara-rqbit-both-vs-utp-matrix",
+      "platform": "linux",
+      "backend": "rqbit",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "rqbitTransport": "both",
+        "seedEngine": "libtorrent",
+        "seedTransport": "utp",
+        "verifyAudio": "true"
+      },
+      "seedSettings": null,
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 0,
+          "failed": 3,
+          "minMs": null,
+          "medianMs": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 0,
+          "failed": 3,
+          "minMs": null,
+          "medianMs": null,
+          "p95Ms": null,
+          "maxMs": null
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        }
+      ]
+    },
+    {
+      "name": "vantara-rqbit-both-udp-only-matrix",
+      "platform": "linux",
+      "backend": "rqbit",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "rqbitTransport": "both",
+        "seedEngine": "libtorrent",
+        "seedTransport": "utp-closed-tcp",
+        "verifyAudio": "true"
+      },
+      "seedSettings": null,
+      "transportProof": {
+        "tcpConnectRejected": true,
+        "transport": "UDP-only relay to owned loopback seeder"
+      },
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 464.9684279999992,
+          "medianMs": 555.7825820000016,
+          "p95Ms": 932.8916360000001,
+          "maxMs": 932.8916360000001
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 464.38936400000057,
+          "medianMs": 472.22967700000027,
+          "p95Ms": 483.91628499999933,
+          "maxMs": 483.91628499999933
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 932.8916360000001,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.000866835,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.200520101,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 38.20538699999997
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.08730400000013
+            }
+          ],
+          "renderedScreenshotSha256": "7236b8d328772fbf05fb1cee4f791444a343e08f9005af0033ea5f79916caf9d"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 472.22967700000027,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.000517237,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003103421999999,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.958944999999403
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 55.79663700000037
+            }
+          ],
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 464.9684279999992,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 1.958333,
+            "observedSeconds": 2.0000992669999995,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000595601999997,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.7615470000000641
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 64.09020400000009
+            }
+          ],
+          "renderedScreenshotSha256": "0cc6a7db7ed4cdff1b2cb1e57ab6ac9ae75200b2f73a9b2b238cb7be2da637f2"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 483.91628499999933,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0007015329999995,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004209197999998,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6179720000000088
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 55.19287700000132
+            }
+          ],
+          "renderedScreenshotSha256": "d94316cfbb6a0b37acad684a3f8bc7da9afc954cdad0c76d8faa499d0aaa442b"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 555.7825820000016,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0009928070000007,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005956842000003,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.4272199999995792
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 50.596198999999615
+            }
+          ],
+          "renderedScreenshotSha256": "17a6c393b3896b9ffb9e3390a256235c41cac155726f07d20cb7e9d644c6c10f"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 464.38936400000057,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.000632051999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003792311999992,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5833410000013828
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 60.949469999999565
+            }
+          ],
+          "renderedScreenshotSha256": "6627d83917d101325225b5037e909885ac504dd9dedd839db1704906a37879d5"
+        }
+      ]
+    },
+    {
+      "name": "vantara-native-mse-matrix",
+      "platform": "linux",
+      "backend": "libtorrent",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "seedEngine": "libtorrent",
+        "seedEncryption": "mse",
+        "verifyAudio": "true"
+      },
+      "seedSettings": {
+        "verified": true,
+        "transport": "both",
+        "encryption": "mse",
+        "incomingTcp": true,
+        "incomingUtp": true,
+        "inEncPolicy": 0,
+        "allowedEncLevel": 2
+      },
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 1020.7111200000008,
+          "medianMs": 1058.4494140000006,
+          "p95Ms": 1096.186608,
+          "maxMs": 1096.186608
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 402.6356920000003,
+          "medianMs": 466.8604350000005,
+          "p95Ms": 476.9587240000001,
+          "maxMs": 476.9587240000001
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1096.186608,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.000671484,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004028904000001,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.2578080000002956
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 39.5619099999999
+            }
+          ],
+          "renderedScreenshotSha256": "cb239dbe7191b51ac6d6d26521d780f5c378e64ea819c7c1cf3f70d3a2c8f34f"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 402.6356920000003,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 1.9999740719999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1999844432,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5691299999998591
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 70.00022999999965
+            }
+          ],
+          "renderedScreenshotSha256": "285b5d4b5d904e12b10e56481a2bb36d329ba0ab84e48adb78a745b9d8ba9b65"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1020.7111200000008,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 2,
+            "observedSeconds": 2.0001121539999995,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000672923999998,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5739569999986998
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 31.147790000000896
+            }
+          ],
+          "renderedScreenshotSha256": "8337b4318cb36a405fad039fa2baa3e164ba7832501e521f3e5403fe9075c174"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 476.9587240000001,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.000079065,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.200047439,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8572189999995317
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 65.36310800000138
+            }
+          ],
+          "renderedScreenshotSha256": "43d99f7e3b743c222210590d6dc6483624cada9be34f6a066cc41cc17c249991"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 1058.4494140000006,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 1.958333,
+            "observedSeconds": 2.0002403479999993,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2001442087999996,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8400939999992261
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 67.2926380000008
+            }
+          ],
+          "renderedScreenshotSha256": "0cc6a7db7ed4cdff1b2cb1e57ab6ac9ae75200b2f73a9b2b238cb7be2da637f2"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 466.8604350000005,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": {
+            "params": {
+              "samplerate": 48000,
+              "channel-count": 1,
+              "channels": "mono",
+              "hr-channels": "mono",
+              "format": "floatp"
+            },
+            "sink": "null (decoded PCM; physical speaker output not measured)"
+          },
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0001287339999982,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000772403999989,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8866830000006303
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 42.022908999999345
+            }
+          ],
+          "renderedScreenshotSha256": "285b5d4b5d904e12b10e56481a2bb36d329ba0ab84e48adb78a745b9d8ba9b65"
+        }
+      ]
+    },
+    {
+      "name": "vantara-rqbit-mse-rejection",
+      "platform": "linux",
+      "backend": "rqbit",
+      "options": {
+        "runs": 1,
+        "modes": "cold",
+        "stableSeconds": 2,
+        "timeoutMs": 8000,
+        "rqbitTransport": "both",
+        "seedEngine": "libtorrent",
+        "seedEncryption": "mse",
+        "verifyAudio": "true"
+      },
+      "seedSettings": {
+        "verified": true,
+        "transport": "both",
+        "encryption": "mse",
+        "incomingTcp": true,
+        "incomingUtp": true,
+        "inEncPolicy": 0,
+        "allowedEncLevel": 2
+      },
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7921108,
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 0,
+          "failed": 1,
+          "minMs": null,
+          "medianMs": null,
+          "p95Ms": null,
+          "maxMs": null
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "6f471a6da03ede8ca3954b01de52055fd6d55359",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": null,
+          "error": "Error: Benchmark deadline exceeded",
+          "startPlaybackError": "رفض محرك التورنت الطلب",
+          "audioEvidence": null,
+          "stablePlayback": null,
+          "seeks": null,
+          "renderedScreenshotSha256": null
+        }
+      ]
+    },
+    {
+      "name": "vantara-native-truthful-rqbit-peers",
+      "platform": "linux",
+      "backend": "libtorrent",
+      "options": {
+        "runs": 3,
+        "modes": "cold,warm,restart,partial",
+        "stableSeconds": 2,
+        "timeoutMs": 12000,
+        "seedEngine": "rqbit"
+      },
+      "seedSettings": null,
+      "transportProof": null,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7622078,
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 5039.373246000003,
+          "medianMs": 5073.368449000001,
+          "p95Ms": 5303.309577,
+          "maxMs": 5303.309577
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 430.726541,
+          "medianMs": 437.3348420000011,
+          "p95Ms": 453.65424899999925,
+          "maxMs": 453.65424899999925
+        },
+        {
+          "fixture": "mp4",
+          "mode": "restart",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 348.7338119999986,
+          "medianMs": 478.1287540000012,
+          "p95Ms": 505.9370450000006,
+          "maxMs": 505.9370450000006
+        },
+        {
+          "fixture": "mp4",
+          "mode": "partial",
+          "successful": 0,
+          "failed": 3,
+          "minMs": null,
+          "medianMs": null,
+          "p95Ms": null,
+          "maxMs": null
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 5303.309577,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.291667,
+            "observedSeconds": 2.0018905780000003,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2011343468000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.9822790000007444
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 13.292473999999856
+            }
+          ],
+          "renderedScreenshotSha256": "17a6c393b3896b9ffb9e3390a256235c41cac155726f07d20cb7e9d644c6c10f"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 437.3348420000011,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0000937479999994,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000562487999995,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8372399999989284
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 27.63198999999986
+            }
+          ],
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 505.9370450000006,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.000073778,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000442668,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 2.2949769999995624
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 87.20597499999894
+            }
+          ],
+          "renderedScreenshotSha256": "10dbc4cb8a7d95ea4c32ad856762713e174c55295bb01a141653af1577710d31"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": 500.32469200000014,
+          "error": "AssertionError [ERR_ASSERTION]: Playback did not progress (realtime): 0 → 0, minimum 1.2005840531999994",
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 0,
+            "observedSeconds": 2.000973421999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005840531999994,
+            "localRate": null,
+            "passed": false
+          },
+          "seeks": null,
+          "renderedScreenshotSha256": "a4437c1ddfa26cedbd0c964dc34454275b9e8896a680cda5b2cea16e23a2c35d"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 5039.373246000003,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 2.041667,
+            "observedSeconds": 1.9994142769999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1996485661999998,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.7602250000018103
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 41.94587599999795
+            }
+          ],
+          "renderedScreenshotSha256": "0cc6a7db7ed4cdff1b2cb1e57ab6ac9ae75200b2f73a9b2b238cb7be2da637f2"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 430.726541,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 1.9995324419999998,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1997194651999998,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6234409999997297
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 46.45653400000083
+            }
+          ],
+          "renderedScreenshotSha256": "d328a4ec41a80553838f94dc55383963ea71bf40fe224b228bec3e1dc3a50466"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 478.1287540000012,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.001201924000001,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2007211544000005,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.9212179999994987
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 30.67207899999994
+            }
+          ],
+          "renderedScreenshotSha256": "d328a4ec41a80553838f94dc55383963ea71bf40fe224b228bec3e1dc3a50466"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": 498.4064610000023,
+          "error": "AssertionError [ERR_ASSERTION]: Playback did not progress (realtime): 0 → 0, minimum 1.2007789068000003",
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 0,
+            "observedSeconds": 2.0012981780000008,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2007789068000003,
+            "localRate": null,
+            "passed": false
+          },
+          "seeks": null,
+          "renderedScreenshotSha256": "a4437c1ddfa26cedbd0c964dc34454275b9e8896a680cda5b2cea16e23a2c35d"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 5073.368449000001,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 2.041667,
+            "observedSeconds": 2.0006958040000025,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004174824000013,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.6836629999961588
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 41.65971300000092
+            }
+          ],
+          "renderedScreenshotSha256": "e5287d7a15d1ae079a12d0d6dff4514d0754d29a77dd129d00098a57fa5f5a81"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 453.65424899999925,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0004024040000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2002414424,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.9951960000034887
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 43.26330700000108
+            }
+          ],
+          "renderedScreenshotSha256": "c8cbf414d14ccd0708364834d463d38b4e837f41eaa9542eff3ac6df0dbc55f7"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 348.7338119999986,
+          "error": null,
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0006951360000023,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004170816000013,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.7705110000024433
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 26.155427000005147
+            }
+          ],
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9"
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": false,
+          "firstRenderedMs": 445.9773619999978,
+          "error": "AssertionError [ERR_ASSERTION]: Playback did not progress (realtime): 0 → 0, minimum 1.2005364600000028",
+          "startPlaybackError": null,
+          "audioEvidence": null,
+          "stablePlayback": {
+            "fromSeconds": 0,
+            "toSeconds": 0,
+            "observedSeconds": 2.000894100000005,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005364600000028,
+            "localRate": null,
+            "passed": false
+          },
+          "seeks": null,
+          "renderedScreenshotSha256": "e5287d7a15d1ae079a12d0d6dff4514d0754d29a77dd129d00098a57fa5f5a81"
+        }
+      ]
+    }
+  ]
+}
