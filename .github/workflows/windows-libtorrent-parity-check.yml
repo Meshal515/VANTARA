@@ -170,7 +170,7 @@ jobs:
             $referenceHash=$null
             foreach($engine in @('rqbit','libtorrent')){
               $out=Join-Path $env:PARITY_ROOT "runs/high-resolution/$($format.name)-$engine"
-              & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $env:PARITY_RQBIT --mpv $env:PARITY_MPV --ffmpeg $env:PARITY_FFMPEG --torrent-backend $engine --libtorrent-python $env:PARITY_PYTHON --libtorrent-script $env:PARITY_SERVER --seed-engine libtorrent --fixtures-from $source --verify-audio true --output $out --runs 5 --kinds mp4 --modes cold,warm --stable-seconds 10 --timeout-ms 30000
+              & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $env:PARITY_RQBIT --mpv $env:PARITY_MPV --ffmpeg $env:PARITY_FFMPEG --torrent-backend $engine --libtorrent-python $env:PARITY_PYTHON --libtorrent-script $env:PARITY_SERVER --seed-engine libtorrent --fixtures-from $source --verify-audio true --output $out --runs 5 --kinds mp4 --modes cold,warm --stable-seconds 10 --timeout-ms 30000 --probe-local true
               $benchmarkExit=$LASTEXITCODE
               if(-not (Test-Path (Join-Path $out 'results.json'))){$highResolutionFailures+=@{format=$format.name;engine=$engine;reason='Missing benchmark evidence'};continue}
               $report=Get-Content (Join-Path $out 'results.json') -Raw | ConvertFrom-Json
