@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createPlaybackBudget } from './playback-budget.mjs';
 import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
+import { reusableStartupReplay } from './torrent-replay-startup.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
 import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import { libtorrentCommand, isolatedPythonEnvironment } from './libtorrent-engine.mjs';
@@ -1026,6 +1027,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         assertSession(state);url=await makeProxy(state,null,{},true);
       }else if(candidate.infoHash){
         state.replayEntry=await state.replayStore?.lookup({infoHash:candidate.infoHash,...(candidate.fileIdx!=null?{fileIdx:candidate.fileIdx}:{}),...(candidate.fileIdx==null&&candidate.filename?{filename:basename(String(candidate.filename).replaceAll('\\','/'))}:{})});
+        if(state.replayEntry){
+          // A tiny verified cache can render a screenshot but leave mpv stuck
+          // at time 0 waiting for the next verified torrent piece. For that
+          // case prefer the real engine handshake to a misleading instant start.
+          // No cached bytes or account-owned data are deleted.
+          const head=await reusableStartupReplay(state.replayEntry);assertSession(state);
+          state.trace.record('replay-preflight',{mode:head.usable?'verified-head':'engine-required',requiredBytes:head.requiredBytes,verifiedBytes:head.verifiedBytes});
+          if(!head.usable)state.replayEntry=null;
+        }
         state.trace.record('replay-lookup',{mode:state.replayEntry?'replay-descriptor':'cold'});
         assertSession(state);
         state.engineTask=engine(state,candidate);

@@ -192,6 +192,20 @@ test('controls arriving during preparation wait for loadfile rather than reporti
   const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(commands.findIndex(m=>m.command[0]==='loadfile')<commands.findIndex(m=>m.command[0]==='set_property'&&m.command[1]==='pause'));
 });
+test('sparse 256 KiB replay for a large video does not masquerade as a warm-ready first frame',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{replayCache:true,torrentMetadataStrategy:'direct-index'});
+  const cache=createTorrentReplayCache({userData:dir});
+  const entry=await cache.remember({root:dir,infoHash:hash,fileIdx:0,fileLength:8*1024*1024,filename:'clip.mp4'});
+  assert.equal(await entry.write(0,Buffer.alloc(256*1024,0x41)),true);
+  await cache.close();
+  await services.startPlayback({session:'sparse-replay-needs-engine',candidate:{infoHash:hash,fileIdx:0}});
+  const stage=events.find(e=>e.stage==='replay-preflight');
+  assert.equal(stage?.mode,'engine-required');
+  assert.equal(stage?.verifiedBytes,256*1024);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(requests.some(x=>x.url.startsWith('/torrents?')),'playback must use the verified engine instead of the sparse shortcut');
+});
+
 test('verified replay serves the exact selected range while fresh magnet discovery is still blocked',async t=>{
   const {dir,services}=await fixture(t,'slow',{replayCache:true,torrentMetadataStrategy:'direct-index'});
   const cache=createTorrentReplayCache({userData:dir});

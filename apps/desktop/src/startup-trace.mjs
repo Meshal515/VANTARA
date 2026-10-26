@@ -1,5 +1,5 @@
 const numeric = new Set(['fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId']);
-const modes = new Set(['cold','replay-descriptor','cache','torrent','network','decoded','render-unmeasured']);
+const modes = new Set(['cold','replay-descriptor','cache','torrent','network','decoded','render-unmeasured','verified-head','engine-required']);
 /** Device-local engineering events. Never accept URLs, titles, headers, paths,
  * account IDs or arbitrary strings, even when an upstream error includes them. */
 export function createStartupTrace(publish, clock = () => performance.now()) {
