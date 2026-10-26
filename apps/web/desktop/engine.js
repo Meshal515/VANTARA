@@ -288,7 +288,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
     async playerState({session}) {
       const s=sessionOf(session);
-      return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
+      return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,banner:s.playArgs?.banner??s.playArgs?.background??null,logo:s.playArgs?.logo??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
         total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
         sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
     },

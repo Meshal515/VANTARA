@@ -208,3 +208,20 @@ it('ignores a canceled subtitle selection error after the user turns subtitles o
  await Promise.resolve();await Promise.resolve();expect(f.document.querySelector('.desktop-player').textContent).not.toContain('خطأ اختيار قديم');
  expect(f.bridge.playbackCommand).toHaveBeenCalledWith({session:'one',command:'subtitle-off',value:undefined});
 });
+
+
+it('shows stage art during startup without faking torrent progress and preserves it across buffering',async()=>{
+ const f=fixture();
+ f.engine.playerState=async()=>({title:'فيلم التجربة',banner:'https://art.example/banner.webp',logo:'https://art.example/logo.png',sources:[]});
+ f.event({type:'playback/preparing',session:'one',title:'فيلم التجربة'});
+ await Promise.resolve();await Promise.resolve();
+ const stage=f.document.querySelector('.desktop-player-video .v-stage');
+ expect(stage).toBeTruthy();expect(stage.hidden).toBe(false);
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/banner.webp');
+ expect(stage.dataset.progress).toBe('indeterminate');
+ f.event({type:'playback/ready',session:'one'});
+ expect(stage.hidden).toBe(true);
+ f.event({type:'playback/state',session:'one',buffering:true});
+ expect(stage.dataset.mode).toBe('buffering');
+ f.player.dispose();
+});

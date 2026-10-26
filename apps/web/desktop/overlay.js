@@ -8,6 +8,8 @@
  * لا تشغيل هنا ولا شبكة؛ الفيديو نافذة mpv الأصلية تحت هذه النافذة الشفافة.
  */
 
+import { createDesktopLoadingStage } from './loading-stage.js';
+
 const HIDE_AFTER_MS = 3000;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -60,6 +62,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   // v35: أنماط ورقة السيرفرات المشتركة مربوطة به (مشغل الويب يضيفه كذلك في غرفة الأصدقاء)
   const root = el('div', 'pwa-player');
   root.dir = 'ltr';
+  const loadingStage = createDesktopLoadingStage(doc);
+  root.append(loadingStage.element);
   const gestures = el('div', 'pp-gestures');
   const spinner = el('div', 'pp-spinner'); spinner.innerHTML = '<i></i>';
   const retry = el('button','pp-retry','إعادة المحاولة');retry.type='button';retry.hidden=true;retry.onclick=()=>cmd('retry');
@@ -454,7 +458,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     subEl.textContent = state.subtitle ?? '';
     playBtn.innerHTML = state.paused || !state.ready ? ICON.play : ICON.pause;
     playBtn.setAttribute('aria-label', state.paused ? 'تشغيل' : 'إيقاف مؤقت');
-    spinner.hidden = !(state.buffering || !state.ready) || !!state.status?.error;
+    loadingStage.update(state);
+    spinner.hidden = !loadingStage.element.hidden || !(state.buffering || !state.ready) || !!state.status?.error;
     root.classList.toggle('pp--loading', !state.ready);
     status.textContent = state.status?.text ?? '';
     status.dataset.error = String(!!state.status?.error);retry.hidden=!state.status?.error;
