@@ -72,8 +72,15 @@ jobs:
           for phase in baseline candidate; do
             app="$RUNNER_TEMP/android-login/$phase/app-release.apk"
             test="$RUNNER_TEMP/android-login/$phase/app-release-androidTest.apk"
+            # AGP can finalize AndroidTest with its own debug certificate after
+            # the init script. Sign only the test harness with our fixture key.
+            "$signer" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+              --out "$test.matched.apk" "$test"
+            mv "$test.matched.apk" "$test"
             "$signer" verify --print-certs "$app" > "$RUNNER_TEMP/app-cert"
             "$signer" verify --print-certs "$test" > "$RUNNER_TEMP/test-cert"
+            cat "$RUNNER_TEMP/app-cert" "$RUNNER_TEMP/test-cert"
             app_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/app-cert")"
             test_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert")"
             test -n "$app_cert" && test "$app_cert" = "$test_cert"
