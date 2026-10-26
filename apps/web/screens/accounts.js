@@ -69,6 +69,14 @@ function immediatePalette(account) {
   return cachedSilkPalette(account.avatarKey) ?? silkPaletteFor(account);
 }
 
+function storageFailure(error) {
+  return error?.code === 'device_storage_unavailable' || error?.code === 'session_storage_full' || error?.name === 'QuotaExceededError' || error?.name === 'SecurityError';
+}
+
+function networkFailure(error) {
+  return error?.stage === 'session_transport' || error?.name === 'AbortError' || error?.name === 'TimeoutError';
+}
+
 export async function screenAccounts({ sync, mount, onSignedIn }) {
   const gate = el('main', 'gate');
   const backdrop = el('div', 'gate__backdrop');
@@ -330,6 +338,21 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
   resizeObserver.observe(stage);
 
   // ───────────────────────── الدخول ─────────────────────────
+  let authenticated = null;
+
+  async function openSignedIn(account, user) {
+    authenticated = { accountId: account.userId, user };
+    rememberGateAccount(account.userId);
+    try {
+      await onSignedIn(user);
+    } catch {
+      busy = false;
+      enter.disabled = false;
+      message.classList.add('gate__message--error');
+      message.textContent = 'تم تسجيل الدخول، لكن تعذّر فتح الرئيسية. اضغط متابعة لإعادة المحاولة.';
+      if (!gate.isConnected) mount(gate);
+    }
+  }
 
   async function chooseCurrent() {
     const account = accounts[currentIndex];
@@ -338,11 +361,12 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
     enter.disabled = true;
     message.classList.remove('gate__message--error');
     message.textContent = '';
+    if (authenticated?.accountId === account.userId && sync.signedIn && sync.user?.userId === account.userId && !sync.locked) return openSignedIn(account, authenticated.user);
+    authenticated = null;
     if (account.pinDigits) return askPin(account);
     try {
       const user = await sync.signIn(account.userId);
-      rememberGateAccount(account.userId);
-      await onSignedIn(user);
+      await openSignedIn(account, user);
     } catch (error) {
       failed(account, error);
     }
@@ -358,7 +382,11 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
       return askPin(account);
     }
     message.classList.add('gate__message--error');
-    message.textContent = error?.status ? 'تعذّر الدخول. حاول مرة أخرى.' : 'ما فيه اتصال بالخادم. تأكد من النت وحاول مرة ثانية.';
+    message.textContent = storageFailure(error)
+      ? 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة؛ لا تمسح بيانات التطبيق.'
+      : networkFailure(error)
+        ? 'ما فيه اتصال بالخادم. تأكد من النت وحاول مرة ثانية.'
+        : 'تعذّر الدخول. حاول مرة أخرى.';
   }
 
   /** حساب محمي: لوحة PIN فوق الحرير نفسه، والدخول بعد الرمز الصحيح. */
@@ -378,7 +406,8 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
           return { ok: true };
         } catch (error) {
           if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
-          if (!error?.status) return { error: 'network' };
+          if (storageFailure(error)) return { error: 'other', message: 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة.' };
+          if (networkFailure(error)) return { error: 'network' };
           // جهاز غير معتمد أو حساب حُذف: اللوحة تُغلق والبوابة تشرح
           deferred = error;
           return { ok: true };
@@ -386,12 +415,7 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
       },
       onDone: async () => {
         if (deferred) return failed(account, deferred);
-        rememberGateAccount(account.userId);
-        try {
-          await onSignedIn(signed);
-        } catch (error) {
-          failed(account, error);
-        }
+        await openSignedIn(account, signed);
       },
       onCancel: () => {
         busy = false;

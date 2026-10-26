@@ -405,9 +405,7 @@ function openSidebar() {
   out.type = 'button';
   out.addEventListener('click', () => {
     closeSidebar();
-    dropV35();
-    sync.signOut();
-    void go({ name: 'gate' });
+    void switchToAccountGate();
   });
   panel.append(out);
 
@@ -1428,6 +1426,16 @@ async function screenFrameById(id) {
  */
 let v35 = null;
 
+async function switchToAccountGate() {
+  try {
+    if (!await sync.signOut()) throw new Error('session_storage_full');
+    dropV35();
+    await go({ name: 'gate' });
+  } catch {
+    showToast({ title: 'تعذّر حفظ تسجيل الخروج. تحقق من مساحة الجهاز وحاول مجددًا.' });
+  }
+}
+
 function dropV35() {
   v35?.destroy();
   v35 = null;
@@ -1502,9 +1510,7 @@ function screenV35(page) {
           },
         },
         switchAccount: () => {
-          dropV35();
-          sync.signOut();
-          void go({ name: 'gate' });
+          void switchToAccountGate();
         },
       },
       { page },
@@ -2226,9 +2232,7 @@ function followAccountState() {
     // account. Never sign out or destroy unsent edits on that evidence alone.
     void sync.verifyDeletedAccount().then((result) => {
       if (result !== 'deleted' || sync.user?.userId !== affectedUserId || sync.deletingHere || sync.accountState !== 'DELETED') return;
-      dropV35();
-      sync.signOut();
-      void go({ name: 'gate' });
+      void switchToAccountGate();
       showToast({ title: 'حُذف هذا الحساب نهائيًا' });
     }).catch(() => {
       // Offline is not deletion. Preserve the session and queued edits.
@@ -2246,9 +2250,7 @@ function followAccountState() {
     out.onclick = () => {
       pendingNotice?.remove();
       pendingNotice = null;
-      dropV35();
-      sync.signOut();
-      void go({ name: 'gate' });
+      void switchToAccountGate();
     };
     box.append(out);
     pendingNotice.append(box);
@@ -2293,9 +2295,7 @@ function showLock(onUnlocked = () => {}) {
     },
     onCancel: () => {
       lockOpen = false;
-      dropV35();
-      sync.signOut();
-      void go({ name: 'gate' });
+      void switchToAccountGate();
     },
   });
 }
@@ -2310,6 +2310,7 @@ async function boot() {
   // Pair a clean APK before the account gate can issue /v1/session.
   // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
   await nativeLinksReady.catch(() => {});
+  await sync.ready;
 
   if (!syncConfigured()) {
     // بلا عنوان مزامنة لا حسابات ولا أصدقاء.

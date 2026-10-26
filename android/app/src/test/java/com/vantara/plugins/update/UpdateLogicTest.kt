@@ -18,7 +18,7 @@ class UpdateLogicTest {
     private val cap = Mem()
     private val onDisk = mutableSetOf<String>()
 
-    private fun device(native: String = "n1") = WebBundleState(own, cap, { it in onDisk }, native)
+    private fun device(native: String = "n1", bundledVersion: String? = null) = WebBundleState(own, cap, { it in onDisk }, native, bundledVersion)
 
     private fun path() = cap.map[WebBundleState.CAP_PATH] ?: ""
 
@@ -110,6 +110,107 @@ class UpdateLogicTest {
         assertEquals(WebBundleState.Boot.Reset, launch(native = "n2") { versionAt(it) })
         assertEquals("", path())
         assertEquals(emptySet<String>(), device("n2").keep())
+    }
+
+    @Test
+    fun `a newer bundled APK replaces an older good web even with unchanged native code`() {
+        device(bundledVersion = "0.0.209").onBoot()
+        onDisk += "/web/0.0.210"
+        device(bundledVersion = "0.0.209").stage("/web/0.0.210", "0.0.210", "n1")
+        device(bundledVersion = "0.0.209").promoteNow()
+        device(bundledVersion = "0.0.209").healthy("0.0.210")
+        own.map["unrelated-setting"] = "preserved"
+
+        val updated = device(bundledVersion = "0.0.212")
+        assertEquals(WebBundleState.Boot.Nothing, updated.onBoot())
+        assertEquals("", path())
+        assertEquals(null, updated.goodVersion())
+        assertEquals(emptySet<String>(), updated.keep())
+        assertEquals("preserved", own.get("unrelated-setting"))
+        assertTrue("/web/0.0.210" in onDisk)
+    }
+
+    @Test
+    fun `an OTA newer than the bundled APK remains active and usable`() {
+        val state = device(bundledVersion = "0.0.212")
+        state.onBoot()
+        onDisk += "/web/0.0.213"
+        assertTrue(state.stage("/web/0.0.213", "0.0.213", "n1"))
+        state.promoteNow()
+        assertEquals(WebBundleState.Boot.Trial("0.0.213"), device(bundledVersion = "0.0.212").onBoot())
+        assertTrue(state.healthy("0.0.213"))
+        assertEquals(WebBundleState.Boot.Nothing, device(bundledVersion = "0.0.212").onBoot())
+        assertEquals("/web/0.0.213", path())
+        assertEquals("0.0.213", state.goodVersion())
+    }
+
+    @Test
+    fun `an older trial and manual staged update cannot override newer embedded web`() {
+        val old = device(bundledVersion = "0.0.209")
+        old.onBoot()
+        onDisk += listOf("/web/0.0.210", "/web/0.0.211")
+        old.stage("/web/0.0.210", "0.0.210", "n1")
+        old.promoteNow()
+        old.stage("/web/0.0.211", "0.0.211", "n1", userInitiated = true)
+
+        val updated = device(bundledVersion = "0.0.212")
+        assertEquals(WebBundleState.Boot.Nothing, updated.onBoot())
+        assertEquals("", path())
+        assertFalse(updated.inTrial("0.0.210"))
+        assertEquals(null, updated.stagedVersion())
+        assertFalse(updated.stage("/web/0.0.211", "0.0.211", "n1", userInitiated = true))
+        assertEquals(null, updated.promoteNow())
+        assertTrue(onDisk.containsAll(listOf("/web/0.0.210", "/web/0.0.211")))
+    }
+
+    @Test
+    fun `a newer manually staged OTA still completes after installing a newer APK`() {
+        val old = device(bundledVersion = "0.0.209")
+        old.onBoot()
+        onDisk += listOf("/web/0.0.210", "/web/0.0.213")
+        old.stage("/web/0.0.210", "0.0.210", "n1")
+        old.promoteNow()
+        old.healthy("0.0.210")
+        old.stage("/web/0.0.213", "0.0.213", "n1", userInitiated = true)
+
+        val updated = device(bundledVersion = "0.0.212")
+        assertEquals(WebBundleState.Boot.Trial("0.0.213"), updated.onBoot())
+        assertEquals("/web/0.0.213", path())
+        assertTrue(updated.healthy("0.0.213"))
+        assertEquals("0.0.213", updated.goodVersion())
+    }
+
+    @Test
+    fun `a newer trial rolls back to embedded web instead of an older good bundle`() {
+        val old = device(bundledVersion = "0.0.209")
+        old.onBoot()
+        onDisk += listOf("/web/0.0.210", "/web/0.0.213")
+        old.stage("/web/0.0.210", "0.0.210", "n1")
+        old.promoteNow()
+        old.healthy("0.0.210")
+        old.stage("/web/0.0.213", "0.0.213", "n1")
+        old.promoteNow()
+
+        val updated = device(bundledVersion = "0.0.212")
+        assertEquals(WebBundleState.Boot.Trial("0.0.213"), updated.onBoot())
+        assertEquals("/web/0.0.213", path())
+        assertEquals("", updated.rollback())
+        assertEquals("", path())
+        assertTrue("0.0.213" in updated.bad())
+    }
+
+    @Test
+    fun `version comparisons are numeric and unknown debug versions do not discard web`() {
+        val old = device(bundledVersion = "0.0.8")
+        old.onBoot()
+        onDisk += "/web/0.0.9"
+        old.stage("/web/0.0.9", "0.0.9", "n1")
+        old.promoteNow()
+        old.healthy("0.0.9")
+        assertEquals(WebBundleState.Boot.Nothing, device(bundledVersion = "debug-10-abc").onBoot())
+        assertEquals("/web/0.0.9", path())
+        assertEquals(WebBundleState.Boot.Nothing, device(bundledVersion = "0.0.10").onBoot())
+        assertEquals("", path())
     }
 
     @Test

@@ -100,6 +100,10 @@ function hostileNetwork(server, { onOps = null } = {}) {
         if (network.mode === 'offline') throw new TypeError('Failed to fetch');
         return response({ reset: false, cursor: server.state.rev, serverRev: server.state.rev, changes: {} });
       }
+      if (path.endsWith('/v1/session')) {
+        if (network.mode === '401') return response({ error: 'device_untrusted' }, 401);
+        return response({ token: 'token-2', user: { userId: 'u1', username: 'fixture_account' } });
+      }
       return response({ ok: true });
     },
   };
@@ -112,6 +116,7 @@ function response(body, status = 200) {
     status,
     headers: { get: () => null },
     json: async () => body,
+    clone: () => response(body, status),
   };
 }
 
@@ -201,9 +206,9 @@ describe('session expires in the middle', () => {
     expect(server.state.appliedCount).toBe(0);
 
     // جلسة جديدة على نفس الجهاز: نفس الطابور، نفس المعرّفات
-    storage.setItem('vantara.token', 'token-2');
     const resumed = await loadSync(storage, network.fetch);
     network.mode = 'ok';
+    await resumed.signIn('u1');
     await resumed.push({ force: true });
 
     expect(server.state.reads.get('c1')).toBe(1);

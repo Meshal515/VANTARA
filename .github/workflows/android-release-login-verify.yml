@@ -1,0 +1,135 @@
+name: Android Release login regression verification
+
+# Isolated proof on the repair branch only: no production secrets, no deployment.
+on:
+  push:
+    branches: ['fix/stable-login-20261026']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-release-login-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  release-login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vantara/domain build
+      - name: Create an isolated Release signing key and emulator-only Gradle init
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -keystore "$RUNNER_TEMP/login-fixture.jks" -storepass android -keypass android -alias vantara -dname 'CN=VANTARA Isolated Release Test' -keyalg RSA -keysize 2048 -validity 2
+          cat > "$RUNNER_TEMP/login-release.gradle" <<'GRADLE'
+          allprojects { p ->
+            p.plugins.withId('com.android.application') {
+              p.android.testBuildType = 'release'
+              // AndroidTest may select the debug signing config; both must match the isolated Release key.
+              def testSigning = p.android.signingConfigs.getByName('debug')
+              testSigning.storeFile = p.file(System.getenv('ANDROID_KEYSTORE_PATH'))
+              testSigning.storePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+              testSigning.keyAlias = System.getenv('ANDROID_KEY_ALIAS')
+              testSigning.keyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+              p.afterEvaluate {
+                p.android.defaultConfig.ndk.abiFilters.clear()
+                p.android.defaultConfig.ndk.abiFilters.add('x86_64')
+                if (p.android.buildTypes.release.debuggable) throw new GradleException('Release verification must stay non-debuggable')
+              }
+            }
+          }
+          GRADLE
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/login-fixture.jks" >> "$GITHUB_ENV"
+          echo 'ANDROID_KEYSTORE_PASSWORD=android' >> "$GITHUB_ENV"
+          echo 'ANDROID_KEY_PASSWORD=android' >> "$GITHUB_ENV"
+          echo 'ANDROID_KEY_ALIAS=vantara' >> "$GITHUB_ENV"
+          echo "ANDROID_LOGIN_GRADLE_INIT=$RUNNER_TEMP/login-release.gradle" >> "$GITHUB_ENV"
+      - name: Build stable 212 baseline and candidate as real Release APKs
+        run: |
+          node tools/android-login-build.mjs baseline
+          node tools/android-login-build.mjs candidate
+      - name: Require matching application and instrumentation signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          for phase in baseline candidate; do
+            app="$RUNNER_TEMP/android-login/$phase/app-release.apk"
+            test="$RUNNER_TEMP/android-login/$phase/app-release-androidTest.apk"
+            # AGP can finalize AndroidTest with its own debug certificate after
+            # the init script. Sign only the test harness with our fixture key.
+            "$signer" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+              --out "$test.matched.apk" "$test"
+            mv "$test.matched.apk" "$test"
+            "$signer" verify --print-certs "$app" > "$RUNNER_TEMP/app-cert"
+            "$signer" verify --print-certs "$test" > "$RUNNER_TEMP/test-cert"
+            cat "$RUNNER_TEMP/app-cert" "$RUNNER_TEMP/test-cert"
+            app_cert="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/app-cert" | sort -u)"
+            test_cert="$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/test-cert" | sort -u)"
+            test -n "$app_cert" && test "$app_cert" = "$test_cert"
+          done
+      - name: Start the real secure worker with isolated in-memory fixture data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android-login-evidence
+          ANDROID_LOGIN_FIXTURE_PROOF="$GITHUB_WORKSPACE/android-login-evidence/server-proof.json" node --experimental-transform-types tools/android-login-fixture.mjs > android-login-evidence/fixture-log.txt 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/__fixture/info >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat android-login-evidence/fixture-log.txt
+          exit 1
+      - name: Enable KVM and install the pinned emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          sdk_manager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          for attempt in 1 2 3; do
+            if "$sdk_manager" --install 'system-images;android-35;google_apis;x86_64'; then exit 0; fi
+            rm -rf "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
+            sleep $((attempt * 5))
+          done
+          exit 1
+      - name: Prove baseline failure, corrected login, sync and preserved restart on real WebView
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash tools/android-login-check.sh
+      - name: Publish sanitized device proof as job annotations
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          for path in pathlib.Path('android-login-evidence').glob('*.json'):
+              print(f'::notice title={path.stem}::{path.read_text().replace(chr(10), " ")}')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-release-login-${{ github.sha }}
+          path: android-login-evidence/
+          if-no-files-found: warn
+          retention-days: 14
