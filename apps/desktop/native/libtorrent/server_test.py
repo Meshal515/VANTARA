@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 SPEC = importlib.util.spec_from_file_location("vantara_native_torrent", Path(__file__).with_name("server.py"))
 backend = importlib.util.module_from_spec(SPEC)
@@ -245,6 +246,32 @@ class SwarmTests(unittest.TestCase):
                 self.engine._save_metadata()
         self.assertEqual(previous, metadata.read_bytes())
         self.assertEqual([], list((self.case / "state").glob("*.tmp")))
+
+    def test_partial_unverified_blocks_are_excluded_from_checked_byte_diagnostics(self):
+        self.add_with_peer()
+        original = self.engine.handle
+        length = self.engine.info.piece_length()
+        snapshot = SimpleNamespace(download_payload_rate=1000, num_peers=1, list_peers=1,
+            total_done=length + 4096, num_pieces=1,
+            pieces=[True] + [False] * (self.engine.info.num_pieces() - 1))
+
+        class PartialStatus:
+            def status(self, flags):
+                self.flags = flags
+                return snapshot
+
+            def __getattr__(self, key):
+                return getattr(original, key)
+
+        replacement = PartialStatus()
+        try:
+            self.engine.handle = replacement
+            checked = self.engine.stats()["live"]["snapshot"]
+            self.assertEqual(length, checked["downloaded_and_checked_bytes"])
+            self.assertEqual(1, checked["downloaded_and_checked_pieces"])
+            self.assertEqual(lt.status_flags_t.query_pieces, replacement.flags)
+        finally:
+            self.engine.handle = original
 
 
 if __name__ == "__main__":

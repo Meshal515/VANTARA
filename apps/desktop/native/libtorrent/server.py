@@ -346,13 +346,22 @@ class Engine:
                     self._prioritize()
 
     def stats(self):
-        s = self.handle.status()
+        s = self.handle.status(lt.status_flags_t.query_pieces)
+        # libtorrent total_done also counts finished/writing blocks from pieces
+        # whose hashes have not passed yet (torrent::bytes_done, 2.0.13).
+        # Only completed-piece bits may populate the "checked" diagnostics.
+        complete = s.pieces
+        checked_pieces = sum(complete)
+        checked_bytes = checked_pieces * self.info.piece_length()
+        last = self.info.num_pieces() - 1
+        if last < len(complete) and complete[last]:
+            checked_bytes -= self.info.piece_length() - self.info.piece_size(last)
         with self.lock:
             requested = [w[0] for w in self.readers.values() if w]
             return {"live": {"download_speed": {"mbps": s.download_payload_rate / MIB},
                 "snapshot": {"peer_stats": {"live": s.num_peers, "seen": s.list_peers},
-                    "downloaded_and_checked_bytes": s.total_done,
-                    "downloaded_and_checked_pieces": s.num_pieces}},
+                    "downloaded_and_checked_bytes": checked_bytes,
+                    "downloaded_and_checked_pieces": checked_pieces}},
                 "streaming": {"requested_pieces": requested, "piece_length": self.info.piece_length(),
                     "verified_memory_bytes": self.piece_bytes, "active_readers": len(self.readers),
                     "requested_piece_ready": all(self.handle.have_piece(p) for p in requested)}}
