@@ -28,6 +28,11 @@ describe('Windows artwork startup stage', () => {
     expect(stage.element.dataset.mode).toBe('buffering');
     stage.close();expect(document.body.querySelector('.v-stage')).toBeNull();
   });
+
+  it('accepts the actual backdrop key emitted by both anime and cinema pages', () => {
+    expect(stageArtwork({title:'اسم العمل',backdrop:'https://art.example/episode-wide.webp',poster:'https://art.example/poster.jpg'}).background)
+      .toBe('https://art.example/episode-wide.webp');
+  });
   it('never confuses invalid or unavailable progress with a real percentage', () => {
     const {document} = parseHTML('<html><body></body></html>');
     const stage=createDesktopLoadingStage(document);

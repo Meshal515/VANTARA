@@ -16,7 +16,7 @@ export function safeStageImage(value) {
 
 export function stageArtwork(data = {}) {
   const media = data.media && typeof data.media === 'object' ? data.media : {};
-  const background = safeStageImage(data.banner ?? media.banner ?? data.background ?? media.background
+  const background = safeStageImage(data.banner ?? media.banner ?? data.backdrop ?? media.backdrop ?? data.background ?? media.background
     ?? data.poster ?? media.poster ?? data.cover ?? media.cover);
   const logo = safeStageImage(data.logo ?? media.logo);
   const title = String(data.title ?? media.title ?? 'VANTARA').replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 180);

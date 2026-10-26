@@ -225,3 +225,13 @@ it('shows stage art during startup without faking torrent progress and preserves
  expect(stage.dataset.mode).toBe('buffering');
  f.player.dispose();
 });
+
+
+it('receives the cached artwork on playback/preparing before the async desktop state resolves',()=>{
+ const f=fixture();f.engine.playerState=()=>new Promise(()=>{});
+ f.event({type:'playback/preparing',session:'one',title:'أنمي',banner:'https://art.example/wide.webp',logo:'https://art.example/title.png'});
+ const stage=f.document.querySelector('.desktop-player-video .v-stage');
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/wide.webp');
+ expect(stage.querySelector('.v-stage__logo--base').getAttribute('src')).toBe('https://art.example/title.png');
+ f.player.dispose();
+});

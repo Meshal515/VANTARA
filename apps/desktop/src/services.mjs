@@ -966,7 +966,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const p=prewarm;if(!p)return;prewarm=null;
     clearTimeout(p.state.prewarmTimer);await cleanup(p.state);
   }
-  async function startPlayback({session,candidate,title,position=0,pause=false,ownerId='guest'}={}) {
+  async function startPlayback({session,candidate,title,position=0,pause=false,ownerId='guest',artwork=null}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
     if(typeof session!=='string'||!session||session.length>200||!Number.isFinite(position)||position<0||typeof pause!=='boolean')throw new Error('جلسة أو موضع تشغيل غير صالح');
     if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
@@ -990,7 +990,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     try{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
-      emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
+      const art=artwork&&typeof artwork==='object'&&!Array.isArray(artwork)?artwork:{};
+      const safeArt=value=>typeof value==='string'&&value.length<=2048?value:null;
+      emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300),banner:safeArt(art.banner),logo:safeArt(art.logo),poster:safeArt(art.poster)});
       let url;
       if(adopted){
         // التورنت جُهّز في الخلفية من صفحة العمل: المحرك والبيانات وأول الملف وفهرسه على القرص.
