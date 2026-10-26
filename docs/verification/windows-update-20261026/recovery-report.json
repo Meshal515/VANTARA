@@ -1,0 +1,18 @@
+{
+  "platform": "win32",
+  "oldInstalledVersion": "0.0.209",
+  "newInstalledVersion": "0.4.214",
+  "actualNsisInstall": true,
+  "actualUpdaterDownloadAndHash": true,
+  "transport": "local verified CI artifact; not a published update",
+  "oldReaderAcceptsRecovery": [
+    "0.3.18",
+    "0.0.209",
+    "0.0.210"
+  ],
+  "profileMarkersRetained": 3,
+  "rollbackRejected": true,
+  "equalVersionRejected": true,
+  "pathWithSpacesAndArabic": true,
+  "installedRegistryVersion": "0.4.214"
+}
