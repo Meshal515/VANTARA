@@ -7312,16 +7312,3629 @@
           ]
         }
       ]
+    },
+    {
+      "report": "vantara-rqbit-matched-corrected-matrix",
+      "platform": "linux",
+      "architecture": "x64",
+      "backend": "rqbit",
+      "seeder": "libtorrent",
+      "startedAt": "2026-10-26T15:36:11.628Z",
+      "finishedAt": "2026-10-26T15:37:50.490Z",
+      "serviceSha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609",
+      "rqbitSha256": "82ed2c23f4c7b91bb2c92eaab92e4a850d386cdf337bcdf9e0971c8ce3da4335",
+      "mpvSha256": "5457be986de69e315e78300ea08b99b2716127ce52b654e9fe18aff057f78eac",
+      "sourceModules": [
+        {
+          "path": "services.mjs",
+          "sha256": "469572355906c095602cc4be43c09c573d50140487bfa5469cf3585cb5c49609"
+        },
+        {
+          "path": "playback-budget.mjs",
+          "sha256": "383851da300bcb612f2468e79bde96210405d77ede7af76a9c367f575f1358c1"
+        },
+        {
+          "path": "startup-trace.mjs",
+          "sha256": "b433e5aea9f563cbc713c826bbf498f82f2c5db9c4977888d6b8a7273bcb148c"
+        },
+        {
+          "path": "torrent-replay-cache.mjs",
+          "sha256": "95ca956ad35564ae4e9935668d892cfa642b1df67aa2b8730cb342c443715aad"
+        },
+        {
+          "path": "torrent-cache.mjs",
+          "sha256": "625de1c1832cfd4146b724fa2c521fd512a3934b7439489e85226df33374498d"
+        },
+        {
+          "path": "torrent-replay-http.mjs",
+          "sha256": "58aa6771d7f0a96d1af61b914912ea7b765d5ac90f946075497e72c258338f23"
+        },
+        {
+          "path": "mp4-bootstrap.mjs",
+          "sha256": "a439751ac4d4e8d9ea98304fe2073f3fe6937dc64938ca8172a81b02c678f371"
+        },
+        {
+          "path": "libtorrent-engine.mjs",
+          "sha256": "91a18c855094d5881b81fde53b3a24fcc67bd223122720d09292077f5890a276"
+        },
+        {
+          "path": "torrent-window.mjs",
+          "sha256": "34beba97f5dbe60ab8b70dc8375fa81bc25a5daaf4c0e143ab47e9487d44ef4c"
+        },
+        {
+          "path": "net-unblock.mjs",
+          "sha256": "329f250c55ee8da6a3935e541d3b47a4cbd199dbda1648d71e5e233ef02a44f7"
+        }
+      ],
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7622078,
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        },
+        {
+          "name": "authored-late-moov.mp4",
+          "kind": "late-moov",
+          "bytes": 41176510,
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 33554432
+        },
+        {
+          "name": "authored-mkv.mkv",
+          "kind": "mkv",
+          "bytes": 7624981,
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ],
+      "summaries": [
+        {
+          "fixture": "mp4",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 509.04022800000166,
+          "medianMs": 652.2131899999986,
+          "p95Ms": 719.4606430000001,
+          "maxMs": 719.4606430000001
+        },
+        {
+          "fixture": "mp4",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 418.39888000000064,
+          "medianMs": 443.0525200000002,
+          "p95Ms": 452.4955520000003,
+          "maxMs": 452.4955520000003
+        },
+        {
+          "fixture": "mp4",
+          "mode": "restart",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 348.6317399999998,
+          "medianMs": 396.5687319999997,
+          "p95Ms": 501.2589110000008,
+          "maxMs": 501.2589110000008
+        },
+        {
+          "fixture": "mp4",
+          "mode": "partial",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 399.7264269999996,
+          "medianMs": 441.70694199999707,
+          "p95Ms": 460.5161850000004,
+          "maxMs": 460.5161850000004
+        },
+        {
+          "fixture": "late-moov",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 607.8611919999967,
+          "medianMs": 639.1350139999995,
+          "p95Ms": 673.5112520000039,
+          "maxMs": 673.5112520000039
+        },
+        {
+          "fixture": "late-moov",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 530.3381230000014,
+          "medianMs": 582.9414530000067,
+          "p95Ms": 635.2514119999978,
+          "maxMs": 635.2514119999978
+        },
+        {
+          "fixture": "late-moov",
+          "mode": "restart",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 528.972136000004,
+          "medianMs": 533.9147770000054,
+          "p95Ms": 564.8175970000011,
+          "maxMs": 564.8175970000011
+        },
+        {
+          "fixture": "late-moov",
+          "mode": "partial",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 508.96208599999954,
+          "medianMs": 669.1337019999992,
+          "p95Ms": 864.8432369999937,
+          "maxMs": 864.8432369999937
+        },
+        {
+          "fixture": "mkv",
+          "mode": "cold",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 486.6574719999917,
+          "medianMs": 546.3666099999973,
+          "p95Ms": 684.3739300000016,
+          "maxMs": 684.3739300000016
+        },
+        {
+          "fixture": "mkv",
+          "mode": "warm",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 382.4587349999929,
+          "medianMs": 444.63194200000726,
+          "p95Ms": 473.9197520000016,
+          "maxMs": 473.9197520000016
+        },
+        {
+          "fixture": "mkv",
+          "mode": "restart",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 429.6618390000076,
+          "medianMs": 487.4779980000021,
+          "p95Ms": 581.4962990000058,
+          "maxMs": 581.4962990000058
+        },
+        {
+          "fixture": "mkv",
+          "mode": "partial",
+          "successful": 3,
+          "failed": 0,
+          "minMs": 447.4719000000041,
+          "medianMs": 507.9355610000057,
+          "p95Ms": 521.2895739999949,
+          "maxMs": 521.2895739999949
+        }
+      ],
+      "runs": [
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 719.4606430000001,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.291667,
+            "toSeconds": 2.291667,
+            "observedSeconds": 2.0009483150000005,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005689890000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.270817999999963
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 36.32663000000002
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 52285,
+                "cpuTicks": 4,
+                "rssBytes": 16023552
+              },
+              {
+                "role": "mpv",
+                "pid": 52290,
+                "cpuTicks": 71,
+                "rssBytes": 164020224
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "cb342375af3f86bf7de7a9065c48e720b2cf36e380a1ffdc45a87f421c2faf16",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 5.268086000000039
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.389381000000071
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 74.79204200000004
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 123.66421700000001
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 130.347671
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 131.41358300000002
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 273.23683200000005
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 559.145544
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 443.0525200000002,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.000739404999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004436429999994,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.857002000000648
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 42.106127999999444
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52401,
+                "cpuTicks": 68,
+                "rssBytes": 158621696
+              },
+              {
+                "role": "rqbit",
+                "pid": 52402,
+                "cpuTicks": 3,
+                "rssBytes": 15994880
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "c8cbf414d14ccd0708364834d463d38b4e837f41eaa9542eff3ac6df0dbc55f7",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.9409949999999299
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 1.3674019999998563
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 10.908485999999812
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 67.96932400000014
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 113.3517539999998
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 113.69924300000002
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 147.9541119999999
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 350.36557600000015
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 348.6317399999998,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 1.9997624699999996,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1998574819999996,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6736869999986084
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 37.46650199999931
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52504,
+                "cpuTicks": 54,
+                "rssBytes": 155295744
+              },
+              {
+                "role": "rqbit",
+                "pid": 52505,
+                "cpuTicks": 4,
+                "rssBytes": 15863808
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 3.12109799999962
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.5885269999998854
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.370387999999366
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 62.27174399999967
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 89.37823199999912
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 115.81117799999993
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 116.07548299999962
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 289.9438659999996
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 0,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 399.7264269999996,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.001095525999999,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006573155999993,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 48.32784999999967
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 1.3789980000001378
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52585,
+                "cpuTicks": 57,
+                "rssBytes": 155639808
+              },
+              {
+                "role": "rqbit",
+                "pid": 52586,
+                "cpuTicks": 5,
+                "rssBytes": 16244736
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "cb239dbe7191b51ac6d6d26521d780f5c378e64ea819c7c1cf3f70d3a2c8f34f",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.8765819999989617
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.2800459999998566
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.018802000000505
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.06642699999975
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 86.43310699999893
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 108.64856399999917
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 108.91918900000019
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 301.62305899999956
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 652.2131899999986,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 1.9996800189999995,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1998080113999996,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.7447570000003907
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 36.64901599999939
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 52667,
+                "cpuTicks": 4,
+                "rssBytes": 16068608
+              },
+              {
+                "role": "mpv",
+                "pid": 52672,
+                "cpuTicks": 75,
+                "rssBytes": 158863360
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "22eeb10d4fa79303bba9f190317e24ab4d1f2cbac0cb17ab24bf36830a098c66",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.8962699999992765
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 2.494182999998884
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 60.1759949999996
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 103.94105399999899
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 107.68472199999997
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 108.04947699999866
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 287.5555839999997
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 559.2324399999998
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 452.4955520000003,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0003486199999987,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2002091719999992,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.7095829999998386
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 46.96229899999889
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52770,
+                "cpuTicks": 70,
+                "rssBytes": 158466048
+              },
+              {
+                "role": "rqbit",
+                "pid": 52771,
+                "cpuTicks": 3,
+                "rssBytes": 16007168
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "25bb34f84e62df3436e52819803f2444a4d447047a4d281eea2d5961d87bcd05",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.1785070000005362
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 1.5696439999992435
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 4.113688999999795
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 60.70507899999939
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 116.1851229999993
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 116.50500199999988
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 145.6189689999992
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 355.8695599999992
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 396.5687319999997,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0013616650000006,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2008169990000004,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 2.0045379999974102
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 31.746352999998635
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52884,
+                "cpuTicks": 58,
+                "rssBytes": 154963968
+              },
+              {
+                "role": "rqbit",
+                "pid": 52885,
+                "cpuTicks": 3,
+                "rssBytes": 16039936
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "cb239dbe7191b51ac6d6d26521d780f5c378e64ea819c7c1cf3f70d3a2c8f34f",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.625970999997662
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.9295539999984612
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 5.739529999998922
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.30106999999771
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 91.5546030000005
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 115.8201859999972
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 116.05705999999918
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 298.4329109999999
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 1,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 441.70694199999707,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0008561740000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005137044000003,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6485190000021248
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 44.501539000000776
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 52989,
+                "cpuTicks": 67,
+                "rssBytes": 158244864
+              },
+              {
+                "role": "rqbit",
+                "pid": 52990,
+                "cpuTicks": 3,
+                "rssBytes": 16109568
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "29e7fc34bb8272f885146e82c5e4944ca0915db4dc8347cff3bca811bebeed76",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.945157999998628
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.3135779999975057
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.226456999997026
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.19460099999924
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 113.56443199999921
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 113.81865199999811
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 128.3318029999973
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 318.29570599999715
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 509.04022800000166,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 1.9994903639999975,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1996942183999983,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.9902880000008736
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 49.963598000002094
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 53119,
+                "cpuTicks": 4,
+                "rssBytes": 16158720
+              },
+              {
+                "role": "mpv",
+                "pid": 53124,
+                "cpuTicks": 58,
+                "rssBytes": 154824704
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "cb239dbe7191b51ac6d6d26521d780f5c378e64ea819c7c1cf3f70d3a2c8f34f",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.3262600000016391
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 1.7672779999993509
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 59.66787299999851
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 104.53848799999832
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 107.4439569999995
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 107.8259160000016
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 196.31907599999977
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 412.62686699999904
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 418.39888000000064,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0008001729999996,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004801037999997,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 2.281266999998479
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 15.196518000000651
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 53218,
+                "cpuTicks": 63,
+                "rssBytes": 157769728
+              },
+              {
+                "role": "rqbit",
+                "pid": 53219,
+                "cpuTicks": 3,
+                "rssBytes": 16064512
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "c9f676609f95c96dd57e4945612526e358dbe57916a96036c9782bee5848e8b9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.008426000000327
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 1.3530610000016168
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 8.373061999998754
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 65.75374200000078
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 85.63584600000104
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 114.61868799999866
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 116.34553600000072
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 324.93167299999914
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "restart",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 501.2589110000008,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0009521739999983,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005713043999988,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.781236999999237
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 28.459211000001233
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 53324,
+                "cpuTicks": 68,
+                "rssBytes": 158773248
+              },
+              {
+                "role": "rqbit",
+                "pid": 53325,
+                "cpuTicks": 3,
+                "rssBytes": 15937536
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "4de6ab00796527b0361bd93fd3f55576623a8c9b0e344eabfc9ebf447064bb6a",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 5.048597000000882
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 5.788371999999072
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 12.983037999998487
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 70.88764100000117
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 89.92477800000052
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 123.17398899999898
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 123.56977999999799
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 360.5054689999997
+            }
+          ]
+        },
+        {
+          "fixture": "mp4",
+          "trial": 2,
+          "mode": "partial",
+          "infoHash": "66c546aab1597379fd29bdba6b1f94fa2defe217",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 460.5161850000004,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.000773073999997,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004638443999982,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.7232289999956265
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 34.214764000003925
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 53646,
+                "cpuTicks": 69,
+                "rssBytes": 166010880
+              },
+              {
+                "role": "rqbit",
+                "pid": 53647,
+                "cpuTicks": 4,
+                "rssBytes": 16232448
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "4f19d8e8153a8292d7bf20c93b6fc2846971f34aef45730ab303bf242eafb25d",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.7740080000003218
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.071792999999161
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 5.101215999999113
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 61.97947600000043
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 116.47990099999879
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 116.69606299999941
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 126.67633299999943
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 313.4921539999996
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 607.8611919999967,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0006251080000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003750648000002,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.1731220000001485
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 31.858219999994617
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 53886,
+                "cpuTicks": 19,
+                "rssBytes": 16519168
+              },
+              {
+                "role": "mpv",
+                "pid": 53906,
+                "cpuTicks": 53,
+                "rssBytes": 155598848
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.1919679999991786
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 1.701748999999836
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 58.49203200000193
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 107.19369400000141
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 109.28184899999906
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 109.49151200000051
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 207.1430160000018
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 596.5708890000024
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 635.2514119999978,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.000746377999996,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004478267999976,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.308112999999139
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 14.27767500000482
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54157,
+                "cpuTicks": 68,
+                "rssBytes": 158814208
+              },
+              {
+                "role": "rqbit",
+                "pid": 54158,
+                "cpuTicks": 18,
+                "rssBytes": 16207872
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "af60268f618856ec5da442e8cd9b97e689f4dbe77fa79224619dae80d67a97c3",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.1172680000017863
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 1.7585249999974621
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 12.908309999998892
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 70.54520400000183
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 119.61749299999792
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 120.39387200000056
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 121.3740850000031
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 572.8086190000031
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 0,
+          "mode": "restart",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 528.972136000004,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0005194630000043,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003116778000025,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 3.038075000004028
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 29.935197999999218
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54358,
+                "cpuTicks": 67,
+                "rssBytes": 154816512
+              },
+              {
+                "role": "rqbit",
+                "pid": 54359,
+                "cpuTicks": 18,
+                "rssBytes": 15937536
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.8567050000056042
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.1963720000057947
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 7.2833430000027874
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.83835100000579
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 91.94489500000054
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 119.53957500000251
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 125.39653900000121
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 515.5272750000004
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 0,
+          "mode": "partial",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 864.8432369999937,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0010775100000027,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006465060000016,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.3034960000004503
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.76973700000235
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54490,
+                "cpuTicks": 76,
+                "rssBytes": 170213376
+              },
+              {
+                "role": "rqbit",
+                "pid": 54491,
+                "cpuTicks": 21,
+                "rssBytes": 16543744
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.637046999996528
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.893529999993916
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 10.448208999994677
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 72.05829299999459
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 117.61569299999974
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 118.71624599999632
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 160.62680199999886
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 788.0031369999997
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 639.1350139999995,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.0000009050000007,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000005430000005,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5654740000027232
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 40.86591800000315
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 54669,
+                "cpuTicks": 16,
+                "rssBytes": 16560128
+              },
+              {
+                "role": "mpv",
+                "pid": 54675,
+                "cpuTicks": 68,
+                "rssBytes": 158216192
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.0480349999997998
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 1.6123769999976503
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 58.77564399999392
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 105.78017899999395
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 108.95566499999404
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 109.29643299999589
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 307.3187570000009
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 600.9236400000009
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 530.3381230000014,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.000453265999997,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2002719595999982,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.721504000001005
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.266491000002134
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54772,
+                "cpuTicks": 71,
+                "rssBytes": 157450240
+              },
+              {
+                "role": "rqbit",
+                "pid": 54773,
+                "cpuTicks": 14,
+                "rssBytes": 16097280
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 5.277470000000903
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 5.6545530000003055
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 16.901346999999078
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 72.76745500000106
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 121.45837600000232
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 121.83105200000136
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 143.72493799999938
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 435.59321400000044
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 1,
+          "mode": "restart",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 564.8175970000011,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 1.9999227119999996,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1999536271999998,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5405070000051637
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 37.975249000002805
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54875,
+                "cpuTicks": 67,
+                "rssBytes": 158482432
+              },
+              {
+                "role": "rqbit",
+                "pid": 54876,
+                "cpuTicks": 15,
+                "rssBytes": 16064512
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.3768180000042776
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.583226000002469
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.49508600000263
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 64.39335299999948
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 88.20737999999983
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 111.88745700000436
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 112.42292600000656
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 467.87247700000444
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 1,
+          "mode": "partial",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 508.96208599999954,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0004753619999973,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2002852171999983,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.116917999999714
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 43.263065999999526
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 54978,
+                "cpuTicks": 66,
+                "rssBytes": 154533888
+              },
+              {
+                "role": "rqbit",
+                "pid": 54979,
+                "cpuTicks": 17,
+                "rssBytes": 16392192
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.6653490000026068
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.924275999997917
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 15.388893999996071
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 73.7672820000007
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 95.06827299999713
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 121.88916800000152
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 122.00541199999861
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 491.5674369999979
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 673.5112520000039,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.125,
+            "toSeconds": 2.125,
+            "observedSeconds": 2.000639127000002,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003834762000012,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5783929999961401
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 9.002189999999246
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 55060,
+                "cpuTicks": 21,
+                "rssBytes": 16564224
+              },
+              {
+                "role": "mpv",
+                "pid": 55066,
+                "cpuTicks": 65,
+                "rssBytes": 156917760
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "a4437c1ddfa26cedbd0c964dc34454275b9e8896a680cda5b2cea16e23a2c35d",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.5709760000027018
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 2.2162890000035986
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 62.75174700000207
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 108.56273200000578
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 111.14804600000207
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 111.48422800000117
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 237.49130300000252
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 658.4136409999992
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 582.9414530000067,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 2.0005088350000007,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003053010000004,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.0247400000007474
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 6.578461000004609
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55163,
+                "cpuTicks": 59,
+                "rssBytes": 157523968
+              },
+              {
+                "role": "rqbit",
+                "pid": 55164,
+                "cpuTicks": 17,
+                "rssBytes": 16601088
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "17a6c393b3896b9ffb9e3390a256235c41cac155726f07d20cb7e9d644c6c10f",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.6221290000030422
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 0.8340050000042538
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 5.961019000002125
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.78893000000244
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 88.28609400000278
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 115.82076300000335
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 120.2104260000051
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 412.78992100000323
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 2,
+          "mode": "restart",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 533.9147770000054,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.166667,
+            "toSeconds": 2.166667,
+            "observedSeconds": 2.000840376,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005042256,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.7635500000033062
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.39682999999786
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55266,
+                "cpuTicks": 72,
+                "rssBytes": 157880320
+              },
+              {
+                "role": "rqbit",
+                "pid": 55267,
+                "cpuTicks": 14,
+                "rssBytes": 16027648
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "af60268f618856ec5da442e8cd9b97e689f4dbe77fa79224619dae80d67a97c3",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.7944920000009006
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.992478000000119
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.55054999999993
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 62.769483000003675
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 117.2918490000011
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 117.52810100000352
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 119.51719100000628
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 480.14169100000436
+            }
+          ]
+        },
+        {
+          "fixture": "late-moov",
+          "trial": 2,
+          "mode": "partial",
+          "infoHash": "79048ec5972417c2af337868eed27ac611d92781",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 669.1337019999992,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208333,
+            "toSeconds": 2.208333,
+            "observedSeconds": 2.0000648470000013,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000389082000007,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8402599999972153
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 28.259777999992366
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55369,
+                "cpuTicks": 75,
+                "rssBytes": 161525760
+              },
+              {
+                "role": "rqbit",
+                "pid": 55370,
+                "cpuTicks": 20,
+                "rssBytes": 16183296
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 14.828698000004806
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 15.277548000005481
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 20.58638300000166
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 83.06294899999921
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 127.54045700000279
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 128.14873600000283
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 165.84712500000023
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 587.0134210000033
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 0,
+          "mode": "cold",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 684.3739300000016,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 2.000881782000011,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2005290692000066,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6065559999988182
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 41.27735200000461
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 55476,
+                "cpuTicks": 5,
+                "rssBytes": 16158720
+              },
+              {
+                "role": "mpv",
+                "pid": 55481,
+                "cpuTicks": 81,
+                "rssBytes": 162979840
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.3727300000027753
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 2.0084490000008373
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.27630500000669
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 110.17520000001241
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 119.43974000000162
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 119.72056900001189
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 301.8402830000123
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 593.0734809999994
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 0,
+          "mode": "warm",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 444.63194200000726,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 2.0001601380000067,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.200096082800004,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8395330000057584
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 38.579490000003716
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55580,
+                "cpuTicks": 66,
+                "rssBytes": 154689536
+              },
+              {
+                "role": "rqbit",
+                "pid": 55581,
+                "cpuTicks": 5,
+                "rssBytes": 16285696
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.6593640000064624
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 1.054193000003579
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 11.152828999998746
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 68.80314400000498
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 88.9128100000089
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 119.3000699999975
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 119.71988699999929
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 383.813347000003
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 0,
+          "mode": "restart",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 581.4962990000058,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.25,
+            "toSeconds": 2.25,
+            "observedSeconds": 1.9998913249999897,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1999347949999937,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.652514000001247
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 31.569478999997955
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55662,
+                "cpuTicks": 77,
+                "rssBytes": 163385344
+              },
+              {
+                "role": "rqbit",
+                "pid": 55663,
+                "cpuTicks": 4,
+                "rssBytes": 16007168
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "f8b18cb66c3b4d3ab9231d44b9422457a55409aadf09dea03d50db3779f95e8a",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.5032070000015665
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.7579470000055153
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 7.216222999995807
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 64.32996600000479
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 120.05010000000766
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 120.29885099999956
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 189.6063589999976
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 451.18704800000705
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 0,
+          "mode": "partial",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 507.9355610000057,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 1.999980680000008,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1999884080000047,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.854791000005207
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 30.665504000004148
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55766,
+                "cpuTicks": 69,
+                "rssBytes": 162140160
+              },
+              {
+                "role": "rqbit",
+                "pid": 55767,
+                "cpuTicks": 4,
+                "rssBytes": 15908864
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.7322540000022855
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 2.920645999998669
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 6.590244000006351
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 61.816480000008596
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 105.67049400000542
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 105.90700700000161
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 166.7895780000108
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 415.5813530000014
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 1,
+          "mode": "cold",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 546.3666099999973,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.167,
+            "toSeconds": 2.208,
+            "observedSeconds": 2.000318142000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2001908852000023,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 42.80866799999785
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 0.9726819999923464
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 55869,
+                "cpuTicks": 3,
+                "rssBytes": 16068608
+              },
+              {
+                "role": "mpv",
+                "pid": 55874,
+                "cpuTicks": 61,
+                "rssBytes": 160485376
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "cb239dbe7191b51ac6d6d26521d780f5c378e64ea819c7c1cf3f70d3a2c8f34f",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.9269439999916358
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 1.4118279999966035
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 57.90989300000365
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 101.64066200000525
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 104.13875199999893
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 104.37150900000415
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 246.867287999994
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 453.94365899999684
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 1,
+          "mode": "warm",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 382.4587349999929,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.167,
+            "toSeconds": 2.167,
+            "observedSeconds": 2.000500138000003,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2003000828000019,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5288999999902444
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 38.78560300001118
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 55973,
+                "cpuTicks": 58,
+                "rssBytes": 157257728
+              },
+              {
+                "role": "rqbit",
+                "pid": 55974,
+                "cpuTicks": 3,
+                "rssBytes": 15998976
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "af60268f618856ec5da442e8cd9b97e689f4dbe77fa79224619dae80d67a97c3",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.5199359999969602
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 0.7485179999930551
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 4.260431000002427
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 58.84545900000376
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 104.80457100000058
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 105.07855000000563
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 113.78583900000376
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 328.19631800000207
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 1,
+          "mode": "restart",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 429.6618390000076,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.167,
+            "toSeconds": 2.167,
+            "observedSeconds": 2.001052668000004,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2006316008000022,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.5457690000039292
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 42.48962199999369
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 56076,
+                "cpuTicks": 63,
+                "rssBytes": 156803072
+              },
+              {
+                "role": "rqbit",
+                "pid": 56077,
+                "cpuTicks": 3,
+                "rssBytes": 16023552
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "1c101abc6323a6a5208a41fa27041a967907b6470c48a88512a7f2396c7a9433",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 9.938777999996091
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 11.006762000004528
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 21.249223000006168
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 78.00037199999497
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 123.31431000000157
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 125.24872800000594
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 143.08771900000283
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 377.33438000000024
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 1,
+          "mode": "partial",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 447.4719000000041,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.167,
+            "toSeconds": 2.167,
+            "observedSeconds": 1.9999309260000009,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1999585556000005,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.8088980000029551
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.165245000011055
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 56200,
+                "cpuTicks": 66,
+                "rssBytes": 156745728
+              },
+              {
+                "role": "rqbit",
+                "pid": 56201,
+                "cpuTicks": 4,
+                "rssBytes": 16175104
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "1c101abc6323a6a5208a41fa27041a967907b6470c48a88512a7f2396c7a9433",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 2.9614609999989625
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.1877280000044266
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 7.187109000005876
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 62.731140000003506
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 88.26984999999695
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 106.10394400000223
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 107.5095319999964
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 397.2551769999991
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 2,
+          "mode": "cold",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 486.6574719999917,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.167,
+            "toSeconds": 2.167,
+            "observedSeconds": 2.0003182180000003,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2001909308,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.5052940000023227
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 38.43175399999018
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "rqbit",
+                "pid": 56309,
+                "cpuTicks": 4,
+                "rssBytes": 16179200
+              },
+              {
+                "role": "mpv",
+                "pid": 56314,
+                "cpuTicks": 57,
+                "rssBytes": 153387008
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "da085fe6e8cd35dbeffeaa547209a00fda21bca845faa5fb334715dcd63794a9",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 1.3816419999930076
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 2.3084359999920707
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 60.7589799999987
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 105.83062199999404
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 110.11353600000439
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 110.36021400000027
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 199.34459300000162
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 474.0338469999988
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 2,
+          "mode": "warm",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 473.9197520000016,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 2.0007893550000007,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2004736130000004,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.4883890000055544
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 48.42235900000378
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 56391,
+                "cpuTicks": 68,
+                "rssBytes": 161738752
+              },
+              {
+                "role": "rqbit",
+                "pid": 56392,
+                "cpuTicks": 4,
+                "rssBytes": 16125952
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 0.6871260000043549
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 0.959262000003946
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 5.166473000004771
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 60.917222000003676
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 112.0225369999971
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 112.2081840000028
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 129.63330699999642
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 380.90207300000475
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 2,
+          "mode": "restart",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 487.4779980000021,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 2.0000259229999937,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.2000155537999961,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 0.6771609999996144
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 49.21807699999772
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 56495,
+                "cpuTicks": 67,
+                "rssBytes": 157175808
+              },
+              {
+                "role": "rqbit",
+                "pid": 56496,
+                "cpuTicks": 4,
+                "rssBytes": 16125952
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 3.126447000002372
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 3.3605769999994664
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 7.248842000000877
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 63.493714999989606
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 121.90016799999285
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 122.16827799999737
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 138.8512539999938
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 393.1652899999899
+            }
+          ]
+        },
+        {
+          "fixture": "mkv",
+          "trial": 2,
+          "mode": "partial",
+          "infoHash": "b1eb9ae51d8001d6d02dc1808772d0360f1b27a9",
+          "fileIdx": 0,
+          "ok": true,
+          "firstRenderedMs": 521.2895739999949,
+          "error": null,
+          "stablePlayback": {
+            "fromSeconds": 0.208,
+            "toSeconds": 2.208,
+            "observedSeconds": 1.9996361600000092,
+            "frameToleranceSeconds": 0.041666666666666664,
+            "kind": "realtime",
+            "minimumSeconds": 1.1997816960000054,
+            "localRate": null,
+            "passed": true
+          },
+          "seeks": [
+            {
+              "targetSeconds": 12,
+              "settledMs": 1.0374180000071647
+            },
+            {
+              "targetSeconds": 2,
+              "settledMs": 45.9815840000083
+            }
+          ],
+          "resources": {
+            "available": true,
+            "cpuTickUnit": "OS scheduler ticks; not converted to seconds",
+            "processes": [
+              {
+                "role": "mpv",
+                "pid": 56598,
+                "cpuTicks": 69,
+                "rssBytes": 163745792
+              },
+              {
+                "role": "rqbit",
+                "pid": 56599,
+                "cpuTicks": 6,
+                "rssBytes": 16003072
+              }
+            ]
+          },
+          "renderedScreenshotSha256": "e0e3724b03f43b4970938ddf70d35f486ad42cdbd90d8b7ef03124c56b3be507",
+          "traceStages": [
+            {
+              "type": "playback/stage",
+              "stage": "engine-start",
+              "atMs": 12.07994399999734
+            },
+            {
+              "type": "playback/stage",
+              "stage": "player-start",
+              "atMs": 12.42825399999856
+            },
+            {
+              "type": "playback/stage",
+              "stage": "cache-selected",
+              "atMs": 21.396080999998958
+            },
+            {
+              "type": "playback/stage",
+              "stage": "metadata",
+              "atMs": 78.35574600000109
+            },
+            {
+              "type": "playback/stage",
+              "stage": "file-selected",
+              "atMs": 135.32121799999732
+            },
+            {
+              "type": "playback/stage",
+              "stage": "downloading",
+              "atMs": 136.07076199998846
+            },
+            {
+              "type": "playback/stage",
+              "stage": "first-frame",
+              "atMs": 154.55151799999294
+            },
+            {
+              "type": "playback/ready",
+              "stage": null,
+              "atMs": 427.291109999991
+            }
+          ]
+        }
+      ]
     }
   ],
   "fixtureCorrection": {
     "initialReport": "vantara-libtorrent-cross-render",
-    "cause": "The loopback-only libtorrent seeder used its default one-connection-per-IP policy while successive client processes all shared127.0.0.1; repeated reconnects were refused. This was a benchmark seeder restriction, not proof of production peer failures.",
+    "cause": "The loopback-only libtorrent seeder retained connection restrictions and outbound reconnection behavior across successive client processes sharing127.0.0.1. Changing only the seeder settings below resolved repeated metadata/partial failures with identical backend code. The two setting effects were not isolated individually; this establishes a fixture issue, not proof of production peer failures.",
     "testOnlyChange": {
       "allow_multiple_connections_per_ip": true,
       "seeding_outgoing_connections": false
     },
     "applicationChange": "None; production worker still denies private peers",
     "validation": "Same MP4 infoHash/fileIdx changed from failing repeated metadata/partial runs to9/9 passes, then the full36-runMP4/late-moov/MKV matrix passed with seeks and2seconds stable playback; failed rows retained unchanged"
+  },
+  "matchedComparison": {
+    "platform": "linux-x64/Xvfb",
+    "seeder": "libtorrent (corrected loopback fixture)",
+    "sameInfoHashAndFileIdx": true,
+    "sameFixtureFiles": true,
+    "sequentialNotConcurrentRuns": true,
+    "decision": "Do not switch default: no demonstrated speed improvement; candidate cold medians slower in all3 containers. Actual Windows comparison still pending.",
+    "groups": [
+      {
+        "fixture": "mp4",
+        "mode": "cold",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 652.2131899999986,
+        "rqbitP95Ms": 719.4606430000001,
+        "libtorrentMedianMs": 1222.1738400000002,
+        "libtorrentP95Ms": 1276.3567829999993,
+        "libtorrentMedianRatioToRqbit": 1.873887033778024
+      },
+      {
+        "fixture": "mp4",
+        "mode": "warm",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 443.0525200000002,
+        "rqbitP95Ms": 452.4955520000003,
+        "libtorrentMedianMs": 442.0729419999989,
+        "libtorrentP95Ms": 508.4992650000004,
+        "libtorrentMedianRatioToRqbit": 0.9977890251024838
+      },
+      {
+        "fixture": "mp4",
+        "mode": "restart",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 396.5687319999997,
+        "rqbitP95Ms": 501.2589110000008,
+        "libtorrentMedianMs": 461.14666999999827,
+        "libtorrentP95Ms": 494.7222929999998,
+        "libtorrentMedianRatioToRqbit": 1.1628417290347506
+      },
+      {
+        "fixture": "mp4",
+        "mode": "partial",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 441.70694199999707,
+        "rqbitP95Ms": 460.5161850000004,
+        "libtorrentMedianMs": 438.1798010000002,
+        "libtorrentP95Ms": 486.35332500000004,
+        "libtorrentMedianRatioToRqbit": 0.9920147485479256
+      },
+      {
+        "fixture": "late-moov",
+        "mode": "cold",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 639.1350139999995,
+        "rqbitP95Ms": 673.5112520000039,
+        "libtorrentMedianMs": 1541.7863069999948,
+        "libtorrentP95Ms": 1639.6768199999933,
+        "libtorrentMedianRatioToRqbit": 2.412301428067272
+      },
+      {
+        "fixture": "late-moov",
+        "mode": "warm",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 582.9414530000067,
+        "rqbitP95Ms": 635.2514119999978,
+        "libtorrentMedianMs": 744.2087119999997,
+        "libtorrentP95Ms": 934.3762690000003,
+        "libtorrentMedianRatioToRqbit": 1.276644006306395
+      },
+      {
+        "fixture": "late-moov",
+        "mode": "restart",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 533.9147770000054,
+        "rqbitP95Ms": 564.8175970000011,
+        "libtorrentMedianMs": 507.01480000000447,
+        "libtorrentP95Ms": 645.1096370000014,
+        "libtorrentMedianRatioToRqbit": 0.9496174705050341
+      },
+      {
+        "fixture": "late-moov",
+        "mode": "partial",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 669.1337019999992,
+        "rqbitP95Ms": 864.8432369999937,
+        "libtorrentMedianMs": 1090.8245429999952,
+        "libtorrentP95Ms": 1146.5638419999887,
+        "libtorrentMedianRatioToRqbit": 1.6302041576139241
+      },
+      {
+        "fixture": "mkv",
+        "mode": "cold",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 546.3666099999973,
+        "rqbitP95Ms": 684.3739300000016,
+        "libtorrentMedianMs": 1008.6380260000005,
+        "libtorrentP95Ms": 1280.3603139999905,
+        "libtorrentMedianRatioToRqbit": 1.8460828453627602
+      },
+      {
+        "fixture": "mkv",
+        "mode": "warm",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 444.63194200000726,
+        "rqbitP95Ms": 473.9197520000016,
+        "libtorrentMedianMs": 503.0813060000073,
+        "libtorrentP95Ms": 584.8975860000064,
+        "libtorrentMedianRatioToRqbit": 1.1314556118867392
+      },
+      {
+        "fixture": "mkv",
+        "mode": "restart",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 487.4779980000021,
+        "rqbitP95Ms": 581.4962990000058,
+        "libtorrentMedianMs": 424.8543260000006,
+        "libtorrentP95Ms": 471.65165099999285,
+        "libtorrentMedianRatioToRqbit": 0.8715353877366148
+      },
+      {
+        "fixture": "mkv",
+        "mode": "partial",
+        "nPerEngine": 3,
+        "rqbitMedianMs": 507.9355610000057,
+        "rqbitP95Ms": 521.2895739999949,
+        "libtorrentMedianMs": 663.4354080000048,
+        "libtorrentP95Ms": 760.6451509999897,
+        "libtorrentMedianRatioToRqbit": 1.3061408945139743
+      }
+    ]
   }
 }
