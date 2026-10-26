@@ -12,19 +12,43 @@ function requestHeaders(value) {
   }
   return out;
 }
-function torrentFields(stream) {
-  let magnet = null, infoHash = stream.infoHash;
-  if (typeof stream.url === "string" && stream.url.startsWith("magnet:")) {
-    const uri = new URL(stream.url);
-    if (stream.url.length > 16000) throw new Error("magnet");
-    const hash = uri.searchParams.getAll("xt").map(x => /^urn:btih:([a-f\d]{40})$/i.exec(x)?.[1]).find(Boolean);
-    if (!hash || infoHash && String(infoHash).toLowerCase() !== hash.toLowerCase()) throw new Error("magnet");
-    infoHash = hash;
-    magnet = stream.url;
+function canonicalHash(value) {
+  if (typeof value !== "string") throw new Error("torrent");
+  if (/^[a-f\d]{40}$/i.test(value)) return value.toLowerCase();
+  if (!/^[a-z2-7]{32}$/i.test(value)) throw new Error("torrent");
+  // BTIH Base32 is exactly 160 bits, just like Android TorrentRequest.canonicalHash.
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0, buffer = 0, hash = "";
+  for (const char of value.toUpperCase()) {
+    buffer = (buffer << 5) | alphabet.indexOf(char);
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      hash += ((buffer >>> bits) & 255).toString(16).padStart(2, "0");
+    }
   }
-  if (typeof infoHash !== "string" || !/^[a-f\d]{40}$/i.test(infoHash) || stream.fileIdx != null && (!Number.isSafeInteger(stream.fileIdx) || stream.fileIdx < 0)) throw new Error("torrent");
+  return hash;
+}
+/** Exact file identity shared by Stremio results and desktop source adapters. */
+export function normalizeTorrentFields(stream) {
+  const urlMagnet = typeof stream.url === "string" && stream.url.startsWith("magnet:") ? stream.url : null;
+  let magnet = stream.magnet ?? urlMagnet, infoHash = stream.infoHash == null ? null : canonicalHash(stream.infoHash);
+  if (stream.magnet != null && urlMagnet != null && stream.magnet !== urlMagnet) throw new Error("magnet");
+  if (magnet != null) {
+    if (typeof magnet !== "string" || magnet.length > 16000 || !magnet.startsWith("magnet:?") || /[\x00-\x1f\x7f]/.test(magnet)) throw new Error("magnet");
+    const uri = new URL(magnet), identities = uri.searchParams.getAll("xt");
+    // The native boundary also refuses unsolicited xs/ws resource fetches.
+    if (identities.length !== 1 || !/^urn:btih:/i.test(identities[0]) ||
+      [...uri.searchParams.keys()].some(key => !["xt", "tr", "dn"].includes(key))) throw new Error("magnet");
+    const hash = canonicalHash(identities[0].slice(9));
+    if (infoHash != null && infoHash !== hash) throw new Error("magnet");
+    infoHash = hash;
+    uri.searchParams.set("xt", `urn:btih:${hash}`);
+    magnet = uri.href;
+  }
+  if (!infoHash || stream.fileIdx != null && (!Number.isSafeInteger(stream.fileIdx) || stream.fileIdx < 0)) throw new Error("torrent");
   const sources = (Array.isArray(stream.sources) ? stream.sources : []).slice(0, 100).filter(x => typeof x === "string" && x.length <= 2000 && !/[\x00-\x1f]/.test(x) && /^(tracker:(?:https?|udp):\/\/|dht:[a-f\d]{40}$)/i.test(x));
-  return { infoHash: infoHash.toLowerCase(), magnet, fileIdx: stream.fileIdx ?? null, sources };
+  return { infoHash, magnet, fileIdx: stream.fileIdx ?? null, sources };
 }
 export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName = "pwa", torrentSupported = false } = {}) {
   return boundedItems(raw).map((s, index) => {
@@ -41,12 +65,12 @@ export function normalizeStreams(raw, { addonKey, now = Date.now(), runtimeName 
     if (s.externalUrl) return { ...base, reason: "هذه النتيجة تفتح موقعًا خارجيًا ولا توفر رابط فيديو مباشرًا" };
     // مشغّل التطبيق (Media3) والويندوز (mpv) يشغّلان ما ليس «جاهزًا للويب» (notWebReady)
     const native = runtimeName === "apk" || runtimeName === "desktop";
-    const torrent = s.infoHash != null || typeof s.url === "string" && s.url.startsWith("magnet:");
+    const torrent = s.infoHash != null || s.magnet != null || typeof s.url === "string" && s.url.startsWith("magnet:");
     if (s.ytId || s.nzbUrl || s.archiveUrl || (!native && s.behaviorHints?.notWebReady && !torrent))
       return base;
     let url, torrentData;
     try {
-      if (torrent) torrentData = torrentFields(s);
+      if (torrent) torrentData = normalizeTorrentFields(s);
       else url = publicUrl(s.url);
     } catch {
       return { ...base, reason: torrent ? "بيانات التورنت غير صالحة" : "رابط الفيديو غير مسموح" };

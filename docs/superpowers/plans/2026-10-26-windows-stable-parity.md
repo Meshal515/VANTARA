@@ -23,14 +23,14 @@
 **Files:** update-check.js/tests، updater.cjs/tests، main.cjs.
 **Interfaces:** checkDesktopUpdate(bridge)، assertForwardUpdate(update,installed).
 - [x] اختبارات حمراء تثبت اختيار0.3.18بدلStableالأحدث.
-- [ ] إصلاح المصدر وحارسIPC؛ تشغيلVitest/Node ثمرفعcommit.
+- [x] إصلاح المصدر وحارسIPC؛ تشغيلVitest/Node ثمرفعcommit.
 
 ### Task 2: الإصدار اليدوي
 **Files:** android-stable.yml، windows-stable-companion.yml، repository-safety.test.mjs، windows-stable-channel.mjs/tests.
 **Interfaces:** workflow_dispatchعلىmain؛ source_shaموجودفيmain ولهCIناجح؛ مؤشرformat2بعدفحصWindows.
-- [ ] اختبار منعworkflow_run/pushلإنشاءStable مع حفظ بواباتCI والتوقيع.
-- [ ] تنفيذ الإصدار اليدوي ومؤشر Windows مضاد الرجوع وتوحيد سلسلة أعلى0.3.18.
-- [ ] فحص YAML والسلامة والبناء ورفع النتائج.
+- [x] اختبار منعworkflow_run/pushلإنشاءStable مع حفظ بواباتCI والتوقيع.
+- [x] تنفيذ الإصدار اليدوي ومؤشر Windows مضاد الرجوع وتوحيد سلسلة أعلى0.3.18.
+- [x] فحص YAML والسلامة والواجهة؛ نتائج التحقق في docs/windows-stable-recovery-20261026.md. بناء Windows الحقيقي قيد التنفيذ.
 
 ### Task 3: المحرك والإضافات
 **Files:** يحددها الوكيل windows_android_torrent_parity_20261026 خارج ملفات التحديث.

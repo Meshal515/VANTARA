@@ -37,6 +37,7 @@ function readAttempt() {
 }
 function scheduleUpdateInstall(relaunch) {
   if (!pendingUpdate || pendingUpdate.scheduled || process.platform !== 'win32') return false;
+  try { updater.assertForwardUpdate(pendingUpdate, appVersion); } catch { return false; }
   // المحاولة الصامتة السابقة لهذا الإصدار لم تكتمل (ما زلنا على الإصدار الأقدم): المثبّت بواجهته هذه المرة
   const attempt = readAttempt();
   const interactive = attempt?.version === pendingUpdate.version && updater.attemptFailed(attempt, appVersion);
@@ -175,7 +176,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       fetch: (url, options) => net.fetch(url, options),
       onProgress: (p) => publish({ type: 'update/progress', ...p }),
     });
-    pendingUpdate = { version: String(update.version), file, scheduled: false };
+    pendingUpdate = { ...update, file, scheduled: false };
     return { ready: true, version: pendingUpdate.version };
   });
   register('apply-update', () => {

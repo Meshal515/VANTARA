@@ -2,6 +2,7 @@ import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
 import { publicUrl } from '../addons/manifest.js';
 import { parseRelease } from '../addons/release-info.js';
+import { normalizeTorrentFields } from '../addons/streams.js';
 
 // Same quality, variant and swarm weights as Android StreamRanker/TorrentSwarm.
 function playbackScore(candidate, session) {
@@ -159,9 +160,15 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
             let accepting = true;
             const publish = streams => {
               if (!accepting || !valid()) return;
-              for (const st of streams ?? []) {
+              for (let st of streams ?? []) {
                 if (!st || st.status && st.status !== 'RESOLVED' || !(st.url || st.infoHash || st.magnet)) continue;
-                if (st.url) { try { publicUrl(st.url); } catch { continue; } }
+                if (st.infoHash != null || st.magnet != null || typeof st.url === 'string' && st.url.startsWith('magnet:')) {
+                  try {
+                    st = { ...st, ...normalizeTorrentFields(st), type: 'torrent' };
+                    // Native torrent playback uses the selected hash/file, never the HTTP proxy.
+                    delete st.url;
+                  } catch { continue; }
+                } else if (st.url) { try { publicUrl(st.url); } catch { continue; } }
                 const key = `${st.url ?? st.infoHash ?? st.magnet}|${st.fileIdx ?? ''}|${st.quality ?? server.quality ?? ''}`;
                 if (seen.has(key)) continue; seen.add(key);
                 const id = count === 0 ? base.id : `${base.id}|${index}|${count}`; count++;

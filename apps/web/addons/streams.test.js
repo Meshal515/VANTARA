@@ -89,6 +89,30 @@ it('accepts a valid magnet result natively and preserves the selected file index
  const hash='0123456789abcdef0123456789abcdef01234567';
  expect(normalizeStreams([{url:`magnet:?xt=urn:btih:${hash}&tr=udp%3A%2F%2Ftracker.example.com%3A80`,fileIdx:0}],{addonKey:'a',runtimeName:'apk',torrentSupported:true})[0]).toMatchObject({type:'torrent',status:'RESOLVED',infoHash:hash,fileIdx:0});
 });
+it.each(['apk', 'desktop'])('canonicalizes Base32 BTIH without changing the selected file on %s', runtimeName => {
+ const hash='0123456789abcdef0123456789abcdef01234567';
+ const base32='AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH';
+ const magnet=`magnet:?xt=urn:btih:${base32}&tr=udp%3A%2F%2Ftracker.example.com%3A80&dn=release.mkv`;
+ const options={addonKey:'a',runtimeName,torrentSupported:true};
+ const raw={infoHash:base32.toLowerCase(),magnet,fileIdx:3,sources:['tracker:https://tracker.example.com/announce'],subtitles:[{id:'ar',lang:'ar',url:'https://cdn.test/ar.vtt'}]};
+ const [stream]=normalizeStreams([raw],options);
+ expect(stream).toMatchObject({status:'RESOLVED',type:'torrent',infoHash:hash,fileIdx:3,sources:raw.sources,subtitles:[{lang:'ar',url:'https://cdn.test/ar.vtt'}]});
+ expect(new URL(stream.magnet).searchParams.get('xt')).toBe(`urn:btih:${hash}`);
+ expect(new URL(stream.magnet).searchParams.get('tr')).toBe('udp://tracker.example.com:80');
+ // The native bridge consumes the same normalized identity if adapters normalize again.
+ expect(normalizeStreams([stream],options)[0]).toMatchObject({status:'RESOLVED',infoHash:hash,magnet:stream.magnet,fileIdx:3,sources:raw.sources});
+ expect(normalizeStreams([{url:magnet,fileIdx:0}],options)[0]).toMatchObject({status:'RESOLVED',infoHash:hash,fileIdx:0});
+});
+it('rejects conflicting or ambiguous magnet identities before declaring native playback ready', () => {
+ const hash='0123456789abcdef0123456789abcdef01234567';
+ const out=normalizeStreams([
+  {infoHash:hash,magnet:`magnet:?xt=urn:btih:${'f'.repeat(40)}`},
+  {url:`magnet:?xt=urn:btih:${hash}&xt=urn:btih:${'f'.repeat(40)}`},
+  {infoHash:'AERUKZ4JVPG66AJDIVTYTK6N54ASGRL0'},
+  {magnet:`magnet:?xt=urn:btih:${hash}`,fileIdx:1.5},
+ ],{addonKey:'a',runtimeName:'desktop',torrentSupported:true});
+ expect(out.every(stream=>stream.status==='UNSUPPORTED')).toBe(true);
+});
 it.each([
  {url:'https://cdn.test/movie.mpd?token=keep'},
  {url:'https://cdn.test/manifest?token=keep',type:'dash'},

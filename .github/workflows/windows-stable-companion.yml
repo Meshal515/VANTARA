@@ -204,7 +204,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: windows-stable-publish-${{ needs.resolve.outputs.tag }}
+      group: windows-stable-publish
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -255,3 +255,21 @@ jobs:
           cmp "$archive" "$dir/published/$(basename "$archive")"
           cp "$dir/vantara-update.next.json" "$dir/vantara-update.json"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$dir/vantara-update.json" --clobber
+
+      - name: Advance the Windows channel only after verified installer publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/stable"
+          mkdir -p "$dir/channel-current"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'vantara-update.json' --dir "$dir/channel-current"
+          gh release view windows-channel --repo "$GITHUB_REPOSITORY" --json assets > "$dir/channel-assets.json"
+          previous='-'
+          if jq -e '.assets[] | select(.name == "desktop-update.json")' "$dir/channel-assets.json" >/dev/null; then
+            gh release download windows-channel --repo "$GITHUB_REPOSITORY" --pattern 'desktop-update.json' --dir "$dir/channel-current"
+            previous="$dir/channel-current/desktop-update.json"
+          fi
+          node tools/windows-stable-channel.mjs "$dir/channel-current/vantara-update.json" "$previous" "$dir/desktop-update.json"
+          gh release upload windows-channel --repo "$GITHUB_REPOSITORY" "$dir/desktop-update.json" --clobber
