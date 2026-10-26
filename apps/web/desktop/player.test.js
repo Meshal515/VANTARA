@@ -235,3 +235,42 @@ it('receives the cached artwork on playback/preparing before the async desktop s
  expect(stage.querySelector('.v-stage__logo--base').getAttribute('src')).toBe('https://art.example/title.png');
  f.player.dispose();
 });
+
+it('keeps preparing artwork across progress while the desktop state is still pending',()=>{
+ const f=fixture();f.engine.playerState=()=>new Promise(()=>{});
+ f.event({type:'playback/preparing',session:'one',title:'أنمي',banner:'https://art.example/wide.webp',logo:'https://art.example/title.png'});
+ f.event({type:'playback/progress',session:'one',position:0,buffering:true});
+ const stage=f.document.querySelector('.v-stage');
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/wide.webp');
+ expect(stage.querySelector('.v-stage__logo--base').getAttribute('src')).toBe('https://art.example/title.png');
+ f.player.dispose();
+});
+
+it('keeps cached artwork when the resolved desktop state has no artwork',async()=>{
+ const f=fixture();
+ f.event({type:'playback/preparing',session:'one',title:'أنمي',banner:'https://art.example/wide.webp',logo:'https://art.example/title.png'});
+ await Promise.resolve();await Promise.resolve();
+ const stage=f.document.querySelector('.v-stage');
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/wide.webp');
+ expect(stage.querySelector('.v-stage__logo--base').getAttribute('src')).toBe('https://art.example/title.png');
+ f.player.dispose();
+});
+
+it('keeps the failure visible after late progress in both player surfaces until a retry',async()=>{
+ const f=fixture({overlay:true});
+ f.event({type:'playback/preparing',session:'one',title:'أنمي',banner:'https://art.example/wide.webp'});
+ await Promise.resolve();await Promise.resolve();
+ f.event({type:'playback/error',session:'one',message:'تعذر تشغيل الفيديو'});
+ f.event({type:'playback/progress',session:'one',position:0,buffering:true});
+ const stage=f.document.querySelector('.v-stage');
+ expect(stage.hidden).toBe(true);
+ expect(f.document.querySelector('.desktop-player-status').textContent).toBe('تعذر تشغيل الفيديو');
+ const snapshots=f.bridge.playerOverlay.mock.calls.map(([state])=>state).filter(state=>state.status);
+ expect(snapshots.at(-1).status).toMatchObject({error:true,text:'تعذر تشغيل الفيديو'});
+ f.event({type:'playback/preparing',session:'one',title:'أنمي',banner:'https://art.example/retry.webp'});
+ expect(stage.hidden).toBe(false);
+ expect(stage.querySelector('.v-stage__backdrop').getAttribute('src')).toBe('https://art.example/retry.webp');
+ f.event({type:'playback/ready',session:'one'});
+ expect(stage.hidden).toBe(true);
+ f.player.dispose();
+});
