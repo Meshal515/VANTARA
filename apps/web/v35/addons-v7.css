@@ -90,3 +90,13 @@
 @media(max-width:720px){.v7-addon .v7-heading h2{font-size:34px}.v7-addon .v7-logo{width:58px;height:58px}.v7-addon .v7-logo.is-repo{width:60px;height:60px}.v7-addon .v7-row{gap:10px;min-height:99px}.v7-addon .v7-name{font-size:16px}.v7-addon .v7-meta{font-size:11px}.v7-addon .v7-native-actions{width:134px;min-width:134px;gap:8px}.v7-addon .v7-flip{width:88px;min-width:88px}.v7-addon .v7-trash-holder{width:38px;min-width:38px}.v7-addon .v7-trash{width:38px}.v7-addon .v7-simple-btn{min-width:92px}.v7-addon .v7-dialog{padding:20px}.v7-addon .v7-fields{grid-template-columns:1fr}.v7-addon .v7-filter{min-width:118px}}
 @media(max-width:380px){.v7-addon .v7-native-actions{width:122px;min-width:122px;gap:6px}.v7-addon .v7-flip{width:78px;min-width:78px}.v7-addon .v7-row{gap:8px}.v7-addon .v7-logo{width:50px;height:50px}.v7-addon .v7-name{font-size:15px}}
 @media(prefers-reduced-motion:reduce){.v7-addon .v7-rotor,.v7-addon .v7-trash-holder,.v7-addon .v7-status{transition:none}}
+
+/* Human verification is visible only inside Add-ons, never as a global toast. */
+.v7-addon .v7-verification-bar[hidden]{display:none}
+.v7-addon .v7-verification-bar{margin:14px 0 18px}
+.v7-addon .v7-verify-entry{width:100%;display:flex;align-items:center;justify-content:center;gap:12px;min-height:52px;padding:12px 18px;border:1px solid #51425f;border-radius:16px;background:#18141f;color:#eee6ff;font:inherit;font-weight:780;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.v7-addon .v7-verify-entry svg{width:19px;height:19px}
+.v7-addon .v7-verification-item{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:66px;border-bottom:1px solid #292631;padding:12px 0}
+.v7-addon .v7-verification-name{display:flex;min-width:0;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.v7-addon .v7-verification-name small{font-size:12px;color:#aaa1b2;direction:ltr;text-align:right}
+.v7-addon .v7-fallback svg{width:26px;height:26px;stroke:#d1c5e7;stroke-width:1.6;fill:none}
