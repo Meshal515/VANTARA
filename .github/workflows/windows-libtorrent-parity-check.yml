@@ -20,6 +20,7 @@ on:
       - 'tools/torrent-byte-consumer.mjs'
       - 'tools/torrent-validation*'
       - 'tools/windows-torrent-engine-validation.ps1'
+      - 'tools/windows-torrent-evidence*'
       - '.github/workflows/windows-libtorrent-parity-check.yml'
 permissions:
   contents: read
@@ -52,7 +53,13 @@ jobs:
             ${{ runner.temp }}/vantara-engine-validation/runs/**/before-process-restart.json
           if-no-files-found: error
   native-comparison:
-    name: Real MPV Playback Validation (required)
+    name: Real MPV Playback Validation (${{ matrix.suite }}, required)
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [containers-rqbit-rqbit, containers-rqbit-libtorrent, containers-libtorrent-rqbit, containers-libtorrent-libtorrent, protocol, 1080p-h264, 1080p-hevc, 2160p-hevc, 2160p-hevc10-pq]
+    env:
+      PARITY_SUITE: ${{ matrix.suite }}
     runs-on: ${{ inputs.playback_runner || 'windows-2022' }}
     timeout-minutes: 45
     steps:
@@ -129,15 +136,20 @@ jobs:
           "PARITY_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
           "PARITY_FFMPEG=$($ffmpeg.FullName)" | Out-File -Append $env:GITHUB_ENV
       - name: Compare actual rendered frames across both clients and both seed engines
+        if: startsWith(matrix.suite, 'containers-')
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$false
           $failed=$false
           $fixtures=$null
+          $pair=$env:PARITY_SUITE -split '-'
           foreach($seed in @('rqbit','libtorrent')){
+            if($seed -ne $pair[1]){continue}
             foreach($engine in @('rqbit','libtorrent')){
+              if($engine -ne $pair[2]){continue}
               $out=Join-Path $env:PARITY_ROOT "runs/$seed-$engine"
-              $arguments=@('tools/torrent-startup-benchmark.mjs','--service-module','apps/desktop/src/services.mjs','--rqbit',$env:PARITY_RQBIT,'--mpv',$env:PARITY_MPV,'--ffmpeg',$env:PARITY_FFMPEG,'--torrent-backend',$engine,'--libtorrent-python',$env:PARITY_PYTHON,'--libtorrent-script',$env:PARITY_SERVER,'--seed-engine',$seed,'--output',$out,'--runs','3','--kinds','mp4,late-moov,mkv','--modes','cold,warm,restart,partial','--stable-seconds','2','--timeout-ms','30000')
+              $arguments=@('tools/torrent-startup-benchmark.mjs','--service-module','apps/desktop/src/services.mjs','--rqbit',$env:PARITY_RQBIT,'--mpv',$env:PARITY_MPV,'--ffmpeg',$env:PARITY_FFMPEG,'--torrent-backend',$engine,'--libtorrent-python',$env:PARITY_PYTHON,'--libtorrent-script',$env:PARITY_SERVER,'--seed-engine',$seed,'--output',$out,'--runs','3','--kinds','mp4,late-moov,mkv','--modes','cold,warm,restart,partial','--stable-seconds','2','--timeout-ms','30000','--probe-local','true')
               if($fixtures){$arguments+=@('--fixtures-from',$fixtures)}
               & node @arguments
               if($LASTEXITCODE -ne 0){$failed=$true}
@@ -146,7 +158,7 @@ jobs:
           }
           if($failed){throw 'One or more actual Windows playback comparisons failed; do not switch engine'}
       - name: Verify uTP and mandatory MSE with decoded audio on the same owned source
-        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' && matrix.suite == 'protocol' }}
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -191,7 +203,7 @@ jobs:
           $protocolResults | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/protocol-summary.json')
 
       - name: Measure real 1080p and 4K HEVC playback for five cold and warm samples
-        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.native_tools.outcome == 'success' && !startsWith(matrix.suite, 'containers-') && matrix.suite != 'protocol' }}
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -199,6 +211,7 @@ jobs:
           $highResolutionResults=@()
           $highResolutionFailures=@()
           foreach($format in @(@{name='1080p-h264';size='1920x1080';width=1920;height=1080;codec='libx264';tenBit=$false},@{name='1080p-hevc';size='1920x1080';width=1920;height=1080;codec='libx265';tenBit=$false},@{name='2160p-hevc';size='3840x2160';width=3840;height=2160;codec='libx265';tenBit=$false},@{name='2160p-hevc10-pq';size='3840x2160';width=3840;height=2160;codec='libx265';tenBit=$true})){
+            if($format.name -ne $env:PARITY_SUITE){continue}
             $source=Join-Path $env:PARITY_ROOT "high-resolution-fixtures/$($format.name)"
             New-Item -ItemType Directory -Path $source -Force | Out-Null
             $video=Join-Path $source 'authored-mp4.mp4'
@@ -216,14 +229,19 @@ jobs:
               $report=Get-Content (Join-Path $out 'results.json') -Raw | ConvertFrom-Json
               if(-not $referenceHash){$referenceHash=$report.fixtures[0].infoHash}
               if($report.fixtures[0].infoHash -ne $referenceHash){throw 'High-resolution engine comparison changed torrent identity'}
+              $localDefault=@($report.localPlayerProbe | Where-Object {$_.label -eq 'default'})[0]
+              $localReady=($localDefault.realtimeAcceptance.passed -eq $true)
+              if(-not $localReady){$highResolutionFailures+=@{format=$format.name;engine=$engine;classification='environment-local-file-playback-failed';reason='Same local file fails real-time/frame-loss acceptance without torrent; streaming is not exonerated';local=$localDefault.realtimeAcceptance;softwareAdapter=$localDefault.softwareAdapter;hwdec=$localDefault.after.'hwdec-current'}}
               if(@($report.runs).Count -ne 10){throw 'Expected five cold and five warm samples'}
               $bad=@($report.runs | Where-Object {
                 $row=$_; $decoded=$row.renderedProof.decodedParams
                 $motion=$row.stablePlayback.toSeconds-$row.stablePlayback.fromSeconds
-                -not $row.ok -or -not $row.realtimePlaybackVerified -or $decoded.w -ne $format.width -or $decoded.h -ne $format.height -or $row.audioEvidence.params.samplerate -ne 48000 -or $motion -lt 9
+                $codecOk=if($format.codec -eq 'libx264'){$row.renderedProof.codec -match '(?i)h\.?264'}else{$row.renderedProof.codec -match '(?i)hevc|h\.?265'}
+                $depthOk=(-not $format.tenBit) -or (([string]$decoded.pixelformat+' '+[string]$decoded.'hw-pixelformat') -match '10|p010|p016')
+                -not $row.ok -or -not $row.realtimePlaybackVerified -or -not $codecOk -or -not $depthOk -or $decoded.w -ne $format.width -or $decoded.h -ne $format.height -or $row.audioEvidence.params.samplerate -ne 48000 -or $motion -lt 9
               })
-              if($benchmarkExit -ne 0 -or $bad.Count){$highResolutionFailures+=@{format=$format.name;engine=$engine;reason='Real-time playback/seek/codec acceptance failed';failedRuns=$bad.Count}}
-              $highResolutionResults+=@{format=$format.name;engine=$engine;infoHash=$referenceHash;samples=10;accepted=($benchmarkExit -eq 0 -and $bad.Count -eq 0);summaries=$report.summaries}
+              if($benchmarkExit -ne 0 -or $bad.Count){$highResolutionFailures+=@{format=$format.name;engine=$engine;classification=if($localReady){'streaming-or-player-path-failed'}else{'environment-and-streaming-acceptance-unresolved'};reason='Real-time playback/seek/codec acceptance failed';failedRuns=$bad.Count}}
+              $highResolutionResults+=@{format=$format.name;engine=$engine;infoHash=$referenceHash;samples=10;accepted=($localReady -and $benchmarkExit -eq 0 -and $bad.Count -eq 0);localFileRealtime=$localReady;localFileEvidence=$localDefault.realtimeAcceptance;summaries=$report.summaries}
             }
           }
           $highResolutionResults | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:PARITY_ROOT 'runs/high-resolution-summary.json')
@@ -245,7 +263,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-parity-reports-${{ github.sha }}
+          name: windows-parity-reports-${{ matrix.suite }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/vantara-runner-graphics.json
             ${{ runner.temp }}/vantara-libtorrent-parity/mpv-hwdec-inventory.txt
@@ -259,7 +277,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-libtorrent-parity-${{ github.sha }}
+          name: windows-libtorrent-parity-${{ matrix.suite }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/vantara-libtorrent-parity/runs/
             ${{ runner.temp }}/vantara-libtorrent-parity/native/LIBTORRENT-MANIFEST.json
@@ -271,6 +289,15 @@ jobs:
     needs: [torrent-engine-validation, native-comparison]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: windows-parity-reports-containers-*
+          path: evidence
+      - run: node tools/windows-torrent-evidence.mjs evidence
       - env:
           ENGINE_RESULT: ${{ needs.torrent-engine-validation.result }}
           PLAYBACK_RESULT: ${{ needs.native-comparison.result }}

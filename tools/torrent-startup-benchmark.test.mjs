@@ -1,7 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
-import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay } from './torrent-startup-benchmark.mjs';
+import net from 'node:net';
+import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay, waitForOwnedTcpListener, waitForOwnedBitTorrentPeer } from './torrent-startup-benchmark.mjs';
+
+test('fixture readiness verifies the requested BitTorrent hash, not an accepted TCP socket',async t=>{
+  const hash='a'.repeat(40);let attempts=0;
+  const server=net.createServer(socket=>{socket.once('data',request=>{attempts++;assert.equal(request.length,68);const reply=Buffer.from(request);if(attempts===1)reply.fill(0,28,48);socket.end(reply);});});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+  await waitForOwnedBitTorrentPeer(server.address().port,hash,1000);
+  assert.equal(attempts,2);
+});
+
+test('owned seeder readiness waits for an actual listening socket, not just checked file bytes',async t=>{
+  const server=net.createServer(socket=>socket.end());
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;
+  await new Promise(r=>server.close(r));
+  let listening=false;
+  const ready=waitForOwnedTcpListener(port,1000).then(()=>assert.equal(listening,true));
+  setTimeout(()=>server.listen(port,'127.0.0.1',()=>{listening=true;}),50);
+  t.after(()=>new Promise(r=>server.close(r)));
+  await ready;
+});
 
 test('frame proof rejects black output and accepts authored colored rendered pixels',()=>{
   assert.equal(framePixels(Buffer.alloc(1200)).nonblack,false);

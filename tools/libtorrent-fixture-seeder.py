@@ -12,6 +12,8 @@ parser.add_argument("--ready", required=True)
 parser.add_argument("--listen-port", type=int, required=True)
 parser.add_argument("--transport", choices=("both", "utp"), default="both")
 parser.add_argument("--encryption", choices=("optional", "mse"), default="optional")
+parser.add_argument("--upload-bps", type=int, default=0)
+parser.add_argument("--control")
 args = parser.parse_args()
 manifest = json.loads(Path(args.manifest).read_text())
 session = lt.session({"listen_interfaces": f"127.0.0.1:{args.listen_port}", "enable_dht": False,
@@ -20,6 +22,14 @@ session = lt.session({"listen_interfaces": f"127.0.0.1:{args.listen_port}", "ena
     "seeding_outgoing_connections": False,
     "enable_incoming_tcp": args.transport != "utp", "enable_outgoing_tcp": args.transport != "utp",
     "enable_incoming_utp": True, "enable_outgoing_utp": True})
+if args.upload_bps:
+    if args.upload_bps < 16384:
+        raise ValueError("invalid authored seeder upload limit")
+    # libtorrent otherwise exempts loopback peers from the global rate limit.
+    # A throttled-underrun test must measure the actual enforced local rate.
+    session.apply_settings({"upload_rate_limit": args.upload_bps,
+                            "local_upload_rate_limit": args.upload_bps,
+                            "ignore_limits_on_local_network": False})
 if args.encryption == "mse":
     session.apply_settings({"in_enc_policy": int(lt.enc_policy.forced),
         "out_enc_policy": int(lt.enc_policy.forced), "allowed_enc_level": int(lt.enc_level.rc4),
@@ -42,5 +52,20 @@ Path(args.ready).write_text(json.dumps({"verified": True, "transport": args.tran
     "encryption": args.encryption, "incomingTcp": actual["enable_incoming_tcp"],
     "incomingUtp": actual["enable_incoming_utp"], "inEncPolicy": actual["in_enc_policy"],
     "allowedEncLevel": actual["allowed_enc_level"]}))
+last_control_nonce = None
 while True:
-    time.sleep(1)
+    if args.control and Path(args.control).exists():
+        try:
+            command = json.loads(Path(args.control).read_text())
+            if command.get("nonce") == last_control_nonce:
+                time.sleep(0.05)
+                continue
+            if command["paused"]:
+                session.pause()
+            else:
+                session.resume()
+            Path(args.control + ".ack").write_text(json.dumps(command))
+            last_control_nonce = command["nonce"]
+        except (OSError, ValueError, KeyError):
+            pass  # A writer can be between truncation and completing JSON.
+    time.sleep(0.05)
