@@ -56,7 +56,7 @@ const kindName=(a)=>{
 };
 
 export function renderV7Addons({
-  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null,
+  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null, verification=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck,
 }={}){
   const root=el("section","v7-addon addon-v7");
@@ -97,13 +97,14 @@ export function renderV7Addons({
   const filterArrow=ico("down");filterButton.append(filterArrow);
   const filterMenu=el("div","v7-menu");filterMenu.hidden=true;
   filterWrap.append(filterButton,filterMenu);tools.append(searchBox,filterWrap);
+  const verificationBar=el("div","v7-verification-bar");verificationBar.hidden=true;
   const body=el("div","v7-body"),message=el("div","v7-diagnostic");
   message.setAttribute("role","status");message.setAttribute("aria-live","polite");
   const layer=el("div","v7-layer");layer.hidden=true;
   const dialog=el("section","v7-dialog");
   dialog.setAttribute("role","dialog");dialog.setAttribute("aria-modal","true");
   layer.append(dialog);
-  root.append(mast,head,tabs,tools,body,message,layer);
+  root.append(mast,head,tabs,tools,verificationBar,body,message,layer);
   layer.addEventListener("click",e=>{if(e.target===layer && !busy)closeModal();});
   const fmtErr=e=>String(e?.message||e||"تعذر إكمال العملية").replace(/(?:https?:\/\/|stremio:\/\/)\S+/gi,"[رابط]");
   const notify=(s)=>{if(alive)message.textContent=s;};
@@ -121,9 +122,67 @@ export function renderV7Addons({
     for(const job of queue)job.resolve();
     queue=[];requests=new Map();activeRequests=0;
   };
+  // The queue is a display of pending human verification; only an explicit
+  // user click may launch Android's verification Activity.
+  let pendingVerification=[];
+  function renderVerification(){
+    verificationBar.replaceChildren();
+    verificationBar.hidden=!pendingVerification.length;
+    if(!pendingVerification.length)return;
+    const action=btn("مصادر تحتاج تحقق ("+pendingVerification.length+")","v7-verify-entry",()=>{
+      showDialog("مصادر تحتاج تحقق","اختر موقعًا للتحقق. لن يفتح أي موقع تلقائيًا.");
+      for(const item of pendingVerification){
+        const line=el("div","v7-verification-item");
+        const title=el("div","v7-verification-name");
+        title.append(el("strong",null,item.sourceName||item.host),el("small",null,item.host));
+        const go=btn("تحقق","v7-btn",()=>{void verifyHost(item.host,go);});
+        line.append(title,go);
+        dialog.append(line);
+      }
+      dialog.append(btn("رجوع","v7-btn",()=>closeModal()));
+    });
+    action.prepend(ico("box"));
+    verificationBar.append(action);
+  }
+  async function verifyHost(host,button){
+    if(!verification?.begin)return;
+    if(button){button.disabled=true;button.textContent="جارٍ التحقق…";}
+    try{
+      const result=await verification.begin(host);
+      if(!alive)return;
+      if(result?.ok===true||result?.state==="verified"){
+        if(button)button.textContent="تم التحقق";
+        // Do not claim the source can play until its own runtime succeeds.
+      }else if(button){
+        button.disabled=false;button.textContent="إعادة التحقق";
+      }
+    }catch(err){if(alive){notify(fmtErr(err));if(button){button.disabled=false;button.textContent="إعادة التحقق";}}}
+  }
+  function sourceChallenges(source){
+    const hosts=new Set();
+    const addHost=value=>{
+      if(typeof value!=="string")return;
+      try{hosts.add(new URL(value).hostname.toLowerCase());return;}catch{}
+      if(/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value))hosts.add(value.toLowerCase());
+    };
+    addHost(source.domain);addHost(source.url);addHost(source.homepage);
+    for(const v of source.domains||[])addHost(typeof v==="string"?v:v?.url||v?.host);
+    for(const h of source.permissions?.networkHosts||[])addHost(h);
+    const name=String(source.name||"").trim().toLowerCase();
+    return pendingVerification.filter(item=>
+      hosts.has(item.host?.toLowerCase()) ||
+      (item.sourceName && String(item.sourceName).trim().toLowerCase()===name)
+    );
+  }
+  let removeVerification=verification?.subscribe?.(items=>{
+    if(!alive)return;
+    pendingVerification=(items||[]).filter(x=>typeof x.host==="string");
+    renderVerification();
+  })||(()=>{});
+
   function logo(item,fallback,repo=false){
     const box=el("span","v7-logo"+(repo?" is-repo":""));
-    const abbr=el("span","v7-fallback",label(item.name));box.append(abbr);
+    const abbr=el("span","v7-fallback");abbr.append(ico("box"));box.append(abbr);
     const urls=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo].map(safeIcon).filter(Boolean);
     let idx=0;
     const next=()=>{
@@ -428,6 +487,16 @@ export function renderV7Addons({
     const field=(k,v)=>{const d=el("div","v7-field");d.append(el("strong",null,k),el("span",null,v||"—"));return d;};
     main.append(field("النوع",kindName(a)),field("الإصدار",a.version||"—"),field("المستودع",parent?.name||"إضافات VANTARA"),field("اللغة",a.lang||a.languages?.[0]||"—"));
     dialog.append(main);
+    const challenges=sourceChallenges(a);
+    if(challenges.length){
+      dialog.append(el("p","v7-notice","هذا المصدر يحتاج تحققًا قبل إعادة المحاولة."));
+      const verify=btn("تحقق من المصدر","v7-btn",()=>{void verifyHost(challenges[0].host,verify);});
+      dialog.append(verify);
+    }
+    const assessment=a.assessment;
+    dialog.append(el("p","v7-notice",assessment?.label
+      ? "حالة التشغيل: "+assessment.label
+      : "حالة التشغيل: لم تُفحص. ظهور «مثبتة» لا يعني أن المصدر يعمل."));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");
       const open=btn("فتح في VANTARA","v7-btn primary",()=>openRemote(a));
@@ -631,8 +700,8 @@ export function renderV7Addons({
     return false;
   }
   root.back=navigateBack;
-  root.close=()=>{alive=false;generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
-  root.reload=()=>{alive=true;void refresh();};
+  root.close=()=>{alive=false;removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
+  root.reload=()=>{alive=true;removeVerification=verification?.subscribe?.(items=>{pendingVerification=items||[];renderVerification();})||(()=>{});void refresh();};
   search.oninput=()=>{currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();
   return root;
