@@ -166,8 +166,8 @@ export function renderV7Addons({
       if(/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value))hosts.add(value.toLowerCase());
     };
     addHost(source.domain);addHost(source.url);addHost(source.homepage);
-    for(const v of source.domains||[])addHost(typeof v==="string"?v:v?.url||v?.host);
-    for(const h of source.permissions?.networkHosts||[])addHost(h);
+    for(const v of Array.isArray(source.domains)?source.domains:[])addHost(typeof v==="string"?v:v?.url||v?.host);
+    for(const h of Array.isArray(source.permissions?.networkHosts)?source.permissions.networkHosts:[])addHost(h);
     const name=String(source.name||"").trim().toLowerCase();
     return pendingVerification.filter(item=>
       hosts.has(item.host?.toLowerCase()) ||
@@ -494,9 +494,12 @@ export function renderV7Addons({
       dialog.append(verify);
     }
     const assessment=a.assessment;
-    dialog.append(el("p","v7-notice",assessment?.label
-      ? "حالة التشغيل: "+assessment.label
-      : "حالة التشغيل: لم تُفحص. ظهور «مثبتة» لا يعني أن المصدر يعمل."));
+    const knownFailure=a.loadError||a.disabledReason||a.error;
+    dialog.append(el("p","v7-notice",knownFailure
+      ? "حالة التشغيل: مشكلة في المصدر — "+fmtErr(knownFailure)
+      : assessment?.label
+        ? "حالة التشغيل: "+assessment.label
+        : "حالة التشغيل: لم تُفحص. ظهور «مثبتة» لا يعني أن المصدر يعمل."));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");
       const open=btn("فتح في VANTARA","v7-btn primary",()=>openRemote(a));
