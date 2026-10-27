@@ -1,0 +1,551 @@
+{
+  "date": "2026-10-27",
+  "sourceCommit": "2656352a34978b70500ad9e865364081935c66db",
+  "windowsRun": 40451193146,
+  "overall": "failure; real 1080p/4K rendering acceptance not met",
+  "enginePositive": 54,
+  "engineExpectedRejections": 2,
+  "engineTimings": [
+    {
+      "engine": "rqbit",
+      "mode": "cold",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 552.9680333333331,
+      "medianMs": 517.685,
+      "p95Ms": 687.7906999999996,
+      "minFullRangeMbps": 756.7805047064883,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "rqbit",
+      "mode": "warm",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 166.13283333333325,
+      "medianMs": 161.90290000000005,
+      "p95Ms": 187.19169999999986,
+      "minFullRangeMbps": 989.8792536322735,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "rqbit",
+      "mode": "restart",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 192.15733333333344,
+      "medianMs": 194.01270000000022,
+      "p95Ms": 217.4389,
+      "minFullRangeMbps": 1133.017683546569,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "rqbit",
+      "mode": "partial",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 561.8588,
+      "medianMs": 609.3769000000002,
+      "p95Ms": 610.1266999999998,
+      "minFullRangeMbps": 732.5821337429865,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "rqbit",
+      "mode": "corrupt",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 464.10986666666685,
+      "medianMs": 444.9805000000001,
+      "p95Ms": 505.80110000000013,
+      "minFullRangeMbps": 757.9278437316295,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "libtorrent",
+      "mode": "cold",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 1129.2615333333329,
+      "medianMs": 1128.3274999999994,
+      "p95Ms": 1160.932499999999,
+      "minFullRangeMbps": 65.68226732154135,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "libtorrent",
+      "mode": "warm",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 155.28310000000056,
+      "medianMs": 157.619200000001,
+      "p95Ms": 176.2471000000005,
+      "minFullRangeMbps": 1404.4241679728975,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "libtorrent",
+      "mode": "restart",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 210.667,
+      "medianMs": 229.5897,
+      "p95Ms": 238.89560000000006,
+      "minFullRangeMbps": 1310.1544840996369,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "libtorrent",
+      "mode": "partial",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 970.5092666666677,
+      "medianMs": 968.2381000000023,
+      "p95Ms": 988.4444000000001,
+      "minFullRangeMbps": 65.07515320762252,
+      "maxDeliveryLatenessSeconds": 0
+    },
+    {
+      "engine": "libtorrent",
+      "mode": "corrupt",
+      "n": 3,
+      "successful": 3,
+      "metric": "first verified 256 KiB range completed, not a frame",
+      "meanMs": 988.994966666667,
+      "medianMs": 992.2083999999995,
+      "p95Ms": 996.4777000000013,
+      "minFullRangeMbps": 65.86790848735397,
+      "maxDeliveryLatenessSeconds": 0
+    }
+  ],
+  "cacheProcessIds": {
+    "rqbit": [
+      7296,
+      7612,
+      3816,
+      8140
+    ],
+    "libtorrent": [
+      2520,
+      5216,
+      5040,
+      3284
+    ]
+  },
+  "prewarm": [
+    {
+      "engine": "rqbit",
+      "osProcesses": [
+        7000,
+        1844
+      ],
+      "cacheAfterProcessRestart": true,
+      "verifiedRestartRangeMs": 253.74349999999993,
+      "ok": true
+    },
+    {
+      "engine": "libtorrent",
+      "osProcesses": [
+        7648,
+        3000
+      ],
+      "cacheAfterProcessRestart": true,
+      "verifiedRestartRangeMs": 207.2593999999999,
+      "ok": true
+    }
+  ],
+  "underrun": [
+    {
+      "engine": "rqbit",
+      "observedMs": 1011.1773999999996,
+      "unverifiedBytesReceived": 0,
+      "recovered": true
+    },
+    {
+      "engine": "libtorrent",
+      "observedMs": 1012.0021999999999,
+      "unverifiedBytesReceived": 0,
+      "recovered": true
+    }
+  ],
+  "renderCases": [
+    {
+      "case": "1080p-hevc-libtorrent",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 1756.348699999995,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 2345.3422999999893,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 10.0345029,
+        "advanceSeconds": 9.75,
+        "minimumSeconds": 9.03105261,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0,
+        "droppedFrames": 172,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.7142024610573052
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "bd08edfbc5f272065b0217804472b20fdd223ebb",
+      "fileIdx": 0
+    },
+    {
+      "case": "1080p-hevc-rqbit",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 1470.443100000004,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 5001.126400000001,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 10.2144975,
+        "advanceSeconds": 10.208334,
+        "minimumSeconds": 9.19304775,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0,
+        "droppedFrames": 183,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.7464880186225509
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "bd08edfbc5f272065b0217804472b20fdd223ebb",
+      "fileIdx": 0
+    },
+    {
+      "case": "1080p-h264-rqbit",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 1454.8825499999948,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 7777.1572000000015,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 10.232644900000002,
+        "advanceSeconds": 10.208334,
+        "minimumSeconds": 9.209380410000001,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0,
+        "droppedFrames": 178,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.724804460542422
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "ea30167fdb8921d6b29048bc49d39f34ded14b66",
+      "fileIdx": 0
+    },
+    {
+      "case": "1080p-h264-libtorrent",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 1653.0895000000019,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 2358.9009000000005,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 9.9812545,
+        "advanceSeconds": 9.875,
+        "minimumSeconds": 8.98312905,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0,
+        "droppedFrames": 172,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.7180126172182731
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "ea30167fdb8921d6b29048bc49d39f34ded14b66",
+      "fileIdx": 0
+    },
+    {
+      "case": "2160p-hevc10-pq-rqbit",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 3389.8526500000007,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 8647.1535,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 10.0665492,
+        "advanceSeconds": 8.083334,
+        "minimumSeconds": 9.059894280000002,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0.3944806999999999,
+        "droppedFrames": 177,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.7326244429421752
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "f672d24c7b8ea63eae97abe6a0264518669de503",
+      "fileIdx": 0
+    },
+    {
+      "case": "2160p-hevc10-pq-libtorrent",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 2946.513650000008,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 3970.0973999999987,
+      "localFileAcceptance": {
+        "passed": false,
+        "observedSeconds": 10.027814399999999,
+        "advanceSeconds": 8.583334,
+        "minimumSeconds": 9.025032959999999,
+        "longestBufferSeconds": 0,
+        "longestStallSeconds": 0.3063664999999993,
+        "droppedFrames": 189,
+        "delayedFrames": 0,
+        "decoderDroppedFrames": 0,
+        "lostFraction": 0.7853156915229704
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "f672d24c7b8ea63eae97abe6a0264518669de503",
+      "fileIdx": 0
+    },
+    {
+      "case": "2160p-hevc-libtorrent",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 3534.796100000003,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 3787.0042000000103,
+      "localFileAcceptance": {
+        "passed": false,
+        "reason": "unobserved playback interval"
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "edc528e80a4f1e9bef36426cb145b97176a4ad56",
+      "fileIdx": 0
+    },
+    {
+      "case": "2160p-hevc-rqbit",
+      "n": 10,
+      "accepted": 0,
+      "firstScreenshotMedianMsEvenIfPlaybackFailed": 3456.1941499999957,
+      "firstScreenshotP95MsEvenIfPlaybackFailed": 6478.434400000006,
+      "localFileAcceptance": {
+        "passed": false,
+        "reason": "unobserved playback interval"
+      },
+      "softwareAdapter": true,
+      "hwdec": "no",
+      "torrentIdentity": "edc528e80a4f1e9bef36426cb145b97176a4ad56",
+      "fileIdx": 0
+    }
+  ],
+  "containerCases": [
+    {
+      "case": "rqbit-rqbit",
+      "accepted": 36,
+      "n": 36,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7644773,
+          "infoHash": "29c78837b8a8543abe1b7b14695e25701c83d6a9",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        },
+        {
+          "name": "authored-late-moov.mp4",
+          "kind": "late-moov",
+          "bytes": 41199205,
+          "infoHash": "19712adb964f6aa2cfa0fe6e9d21feebcc6b3495",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 33554432
+        },
+        {
+          "name": "authored-mkv.mkv",
+          "kind": "mkv",
+          "bytes": 7647678,
+          "infoHash": "ba0f5eac186788ffc6ce5de09c16b585151059c3",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ]
+    },
+    {
+      "case": "libtorrent-rqbit",
+      "accepted": 36,
+      "n": 36,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7644773,
+          "infoHash": "29c78837b8a8543abe1b7b14695e25701c83d6a9",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        },
+        {
+          "name": "authored-late-moov.mp4",
+          "kind": "late-moov",
+          "bytes": 41199205,
+          "infoHash": "19712adb964f6aa2cfa0fe6e9d21feebcc6b3495",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 33554432
+        },
+        {
+          "name": "authored-mkv.mkv",
+          "kind": "mkv",
+          "bytes": 7647678,
+          "infoHash": "ba0f5eac186788ffc6ce5de09c16b585151059c3",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ]
+    },
+    {
+      "case": "libtorrent-libtorrent",
+      "accepted": 36,
+      "n": 36,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7644773,
+          "infoHash": "29c78837b8a8543abe1b7b14695e25701c83d6a9",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        },
+        {
+          "name": "authored-late-moov.mp4",
+          "kind": "late-moov",
+          "bytes": 41199205,
+          "infoHash": "19712adb964f6aa2cfa0fe6e9d21feebcc6b3495",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 33554432
+        },
+        {
+          "name": "authored-mkv.mkv",
+          "kind": "mkv",
+          "bytes": 7647678,
+          "infoHash": "ba0f5eac186788ffc6ce5de09c16b585151059c3",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ]
+    },
+    {
+      "case": "rqbit-libtorrent",
+      "accepted": 36,
+      "n": 36,
+      "fixtures": [
+        {
+          "name": "authored-mp4.mp4",
+          "kind": "mp4",
+          "bytes": 7644773,
+          "infoHash": "29c78837b8a8543abe1b7b14695e25701c83d6a9",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        },
+        {
+          "name": "authored-late-moov.mp4",
+          "kind": "late-moov",
+          "bytes": 41199205,
+          "infoHash": "19712adb964f6aa2cfa0fe6e9d21feebcc6b3495",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 33554432
+        },
+        {
+          "name": "authored-mkv.mkv",
+          "kind": "mkv",
+          "bytes": 7647678,
+          "infoHash": "ba0f5eac186788ffc6ce5de09c16b585151059c3",
+          "fileIdx": 0,
+          "pieceLength": 262144,
+          "syntheticPaddingBytes": 0
+        }
+      ]
+    }
+  ],
+  "videoProtocolCases": [
+    {
+      "case": "mse-rqbit-expected-failure",
+      "ok": 0,
+      "n": 1,
+      "intentionalRejection": true,
+      "sourceHash": "752ca29a054a45ef192680ff250525426e92f612"
+    },
+    {
+      "case": "utp-rqbit-both",
+      "ok": 6,
+      "n": 6,
+      "intentionalRejection": false,
+      "sourceHash": "752ca29a054a45ef192680ff250525426e92f612"
+    },
+    {
+      "case": "mse-native",
+      "ok": 6,
+      "n": 6,
+      "intentionalRejection": false,
+      "sourceHash": "752ca29a054a45ef192680ff250525426e92f612"
+    },
+    {
+      "case": "utp-tcp-only-expected-failure",
+      "ok": 0,
+      "n": 1,
+      "intentionalRejection": true,
+      "sourceHash": "752ca29a054a45ef192680ff250525426e92f612"
+    },
+    {
+      "case": "utp-native",
+      "ok": 6,
+      "n": 6,
+      "intentionalRejection": false,
+      "sourceHash": "752ca29a054a45ef192680ff250525426e92f612"
+    }
+  ],
+  "limitations": [
+    "Owned loopback only; no public 26GB film benchmark",
+    "Application-services OS processes restarted; full installed Electron GUI restart not certified",
+    "Frame screenshots do not establish sustained playback",
+    "Default rqbit unchanged; mandatory MSE supported by candidate only"
+  ],
+  "runner": {
+    "os": {
+      "Caption": "Microsoft Windows Server 2022 Datacenter",
+      "Version": "10.0.20348"
+    },
+    "cpu": {
+      "Name": "AMD EPYC 9V45 96-Core Processor                ",
+      "NumberOfCores": 2,
+      "NumberOfLogicalProcessors": 4
+    },
+    "gpu": [
+      {
+        "Name": "Microsoft Hyper-V Video",
+        "AdapterCompatibility": "Microsoft",
+        "DriverVersion": "10.0.20348.1",
+        "VideoProcessor": null,
+        "Status": "OK"
+      }
+    ]
+  }
+}
