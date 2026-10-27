@@ -4,14 +4,16 @@ export function nativeVerificationPlugin() {
   return globalThis.Capacitor?.getPlatform?.() === 'android' ? globalThis.Capacitor?.Plugins?.Verification ?? null : null;
 }
 export function createSourceVerification({plugin=nativeVerificationPlugin(),document=globalThis.document}={}) {
-  let closed=false,box=null;const pending=new Map(),active=new Map(),handles=[];
+  let closed=false;
+  const pending=new Map(),active=new Map(),handles=[],listeners=new Set();
+  // Background network challenges update the Add-ons list only. No toast,
+  // system notification, automatic WebView or focus-stealing overlay.
   function render(){
-    box?.remove();box=null;if(closed||!pending.size||!document?.body)return;
-    box=document.createElement('aside');box.setAttribute('data-source-verification','');box.setAttribute('role','status');box.setAttribute('dir','rtl');
-    box.style.cssText='position:fixed;inset-inline:16px;bottom:84px;z-index:1100;max-width:520px;margin-inline:auto;padding:12px 16px;background:#17151e;color:#fff;border:1px solid #51425f;border-radius:16px;display:flex;align-items:center;gap:12px;font:14px/1.6 system-ui';
-    const [host,item]=pending.entries().next().value,text=document.createElement('span');text.style.cssText='flex:1;overflow-wrap:anywhere';text.textContent=item.message??`المصدر ${item.sourceName||host} يحتاج تحققًا`;
-    const go=document.createElement('button');go.setAttribute('data-verification-go','');go.textContent=active.has(host)?'جارٍ التحقق…':'تحقق';go.disabled=active.has(host);go.style.cssText='background:#fff;color:#17151e;border:0;border-radius:10px;padding:9px 16px;font:inherit';go.onclick=()=>{void begin(host);};
-    const dismiss=document.createElement('button');dismiss.textContent='إغلاق';dismiss.setAttribute('aria-label','إخفاء إشعار التحقق');dismiss.style.cssText='background:none;color:#ccc;border:0;padding:8px;font:inherit';dismiss.onclick=()=>{pending.delete(host);render();};box.append(text,go,dismiss);document.body.append(box);
+    if(closed)return;
+    const snapshot=[...pending.values()].map(({retry,...item})=>({...item}));
+    for(const listener of listeners){
+      try{listener(snapshot);}catch{/* Observers cannot break verification. */}
+    }
   }
   function require(item){if(closed||!validHost(item?.host))return;const host=item.host.toLowerCase(),old=pending.get(host);if(!old&&pending.size>=24)pending.delete(pending.keys().next().value);pending.set(host,{...old,...item,host});render();}
   async function begin(host){
@@ -40,7 +42,22 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
     }));
     try{const out=await plugin.pending();if(!closed)for(const item of out?.pending??[])require(item);}catch{/* Host detection can be unavailable without affecting the app. */}
   })();
-  return {ready,require,begin,close(){if(closed)return;closed=true;box?.remove();box=null;pending.clear();for(const h of handles)void Promise.resolve(h?.remove?.()).catch(()=>{});handles.length=0;}};
+  return {
+    ready,require,begin,
+    list:()=>[...pending.values()].map(({retry,...item})=>({...item})),
+    subscribe(listener){
+      if(typeof listener!=='function'||closed)return ()=>{};
+      listeners.add(listener);
+      try{listener([...pending.values()].map(({retry,...item})=>({...item}));}catch{}
+      return ()=>listeners.delete(listener);
+    },
+    close(){
+      if(closed)return;closed=true;
+      pending.clear();listeners.clear();
+      for(const h of handles)void Promise.resolve(h?.remove?.()).catch(()=>{});
+      handles.length=0;
+    },
+  };
 }
 
 /** Existing anime Verify button: choose the exact source domain, then one retry. */
