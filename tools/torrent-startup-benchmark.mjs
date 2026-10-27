@@ -204,6 +204,8 @@ export async function main(argv=process.argv.slice(2)){
       track(nativeSpawn(resolve(options.libtorrentPython),['-I',fileURLToPath(new URL('./libtorrent-fixture-seeder.py',import.meta.url)),'--seed-dir',seedFolder,'--manifest',manifestPath,'--ready',ready,'--listen-port',String(peer),'--transport',options.seedTransport?.startsWith('utp')?'utp':'both','--encryption',options.seedEncryption??'optional','--upload-bps',String(options.seedUploadBps??0),'--control',seedControl],{env:nativeEnv,stdio:'ignore'}),'seed');
       await until(()=>fs.stat(ready));
       report.seedSettings=JSON.parse(await fs.readFile(ready,'utf8'));
+      assert.ok(Number.isSafeInteger(report.seedSettings.listenPort)&&report.seedSettings.listenPort>0&&report.seedSettings.listenPort<=65535,'Owned seeder did not expose its actual listening port');
+      peer=report.seedSettings.listenPort;
       if(!options.seedTransport?.startsWith('utp'))report.seedListenWaitMs=await waitForOwnedTcpListener(peer);
     }else{
       track(nativeSpawn(rqbit,['-v','error','--http-api-listen-addr',`127.0.0.1:${seedPort}`,'--listen-ip','127.0.0.1','--listen-port',String(peer),'--disable-dht','--disable-trackers','--disable-lsd','--disable-upnp-port-forward',...(options.seedUploadBps?['--ratelimit-upload',String(options.seedUploadBps)]:[]),'server','start',seedFolder,'--disable-persistence'],{env:{...nativeEnv,RQBIT_HTTP_BASIC_AUTH_USERPASS:seedAuth},stdio:'ignore'}),'seed');

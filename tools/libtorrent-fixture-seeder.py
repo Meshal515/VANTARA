@@ -43,12 +43,13 @@ for torrent in manifest:
     params.flags &= ~lt.torrent_flags.paused
     handles.append(session.add_torrent(params))
 until = time.monotonic() + 30
-while not all(h.status().is_seeding for h in handles):
+while not all(h.status().is_seeding for h in handles) or not session.is_listening():
     if time.monotonic() > until:
         raise SystemExit("fixture seeder did not verify all files")
     time.sleep(0.025)
 actual = session.get_settings()
 Path(args.ready).write_text(json.dumps({"verified": True, "transport": args.transport,
+    "requestedPort": args.listen_port, "listenPort": session.listen_port(),
     "encryption": args.encryption, "incomingTcp": actual["enable_incoming_tcp"],
     "incomingUtp": actual["enable_incoming_utp"], "inEncPolicy": actual["in_enc_policy"],
     "allowedEncLevel": actual["allowed_enc_level"]}))
