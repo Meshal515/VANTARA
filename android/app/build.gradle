@@ -74,6 +74,14 @@ android {
             // نسخة الاختبار تعيش بجانب النسخة الموقعة الأساسية على نفس الهاتف.
             applicationIdSuffix '.debug'
             resValue 'string', 'app_name', 'VANTARA اختبار'
+            // Only the protected opt-in debug channel has a persistent signature.
+            // Ordinary local/debug CI builds keep the standard Android debug key.
+            if (System.getenv('VANTARA_SIGN_DEBUG_CHANNEL') == 'true') {
+                if (!keystorePath || !keystorePassword) {
+                    throw new GradleException('Upgradeable debug channel requires the persistent signing key')
+                }
+                signingConfig signingConfigs.release
+            }
         }
         release {
             minifyEnabled false
