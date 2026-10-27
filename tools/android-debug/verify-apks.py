@@ -11,26 +11,33 @@ PACKAGE = 'com.vantara.app.debug'
 
 
 def parse_single_signer(output):
-    """Fail closed on zero, multiple or conflicting APK signer certificates.
+    """Verify one APK signer and one SHA-256 identity across all schemes.
 
-    apksigner versions vary in whitespace/capitalization. No certificate pin is
-    weakened: the normalized digest still must match the hard-coded pin.
+    apksigner on newer build-tools prints "V2 Signer: certificate ...", whereas
+    older versions print "Signer #1 certificate ...". Both must be recognized
+    without weakening the single-signer or pinned-certificate contract.
     """
-    matches = re.findall(
+    count = re.search(r"^Number of signers:\s*(\d+)\s*$", output, re.M | re.I)
+    if count is None or int(count[1]) != 1:
+        raise ValueError("APK signature verifier must report exactly one signer")
+    numbered = re.findall(
         r"^\s*Signer\s+#(\d+)\s+certificate\s+SHA-256\s+digest:\s*([0-9a-fA-F]{64})\s*$",
-        output, re.MULTILINE | re.IGNORECASE,
+        output, re.M | re.I,
     )
-    unique = {(int(index), digest.lower()) for index, digest in matches}
+    schemes = re.findall(
+        r"^\s*V\d+(?:\.\d+)?\s+Signer:\s*certificate\s+SHA-256\s+digest:\s*([0-9a-fA-F]{64})\s*$",
+        output, re.M | re.I,
+    )
+    all_digests = {digest.lower() for _, digest in numbered} | {digest.lower() for digest in schemes}
     announced = {int(index) for index in re.findall(
-        r"^\s*Signer\s+#(\d+)\s+certificate\b", output, re.MULTILINE | re.IGNORECASE,
+        r"^\s*Signer\s+#(\d+)\s+certificate\b", output, re.M | re.I,
     )}
-    if len(unique) != 1 or announced != {1} or {i for i, _ in unique} != {1}:
+    if len(all_digests) != 1 or (announced and announced != {1}):
         raise ValueError(
-            f"Expected exactly one signer with complete SHA-256 certificate; "
-            f"parsed={len(unique)}, announced={sorted(announced)}; "
-            f"apksigner output: {output[-1200:]!r}"
+            f"Expected one consistent signer certificate; digests={len(all_digests)}, "
+            f"numbered_signers={sorted(announced)}; apksigner output: {output[-1200:]!r}"
         )
-    return next(iter(unique))[1]
+    return next(iter(all_digests))
 
 
 def inspect(apk, build_tools):
