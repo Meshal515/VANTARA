@@ -213,7 +213,7 @@ export function renderV7Addons({
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
         dialog.append(confirm);
-      });
+      }));
       dialog.append(acts);
     });
     actions.append(details);
