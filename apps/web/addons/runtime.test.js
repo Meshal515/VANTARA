@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import { createAddonRuntime } from "./runtime.js";
 import { createStore } from "../pwa/cache/store.js";
+it('preserves actual source artwork, language and repository metadata through the manager registry',async()=>{
+ const def={id:'native-id',label:'Source',content:'manga',version:'1.6.42',domain:'source.example',iconUrl:'data:image/png;base64,YWJj',pkg:'org.actual.source',repo:'Original Repository',lang:'ar'};
+ const r={ready:Promise.resolve(),store:createStore({indexedDB:null}),registry:{list:()=>[def],source:()=>({}),def:()=>def,call:async()=>[]}};
+ const a=createAddonRuntime({runtime:r,store:r.store,transport:{}});await a.ready;
+ expect(a.registry.list().find(x=>x.sourceId===def.id)).toMatchObject({iconUrl:def.iconUrl,pkg:def.pkg,repositoryName:def.repo,lang:'ar',version:'1.6.42'});
+});
 it("routes an installed Stremio episode by explicit video ID and keeps core available", async () => {
   const urls = [];
   const r = {

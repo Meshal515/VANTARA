@@ -3723,7 +3723,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage('utility');
     q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
     try {
-      const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
+      const addons = await getAddonRuntime(); await addons.ready; await addons.reloadSources?.(); addons.registry.setProfile(sync.user?.userId ?? "local");
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());

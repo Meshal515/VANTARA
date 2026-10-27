@@ -228,9 +228,12 @@ export function renderV7Addons({
     if(!isAdded)stateLabel.classList.remove("visible");
     statusSlot.append(stateLabel);info.append(statusSlot);
     const actions=el("div","v7-actions");
+    const challenges=sourceChallenges(a);
+    const verifyButton=()=>{const verify=btn("تحقق","v7-simple-btn",e=>{e.stopPropagation();void verifyHost(challenges[0].host,verify);});return verify;};
     const foreign=mode==="native" && ((a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true));
     if(mode==="remote"){
-      if(canOpenRemote(a)){
+      if(challenges.length)actions.append(verifyButton());
+      else if(canOpenRemote(a)){
         const open=btn("فتح","v7-simple-btn",e=>{e.stopPropagation();openRemote(a);});
         open.prepend(ico("open"));actions.append(open);
       }
@@ -240,7 +243,10 @@ export function renderV7Addons({
       }
     }else if(mode==="native"){
       actions.classList.add("v7-native-actions");
-      if(foreign){
+      if(challenges.length&&isAdded){
+        if(!a.builtin){const del=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"native");});del.setAttribute("aria-label","حذف "+a.name);del.append(ico("trash"));actions.append(del);}
+        actions.append(verifyButton());
+      }else if(foreign){
         const wrong=btn("نوع مختلف","v7-simple-btn",e=>{e.stopPropagation();showDetails(a,"native",parent);});
         actions.append(wrong);
       }else{
@@ -317,7 +323,9 @@ export function renderV7Addons({
       }));
       dialog.append(acts);
     });
-    actions.append(details);
+    const challenges=sourceChallenges({...site,name:item.name});
+    if(challenges.length){const verify=btn("تحقق","v7-simple-btn",e=>{e.stopPropagation();void verifyHost(challenges[0].host,verify);});actions.append(verify);}
+    else actions.append(details);
     row.append(logo({...site,...item}),info,actions);
     row.onclick=e=>{if(!e.target.closest("button"))details.click();};
     return row;
@@ -374,7 +382,8 @@ export function renderV7Addons({
     }
     const allNative=[...nativeByPackage.values()];
     const installedNative=allNative.filter(x=>x.installed || x.update || x.builtin);
-    repoCount.textContent=String(repos.length);
+    const direct=allRemote.filter(a=>!a.bundled);
+    repoCount.textContent=String(repos.length+direct.length+siteRows.length);
     installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
     repoTab.classList.toggle("active",tab==="repos");
     installedTab.classList.toggle("active",tab==="installed");
@@ -385,8 +394,8 @@ export function renderV7Addons({
     verificationCount.textContent=String(challenged.length+unknown.length);
     body.replaceChildren();
     body.setAttribute("aria-busy",String(loading));
-    filterWrap.hidden=tab==="repos"&&!opened;
-    fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[]));
+    filterWrap.hidden=tab==="repos"&&!opened&&!direct.length&&!siteRows.length;
+    fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[...direct,...siteRows.map(x=>({kind:"manga",name:x.label})),...repos.map(r=>({kind:r.group.kind,name:r.data.name}))]));
     if(tab==="repos"){
       if(opened){
         body.append(section(opened.data.name,opened.group.kind==="anime"?"Aniyomi":"Mihon"));
@@ -402,18 +411,22 @@ export function renderV7Addons({
         for(const item of records)list.append(sourceRow(item,"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
-        if(!repos.length){if(loading){body.append(el("p","v7-notice","جارٍ تحميل المستودعات…"));return;}body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
-        const matches=repos.filter(r=>!currentSearch||(r.data.name||"").toLowerCase().includes(currentSearch));
-        const list=el("div","v7-list");matches.forEach(r=>list.append(storeRepoRow(r)));
-        body.append(list);
+        if(!repos.length&&!direct.length&&!siteRows.length){if(loading){body.append(el("p","v7-notice","جارٍ تحميل الإضافات…"));return;}body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
+        const matches=repos.filter(r=>(type==="الكل"||kindName({kind:r.group.kind})===type)&&(!currentSearch||String(r.data.name||"").toLowerCase().includes(currentSearch)));
+        const directMatches=filtered(direct);
+        const siteMatches=siteRows.filter(x=>(type==="الكل"||type==="مانجا")&&(!currentSearch||String((x.label||"")+" "+(x.domain||"")+" "+(x.engine||"")).toLowerCase().includes(currentSearch)));
+        const groups=[{name:"مستودعات",items:matches,row:storeRepoRow},{name:"إضافات برابط",items:directMatches,row:a=>sourceRow(a,"remote")},{name:"مواقع",items:siteMatches,row:siteRow}].filter(group=>group.items.length);
+        for(const group of groups){
+          if(groups.length>1)body.append(el("h3","v7-group-title",group.name));
+          const list=el("div","v7-list");group.items.forEach(item=>list.append(group.row(item)));body.append(list);
+        }
+        if(!groups.length)body.append(empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }
     }else if(tab==="verification"){
       const list=el("div","v7-list");
       for(const a of filtered(challenged)){
         if(a._site)list.append(siteRow(a));
         else list.append(sourceRow(a,a._store?"native":"remote",repos.find(r=>r.data.url===a._url)?.data));
-        const challenges=sourceChallenges(a);
-        for(const item of challenges)list.append(verificationRow(item));
       }
       for(const item of unknown.filter(x=>!currentSearch||String(x.host+" "+(x.sourceName||"")).toLowerCase().includes(currentSearch)))list.append(verificationRow(item));
       body.append(list.childElementCount?list:empty("لا توجد مصادر تحتاج تحققًا",""));

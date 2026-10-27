@@ -14,13 +14,14 @@ const registry = (items=[]) => ({runtimeName:'apk', list:()=>items});
 const installedTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المثبتة'));
 const repositoryTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المستودعات'));
 
-it('shows real existing direct addons and saved manga sites; starts on repositories without presets', async () => {
+it('shows real existing direct addons and saved manga sites; starts with the saved additions without presets', async () => {
   const d=setup();
   const sites={list:vi.fn(async()=>[{id:'site-9',label:'My Manga',domain:'reader.example',engine:'madara'}]),remove:vi.fn(async()=>{})};
   const existing={key:'addon-k',name:'My Cinemeta',enabled:true,capabilities:['catalog'],contentTypes:['movie']};
   const view=renderV7Addons({registry:registry([existing]),sites});
   d.body.append(view);await tick();
-  expect(view.querySelector('.v7-body').textContent).toContain('ابدأ بإضافة');
+  expect(view.querySelector('.v7-body').textContent).toContain('My Cinemeta');
+  expect(view.querySelector('.v7-body').textContent).toContain('My Manga');
   installedTab(view).click();
   expect(view.querySelector('.v7-body').textContent).toContain('My Manga');
   expect(view.querySelector('.v7-body').textContent).toContain('My Cinemeta');
@@ -273,7 +274,7 @@ it('offers three counted tabs with verification sources retained in installed an
   setup();const items=[{key:'verified',name:'Needs Verify',domain:'verify.example'},{key:'normal',name:'Normal'}];
   const verification={list:()=>[{host:'verify.example'},{host:'unknown.example'}],subscribe:()=>()=>{},begin:vi.fn()};
   const view=renderV7Addons({registry:registry(items),verification});await tick();
-  expect([...view.querySelectorAll('.v7-tab')].map(x=>x.textContent)).toEqual(['الإضافات0','المثبتة2','تحتاج تحقق2']);
+  expect([...view.querySelectorAll('.v7-tab')].map(x=>x.textContent)).toEqual(['الإضافات2','المثبتة2','تحتاج تحقق2']);
   expect(view.querySelector('.v7-mast')).toBeNull();expect(view.querySelector('.v7-back')).toBeNull();
   installedTab(view).click();expect(view.querySelectorAll('.v7-row')).toHaveLength(2);
   [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('تحتاج تحقق')).click();
@@ -286,7 +287,7 @@ it('gates challenged source opens until explicit verification without launching 
   setup();const open=vi.fn(),begin=vi.fn();
   const item={key:'verify',name:'Verify',domain:'verify.example',protocol:'stremio',capabilities:['catalog']};
   const view=renderV7Addons({registry:registry([item]),verification:{list:()=>[{host:'verify.example'}],begin},onOpenSource:open});await tick();installedTab(view).click();
-  view.querySelector('.v7-simple-btn').click();expect(open).not.toHaveBeenCalled();expect(begin).not.toHaveBeenCalled();
+  view.querySelector('.v7-row').click();expect(open).not.toHaveBeenCalled();expect(begin).not.toHaveBeenCalled();
   expect(view.querySelector('.v7-dialog').textContent).toContain('تحقق من المصدر');view.close();
 });
 
@@ -392,4 +393,28 @@ it('never routes a native package to a different addon sharing its display name'
   const view=renderV7Addons({registry:registry([{key:'remote.unrelated',name:'Same Name',protocol:'stremio',capabilities:['catalog']}]),repositories:api,onOpenSource:open});await tick();browse(view);view.querySelector('.v7-row').click();
   [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فتح في VANTARA').click();
   expect(open).not.toHaveBeenCalled();expect(view.querySelector('.v7-diagnostic').textContent).toContain('المحرك الأصلي');view.close();
+});
+
+
+it('shows direct manifest additions and sites on the root tab with accurate counts, kinds and search',async()=>{
+  setup();const items=[{key:'direct',name:'Direct Manifest',contentTypes:['movie']},{key:'builtin',name:'Core',bundled:true}];
+  const view=renderV7Addons({registry:registry(items),sites:{list:async()=>[{id:'site',label:'Saved Site',domain:'reader.example'}]}});await tick();
+  expect(view.querySelector('.v7-tab').textContent).toBe('الإضافات2');
+  expect(view.querySelector('.v7-body').textContent).toContain('Direct Manifest');expect(view.querySelector('.v7-body').textContent).toContain('Saved Site');
+  expect(view.querySelector('.v7-body').textContent).not.toContain('Core');expect(view.querySelector('.v7-filter-wrap').hidden).toBe(false);
+  view.querySelector('.v7-filter').click();[...view.querySelectorAll('.v7-menu button')].find(x=>x.textContent==='سينما').click();
+  expect(view.querySelectorAll('.v7-row')).toHaveLength(1);expect(view.querySelector('.v7-body').textContent).toContain('Direct Manifest');
+  const search=view.querySelector('[data-addon-search]');search.value='missing';search.oninput();expect(view.querySelectorAll('.v7-row')).toHaveLength(0);view.close();
+});
+
+it.each(['remote','native'])('renders one challenged %s source card with Verify instead of Open',async mode=>{
+  setup();const begin=vi.fn(async()=>({ok:true})),open=vi.fn();
+  const item={name:'Challenged',key:'challenge',pkg:'native.challenge',installed:true,domain:'verify.example',protocol:'stremio',capabilities:['catalog']};
+  const api={list:async()=>({repos:[{name:'Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[item]};
+  const view=renderV7Addons({registry:registry(mode==='remote'?[item]:[]),repositories:mode==='native'?api:null,verification:{list:()=>[{host:'verify.example'}],begin},onOpenSource:open,onOpenNativeSource:open});await tick();
+  [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('تحتاج تحقق')).click();
+  expect(view.querySelectorAll('.v7-row')).toHaveLength(1);expect(view.querySelectorAll('.v7-verification-item')).toHaveLength(0);
+  const buttons=[...view.querySelectorAll('.v7-row button')];expect(buttons.some(x=>x.textContent.includes('فتح'))).toBe(false);
+  const verify=buttons.find(x=>x.textContent==='تحقق');expect(verify).toBeTruthy();expect(begin).not.toHaveBeenCalled();verify.click();await tick();
+  expect(begin).toHaveBeenCalledWith('verify.example');expect(open).not.toHaveBeenCalled();view.close();
 });

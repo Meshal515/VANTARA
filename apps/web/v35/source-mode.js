@@ -1,6 +1,7 @@
 import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { nativeCover } from "./covers.js";
+import { imageLoadingNode, imageFallbackNode } from "./image-loading.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -332,20 +333,49 @@ export function renderSourceMode({
           state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
           onOpenWork(work, { addon, adapter, state });
         };
+        const imageState = (value, label) => {
+          art.dataset.imageState = value;
+          art.setAttribute("role", "img");
+          art.setAttribute("aria-busy", String(value === "loading"));
+          art.setAttribute("aria-label", label);
+          art.title = label;
+        };
+        const imageFailed = () => {
+          imageState("failed", "تعذّر تحميل الغلاف");
+          art.replaceChildren(imageFallbackNode("—"));
+        };
         const image = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
-        if (image)
+        if (image) {
+          imageState("loading", "جارٍ تحميل الغلاف");
+          art.style.position = "relative";
+          art.append(imageLoadingNode());
           try {
             const img = node("img", "poster");
             const url = publicUrl(image).href;
             img.alt = "";
             img.loading = "lazy";
             img.referrerPolicy = "no-referrer";
-            img.onerror = () => img.remove();
+            // Keep the placeholder in the host until the browser decodes the image.
+            img.style.position = "absolute";
+            img.style.inset = "0";
+            img.style.opacity = "0";
+            img.onload = () => {
+              if (closed || !root.contains(art)) return;
+              imageState("ready", `غلاف ${work.title ?? work.name ?? "العمل"}`);
+              img.style.position = "";
+              img.style.inset = "";
+              img.style.opacity = "";
+              art.replaceChildren(img);
+            };
+            img.onerror = () => {
+              if (!closed && root.contains(art)) imageFailed();
+            };
             if (addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
               // Same source client, cookies, headers and persistent cover cache as the library.
               // A failed native request must stay in that pipeline (including verification).
               void nativeCover(url, addon.sourceId).then(local => {
-                if (!local || closed || !root.contains(art)) return;
+                if (closed || !root.contains(art)) return;
+                if (!local) return imageFailed();
                 img.src = local;
                 art.append(img);
               });
@@ -353,7 +383,11 @@ export function renderSourceMode({
               img.src = url;
               art.append(img);
             }
-          } catch {}
+          } catch { imageFailed(); }
+        } else {
+          imageState("missing", "لا يوجد غلاف من المصدر");
+          art.append(imageFallbackNode("—"));
+        }
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;
         if (unit) card.append(node("span", "up-unit", String(unit)));

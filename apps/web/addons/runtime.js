@@ -47,6 +47,12 @@ export function createAddonRuntime({
         sourceId: d.id,
         name: d.label,
         version: String(d.version),
+        ...(d.iconUrl ? {iconUrl:d.iconUrl} : {}),
+        ...(d.pkg ? {pkg:d.pkg} : {}),
+        ...(d.lang ? {lang:d.lang} : {}),
+        ...(d.repo ? {repositoryName:d.repo} : {}),
+        ...(d.domain ? {domain:d.domain} : {}),
+        ...(d.domains ? {domains:d.domains} : {}),
         contentTypes:
           d.content === "cinema" ? ["movie", "series"] : [d.content],
         // «آخر التحديثات» لكل مصدر يقدّم latest فعلًا (كل مصادر الـAPK، ومحرّكات الويب التي تعرفه)

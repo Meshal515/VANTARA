@@ -106,3 +106,5 @@
 .v7-addon .v7-update-result{font-size:13px;margin-top:12px;color:#c8b5ff}
 .v7-addon button:disabled{opacity:.5;cursor:default}
 @media(max-width:380px){.v7-addon{padding-inline:12px}.v7-addon .v7-tabs{gap:14px}.v7-addon .v7-tab{font-size:13px}.v7-addon .v7-count{margin-inline-start:4px}.v7-addon .v7-tools{gap:8px}.v7-addon .v7-search{padding-inline:10px}.v7-addon .v7-logo{width:44px;height:44px}.v7-addon .v7-native-actions{width:112px;min-width:112px}.v7-addon .v7-flip{min-width:72px;width:72px}.v7-addon .v7-trash-holder,.v7-addon .v7-trash{width:34px;min-width:34px}.v7-addon .v7-actions{gap:6px}.v7-addon .v7-simple-btn{min-width:72px}}
+
+.v7-addon .v7-group-title{font-size:13px;font-weight:650;color:#a69bb6;margin:20px 0 8px}

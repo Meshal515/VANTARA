@@ -134,62 +134,75 @@ class ExtensionEnginePlugin : Plugin() {
      */
     @PluginMethod
     fun sources(call: PluginCall) {
-        val list = JSArray()
-        for (spec in SPIKE_SOURCES) {
-            if (spec.blockedReason != null) continue
-            list.put(
-                JSObject()
-                    .put("id", spec.pkg)
-                    .put("pkg", spec.pkg)
-                    .put("label", spec.label)
-                    .put("lib", spec.expectedLib)
-                    .put("version", spec.versionName)
-                    .put("warning", spec.warning.name)
-                    .put("names", JSArray(spec.arabicSourceNames))
-                    .put("lang", "ar")
-                    .put("ready", loaded.containsKey(spec.pkg)),
-            )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val st = userStore.state
+                val list = JSArray()
+                for (spec in SPIKE_SOURCES) {
+                    if (spec.blockedReason != null) continue
+                    list.put(
+                        JSObject()
+                            .put("id", spec.pkg)
+                            .put("pkg", spec.pkg)
+                            .put("label", spec.label)
+                            .put("lib", spec.expectedLib)
+                            .put("version", spec.versionName)
+                            .put("warning", spec.warning.name)
+                            .put("names", JSArray(spec.arabicSourceNames))
+                            .put("lang", "ar")
+                            .put("domain", runCatching { (loaded[spec.pkg] as? HttpSource)?.baseUrl }.getOrNull())
+                            .put("ready", loaded.containsKey(spec.pkg))
+                            .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
+                    )
+                }
+                // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
+                for (filler in FILLER_SOURCES) {
+                    val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
+                    val id = "${filler.pkg}@${filler.lang}"
+                    list.put(
+                        JSObject()
+                            .put("id", id)
+                            .put("pkg", filler.pkg)
+                            .put("label", filler.label)
+                            .put("lib", spec.expectedLib)
+                            .put("version", spec.versionName)
+                            .put("warning", spec.warning.name)
+                            .put("names", JSArray(listOf(filler.label)))
+                            .put("lang", filler.lang)
+                            .put("filler", true)
+                            .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
+                            .put("ready", loaded.containsKey(id))
+                            .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
+                    )
+                }
+                // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
+                for (ext in st.extensions) {
+                    val icon = NativeExtensionIcons.iconUrl(context, "extensions", ext.pkg, ext.sha256)
+                    for (src in ext.sources) {
+                        val id = "${ext.pkg}#${src.id}"
+                        list.put(
+                            JSObject()
+                                .put("id", id)
+                                .put("pkg", ext.pkg)
+                                .put("label", src.name)
+                                .put("lib", ext.lib)
+                                .put("version", ext.versionName)
+                                .put("warning", if (ext.nsfw) "MIXED" else "SAFE")
+                                .put("names", JSArray(listOf(src.name)))
+                                .put("lang", src.lang)
+                                .put("filler", !src.lang.equals("ar", ignoreCase = true))
+                                .put("user", true)
+                                .put("repo", st.repos.firstOrNull { it.url == ext.repoUrl }?.name)
+                                .put("repoUrl", ext.repoUrl)
+                                .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
+                                .put("ready", loaded.containsKey(id))
+                                .withIcon(icon),
+                        )
+                    }
+                }
+                call.resolve(JSObject().put("sources", list))
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
         }
-        // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
-        for (filler in FILLER_SOURCES) {
-            val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
-            val id = "${filler.pkg}@${filler.lang}"
-            list.put(
-                JSObject()
-                    .put("id", id)
-                    .put("pkg", filler.pkg)
-                    .put("label", filler.label)
-                    .put("lib", spec.expectedLib)
-                    .put("version", spec.versionName)
-                    .put("warning", spec.warning.name)
-                    .put("names", JSArray(listOf(filler.label)))
-                    .put("lang", filler.lang)
-                    .put("filler", true)
-                    .put("ready", loaded.containsKey(id)),
-            )
-        }
-        // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
-        for (ext in userStore.state.extensions) {
-            for (src in ext.sources) {
-                val id = "${ext.pkg}#${src.id}"
-                list.put(
-                    JSObject()
-                        .put("id", id)
-                        .put("pkg", ext.pkg)
-                        .put("label", src.name)
-                        .put("lib", ext.lib)
-                        .put("version", ext.versionName)
-                        .put("warning", if (ext.nsfw) "MIXED" else "SAFE")
-                        .put("names", JSArray(listOf(src.name)))
-                        .put("lang", src.lang)
-                        .put("filler", !src.lang.equals("ar", ignoreCase = true))
-                        .put("user", true)
-                        .put("repo", userStore.state.repos.firstOrNull { it.url == ext.repoUrl }?.name ?: "")
-                        .put("ready", loaded.containsKey(id)),
-                )
-            }
-        }
-        call.resolve(JSObject().put("sources", list))
     }
 
     // ───────────────────────── مستودعات المستخدم ─────────────────────────

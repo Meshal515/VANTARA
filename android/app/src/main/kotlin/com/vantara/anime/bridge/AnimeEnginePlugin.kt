@@ -266,21 +266,34 @@ class AnimeEnginePlugin : Plugin() {
 
     @PluginMethod
     fun sources(call: PluginCall) {
-        val list = JSArray()
-        for (s in engine.sources()) {
-            val rec = engine.health.get(HealthStore.sourceKey(s.id))
-            list.put(
-                JSObject()
-                    .put("id", s.id).put("name", s.name).put("content", s.content)
-                    .put("pkg", s.extension?.pkg)
-                    .put("enabled", s.enabled && s.disabledReason == null)
-                    .put("disabledReason", s.disabledReason)
-                    .put("loadError", engine.loadError(s.id))
-                    .put("domain", rec?.domain ?: s.domains.current)
-                    .put("catalog", engine.catalogCursor(s.id)?.let { JSONObject(json.encodeToString(com.vantara.anime.catalog.CatalogCursor.serializer(), it)) }),
-            )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val st = userStore.state
+                val list = JSArray()
+                for (s in engine.sources()) {
+                    val rec = engine.health.get(HealthStore.sourceKey(s.id))
+                    val installed = s.extension?.let { ref -> st.extensions.firstOrNull { it.pkg == ref.pkg } }
+                    val icon = s.extension?.let { ref -> NativeExtensionIcons.iconUrl(context, "anime-extensions", ref.pkg, ref.sha256) }
+                    list.put(
+                        JSObject()
+                            .put("id", s.id).put("name", s.name).put("content", s.content)
+                            .put("pkg", s.extension?.pkg)
+                            .put("lang", s.lang)
+                            .put("version", s.extension?.version)
+                            .put("user", installed != null)
+                            .put("repo", installed?.let { ext -> st.repos.firstOrNull { it.url == ext.repoUrl }?.name })
+                            .put("repoUrl", installed?.repoUrl)
+                            .put("enabled", s.enabled && s.disabledReason == null)
+                            .put("disabledReason", s.disabledReason)
+                            .put("loadError", engine.loadError(s.id))
+                            .put("domain", rec?.domain ?: s.domains.current)
+                            .put("catalog", engine.catalogCursor(s.id)?.let { JSONObject(json.encodeToString(com.vantara.anime.catalog.CatalogCursor.serializer(), it)) })
+                            .withIcon(icon),
+                    )
+                }
+                call.resolve(JSObject().put("sources", list))
+            } catch (t: Throwable) { call.reject(t.message ?: "تعذّر قراءة المصادر") }
         }
-        call.resolve(JSObject().put("sources", list))
     }
 
     // ───────────────────── مستودعات إضافات الأنمي (Aniyomi) ─────────────────────

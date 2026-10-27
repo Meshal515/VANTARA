@@ -14,6 +14,15 @@ const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   return {a,key:p.manifest.key,requests};
 };
 const manifest={id:'org.sub',name:'Sub',version:'1.0.0',resources:['subtitles'],types:['movie'],catalogs:[]};
+it('retains native declared versions and loaded manga domain instead of overwriting metadata',async()=>{
+ vi.stubGlobal('fetch',async()=>{throw new Error('no remote configuration in this fixture');});
+ const {a}=await setup(manifest,{
+  AnimeEngine:{sources:async()=>({sources:[{id:'video',name:'Video',enabled:true,content:'anime',version:'1.6.7',lang:'ar',repo:'Video Repository'}]})},
+  ExtensionEngine:{sources:async()=>({sources:[{id:'reader',label:'Reader',domain:'https://source.example',version:'1.6.8'}]})},
+ });
+ expect(a.sources.def('video')).toMatchObject({version:'1.6.7'});
+ expect(a.sources.def('reader')).toMatchObject({domain:'https://source.example',version:'1.6.8'});
+});
 it('listing native subtitle providers does not consume a half-open request slot',async()=>{
   vi.useFakeTimers();vi.setSystemTime(1000);
   const {a,key}=await setup(manifest);

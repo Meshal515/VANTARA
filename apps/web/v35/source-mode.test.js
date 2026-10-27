@@ -4,6 +4,79 @@ import { renderSourceMode } from "./source-mode.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("keeps a visible loading cover until the saved native image actually loads", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  let finish;
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover: () => new Promise(resolve => { finish = resolve; }) } } });
+  const view = renderSourceMode({
+    addon: { name: "Native", protocol: "native", sourceId: "native-reader", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: "https://images.example.com/visible-native-loading.webp" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const art = view.querySelector(".up-art");
+  expect(art.dataset.imageState).toBe("loading");
+  expect(art.getAttribute("aria-busy")).toBe("true");
+  expect(art.querySelector(".skeleton")).not.toBeNull();
+  finish({ path: "/saved/visible-native-loading.webp" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(art.dataset.imageState).toBe("loading");
+  const image = art.querySelector("img");
+  image.onload();
+  expect(art.dataset.imageState).toBe("ready");
+  expect(art.getAttribute("aria-busy")).toBe("false");
+  expect(art.querySelector(".skeleton")).toBeNull();
+  expect(art.querySelector("img")).toBe(image);
+  view.close();
+});
+
+it("shows an honest fallback when the source cover pipeline fails without guessing a cause", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover: async () => { throw new Error("unknown source failure"); } } } });
+  const view = renderSourceMode({
+    addon: { name: "Native", protocol: "native", sourceId: "native-reader", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: "https://images.example.com/visible-native-failure.webp" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const art = view.querySelector(".up-art");
+  expect(art.dataset.imageState).toBe("failed");
+  expect(art.title).toBe("تعذّر تحميل الغلاف");
+  expect(art.getAttribute("aria-label")).toBe("تعذّر تحميل الغلاف");
+  expect(art.querySelector(".image-fallback")).not.toBeNull();
+  expect(art.querySelector("img,.skeleton")).toBeNull();
+  expect(art.textContent).not.toMatch(/Cloudflare|تحقق/);
+  view.close();
+});
+
+it("replaces a failed public image with visible fallback art", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const view = renderSourceMode({
+    addon: { name: "External", protocol: "remote", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: "https://images.example.com/visible-public-failure.webp" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const art = view.querySelector(".up-art");
+  expect(art.dataset.imageState).toBe("loading");
+  art.querySelector("img").onerror();
+  expect(art.dataset.imageState).toBe("failed");
+  expect(art.querySelector(".image-fallback")).not.toBeNull();
+  expect(art.querySelector("img,.skeleton")).toBeNull();
+  view.close();
+});
+
+it("distinguishes a missing source cover from a failed download", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const view = renderSourceMode({
+    addon: { name: "Source", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const art = view.querySelector(".up-art");
+  expect(art.dataset.imageState).toBe("missing");
+  expect(art.title).toBe("لا يوجد غلاف من المصدر");
+  expect(art.querySelector(".image-fallback")).not.toBeNull();
+  view.close();
+});
+
 it("loads native manga covers through the source session and renders the saved file", async () => {
   globalThis.document = parseHTML("<html><body></body></html>").document;
   const sourceId = "eu.kanade.tachiyomi.extension.ar.mangaswat#7657007209499352344";
@@ -142,7 +215,7 @@ it("searches only the chosen adapter and preserves source/tab/filter on back", a
   await new Promise((r) => setTimeout(r, 0));
   expect(query).toBe("naruto");
   [...view.querySelectorAll("button")]
-    .find((b) => b.textContent === "Naruto")
+    .find((b) => b.querySelector(".up-title")?.textContent === "Naruto")
     .click();
   expect(work.url).toBe("/n");
   expect(state).toMatchObject({ tab: "search", query: "naruto", scroll: 42 });

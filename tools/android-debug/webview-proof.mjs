@@ -85,7 +85,9 @@ function assertNoAutomaticVerification(iteration) {
   }
 }
 try {
-  await waitFor("document.querySelector('.gate,.v35,.vpin')", 'real APK startup gate or Home');
+  // index.html contains a static .gate before app.js even evaluates. Wait for
+  // a live screen so we cannot remove the root while app.js is importing.
+  await waitFor("document.querySelector('#root .gate button,#root .v35,#root .vpin')", 'mounted APK account gate, configuration screen, or Home');
   proof.startup = await evaluate(`({gate:!!document.querySelector('.gate'),home:!!document.querySelector('.v35'),pin:!!document.querySelector('.vpin')})`);
   // A sentinel in both web storage systems and the real native identity must
   // survive a package replacement and then a complete process restart.
@@ -117,6 +119,16 @@ try {
     throw new Error('APK upgrade retention failure (diagnostics in '+out+'/'+phase+'.json): '+JSON.stringify(proof.retention));
   }
   if (phase === 'candidate') {
+    // Inspect real bundled APK resources, without preparing a source or making
+    // any catalogue/CAPTCHA request. Do not mistake a fallback SVG for its logo.
+    proof.nativeArtwork = await evaluate(`(async()=>{
+      const out=await Capacitor.Plugins.ExtensionEngine.sources();
+      const source=out.sources.find(s=>s.pkg==='eu.kanade.tachiyomi.extension.ar.mangaswat');
+      if(!source||!/^data:image\\/png;base64,/.test(source.iconUrl||''))throw new Error('Bundled source APK icon was not resolved');
+      const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('Native source logo did not decode'));img.src=source.iconUrl});
+      return {realBundledPng:true,width:img.naturalWidth,height:img.naturalHeight};
+    })()`);
+    if(proof.nativeArtwork.width!==96||proof.nativeArtwork.height!==96)throw new Error('Native logo dimensions exceed the fixed resource budget');
     // No production credentials or synthetic login: render the actual shipped
     // shell using a local anonymous sync fixture; native engines stay real.
     await evaluate(`(async()=>{
@@ -128,7 +140,7 @@ try {
         presence:async()=>[],stats:async()=>({}),insights:async()=>({}),topWorks:async()=>[],
         pendingDevices:async()=>[],privacyCapability:async()=>({}),authorizationHeader:null};
       const {mountV35}=await import('/v35/shell.js');
-      window.__debugProofShell=mountV35({sync,mount:node=>document.body.replaceChildren(node),go:async()=>{},
+      window.__debugProofShell=mountV35({sync,mount:node=>document.querySelector('#root').replaceChildren(node),go:async()=>{},
         friends:()=>[],presence:async()=>[],version:'debug-emulator-fixture',switchAccount:()=>{},openReader:()=>{}},{page:'home'});
       return true;
     })()`);
