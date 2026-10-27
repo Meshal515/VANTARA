@@ -65,7 +65,8 @@ export async function waitForOwnedBitTorrentPeer(peerPort,infoHash,timeout=30000
 }
 export async function createUtpFixtureRelay(targetPort){
   assert.ok(Number.isSafeInteger(targetPort)&&targetPort>0&&targetPort<=65535,'Invalid owned peer port');
-  const relay=dgram.createSocket('udp4'),clients=new Map();
+  const relay=dgram.createSocket('udp4'),clients=new Map(),proof={tcpConnectRejected:true,transport:'UDP-only relay to owned loopback seeder',clientPackets:0,replyPackets:0,clientTypes:{},replyTypes:{}};
+  const packet=(side,bytes)=>{proof[side+'Packets']++;const kind=(bytes[0]&15)===1?String(bytes[0]>>4):'other';proof[side+'Types'][kind]=(proof[side+'Types'][kind]??0)+1;};
   relay.on('error',()=>{});
   await new Promise((r,j)=>{relay.once('error',j);relay.bind(0,'127.0.0.1',r);});
   const relayPort=relay.address().port;
@@ -76,15 +77,16 @@ export async function createUtpFixtureRelay(targetPort){
   });
   if(!tcpRejected){relay.close();throw new Error('UDP-only fixture unexpectedly has a TCP listener');}
   relay.on('message',(bytes,from)=>{
+    packet('client',bytes);
     const key=`${from.address}:${from.port}`;let outgoing=clients.get(key);
     if(!outgoing){
       if(clients.size>=16){const [old,socket]=clients.entries().next().value;clients.delete(old);socket.close();}
       outgoing=dgram.createSocket('udp4');clients.set(key,outgoing);outgoing.on('error',()=>{});
-      outgoing.on('message',reply=>relay.send(reply,from.port,from.address,()=>{}));
+      outgoing.on('message',reply=>{packet('reply',reply);relay.send(reply,from.port,from.address,()=>{});});
     }
     outgoing.send(bytes,targetPort,'127.0.0.1',()=>{});
   });
-  return {port:relayPort,proof:{tcpConnectRejected:true,transport:'UDP-only relay to owned loopback seeder'},close:async()=>{
+  return {port:relayPort,proof,close:async()=>{
     for(const socket of clients.values())socket.close();clients.clear();await new Promise(r=>relay.close(r));
   }};
 }
@@ -140,6 +142,11 @@ async function replayState(userData,fixture,trim=false,corrupt=false){
     }
   }return {entries:states,partialFixtureTrimmed:trim,corruptedFixture:corrupt,available:states.length>0};
 }
+export async function windowsProcessSnapshot(ids,exec=cp.execFile){
+  assert.ok(ids.length&&ids.every(id=>Number.isSafeInteger(id)&&id>0));
+  const script=`$taskProcessIds=@(${ids.join(',')}); $taskRows=@(Get-Process -Id $taskProcessIds -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{pid=$_.Id;cpuSeconds=$_.TotalProcessorTime.TotalSeconds;rssBytes=$_.WorkingSet64;peakRssBytes=$_.PeakWorkingSet64} }); ConvertTo-Json -InputObject $taskRows -Compress`;
+  return JSON.parse(await new Promise((resolveQuery,reject)=>exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:10000,maxBuffer:1024*1024},(error,out)=>error?reject(error):resolveQuery(out))));
+}
 async function processMetrics(children){
   if(process.platform==='win32'){
     const active=children.filter(({child})=>Number.isSafeInteger(child.pid)&&child.pid>0);
@@ -147,9 +154,9 @@ async function processMetrics(children){
     try{
       // Only Node-assigned integer PIDs enter the script; no paths, titles,
       // torrents or user-controlled shell text. Sampling follows timing/seek checks.
-      const ids=active.map(({child})=>child.pid).join(',');
-      const script=`$taskProcessIds=@(${ids}); $taskRows=@(Get-Process -Id $taskProcessIds -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{pid=$_.Id;cpuSeconds=$_.TotalProcessorTime.TotalSeconds;rssBytes=$_.WorkingSet64;peakRssBytes=$_.PeakWorkingSet64} }); ConvertTo-Json -InputObject $taskRows -Compress`;
-      const data=JSON.parse(cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:10000}));
+      // The same Node host forwards the owned uTP swarm. A synchronous
+      // PowerShell query pauses its UDP ACKs, even outside the timed interval.
+      const data=await windowsProcessSnapshot(active.map(({child})=>child.pid));
       const rows=(Array.isArray(data)?data:[data]).filter(row=>row&&Number.isSafeInteger(row.pid)&&Number.isFinite(row.rssBytes)&&Number.isFinite(row.cpuSeconds));
       return {available:rows.length>0,cpuUnit:'seconds since process start; reused engine totals are cumulative',processes:rows.map(row=>({...row,role:active.find(({child})=>child.pid===row.pid)?.role??'unknown'}))};
     }catch{return {available:false,reason:'Windows process sampler failed'};}
@@ -201,6 +208,9 @@ export async function main(argv=process.argv.slice(2)){
     if(seedEngine==='libtorrent'){
       const manifest=[];for(const f of [...fixtures,...newSources]){const file=join(root,`${f.infoHash}.torrent`);await fs.writeFile(file,f.torrent);manifest.push(file);}
       const manifestPath=join(root,'seed-manifest.json'),ready=join(root,'seed-ready');await fs.writeFile(manifestPath,JSON.stringify(manifest));
+      // A new OS process may reuse this benchmark/profile directory. Its old
+      // marker describes a terminated seeder and a different listening port.
+      await fs.rm(ready,{force:true});
       track(nativeSpawn(resolve(options.libtorrentPython),['-I',fileURLToPath(new URL('./libtorrent-fixture-seeder.py',import.meta.url)),'--seed-dir',seedFolder,'--manifest',manifestPath,'--ready',ready,'--listen-port',String(peer),'--transport',options.seedTransport?.startsWith('utp')?'utp':'both','--encryption',options.seedEncryption??'optional','--upload-bps',String(options.seedUploadBps??0),'--control',seedControl],{env:nativeEnv,stdio:'ignore'}),'seed');
       await until(()=>fs.stat(ready));
       report.seedSettings=JSON.parse(await fs.readFile(ready,'utf8'));
@@ -219,6 +229,8 @@ export async function main(argv=process.argv.slice(2)){
       if(torrentBackend==='libtorrent'&&resolve(String(binary))===resolve(options.libtorrentPython)&&active){
         // The shipped CLI always blocks private peers. Only this excluded test
         // adapter admits the authored loopback seeder, just like rqbit below.
+        active.fixturePorts={peer,api:Number(args[args.indexOf('--api-port')+1]),listen:Number(args[args.indexOf('--listen-port')+1])};
+        assert.ok(active.fixturePorts.api!==peer&&active.fixturePorts.listen!==peer,'Owned UDP-only peer endpoint collided with a client socket');
         const scriptIndex=args.indexOf(resolve(options.libtorrentScript));
         assert.ok(scriptIndex>=0,'Expected isolated native backend script');
         const rewritten=[...args];rewritten[scriptIndex]=fileURLToPath(new URL('./libtorrent-fixture-server.py',import.meta.url));
@@ -250,6 +262,7 @@ export async function main(argv=process.argv.slice(2)){
         if(!services||['restart','partial','corrupt','newsource','nocache'].includes(mode)){await services?.close();services=null;}
         const cacheBefore=await replayState(userData,source,mode==='partial',mode==='corrupt');if(!services)services=create(mode);
         const directory=join(root,`${f.kind}-${trial}-${mode}`);await fs.mkdir(directory,{recursive:true});const session=`bench-${f.kind}-${trial}-${mode}`,run={fixture:f.kind,trial,mode,infoHash:source.infoHash,fileIdx:source.fileIdx,logicalFileBytes:source.bytes,cacheBefore,directory,startedAt:performance.now(),events:[],http:[],backend:await port(),ok:false};active=run;results.push(run);let connection;
+        if(report.transportProof)run.transportBefore=structuredClone(report.transportProof);
         console.log(JSON.stringify({event:'run-start',fixture:f.kind,trial,mode,infoHash:source.infoHash}));
         try{
           if(options.prewarm==='true'&&mode==='cold'){const prepared=await services.prewarmTorrent({candidate:{infoHash:source.infoHash,fileIdx:0}});assert.equal(prepared.prewarmed,true);run.prewarmAdopted=true;}
@@ -319,7 +332,7 @@ export async function main(argv=process.argv.slice(2)){
           run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);const settledMs=performance.now()-at;await until(async()=>{const p=await playerStatus(connection);return p['time-pos']>=target+.25&&p['paused-for-cache']===false&&p.pause===false;},6000);run.seeks.push({targetSeconds:target,settledMs,motionVerifiedMs:performance.now()-at});}
           run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit','libtorrent'].includes(role)&&child.exitCode===null));run.storageDuring=await diskBytes(userData);run.ok=true;
         }catch(error){run.error=String(error.stack??error);run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit','libtorrent'].includes(role)&&child.exitCode===null));if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
-        finally{connection?.close();await services.stopPlayback({session}).catch(()=>{});if(run.proxy){run.proxy.closeAllConnections();await new Promise(r=>run.proxy.close(r));delete run.proxy;}run.storageAfter=await diskBytes(userData);run.elapsedMs=performance.now()-run.startedAt;delete run.startedAt;delete run.mpvIpc;delete run.backend;delete run.byteStreamURL;await fs.writeFile(join(directory,'run.json'),JSON.stringify(run,null,2));await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({event:'run-end',fixture:f.kind,trial,mode,ok:run.ok,firstRenderedMs:run.firstRenderedMs,firstVerifiedRangeMs:run.firstVerifiedRangeMs,error:run.error?.split('\n')[0],mpvExit:run.mpvExit,mpvError:run.mpvError,mpvLogTail:run.ok?undefined:run.mpvLogTail,startPlaybackError:run.startPlaybackError,
+        finally{connection?.close();await services.stopPlayback({session}).catch(()=>{});if(run.proxy){run.proxy.closeAllConnections();await new Promise(r=>run.proxy.close(r));delete run.proxy;}run.storageAfter=await diskBytes(userData);run.elapsedMs=performance.now()-run.startedAt;delete run.startedAt;delete run.mpvIpc;delete run.backend;delete run.byteStreamURL;if(report.transportProof)run.transportAfter=structuredClone(report.transportProof);await fs.writeFile(join(directory,'run.json'),JSON.stringify(run,null,2));await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({event:'run-end',fixture:f.kind,trial,mode,ok:run.ok,firstRenderedMs:run.firstRenderedMs,firstVerifiedRangeMs:run.firstVerifiedRangeMs,error:run.error?.split('\n')[0],mpvExit:run.mpvExit,mpvError:run.mpvError,mpvLogTail:run.ok?undefined:run.mpvLogTail,startPlaybackError:run.startPlaybackError,
           // Bound diagnostics to non-identifying player status + verified-piece counters.
           // This distinguishes slow decoding from torrent starvation without recording URLs, accounts or peers' IPs.
           playerEvidence:run.ok?undefined:run.playerStatus&&Object.fromEntries(['time-pos','pause','paused-for-cache','hwdec-current','current-vo','decoder-frame-drop-count','frame-drop-count','demuxer-cache-state'].map(k=>[k,run.playerStatus[k]])),

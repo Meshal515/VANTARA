@@ -89,14 +89,17 @@ $protocols=@(
 )
 foreach($case in $protocols){
   $out=Join-Path $root "runs/protocol/$($case.name)"
-  & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $rqbit --mpv $node --engine-only true --torrent-backend $case.engine --libtorrent-python $python --libtorrent-script "$native/server.py" --seed-engine libtorrent --byte-scenario protocol --seed-transport $case.transport --seed-encryption $case.encryption --rqbit-transport $case.rqbit --fixtures-from $fixtures --output $out --runs 1 --kinds mp4 --modes cold --timeout-ms 12000
+  $samples=if($case.expected){'3'}else{'1'}
+  $modes=if($case.expected){'cold,warm'}else{'cold'}
+  & node tools/torrent-startup-benchmark.mjs --service-module apps/desktop/src/services.mjs --rqbit $rqbit --mpv $node --engine-only true --torrent-backend $case.engine --libtorrent-python $python --libtorrent-script "$native/server.py" --seed-engine libtorrent --byte-scenario protocol --seed-transport $case.transport --seed-encryption $case.encryption --rqbit-transport $case.rqbit --fixtures-from $fixtures --output $out --runs $samples --kinds mp4 --modes $modes --timeout-ms 12000
   $nativeExit=$LASTEXITCODE
   if(-not(Test-Path "$out/results.json")){throw 'Missing protocol evidence'}
   $report=Get-Content "$out/results.json" -Raw | ConvertFrom-Json
   if($report.fixtures[0].infoHash -ne $expectedHash -or $report.fixtures[0].fileIdx -ne 0){throw 'Protocol changed torrent/file identity'}
-  if(@($report.runs).Count -ne 1){throw 'Missing protocol sample'}
+  $expectedSamples=if($case.expected){6}else{1}
+  if(@($report.runs).Count -ne $expectedSamples){throw 'Missing protocol samples'}
   if($case.expected){
-    if($nativeExit -ne 0 -or -not $report.runs[0].ok){$failures+=$case.name}
+    if($nativeExit -ne 0 -or @($report.runs | Where-Object {-not $_.ok}).Count){$failures+=$case.name}
   }else{
     if($nativeExit -eq 0 -or $report.runs[0].ok -or $report.runs[0].startPlaybackError -notmatch 'رفض محرك التورنت الطلب'){throw "Missing exact negative protocol control: $($case.name)"}
     $global:LASTEXITCODE=0

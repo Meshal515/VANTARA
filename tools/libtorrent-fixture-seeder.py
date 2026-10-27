@@ -48,11 +48,14 @@ while not all(h.status().is_seeding for h in handles) or not session.is_listenin
         raise SystemExit("fixture seeder did not verify all files")
     time.sleep(0.025)
 actual = session.get_settings()
-Path(args.ready).write_text(json.dumps({"verified": True, "transport": args.transport,
+ready = Path(args.ready)
+pending_ready = ready.with_name(ready.name + ".tmp")
+pending_ready.write_text(json.dumps({"verified": True, "transport": args.transport,
     "requestedPort": args.listen_port, "listenPort": session.listen_port(),
     "encryption": args.encryption, "incomingTcp": actual["enable_incoming_tcp"],
     "incomingUtp": actual["enable_incoming_utp"], "inEncPolicy": actual["in_enc_policy"],
     "allowedEncLevel": actual["allowed_enc_level"]}))
+pending_ready.replace(ready)
 last_control_nonce = None
 while True:
     if args.control and Path(args.control).exists():

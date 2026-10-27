@@ -2,7 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import net from 'node:net';
-import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay, waitForOwnedTcpListener, waitForOwnedBitTorrentPeer } from './torrent-startup-benchmark.mjs';
+import cp from 'node:child_process';
+import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay, waitForOwnedTcpListener, waitForOwnedBitTorrentPeer, windowsProcessSnapshot } from './torrent-startup-benchmark.mjs';
+
+test('process sampling leaves owned UDP traffic live while its real child query is pending',async t=>{
+  const seed=dgram.createSocket('udp4'),client=dgram.createSocket('udp4');
+  t.after(()=>{seed.close();client.close();});await new Promise(r=>seed.bind(0,'127.0.0.1',r));
+  seed.on('message',(b,from)=>seed.send(b,from.port,from.address));
+  const relay=await createUtpFixtureRelay(seed.address().port);t.after(()=>relay.close());
+  let finished=false;
+  const sample=windowsProcessSnapshot([process.pid],(_binary,_args,options,callback)=>cp.execFile(process.execPath,['-e','setTimeout(()=>console.log("[]"),500)'],options,callback)).then(x=>{finished=true;return x;});
+  const echoed=new Promise((resolveEcho,reject)=>{const timer=setTimeout(()=>reject(new Error('sampler blocked UDP forwarding')),250);client.once('message',()=>{clearTimeout(timer);resolveEcho();});});
+  client.send(Buffer.from('owned sampler probe'),relay.port,'127.0.0.1');await echoed;
+  assert.equal(finished,false);assert.deepEqual(await sample,[]);
+});
 
 test('fixture readiness verifies the requested BitTorrent hash, not an accepted TCP socket',async t=>{
   const hash='a'.repeat(40);let attempts=0;
