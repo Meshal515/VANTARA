@@ -137,7 +137,7 @@ export function renderV7Addons({
     statusSlot.append(stateLabel);info.append(statusSlot);
     const actions=el("div","v7-actions");
     if(mode==="remote"){
-      if(a.bundled || a.enabled!==false){
+      if(canOpenRemote(a)){
         const open=btn("فتح","v7-simple-btn",e=>{e.stopPropagation();openRemote(a);});
         open.prepend(ico("open"));actions.append(open);
       }
@@ -216,7 +216,7 @@ export function renderV7Addons({
   function draw(){
     if(!alive)return;
     const allRemote=registry.list?.()||[];
-    const allNative=[...extensions.values()].flatMap(x=>x.items.map(ext=>({...ext,_store:x.store,_url:x.url})));
+    const allNative=[...extensions.values()].flatMap(x=>x.items.map(ext=>({...ext,kind:x.store.kind,_store:x.store,_url:x.url})));
     const installedNative=allNative.filter(x=>x.installed || x.update);
     repoCount.textContent=String(repos.length);
     installedCount.textContent=String(allRemote.length+installedNative.length);
@@ -235,7 +235,7 @@ export function renderV7Addons({
         const ext=extensions.get(opened.key);
         if(!ext){body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
         const records=filtered(ext.items.filter(x=>!x.nsfw));
-        for(const item of records)list.append(sourceRow({...item,_store:opened.group,_url:opened.data.url},"native",opened.data));
+        for(const item of records)list.append(sourceRow({...item,kind:opened.group.kind,_store:opened.group,_url:opened.data.url},"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
         if(!repos.length){body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
@@ -280,7 +280,7 @@ export function renderV7Addons({
       if(alive){extensions.set(r.key,{store:r.group,url:r.data.url,items:items||[]});draw();}
     }catch(err){notify(fmtErr(err));}
   }
-  function closeModal(){if(busy)return;modal=null;layer.hidden=true;dialog.replaceChildren();}
+  function closeModal(force=false){if(busy&&!force)return;modal=null;layer.hidden=true;dialog.replaceChildren();}
   function showDialog(title,description){
     modal=true;layer.hidden=false;dialog.replaceChildren();
     dialog.append(el("h3",null,title));
@@ -308,7 +308,7 @@ export function renderV7Addons({
       if(!a.installed){
         acts.append(btn("تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
-          try{await installNative(a);closeModal();onSourcesChanged();await refresh();}
+          try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
       }else{
@@ -347,7 +347,7 @@ export function renderV7Addons({
       try{
         if(mode==="remote")await registry.remove(a.key);
         else await a._store.api.uninstall(a.pkg);
-        closeModal();onSourcesChanged();await refresh();draw();
+        closeModal(true);onSourcesChanged();await refresh();draw();
       }catch(err){notify(fmtErr(err));}finally{busy=false;yes.disabled=false;}
     });
     actions.append(cancel,yes);dialog.append(actions);
@@ -382,7 +382,7 @@ export function renderV7Addons({
         note.textContent="الإضافة: "+preview.manifest.name+" · راجع المصدر قبل التثبيت.";
         yes.textContent="تأكيد التثبيت";yes.onclick=async()=>{
           if(busy)return;busy=true;yes.disabled=true;
-          try{await registry.install(preview);closeModal();await refresh();onSourcesChanged();}
+          try{await registry.install(preview);closeModal(true);await refresh();onSourcesChanged();}
           catch(e){note.textContent=fmtErr(e);}finally{busy=false;yes.disabled=false;}
         };
         return;
@@ -396,7 +396,7 @@ export function renderV7Addons({
           note.textContent="جارٍ قراءة المستودع باستخدام "+(store.kind==="anime"?"Aniyomi":"Mihon")+"…";
           const result=await store.api.add(uri);
           note.textContent="مستودع "+(result?.repo?.name||"جديد")+" يحتاج تأكيدًا في المحرك.";
-          matched=true;onSourcesChanged();await refresh();closeModal();break;
+          matched=true;onSourcesChanged();await refresh();closeModal(true);break;
         }catch(e){lastError=fmtErr(e);}
       }
       if(!matched)note.textContent=lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية.";
@@ -429,7 +429,7 @@ export function renderV7Addons({
         if(busy)return;busy=true;
         try{
           for(const pick of picks.filter(p=>p.cb.checked&&p.preview))await registry.install(pick.preview);
-          closeModal();await refresh();onSourcesChanged();
+          closeModal(true);await refresh();onSourcesChanged();
         }catch(e){state.textContent=fmtErr(e);}finally{busy=false;}
       });
     }catch(e){note.textContent=fmtErr(e);}
