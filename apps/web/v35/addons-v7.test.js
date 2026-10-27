@@ -220,3 +220,51 @@ it('reveals delete at 300ms and reports rejected source refresh at 400ms without
   expect(view.querySelector('.v7-diagnostic').textContent).toContain('source refresh failed');
   view.close();expect(vi.getTimerCount()).toBe(0);
 });
+
+it('keeps verification quiet outside Add-ons and exposes the explicit in-page button',async()=>{
+  const d=setup(),begin=vi.fn(async({host})=>({host,state:'verified',ok:true}));
+  const verification={
+    subscribe:fn=>{fn([{host:'mesh.example',sourceName:'Mesh Manga'}]);return vi.fn();},
+    begin:host=>begin({host}),
+  };
+  const view=renderV7Addons({registry:registry(),verification});d.body.append(view);await tick();
+  expect(d.querySelector('[data-source-verification]')).toBeNull();
+  const entry=view.querySelector('.v7-verify-entry');
+  expect(entry.textContent).toContain('مصادر تحتاج تحقق');
+  expect(begin).not.toHaveBeenCalled();
+  entry.click();await tick();
+  expect(begin).not.toHaveBeenCalled();
+  const button=[...view.querySelectorAll('.v7-verification-item button')][0];
+  button.click();await tick();
+  expect(begin).toHaveBeenCalledOnce();
+  expect(begin).toHaveBeenCalledWith({host:'mesh.example'});
+  view.close();
+});
+
+it('offers verification on matching source details without confusing it with installed status',async()=>{
+  const d=setup();
+  const begin=vi.fn(async()=>({ok:true}));
+  const verification={subscribe:fn=>{fn([{host:'mesh.example',sourceName:'Mesh Manga'}]);return()=>{};},begin};
+  const api={list:async()=>({repos:[{url:'https://repo.example/index.json',name:'Mihon'}]}),
+    extensions:async()=>[{name:'Mesh Manga',pkg:'test.pkg',domain:'mesh.example',installed:true}]};
+  const view=renderV7Addons({registry:registry(),repositories:api,verification});d.body.append(view);await tick();
+  browse(view);await tick();
+  view.querySelector('.v7-row').click();await tick();
+  expect(view.querySelector('.v7-dialog').textContent).toContain('لم تُفحص');
+  const verify=[...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent.includes('تحقق من المصدر'));
+  expect(verify).toBeTruthy();
+  expect(begin).not.toHaveBeenCalled();
+  verify.click();await tick();
+  expect(begin).toHaveBeenCalledWith('mesh.example');
+  view.close();
+});
+
+it('uses a neutral SVG fallback when no authentic icon is available',async()=>{
+  const d=setup(),api={list:async()=>({repos:[{url:'https://repo.example/index.json',name:'Repo'}]}),
+    extensions:async()=>[{name:'Missing Icon',pkg:'pkg.noicon'}]};
+  const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
+  browse(view);await tick();
+  expect(view.querySelector('.v7-row .v7-fallback svg')).toBeTruthy();
+  expect(view.querySelector('.v7-row .v7-fallback').textContent).toBe('');
+  view.close();
+});
