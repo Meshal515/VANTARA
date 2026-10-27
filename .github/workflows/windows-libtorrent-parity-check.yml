@@ -51,6 +51,7 @@ jobs:
             ${{ runner.temp }}/vantara-engine-validation/runs/**/results.json
             ${{ runner.temp }}/vantara-engine-validation/runs/**/run.json
             ${{ runner.temp }}/vantara-engine-validation/runs/**/before-process-restart.json
+            ${{ runner.temp }}/vantara-engine-validation/runs/**/process-*.json
           if-no-files-found: error
   native-comparison:
     name: Real MPV Playback Validation (${{ matrix.suite }}, required)

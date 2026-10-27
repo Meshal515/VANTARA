@@ -35,18 +35,30 @@ foreach($engine in @('rqbit','libtorrent')){
   $before=Get-Content "$out/results.json" -Raw | ConvertFrom-Json
   if($engineIdentity -and $engineIdentity -ne $before.fixtures[0].infoHash){throw 'Engine comparison changed torrent identity'}
   $engineIdentity=$before.fixtures[0].infoHash
-  & node @base --modes restart,partial,corrupt
-  $secondExit=$LASTEXITCODE
-  if(-not(Test-Path "$out/results.json")){throw 'Missing restarted-process evidence'}
-  $after=Get-Content "$out/results.json" -Raw | ConvertFrom-Json
-  if(@($before.runs).Count -ne 6 -or @($after.runs).Count -ne 9){throw 'Missing required engine samples'}
-  if($before.serviceHostPid -eq $after.serviceHostPid){throw 'Application-services process did not restart'}
-  if($before.fixtures[0].infoHash -ne $after.fixtures[0].infoHash){throw 'Restart changed torrent identity'}
-  if($firstExit -ne 0 -or $secondExit -ne 0 -or @($before.runs | Where-Object {-not $_.ok}).Count -or @($after.runs | Where-Object {-not $_.ok}).Count){$failures+=$engine}
+  $processIds=@($before.serviceHostPid)
+  $cacheRows=@()
+  $cacheFailed=$false
+  foreach($cacheMode in @('restart','partial','corrupt')){
+    # Each persisted-cache mode starts a fresh OS application-services process.
+    # In particular, partial replay cannot inherit module/session state from a
+    # preceding full replay in this same process.
+    & node @base --modes $cacheMode
+    $cacheExit=$LASTEXITCODE
+    if(-not(Test-Path "$out/results.json")){throw 'Missing restarted-process evidence'}
+    Copy-Item "$out/results.json" "$out/process-$cacheMode.json"
+    $cacheReport=Get-Content "$out/results.json" -Raw | ConvertFrom-Json
+    $processIds+=@($cacheReport.serviceHostPid)
+    if($before.fixtures[0].infoHash -ne $cacheReport.fixtures[0].infoHash){throw 'Process restart changed torrent identity'}
+    if($cacheExit -ne 0){$cacheFailed=$true}
+    $cacheRows+=@($cacheReport.runs)
+  }
+  if(@($before.runs).Count -ne 6 -or $cacheRows.Count -ne 9){throw 'Missing required engine samples'}
+  if(@($processIds | Select-Object -Unique).Count -ne 4){throw 'Each cache mode must start a separate application-services process'}
+  if($firstExit -ne 0 -or $cacheFailed -or @($before.runs | Where-Object {-not $_.ok}).Count -or @($cacheRows | Where-Object {-not $_.ok}).Count){$failures+=$engine}
   foreach($row in @($before.runs | Where-Object {$_.mode -eq 'cold'})){if($row.cacheBefore.available){throw 'Cold start unexpectedly reused replay cache'}}
   $expectedHash=$before.fixtures[0].infoHash
   foreach($mode in @('restart','partial','corrupt')){
-    $rows=@($after.runs | Where-Object {$_.mode -eq $mode})
+    $rows=@($cacheRows | Where-Object {$_.mode -eq $mode})
     if($rows.Count -ne 3){throw 'Missing required restarted/cache samples'}
     foreach($row in $rows){if(-not $row.cacheBefore.available){throw 'Restart test had no persisted cache'}}
   }
