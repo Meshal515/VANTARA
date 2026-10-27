@@ -559,10 +559,10 @@ test('ملف ترجمة مقبول SRT/VTT/ASS فقط، محدود دون HTML �
   assert.equal(validateSubtitleText('[Script Info]\nTitle: Owned\n[Events]\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,مرحبا').extension,'ass');
   for(const text of ['<html>not subtitles</html>','#EXTM3U\nhttps://private.local','PK\u0003\u0004bytes','random text','x'.repeat(2*1024*1024+1),'1\n00:00:00,000 --> 00:00:02,000\nhi\u0000'])assert.throws(()=>validateSubtitleText(text),/ترجمة|الحد/);
 });
-async function subtitleSource(t,{slow=false,invalid=false,oversize=false,redirect=false,legacyArabic=false,utf16=false,declaredCharset=null}={}){
+async function subtitleSource(t,{slow=false,blocked=null,invalid=false,oversize=false,redirect=false,legacyArabic=false,utf16=false,declaredCharset=null}={}){
   const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
   const body=utf16?Buffer.concat([Buffer.from([255,254]),Buffer.from('1\n00:00:00,000 --> 00:00:02,000\nمرحبا\n','utf16le')]):legacyArabic?Buffer.concat([Buffer.from('1\n00:00:00,000 --> 00:00:02,000\n'),Buffer.from([0xe3,0xd1,0xcd,0xc8,0xc7])]):oversize?'x'.repeat(2*1024*1024+1):invalid?'<html>upstream failed</html>':'1\n00:00:00,000 --> 00:00:02,000\nترجمة مؤلفة\n';
-  const source=http.createServer((req,res)=>{if(declaredCharset)res.setHeader('content-type','text/plain; charset='+declaredCharset);if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
+  const source=http.createServer((req,res)=>{if(declaredCharset)res.setHeader('content-type','text/plain; charset='+declaredCharset);if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(blocked)blocked.then(()=>res.end(body));else if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
   t.after(()=>new Promise(r=>source.close(r)));t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
   t.mock.method(https,'request',(url,options,cb)=>http.request(`http://127.0.0.1:${source.address().port}${url.pathname}`,{...options,lookup:undefined},cb));return body;
 }
@@ -647,10 +647,16 @@ test('تنزيل ترجمة متأخر لا يضاف لمشغل جديد يحم�
 });
 
 test('ترجمات candidate تنزل في الخلفية بأولوية العربية دون تأخير startPlayback',async t=>{
-  await subtitleSource(t,{slow:true});const {services,dir}=await fixture(t);
-  await services.startPlayback({session:'embedded',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[{url:'https://subs.example.com/en.srt',lang:'en'},{url:'https://subs.example.com/ar.srt',lang:'ar'}]}});
+  let release;const blocked=new Promise(resolve=>release=resolve);t.after(()=>release());
+  await subtitleSource(t,{blocked});const {services,dir}=await fixture(t);
+  // Hold responses until playback has returned: prove independence from the
+  // download without two synthetic 150ms delays consuming a disk/IPC deadline.
+  const start=services.startPlayback({session:'embedded',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[{url:'https://subs.example.com/en.srt',lang:'en'},{url:'https://subs.example.com/ar.srt',lang:'ar'}]}});
+  await Promise.race([start,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error('playback waited for blocked subtitle responses')),380);timer.unref();})]);
   let commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
-  await new Promise(r=>setTimeout(r,380));commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);const adds=commands.filter(m=>m.command[0]==='sub-add');
+  release();const deadline=Date.now()+380;
+  do{commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);if(commands.filter(m=>m.command[0]==='sub-add').length===2)break;await new Promise(r=>setTimeout(r,10));}while(Date.now()<deadline);
+  const adds=commands.filter(m=>m.command[0]==='sub-add');
   assert.equal(adds.length,2);assert.equal(adds[0].command[4],'ar');assert.equal(adds[0].command[2],'select');assert.equal(adds[1].command[2],'auto');
 });
 test('subtitle-load يرفض هدفًا داخليًا والتوجيه الداخلي والملف فوق 2MiB دون تمرير URL إلى mpv',async t=>{

@@ -201,10 +201,17 @@ class SwarmTests(unittest.TestCase):
         response.close()
         c.close()
         until = time.monotonic() + 1
-        while self.engine.readers and time.monotonic() < until:
+        while time.monotonic() < until:
+            # Cleanup removes the reader and calls libtorrent to reset all its
+            # deadlines under this same lock. Those C++ calls release the GIL;
+            # an unlocked test could observe half of that atomic transition.
+            with self.engine.changed:
+                if not self.engine.readers:
+                    break
             time.sleep(0.01)
-        self.assertEqual({}, self.engine.readers)
-        self.assertEqual({}, self.engine.priorities)
+        with self.engine.changed:
+            self.assertEqual({}, self.engine.readers)
+            self.assertEqual({}, self.engine.priorities)
 
     def test_storage_reserve_stops_new_piece_requests_before_disk_exhaustion(self):
         self.add_with_peer()
