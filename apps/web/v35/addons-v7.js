@@ -40,7 +40,7 @@ const safe=(value)=>{
 };
 const label=(x)=>String(x||"V").trim().slice(0,2).toUpperCase();
 const kindName=(a)=>{
-  if(a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
+  if(a.kind==="anime" || a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
   if((a.contentTypes||[]).includes("manga") || a.kind==="manga")return "مانجا";
   if((a.contentTypes||[]).some(x=>x==="movie"||x==="series"))return "سينما";
   if((a.capabilities||[]).includes("subtitles"))return "ترجمة";
@@ -131,7 +131,7 @@ export function renderV7Addons({
     const logoBox=logo(a,parent),info=el("div","v7-info");
     info.append(el("div","v7-name",a.name),el("div","v7-meta",sourceMeta(a)));
     const statusSlot=el("div","v7-status-slot"),stateLabel=el("span","v7-status");
-    const isAdded=mode==="remote"?true:!!a.installed;
+    const isAdded=mode==="remote"?true:!!(a.installed||a.builtin);
     stateLabel.textContent="● مثبتة";
     if(isAdded)stateLabel.classList.add("visible");
     statusSlot.append(stateLabel);info.append(statusSlot);
@@ -149,9 +149,9 @@ export function renderV7Addons({
       const slot=el("div","v7-trash-holder");
       const trash=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"native");});
       trash.append(ico("trash"));trash.setAttribute("aria-label","حذف "+a.name);slot.append(trash);
-      if(a.installed)slot.classList.add("visible");
-      const flip=el("button","v7-flip"+(a.installed?" installed":""));
-      flip.type="button";flip.setAttribute("aria-label",(a.installed?"فتح ":"تثبيت ")+a.name);
+      if(isAdded)slot.classList.add("visible");
+      const flip=el("button","v7-flip"+(isAdded?" installed":""));
+      flip.type="button";flip.setAttribute("aria-label",(isAdded?"فتح ":"تثبيت ")+a.name);
       const rotor=el("span","v7-rotor");
       const front=el("span","v7-face v7-front","تثبيت");
       const rear=el("span","v7-face v7-rear");
@@ -159,7 +159,7 @@ export function renderV7Addons({
       flip.onclick=async e=>{
         e.stopPropagation();
         if(flip.disabled)return;
-        if(a.installed){
+        if(a.installed||a.builtin){
           showDetails(a,"native");
           return;
         }
@@ -305,7 +305,7 @@ export function renderV7Addons({
       if(!canOpenRemote(a))dialog.append(el("p","v7-notice","هذه الإضافة لا تعرض كتالوجًا مباشرًا على هذا الجهاز؛ تبقى متاحة لوظائفها المدعومة."));
     }else{
       const acts=el("div","v7-dialog-actions");
-      if(!a.installed){
+      if(!a.installed&&!a.builtin){
         acts.append(btn("تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
           try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
@@ -319,7 +319,7 @@ export function renderV7Addons({
     }
   }
   function canOpenRemote(a){
-    return a.enabled!==false && supportedCapabilities(a,registry.runtimeName||"pwa")
+    return a.enabled!==false && !(a.configuration?.required && !a.configuration?.configured) && supportedCapabilities(a,registry.runtimeName||"pwa")
       .some(c=>["catalog","home","search"].includes(c));
   }
   function openRemote(a){
