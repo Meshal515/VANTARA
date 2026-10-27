@@ -100,9 +100,22 @@ try {
     }
     const stored=await new Promise((resolve,reject)=>{const r=db.transaction('proof').objectStore('proof').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
     db.close();
-    if(localStorage.getItem(key)!==JSON.stringify(value)||JSON.stringify(stored)!==JSON.stringify(value))throw new Error('APK upgrade lost storage or changed native identity');
-    return {localStorage:true,indexedDB:true,nativeIdentity:true};
+    const persisted=localStorage.getItem(key);
+    const saved=JSON.parse(persisted||'null');
+    // Diagnostic booleans only: do not expose device IDs or user data in logs.
+    return {
+      localStorage:persisted===JSON.stringify(value),
+      indexedDB:JSON.stringify(stored)===JSON.stringify(value),
+      nativeIdentity:saved?.deviceId===native.identifier,
+      localExists:persisted!==null,
+      indexedDBExists:stored!==undefined,
+      nativeHasIdentifier:typeof native.identifier==='string'&&native.identifier.length>0,
+    };
   })()`);
+  console.log('Debug upgrade storage proof:', JSON.stringify(proof.retention));
+  if (!proof.retention.localStorage || !proof.retention.indexedDB || !proof.retention.nativeIdentity) {
+    throw new Error('APK upgrade retention failure (diagnostics in '+out+'/'+phase+'.json): '+JSON.stringify(proof.retention));
+  }
   if (phase === 'candidate') {
     // No production credentials or synthetic login: render the actual shipped
     // shell using a local anonymous sync fixture; native engines stay real.
