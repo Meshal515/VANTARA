@@ -80,6 +80,8 @@ class LocalPayloadTest(unittest.TestCase):
     # Removing metadata or digest validation would admit changed executable bytes
     # or silently replace the reviewed source snapshot with different metadata.
     def setUp(self):
+        self.enterContext(patch.object(gas, "COMMIT", "test-commit"))
+        self.enterContext(patch.object(gas, "INDEX_URL", "https://raw.githubusercontent.com/keiyoushi/extensions/test-commit/index.json"))
         self.folder = TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.root = Path(self.folder.name)
