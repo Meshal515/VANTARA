@@ -112,6 +112,30 @@ def safe_files(info):
     return result
 
 
+def peer_ip_filter(_test_loopback=False):
+    ip_filter = lt.ip_filter()
+    if not _test_loopback:
+        # Match Android's deny rules, including DNS-resolved trackers/peers.
+        for start, end in [
+            ("0.0.0.0", "0.255.255.255"), ("10.0.0.0", "10.255.255.255"),
+            ("100.64.0.0", "100.127.255.255"), ("127.0.0.0", "127.255.255.255"),
+            ("169.254.0.0", "169.254.255.255"), ("172.16.0.0", "172.31.255.255"),
+            # RFC 6890 special-purpose /24 and TEST-NET-1, not all 192.0/16.
+            # The former /16 also excluded ordinary public peer IPs such as
+            # 192.0.78.1. Private, loopback, link-local and documentation ranges
+            # remain denied; the loopback test exception is never a CLI option.
+            ("192.0.0.0", "192.0.0.255"), ("192.0.2.0", "192.0.2.255"),
+            ("192.168.0.0", "192.168.255.255"),
+            ("198.18.0.0", "198.19.255.255"), ("224.0.0.0", "255.255.255.255"),
+            ("::", "1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+            ("4000::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+            ("2001:db8::", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff"),
+            ("2002::", "2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+        ]:
+            ip_filter.add_rule(start, end, 1)
+    return ip_filter
+
+
 class Engine:
     def __init__(self, root, state_dir, listen_port, *, _test_loopback=False):
         self.root = Path(root).resolve()
@@ -157,22 +181,7 @@ class Engine:
         if _test_loopback:
             settings.update(enable_dht=False, listen_interfaces=f"127.0.0.1:{listen_port}")
         self.session = lt.session(settings)
-        ip_filter = lt.ip_filter()
-        if not _test_loopback:
-            # Match Android's deny rules, including DNS-resolved trackers/peers.
-            for start, end in [
-                ("0.0.0.0", "0.255.255.255"), ("10.0.0.0", "10.255.255.255"),
-                ("100.64.0.0", "100.127.255.255"), ("127.0.0.0", "127.255.255.255"),
-                ("169.254.0.0", "169.254.255.255"), ("172.16.0.0", "172.31.255.255"),
-                ("192.0.0.0", "192.0.255.255"), ("192.168.0.0", "192.168.255.255"),
-                ("198.18.0.0", "198.19.255.255"), ("224.0.0.0", "255.255.255.255"),
-                ("::", "1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-                ("4000::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-                ("2001:db8::", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff"),
-                ("2002::", "2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-            ]:
-                ip_filter.add_rule(start, end, 1)
-        self.session.set_ip_filter(ip_filter)
+        self.session.set_ip_filter(peer_ip_filter(_test_loopback))
         state_file = self.state_dir / "dht.state"
         try:
             if state_file.stat().st_size <= 512 * 1024:
