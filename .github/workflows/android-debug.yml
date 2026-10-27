@@ -281,7 +281,7 @@ jobs:
             dist/VANTARA-debug.apk dist/VANTARA-debug.apk.sha256
           gh release upload debug-channel --repo "$GITHUB_REPOSITORY" --clobber \
             dist/vantara-debug-update.json
-          gh release view debug-channel --repo "$GITHUB_REPOSITORY" --json isPrerelease,isLatest --jq '.isPrerelease'
+          gh release view debug-channel --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease'
           echo '### VANTARA Debug channel' >> "$GITHUB_STEP_SUMMARY"
           echo "APK: https://github.com/$GITHUB_REPOSITORY/releases/download/debug-channel/VANTARA-debug.apk" >> "$GITHUB_STEP_SUMMARY"
           echo "Version: 0.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_STEP_SUMMARY"
