@@ -158,7 +158,7 @@ async function processMetrics(children){
   const rows=[];for(const {child,role} of children){try{const text=await fs.readFile(`/proc/${child.pid}/stat`,'utf8'),fields=text.slice(text.lastIndexOf(')')+2).split(' '),status=await fs.readFile(`/proc/${child.pid}/status`,'utf8');rows.push({role,pid:child.pid,cpuTicks:Number(fields[11])+Number(fields[12]),rssBytes:Number(/VmRSS:\s+(\d+)/.exec(status)?.[1]??0)*1024});}catch{}}
   return {available:true,cpuTickUnit:'OS scheduler ticks; not converted to seconds',processes:rows};
 }
-async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,audio=false){
+export async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,audio=false){
   const name=`authored-${kind}.${kind==='mkv'?'mkv':'mp4'}`,path=join(folder,name);
   if(fixturesFrom)await fs.copyFile(join(resolve(fixturesFrom),name),path);
   else {

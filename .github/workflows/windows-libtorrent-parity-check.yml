@@ -21,6 +21,7 @@ on:
       - 'tools/torrent-validation*'
       - 'tools/windows-torrent-engine-validation.ps1'
       - 'tools/windows-torrent-evidence*'
+      - 'tools/torrent-fixture-pack*'
       - '.github/workflows/windows-libtorrent-parity-check.yml'
 permissions:
   contents: read
@@ -28,6 +29,32 @@ concurrency:
   group: windows-libtorrent-parity-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  owned-video-fixtures:
+    name: One checksum-verified owned video pack for every comparison
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generate the owned fixture files once, including the exact MKV bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'fixture-ffmpeg.zip'
+          Invoke-WebRequest 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-26-14-25/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-shared-8.1.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '40daf4793f3adcf13ed6658c775c10380188e99059a286a12ad984ca5992a34d'){throw 'Fixture encoder checksum mismatch'}
+          $bin=Join-Path $env:RUNNER_TEMP 'fixture-ffmpeg'
+          Expand-Archive $zip -DestinationPath $bin
+          $ffmpeg=Get-ChildItem $bin -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          node tools/torrent-fixture-pack.mjs create (Join-Path $env:RUNNER_TEMP 'vantara-owned-torrent-fixtures') $ffmpeg.FullName
+          if($LASTEXITCODE -ne 0){throw 'Owned fixture generation/verification failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-owned-torrent-fixtures-${{ github.sha }}
+          path: ${{ runner.temp }}/vantara-owned-torrent-fixtures/
+          if-no-files-found: error
   torrent-engine-validation:
     name: Torrent Engine Validation (verified bytes, no decoder)
     runs-on: windows-2022
@@ -54,6 +81,7 @@ jobs:
             ${{ runner.temp }}/vantara-engine-validation/runs/**/process-*.json
           if-no-files-found: error
   native-comparison:
+    needs: owned-video-fixtures
     name: Real MPV Playback Validation (${{ matrix.suite }}, required)
     strategy:
       fail-fast: false
@@ -136,6 +164,19 @@ jobs:
           "PARITY_RQBIT=$rqbit" | Out-File -Append $env:GITHUB_ENV
           "PARITY_MPV=$($mpv.FullName)" | Out-File -Append $env:GITHUB_ENV
           "PARITY_FFMPEG=$($ffmpeg.FullName)" | Out-File -Append $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        if: startsWith(matrix.suite, 'containers-')
+        with:
+          name: windows-owned-torrent-fixtures-${{ github.sha }}
+          path: ${{ runner.temp }}/vantara-shared-fixtures
+      - name: Verify every downloaded comparison byte before running either engine
+        if: startsWith(matrix.suite, 'containers-')
+        shell: pwsh
+        run: |
+          $dir=Join-Path $env:RUNNER_TEMP 'vantara-shared-fixtures'
+          node tools/torrent-fixture-pack.mjs verify $dir
+          if($LASTEXITCODE -ne 0){throw 'Comparison fixture bytes changed'}
+          "PARITY_FIXTURES=$dir" | Out-File -Append $env:GITHUB_ENV
       - name: Compare actual rendered frames across both clients and both seed engines
         if: startsWith(matrix.suite, 'containers-')
         shell: pwsh
@@ -143,7 +184,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $PSNativeCommandUseErrorActionPreference=$false
           $failed=$false
-          $fixtures=$null
+          $fixtures=$env:PARITY_FIXTURES
           $pair=$env:PARITY_SUITE -split '-'
           foreach($seed in @('rqbit','libtorrent')){
             if($seed -ne $pair[1]){continue}
