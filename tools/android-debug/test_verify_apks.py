@@ -59,6 +59,7 @@ class UpgradeContract(unittest.TestCase):
         certificate = 'A' * 64
         output = (
             'Verifies\n'
+            'Number of signers: 1\n'
             'Signer #1 certificate DN: CN=VANTARA\n'
             f'  Signer #1 certificate SHA-256 digest: {certificate}  \n'
             'Source Stamp Signer certificate SHA-256 digest: ' + 'B' * 64 + '\n'
