@@ -1,24 +1,22 @@
-/*
- * Holds a weak reference to the currently-resumed Activity so the Cloudflare
- * solver can attach its WebView to a live window.
- *
- * A Cloudflare managed/Turnstile challenge only completes when the WebView is
- * attached to the view hierarchy and rendered: a detached WebView has its JS
- * timers throttled, so the challenge's proof-of-work never finishes and the
- * cf_clearance cookie is never issued. Attaching a 1x1, transparent WebView is
- * enough to let the challenge run without being visible to the user.
- */
+/* Weak, lifecycle-checked window ownership for remaining passive WebView tasks.
+ * Explicit human verification owns its own isolated VerificationActivity. */
 package eu.kanade.tachiyomi.network.interceptor
 
 import android.app.Activity
-import java.lang.ref.WeakReference
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import com.vantara.verification.ForegroundOwner
 
 object WebViewActivityHolder {
-    private var ref: WeakReference<Activity>? = null
+    private val owner = ForegroundOwner<Activity>(
+        { !it.isFinishing && !it.isDestroyed && it.window?.decorView?.isAttachedToWindow == true },
+        { (it as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true },
+    )
 
-    fun set(activity: Activity?) {
-        ref = activity?.let { WeakReference(it) }
-    }
+    @JvmStatic fun set(activity: Activity?) { owner.set(activity) }
+    @JvmStatic fun resumed(activity: Activity) { owner.resumed(activity) }
+    @JvmStatic fun paused(activity: Activity) { owner.paused(activity) }
+    @JvmStatic fun clear(activity: Activity?) { owner.clear(activity) }
 
-    fun get(): Activity? = ref?.get()
+    @JvmStatic fun get(): Activity? = owner.get()
 }

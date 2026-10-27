@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { renderV7Addons } from './addons-v7.js';
 
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 const tick = async () => { for(let i=0;i<8;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
 const setup = () => {
   const {document,window}=parseHTML('<html><body></body></html>');
@@ -71,4 +71,152 @@ it('preserves safe catalog routing and never advertises direct browsing for a st
   catalog.querySelector('.v7-simple-btn').click();
   expect(open).toHaveBeenCalledWith(items[0]);
   view.close();
+});
+
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((ok, fail) => { resolve=ok; reject=fail; });
+  return {promise,resolve,reject};
+};
+const browse = view => [...view.querySelectorAll('.v7-simple-btn')].find(x=>x.textContent.includes('استعراض'))?.click();
+
+it('shows saved repositories before a slow extension index finishes and shares its in-flight request', async()=>{
+  const d=setup(), index=deferred();
+  const api={list:async()=>({repos:[{url:'https://repo.example/index.json',name:'Slow Repo'}]}),extensions:vi.fn(()=>index.promise)};
+  const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
+  expect(view.querySelector('.v7-body').textContent).toContain('Slow Repo');
+  browse(view);view.back();browse(view);await tick();
+  expect(api.extensions).toHaveBeenCalledOnce();
+  index.resolve([{name:'Loaded Source',pkg:'pkg.loaded'}]);await tick();
+  expect(view.querySelector('.v7-body').textContent).toContain('Loaded Source');view.close();
+});
+
+it('keeps index failure visible with retry instead of a permanent loading message', async()=>{
+  const d=setup();let fail=true;
+  const api={list:async()=>({repos:[{url:'https://repo.example/index.json',name:'Saved Repo'}]}),extensions:async()=>{if(fail)throw Error('index offline');return [{name:'Recovered Source',pkg:'pkg.recovered'}];}};
+  const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();browse(view);await tick();
+  expect(view.querySelector('.v7-body').textContent).toContain('index offline');
+  expect(view.querySelector('.v7-body').textContent).not.toContain('جارٍ تحميل المصادر');
+  fail=false;[...view.querySelectorAll('button')].find(x=>x.textContent==='إعادة المحاولة').click();await tick();
+  expect(view.querySelector('.v7-body').textContent).toContain('Recovered Source');view.close();
+});
+
+it('preserves refresh errors after drawing and redacts source URLs', async()=>{
+  setup();
+  const api={list:async()=>{throw Error('offline https://repo.example/private?token=secret');},extensions:async()=>[]};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();
+  expect(view.querySelector('.v7-diagnostic').textContent).toContain('offline');
+  expect(view.textContent).not.toContain('token=secret');view.close();
+});
+
+it('removes cached installed sources only after their saved repository is actually removed', async()=>{
+  setup();let saved=true;
+  const api={list:async()=>({repos:saved?[{url:'https://repo.example/index.json',name:'Saved Repo'}]:[]}),extensions:async()=>[{name:'Old Source',pkg:'old',installed:true}]};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();installedTab(view).click();
+  expect(view.textContent).toContain('Old Source');saved=false;view.reload();await tick();
+  expect(view.querySelector('.v7-body').textContent).not.toContain('Old Source');view.close();
+});
+
+it('ignores stale discovery results after close and reload', async()=>{
+  setup();const oldSites=deferred();let calls=0;
+  const sites={list:()=>++calls===1?oldSites.promise:Promise.resolve([{id:'current',label:'Current Site'}])};
+  const view=renderV7Addons({registry:registry(),sites});await tick();view.close();view.reload();await tick();
+  oldSites.resolve([{id:'stale',label:'Stale Site'}]);await tick();installedTab(view).click();
+  expect(view.querySelector('.v7-body').textContent).toContain('Current Site');
+  expect(view.querySelector('.v7-body').textContent).not.toContain('Stale Site');view.close();
+});
+
+it('bounds native index discovery for many saved repositories and stops queued work on close', async()=>{
+  setup();const pending=[];
+  const api={list:async()=>({repos:Array.from({length:30},(_,i)=>({name:'Repo '+i,url:'https://repo.example/'+i+'.json'}))}),extensions:vi.fn(()=>{const job=deferred();pending.push(job);return job.promise;})};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();
+  expect(api.extensions.mock.calls.length).toBeGreaterThan(0);
+  expect(api.extensions.mock.calls.length).toBeLessThanOrEqual(4);
+  view.close();const calls=api.extensions.mock.calls.length;pending.forEach(x=>x.resolve([]));await tick();
+  expect(api.extensions).toHaveBeenCalledTimes(calls);
+});
+
+it('routes installed native open by its real package record and handles asynchronous routing failure', async()=>{
+  const d=setup(),open=vi.fn(async()=>{throw Error('native unavailable');});
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Installed Native',pkg:'native.pkg',installed:true}]};
+  const view=renderV7Addons({registry:registry(),repositories:api,onOpenNativeSource:open});d.body.append(view);await tick();browse(view);await tick();
+  view.querySelector('.v7-flip').click();await tick();
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({pkg:'native.pkg',_url:'https://repo.example/index.json',_store:expect.objectContaining({kind:'manga'})}));
+  expect(view.querySelector('.v7-diagnostic').textContent).toContain('native unavailable');view.close();
+});
+
+it('requires confirmation before deleting an installed source', async()=>{
+  setup();const remove=vi.fn(async()=>{});
+  const view=renderV7Addons({registry:{...registry([{key:'saved',name:'Saved Addon'}]),remove}});await tick();installedTab(view).click();
+  view.querySelector('.v7-trash').click();expect(remove).not.toHaveBeenCalled();
+  view.querySelector('.v7-confirm-actions .danger').click();await tick();expect(remove).toHaveBeenCalledWith('saved');view.close();
+});
+
+it('keeps installed state when switching tabs immediately after native installation', async()=>{
+  setup();const changed=vi.fn(async()=>{});
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{}};
+  const view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed});await tick();browse(view);await tick();
+  view.querySelector('.v7-flip').click();await tick();installedTab(view).click();
+  expect(view.querySelector('.v7-body').textContent).toContain('Fresh Native');
+  view.close();await new Promise(resolve=>setTimeout(resolve,420));expect(changed).not.toHaveBeenCalled();
+});
+
+it('does not revive a closed install result after reload', async()=>{
+  setup();const job=deferred(),changed=vi.fn();
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:()=>job.promise};
+  const view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed});await tick();browse(view);await tick();
+  view.querySelector('.v7-flip').click();view.close();view.reload();await tick();job.resolve();await tick();
+  installedTab(view).click();expect(view.querySelector('.v7-body').textContent).not.toContain('Fresh Native');
+  view.close();expect(changed).not.toHaveBeenCalled();
+});
+
+it('closes the custom type filter before navigating back and clears repository search', async()=>{
+  setup();const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Native Source',pkg:'native.pkg'}]};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();
+  view.querySelector('.v7-filter').click();expect(view.querySelector('.v7-menu').hidden).toBe(false);
+  expect(view.back()).toBe(true);expect(view.querySelector('.v7-menu').hidden).toBe(true);
+  const search=view.querySelector('[data-addon-search]');search.value='Native';search.oninput();
+  expect(view.back()).toBe(true);expect(search.value).toBe('');expect(view.querySelector('.v7-body').textContent).toContain('Saved Repo');view.close();
+});
+
+it('shows saved installed native metadata even when the repository index is offline', async()=>{
+  setup();const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}],installed:[{name:'Offline Installed',pkg:'offline.pkg',repo:'https://repo.example/index.json',version:'1.0'}]}),extensions:async()=>{throw Error('offline');}};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();installedTab(view).click();
+  expect(view.querySelector('.v7-body').textContent).toContain('Offline Installed');expect(view.querySelector('.v7-flip.installed')).toBeTruthy();view.close();
+});
+
+it('prefers bounded real installed APK PNG icons and rejects other data schemes', async()=>{
+  setup();const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1QAAAAASUVORK5CYII=';
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json',iconUrl:'https://repo.example/logo.png'}],installed:[{name:'Native Icon',pkg:'icon.pkg',repo:'https://repo.example/index.json',iconUrl:png}]}),extensions:async()=>[{name:'Native Icon',pkg:'icon.pkg',installed:true,iconUrl:'https://repo.example/old.png'}]};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();
+  expect(view.querySelector('.v7-row img').src).toBe(png);view.close();
+  const unsafe=renderV7Addons({registry:registry([{key:'a',name:'Unsafe',iconUrl:'data:image/svg+xml;base64,PHN2Zz4=',logo:'data:image/png;base64,'+'A'.repeat(92161)}])});await tick();installedTab(unsafe).click();
+  expect(unsafe.querySelector('.v7-row img')).toBeNull();unsafe.close();
+});
+
+it('filters native sources using their actual family and installed cinema target', async()=>{
+  setup();const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}],installed:[{name:'Cinema Source',pkg:'cinema.pkg',repo:'https://repo.example/index.json',content:'cinema',version:'1.0'}]}),extensions:async()=>[{name:'Cinema Source',pkg:'cinema.pkg',anime:true},{name:'Anime Source',pkg:'anime.pkg',anime:true}]};
+  const view=renderV7Addons({registry:registry(),animeRepositories:api});await tick();browse(view);await tick();view.querySelector('.v7-filter').click();
+  const option=[...view.querySelectorAll('.v7-menu button')].find(x=>x.textContent==='سينما');expect(option).toBeTruthy();option.click();
+  expect(view.querySelector('.v7-body').textContent).toContain('Cinema Source');expect(view.querySelector('.v7-body').textContent).not.toContain('Anime Source');view.close();
+});
+
+it('does not offer removal of a bundled native manga extension', async()=>{
+  setup();const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Bundled Manga',pkg:'builtin.pkg',builtin:true}],uninstall:vi.fn()};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();
+  expect(view.querySelector('.v7-trash')).toBeNull();view.close();expect(api.uninstall).not.toHaveBeenCalled();
+});
+
+
+it('reveals delete at 300ms and reports rejected source refresh at 400ms without an unhandled rejection', async()=>{
+  const d=setup(),changed=vi.fn(async()=>{throw Error('source refresh failed');});
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{}};
+  const view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed});d.body.append(view);await tick();browse(view);await tick();
+  vi.useFakeTimers();view.querySelector('.v7-flip').click();await vi.advanceTimersByTimeAsync(0);
+  const slot=view.querySelector('.v7-trash-holder');expect(slot.classList.contains('visible')).toBe(false);
+  await vi.advanceTimersByTimeAsync(299);expect(slot.classList.contains('visible')).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);expect(slot.classList.contains('visible')).toBe(true);expect(changed).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(100);expect(changed).toHaveBeenCalledOnce();
+  expect(view.querySelector('.v7-diagnostic').textContent).toContain('source refresh failed');
+  view.close();expect(vi.getTimerCount()).toBe(0);
 });

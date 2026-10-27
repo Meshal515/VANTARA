@@ -38,8 +38,14 @@ const safe=(value)=>{
     return u.protocol==="https:" && !u.username && !u.password ? u.href : null;
   }catch{return null;}
 };
+const safeIcon=(value)=>{
+  const text=String(value||"");
+  if(text.length<=90*1024&&/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(text))return text;
+  return safe(value);
+};
 const label=(x)=>String(x||"V").trim().slice(0,2).toUpperCase();
 const kindName=(a)=>{
+  if(a.content==="cinema"||a.kind==="cinema")return "سينما";
   if(a.kind==="anime" || a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
   if((a.contentTypes||[]).includes("manga") || a.kind==="manga")return "مانجا";
   if((a.contentTypes||[]).some(x=>x==="movie"||x==="series"))return "سينما";
@@ -50,14 +56,16 @@ const kindName=(a)=>{
 };
 
 export function renderV7Addons({
-  registry, filter="all", repositories=null, animeRepositories=null, sites=null,
-  onOpenSource=()=>{}, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck,
+  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null,
+  onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck,
 }={}){
   const root=el("section","v7-addon addon-v7");
   root.dir="rtl";
   if(["anime","manga","cinema"].includes(filter))root.dataset.sectionHub=filter;
-  let alive=true, tab="repos", opened=null, details=null, currentSearch="", type="الكل";
-  let busy=false, generation=0, pending=false, modal=null, menuOpen=false;
+  let alive=true, tab="repos", opened=null, currentSearch="", type="الكل";
+  let busy=false, generation=0, lifecycle=0, menuOpen=false;
+  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map();
+  let requests=new Map(), queue=[], activeRequests=0;
   const stores=[
     ...(animeRepositories?[{id:"anime",kind:"anime",api:animeRepositories}]:[]),
     ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[])
@@ -98,14 +106,28 @@ export function renderV7Addons({
   root.append(mast,head,tabs,tools,body,message,layer);
   layer.addEventListener("click",e=>{if(e.target===layer && !busy)closeModal();});
   const fmtErr=e=>String(e?.message||e||"تعذر إكمال العملية").replace(/(?:https?:\/\/|stremio:\/\/)\S+/gi,"[رابط]");
-  const notify=(s)=>{message.textContent=s;};
+  const notify=(s)=>{if(alive)message.textContent=s;};
+  const invoke=(callback,...args)=>{
+    if(!alive)return;
+    try{Promise.resolve(callback(...args)).catch(err=>notify(fmtErr(err)));}
+    catch(err){notify(fmtErr(err));}
+  };
+  const sourcesChanged=()=>invoke(onSourcesChanged);
+  const later=(callback,delay)=>{
+    const id=setTimeout(()=>{timers.delete(id);if(alive)callback();},delay);
+    timers.add(id);
+  };
+  const resetRequests=()=>{
+    for(const job of queue)job.resolve();
+    queue=[];requests=new Map();activeRequests=0;
+  };
   function logo(item,fallback,repo=false){
     const box=el("span","v7-logo"+(repo?" is-repo":""));
     const abbr=el("span","v7-fallback",label(item.name));box.append(abbr);
-    const urls=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo].map(safe).filter(Boolean);
+    const urls=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo].map(safeIcon).filter(Boolean);
     let idx=0;
     const next=()=>{
-      if(idx>=urls.length)return;
+      if(!alive||idx>=urls.length)return;
       const img=el("img");img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";
       img.onload=()=>{if(img.naturalWidth<16){img.remove();next();}else{abbr.hidden=true;}};
       img.onerror=()=>{img.remove();next();};
@@ -124,7 +146,6 @@ export function renderV7Addons({
   function sourceMeta(a){
     return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||""),a.version||""].filter(Boolean).join(" · ");
   }
-  function installed(a){return a.installed!==false && !a.available && (a.bundled || a.key || a.installed===true);}
   function sourceRow(a,mode,parent){
     const row=el("article","v7-row");row.tabIndex=0;
     row.setAttribute("role","button");row.setAttribute("aria-label","تفاصيل "+a.name);
@@ -147,13 +168,14 @@ export function renderV7Addons({
         del.setAttribute("aria-label","حذف "+a.name);del.append(ico("trash"));actions.prepend(del);
       }
     }else if(mode==="native"){
+      actions.classList.add("v7-native-actions");
       if(foreign){
         const wrong=btn("نوع مختلف","v7-simple-btn",e=>{e.stopPropagation();showDetails(a,"native",parent);});
         actions.append(wrong);
       }else{
       const slot=el("div","v7-trash-holder");
       const trash=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"native");});
-      trash.append(ico("trash"));trash.setAttribute("aria-label","حذف "+a.name);slot.append(trash);
+      trash.append(ico("trash"));trash.setAttribute("aria-label","حذف "+a.name);if(!a.builtin)slot.append(trash);
       if(isAdded)slot.classList.add("visible");
       const flip=el("button","v7-flip"+(isAdded?" installed":""));
       flip.type="button";flip.setAttribute("aria-label",(isAdded?"فتح ":"تثبيت ")+a.name);
@@ -165,19 +187,27 @@ export function renderV7Addons({
         e.stopPropagation();
         if(flip.disabled)return;
         if(a.installed||a.builtin||a.update){
-          showDetails(a,"native");
+          if(onOpenNativeSource)openNative(a);else showDetails(a,"native",parent);
           return;
         }
-        if(a.builtin){showDetails(a,"native");return;}
         flip.disabled=true;
+        const installLifecycle=lifecycle;
         try{
           await installNative(a);
+          if(!alive||installLifecycle!==lifecycle)return;
           a.installed=true;
+          const cached=extensions.get(a._store.id+":"+a._url)?.items.find(x=>x.pkg===a.pkg);
+          if(cached)cached.installed=true;
+          if(installedMetadata.has(a._store.id)){
+            const saved=installedMetadata.get(a._store.id);
+            if(!saved.some(x=>x.pkg===a.pkg))saved.push({...a,repo:a._url,installed:true});
+          }
+          installedCount.textContent=String(Number(installedCount.textContent)+1);
           flip.classList.add("installed");
           flip.setAttribute("aria-label","فتح "+a.name);
-          setTimeout(()=>{if(alive && row.isConnected)slot.classList.add("visible");},300);
+          later(()=>{if(row.isConnected)slot.classList.add("visible");},300);
           stateLabel.classList.add("visible");
-          setTimeout(()=>{if(alive)onSourcesChanged();},430);
+          later(sourcesChanged,400);
         }catch(err){notify(fmtErr(err));}finally{flip.disabled=false;}
       };
       actions.append(slot,flip);
@@ -185,7 +215,7 @@ export function renderV7Addons({
     }
     row.append(logoBox,info,actions);
     row.onclick=e=>{if(!e.target.closest("button"))showDetails(a,mode,parent);};
-    row.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();showDetails(a,mode,parent);}};
+    row.onkeydown=e=>{if(e.target!==row)return;if(e.key==="Enter"||e.key===" "){e.preventDefault();showDetails(a,mode,parent);}};
     return row;
   }
   function siteRow(site){
@@ -209,7 +239,7 @@ export function renderV7Addons({
         const confirm=el("div","v7-confirm-actions");
         confirm.append(btn("رجوع","v7-btn",()=>closeModal()),btn("حذف","v7-btn danger",async()=>{
           if(busy)return;busy=true;
-          try{await sites.remove(site.id);closeModal(true);await refresh();onSourcesChanged();}
+          try{await sites.remove(site.id);closeModal(true);await refresh();sourcesChanged();}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
         dialog.append(confirm);
@@ -231,7 +261,7 @@ export function renderV7Addons({
     go.prepend(ico("chevron"));row.append(go);
     return row;
   }
-  function switchTab(t){tab=t;opened=null;details=null;currentSearch="";type="الكل";search.value="";draw();}
+  function switchTab(t){tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";draw();}
   function toggleMenu(){
     menuOpen=!menuOpen;filterMenu.hidden=!menuOpen;
   }
@@ -252,18 +282,35 @@ export function renderV7Addons({
       return !currentSearch || (String(a.name)+" "+sourceMeta(a)).toLocaleLowerCase().includes(currentSearch);
     });
   }
+  function nativeRecord(item,store,url){
+    const local=installedMetadata.get(store.id)?.find(x=>x.pkg===item.pkg);
+    const record={...item,kind:store.kind,_store:store,_url:url};
+    if(installedMetadata.has(store.id)){
+      record.installed=local?(local.version||true):false;
+      if(!local)record.update=false;
+    }
+    if(local){record.iconUrl=local.iconUrl||item.iconUrl;record.content=local.content||item.content;}
+    return record;
+  }
   function draw(){
     if(!alive)return;
     const allRemote=registry.list?.()||[];
-    const allNative=[...extensions.values()].flatMap(x=>x.items.map(ext=>({...ext,kind:x.store.kind,_store:x.store,_url:x.url})));
+    const nativeByPackage=new Map();
+    for(const x of extensions.values())for(const ext of x.items)nativeByPackage.set(x.store.id+":"+ext.pkg,nativeRecord(ext,x.store,x.url));
+    for(const store of stores)for(const item of installedMetadata.get(store.id)||[]){
+      const key=store.id+":"+item.pkg;
+      if(!nativeByPackage.has(key))nativeByPackage.set(key,nativeRecord(item,store,item.repo));
+    }
+    const allNative=[...nativeByPackage.values()];
     const installedNative=allNative.filter(x=>x.installed || x.update || x.builtin);
     repoCount.textContent=String(repos.length);
     installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
     repoTab.classList.toggle("active",tab==="repos");
     installedTab.classList.toggle("active",tab==="installed");
-    body.replaceChildren();message.textContent="";
+    body.replaceChildren();
+    body.setAttribute("aria-busy",String(loading));
     filterWrap.hidden=tab==="repos"&&!opened;
-    fillKinds(tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?extensions.get(opened.key)?.items||[]:[]));
+    fillKinds(tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[]));
     if(tab==="repos"){
       if(opened){
         const backRepo=btn("رجوع","v7-back",()=>{opened=null;search.value="";currentSearch="";draw();});
@@ -272,12 +319,17 @@ export function renderV7Addons({
         body.append(section(opened.data.name,opened.group.kind==="anime"?"Aniyomi":"Mihon"));
         const list=el("div","v7-list");
         const ext=extensions.get(opened.key);
-        if(!ext){body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
-        const records=filtered(ext.items.filter(x=>!x.nsfw));
-        for(const item of records)list.append(sourceRow({...item,kind:opened.group.kind,_store:opened.group,_url:opened.data.url},"native",opened.data));
+        const failure=extensionErrors.get(opened.key);
+        if(failure){
+          const retryRepo=opened;
+          body.append(el("p","v7-notice",failure),btn("إعادة المحاولة","v7-simple-btn",()=>void loadExtensions(retryRepo,{force:true})));
+        }
+        if(!ext){if(!failure)body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
+        const records=filtered(ext.items.filter(x=>!x.nsfw).map(item=>nativeRecord(item,opened.group,opened.data.url)));
+        for(const item of records)list.append(sourceRow(item,"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
-        if(!repos.length){body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
+        if(!repos.length){if(loading){body.append(el("p","v7-notice","جارٍ تحميل المستودعات…"));return;}body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
         const matches=repos.filter(r=>!currentSearch||(r.data.name||"").toLowerCase().includes(currentSearch));
         body.append(section("المستودعات",String(matches.length)));
         const list=el("div","v7-list");matches.forEach(r=>list.append(storeRepoRow(r)));
@@ -296,40 +348,72 @@ export function renderV7Addons({
     }
   }
   async function refresh(){
+    if(!alive)return;
     const run=++generation;
-    loading=true;
+    resetRequests();loading=true;notify("");draw();
+    const sitesTask=(async()=>{
+      if(!sites?.list)return;
+      try{
+        const rows=await sites.list();
+        if(alive&&run===generation){siteRows=rows||[];draw();}
+      }catch(err){if(alive&&run===generation)notify("تعذر تحديث مواقع المانجا: "+fmtErr(err));}
+    })();
     try{
       const settled=await Promise.allSettled(stores.map(async group=>{
         const res=await group.api.list();
+        if(alive&&run===generation&&Array.isArray(res?.installed))installedMetadata.set(group.id,res.installed);
         return (res?.repos||[]).map(data=>({group,data,key:group.id+":"+data.url}));
       }));
       if(!alive||run!==generation)return;
       const failedKinds=new Set(stores.filter((g,i)=>settled[i]?.status==="rejected").map(g=>g.id));
       repos=[...repos.filter(r=>failedKinds.has(r.group.id)),...settled.filter(x=>x.status==="fulfilled").flatMap(x=>x.value)];
-      if(sites?.list){
-        try{siteRows=await sites.list()||[];}
-        catch(err){notify("تعذر تحديث مواقع المانجا: "+fmtErr(err));}
-      }
-      if(!alive||run!==generation)return;
-      // Always read previously installed native extensions; never infer an empty list from unopened repos.
-      await Promise.all(repos.map(async r=>{
-        try{
-          const items=await r.group.api.extensions(r.data.url);
-          if(alive&&run===generation)extensions.set(r.key,{store:r.group,url:r.data.url,items:items||[]});
-        }catch(err){if(alive&&run===generation)notify(fmtErr(err));}
-      }));
+      for(const result of settled)if(result.status==="rejected")notify("تعذر تحديث المستودعات: "+fmtErr(result.reason));
+      const saved=new Set(repos.map(r=>r.key));
+      for(const key of extensions.keys())if(!saved.has(key))extensions.delete(key);
+      for(const key of extensionErrors.keys())if(!saved.has(key))extensionErrors.delete(key);
+      if(opened&&!saved.has(opened.key))opened=null;
+      draw();
+      // Read installed native sources without flooding bridges with every saved index at once.
+      await Promise.all(repos.map(r=>loadExtensions(r,{force:true,run})));
+      await sitesTask;
     }catch(err){if(alive&&run===generation)notify(fmtErr(err));}
-    finally{loading=false;if(alive&&run===generation)draw();}
+    finally{if(alive&&run===generation){loading=false;draw();}}
   }
-  async function loadExtensions(r){
-    if(extensions.has(r.key)){draw();return;}
-    try{const items=await r.group.api.extensions(r.data.url);
-      if(alive){extensions.set(r.key,{store:r.group,url:r.data.url,items:items||[]});draw();}
-    }catch(err){notify(fmtErr(err));}
+  function drainRequests(){
+    while(alive&&activeRequests<4&&queue.length){
+      const job=queue.shift();
+      if(job.run!==generation){job.resolve();continue;}
+      activeRequests++;
+      void (async()=>{
+        try{
+          const items=await job.repo.group.api.extensions(job.repo.data.url);
+          if(alive&&job.run===generation){
+            extensions.set(job.repo.key,{store:job.repo.group,url:job.repo.data.url,items:items||[]});
+            extensionErrors.delete(job.repo.key);
+          }
+        }catch(err){
+          if(alive&&job.run===generation){extensionErrors.set(job.repo.key,fmtErr(err));notify(fmtErr(err));}
+        }finally{
+          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);draw();drainRequests();}
+          job.resolve();
+        }
+      })();
+    }
   }
-  function closeModal(force=false){if(busy&&!force)return;modal=null;layer.hidden=true;dialog.replaceChildren();}
+  function loadExtensions(r,{force=false,run=generation}={}){
+    if(!alive||run!==generation)return Promise.resolve();
+    if(requests.has(r.key))return requests.get(r.key);
+    if(!force&&(extensions.has(r.key)||extensionErrors.has(r.key))){draw();return Promise.resolve();}
+    extensionErrors.delete(r.key);
+    let resolve;
+    const promise=new Promise(done=>{resolve=done;});
+    requests.set(r.key,promise);queue.push({repo:r,run,resolve});
+    draw();drainRequests();return promise;
+  }
+  function closeModal(force=false){if(busy&&!force)return;layer.hidden=true;dialog.replaceChildren();}
   function showDialog(title,description){
-    modal=true;layer.hidden=false;dialog.replaceChildren();
+    if(!alive)return;
+    layer.hidden=false;dialog.replaceChildren();
     dialog.append(el("h3",null,title));
     if(description)dialog.append(el("p",null,description));
   }
@@ -356,7 +440,7 @@ export function renderV7Addons({
       const advancedActions=el("div","v7-dialog-actions");
       const run=async(action)=>{
         if(busy)return;busy=true;
-        try{await action();closeModal(true);draw();onSourcesChanged();}
+        try{await action();closeModal(true);draw();sourcesChanged();}
         catch(err){notify(fmtErr(err));}finally{busy=false;}
       };
       const act=(title,fn)=>advancedActions.append(btn(title,"v7-btn",()=>void run(fn)));
@@ -386,20 +470,20 @@ export function renderV7Addons({
       }else if(!a.installed&&!a.builtin&&!a.update){
         acts.append(btn("تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
-          try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
+          try{await installNative(a);closeModal(true);sourcesChanged();await refresh();}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
         if(a._store?.kind==="anime"){
           acts.append(btn("ثبّت في السينما","v7-btn",async()=>{
             if(busy)return;busy=true;
-            try{await a._store.api.install(a._url,a.pkg,"cinema");closeModal(true);onSourcesChanged();await refresh();}
+            try{await a._store.api.install(a._url,a.pkg,"cinema");closeModal(true);sourcesChanged();await refresh();}
             catch(err){notify(fmtErr(err));}finally{busy=false;}
           }));
         }
       }else if(!wrongFamily){
         if(a.update)acts.append(btn("تحديث","v7-btn primary",async()=>{
           if(busy)return;busy=true;
-          try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
+          try{await installNative(a);closeModal(true);sourcesChanged();await refresh();}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
         acts.append(btn("فتح في VANTARA","v7-btn primary",()=>openNative(a)));
@@ -414,12 +498,13 @@ export function renderV7Addons({
   }
   function openRemote(a){
     if(!canOpenRemote(a))return notify("المصدر لا يوفر كتالوجًا مدعومًا.");
-    closeModal();onOpenSource(a);
+    closeModal();invoke(onOpenSource,a);
   }
   function openNative(a){
     closeModal();
+    if(onOpenNativeSource){invoke(onOpenNativeSource,a);return;}
     const match=(registry.list?.()||[]).find(x=>x.name===a.name && canOpenRemote(x));
-    if(match){onOpenSource(match);return;}
+    if(match){invoke(onOpenSource,match);return;}
     notify("هذا المصدر مثبت في المحرك الأصلي. افتحه من قسم الأنمي أو المانجا في VANTARA.");
   }
   async function installNative(a){
@@ -437,7 +522,7 @@ export function renderV7Addons({
       try{
         if(mode==="remote")await registry.remove(a.key);
         else await a._store.api.uninstall(a.pkg);
-        closeModal(true);onSourcesChanged();await refresh();draw();
+        closeModal(true);sourcesChanged();await refresh();draw();
       }catch(err){notify(fmtErr(err));}finally{busy=false;yes.disabled=false;}
     });
     actions.append(cancel,yes);dialog.append(actions);
@@ -480,7 +565,7 @@ export function renderV7Addons({
         note.textContent="الإضافة: "+preview.manifest.name+" · راجع المصدر قبل التثبيت.";
         yes.textContent="تأكيد التثبيت";yes.onclick=async()=>{
           if(busy)return;busy=true;yes.disabled=true;
-          try{await registry.install(preview);closeModal(true);await refresh();onSourcesChanged();}
+          try{await registry.install(preview);closeModal(true);await refresh();sourcesChanged();}
           catch(e){note.textContent=fmtErr(e);}finally{busy=false;yes.disabled=false;}
         };
         return;
@@ -489,7 +574,7 @@ export function renderV7Addons({
       if(!/\.json$/i.test(parsed.pathname) && sites?.add){
         const site=await sites.add(uri);
         note.textContent="أُضيف الموقع: "+(site?.label||parsed.hostname);
-        closeModal(true);await refresh();onSourcesChanged();return;
+        closeModal(true);await refresh();sourcesChanged();return;
       }
       const candidates=stores.filter(s=>s.api?.add);
       if(!candidates.length){note.textContent="لا يوجد محرك مستودعات متاح في هذا الجهاز.";return;}
@@ -500,7 +585,7 @@ export function renderV7Addons({
           note.textContent="جارٍ قراءة المستودع باستخدام "+(store.kind==="anime"?"Aniyomi":"Mihon")+"…";
           const result=await store.api.add(uri);
           note.textContent="مستودع "+(result?.repo?.name||"جديد")+" يحتاج تأكيدًا في المحرك.";
-          matched=true;onSourcesChanged();await refresh();closeModal(true);break;
+          matched=true;sourcesChanged();await refresh();closeModal(true);break;
         }catch(e){lastError=fmtErr(e);}
       }
       if(!matched)note.textContent=lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية.";
@@ -533,19 +618,20 @@ export function renderV7Addons({
         if(busy)return;busy=true;
         try{
           for(const pick of picks.filter(p=>p.cb.checked&&p.preview))await registry.install(pick.preview);
-          closeModal(true);await refresh();onSourcesChanged();
+          closeModal(true);await refresh();sourcesChanged();
         }catch(e){state.textContent=fmtErr(e);}finally{busy=false;}
       });
     }catch(e){note.textContent=fmtErr(e);}
   }
   function navigateBack(){
     if(!layer.hidden){if(!busy)closeModal();return true;}
-    if(opened){opened=null;draw();return true;}
+    if(menuOpen){menuOpen=false;filterMenu.hidden=true;return true;}
+    if(opened){opened=null;type="الكل";currentSearch="";search.value="";draw();return true;}
     if(tab==="installed"){switchTab("repos");return true;}
     return false;
   }
   root.back=navigateBack;
-  root.close=()=>{alive=false;generation++;};
+  root.close=()=>{alive=false;generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
   root.reload=()=>{alive=true;void refresh();};
   search.oninput=()=>{currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();

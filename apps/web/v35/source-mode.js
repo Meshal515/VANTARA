@@ -6,6 +6,45 @@ const node = (tag, cls, text) => {
   if (text != null) n.textContent = text;
   return n;
 };
+function sourceLogo(addon) {
+  const mark = node("span", "addon-logo");
+  mark.setAttribute("aria-hidden", "true");
+  const fallback = () => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "28");
+    svg.setAttribute("height", "28");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h8M8 12h8M8 16h5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linecap", "round");
+    svg.append(path);
+    mark.replaceChildren(svg);
+  };
+  let url;
+  for (const value of [addon.iconUrl, addon.logo, addon.icon, addon.imageUrl]) {
+    if (typeof value !== "string") continue;
+    if (value.length <= 90 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+      url = value;
+      break;
+    }
+    try { url = publicUrl(value).href; break; } catch {}
+  }
+  if (url) {
+    const image = node("img");
+    image.alt = "";
+    image.referrerPolicy = "no-referrer";
+    image.style.width = "100%";
+    image.style.height = "100%";
+    image.style.objectFit = "contain";
+    image.onerror = fallback;
+    image.src = url;
+    mark.append(image);
+  } else fallback();
+  return mark;
+}
 const extraLabel = (name) =>
   ({
     genre: "التصنيف",
@@ -49,7 +88,7 @@ export function renderSourceMode({
   // رأس المصدر: اسمه وحالته الفعلية الآن (من نبضه)، بلا شعار عام
   const header = node("section", "addon-source-head"),
     heading = node("div", "addon-source-title"),
-    mark = node("span", "addon-logo", addon.name?.trim().slice(0, 2).toUpperCase() || "✦"),
+    mark = sourceLogo(addon),
     status = node("p", "addon-pulse");
   const name = node("h2", null, addon.name);
   name.dir = "auto";

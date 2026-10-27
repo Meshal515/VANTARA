@@ -1155,6 +1155,7 @@ test('the reader app runs the exact engine the spike proved on device', () => {
     'eu/kanade/tachiyomi/network/NetworkHelper.kt',
     'eu/kanade/tachiyomi/network/interceptor/BrowserVerificationInterceptor.kt',
     'eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt',
+    'eu/kanade/tachiyomi/network/interceptor/CloudflareRequestPolicy.kt',
   ];
   for (const file of shared) {
     assert.equal(
@@ -1170,8 +1171,12 @@ test('the reader app runs the exact engine the spike proved on device', () => {
   assert.match(plugin, /SourceCompatRepairs\.loadSeries\(/);
   assert.match(plugin, /SourceCompatRepairs\.loadPages\(/);
   assert.doesNotMatch(plugin, /source\.getPageList\(/, 'pages must go through the per-source repairs');
-  // The reader solves Cloudflare by hand; only the spike batch fails fast.
-  assert.match(plugin, /CloudflareInteractionMode\.batchProbe = false/);
+  // Background requests never open verification UI; only explicit coordinator begin can.
+  assert.match(plugin, /CloudflareInteractionMode\.batchProbe = true/);
+  const cloudflare = read('android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt');
+  assert.doesNotMatch(cloudflare, /Toast\.makeText|showInteractive|cookieManager\.remove\(/);
+  assert.match(cloudflare, /SourceVerificationRequests\.require\(/);
+  assert.match(read('android/app/src/main/kotlin/com/vantara/verification/VerificationPlugin.kt'), /fun begin\(call: PluginCall\)/);
   // Explore browses the full catalogue, never a ranking or an all-language feed.
   assert.match(plugin, /fun catalogue\(call: PluginCall\)/);
   assert.match(plugin, /CatalogueFilterPolicy\.catalogueFilters\(source\)/);

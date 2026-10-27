@@ -95,10 +95,9 @@ class ExtensionEnginePlugin : Plugin() {
         // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
         // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
         WebViewActivityHolder.set(activity)
-        // المحرّك مشترك مع الـspike، والـspike يفشل سريعًا أمام تحدّي Cloudflare
-        // كي لا تُسرق شاشة الدفعة. القارئ هنا يقلّب بيده: التحدّي المرئي هو
-        // الطريق الوحيد، وإلا قرأ «محجوب» ما كان يكفيه أن يحلّه
-        CloudflareInteractionMode.batchProbe = false
+        // المصادر الخلفية لا تفتح تحديًا فوق Activity. التحقق المرئي محصور
+        // في VerificationCoordinator وبطلب صريح من المستخدم.
+        CloudflareInteractionMode.batchProbe = true
         // الإضافات تطلب اعتمادياتها بـ`injectLazy()`. التسجيل قبل أول تحميل،
         // وإلا سقط أول مصدر بـIllegalStateException من injekt فيبدو عطل مصدر.
         //
@@ -120,7 +119,7 @@ class ExtensionEnginePlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
-        WebViewActivityHolder.set(null)
+        WebViewActivityHolder.clear(activity)
         scope.cancel()
     }
 
@@ -141,6 +140,7 @@ class ExtensionEnginePlugin : Plugin() {
             list.put(
                 JSObject()
                     .put("id", spec.pkg)
+                    .put("pkg", spec.pkg)
                     .put("label", spec.label)
                     .put("lib", spec.expectedLib)
                     .put("version", spec.versionName)
@@ -157,6 +157,7 @@ class ExtensionEnginePlugin : Plugin() {
             list.put(
                 JSObject()
                     .put("id", id)
+                    .put("pkg", filler.pkg)
                     .put("label", filler.label)
                     .put("lib", spec.expectedLib)
                     .put("version", spec.versionName)
@@ -174,6 +175,7 @@ class ExtensionEnginePlugin : Plugin() {
                 list.put(
                     JSObject()
                         .put("id", id)
+                        .put("pkg", ext.pkg)
                         .put("label", src.name)
                         .put("lib", ext.lib)
                         .put("version", ext.versionName)
@@ -192,16 +194,25 @@ class ExtensionEnginePlugin : Plugin() {
 
     // ───────────────────────── مستودعات المستخدم ─────────────────────────
 
-    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name)
+    private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
+    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
 
     @PluginMethod
     fun repos(call: PluginCall) {
-        val st = userStore.state
-        call.resolve(
-            JSObject()
-                .put("repos", JSArray(st.repos.map { repoJson(it) }))
-                .put("installed", JSArray(st.extensions.map { JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl) })),
-        )
+        scope.launch {
+            try {
+                val st = userStore.state
+                call.resolve(
+                    JSObject()
+                        .put("repos", JSArray(st.repos.map { repoJson(it) }))
+                        .put("installed", JSArray(st.extensions.map {
+                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl)
+                                .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256)
+                                    ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
+                        })),
+                )
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
     }
 
     /** يضيف مستودعًا بعد قراءة repo.json (مفتاح التوقيع) وindex.min.json. */
@@ -212,7 +223,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 val (meta, list) = repoClient.read(base)
                 val count = list.size
-                val repo = UserRepo(base, meta.name, meta.fingerprint)
+                val repo = UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
                 userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", count))
             } catch (t: Throwable) {
@@ -257,7 +268,10 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("builtin", packageSpec(ext.pkg) != null)
                             .put("installed", mine?.versionName)
                             .put("update", mine != null && mine.versionName != ext.version)
-                            .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name })),
+                            .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name }))
+                            .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256) }
+                                ?: packageSpec(ext.pkg)?.let { NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256) }
+                                ?: ext.iconUrl ?: userStore.state.repos.firstOrNull { it.url == base }?.iconUrl),
                     )
                 }
                 call.resolve(JSObject().put("extensions", list))

@@ -13,6 +13,7 @@ import com.vantara.anime.health.HealthStore
 import com.vantara.anime.stream.Preferences
 import com.vantara.anime.stream.Variant
 import com.vantara.plugins.ensureEngineInjekt
+import com.vantara.plugins.NativeExtensionIcons
 import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -271,6 +272,7 @@ class AnimeEnginePlugin : Plugin() {
             list.put(
                 JSObject()
                     .put("id", s.id).put("name", s.name).put("content", s.content)
+                    .put("pkg", s.extension?.pkg)
                     .put("enabled", s.enabled && s.disabledReason == null)
                     .put("disabledReason", s.disabledReason)
                     .put("loadError", engine.loadError(s.id))
@@ -283,17 +285,26 @@ class AnimeEnginePlugin : Plugin() {
 
     // ───────────────────── مستودعات إضافات الأنمي (Aniyomi) ─────────────────────
 
-    private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name)
+    private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
+    private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
     private fun failure(call: PluginCall, t: Throwable) = call.reject(t.message ?: t.javaClass.simpleName)
 
     @PluginMethod
     fun repos(call: PluginCall) {
-        val st = userStore.state
-        call.resolve(
-            JSObject()
-                .put("repos", JSArray(st.repos.map { repoJson(it) }))
-                .put("installed", JSArray(st.extensions.map { JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl) })),
-        )
+        scope.launch {
+            try {
+                val st = userStore.state
+                call.resolve(
+                    JSObject()
+                        .put("repos", JSArray(st.repos.map { repoJson(it) }))
+                        .put("installed", JSArray(st.extensions.map {
+                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl)
+                                .withIcon(NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
+                                    ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
+                        })),
+                )
+            } catch (t: Throwable) { failure(call, t) }
+        }
     }
 
     @PluginMethod
@@ -303,7 +314,7 @@ class AnimeEnginePlugin : Plugin() {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 val (meta, list) = repoClient.read(base)
                 require(list.any { it.anime }) { "هذا مستودع مانجا؛ أضفه من قسم المانجا" }
-                val repo = com.vantara.plugins.UserRepo(base, meta.name, meta.fingerprint)
+                val repo = com.vantara.plugins.UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
                 userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", list.count { it.anime }))
             } catch (t: Throwable) { failure(call, t) }
@@ -340,7 +351,12 @@ class AnimeEnginePlugin : Plugin() {
                             .put("builtin", engine.shipsPackage(ext.pkg))
                             .put("installed", mine?.version).put("content", mine?.content)
                             .put("update", mine != null && mine.version != ext.version)
-                            .put("sources", JSArray(com.vantara.plugins.RepoIndex.visibleSources(ext).map { it.name })),
+                            .put("sources", JSArray(com.vantara.plugins.RepoIndex.visibleSources(ext).map { it.name }))
+                            .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256) }
+                                ?: engine.sources().firstOrNull { it.extension?.pkg == ext.pkg }?.extension?.let {
+                                    NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
+                                }
+                                ?: ext.iconUrl ?: repo.iconUrl),
                     )
                 }
                 call.resolve(JSObject().put("extensions", list))

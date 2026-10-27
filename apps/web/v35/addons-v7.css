@@ -35,7 +35,7 @@
 .v7-addon .v7-section-head h3{margin:0;font-size:18px;font-weight:800}
 .v7-addon .v7-section-head span{font-size:12px;color:var(--v7-muted)}
 .v7-addon .v7-list{border-top:1px solid #ffffff0c}
-.v7-addon .v7-row{min-height:102px;border-bottom:1px solid #ffffff12;display:flex;align-items:center;gap:12px;padding:12px 0;cursor:pointer;position:relative}
+.v7-addon .v7-row{min-height:108px;border-bottom:1px solid #ffffff12;display:flex;align-items:center;gap:12px;padding:12px 0;cursor:pointer;position:relative}
 .v7-addon .v7-row:hover{background:#ffffff03}
 .v7-addon .v7-row:focus-visible{outline:2px solid var(--v7-accent);outline-offset:2px}
 .v7-addon .v7-logo{width:64px;height:64px;flex:none;border-radius:17px;overflow:hidden;background:#15131a;border:1px solid #33303b;display:flex;align-items:center;justify-content:center;position:relative;color:#d1c5e7}
@@ -46,17 +46,18 @@
 .v7-addon .v7-name{font-size:18px;font-weight:810;line-height:1.24;overflow-wrap:anywhere}
 .v7-addon .v7-meta{font-size:12px;color:var(--v7-muted);margin-top:5px;overflow-wrap:anywhere}
 .v7-addon .v7-status-slot{height:18px;margin-top:6px;display:flex;align-items:center}
-.v7-addon .v7-status{font-size:12px;color:#7ce0b1;opacity:0;transition:opacity 100ms;white-space:nowrap}
-.v7-addon .v7-status.visible{opacity:1}
+.v7-addon .v7-status{visibility:hidden;font-size:12px;color:#7ce0b1;opacity:0;transition:opacity 100ms;white-space:nowrap}
+.v7-addon .v7-status.visible{opacity:1;visibility:visible}
 .v7-addon .v7-actions{flex:none;display:flex;align-items:center;gap:9px;direction:ltr}
+.v7-addon .v7-native-actions{width:162px;min-width:162px;justify-content:flex-end}
 .v7-addon .v7-flip{min-width:108px;width:108px;height:46px;perspective:800px;background:transparent;padding:0}
 .v7-addon .v7-rotor{height:100%;width:100%;display:block;position:relative;transform-style:preserve-3d;transition:transform 400ms cubic-bezier(.2,.7,.2,1)}
 .v7-addon .v7-flip.installed .v7-rotor{transform:rotateY(-180deg)}
 .v7-addon .v7-face{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;border-radius:13px;font-weight:800;backface-visibility:hidden;-webkit-backface-visibility:hidden}
 .v7-addon .v7-front{background:#f0ebfa;color:#17131d}
 .v7-addon .v7-rear{background:#08080a;color:#faf9fb;border:1px solid #2c2c34;transform:rotateY(-180deg)}
-.v7-addon .v7-trash-holder{width:0;opacity:0;overflow:hidden;transform:translateX(8px);transition:width 250ms,opacity 200ms,transform 250ms;pointer-events:none}
-.v7-addon .v7-trash-holder.visible{width:45px;opacity:1;transform:none;pointer-events:auto}
+.v7-addon .v7-trash-holder{width:45px;min-width:45px;opacity:0;visibility:hidden;overflow:hidden;transform:translateX(5px) scale(.92);transition:opacity 180ms ease,transform 180ms ease;pointer-events:none}
+.v7-addon .v7-trash-holder.visible{opacity:1;visibility:visible;transform:none;pointer-events:auto}
 .v7-addon .v7-trash{width:45px;height:46px;background:#08080a;color:#f0ecf5;border:1px solid #2c2c34;border-radius:13px;display:grid;place-items:center}
 .v7-addon .v7-simple-btn{height:44px;min-width:106px;background:#08080a;border:1px solid #2b2b34;border-radius:13px;color:#efedf4;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px}
 .v7-addon .v7-empty{min-height:48vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:15px;text-align:center}
@@ -86,5 +87,6 @@
 .v7-addon .v7-notice{font-size:13px;line-height:1.65;color:#b9b0cb;margin-top:11px}
 .v7-addon .v7-confirm-actions{display:flex;align-items:center;gap:22px;margin-top:22px}
 .v7-addon .v7-diagnostic{color:#bd9cff;font-size:12px;margin-top:8px}
-@media(max-width:720px){.v7-addon .v7-heading h2{font-size:34px}.v7-addon .v7-logo{width:58px;height:58px}.v7-addon .v7-logo.is-repo{width:60px;height:60px}.v7-addon .v7-row{gap:10px}.v7-addon .v7-name{font-size:16px}.v7-addon .v7-meta{font-size:11px}.v7-addon .v7-flip{width:100px;min-width:100px}.v7-addon .v7-simple-btn{min-width:92px}.v7-addon .v7-dialog{padding:20px}.v7-addon .v7-fields{grid-template-columns:1fr}.v7-addon .v7-filter{min-width:118px}}
+@media(max-width:720px){.v7-addon .v7-heading h2{font-size:34px}.v7-addon .v7-logo{width:58px;height:58px}.v7-addon .v7-logo.is-repo{width:60px;height:60px}.v7-addon .v7-row{gap:10px;min-height:99px}.v7-addon .v7-name{font-size:16px}.v7-addon .v7-meta{font-size:11px}.v7-addon .v7-native-actions{width:134px;min-width:134px;gap:8px}.v7-addon .v7-flip{width:88px;min-width:88px}.v7-addon .v7-trash-holder{width:38px;min-width:38px}.v7-addon .v7-trash{width:38px}.v7-addon .v7-simple-btn{min-width:92px}.v7-addon .v7-dialog{padding:20px}.v7-addon .v7-fields{grid-template-columns:1fr}.v7-addon .v7-filter{min-width:118px}}
+@media(max-width:380px){.v7-addon .v7-native-actions{width:122px;min-width:122px;gap:6px}.v7-addon .v7-flip{width:78px;min-width:78px}.v7-addon .v7-row{gap:8px}.v7-addon .v7-logo{width:50px;height:50px}.v7-addon .v7-name{font-size:15px}}
 @media(prefers-reduced-motion:reduce){.v7-addon .v7-rotor,.v7-addon .v7-trash-holder,.v7-addon .v7-status{transition:none}}

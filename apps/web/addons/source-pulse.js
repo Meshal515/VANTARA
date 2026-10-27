@@ -5,6 +5,7 @@
  * الآن كل طلب حقيقي (آخر التحديثات، البحث، فحص يدوي أو تلقائي) يُسجَّل:
  *   ok     ← أعاد أعمالًا
  *   empty  ← استجاب بقائمة فارغة (قد يكون بحثًا بلا نتائج؛ ليس عطلًا)
+ *   verification ← طلب تحقق بشري مؤكد من المحرك
  *   failed ← خطأ أو انتهاء مهلة
  * ويُحفظ على الجهاز نفسه (مفتاح لكل مصدر)، فيظهر في صفحة الإضافات: «يعمل · قبل 3 د».
  *
@@ -17,6 +18,24 @@ const KEY = 'vantara.sourcePulse.v1';
 const FRESH_MS = 30 * 60_000;
 const RETRY_BASE_MS = 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
+
+// Only confirmed interactive evidence requests verification; HTTP 403 alone does not.
+function confirmedVerification(value) {
+  if (value?.needsHuman === true || value?.blocked === 'cloudflare_interactive' || (value?.code === 'challenge' && value?.challenge === 'interactive')) return true;
+  const native = /(?:^|\.)CloudflareBypassException$/.test(String(value?.code ?? value?.name ?? ''));
+  return native && (value?.interactive === true || (value?.interactive !== false && /^Cloudflare wants a human check for [^;]+; open the site in the WebView to pass it$/.test(value?.message ?? '')));
+}
+function browseItems(out) {
+  const list = out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : null);
+  const reference = item => item?.url ?? item?.id;
+  if (out?.error || Number(out?.status) >= 400 || !Array.isArray(list) || list.some(item =>
+    !item || typeof item !== 'object' ||
+    !((typeof reference(item) === 'string' && reference(item).trim()) || (typeof reference(item) === 'number' && Number.isFinite(reference(item)))) ||
+    typeof (item.title ?? item.name) !== 'string' || !(item.title ?? item.name).trim()))
+    throw Object.assign(new Error('لم يُرجع المصدر قائمة أعمال صالحة.'), { code: 'INVALID_SOURCE_RESPONSE' });
+  return list;
+}
+const hasBrowseEvidence = p => Number.isInteger(p?.items) && (p.state === 'ok' ? p.items > 0 : p.state === 'empty' && p.items === 0);
 
 function readAll(storage) {
   try {
@@ -46,16 +65,16 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
         at: now(),
         ms: Number.isFinite(ms) ? Math.round(ms) : null,
         items: Number.isFinite(items) ? items : null,
-        error: state === 'failed' ? String(error ?? 'تعذّر الطلب').slice(0, 160) : null,
+        error: ['failed', 'verification'].includes(state) ? String(error ?? 'تعذّر الطلب').slice(0, 160) : null,
         failures,
-        lastOkAt: state === 'failed' ? old.lastOkAt ?? null : now(),
+        lastOkAt: ['ok', 'empty'].includes(state) ? now() : old.lastOkAt ?? null,
       },
     };
     save();
     return all[key];
   }
 
-  /** يغلّف دالة مصدر: يقيس زمنها ويسجّل نتيجتها، ويُرجع النتيجة أو يرمي الخطأ كما هو. */
+  /** يقيس تصفحًا أو بحثًا: النجاح يحتاج أعمالًا صالحة، والفراغ الصالح مستقل عن الفشل. */
   async function measure(key, run, { signal, timeoutMs = 20_000 } = {}) {
     const started = now();
     let timer, abort;
@@ -68,11 +87,13 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
       });
       // بعض الجسور الأصلية لا تدعم AbortSignal؛ نتيجتها المتأخرة لا تغيّر النبض.
       const out = await Promise.race([Promise.resolve().then(run), deadline]);
-      const list = out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : null);
-      record(key, list && list.length === 0 ? 'empty' : 'ok', { ms: now() - started, items: list?.length ?? null });
+      if (signal?.aborted) throw new DOMException('ألغي الطلب', 'AbortError');
+      if (confirmedVerification(out)) throw Object.assign(new Error('المصدر يطلب تحققًا منك.'), { code: 'VERIFICATION_REQUIRED', needsHuman: true });
+      const list = browseItems(out);
+      record(key, list.length === 0 ? 'empty' : 'ok', { ms: now() - started, items: list.length });
       return out;
     } catch (error) {
-      if (error?.name !== 'AbortError') record(key, 'failed', { ms: now() - started, error: error?.message });
+      if (error?.name !== 'AbortError') record(key, confirmedVerification(error) ? 'verification' : 'failed', { ms: now() - started, error: error?.message });
       throw error;
     } finally {
       clearTimeout(timer);
@@ -83,7 +104,7 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
   /** هل يستحق المصدر فحصًا الآن؟ */
   function due(key) {
     const p = all[key];
-    if (!p) return true;
+    if (!p || (['ok', 'empty'].includes(p.state) && !hasBrowseEvidence(p))) return true;
     if (p.state !== 'failed') return now() - p.at >= FRESH_MS;
     return now() - p.at >= Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, p.failures - 1));
   }
@@ -111,15 +132,16 @@ export function agoShort(at, now = Date.now()) {
 }
 
 /**
- * ما يراه المستخدم: {level, label, detail}. level ∈ ok | empty | failed | checking | unknown.
+ * ما يراه المستخدم: {level, label, detail}. level ∈ ok | empty | verification | failed | checking | unknown.
  * المصدر الذي فشل الآن لكنه نجح قبل قليل «متعثّر» لا «معطّل».
  */
 export function pulseView(p, { checking = false, now = Date.now() } = {}) {
   if (checking) return { level: 'checking', label: 'يُفحص الآن…', detail: null };
-  if (!p) return { level: 'unknown', label: 'لم يُفحص بعد', detail: null };
+  if (!p || (['ok', 'empty'].includes(p.state) && !hasBrowseEvidence(p))) return { level: 'unknown', label: 'لم يُفحص بعد', detail: null };
   const when = agoShort(p.at, now);
   if (p.state === 'ok') return { level: 'ok', label: 'يعمل', detail: [p.ms != null ? `${(p.ms / 1000).toFixed(1)} ث` : null, when].filter(Boolean).join(' · ') };
   if (p.state === 'empty') return { level: 'empty', label: 'يستجيب بلا نتائج', detail: when };
+  if (p.state === 'verification') return { level: 'verification', label: 'يحتاج تحققًا', detail: when };
   const recent = p.lastOkAt && now - p.lastOkAt < 6 * 60 * MIN;
   return { level: 'failed', label: recent ? 'متعثّر' : 'لا يستجيب', detail: [when, p.failures > 1 ? `${p.failures} محاولات` : null].filter(Boolean).join(' · ') };
 }

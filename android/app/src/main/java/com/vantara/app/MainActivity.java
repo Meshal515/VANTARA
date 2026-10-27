@@ -7,6 +7,7 @@ import com.vantara.plugins.AppUpdatePlugin;
 import com.vantara.plugins.ExtensionEnginePlugin;
 import com.vantara.plugins.SystemUiPlugin;
 import com.vantara.plugins.translation.TranslationPlugin;
+import eu.kanade.tachiyomi.network.interceptor.WebViewActivityHolder;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -21,6 +22,25 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TranslationPlugin.class);
         registerPlugin(com.vantara.anime.bridge.AnimeEnginePlugin.class);
         registerPlugin(com.vantara.usage.UsagePlugin.class);
+        registerPlugin(com.vantara.verification.VerificationPlugin.class);
         super.onCreate(savedInstanceState);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        WebViewActivityHolder.resumed(this);
+    }
+
+    @Override
+    public void onPause() {
+        WebViewActivityHolder.paused(this);
+        super.onPause();
+    }
+
+    @Override
+    public void onDestroy() {
+        WebViewActivityHolder.clear(this);
+        super.onDestroy();
     }
 }

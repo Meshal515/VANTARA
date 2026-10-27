@@ -1,17 +1,8 @@
 name: Android debug APK
 
-# APK غير موقّع من أي فرع، لكل دفعة.
-#
-# غرضان:
-#
-#  1. **التحقّق.** `ci.yml` لا يصرّف أندرويد إطلاقًا، فخطأ تصريف واحد في
-#     Kotlin كان يبقى مخفيًّا إلى أن يُوسَم إصدار — وهناك يُكتشف في أسوأ
-#     وقت. هنا يظهر خلال دقائق من الدفع.
-#
-#  2. **التجربة.** إخراج APK قابل للتثبيت بلا وسم إصدار وبلا سرّ توقيع،
-#     فيُجرَّب المحرّك على جهاز حقيقي من فرع العمل نفسه.
-#
-# debug فقط: لا يقرأ keystore ولا أي سرّ، فلا يمسّ ما يحرسه سير الإصدار.
+# بناء Debug عادي لكل فرع؛ فرع V7 المصرّح به وحده يوقّع بهوية دائمة
+# وينشر Debug prerelease بعد اختبارات الويب/Native وبوابة ترقية APK على محاكي.
+# لا يلمس قناة Stable أو latest.
 
 on:
   push:
@@ -140,7 +131,7 @@ jobs:
   upgradeable-debug:
     if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -157,8 +148,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
 
-      - name: Validate add-ons and updater before signing
-        run: pnpm exec vitest run apps/web/v35/addons-v7.test.js apps/web/v35/addons-view.test.js apps/web/lib/updater.test.js
+      - name: Validate web regressions and upgrade contract before signing
+        run: |
+          pnpm --filter @vantara/domain build
+          pnpm test:web
+          pnpm test:safety
+          python3 -m unittest discover -s tools/android-debug -p 'test_*.py' -v
+
+      - name: Download the actual previous signed Debug APK and manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view debug-channel --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" = true
+          mkdir -p "$RUNNER_TEMP/previous-debug" android-debug-evidence
+          gh release download debug-channel --repo "$GITHUB_REPOSITORY" \
+            --pattern VANTARA-debug.apk --pattern vantara-debug-update.json \
+            --dir "$RUNNER_TEMP/previous-debug"
+          cp "$RUNNER_TEMP/previous-debug/vantara-debug-update.json" android-debug-evidence/previous-manifest.json
 
       - name: Verify permanent signing key available
         env:
@@ -175,11 +182,21 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          echo "name=0.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "code=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          # Re-runs and a future workflow counter reset must still increase over
+          # the APK currently installed by testers, independently of Stable.
+          code=$(python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          previous=json.loads((Path(os.environ['RUNNER_TEMP'])/'previous-debug/vantara-debug-update.json').read_text())
+          assert previous.get('channel')=='debug' and type(previous.get('versionCode')) is int
+          print(max(int(os.environ['GITHUB_RUN_NUMBER']),previous['versionCode']+1))
+          PY
+          )
+          echo "name=0.0.$code" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
           fp=$(node tools/native-fingerprint.mjs)
           echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
-          VERSION="0.0.$GITHUB_RUN_NUMBER" python3 - <<'PY'
+          VERSION="0.0.$code" python3 - <<'PY'
           import os
           from pathlib import Path
           p=Path('apps/web/lib/config.js')
@@ -211,6 +228,10 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest
 
+      - name: Remove signing key from runner after build
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vantara-debug.jks"
+
       - name: Verify signing certificate, application ID, and version
         env:
           VERSION_CODE: ${{ steps.version.outputs.code }}
@@ -219,15 +240,46 @@ jobs:
           apk=android/app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           tools_dir=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          "$tools_dir/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/debug-cert.txt"
-          pinned=$(grep -oE 'STABLE_CERT_SHA256 = "[0-9a-f]{64}"' android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt | grep -oE '[0-9a-f]{64}')
-          grep -q "certificate SHA-256 digest: $pinned" "$RUNNER_TEMP/debug-cert.txt" || { echo 'Debug channel signer changed — refusing upload'; exit 1; }
-          grep -q '^Number of signers: 1$' "$RUNNER_TEMP/debug-cert.txt"
-          "$tools_dir/aapt2" dump badging "$apk" > "$RUNNER_TEMP/debug-badging.txt"
-          grep -q "package: name='com.vantara.app.debug' versionCode='$VERSION_CODE' " "$RUNNER_TEMP/debug-badging.txt"
+          python3 tools/android-debug/verify-apks.py \
+            --previous "$RUNNER_TEMP/previous-debug/VANTARA-debug.apk" \
+            --manifest "$RUNNER_TEMP/previous-debug/vantara-debug-update.json" \
+            --candidate "$apk" --build-tools "$tools_dir" \
+            --pin-source android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt \
+            --expected-code "$VERSION_CODE" --output android-debug-evidence/apk-contract.json
           mkdir -p dist
           cp "$apk" dist/VANTARA-debug.apk
           sha256sum dist/VANTARA-debug.apk > dist/VANTARA-debug.apk.sha256
+
+      - name: Enable KVM for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Upgrade exact signed APK and stress Home and Addons on Android
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          ram-size: 4096M
+          heap-size: 512M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/android-debug/upgrade-check.sh "$RUNNER_TEMP/previous-debug/VANTARA-debug.apk" dist/VANTARA-debug.apk
+
+      - name: Retain Debug upgrade, crash, ANR, and renderer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-upgrade-evidence
+          path: |
+            android-debug-evidence/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Generate versioned SHA256 manifest for dedicated Debug updates
         env:
@@ -284,4 +336,6 @@ jobs:
           gh release view debug-channel --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease'
           echo '### VANTARA Debug channel' >> "$GITHUB_STEP_SUMMARY"
           echo "APK: https://github.com/$GITHUB_REPOSITORY/releases/download/debug-channel/VANTARA-debug.apk" >> "$GITHUB_STEP_SUMMARY"
-          echo "Version: 0.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version: ${{ steps.version.outputs.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Gates: web regressions, native unit tests, previous APK certificate/package/version, real install -r and storage retention, 30 Home/Addons cycles on Android emulator.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Scope: navigation uses a local anonymous sync fixture and real native bridges; authentication, Cloudflare clearance, and playback on physical devices require separate evidence.' >> "$GITHUB_STEP_SUMMARY"

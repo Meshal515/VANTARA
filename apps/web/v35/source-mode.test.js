@@ -1,6 +1,38 @@
 import { expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { renderSourceMode } from "./source-mode.js";
+
+it("shows actual source logos and replaces broken images with a clean glyph", () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const view = renderSourceMode({ addon: { name: "Actual source", iconUrl: "https://images.example.com/icon.png" }, adapter: {} });
+  const mark = view.querySelector(".addon-source-head .addon-logo");
+  const image = mark.querySelector("img");
+  expect(image?.getAttribute("src")).toBe("https://images.example.com/icon.png");
+  expect(image.style.objectFit).toBe("contain");
+  expect(image.referrerPolicy).toBe("no-referrer");
+  image.onerror();
+  expect(mark.querySelector("img")).toBeNull();
+  expect(mark.querySelector("svg")).not.toBeNull();
+  expect(mark.textContent).toBe("");
+  view.close();
+});
+
+it("accepts bounded native PNG data while rejecting unsafe or oversized source logos", () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=";
+  const accepted = renderSourceMode({ addon: { name: "Native", logo: png }, adapter: {} });
+  expect(accepted.querySelector(".addon-logo img")?.getAttribute("src")).toBe(png);
+  accepted.close();
+  for (const logo of [undefined, "javascript:alert(1)", "http://example.com/icon.png", "https://user:secret@example.com/icon.png", "data:image/svg+xml;base64,AAAA", "data:image/png;base64,AAAA<script>", "data:image/png;base64," + "A".repeat(90 * 1024)]) {
+    const view = renderSourceMode({ addon: { name: "No invented initials", logo }, adapter: {} });
+    const mark = view.querySelector(".addon-logo");
+    expect(mark.querySelector("img")).toBeNull();
+    expect(mark.querySelector("svg")).not.toBeNull();
+    expect(mark.textContent).toBe("");
+    view.close();
+  }
+});
+
 it("searches only the chosen adapter and preserves source/tab/filter on back", async () => {
   globalThis.document = parseHTML("<html><body></body></html>").document;
   let query;
