@@ -13,13 +13,13 @@ test('timing summary excludes failed runs and reports measured samples only',()=
   assert.equal(summarize([{ok:false}]).medianMs,null);
 });
 
-test('software-only host comparison never passes a stopped video or exempts a normal renderer',()=>{
+test('software-only local baseline cannot weaken absolute playback acceptance',()=>{
   const sample={fromSeconds:0,toSeconds:.3,observedSeconds:2};
   const baseline={fromSeconds:0,toSeconds:.4,observedSeconds:2,softwareAdapter:true};
   assert.equal(assessPlaybackProgress(sample).passed,false);
   assert.equal(assessPlaybackProgress(sample,{...baseline,softwareAdapter:false}).passed,false);
-  assert.equal(assessPlaybackProgress(sample,baseline).kind,'host-relative');
-  assert.equal(assessPlaybackProgress(sample,baseline).passed,true);
+  assert.equal(assessPlaybackProgress(sample,baseline).kind,'realtime');
+  assert.equal(assessPlaybackProgress(sample,baseline).passed,false);
   assert.equal(assessPlaybackProgress({...sample,toSeconds:0},baseline).passed,false);
   assert.equal(assessPlaybackProgress(sample,{...baseline,toSeconds:0}).passed,false);
   assert.equal(assessPlaybackProgress({...sample,toSeconds:2}).kind,'realtime');

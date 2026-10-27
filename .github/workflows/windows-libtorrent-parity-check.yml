@@ -1,6 +1,11 @@
 name: Windows libtorrent parity evidence (no release)
 on:
   workflow_dispatch:
+    inputs:
+      playback_runner:
+        description: 'Existing authorized Windows runner label (GPU-capable for HEVC acceptance)'
+        type: string
+        default: windows-2022
   push:
     branches: ['fix/windows-update-release-parity-20261026', 'chatgpt/windows-torrent-ci-and-rebuffer-20261026']
     paths:
@@ -11,7 +16,10 @@ on:
       - 'apps/desktop/src/startup-trace.mjs'
       - 'tools/bundle-windows-libtorrent*'
       - 'tools/libtorrent-fixture*'
-      - 'tools/torrent-startup-benchmark.mjs'
+      - 'tools/torrent-startup-benchmark*'
+      - 'tools/torrent-byte-consumer.mjs'
+      - 'tools/torrent-validation*'
+      - 'tools/windows-torrent-engine-validation.ps1'
       - '.github/workflows/windows-libtorrent-parity-check.yml'
 permissions:
   contents: read
@@ -19,8 +27,33 @@ concurrency:
   group: windows-libtorrent-parity-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  native-comparison:
+  torrent-engine-validation:
+    name: Torrent Engine Validation (verified bytes, no decoder)
     runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate both engines, byte hashes, process restart, partial and corrupt cache
+        shell: pwsh
+        run: ./tools/windows-torrent-engine-validation.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-torrent-engine-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-engine-validation/runs/**/results.json
+            ${{ runner.temp }}/vantara-engine-validation/runs/**/run.json
+            ${{ runner.temp }}/vantara-engine-validation/runs/**/before-process-restart.json
+          if-no-files-found: error
+  native-comparison:
+    name: Real MPV Playback Validation (required)
+    runs-on: ${{ inputs.playback_runner || 'windows-2022' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +63,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Inventory real runner graphics before testing codecs
+        shell: pwsh
+        run: |
+          $inventory=@{os=(Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version);cpu=(Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors);gpu=@(Get-CimInstance Win32_VideoController | Select-Object Name,AdapterCompatibility,DriverVersion,VideoProcessor,Status)}
+          $inventory | ConvertTo-Json -Depth 8 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'vantara-runner-graphics.json')
       - name: Bundle the pinned embedded interpreter and official libtorrent wheel
         shell: pwsh
         run: |
@@ -71,6 +109,7 @@ jobs:
           $electronDir=Join-Path $env:PARITY_ROOT 'electron'
           Expand-Archive $electron -DestinationPath $electronDir
           Copy-Item (Join-Path $electronDir 'vulkan-1.dll') (Join-Path $mpv.DirectoryName 'vulkan-1.dll')
+          & $mpv.FullName --hwdec=help | Out-File (Join-Path $env:PARITY_ROOT 'mpv-hwdec-inventory.txt')
           & $mpv.FullName --version
           if($LASTEXITCODE -ne 0){throw 'Pinned MPV cannot start'}
           # GPL encoders are used to generate owned test fixtures only; not shipped.
@@ -156,14 +195,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$false
           $highResolutionResults=@()
           $highResolutionFailures=@()
-          foreach($format in @(@{name='1080p-h264';size='1920x1080';width=1920;height=1080;codec='libx264'},@{name='2160p-hevc10-pq';size='3840x2160';width=3840;height=2160;codec='libx265'})){
+          foreach($format in @(@{name='1080p-h264';size='1920x1080';width=1920;height=1080;codec='libx264';tenBit=$false},@{name='1080p-hevc';size='1920x1080';width=1920;height=1080;codec='libx265';tenBit=$false},@{name='2160p-hevc';size='3840x2160';width=3840;height=2160;codec='libx265';tenBit=$false},@{name='2160p-hevc10-pq';size='3840x2160';width=3840;height=2160;codec='libx265';tenBit=$true})){
             $source=Join-Path $env:PARITY_ROOT "high-resolution-fixtures/$($format.name)"
             New-Item -ItemType Directory -Path $source -Force | Out-Null
             $video=Join-Path $source 'authored-mp4.mp4'
             $encode=@('-hide_banner','-loglevel','error','-y','-f','lavfi','-i',"testsrc2=size=$($format.size):rate=24",'-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','24','-c:v',$format.codec,'-preset','ultrafast','-threads','2')
-            if($format.codec -eq 'libx265'){$encode+=@('-pix_fmt','yuv420p10le','-b:v','24M','-maxrate','32M','-bufsize','48M','-x265-params','pools=2:frame-threads=2:hdr10=1:repeat-headers=1','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc')}else{$encode+=@('-pix_fmt','yuv420p','-crf','23')}
+            if($format.tenBit){$encode+=@('-pix_fmt','yuv420p10le','-b:v','24M','-maxrate','32M','-bufsize','48M','-x265-params','pools=2:frame-threads=2:hdr10=1:repeat-headers=1','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc')}elseif($format.codec -eq 'libx265'){$encode+=@('-pix_fmt','yuv420p','-b:v','24M','-maxrate','32M','-bufsize','48M','-x265-params','pools=2:frame-threads=2')}else{$encode+=@('-pix_fmt','yuv420p','-crf','23')}
             $encode+=@('-c:a','aac','-b:a','96k','-movflags','+faststart',$video)
             & $env:PARITY_FFMPEG @encode
             if($LASTEXITCODE -ne 0){throw 'Owned high-resolution fixture encoding failed'}
@@ -205,8 +245,35 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          name: windows-parity-reports-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-runner-graphics.json
+            ${{ runner.temp }}/vantara-libtorrent-parity/mpv-hwdec-inventory.txt
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/**/results.json
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/**/run.json
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/**/local-player-probe.json
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/**/*.log
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/*-summary.json
+            ${{ runner.temp }}/vantara-libtorrent-parity/runs/*-failures.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
           name: windows-libtorrent-parity-${{ github.sha }}
           path: |
             ${{ runner.temp }}/vantara-libtorrent-parity/runs/
             ${{ runner.temp }}/vantara-libtorrent-parity/native/LIBTORRENT-MANIFEST.json
           if-no-files-found: warn
+
+  required-windows-validation:
+    name: Required Windows engine AND real playback acceptance
+    if: always()
+    needs: [torrent-engine-validation, native-comparison]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          ENGINE_RESULT: ${{ needs.torrent-engine-validation.result }}
+          PLAYBACK_RESULT: ${{ needs.native-comparison.result }}
+        run: |
+          test "$ENGINE_RESULT" = success
+          test "$PLAYBACK_RESULT" = success
