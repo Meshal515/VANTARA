@@ -1,0 +1,123 @@
+{
+  "date": "2026-10-27",
+  "windowsRun": 40443655862,
+  "testedCommit": "f42bbe6d365d2a42967058a55349d41b3f8dd975",
+  "scope": "Engine bytes through actual desktop proxy; no MPV or rendered-video claim",
+  "metric": "Completion of first verified 256 KiB HTTP Range; legacy raw field is named firstByteMs",
+  "engines": [
+    {
+      "engine": "rqbit",
+      "hostProcesses": [
+        3420,
+        4512
+      ],
+      "infoHash": "314d27f8efc70de305adb3280babafdff567ee8e",
+      "fileIdx": 0,
+      "ownedBytes": 67108864,
+      "cases": [
+        {
+          "mode": "cold",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 632.696899999999,
+          "p95VerifiedRangeMs": 7375.9047,
+          "minFullRangeMbps": 974.5501596504562,
+          "maxFullRangeMbps": 1321.3530857075184
+        },
+        {
+          "mode": "warm",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 122.66799999999967,
+          "p95VerifiedRangeMs": 135.20169999999962,
+          "minFullRangeMbps": 642.6036276934203,
+          "maxFullRangeMbps": 682.7859583418231
+        },
+        {
+          "mode": "restart",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 186.09460000000036,
+          "p95VerifiedRangeMs": 249.43309999999997,
+          "minFullRangeMbps": 910.4306032501877,
+          "maxFullRangeMbps": 1140.6275384799405
+        },
+        {
+          "mode": "partial",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 629.9643999999998,
+          "p95VerifiedRangeMs": 640.5184999999997,
+          "minFullRangeMbps": 1003.6037701953722,
+          "maxFullRangeMbps": 1331.9885664580218
+        },
+        {
+          "mode": "corrupt",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 147.59510000000046,
+          "p95VerifiedRangeMs": 638.2438000000002,
+          "minFullRangeMbps": 1031.399571126625,
+          "maxFullRangeMbps": 1405.927295819833
+        }
+      ]
+    },
+    {
+      "engine": "libtorrent",
+      "hostProcesses": [
+        4712,
+        2812
+      ],
+      "infoHash": "314d27f8efc70de305adb3280babafdff567ee8e",
+      "fileIdx": 0,
+      "ownedBytes": 67108864,
+      "cases": [
+        {
+          "mode": "cold",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 1009.1646000000001,
+          "p95VerifiedRangeMs": 1047.5992000000006,
+          "minFullRangeMbps": 67.37304972908706,
+          "maxFullRangeMbps": 67.59589495801859
+        },
+        {
+          "mode": "warm",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 141.54269999999997,
+          "p95VerifiedRangeMs": 148.3992999999973,
+          "minFullRangeMbps": 1393.6026099082205,
+          "maxFullRangeMbps": 1782.1742774732577
+        },
+        {
+          "mode": "restart",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 173.97790000000168,
+          "p95VerifiedRangeMs": 211.20749999999998,
+          "minFullRangeMbps": 212.85031046944462,
+          "maxFullRangeMbps": 1659.6972874582375
+        },
+        {
+          "mode": "partial",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 880.2465999999986,
+          "p95VerifiedRangeMs": 887.8366000000005,
+          "minFullRangeMbps": 67.34992030914847,
+          "maxFullRangeMbps": 67.58440987279822
+        },
+        {
+          "mode": "corrupt",
+          "successful": 3,
+          "samples": 3,
+          "medianVerifiedRangeMs": 895.082699999999,
+          "p95VerifiedRangeMs": 932.7878999999994,
+          "minFullRangeMbps": 66.16066343085002,
+          "maxFullRangeMbps": 67.51263597808621
+        }
+      ]
+    }
+  ]
+}

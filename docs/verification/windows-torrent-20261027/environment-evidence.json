@@ -1,0 +1,334 @@
+{
+  "run": 40443655862,
+  "testedCommit": "f42bbe6d365d2a42967058a55349d41b3f8dd975",
+  "overall": "cancelled at existing 45-minute job deadline; not accepted",
+  "hardware": {
+    "cpu": {
+      "Name": "AMD EPYC 7763 64-Core Processor                ",
+      "NumberOfCores": 2,
+      "NumberOfLogicalProcessors": 4
+    },
+    "os": {
+      "Caption": "Microsoft Windows Server 2022 Datacenter",
+      "Version": "10.0.20348"
+    },
+    "gpu": [
+      {
+        "Name": "Microsoft Hyper-V Video",
+        "AdapterCompatibility": "Microsoft",
+        "DriverVersion": "10.0.20348.1",
+        "VideoProcessor": null,
+        "Status": "OK"
+      }
+    ]
+  },
+  "localFiles": [
+    {
+      "case": "1080p-h264-rqbit",
+      "completedTorrentSamples": 10,
+      "baselines": [
+        {
+          "label": "default",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.1411137,
+            "advanceSeconds": 10.166667,
+            "minimumSeconds": 9.12700233,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 177,
+            "delayedFrames": 0,
+            "lostFraction": 0.7272376800193059
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-gpu",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.0189978,
+            "advanceSeconds": 9.958334,
+            "minimumSeconds": 9.017098019999999,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 180,
+            "delayedFrames": 0,
+            "lostFraction": 0.7485778667403241
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-next",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.1026404,
+            "advanceSeconds": 10,
+            "minimumSeconds": 9.092376360000001,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0.2505627999999997,
+            "droppedFrames": 174,
+            "delayedFrames": 0,
+            "lostFraction": 0.7176341741313488
+          },
+          "error": null
+        }
+      ]
+    },
+    {
+      "case": "2160p-hevc-rqbit",
+      "completedTorrentSamples": 10,
+      "baselines": [
+        {
+          "label": "default",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.063899900000001,
+            "advanceSeconds": 7.541667,
+            "minimumSeconds": 9.05750991,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0.33763759999999987,
+            "droppedFrames": 166,
+            "delayedFrames": 0,
+            "lostFraction": 0.6872749863764709
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-gpu",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.3600113,
+            "advanceSeconds": 6.791667,
+            "minimumSeconds": 9.324010170000001,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0.5928783000000003,
+            "droppedFrames": 150,
+            "delayedFrames": 0,
+            "lostFraction": 0.6032811952627889
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-next",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 9.959576199999995,
+            "advanceSeconds": 8.25,
+            "minimumSeconds": 8.963618579999997,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0.5160856999999996,
+            "droppedFrames": 177,
+            "delayedFrames": 0,
+            "lostFraction": 0.7404933555305298
+          },
+          "error": null
+        }
+      ]
+    },
+    {
+      "case": "1080p-h264-libtorrent",
+      "completedTorrentSamples": 10,
+      "baselines": [
+        {
+          "label": "default",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.180857,
+            "advanceSeconds": 10.125,
+            "minimumSeconds": 9.1627713,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 176,
+            "delayedFrames": 0,
+            "lostFraction": 0.720306093419575
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-gpu",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.082101900000001,
+            "advanceSeconds": 10,
+            "minimumSeconds": 9.073891710000002,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 181,
+            "delayedFrames": 0,
+            "lostFraction": 0.7480252373432831
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-next",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.1776433,
+            "advanceSeconds": 10.083334,
+            "minimumSeconds": 9.15987897,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 176,
+            "delayedFrames": 0,
+            "lostFraction": 0.7205335377919301
+          },
+          "error": null
+        }
+      ]
+    },
+    {
+      "case": "1080p-hevc-libtorrent",
+      "completedTorrentSamples": 10,
+      "baselines": [
+        {
+          "label": "default",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.119981200000002,
+            "advanceSeconds": 10.166667,
+            "minimumSeconds": 9.107983080000002,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 181,
+            "delayedFrames": 0,
+            "lostFraction": 0.745225363330385
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-gpu",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.027706799999999,
+            "advanceSeconds": 10,
+            "minimumSeconds": 9.02493612,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 185,
+            "delayedFrames": 0,
+            "lostFraction": 0.7687035019146485
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-next",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.100308199999999,
+            "advanceSeconds": 10,
+            "minimumSeconds": 9.09027738,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 178,
+            "delayedFrames": 0,
+            "lostFraction": 0.7343010252565033
+          },
+          "error": null
+        }
+      ]
+    },
+    {
+      "case": "1080p-hevc-rqbit",
+      "completedTorrentSamples": 10,
+      "baselines": [
+        {
+          "label": "default",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.0412569,
+            "advanceSeconds": 10,
+            "minimumSeconds": 9.03713121,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 177,
+            "delayedFrames": 0,
+            "lostFraction": 0.7344698052690993
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-gpu",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.202997700000001,
+            "advanceSeconds": 10.041666,
+            "minimumSeconds": 9.182697930000002,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 186,
+            "delayedFrames": 0,
+            "lostFraction": 0.7595806867622835
+          },
+          "error": null
+        },
+        {
+          "label": "d3d11-next",
+          "softwareAdapter": true,
+          "hwdec": "no",
+          "acceptance": {
+            "passed": false,
+            "observedSeconds": 10.2488383,
+            "advanceSeconds": 9.916666,
+            "minimumSeconds": 9.223954469999999,
+            "longestBufferSeconds": 0,
+            "longestStallSeconds": 0,
+            "droppedFrames": 175,
+            "delayedFrames": 0,
+            "lostFraction": 0.7114627485796773
+          },
+          "error": null
+        }
+      ]
+    }
+  ],
+  "containerComparisons": [
+    {
+      "case": "rqbit-rqbit",
+      "successful": 36,
+      "samples": 36
+    },
+    {
+      "case": "libtorrent-rqbit",
+      "successful": 0,
+      "samples": 36
+    },
+    {
+      "case": "libtorrent-libtorrent",
+      "successful": 36,
+      "samples": 36
+    },
+    {
+      "case": "rqbit-libtorrent",
+      "successful": 36,
+      "samples": 36
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+name: Windows actual software render paths (no release)
+on:
+  workflow_dispatch:
+  push:
+    branches: ['chatgpt/windows-torrent-ci-and-rebuffer-20261026']
+    paths: ['tools/windows-render-paths.mjs', '.github/workflows/windows-render-paths.yml']
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [1080p-h264, 1080p-hevc, 2160p-hevc, 2160p-hevc10-pq]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compare actual Windows render paths on the same owned local file
+        shell: pwsh
+        env:
+          RENDER_FORMAT: ${{ matrix.format }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:RENDER_ROOT=Join-Path $env:RUNNER_TEMP 'vantara-render-paths'
+          New-Item -ItemType Directory -Path $env:RENDER_ROOT -Force | Out-Null
+          Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion | ConvertTo-Json | Set-Content (Join-Path $env:RENDER_ROOT 'graphics.json')
+          function Fetch-Pinned([string]$Url,[string]$Name,[string]$Hash) {
+            $file=Join-Path $env:RENDER_ROOT $Name
+            Invoke-WebRequest $Url -OutFile $file
+            if((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $Hash){throw "Checksum mismatch: $Name"}
+            return $file
+          }
+          $archive=Fetch-Pinned 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-x86_64-20261014-git-ec38361c56.7z' 'mpv.7z' 'ab6236a2b78a3e9e93a156c1f638d3182ee906006d019c15d1b7b056a7c9a4c5'
+          $mpvDir=Join-Path $env:RENDER_ROOT 'mpv'
+          & 7z x -y "-o$mpvDir" $archive | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'MPV archive failed'}
+          $mpv=Get-ChildItem $mpvDir -Recurse -File -Filter mpv.exe | Select-Object -First 1
+          $electron=Fetch-Pinned 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip' 'electron.zip' '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4'
+          $electronDir=Join-Path $env:RENDER_ROOT 'electron'
+          Expand-Archive $electron -DestinationPath $electronDir
+          Copy-Item (Join-Path $electronDir 'vulkan-1.dll') (Join-Path $mpv.DirectoryName 'vulkan-1.dll')
+          & $mpv.FullName --hwdec=help | Out-File (Join-Path $env:RENDER_ROOT 'mpv-hwdec-inventory.txt')
+          & $mpv.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'Pinned MPV cannot start'}
+          # GPL encoders are used to generate owned test fixtures only; not shipped.
+          # Compare every downloaded byte with the exact tagged release asset SHA256.
+          # Release tag and SHA256 independently pinned; no mutable GitHub API lookup.
+          $ffmpegZip=Fetch-Pinned 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-26-14-25/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-shared-8.1.zip' 'ffmpeg.zip' '40daf4793f3adcf13ed6658c775c10380188e99059a286a12ad984ca5992a34d'
+          $ffmpegDir=Join-Path $env:RENDER_ROOT 'ffmpeg'
+          Expand-Archive $ffmpegZip -DestinationPath $ffmpegDir
+          $ffmpeg=Get-ChildItem $ffmpegDir -Recurse -File -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $mpv -or -not $ffmpeg){throw 'Missing media executable'}
+
+          $is4k=$env:RENDER_FORMAT.StartsWith('2160p')
+          $isHevc=$env:RENDER_FORMAT.Contains('hevc')
+          $ten=$env:RENDER_FORMAT.Contains('10-pq')
+          $size=if($is4k){'3840x2160'}else{'1920x1080'}
+          $codec=if($isHevc){'libx265'}else{'libx264'}
+          $video=Join-Path $env:RENDER_ROOT 'owned.mp4'
+          $encode=@('-hide_banner','-loglevel','error','-y','-f','lavfi','-i',"testsrc2=size=${size}:rate=24",'-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','24','-c:v',$codec,'-preset','ultrafast','-threads','2')
+          if($isHevc){$encode+=@('-b:v','24M','-maxrate','32M','-bufsize','48M','-x265-params','pools=2:frame-threads=2')}
+          if($ten){$encode+=@('-pix_fmt','yuv420p10le','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc')}else{$encode+=@('-pix_fmt','yuv420p')}
+          $encode+=@('-c:a','aac','-b:a','96k','-movflags','+faststart',$video)
+          & $ffmpeg.FullName @encode
+          if($LASTEXITCODE -ne 0){throw 'Owned fixture encoding failed'}
+          node tools/mpv-render-policy-check.mjs $mpv.FullName
+          if($LASTEXITCODE -ne 0){throw 'Bundled MPV Lua render policy contract failed'}
+          node tools/windows-render-paths.mjs $mpv.FullName $ffmpeg.FullName $video (Join-Path $env:RENDER_ROOT 'evidence')
+          if($LASTEXITCODE -ne 0){throw 'No render path met unchanged real playback acceptance'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-render-${{ matrix.format }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/vantara-render-paths/evidence/
+            ${{ runner.temp }}/vantara-render-paths/graphics.json
+          if-no-files-found: error

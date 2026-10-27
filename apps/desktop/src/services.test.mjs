@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs } from './services.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
+import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 
 const hash = 'a'.repeat(40);
 test('HTTPS يرفض الأهداف الداخلية وكل DNS يحتوي عنوانًا داخليًا', async () => {
@@ -97,7 +99,7 @@ test('initial_peers: عناوين عامة فقط وبصيغة SocketAddr الت
 });
 test('سطر rqbit: خيارات 9.0.1 الصحيحة، وحفظ DHT يمكن تعطيله للمحاولة الثانية', () => {
   const on=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache'});
-  assert.deepEqual(on,['-v','error','--http-api-listen-addr','127.0.0.1:3030','--disable-lsd','--listen-port','51413','server','start','C:\\cache','--disable-persistence']);
+  assert.deepEqual(on,['-v','error','--http-api-listen-addr','127.0.0.1:3030','--disable-lsd','--experimental-enable-utp-listen','--listen-port','51413','server','start','C:\\cache','--disable-persistence']);
   const off=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache',dhtPersistence:false});
   assert.ok(off.includes('--disable-dht-persistence'));
   assert.ok(off.indexOf('--disable-dht-persistence')<off.indexOf('server'),'خيار عام قبل الأمر الفرعي');
@@ -109,11 +111,30 @@ async function fixture(t, mode='normal', serviceOptions={}) {
   let services;
   t.after(async() => {await services?.close();await rm(dir,{recursive:true,force:true});});
   const rqbit=join(dir,'rqbit'), mpv=join(dir,'mpv');
+  if(process.platform==='win32'){
+    // Windows CreateProcess does not execute extensionless Node shebang files.
+    // Only these two test programs use a Node launcher; real binaries and the
+    // application's process launcher retain their normal behavior.
+    const nativeSpawn=cp.spawn;
+    t.mock.method(cp,'spawn',(binary,args,options)=>[rqbit,mpv].includes(binary)?nativeSpawn(process.execPath,[binary,...args],options):nativeSpawn(binary,args,options));
+    // Contract fixtures use their temporary profile, not repeated CIM process
+    // startup. Actual volume discovery and NTFS are exercised by separate real
+    // Windows engine/NTFS tests, outside this mocked fixture process.
+    const nativeExecFile=cp.execFile;
+    t.mock.method(cp,'execFile',(binary,args,...rest)=>{
+      if(binary==='powershell.exe'&&args.at(-1)?.startsWith('[System.IO.DriveInfo]::GetDrives()')){
+        queueMicrotask(()=>rest.at(-1)(null,'',''));return {};
+      }
+      return nativeExecFile(binary,args,...rest);
+    });
+    syncBuiltinESMExports();
+    t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+  }
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
 fs.appendFileSync(${JSON.stringify(join(dir,'rqbit-attempts'))},JSON.stringify(args)+'\\n');if(${JSON.stringify(mode)}==='dht-conflict'&&!args.includes('--disable-dht-persistence'))process.exit(1);
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
-const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>clearInterval(gate));return;}res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
+const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>clearInterval(gate));return;}if(req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,torrentMetadataStrategy:'list-only',replayCache:false,...serviceOptions});
@@ -171,6 +192,30 @@ test('a prewarmed torrent is adopted by playback: one engine add, paused while w
   assert.equal(all.filter(r=>r.url.startsWith('/torrents?')).length,1,'playback reuses the prewarmed engine and torrent');
   assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')));
 });
+for(const completed of [false,true])test(`adopted prewarm records replay only for its playback owner (completed=${completed})`,async t=>{
+  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',replayCache:true});
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  if(completed){
+    for(let i=0;i<200;i++){
+      const requests=(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).split('\n').filter(Boolean).map(JSON.parse);
+      if(requests.some(r=>r.url.endsWith('/pause')))break;
+      await new Promise(r=>setTimeout(r,25));
+    }
+  }
+  const anonymous=createTorrentReplayCache({userData:dir});
+  assert.equal(await anonymous.lookup({infoHash:hash,fileIdx:0}),null,'preparation must not create a guest-owned replay');await anonymous.close();
+  await services.startPlayback({session:'owned-prewarm',ownerId:'playback-owner',candidate:{infoHash:hash,fileIdx:0}});
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const url=commands.find(m=>m.command[0]==='loadfile').command[1];
+  const response=await fetch(url,{headers:{Range:'bytes=0-3'},signal:AbortSignal.timeout(4000)});
+  assert.equal(await response.text(),'abcd');
+  await services.stopPlayback({session:'owned-prewarm'});await services.close();
+  const cache=createTorrentReplayCache({userData:dir,ownerId:'playback-owner'});t.after(()=>cache.close());
+  const replay=await cache.lookup({infoHash:hash,fileIdx:0});
+  assert.ok(replay,'adoption must retain verified replay for the next app process');
+  assert.equal((await replay.read(0,4))?.toString(),'abcd');
+  for(const ownerId of ['guest','other-owner']){const other=createTorrentReplayCache({userData:dir,ownerId});assert.equal(await other.lookup({infoHash:hash,fileIdx:0}),null);await other.close();}
+});
 test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
   const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
   const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
@@ -192,6 +237,25 @@ test('controls arriving during preparation wait for loadfile rather than reporti
   const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(commands.findIndex(m=>m.command[0]==='loadfile')<commands.findIndex(m=>m.command[0]==='set_property'&&m.command[1]==='pause'));
 });
+test('sparse 256 KiB replay for a large video does not masquerade as a warm-ready first frame',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{replayCache:true,torrentMetadataStrategy:'direct-index'});
+  const cache=createTorrentReplayCache({userData:dir});
+  const entry=await cache.remember({root:dir,infoHash:hash,fileIdx:0,fileLength:8*1024*1024,filename:'clip.mp4'});
+  assert.equal(await entry.write(0,Buffer.alloc(256*1024,0x41)),true);
+  await cache.close();
+  await services.startPlayback({session:'sparse-replay-needs-engine',candidate:{infoHash:hash,fileIdx:0}});
+  const stage=events.find(e=>e.stage==='replay-preflight');
+  assert.equal(stage?.mode,'engine-required');
+  assert.equal(stage?.verifiedBytes,256*1024);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(requests.some(x=>x.url.startsWith('/torrents?')),'playback must use the verified engine instead of the sparse shortcut');
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const url=commands.find(m=>m.command[0]==='loadfile').command[1];
+  const response=await fetch(url,{headers:{Range:'bytes=0-3'},signal:AbortSignal.timeout(4000)});
+  assert.equal(response.status,206);
+  assert.equal(await response.text(),'abcd','a rejected replay must never be served again after remember()');
+});
+
 test('verified replay serves the exact selected range while fresh magnet discovery is still blocked',async t=>{
   const {dir,services}=await fixture(t,'slow',{replayCache:true,torrentMetadataStrategy:'direct-index'});
   const cache=createTorrentReplayCache({userData:dir});
@@ -495,10 +559,10 @@ test('ملف ترجمة مقبول SRT/VTT/ASS فقط، محدود دون HTML �
   assert.equal(validateSubtitleText('[Script Info]\nTitle: Owned\n[Events]\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,مرحبا').extension,'ass');
   for(const text of ['<html>not subtitles</html>','#EXTM3U\nhttps://private.local','PK\u0003\u0004bytes','random text','x'.repeat(2*1024*1024+1),'1\n00:00:00,000 --> 00:00:02,000\nhi\u0000'])assert.throws(()=>validateSubtitleText(text),/ترجمة|الحد/);
 });
-async function subtitleSource(t,{slow=false,invalid=false,oversize=false,redirect=false,legacyArabic=false,utf16=false,declaredCharset=null}={}){
+async function subtitleSource(t,{slow=false,blocked=null,invalid=false,oversize=false,redirect=false,legacyArabic=false,utf16=false,declaredCharset=null}={}){
   const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
   const body=utf16?Buffer.concat([Buffer.from([255,254]),Buffer.from('1\n00:00:00,000 --> 00:00:02,000\nمرحبا\n','utf16le')]):legacyArabic?Buffer.concat([Buffer.from('1\n00:00:00,000 --> 00:00:02,000\n'),Buffer.from([0xe3,0xd1,0xcd,0xc8,0xc7])]):oversize?'x'.repeat(2*1024*1024+1):invalid?'<html>upstream failed</html>':'1\n00:00:00,000 --> 00:00:02,000\nترجمة مؤلفة\n';
-  const source=http.createServer((req,res)=>{if(declaredCharset)res.setHeader('content-type','text/plain; charset='+declaredCharset);if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
+  const source=http.createServer((req,res)=>{if(declaredCharset)res.setHeader('content-type','text/plain; charset='+declaredCharset);if(redirect&&req.url==='/redirect.srt'){res.writeHead(302,{location:redirect==='public'?'https://cdn.example.com/final.srt':'https://127.0.0.1/private'});return res.end();}if(blocked)blocked.then(()=>res.end(body));else if(slow)setTimeout(()=>res.end(body),150);else res.end(body);});await new Promise(r=>source.listen(0,'127.0.0.1',r));
   t.after(()=>new Promise(r=>source.close(r)));t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
   t.mock.method(https,'request',(url,options,cb)=>http.request(`http://127.0.0.1:${source.address().port}${url.pathname}`,{...options,lookup:undefined},cb));return body;
 }
@@ -583,10 +647,16 @@ test('تنزيل ترجمة متأخر لا يضاف لمشغل جديد يحم�
 });
 
 test('ترجمات candidate تنزل في الخلفية بأولوية العربية دون تأخير startPlayback',async t=>{
-  await subtitleSource(t,{slow:true});const {services,dir}=await fixture(t);
-  await services.startPlayback({session:'embedded',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[{url:'https://subs.example.com/en.srt',lang:'en'},{url:'https://subs.example.com/ar.srt',lang:'ar'}]}});
+  let release;const blocked=new Promise(resolve=>release=resolve);t.after(()=>release());
+  await subtitleSource(t,{blocked});const {services,dir}=await fixture(t);
+  // Hold responses until playback has returned: prove independence from the
+  // download without two synthetic 150ms delays consuming a disk/IPC deadline.
+  const start=services.startPlayback({session:'embedded',candidate:{url:'https://video.example.com/owned.mp4',subtitles:[{url:'https://subs.example.com/en.srt',lang:'en'},{url:'https://subs.example.com/ar.srt',lang:'ar'}]}});
+  await Promise.race([start,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error('playback waited for blocked subtitle responses')),380);timer.unref();})]);
   let commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);assert.ok(!commands.some(m=>m.command[0]==='sub-add'));
-  await new Promise(r=>setTimeout(r,380));commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);const adds=commands.filter(m=>m.command[0]==='sub-add');
+  release();const deadline=Date.now()+380;
+  do{commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);if(commands.filter(m=>m.command[0]==='sub-add').length===2)break;await new Promise(r=>setTimeout(r,10));}while(Date.now()<deadline);
+  const adds=commands.filter(m=>m.command[0]==='sub-add');
   assert.equal(adds.length,2);assert.equal(adds[0].command[4],'ar');assert.equal(adds[0].command[2],'select');assert.equal(adds[1].command[2],'auto');
 });
 test('subtitle-load يرفض هدفًا داخليًا والتوجيه الداخلي والملف فوق 2MiB دون تمرير URL إلى mpv',async t=>{
@@ -671,4 +741,17 @@ test('subtitles off before an Arabic result arrives stays off',async t=>{
   await services.playbackCommand({session:'auto-off',command:'subtitle-register',value:{url:'https://subs.example.com/ar.srt',lang:'ar',label:'ar'}});
   await new Promise(r=>setTimeout(r,80));
   assert.equal((await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add').length,0);
+});
+
+
+test('Windows player carries its conditional software-render policy and removes the session script on stop',{skip:process.platform!=='win32'},async t=>{
+  const {dir,services}=await fixture(t);
+  await services.startPlayback({session:'render-policy-cleanup',candidate:{infoHash:hash,fileIdx:0}});
+  const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
+  const script=args.find(x=>x.startsWith('--script='))?.slice(9);
+  assert.ok(script);
+  assert.match(await readFile(script,'utf8'),/Using a software adapter/);
+  assert.equal(args.includes('--profile=fast'),false,'Real GPU must keep its rendering quality');
+  await services.stopPlayback({session:'render-policy-cleanup'});
+  await assert.rejects(readFile(script),{code:'ENOENT'});
 });

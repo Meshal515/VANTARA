@@ -32,9 +32,20 @@ def port():
 
 
 class PolicyTests(unittest.TestCase):
+    def test_public_192_0_peers_are_not_mistaken_for_private_networks(self):
+        rules = backend.peer_ip_filter()
+        for address in ("192.0.78.1", "192.0.79.1", "8.8.8.8", "2606:4700:4700::1111"):
+            self.assertEqual(0, rules.access(address), address)
+        for address in ("192.0.0.1", "192.0.2.1", "192.168.1.1", "127.0.0.1", "10.1.1.1", "169.254.169.254", "100.64.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "fe80::1", "2001:db8::1"):
+            self.assertNotEqual(0, rules.access(address), address)
+
     def test_current_piece_precedes_interleaved_readers_without_speculative_tail(self):
         w = backend.piece_window(0, 100000, 0, 1024, 7 * 1024)
-        self.assertEqual(tuple(range(7, 19)), w)
+        self.assertEqual(tuple(range(7, 71)), w)
+        # 256 KiB torrent pieces now retain up to 16 MiB ahead of the reader.
+        self.assertEqual(len(backend.piece_window(0, 256*1024*500, 0, 256*1024, 0)), 64)
+        # Large pieces must NOT allocate an unbounded number of requests.
+        self.assertEqual(len(backend.piece_window(0, 32*1024*1024*20, 0, 32*1024*1024, 0)), 1)
         deadlines = backend.deadlines([w, (90, 91, 92)])
         self.assertEqual(0, deadlines[7])
         self.assertEqual(0, deadlines[90])
@@ -190,10 +201,17 @@ class SwarmTests(unittest.TestCase):
         response.close()
         c.close()
         until = time.monotonic() + 1
-        while self.engine.readers and time.monotonic() < until:
+        while time.monotonic() < until:
+            # Cleanup removes the reader and calls libtorrent to reset all its
+            # deadlines under this same lock. Those C++ calls release the GIL;
+            # an unlocked test could observe half of that atomic transition.
+            with self.engine.changed:
+                if not self.engine.readers:
+                    break
             time.sleep(0.01)
-        self.assertEqual({}, self.engine.readers)
-        self.assertEqual({}, self.engine.priorities)
+        with self.engine.changed:
+            self.assertEqual({}, self.engine.readers)
+            self.assertEqual({}, self.engine.priorities)
 
     def test_storage_reserve_stops_new_piece_requests_before_disk_exhaustion(self):
         self.add_with_peer()

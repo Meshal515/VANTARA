@@ -12,6 +12,8 @@ import { basename, dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
+import {softwareRenderPolicyLua} from '../apps/desktop/src/mpv-render-policy.mjs';
+import { assessRealtimePlayback, verifyByteRange, assessByteFlow } from './torrent-validation.mjs';
 
 const nativeSpawn=cp.spawn;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -33,18 +35,51 @@ export function summarize(rows){
   const values=rows.filter(r=>r.ok&&Number.isFinite(r.firstRenderedMs)).map(r=>r.firstRenderedMs).sort((a,b)=>a-b),n=values.length;
   return {successful:n,failed:rows.length-n,minMs:values[0]??null,medianMs:n?(values[Math.floor((n-1)/2)]+values[Math.ceil((n-1)/2)])/2:null,p95Ms:n?values[Math.ceil(n*.95)-1]:null,maxMs:values.at(-1)??null};
 }
-export function assessPlaybackProgress(sample,baseline){
-  const localRate=baseline?.observedSeconds>0?(baseline.toSeconds-baseline.fromSeconds)/baseline.observedSeconds:NaN;
-  const constrained=baseline?.softwareAdapter===true&&Number.isFinite(localRate)&&localRate>=.05&&localRate<.6;
-  const tolerance=constrained?Math.min(.1,Math.max(0,sample.frameToleranceSeconds??0)):0;
-  const minimumSeconds=Math.max(.01,sample.observedSeconds*(constrained?localRate*.6:.6)-tolerance);
-  return {kind:constrained?'host-relative':'realtime',minimumSeconds,localRate:constrained?localRate:null,passed:sample.toSeconds-sample.fromSeconds>=minimumSeconds};
+export function playbackHasActuallyStarted({position, paused, buffering}={}) {
+  // A rendered still/screenshot does not certify video playback. Never count
+  // paused or paused-for-cache mpv output as a running stream.
+  return Number.isFinite(position)&&position>0.05&&paused===false&&buffering===false;
 }
+export function assessPlaybackProgress(sample){
+  // Backwards-compatible report helper. Host baselines are diagnostics only.
+  const minimumSeconds=sample.observedSeconds*.9;
+  return {kind:'realtime',minimumSeconds,passed:sample.observedSeconds>0&&sample.toSeconds-sample.fromSeconds>=minimumSeconds};
+}
+
+// Default comparisons must exercise the shipped arguments. Explicit transport
+// controls are isolated here so enabling uTP in production cannot invalidate
+// the TCP-only negative control or duplicate a clap flag.
+export function fixtureRqbitTransportArgs(args,transport='production'){
+  assert.ok(['production','tcp','utp','both'].includes(transport),'Unsupported fixture rqbit transport');
+  if(transport==='production')return [...args];
+  const result=args.filter(x=>!['--experimental-enable-utp-listen','--disable-tcp-connect','--disable-tcp-listen'].includes(x));
+  if(transport!=='tcp')result.unshift('--experimental-enable-utp-listen');
+  if(transport==='utp')result.unshift('--disable-tcp-connect','--disable-tcp-listen');
+  return result;
+}
+
 async function until(fn,timeout=30000){const deadline=performance.now()+timeout;let last;while(performance.now()<deadline){try{const value=await fn();if(value)return value;}catch(e){last=e;}await sleep(25);}throw last??new Error('Benchmark deadline exceeded');}
 async function port(){const s=net.createServer();await new Promise((r,j)=>{s.once('error',j);s.listen(0,'127.0.0.1',r);});const p=s.address().port;await new Promise(r=>s.close(r));return p;}
+export async function waitForOwnedTcpListener(peerPort,timeout=30000){
+  const started=performance.now();
+  await until(()=>new Promise(resolveReady=>{const socket=net.createConnection({host:'127.0.0.1',port:peerPort});const done=value=>{socket.destroy();resolveReady(value);};socket.once('connect',()=>done(true));socket.once('error',()=>done(false));socket.setTimeout(500,()=>done(false));}),timeout);
+  return performance.now()-started;
+}
+export async function waitForOwnedBitTorrentPeer(peerPort,infoHash,timeout=30000){
+  assert.match(infoHash,/^[a-f0-9]{40}$/);const hash=Buffer.from(infoHash,'hex'),started=performance.now();
+  const request=Buffer.concat([Buffer.from([19]),Buffer.from('BitTorrent protocol'),Buffer.alloc(8),hash,Buffer.from('-VA0001-'),randomBytes(12)]);
+  await until(()=>new Promise(resolveReady=>{
+    const socket=net.createConnection({host:'127.0.0.1',port:peerPort});let reply=Buffer.alloc(0),done=false;
+    const finish=value=>{if(done)return;done=true;socket.destroy();resolveReady(value);};
+    socket.once('connect',()=>socket.write(request));socket.on('error',()=>finish(false));socket.once('end',()=>finish(false));socket.setTimeout(500,()=>finish(false));
+    socket.on('data',b=>{reply=Buffer.concat([reply,b]);if(reply.length>4096)return finish(false);if(reply.length>=68)finish(reply[0]===19&&reply.toString('ascii',1,20)==='BitTorrent protocol'&&reply.subarray(28,48).equals(hash));});
+  }),timeout);
+  return performance.now()-started;
+}
 export async function createUtpFixtureRelay(targetPort){
   assert.ok(Number.isSafeInteger(targetPort)&&targetPort>0&&targetPort<=65535,'Invalid owned peer port');
-  const relay=dgram.createSocket('udp4'),clients=new Map();
+  const relay=dgram.createSocket('udp4'),clients=new Map(),proof={tcpConnectRejected:true,transport:'UDP-only relay to owned loopback seeder',clientPackets:0,replyPackets:0,clientTypes:{},replyTypes:{}};
+  const packet=(side,bytes)=>{proof[side+'Packets']++;const kind=(bytes[0]&15)===1?String(bytes[0]>>4):'other';proof[side+'Types'][kind]=(proof[side+'Types'][kind]??0)+1;};
   relay.on('error',()=>{});
   await new Promise((r,j)=>{relay.once('error',j);relay.bind(0,'127.0.0.1',r);});
   const relayPort=relay.address().port;
@@ -55,15 +90,16 @@ export async function createUtpFixtureRelay(targetPort){
   });
   if(!tcpRejected){relay.close();throw new Error('UDP-only fixture unexpectedly has a TCP listener');}
   relay.on('message',(bytes,from)=>{
+    packet('client',bytes);
     const key=`${from.address}:${from.port}`;let outgoing=clients.get(key);
     if(!outgoing){
       if(clients.size>=16){const [old,socket]=clients.entries().next().value;clients.delete(old);socket.close();}
       outgoing=dgram.createSocket('udp4');clients.set(key,outgoing);outgoing.on('error',()=>{});
-      outgoing.on('message',reply=>relay.send(reply,from.port,from.address,()=>{}));
+      outgoing.on('message',reply=>{packet('reply',reply);relay.send(reply,from.port,from.address,()=>{});});
     }
     outgoing.send(bytes,targetPort,'127.0.0.1',()=>{});
   });
-  return {port:relayPort,proof:{tcpConnectRejected:true,transport:'UDP-only relay to owned loopback seeder'},close:async()=>{
+  return {port:relayPort,proof,close:async()=>{
     for(const socket of clients.values())socket.close();clients.clear();await new Promise(r=>relay.close(r));
   }};
 }
@@ -84,19 +120,26 @@ async function playerStatus(connection){
 }
 async function localPlayerProbe(mpv,file,root,nativeEnv){
   const results=[];
-  for(const [label,args] of [['default',[]],['d3d11-gpu',['--vo=gpu','--gpu-api=d3d11']],['d3d11-next',['--vo=gpu-next','--gpu-api=d3d11']]]){
+  const script=join(root,'local-software-render.lua');
+  await fs.writeFile(script,softwareRenderPolicyLua);
+  for(const [label,args] of [['default',process.platform==='win32'?[`--script=${script}`]:[]],['unoptimized',[]],['d3d11-gpu',['--vo=gpu','--gpu-api=d3d11']],['d3d11-next',['--vo=gpu-next','--gpu-api=d3d11']]]){
     const pipe=process.platform==='win32'?`\\\\.\\pipe\\vantara-probe-${randomBytes(8).toString('hex')}`:join(root,`probe-${label}.sock`);
     const row={label,args};results.push(row);let connection,child;
     try{
-      child=nativeSpawn(mpv,['--no-config','--idle=yes','--terminal=no','--force-window=yes','--hwdec=auto-safe',`--input-ipc-server=${pipe}`,`--log-file=${join(root,`local-${label}.log`)}`,...args],{env:nativeEnv,stdio:'ignore'});
+      child=nativeSpawn(mpv,['--no-config','--idle=yes','--terminal=no','--force-window=yes','--hwdec=auto-safe','--ao=null',`--input-ipc-server=${pipe}`,`--log-file=${join(root,`local-${label}.log`)}`,...args],{env:nativeEnv,stdio:'ignore'});
       connection=await ipc(pipe);await connection.send(['loadfile',file]);
       await until(async()=>{const p=await connection.send(['get_property','video-params']);return p?.w>0;},15000);
-      await sleep(1000);row.before=await playerStatus(connection);const started=performance.now();await sleep(2000);row.after=await playerStatus(connection);row.observedSeconds=(performance.now()-started)/1000;
+      await until(async()=>{const p=await playerStatus(connection);return playbackHasActuallyStarted({position:p['time-pos'],paused:p.pause,buffering:p['paused-for-cache']});},6000);
+      row.before=await playerStatus(connection);const started=performance.now(),samples=[];
+      while(!samples.length||performance.now()-started<10000){const p=await playerStatus(connection);samples.push({atSeconds:(performance.now()-started)/1000,position:p['time-pos'],paused:p.pause,buffering:p['paused-for-cache'],droppedFrames:p['frame-drop-count'],delayedFrames:p['vo-delayed-frame-count'],decoderDroppedFrames:p['decoder-frame-drop-count']});await sleep(250);}
+      row.after=await playerStatus(connection);samples.push({atSeconds:(performance.now()-started)/1000,position:row.after['time-pos'],paused:row.after.pause,buffering:row.after['paused-for-cache'],droppedFrames:row.after['frame-drop-count'],delayedFrames:row.after['vo-delayed-frame-count'],decoderDroppedFrames:row.after['decoder-frame-drop-count']});row.observedSeconds=(performance.now()-started)/1000;
+      row.realtimeAcceptance=assessRealtimePlayback(samples,{seconds:10,fps:row.after['container-fps']??24});row.samples=samples;
+
     }catch(error){row.error=String(error.message);}finally{connection?.close();await terminate(child);}
     row.softwareAdapter=/Using a software adapter/.test(await fs.readFile(join(root,`local-${label}.log`),'utf8').catch(()=>''));
   }
   await fs.writeFile(join(root,'local-player-probe.json'),JSON.stringify(results,null,2));
-  console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current']}))}));
+  console.log(JSON.stringify({event:'local-player-probe',results:results.map(r=>({label:r.label,error:r.error,before:r.before?.['time-pos'],after:r.after?.['time-pos'],vo:r.after?.['current-vo'],hwdec:r.after?.['hwdec-current'],softwareAdapter:r.softwareAdapter,realtimeAcceptance:r.realtimeAcceptance}))}));
   return results;
 }
 async function diskBytes(directory){let logical=0,allocated=0,files=0;try{for(const entry of await fs.readdir(directory,{withFileTypes:true})){const path=join(directory,entry.name);if(entry.isDirectory()){const c=await diskBytes(path);logical+=c.logicalBytes;allocated+=c.allocatedBytes??0;files+=c.files;}else if(entry.isFile()){const s=await fs.stat(path);logical+=s.size;allocated+=(s.blocks??0)*512;files++;}}}catch{}return {logicalBytes:logical,allocatedBytes:process.platform==='win32'?null:allocated,files};}
@@ -105,13 +148,19 @@ async function snapshotModule(entry,directory){
   async function copy(file){if(visited.has(file))return;visited.add(file);const rel=relative(base,file);assert.ok(!rel.startsWith('..'),'Runtime import outside source folder');const data=await fs.readFile(file),target=join(directory,rel);await fs.mkdir(dirname(target),{recursive:true});await fs.writeFile(target,data);modules.push({path:rel,sha256:sha(data,'sha256').toString('hex')});for(const m of data.toString().matchAll(/from\s+['"](\.[^'"]+)['"]/g))await copy(resolve(dirname(file),m[1]));}
   await copy(entry);return {entry:join(directory,basename(entry)),modules};
 }
-async function replayState(userData,fixture,trim=false){
+async function replayState(userData,fixture,trim=false,corrupt=false){
   const states=[];for(const file of await fs.readdir(userData)){if(!/^torrent-replay-root-v1-[a-f0-9]+\.json$/.test(file))continue;const pointer=JSON.parse(await fs.readFile(join(userData,file),'utf8')),prefix=`.vantara-torrent-cache-${sha(userData,'sha256').toString('hex').slice(0,20)}-replay-v1-`;assert.ok(pointer.namespace.startsWith(prefix)&&basename(pointer.namespace)===pointer.namespace,'Unexpected benchmark replay namespace');const directory=join(pointer.root,pointer.namespace),index=JSON.parse(await fs.readFile(join(directory,'index.json'),'utf8'));
     for(const entry of index.entries){if(entry.descriptor.infoHash!==fixture.infoHash||entry.descriptor.fileIdx!==0)continue;
       if(trim){const head=entry.extents.find(e=>e.start===0);if(head){assert.match(head.file,/^extent-[a-f0-9-]{36}\.bin$/);const bytes=await fs.readFile(join(directory,head.file));assert.equal(sha(bytes,'sha256').toString('hex'),head.sha256);const retained=bytes.subarray(0,Math.min(bytes.length,256*1024));await fs.writeFile(join(directory,head.file),retained);for(const old of entry.extents)if(old!==head){assert.match(old.file,/^extent-[a-f0-9-]{36}\.bin$/);await fs.unlink(join(directory,old.file)).catch(()=>{});}head.length=retained.length;head.sha256=sha(retained,'sha256').toString('hex');entry.extents=[head];await fs.writeFile(join(directory,'index.json'),JSON.stringify(index));}}
+      if(corrupt&&entry.extents.length){const file=join(directory,entry.extents[0].file);assert.match(entry.extents[0].file,/^extent-[a-f0-9-]{36}\.bin$/);const bytes=await fs.readFile(file);bytes[0]^=255;await fs.writeFile(file,bytes);}
       states.push({directory,fileLength:entry.descriptor.fileLength,cachedBytes:entry.extents.reduce((sum,e)=>sum+e.length,0),ranges:entry.extents.map(e=>({start:e.start,length:e.length}))});
     }
-  }return {entries:states,partialFixtureTrimmed:trim,available:states.length>0};
+  }return {entries:states,partialFixtureTrimmed:trim,corruptedFixture:corrupt,available:states.length>0};
+}
+export async function windowsProcessSnapshot(ids,exec=cp.execFile){
+  assert.ok(ids.length&&ids.every(id=>Number.isSafeInteger(id)&&id>0));
+  const script=`$taskProcessIds=@(${ids.join(',')}); $taskRows=@(Get-Process -Id $taskProcessIds -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{pid=$_.Id;cpuSeconds=$_.TotalProcessorTime.TotalSeconds;rssBytes=$_.WorkingSet64;peakRssBytes=$_.PeakWorkingSet64} }); ConvertTo-Json -InputObject $taskRows -Compress`;
+  return JSON.parse(await new Promise((resolveQuery,reject)=>exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:10000,maxBuffer:1024*1024},(error,out)=>error?reject(error):resolveQuery(out))));
 }
 async function processMetrics(children){
   if(process.platform==='win32'){
@@ -120,9 +169,9 @@ async function processMetrics(children){
     try{
       // Only Node-assigned integer PIDs enter the script; no paths, titles,
       // torrents or user-controlled shell text. Sampling follows timing/seek checks.
-      const ids=active.map(({child})=>child.pid).join(',');
-      const script=`$taskProcessIds=@(${ids}); $taskRows=@(Get-Process -Id $taskProcessIds -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{pid=$_.Id;cpuSeconds=$_.TotalProcessorTime.TotalSeconds;rssBytes=$_.WorkingSet64;peakRssBytes=$_.PeakWorkingSet64} }); ConvertTo-Json -InputObject $taskRows -Compress`;
-      const data=JSON.parse(cp.execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:10000}));
+      // The same Node host forwards the owned uTP swarm. A synchronous
+      // PowerShell query pauses its UDP ACKs, even outside the timed interval.
+      const data=await windowsProcessSnapshot(active.map(({child})=>child.pid));
       const rows=(Array.isArray(data)?data:[data]).filter(row=>row&&Number.isSafeInteger(row.pid)&&Number.isFinite(row.rssBytes)&&Number.isFinite(row.cpuSeconds));
       return {available:rows.length>0,cpuUnit:'seconds since process start; reused engine totals are cumulative',processes:rows.map(row=>({...row,role:active.find(({child})=>child.pid===row.pid)?.role??'unknown'}))};
     }catch{return {available:false,reason:'Windows process sampler failed'};}
@@ -131,7 +180,7 @@ async function processMetrics(children){
   const rows=[];for(const {child,role} of children){try{const text=await fs.readFile(`/proc/${child.pid}/stat`,'utf8'),fields=text.slice(text.lastIndexOf(')')+2).split(' '),status=await fs.readFile(`/proc/${child.pid}/status`,'utf8');rows.push({role,pid:child.pid,cpuTicks:Number(fields[11])+Number(fields[12]),rssBytes:Number(/VmRSS:\s+(\d+)/.exec(status)?.[1]??0)*1024});}catch{}}
   return {available:true,cpuTickUnit:'OS scheduler ticks; not converted to seconds',processes:rows};
 }
-async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,audio=false){
+export async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,audio=false){
   const name=`authored-${kind}.${kind==='mkv'?'mkv':'mp4'}`,path=join(folder,name);
   if(fixturesFrom)await fs.copyFile(join(resolve(fixturesFrom),name),path);
   else {
@@ -142,7 +191,7 @@ async function fixture(folder,kind,paddingMiB,ffmpeg,fixturesFrom,pieceLength,au
   const info={name,length:bytes.length,'piece length':pieceLength,pieces:Buffer.concat(pieces)},torrent=encode({info});
   return {name,path,kind,bytes:bytes.length,infoHash:sha(encode(info)).toString('hex'),fileIdx:0,pieceLength,torrent,syntheticPaddingBytes:kind==='late-moov'?paddingMiB*1024*1024:0};
 }
-function parse(argv){const options={runs:5,kinds:'mp4,late-moov,mkv',modes:'cold,warm,restart,partial,newsource,nocache',stableSeconds:2,paddingMiB:32,pieceLength:256*1024,torrentWarmup:'container',timeoutMs:45000};for(let i=0;i<argv.length;i++){assert.ok(argv[i].startsWith('--'),`Unexpected ${argv[i]}`);const key=argv[i].slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());options[key]=argv[++i];}for(const key of ['runs','stableSeconds','paddingMiB','pieceLength','timeoutMs'])options[key]=Number(options[key]);for(const key of ['serviceModule','rqbit','mpv'])assert.ok(options[key],`--${key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())} is required`);assert.ok(options.runs>=1&&options.runs<=100);assert.ok(['demand','both','container'].includes(options.torrentWarmup),'--torrent-warmup must be demand, both or container');assert.ok(Number.isSafeInteger(options.pieceLength)&&options.pieceLength>=16384&&options.pieceLength<=16*1024*1024&&(options.pieceLength&(options.pieceLength-1))===0,'--piece-length must be a power of two from 16 KiB to 16 MiB');return options;}
+function parse(argv){const options={runs:5,kinds:'mp4,late-moov,mkv',modes:'cold,warm,restart,partial,newsource,nocache',stableSeconds:2,firstMotionTimeoutMs:6000,paddingMiB:32,pieceLength:256*1024,torrentWarmup:'container',timeoutMs:45000};for(let i=0;i<argv.length;i++){assert.ok(argv[i].startsWith('--'),`Unexpected ${argv[i]}`);const key=argv[i].slice(2).replace(/-([a-z])/g,(_,c)=>c.toUpperCase());options[key]=argv[++i];}for(const key of ['runs','stableSeconds','firstMotionTimeoutMs','paddingMiB','pieceLength','timeoutMs'])options[key]=Number(options[key]);for(const key of ['serviceModule','rqbit','mpv'])assert.ok(options[key],`--${key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())} is required`);assert.ok(options.runs>=1&&options.runs<=100);assert.ok(Number.isFinite(options.firstMotionTimeoutMs)&&options.firstMotionTimeoutMs>=1000&&options.firstMotionTimeoutMs<=15000,'Invalid first motion deadline');assert.ok(['demand','both','container'].includes(options.torrentWarmup),'--torrent-warmup must be demand, both or container');assert.ok(Number.isSafeInteger(options.pieceLength)&&options.pieceLength>=16384&&options.pieceLength<=16*1024*1024&&(options.pieceLength&(options.pieceLength-1))===0,'--piece-length must be a power of two from 16 KiB to 16 MiB');return options;}
 
 export async function main(argv=process.argv.slice(2)){
   const options=parse(argv),root=resolve(options.output??await fs.mkdtemp(join(tmpdir(),'vantara-torrent-benchmark-')));await fs.mkdir(root,{recursive:true});
@@ -153,7 +202,7 @@ export async function main(argv=process.argv.slice(2)){
   if(seedEngine==='libtorrent')assert.ok(options.libtorrentPython,'Explicit native runtime required for seeder');
   assert.ok(['both','utp','utp-closed-tcp'].includes(options.seedTransport??'both'),'Unsupported fixture seed transport');
   assert.ok(['both','utp'].includes(options.nativeTransport??'both'),'Unsupported fixture native transport');
-  assert.ok(['tcp','utp','both'].includes(options.rqbitTransport??'tcp'),'Unsupported fixture rqbit transport');
+  assert.ok(['production','tcp','utp','both'].includes(options.rqbitTransport??'production'),'Unsupported fixture rqbit transport');
   if(options.seedTransport?.startsWith('utp'))assert.equal(seedEngine,'libtorrent','uTP-only fixture requires libtorrent seeder');
   assert.ok(['optional','mse'].includes(options.seedEncryption??'optional'),'Unsupported fixture encryption');
   if(options.seedEncryption==='mse')assert.equal(seedEngine,'libtorrent','MSE fixture requires libtorrent seeder');
@@ -161,25 +210,33 @@ export async function main(argv=process.argv.slice(2)){
   const nativeEnv={...process.env,...(options.libraryPath?{LD_LIBRARY_PATH:options.libraryPath}:{})};let display;
   const track=(child,role)=>{children.push({child,role});return child;};
   let active=null;
-  const report={schemaVersion:1,torrentBackend,startedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,serviceModule,serviceSha256:sha(await fs.readFile(serviceModule),'sha256').toString('hex'),rqbitSha256:sha(await fs.readFile(rqbit),'sha256').toString('hex'),mpvSha256:sha(await fs.readFile(mpv),'sha256').toString('hex'),options:{...options,output:root},evidence:'Actual lossless mpv screenshot-to-file window (PNG compression 0); Linux virtual X display is not a physical Windows display',network:'Owned loopback peer only; DHT/trackers/LSD/UPnP disabled in benchmark adapter',runs:results};
+  const report={schemaVersion:1,serviceHostPid:process.pid,timingMetric:options.engineOnly==='true'?'first verified 256 KiB Range completed':'first nonblack rendered screenshot completed',validation:options.engineOnly==='true'?'verified bytes only; IPC stand-in is NOT MPV/video evidence':'real MPV playback',torrentBackend,startedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,serviceModule,serviceSha256:sha(await fs.readFile(serviceModule),'sha256').toString('hex'),rqbitSha256:sha(await fs.readFile(rqbit),'sha256').toString('hex'),mpvSha256:options.engineOnly==='true'?null:sha(await fs.readFile(mpv),'sha256').toString('hex'),options:{...options,output:root},evidence:options.engineOnly==='true'?'SHA256 and exact Range bytes through production desktop proxy; no decoder':'Actual lossless mpv screenshot-to-file window (PNG compression 0); Linux virtual X display is not a physical Windows display',network:'Owned loopback peer only; DHT/trackers/LSD/UPnP disabled in benchmark adapter',runs:results};
   try{
     const snapshot=await snapshotModule(serviceModule,join(root,'module-snapshot'));report.sourceModules=snapshot.modules;
-    if(process.platform==='linux'&&!nativeEnv.DISPLAY){assert.ok(options.xvfb,'--xvfb required when DISPLAY is absent');const n=100+Math.floor(Math.random()*500);display=track(nativeSpawn(options.xvfb,[`:${n}`,'-screen','0','1024x768x24','-nolisten','tcp'],{env:nativeEnv,stdio:'ignore'}),'xvfb');nativeEnv.DISPLAY=`:${n}`;await until(()=>fs.stat(`/tmp/.X11-unix/X${n}`));}
+    if(options.engineOnly!=='true'&&process.platform==='linux'&&!nativeEnv.DISPLAY){assert.ok(options.xvfb,'--xvfb required when DISPLAY is absent');const n=100+Math.floor(Math.random()*500);display=track(nativeSpawn(options.xvfb,[`:${n}`,'-screen','0','1024x768x24','-nolisten','tcp'],{env:nativeEnv,stdio:'ignore'}),'xvfb');nativeEnv.DISPLAY=`:${n}`;await until(()=>fs.stat(`/tmp/.X11-unix/X${n}`));}
     const seedFolder=join(root,'seed');await fs.mkdir(seedFolder,{recursive:true});const fixtures=[];for(const kind of options.kinds.split(','))fixtures.push(await fixture(seedFolder,kind,options.paddingMiB,ffmpeg,options.fixturesFrom,options.pieceLength,options.fixtureAudio==='true'));
     if(options.probeLocal==='true')report.localPlayerProbe=await localPlayerProbe(mpv,fixtures[0].path,root,nativeEnv);
     report.fixtures=fixtures.map(({torrent,path,...f})=>f);
     const newSources=[];for(const f of fixtures){const bytes=await fs.readFile(f.path),name='newsource-'+f.name,pieces=[];for(let i=0;i<bytes.length;i+=f.pieceLength)pieces.push(sha(bytes.subarray(i,i+f.pieceLength)));const info={name,length:bytes.length,'piece length':f.pieceLength,pieces:Buffer.concat(pieces)};await fs.copyFile(f.path,join(seedFolder,name));newSources.push({...f,name,infoHash:sha(encode(info)).toString('hex'),torrent:encode({info})});}
+    const seedControl=join(root,'owned-seed-control.json');await fs.rm(seedControl,{force:true});await fs.rm(seedControl+'.ack',{force:true});
     const seedPort=await port(),seedApi=`http://127.0.0.1:${seedPort}`,seedAuth=`fixture:${randomBytes(16).toString('hex')}`,headers={Authorization:`Basic ${Buffer.from(seedAuth).toString('base64')}`};let peer=await port();
     if(seedEngine==='libtorrent'){
       const manifest=[];for(const f of [...fixtures,...newSources]){const file=join(root,`${f.infoHash}.torrent`);await fs.writeFile(file,f.torrent);manifest.push(file);}
       const manifestPath=join(root,'seed-manifest.json'),ready=join(root,'seed-ready');await fs.writeFile(manifestPath,JSON.stringify(manifest));
-      track(nativeSpawn(resolve(options.libtorrentPython),['-I',fileURLToPath(new URL('./libtorrent-fixture-seeder.py',import.meta.url)),'--seed-dir',seedFolder,'--manifest',manifestPath,'--ready',ready,'--listen-port',String(peer),'--transport',options.seedTransport?.startsWith('utp')?'utp':'both','--encryption',options.seedEncryption??'optional'],{env:nativeEnv,stdio:'ignore'}),'seed');
+      // A new OS process may reuse this benchmark/profile directory. Its old
+      // marker describes a terminated seeder and a different listening port.
+      await fs.rm(ready,{force:true});
+      track(nativeSpawn(resolve(options.libtorrentPython),['-I',fileURLToPath(new URL('./libtorrent-fixture-seeder.py',import.meta.url)),'--seed-dir',seedFolder,'--manifest',manifestPath,'--ready',ready,'--listen-port',String(peer),'--transport',options.seedTransport?.startsWith('utp')?'utp':'both','--encryption',options.seedEncryption??'optional','--upload-bps',String(options.seedUploadBps??0),'--control',seedControl],{env:nativeEnv,stdio:'ignore'}),'seed');
       await until(()=>fs.stat(ready));
       report.seedSettings=JSON.parse(await fs.readFile(ready,'utf8'));
+      assert.ok(Number.isSafeInteger(report.seedSettings.listenPort)&&report.seedSettings.listenPort>0&&report.seedSettings.listenPort<=65535,'Owned seeder did not expose its actual listening port');
+      peer=report.seedSettings.listenPort;
+      if(!options.seedTransport?.startsWith('utp'))report.seedListenWaitMs=await waitForOwnedTcpListener(peer);
     }else{
       track(nativeSpawn(rqbit,['-v','error','--http-api-listen-addr',`127.0.0.1:${seedPort}`,'--listen-ip','127.0.0.1','--listen-port',String(peer),'--disable-dht','--disable-trackers','--disable-lsd','--disable-upnp-port-forward',...(options.seedUploadBps?['--ratelimit-upload',String(options.seedUploadBps)]:[]),'server','start',seedFolder,'--disable-persistence'],{env:{...nativeEnv,RQBIT_HTTP_BASIC_AUTH_USERPASS:seedAuth},stdio:'ignore'}),'seed');
       await until(()=>json(seedApi,'/',{headers}));for(const f of [...fixtures,...newSources]){const added=await json(seedApi,'/torrents?is_url=false&overwrite=true',{method:'POST',headers,body:f.torrent});await until(async()=>{const s=await json(seedApi,`/torrents/${added.id}/stats/v1`,{headers});return s.finished;});}
     }
+    if(!options.seedTransport?.startsWith('utp')&&options.seedEncryption!=='mse')report.seedBitTorrentHandshakeMs=await waitForOwnedBitTorrentPeer(peer,fixtures[0].infoHash);
     if(options.seedTransport==='utp-closed-tcp'){
       const relay=await createUtpFixtureRelay(peer);udpRelays.push(relay);peer=relay.port;report.transportProof=relay.proof;
     }
@@ -187,6 +244,8 @@ export async function main(argv=process.argv.slice(2)){
       if(torrentBackend==='libtorrent'&&resolve(String(binary))===resolve(options.libtorrentPython)&&active){
         // The shipped CLI always blocks private peers. Only this excluded test
         // adapter admits the authored loopback seeder, just like rqbit below.
+        active.fixturePorts={peer,api:Number(args[args.indexOf('--api-port')+1]),listen:Number(args[args.indexOf('--listen-port')+1])};
+        assert.ok(active.fixturePorts.api!==peer&&active.fixturePorts.listen!==peer,'Owned UDP-only peer endpoint collided with a client socket');
         const scriptIndex=args.indexOf(resolve(options.libtorrentScript));
         assert.ok(scriptIndex>=0,'Expected isolated native backend script');
         const rewritten=[...args];rewritten[scriptIndex]=fileURLToPath(new URL('./libtorrent-fixture-server.py',import.meta.url));
@@ -195,11 +254,14 @@ export async function main(argv=process.argv.slice(2)){
       }
       if(resolve(String(binary))===rqbit&&active){
         const run=active,index=args.indexOf('--http-api-listen-addr'),external=Number(args[index+1].split(':').at(-1)),backend=run.backend;
-        const rewritten=[...args];rewritten[index+1]=`127.0.0.1:${backend}`;rewritten.unshift('--disable-dht','--disable-trackers','--disable-upnp-port-forward');
-        if(['utp','both'].includes(options.rqbitTransport))rewritten.unshift('--experimental-enable-utp-listen',...(options.rqbitTransport==='utp'?['--disable-tcp-connect','--disable-tcp-listen']:[]));
+        const rewritten=fixtureRqbitTransportArgs(args,options.rqbitTransport);rewritten[rewritten.indexOf('--http-api-listen-addr')+1]=`127.0.0.1:${backend}`;rewritten.unshift('--disable-dht','--disable-trackers','--disable-upnp-port-forward');
         const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://owned');if(req.method==='POST'&&url.pathname==='/torrents')url.searchParams.set('initial_peers',`127.0.0.1:${peer}`);const row={atMs:performance.now()-run.startedAt,method:req.method,path:url.pathname,query:url.search,range:req.headers.range??null};run.http.push(row);
-          const forward=http.request({hostname:'127.0.0.1',port:backend,path:url.pathname+url.search,method:req.method,headers:req.headers},back=>{row.headersMs=performance.now()-run.startedAt;row.status=back.statusCode;res.writeHead(back.statusCode,back.headers);res.flushHeaders();const haves=[];back.on('data',b=>{row.bodyBytes=(row.bodyBytes??0)+b.length;if(url.pathname.endsWith('/haves'))haves.push(b);});back.once('end',()=>{row.completedMs=performance.now()-run.startedAt;if(haves.length){const bits=Buffer.concat(haves);row.havePieces=[];for(let i=0;i<bits.length*8;i++)if(bits[i>>3]&(128>>(i&7)))row.havePieces.push(i);}});back.once('data',()=>{row.firstBodyMs=performance.now()-run.startedAt;});back.pipe(res);});forward.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});res.on('close',()=>forward.destroy());req.pipe(forward);});server.listen(external,'127.0.0.1');proxies.push(server);run.proxy=server;
+          const forward=http.request({hostname:'127.0.0.1',port:backend,path:url.pathname+url.search,method:req.method,headers:req.headers},back=>{row.headersMs=performance.now()-run.startedAt;row.status=back.statusCode;res.writeHead(back.statusCode,back.headers);res.flushHeaders();const haves=[],errors=[];back.on('data',b=>{if(back.statusCode>=400&&(row.bodyBytes??0)<8192)errors.push(b);row.bodyBytes=(row.bodyBytes??0)+b.length;if(url.pathname.endsWith('/haves'))haves.push(b);});back.once('end',()=>{row.completedMs=performance.now()-run.startedAt;if(errors.length)row.fixtureErrorBody=Buffer.concat(errors).toString().slice(0,8192);if(haves.length){const bits=Buffer.concat(haves);row.havePieces=[];for(let i=0;i<bits.length*8;i++)if(bits[i>>3]&(128>>(i&7)))row.havePieces.push(i);}});back.once('data',()=>{row.firstBodyMs=performance.now()-run.startedAt;});back.pipe(res);});forward.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});res.on('close',()=>forward.destroy());req.pipe(forward);});server.listen(external,'127.0.0.1');proxies.push(server);run.proxy=server;
         return track(nativeSpawn(binary,rewritten,{...spawnOptions,env:{...spawnOptions.env,...(options.libraryPath?{LD_LIBRARY_PATH:options.libraryPath}:{}),...{}}}),'rqbit');
+      }
+      if(resolve(String(binary))===mpv&&active&&options.engineOnly==='true'){
+        const run=active,child=track(nativeSpawn(process.execPath,[fileURLToPath(new URL('./torrent-byte-consumer.mjs',import.meta.url)),...args],{env:nativeEnv,stdio:['ignore','pipe','pipe']}),'byte-consumer');
+        let buffer='';child.stdout.on('data',b=>{buffer+=b;while(buffer.includes('\n')){const i=buffer.indexOf('\n'),line=buffer.slice(0,i);buffer=buffer.slice(i+1);try{const m=JSON.parse(line);if(m.byteStreamURL)run.byteStreamURL=m.byteStreamURL;}catch{}}});return child;
       }
       if(resolve(String(binary))===mpv&&active){const run=active;const log=createWriteStream(join(run.directory,'mpv.log'));active.mpvIpc=args.find(a=>a.startsWith('--input-ipc-server=')).slice(19);const child=track(nativeSpawn(binary,[...args,`--log-file=${join(run.directory,'mpv-native.log')}`,'--msg-level=all=info',...(options.verifyAudio==='true'?['--ao=null']:[])],{...spawnOptions,env:{...spawnOptions.env,...nativeEnv},stdio:['ignore','ignore','pipe']}),'mpv');child.stderr.pipe(log);run.mpvPid=child.pid;child.once('exit',(code,signal)=>{run.mpvExit={code,signal};});child.once('error',error=>{run.mpvError={code:error.code,message:error.message.slice(0,300)};});return child;}
       return nativeSpawn(binary,args,spawnOptions);
@@ -211,37 +273,88 @@ export async function main(argv=process.argv.slice(2)){
       const create=mode=>createDesktopServices({userData,torrentBackend,binaries:{rqbit,mpv,...(torrentBackend==='libtorrent'?{libtorrentPython:resolve(options.libtorrentPython),libtorrentScript:resolve(options.libtorrentScript)}:{})},dnsOverHttps:false,torrentWarmup:options.torrentWarmup,...(options.disableReplay==='true'||mode==='nocache'?{replayCache:false}:{}),onEvent:event=>{if(active)active.events.push({...event,atMs:performance.now()-active.startedAt});}});
       for(const mode of modes){
         const source=mode==='newsource'?newSources.find(n=>n.kind===f.kind):f;
-        if(!services||['restart','partial','newsource','nocache'].includes(mode)){await services?.close();services=null;}
-        const cacheBefore=await replayState(userData,source,mode==='partial');if(!services)services=create(mode);
+        if(!services||['restart','partial','corrupt','newsource','nocache'].includes(mode)){await services?.close();services=null;}
+        const cacheBefore=await replayState(userData,source,mode==='partial',mode==='corrupt');if(!services)services=create(mode);
         const directory=join(root,`${f.kind}-${trial}-${mode}`);await fs.mkdir(directory,{recursive:true});const session=`bench-${f.kind}-${trial}-${mode}`,run={fixture:f.kind,trial,mode,infoHash:source.infoHash,fileIdx:source.fileIdx,logicalFileBytes:source.bytes,cacheBefore,directory,startedAt:performance.now(),events:[],http:[],backend:await port(),ok:false};active=run;results.push(run);let connection;
+        if(report.transportProof)run.transportBefore=structuredClone(report.transportProof);
         console.log(JSON.stringify({event:'run-start',fixture:f.kind,trial,mode,infoHash:source.infoHash}));
         try{
+          if(options.prewarm==='true'&&mode==='cold'){const prepared=await services.prewarmTorrent({candidate:{infoHash:source.infoHash,fileIdx:0}});assert.equal(prepared.prewarmed,true);run.prewarmAdopted=true;}
           const start=services.startPlayback({session,candidate:{infoHash:source.infoHash,fileIdx:0},title:'VANTARA authored benchmark'});start.catch(error=>{run.startPlaybackError=String(error?.message??error).slice(0,500);});
+          if(options.engineOnly==='true'){
+            await until(()=>run.byteStreamURL,options.timeoutMs);await start;
+            const bytes=await fs.readFile(source.path);run.byteProof=[];
+            const read=async(begin,end,label)=>{const at=performance.now();const r=await fetch(run.byteStreamURL,{headers:{Range:`bytes=${begin}-${end}`},signal:AbortSignal.timeout(options.timeoutMs)});assert.equal(r.status,206);assert.equal(r.headers.get('content-range'),`bytes ${begin}-${end}/${bytes.length}`);const chunks=[],arrivals=[{atSeconds:0,bytes:0}];let received=0;for await(const chunk of r.body){chunks.push(chunk);received+=chunk.length;arrivals.push({atSeconds:(performance.now()-at)/1000,bytes:received});}const payload=Buffer.concat(chunks);verifyByteRange(bytes,begin,end,payload);const elapsedMs=performance.now()-at;run.byteProof.push({label,start:begin,end,bytes:payload.length,elapsedMs,sha256:sha(payload,'sha256').toString('hex')});return {payload,elapsedMs,arrivals};};
+            await read(0,Math.min(bytes.length-1,262143),'first useful verified range');run.firstVerifiedRangeMs=performance.now()-run.startedAt;
+            if(options.byteScenario==='underrun'){
+              assert.equal(seedEngine,'libtorrent');
+              const control=async paused=>{const value={paused,nonce:randomBytes(8).toString('hex')};await fs.writeFile(seedControl,JSON.stringify(value));await until(async()=>{try{return JSON.parse(await fs.readFile(seedControl+'.ack','utf8')).nonce===value.nonce;}catch{return false;}},5000);};
+              await control(true);const controller=new AbortController(),stallStart=performance.now();let received=0,settled=false;
+              const end=bytes.length-1,begin=end-262143;
+              const pending=fetch(run.byteStreamURL,{headers:{Range:`bytes=${begin}-${end}`},signal:controller.signal}).then(async r=>{for await(const chunk of r.body)received+=chunk.length;}).finally(()=>{settled=true;});pending.catch(()=>{});
+              await sleep(1000);const observed=performance.now()-stallStart,remainedBlocked=!settled;controller.abort();await pending.catch(()=>{});
+              assert.ok(remainedBlocked,'Missing-piece request completed instead of blocking');
+              assert.equal(received,0,'Unavailable piece produced bytes while owned seeder was paused');
+              assert.ok(observed>=1000,'Underrun observation was incomplete');await control(false);
+              await read(begin,end,'recover missing piece after underrun and cancellation');
+              run.underrunProof={observedMs:observed,unverifiedBytesReceived:received,recovered:true};
+            }
+
+            await read(Math.floor(bytes.length*.8),Math.min(bytes.length-1,Math.floor(bytes.length*.8)+262143),'seek forward');
+            await read(131072,Math.min(bytes.length-1,393215),'seek backward / sparse boundary');
+            if(['underrun','protocol'].includes(options.byteScenario)){run.ok=true;continue;}
+            const flow=await read(0,bytes.length-1,'sequential complete SHA256');
+            run.throughput={...(Number(options.requiredBitrate)>0?assessByteFlow(flow.arrivals,Number(options.requiredBitrate)):{}),bytes:bytes.length,seconds:flow.elapsedMs/1000,bitsPerSecond:bytes.length*8000/flow.elapsedMs,requiredBitsPerSecond:Number(options.requiredBitrate??0)};
+            if(run.throughput.requiredBitsPerSecond>0)assert.ok(run.throughput.passed,'Verified byte flow missed the 4K streaming delivery deadline');
+            assert.ok(run.throughput.bitsPerSecond>=run.throughput.requiredBitsPerSecond,'Verified byte flow is below required 4K bitrate');
+            run.resources=await processMetrics(children.filter(({role,child})=>['rqbit','libtorrent'].includes(role)&&child.exitCode===null));run.ok=true;continue;
+          }
           await until(()=>run.mpvIpc,options.timeoutMs);connection=await ipc(run.mpvIpc);
           // Preserve lossless pixels without blocking playback on 4K PNG compression.
           await connection.send(['set_property','screenshot-png-compression',0]);
           const screenshot=join(directory,'first-rendered.png');
           const proof=await until(async()=>{const params=await connection.send(['get_property','video-out-params']);if(!(params?.w>0&&params?.h>0))return;await connection.send(['screenshot-to-file',screenshot,'window']);const atMs=performance.now()-run.startedAt;const rgb=await command(ffmpeg,['-v','error','-i',screenshot,'-vf','scale=64:36','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','pipe:1']);const pixels=framePixels(rgb);return pixels.nonblack?{atMs,pixels,params}:null;},options.timeoutMs);
-          run.firstRenderedMs=proof.atMs;run.renderedProof={...proof,decodedParams:await connection.send(['get_property','video-params']),screenshot,sha256:sha(await fs.readFile(screenshot),'sha256').toString('hex')};await start;
+          run.firstRenderedMs=proof.atMs;run.renderedProof={...proof,codec:await connection.send(['get_property','video-codec']).catch(()=>null),decodedParams:await connection.send(['get_property','video-params']),screenshot,sha256:sha(await fs.readFile(screenshot),'sha256').toString('hex')};await start;
           if(options.verifyAudio==='true'){
             run.audioEvidence=await until(async()=>{const params=await connection.send(['get_property','audio-params']).catch(()=>null);return params?.samplerate>0?{params,sink:'null (decoded PCM; physical speaker output not measured)'}:null;},5000);
           }
-          const before=await connection.send(['get_property','time-pos']);const stableStarted=performance.now();await sleep(options.stableSeconds*1000);const after=await connection.send(['get_property','time-pos']);
-          const local=options.stabilityBaseline==='local'?report.localPlayerProbe?.find(r=>r.label==='default'):null;
-          const sample={fromSeconds:before,toSeconds:after,observedSeconds:(performance.now()-stableStarted)/1000,frameToleranceSeconds:1/(await connection.send(['get_property','container-fps']))};
-          const assessment=assessPlaybackProgress(sample,local?{fromSeconds:local.before?.['time-pos'],toSeconds:local.after?.['time-pos'],observedSeconds:local.observedSeconds,softwareAdapter:local.softwareAdapter}:null);
-          const hostRenderOnly=options.stabilityPolicy==='host-render-only'&&local?.softwareAdapter===true&&assessment.kind==='host-relative';
-          run.stablePlayback={...sample,...assessment};run.realtimePlaybackVerified=assessment.kind==='realtime'&&assessment.passed;
-          run.validationScope=hostRenderOnly?'first rendered frame and seeks only; this software-only host cannot certify real-time 4K':'rendered frame, playback progress and seeks';
-          assert.ok(assessment.passed||hostRenderOnly,`Playback did not progress (${assessment.kind}): ${before} → ${after}, minimum ${assessment.minimumSeconds}`);
-          run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);run.seeks.push({targetSeconds:target,settledMs:performance.now()-at});}
+          // mpv may decode a frame while still paused for cache; don't sample
+          // playback rate inside that initial buffer wait. Never waive the rate
+          // threshold: require actual forward motion within a separate,
+          // bounded startup limit or fail the case.
+          const proofStart=performance.now();
+          const startedMotion=await until(async()=>{
+            const [position,paused,buffering]=await Promise.all([
+              connection.send(['get_property','time-pos']),
+              connection.send(['get_property','pause']),
+              connection.send(['get_property','paused-for-cache'])
+            ]);
+            if(!playbackHasActuallyStarted({position,paused,buffering}))return null;
+            return {position,paused,buffering};
+          },options.firstMotionTimeoutMs);
+          run.firstMovingFrameMs=performance.now()-run.startedAt;
+          run.firstMotionWaitMs=performance.now()-proofStart;
+          const before=startedMotion.position;
+          const stableStarted=performance.now(),samples=[];
+          const sample=async()=>{const p=await playerStatus(connection);return {atSeconds:(performance.now()-stableStarted)/1000,position:p['time-pos'],buffering:p['paused-for-cache'],paused:p.pause,droppedFrames:p['frame-drop-count'],delayedFrames:p['vo-delayed-frame-count'],decoderDroppedFrames:p['decoder-frame-drop-count']};};
+          samples.push(await sample());
+          while((performance.now()-stableStarted)/1000<samples[0].atSeconds+options.stableSeconds){await sleep(250);samples.push(await sample());}
+          const assessment=assessRealtimePlayback(samples,{seconds:options.stableSeconds,fps:await connection.send(['get_property','container-fps'])});
+          run.stablePlayback={fromSeconds:samples[0].position,toSeconds:samples.at(-1).position,...assessment,samples};run.realtimePlaybackVerified=assessment.passed;
+          run.validationScope='real rendered frame, absolute wall-clock playback, frame loss, buffering and seeks';
+          assert.ok(assessment.passed,`Playback did not sustain real time: ${JSON.stringify(assessment)}`);
+          run.seeks=[];for(const target of [12,2]){const at=performance.now();await services.playbackCommand({session,command:'seek',value:target*1000});await until(async()=>Math.abs((await connection.send(['get_property','time-pos']))-target)<1.5,10000);const settledMs=performance.now()-at;await until(async()=>{const p=await playerStatus(connection);return p['time-pos']>=target+.25&&p['paused-for-cache']===false&&p.pause===false;},6000);run.seeks.push({targetSeconds:target,settledMs,motionVerifiedMs:performance.now()-at});}
           run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit','libtorrent'].includes(role)&&child.exitCode===null));run.storageDuring=await diskBytes(userData);run.ok=true;
-        }catch(error){run.error=String(error.stack??error);if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
-        finally{connection?.close();await services.stopPlayback({session}).catch(()=>{});if(run.proxy){run.proxy.closeAllConnections();await new Promise(r=>run.proxy.close(r));delete run.proxy;}run.storageAfter=await diskBytes(userData);run.elapsedMs=performance.now()-run.startedAt;delete run.startedAt;delete run.mpvIpc;delete run.backend;await fs.writeFile(join(directory,'run.json'),JSON.stringify(run,null,2));await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({event:'run-end',fixture:f.kind,trial,mode,ok:run.ok,firstRenderedMs:run.firstRenderedMs,error:run.error?.split('\n')[0],mpvExit:run.mpvExit,mpvError:run.mpvError,mpvLogTail:run.ok?undefined:run.mpvLogTail,startPlaybackError:run.startPlaybackError,eventsTail:run.ok?undefined:run.events.slice(-12).map(({type,stage,message,atMs})=>({type,stage,message,atMs}))}));}
+        }catch(error){run.error=String(error.stack??error);run.resources=await processMetrics(children.filter(({role,child})=>['mpv','rqbit','libtorrent'].includes(role)&&child.exitCode===null));if(connection)run.playerStatus=await playerStatus(connection).catch(()=>null);try{run.mpvLogTail=(await fs.readFile(join(directory,'mpv-native.log'),'utf8')).slice(-6000);}catch{}process.exitCode=1;}
+        finally{connection?.close();await services.stopPlayback({session}).catch(()=>{});if(run.proxy){run.proxy.closeAllConnections();await new Promise(r=>run.proxy.close(r));delete run.proxy;}run.storageAfter=await diskBytes(userData);run.elapsedMs=performance.now()-run.startedAt;delete run.startedAt;delete run.mpvIpc;delete run.backend;delete run.byteStreamURL;if(report.transportProof)run.transportAfter=structuredClone(report.transportProof);await fs.writeFile(join(directory,'run.json'),JSON.stringify(run,null,2));await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({event:'run-end',fixture:f.kind,trial,mode,ok:run.ok,firstRenderedMs:run.firstRenderedMs,firstVerifiedRangeMs:run.firstVerifiedRangeMs,error:run.error?.split('\n')[0],mpvExit:run.mpvExit,mpvError:run.mpvError,mpvLogTail:run.ok?undefined:run.mpvLogTail,startPlaybackError:run.startPlaybackError,
+          // Bound diagnostics to non-identifying player status + verified-piece counters.
+          // This distinguishes slow decoding from torrent starvation without recording URLs, accounts or peers' IPs.
+          playerEvidence:run.ok?undefined:run.playerStatus&&Object.fromEntries(['time-pos','pause','paused-for-cache','hwdec-current','current-vo','decoder-frame-drop-count','frame-drop-count','demuxer-cache-state'].map(k=>[k,run.playerStatus[k]])),
+          pieceEvidence:run.ok?undefined:run.events.filter(e=>e.type==='playback/diagnostic'&&e.stage==='torrent-sample').slice(-3).map(e=>({elapsedMs:e.elapsedMs,speedBytes:e.speedBytes,checkedPieces:e.checkedPieces,requestedPiece:e.requestedPiece,cacheBytesRead:e.cacheBytesRead})),eventsTail:run.ok?undefined:run.events.slice(-12).map(({type,stage,message,atMs})=>({type,stage,message,atMs}))}));}
       }
       await services?.close();active=null;
     }
-    report.summaries=[];for(const f of fixtures)for(const mode of modes)report.summaries.push({fixture:f.kind,mode,...summarize(results.filter(r=>r.fixture===f.kind&&r.mode===mode))});
+    report.summaries=[];for(const f of fixtures)for(const mode of modes)report.summaries.push({fixture:f.kind,mode,...summarize(results.filter(r=>r.fixture===f.kind&&r.mode===mode).map(r=>options.engineOnly==='true'?{...r,firstRenderedMs:r.firstVerifiedRangeMs}:r))});
   }finally{cp.spawn=nativeSpawn;syncBuiltinESMExports();for(const server of proxies){server.closeAllConnections();server.close();}await Promise.all(children.map(({child})=>terminate(child)));await Promise.all(udpRelays.map(relay=>relay.close()));report.finishedAt=new Date().toISOString();await fs.writeFile(join(root,'results.json'),JSON.stringify(report,null,2));}
   console.log(JSON.stringify({event:'complete',results:join(root,'results.json'),summaries:report.summaries}));return report;
 }

@@ -1,7 +1,9 @@
 import http from 'node:http';
+import { softwareRenderPolicyLua } from './mpv-render-policy.mjs';
 import { createPlaybackBudget } from './playback-budget.mjs';
 import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
+import { reusableStartupReplay } from './torrent-replay-startup.mjs';
 import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mjs';
 import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import { libtorrentCommand, isolatedPythonEnvironment } from './libtorrent-engine.mjs';
@@ -181,8 +183,10 @@ export function engineArgs({apiPort,listenPort,dir,dhtPersistence=true}) {
   if (!Number.isSafeInteger(apiPort) || !Number.isSafeInteger(listenPort) || listenPort < 1 || listenPort > 65535 || typeof dir !== 'string') throw new Error('إعداد محرك التورنت غير صالح');
   // LSD يبقى معطلًا (لا إعلان في الشبكة المحلية، مثل أندرويد). UPnP مفعّل: rqbit يطلب من الراوتر
   // فتح منفذ الاستماع بعقد 60 ث يجدده كل 30 ث، فيصل إلينا مشاركون خلف NAT؛ وينتهي العقد بعد الإغلاق.
+  // تفعيل uTP للاستماع والاتصال: دون هذا الخيار rqbit 9.0.1 لا ينشئ UtpSocket، فيفقد مشاركي UDP-only.
+  // يبقى TCP مفعّلًا؛ تتسابق الوصلتان داخل المحرك نفسه وتتحقق القطع كالمعتاد.
   // --listen-port صريح: القيمة 0 يحوّلها «server start» إلى 4240 الثابت، فيتعارض مع أي rqbit آخر.
-  return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--listen-port',String(listenPort),
+  return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--experimental-enable-utp-listen','--listen-port',String(listenPort),
     ...(dhtPersistence ? [] : ['--disable-dht-persistence']),'server','start',dir,'--disable-persistence'];
 }
 export function selectTorrentFile(files, candidate) {
@@ -399,6 +403,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
+      if(state.renderScriptDir)await rm(state.renderScriptDir,{recursive:true,force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
       if(state.cacheParent)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
@@ -481,7 +486,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const parentAbort=()=>abort.abort();state.controller.signal.addEventListener('abort',parentAbort,{once:true});
       try {
         if(torrent){
-          if(state.replayEntry){
+          if(state.replayEntry&&!state.suppressReplayRead){
             reader.source='cache';
             replay=await sendReplayPrefix({entry:state.replayEntry,req,res,signal:abort.signal,onBytes:demandBytes});
             if(replay.complete)return;
@@ -626,8 +631,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!added)added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
+    // Keep validated identity even for anonymous prewarming. Only playback,
+    // once its owner is known, may bind this descriptor to an owned replay.
+    state.replayDescriptor={root:chosen.root,infoHash:candidate.infoHash,fileIdx:index,fileLength:Number(files[index].length),filename:basename(String(files[index].name).replaceAll('\\','/'))};
     if(state.replayStore){
-      state.replayEntry??=await state.replayStore.remember({root:chosen.root,infoHash:candidate.infoHash,fileIdx:index,fileLength:Number(files[index].length),filename:basename(String(files[index].name).replaceAll('\\','/'))});
+      state.replayEntry??=await state.replayStore.remember(state.replayDescriptor);
       assertSession(state);
     }
     // Every rqbit HTTP reader contributes a 32 MiB priority window. Let mpv's
@@ -836,6 +844,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
     const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    if(platform==='win32'){
+      state.renderScriptDir=await fs.mkdtemp(join(userData,'player-policy-'));
+      const script=join(state.renderScriptDir,'software-render.lua');
+      await fs.writeFile(script,softwareRenderPolicyLua,{mode:0o600});assertSession(state);
+      args.push(`--script=${script}`);
+    }
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -851,6 +865,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       while(buffer.includes('\n')){
         const end=buffer.indexOf('\n'),line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line);}catch{continue;}
         if(event.request_id!=null){const pending=state.pending.get(event.request_id);if(pending){state.pending.delete(event.request_id);clearTimeout(pending.timer);event.error==='success'?pending.resolve(event.data):pending.reject(new Error('رفض المشغل الأمر'));}}
+        if(event.event==='client-message'&&event.args?.[0]==='vantara-software-render'&&event.args?.[1]==='fast')state.trace.once('software-render-profile',{profile:'fast'});
         if(event.event==='client-message'&&['vantara-fullscreen','vantara-back'].includes(event.args?.[0]))emit(state,{type:'playback/action',action:event.args[0]==='vantara-fullscreen'?'fullscreen':'close'});
         if(event.event==='seek'){state.seekRevision=(state.seekRevision??0)+1;state.stableSince=performance.now();}
         if(event.event==='file-loaded')state.trace.once('container-metadata-ready');
@@ -1021,11 +1036,31 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(state.replayEntry)void state.engineTask.catch(error=>{if(!state.stopped)void fail(state,error.message);});
         else await state.engineTask;
         assertSession(state);
+        state.replayStore=replayFor(ownerId);
+        if(state.replayStore&&state.replayDescriptor){
+          state.replayEntry=await state.replayStore.remember(state.replayDescriptor);
+          // This session already has a live, prefetched engine. Record its
+          // checked bytes, without reviving an older sparse replay read path.
+          state.suppressReplayRead=true;
+          assertSession(state);
+        }
         await state.prewarmPause;
         if(state.win?.paused){await localJSON(state.api,`/torrents/${state.torrentId}/start`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000});state.win.paused=false;}
         assertSession(state);url=await makeProxy(state,null,{},true);
       }else if(candidate.infoHash){
         state.replayEntry=await state.replayStore?.lookup({infoHash:candidate.infoHash,...(candidate.fileIdx!=null?{fileIdx:candidate.fileIdx}:{}),...(candidate.fileIdx==null&&candidate.filename?{filename:basename(String(candidate.filename).replaceAll('\\','/'))}:{})});
+        if(state.replayEntry){
+          // A tiny verified cache can render a screenshot but leave mpv stuck
+          // at time 0 waiting for the next verified torrent piece. For that
+          // case prefer the real engine handshake to a misleading instant start.
+          // No cached bytes or account-owned data are deleted.
+          const head=await reusableStartupReplay(state.replayEntry);assertSession(state);
+          state.trace.record('replay-preflight',{mode:head.usable?'verified-head':'engine-required',requiredBytes:head.requiredBytes,verifiedBytes:head.verifiedBytes});
+          // The engine may re-attach the same replay descriptor via remember().
+          // Retain a session-wide read guard, not only a nullable entry pointer.
+          // Cache writes are still allowed after the engine verifies real bytes.
+          if(!head.usable){state.suppressReplayRead=true;state.replayEntry=null;}
+        }
         state.trace.record('replay-lookup',{mode:state.replayEntry?'replay-descriptor':'cold'});
         assertSession(state);
         state.engineTask=engine(state,candidate);

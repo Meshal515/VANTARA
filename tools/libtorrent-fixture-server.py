@@ -31,14 +31,35 @@ server = module.Server(args.api_port, engine, os.environ["RQBIT_HTTP_BASIC_AUTH_
 
 def inject_owned_peer():
     previous = None
-    while not engine.closed.wait(0.01):
+    last_attempt = float("-inf")
+    while not engine.closed.wait(0.05):
         handle = engine.handle
-        if handle is not None and handle != previous:
-            # C++'s default flags13 advertises encryption/uTP/holepunch. The
-            # pinned rqbit fixture is plaintext TCP, so those defaults would
-            # fabricate capabilities and insert failed negotiation timeouts.
-            handle.connect_peer(("127.0.0.1", args.fixture_peer), 0, 0 if args.peer_kind == "rqbit" else 13)
+        if handle is None or not handle.is_valid():
+            continue
+        if handle != previous:
             previous = handle
+            last_attempt = float("-inf")
+        # A single peer injection is insufficient if its first connection
+        # fails while resolving metadata. DHT and trackers are disabled in
+        # these owned-loopback fixtures, so nobody else can reconnect.
+        # A restart can load metadata from disk with zero connected peers.
+        # Partial replay then needs missing pieces, so metadata alone cannot
+        # suppress injection. Keep retries bounded and stop once connected.
+        if handle.has_metadata() and handle.status().num_peers > 0:
+            continue
+        now = time.monotonic()
+        if now - last_attempt < 2.0:
+            continue
+        last_attempt = now
+        try:
+            # rqbit fixture is plaintext TCP; flags13 would advertise
+            # encryption/uTP/holepunch and introduce negotiation timeouts.
+            handle.connect_peer(("127.0.0.1", args.fixture_peer), 0,
+                                0 if args.peer_kind == "rqbit" else 13)
+        except RuntimeError:
+            # Torrent may be removed while its background request exits.
+            # The next bounded probe will retry if the handle is still valid.
+            pass
 
 
 threading.Thread(target=inject_owned_peer, daemon=True).start()
