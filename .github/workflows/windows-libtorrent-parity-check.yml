@@ -12,6 +12,8 @@ on:
       - 'apps/desktop/native/libtorrent/**'
       - 'apps/desktop/src/libtorrent-engine*'
       - 'apps/desktop/src/services.mjs'
+      - 'apps/desktop/src/mpv-render-policy.mjs'
+      - 'tools/mpv-render-policy-check.mjs'
       - 'apps/desktop/src/torrent-replay-*'
       - 'apps/desktop/src/startup-trace.mjs'
       - 'tools/bundle-windows-libtorrent*'
@@ -148,6 +150,8 @@ jobs:
           & $mpv.FullName --hwdec=help | Out-File (Join-Path $env:PARITY_ROOT 'mpv-hwdec-inventory.txt')
           & $mpv.FullName --version
           if($LASTEXITCODE -ne 0){throw 'Pinned MPV cannot start'}
+          node tools/mpv-render-policy-check.mjs $mpv.FullName
+          if($LASTEXITCODE -ne 0){throw 'Bundled MPV Lua render policy contract failed'}
           # GPL encoders are used to generate owned test fixtures only; not shipped.
           # Compare every downloaded byte with the exact tagged release asset SHA256.
           # Release tag and SHA256 independently pinned; no mutable GitHub API lookup.
@@ -213,7 +217,7 @@ jobs:
           $cases=@(
             @{name='utp-native';engine='libtorrent';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$true},
             @{name='utp-tcp-only-expected-failure';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$false},
-            @{name='utp-rqbit-both';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='both';expected=$true},
+            @{name='utp-rqbit-production';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='production';expected=$true},
             @{name='mse-native';engine='libtorrent';transport='both';encryption='mse';rqbit='tcp';expected=$true},
             @{name='mse-rqbit-expected-failure';engine='rqbit';transport='both';encryption='mse';rqbit='both';expected=$false}
           )

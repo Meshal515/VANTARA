@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import net from 'node:net';
 import cp from 'node:child_process';
-import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay, waitForOwnedTcpListener, waitForOwnedBitTorrentPeer, windowsProcessSnapshot } from './torrent-startup-benchmark.mjs';
+import { framePixels, summarize, main, assessPlaybackProgress, playbackHasActuallyStarted, createUtpFixtureRelay, waitForOwnedTcpListener, waitForOwnedBitTorrentPeer, windowsProcessSnapshot, fixtureRqbitTransportArgs } from './torrent-startup-benchmark.mjs';
 
 test('process sampling leaves owned UDP traffic live while its real child query is pending',async t=>{
   const seed=dgram.createSocket('udp4'),client=dgram.createSocket('udp4');
@@ -93,4 +93,17 @@ test('UDP-only owned relay verifies TCP rejection and forwards datagrams in both
   const response=new Promise(r=>client.once('message',bytes=>r(bytes.toString())));
   client.send(Buffer.from('owned request'),relay.port,'127.0.0.1');
   assert.equal(await response,'owned reply');
+});
+
+
+test('protocol fixture defaults to production flags and only explicit controls change transports',()=>{
+  const production=['-v','error','--experimental-enable-utp-listen','server','start','owned'];
+  assert.deepEqual(fixtureRqbitTransportArgs(production),production);
+  assert.deepEqual(fixtureRqbitTransportArgs(production,'tcp'),production.filter(x=>x!=='--experimental-enable-utp-listen'));
+  assert.equal(fixtureRqbitTransportArgs(production,'both').filter(x=>x==='--experimental-enable-utp-listen').length,1);
+  assert.equal(fixtureRqbitTransportArgs(production.filter(x=>x!=='--experimental-enable-utp-listen'),'both').filter(x=>x==='--experimental-enable-utp-listen').length,1);
+  assert.ok(fixtureRqbitTransportArgs(production,'utp').includes('--disable-tcp-connect'));
+  assert.ok(fixtureRqbitTransportArgs(production,'utp').includes('--disable-tcp-listen'));
+  assert.deepEqual(production,['-v','error','--experimental-enable-utp-listen','server','start','owned']);
+  assert.throws(()=>fixtureRqbitTransportArgs(production,'invalid'),/transport/);
 });

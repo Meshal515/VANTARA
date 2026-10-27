@@ -12,6 +12,7 @@ import { basename, dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
+import {softwareRenderPolicyLua} from '../apps/desktop/src/mpv-render-policy.mjs';
 import { assessRealtimePlayback, verifyByteRange, assessByteFlow } from './torrent-validation.mjs';
 
 const nativeSpawn=cp.spawn;
@@ -43,6 +44,18 @@ export function assessPlaybackProgress(sample){
   // Backwards-compatible report helper. Host baselines are diagnostics only.
   const minimumSeconds=sample.observedSeconds*.9;
   return {kind:'realtime',minimumSeconds,passed:sample.observedSeconds>0&&sample.toSeconds-sample.fromSeconds>=minimumSeconds};
+}
+
+// Default comparisons must exercise the shipped arguments. Explicit transport
+// controls are isolated here so enabling uTP in production cannot invalidate
+// the TCP-only negative control or duplicate a clap flag.
+export function fixtureRqbitTransportArgs(args,transport='production'){
+  assert.ok(['production','tcp','utp','both'].includes(transport),'Unsupported fixture rqbit transport');
+  if(transport==='production')return [...args];
+  const result=args.filter(x=>!['--experimental-enable-utp-listen','--disable-tcp-connect','--disable-tcp-listen'].includes(x));
+  if(transport!=='tcp')result.unshift('--experimental-enable-utp-listen');
+  if(transport==='utp')result.unshift('--disable-tcp-connect','--disable-tcp-listen');
+  return result;
 }
 
 async function until(fn,timeout=30000){const deadline=performance.now()+timeout;let last;while(performance.now()<deadline){try{const value=await fn();if(value)return value;}catch(e){last=e;}await sleep(25);}throw last??new Error('Benchmark deadline exceeded');}
@@ -107,7 +120,9 @@ async function playerStatus(connection){
 }
 async function localPlayerProbe(mpv,file,root,nativeEnv){
   const results=[];
-  for(const [label,args] of [['default',[]],['d3d11-gpu',['--vo=gpu','--gpu-api=d3d11']],['d3d11-next',['--vo=gpu-next','--gpu-api=d3d11']]]){
+  const script=join(root,'local-software-render.lua');
+  await fs.writeFile(script,softwareRenderPolicyLua);
+  for(const [label,args] of [['default',process.platform==='win32'?[`--script=${script}`]:[]],['unoptimized',[]],['d3d11-gpu',['--vo=gpu','--gpu-api=d3d11']],['d3d11-next',['--vo=gpu-next','--gpu-api=d3d11']]]){
     const pipe=process.platform==='win32'?`\\\\.\\pipe\\vantara-probe-${randomBytes(8).toString('hex')}`:join(root,`probe-${label}.sock`);
     const row={label,args};results.push(row);let connection,child;
     try{
@@ -187,7 +202,7 @@ export async function main(argv=process.argv.slice(2)){
   if(seedEngine==='libtorrent')assert.ok(options.libtorrentPython,'Explicit native runtime required for seeder');
   assert.ok(['both','utp','utp-closed-tcp'].includes(options.seedTransport??'both'),'Unsupported fixture seed transport');
   assert.ok(['both','utp'].includes(options.nativeTransport??'both'),'Unsupported fixture native transport');
-  assert.ok(['tcp','utp','both'].includes(options.rqbitTransport??'tcp'),'Unsupported fixture rqbit transport');
+  assert.ok(['production','tcp','utp','both'].includes(options.rqbitTransport??'production'),'Unsupported fixture rqbit transport');
   if(options.seedTransport?.startsWith('utp'))assert.equal(seedEngine,'libtorrent','uTP-only fixture requires libtorrent seeder');
   assert.ok(['optional','mse'].includes(options.seedEncryption??'optional'),'Unsupported fixture encryption');
   if(options.seedEncryption==='mse')assert.equal(seedEngine,'libtorrent','MSE fixture requires libtorrent seeder');
@@ -239,8 +254,7 @@ export async function main(argv=process.argv.slice(2)){
       }
       if(resolve(String(binary))===rqbit&&active){
         const run=active,index=args.indexOf('--http-api-listen-addr'),external=Number(args[index+1].split(':').at(-1)),backend=run.backend;
-        const rewritten=[...args];rewritten[index+1]=`127.0.0.1:${backend}`;rewritten.unshift('--disable-dht','--disable-trackers','--disable-upnp-port-forward');
-        if(['utp','both'].includes(options.rqbitTransport))rewritten.unshift('--experimental-enable-utp-listen',...(options.rqbitTransport==='utp'?['--disable-tcp-connect','--disable-tcp-listen']:[]));
+        const rewritten=fixtureRqbitTransportArgs(args,options.rqbitTransport);rewritten[rewritten.indexOf('--http-api-listen-addr')+1]=`127.0.0.1:${backend}`;rewritten.unshift('--disable-dht','--disable-trackers','--disable-upnp-port-forward');
         const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://owned');if(req.method==='POST'&&url.pathname==='/torrents')url.searchParams.set('initial_peers',`127.0.0.1:${peer}`);const row={atMs:performance.now()-run.startedAt,method:req.method,path:url.pathname,query:url.search,range:req.headers.range??null};run.http.push(row);
           const forward=http.request({hostname:'127.0.0.1',port:backend,path:url.pathname+url.search,method:req.method,headers:req.headers},back=>{row.headersMs=performance.now()-run.startedAt;row.status=back.statusCode;res.writeHead(back.statusCode,back.headers);res.flushHeaders();const haves=[],errors=[];back.on('data',b=>{if(back.statusCode>=400&&(row.bodyBytes??0)<8192)errors.push(b);row.bodyBytes=(row.bodyBytes??0)+b.length;if(url.pathname.endsWith('/haves'))haves.push(b);});back.once('end',()=>{row.completedMs=performance.now()-run.startedAt;if(errors.length)row.fixtureErrorBody=Buffer.concat(errors).toString().slice(0,8192);if(haves.length){const bits=Buffer.concat(haves);row.havePieces=[];for(let i=0;i<bits.length*8;i++)if(bits[i>>3]&(128>>(i&7)))row.havePieces.push(i);}});back.once('data',()=>{row.firstBodyMs=performance.now()-run.startedAt;});back.pipe(res);});forward.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});res.on('close',()=>forward.destroy());req.pipe(forward);});server.listen(external,'127.0.0.1');proxies.push(server);run.proxy=server;
         return track(nativeSpawn(binary,rewritten,{...spawnOptions,env:{...spawnOptions.env,...(options.libraryPath?{LD_LIBRARY_PATH:options.libraryPath}:{}),...{}}}),'rqbit');

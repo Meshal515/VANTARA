@@ -7,6 +7,7 @@ import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {performance} from 'node:perf_hooks';
 import {assessRealtimePlayback} from './torrent-validation.mjs';
+import {softwareRenderPolicyLua} from '../apps/desktop/src/mpv-render-policy.mjs';
 import {framePixels} from './torrent-startup-benchmark.mjs';
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -33,7 +34,9 @@ async function status(c){const names=['time-pos','pause','paused-for-cache','fra
 export async function main(argv=process.argv.slice(2)){
   const [mpv,ffmpeg,file,output]=argv; if(!output)throw new Error('Usage: mpv ffmpeg owned-file output');
   const root=resolve(output);await fs.mkdir(root,{recursive:true});const rows=[];
-  for(const [label,args] of renderPaths){
+  const script=join(root,'software-render.lua');await fs.writeFile(script,softwareRenderPolicyLua);
+  const paths=[...renderPaths,['conditional-fast',[`--script=${script}`]]];
+  for(const [label,args] of paths){
     const row={label,args,passed:false};rows.push(row);let child,c;
     try{
       const pipe=process.platform==='win32'?`\\\\.\\pipe\\vantara-render-${randomBytes(8).toString('hex')}`:join(root,`${label}.sock`);

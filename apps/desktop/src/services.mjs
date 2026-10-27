@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { softwareRenderPolicyLua } from './mpv-render-policy.mjs';
 import { createPlaybackBudget } from './playback-budget.mjs';
 import { createStartupTrace } from './startup-trace.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
@@ -182,8 +183,10 @@ export function engineArgs({apiPort,listenPort,dir,dhtPersistence=true}) {
   if (!Number.isSafeInteger(apiPort) || !Number.isSafeInteger(listenPort) || listenPort < 1 || listenPort > 65535 || typeof dir !== 'string') throw new Error('إعداد محرك التورنت غير صالح');
   // LSD يبقى معطلًا (لا إعلان في الشبكة المحلية، مثل أندرويد). UPnP مفعّل: rqbit يطلب من الراوتر
   // فتح منفذ الاستماع بعقد 60 ث يجدده كل 30 ث، فيصل إلينا مشاركون خلف NAT؛ وينتهي العقد بعد الإغلاق.
+  // تفعيل uTP للاستماع والاتصال: دون هذا الخيار rqbit 9.0.1 لا ينشئ UtpSocket، فيفقد مشاركي UDP-only.
+  // يبقى TCP مفعّلًا؛ تتسابق الوصلتان داخل المحرك نفسه وتتحقق القطع كالمعتاد.
   // --listen-port صريح: القيمة 0 يحوّلها «server start» إلى 4240 الثابت، فيتعارض مع أي rqbit آخر.
-  return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--listen-port',String(listenPort),
+  return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--experimental-enable-utp-listen','--listen-port',String(listenPort),
     ...(dhtPersistence ? [] : ['--disable-dht-persistence']),'server','start',dir,'--disable-persistence'];
 }
 export function selectTorrentFile(files, candidate) {
@@ -400,6 +403,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
+      if(state.renderScriptDir)await rm(state.renderScriptDir,{recursive:true,force:true}).catch(()=>{});
       if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
       if(state.cacheParent)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
@@ -840,6 +844,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
     const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    if(platform==='win32'){
+      state.renderScriptDir=await fs.mkdtemp(join(userData,'player-policy-'));
+      const script=join(state.renderScriptDir,'software-render.lua');
+      await fs.writeFile(script,softwareRenderPolicyLua,{mode:0o600});assertSession(state);
+      args.push(`--script=${script}`);
+    }
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -855,6 +865,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       while(buffer.includes('\n')){
         const end=buffer.indexOf('\n'),line=buffer.slice(0,end);buffer=buffer.slice(end+1);let event;try{event=JSON.parse(line);}catch{continue;}
         if(event.request_id!=null){const pending=state.pending.get(event.request_id);if(pending){state.pending.delete(event.request_id);clearTimeout(pending.timer);event.error==='success'?pending.resolve(event.data):pending.reject(new Error('رفض المشغل الأمر'));}}
+        if(event.event==='client-message'&&event.args?.[0]==='vantara-software-render'&&event.args?.[1]==='fast')state.trace.once('software-render-profile',{profile:'fast'});
         if(event.event==='client-message'&&['vantara-fullscreen','vantara-back'].includes(event.args?.[0]))emit(state,{type:'playback/action',action:event.args[0]==='vantara-fullscreen'?'fullscreen':'close'});
         if(event.event==='seek'){state.seekRevision=(state.seekRevision??0)+1;state.stableSince=performance.now();}
         if(event.event==='file-loaded')state.trace.once('container-metadata-ready');

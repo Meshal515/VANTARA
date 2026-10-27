@@ -99,7 +99,7 @@ test('initial_peers: عناوين عامة فقط وبصيغة SocketAddr الت
 });
 test('سطر rqbit: خيارات 9.0.1 الصحيحة، وحفظ DHT يمكن تعطيله للمحاولة الثانية', () => {
   const on=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache'});
-  assert.deepEqual(on,['-v','error','--http-api-listen-addr','127.0.0.1:3030','--disable-lsd','--listen-port','51413','server','start','C:\\cache','--disable-persistence']);
+  assert.deepEqual(on,['-v','error','--http-api-listen-addr','127.0.0.1:3030','--disable-lsd','--experimental-enable-utp-listen','--listen-port','51413','server','start','C:\\cache','--disable-persistence']);
   const off=engineArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache',dhtPersistence:false});
   assert.ok(off.includes('--disable-dht-persistence'));
   assert.ok(off.indexOf('--disable-dht-persistence')<off.indexOf('server'),'خيار عام قبل الأمر الفرعي');
@@ -741,4 +741,17 @@ test('subtitles off before an Arabic result arrives stays off',async t=>{
   await services.playbackCommand({session:'auto-off',command:'subtitle-register',value:{url:'https://subs.example.com/ar.srt',lang:'ar',label:'ar'}});
   await new Promise(r=>setTimeout(r,80));
   assert.equal((await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add').length,0);
+});
+
+
+test('Windows player carries its conditional software-render policy and removes the session script on stop',{skip:process.platform!=='win32'},async t=>{
+  const {dir,services}=await fixture(t);
+  await services.startPlayback({session:'render-policy-cleanup',candidate:{infoHash:hash,fileIdx:0}});
+  const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
+  const script=args.find(x=>x.startsWith('--script='))?.slice(9);
+  assert.ok(script);
+  assert.match(await readFile(script,'utf8'),/Using a software adapter/);
+  assert.equal(args.includes('--profile=fast'),false,'Real GPU must keep its rendering quality');
+  await services.stopPlayback({session:'render-policy-cleanup'});
+  await assert.rejects(readFile(script),{code:'ENOENT'});
 });

@@ -82,7 +82,7 @@ foreach($engine in @('rqbit','libtorrent')){
 # controls must reproduce the explicit API rejection, not merely exit non-zero.
 $protocols=@(
   @{name='utp-native';engine='libtorrent';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$true},
-  @{name='utp-rqbit';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='both';expected=$true},
+  @{name='utp-rqbit';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='production';expected=$true},
   @{name='utp-tcp-negative';engine='rqbit';transport='utp-closed-tcp';encryption='optional';rqbit='tcp';expected=$false},
   @{name='mse-native';engine='libtorrent';transport='both';encryption='mse';rqbit='tcp';expected=$true},
   @{name='mse-rqbit-negative';engine='rqbit';transport='both';encryption='mse';rqbit='both';expected=$false}

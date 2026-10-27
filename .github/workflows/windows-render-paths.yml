@@ -67,6 +67,8 @@ jobs:
           $encode+=@('-c:a','aac','-b:a','96k','-movflags','+faststart',$video)
           & $ffmpeg.FullName @encode
           if($LASTEXITCODE -ne 0){throw 'Owned fixture encoding failed'}
+          node tools/mpv-render-policy-check.mjs $mpv.FullName
+          if($LASTEXITCODE -ne 0){throw 'Bundled MPV Lua render policy contract failed'}
           node tools/windows-render-paths.mjs $mpv.FullName $ffmpeg.FullName $video (Join-Path $env:RENDER_ROOT 'evidence')
           if($LASTEXITCODE -ne 0){throw 'No render path met unchanged real playback acceptance'}
       - uses: actions/upload-artifact@v4
