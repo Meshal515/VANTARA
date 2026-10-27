@@ -227,6 +227,8 @@ const SHELL = [
   '/v35/rafiq.css',
   '/v35/wide.css',
   '/v35/addons.css',
+  '/v35/addons-v7.css',
+  '/v35/addons-v7.js',
   '/account.css',
   '/v35/side-dock.js',
   '/v35/sections.js',
