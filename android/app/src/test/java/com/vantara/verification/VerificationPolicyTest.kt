@@ -40,12 +40,56 @@ class VerificationPolicyTest {
         assertNotNull(ledger.begin("other.org", 5))
     }
 
-    @Test fun pendingWorkIsBoundedAndExpiresWithoutRetry() {
+    @Test fun pendingWorkStaysBoundedAndRequiredAfterExpiryUntilExplicitSuccess() {
         val ledger = VerificationLedger(1, 100)
-        assertNotNull(ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0))
+        val first = ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
         assertNull(ledger.require("other.org", "https://other.org", "https://other.org/", "ua", "cloudflare", "Other", 1))
-        assertEquals(1, ledger.expire(101).size)
+        val expired = ledger.expire(101)
+        assertEquals(1, expired.size)
+        assertEquals(1, ledger.snapshot().size)
+        val pending = ledger.snapshot().single()
+        assertEquals("required", pending.state)
+        assertEquals(101L, pending.createdAt)
+        assertNotEquals(first.token, pending.token)
+        assertEquals(pending, expired.single())
+        assertTrue(ledger.expire(102).isEmpty())
+        assertNull(ledger.finish("example.org", first.token))
+        assertNull(ledger.require("other.org", "https://other.org", "https://other.org/", "ua", "cloudflare", "Other", 102))
+        assertEquals(pending.token, ledger.begin("example.org", 103)?.token)
+        assertNotNull(ledger.finish("example.org", pending.token))
         assertTrue(ledger.snapshot().isEmpty())
-        assertNull(ledger.begin("example.org", 102))
+    }
+
+    @Test fun cancellationOrFailureKeepsChallengeForManualRetryWithFreshToken() {
+        listOf("cancelled", "failed").forEach { outcome ->
+            val ledger = VerificationLedger(1, 100)
+            val first = ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
+            assertNotNull(outcome, ledger.begin("example.org", 1))
+            assertNull(outcome, ledger.retry("example.org", "wrong-token", 2))
+            assertEquals(outcome, "active", ledger.snapshot().single().state)
+            val retry = ledger.retry("example.org", first.token, 3)!!
+            assertEquals(outcome, "required", retry.state)
+            assertNotEquals(outcome, first.token, retry.token)
+            assertEquals(outcome, 3L, retry.createdAt)
+            assertEquals(outcome, first.url, retry.url)
+            assertEquals(outcome, first.userAgent, retry.userAgent)
+            assertEquals(outcome, first.sourceName, retry.sourceName)
+            assertEquals(outcome, listOf(retry), ledger.snapshot())
+            assertNull(outcome, ledger.finish("example.org", first.token))
+            assertNull(outcome, ledger.retry("example.org", first.token, 4))
+            assertEquals(outcome, retry.token, ledger.begin("example.org", 4)?.token)
+            assertNotNull(outcome, ledger.finish("example.org", retry.token))
+            assertTrue(outcome, ledger.snapshot().isEmpty())
+        }
+    }
+
+    @Test fun expiredActiveSessionRotatesTokenWithoutOpeningAnotherSession() {
+        val ledger = VerificationLedger(2, 100)
+        val first = ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
+        assertNotNull(ledger.begin("example.org", 1))
+        assertEquals("required", ledger.expire(100).single().state)
+        assertFalse(ledger.snapshot().any { it.state == "active" })
+        assertNull(ledger.finish("example.org", first.token))
+        assertNotNull(ledger.begin("example.org", 101))
     }
 }

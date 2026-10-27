@@ -17,8 +17,8 @@ def parse_single_signer(output):
     older versions print "Signer #1 certificate ...". Both must be recognized
     without weakening the single-signer or pinned-certificate contract.
     """
-    count = re.search(r"^Number of signers:\s*(\d+)\s*$", output, re.M | re.I)
-    if count is None or int(count[1]) != 1:
+    counts = re.findall(r"^Number of signers:\s*(\d+)\s*$", output, re.M | re.I)
+    if len(counts) != 1 or int(counts[0]) != 1:
         raise ValueError("APK signature verifier must report exactly one signer")
     numbered = re.findall(
         r"^\s*Signer\s+#(\d+)\s+certificate\s+SHA-256\s+digest:\s*([0-9a-fA-F]{64})\s*$",

@@ -28,13 +28,18 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
         }
         pending.delete(host);render();
         // One callback per explicitly opened verification, never per state event.
-        const retried=typeof item.retry==='function'?await item.retry():null;
-        return retried??{ok:true,...result};
+        try {
+          const retried=typeof item.retry==='function'?await item.retry():null;
+          return retried??{ok:true,...result};
+        } catch {
+          // Verification succeeded; a separate content error is not another challenge.
+          return {ok:false,verified:true,error:'اكتمل التحقق، لكن تعذّر إعادة تحميل المحتوى'};
+        }
       }catch{if(!closed)require({...item,message:'تعذّر التحقق من المصدر. تقدر تحاول مرة ثانية.'});return {ok:false,error:'تعذّر التحقق'};}
       finally{active.delete(host);render();}
     })();active.set(host,job);render();return job;
   }
-  function state(item){if(closed||!validHost(item?.host))return;if(['verified','expired'].includes(item.state)){pending.delete(item.host);render();}else if(item.state==='required')require(item);}
+  function state(item){if(closed||!validHost(item?.host))return;if(item.state==='verified'){pending.delete(item.host.toLowerCase());render();}else if(['required','expired','failed','cancelled'].includes(item.state))require(item);}
   const ready=(async()=>{
     if(!plugin)return;
     await Promise.all(['required','state'].map(async name=>{
@@ -48,7 +53,7 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
     subscribe(listener){
       if(typeof listener!=='function'||closed)return ()=>{};
       listeners.add(listener);
-      try{listener([...pending.values()].map(({retry,...item})=>({...item}));}catch{}
+      try{listener([...pending.values()].map(({retry,...item})=>({...item})));}catch{}
       return ()=>listeners.delete(listener);
     },
     close(){

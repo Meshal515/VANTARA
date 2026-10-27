@@ -2,10 +2,57 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+from tempfile import TemporaryDirectory
 
 spec = importlib.util.spec_from_file_location('verify_apks', Path(__file__).with_name('verify-apks.py'))
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
+
+
+class SignerReports(unittest.TestCase):
+    """Captured from the actual published Debug 2164 using official SDK tools."""
+    certificate = '0b5cce2127f3bb107a3ee01fe7e6c51b58d18ab3fe5292e6b944bbfe86a76bb0'
+
+    def report(self, version):
+        return Path(__file__).with_name('fixtures').joinpath(f'apksigner-{version}-debug-2164.txt').read_text()
+
+    def inspect_report(self, report):
+        with TemporaryDirectory() as folder:
+            apk = Path(folder) / 'fixture.apk'
+            apk.write_bytes(b'parser fixture only')
+            badging = "package: name='com.vantara.app.debug' versionCode='2164' versionName='0.0.2164'\n"
+            with patch.object(verify.subprocess, 'check_output', side_effect=[report, badging]):
+                return verify.inspect(apk, Path(folder))
+
+    def test_real_build_tools_35_report(self):
+        self.assertEqual(self.inspect_report(self.report(35))['certificate'], self.certificate)
+
+    def test_real_build_tools_37_report(self):
+        self.assertEqual(self.inspect_report(self.report(37))['certificate'], self.certificate)
+
+    def test_rejects_multiple_signers_even_with_same_certificate(self):
+        for version in [35, 37]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.inspect_report(self.report(version).replace('Number of signers: 1', 'Number of signers: 2'))
+
+    def test_rejects_different_certificates_between_schemes(self):
+        report = self.report(37) + 'V3.0 Signer: certificate SHA-256 digest: ' + 'c' * 64 + '\n'
+        with self.assertRaises(ValueError):
+            self.inspect_report(report)
+
+    def test_rejects_missing_certificate_or_signer_count(self):
+        for report in [self.report(37).replace('Number of signers: 1', ''), self.report(37).replace('certificate SHA-256 digest:', 'public key SHA-256 digest:')]:
+            with self.subTest(report=report), self.assertRaises(ValueError):
+                self.inspect_report(report)
+
+
+class SignerCountReport(unittest.TestCase):
+    def test_rejects_ambiguous_duplicate_signer_counts(self):
+        report = 'Number of signers: 1\nV2 Signer: certificate SHA-256 digest: ' + 'a' * 64 + '\n'
+        for count in [1, 2]:
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                verify.parse_single_signer(report + f'Number of signers: {count}\n')
 
 
 class UpgradeContract(unittest.TestCase):

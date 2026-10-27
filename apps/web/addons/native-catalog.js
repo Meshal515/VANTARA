@@ -21,6 +21,35 @@ async function nativeCall(run, signal) {
 }
 const validId = value => typeof value === 'string' && value.length > 0;
 
+/** The manager delegates checks to the existing runtime, using source identity,
+ * never a matching display name. No discovery or network check runs on mount. */
+export async function diagnoseManagedAddon(record, {runtime, signal, plugins} = {}) {
+  if(signal?.aborted)throw aborted();
+  await nativeCall(()=>runtime.ready,signal);
+  if(record.key && runtime.registry.list().some(x=>x.key===record.key))
+    return runtime.diagnose(record.key,{signal});
+  const result=await createNativeCatalog(record,{plugins,signal});
+  if(result.status==='incompatible')return {checks:[{capability:'integration',state:'unsupported',message:result.reason}]};
+  await nativeCall(()=>runtime.reloadSources?.(),signal);
+  const sources=result.status==='ready'?[{sourceId:result.sourceId,name:record.name}]:result.sources;
+  const checks=[];
+  // Explicit checks are sequential and bounded; untouched sources remain untested.
+  for(const [index,source] of sources.entries()){
+    if(signal?.aborted)throw aborted();
+    if(index>=6){checks.push({capability:'integration',state:'untested',sourceName:source.name,message:'لم يُفحص هذا المصدر ضمن هذه الدفعة.'});continue;}
+    const canonical=runtime.registry.list().find(x=>x.sourceId===source.sourceId);
+    if(!canonical){checks.push({capability:'integration',state:'failed',sourceName:source.name,message:'المصدر مثبت، لكن ربطه بسجل VANTARA غير متاح.'});continue;}
+    try{
+      const diagnosis=await runtime.diagnose(canonical.key,{signal});
+      checks.push(...(diagnosis.checks||[]).map(check=>({...check,sourceName:source.name})));
+    }catch(error){
+      if(signal?.aborted||error.name==='AbortError')throw aborted();
+      checks.push({capability:'integration',state:'failed',sourceName:source.name,message:'تعذّر تنفيذ الفحص من محرك VANTARA.'});
+    }
+  }
+  return {checks};
+}
+
 /**
  * Result: ready {addon,adapter,source,sourceId}, select-source {sources}, or incompatible {code,reason}.
  * plugins are the real Capacitor bridges, not a cross-source search facade.

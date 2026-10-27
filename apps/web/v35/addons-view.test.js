@@ -308,11 +308,11 @@ it('shows disabled before configuration when both apply to an installed addon', 
 });
 
 
-it("V7 starts with real stores only, two tabs, and no sample repositories", async () => {
+it("V7 starts with real stores only, three tabs, and no sample repositories", async () => {
   setup();
   const view=renderAddons({registry:{list:()=>[]}});
   await tick();
-  expect(view.querySelectorAll(".v7-tab").length).toBe(2);
+  expect(view.querySelectorAll(".v7-tab").length).toBe(3);
   expect(view.textContent).toContain("ابدأ بإضافة مصدر لك");
   expect(view.textContent).not.toContain("استكشاف");
   expect(view.textContent).not.toContain("MIHON");
@@ -341,7 +341,6 @@ it("V7 opens addon details from the entire row and respects nested back", async 
   expect(view.textContent).toContain("Original");
   expect(view.back()).toBe(true);
   expect(view.querySelector(".v7-layer").hidden).toBe(true);
-  expect(view.back()).toBe(true);
   expect(view.back()).toBe(false);
 });
 it("V7 plus button in add dialog invokes the file input, not a fake import", async () => {

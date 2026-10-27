@@ -28,7 +28,10 @@ object VerificationCoordinator {
         expire()
         return ledger.begin(host, SystemClock.elapsedRealtime())?.also { listener?.invoke(it, "active", null) }
     }
-    @Synchronized fun finish(host: String, token: String, state: String, reason: String? = null): VerificationPending? =
-        ledger.finish(host, token)?.also { listener?.invoke(it, state, reason) }
+    @Synchronized fun finish(host: String, token: String, state: String, reason: String? = null): VerificationPending? {
+        val item = if (state == "verified") ledger.finish(host, token)
+            else ledger.retry(host, token, SystemClock.elapsedRealtime())
+        return item?.also { listener?.invoke(it, state, reason) }
+    }
     private fun expire() { ledger.expire(SystemClock.elapsedRealtime()).forEach { listener?.invoke(it, "expired", "timeout") } }
 }

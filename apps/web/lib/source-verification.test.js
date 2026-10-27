@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
 import {parseHTML} from 'linkedom';
-import {createSourceVerification} from './source-verification.js';
+import {createSourceVerification,verifySourceDomains} from './source-verification.js';
 
 function fixture(){
   const {document}=parseHTML('<html><body><main>المحتوى الأصلي</main></body></html>');
@@ -18,6 +18,29 @@ function fixture(){
 }
 
 describe('explicit source verification without unsolicited overlay',()=>{
+  it('keeps an expired challenge pending silently until explicit verification succeeds',async()=>{
+    const f=fixture(),c=createSourceVerification(f);await c.ready;
+    c.require({host:'source.example',state:'required'});
+    f.listeners.get('state')({host:'source.example',state:'expired',reason:'timeout'});
+    expect(c.list()).toMatchObject([{host:'source.example',state:'expired'}]);
+    expect(f.document.body.textContent).toBe('المحتوى الأصلي');
+    expect(f.plugin.begin).not.toHaveBeenCalled();c.close();
+  });
+  it('does not recreate a verification challenge when the one content retry fails',async()=>{
+    const f=fixture(),c=createSourceVerification(f);await c.ready;
+    c.require({host:'source.example',retry:async()=>{throw new Error('content timeout');}});
+    expect(await c.begin('source.example')).toMatchObject({ok:false,verified:true});
+    expect(c.list()).toEqual([]);expect(f.plugin.begin).toHaveBeenCalledTimes(1);c.close();
+  });
+  it('verifies only the exact source domain and retries once without opening another source',async()=>{
+    const f=fixture(),retry=vi.fn(async()=>({ok:true}));
+    f.plugin.pending.mockResolvedValue({pending:[{host:'other.example'},{host:'source.example'}]});
+    expect(await verifySourceDomains({plugin:f.plugin,domains:['https://source.example/path'],retry})).toEqual({ok:true});
+    expect(f.plugin.begin).toHaveBeenCalledWith({host:'source.example'});expect(retry).toHaveBeenCalledTimes(1);
+    f.plugin.begin.mockClear();retry.mockClear();
+    await verifySourceDomains({plugin:f.plugin,domains:['https://sub.source.example'],retry});
+    expect(f.plugin.begin).not.toHaveBeenCalled();expect(retry).not.toHaveBeenCalled();
+  });
   it('records background verification requests without altering the screen or starting a browser',async()=>{
     const f=fixture(),c=createSourceVerification(f);await c.ready;
     const changes=[],unsubscribe=c.subscribe(rows=>changes.push(rows));

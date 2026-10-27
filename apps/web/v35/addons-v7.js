@@ -2,7 +2,9 @@
 /* VANTARA V7 live add-on manager.
  * Presentation only: no migration, reset, deletion, or replacement of stored data.
  * The underlying registry and native extension stores remain authoritative. */
-import { supportedCapabilities } from "../addons/assessment.js";
+import { assessAddon, supportedCapabilities } from "../addons/assessment.js";
+
+import { configureLink } from "./addons-view.js";
 
 const icons = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -43,7 +45,6 @@ const safeIcon=(value)=>{
   if(text.length<=90*1024&&/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(text))return text;
   return safe(value);
 };
-const label=(x)=>String(x||"V").trim().slice(0,2).toUpperCase();
 const kindName=(a)=>{
   if(a.content==="cinema"||a.kind==="cinema")return "سينما";
   if(a.kind==="anime" || a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
@@ -57,55 +58,50 @@ const kindName=(a)=>{
 
 export function renderV7Addons({
   registry={}, filter="all", repositories=null, animeRepositories=null, sites=null, verification=null,
-  onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck,
+  onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
 }={}){
   const root=el("section","v7-addon addon-v7");
   root.dir="rtl";
   if(["anime","manga","cinema"].includes(filter))root.dataset.sectionHub=filter;
-  let alive=true, tab="repos", opened=null, currentSearch="", type="الكل";
-  let busy=false, generation=0, lifecycle=0, menuOpen=false;
-  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map();
+  let alive=true, tab=["repos","installed","verification"].includes(initialState.tab)?initialState.tab:"repos", opened=null, currentSearch=String(initialState.search||"").trim().toLocaleLowerCase(), type=String(initialState.type||"الكل");
+  let restoreKey=initialState.openedKey||null, restoreScroll=true;
+  let busy=false, generation=0, lifecycle=0, menuOpen=false, diagnosticController=null;
+  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), functionalEvidence=new Map();
   let requests=new Map(), queue=[], activeRequests=0;
   const stores=[
     ...(animeRepositories?[{id:"anime",kind:"anime",api:animeRepositories}]:[]),
     ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[])
   ];
   let repos=[], extensions=new Map(), siteRows=[], loading=false;
-  const mast=el("div","v7-mast"),word=el("div","v7-word");
-  word.textContent="VANTARA · ADD-ONS";
-  const back=btn("", "v7-back",()=>{if(!root.back())onBack();});
-  back.append(ico("back"),el("span",null,"رجوع"));
-  mast.append(word,back);
-  const head=el("header","v7-heading"),headText=el("div"),heading=el("h2",null,"الإضافات");
-  const subtitle=el("p",null,"أضف مستودعًا أو مصدرًا، وافتحه داخل VANTARA بواجهته الأصلية.");
-  headText.append(heading,subtitle);
+  const head=el("header","v7-heading"),heading=el("h2",null,"الإضافات");
   const add=btn("أضف","v7-plus",()=>showImport());
   add.prepend(ico("plus"));
-  head.append(headText,add);
+  head.append(heading,add);
   const tabs=el("nav","v7-tabs");
-  const repoTab=btn("المستودعات","v7-tab",()=>switchTab("repos"));
+  const repoTab=btn("الإضافات","v7-tab",()=>switchTab("repos"));
   const installedTab=btn("المثبتة","v7-tab",()=>switchTab("installed"));
   const repoCount=el("span","v7-count","0"), installedCount=el("span","v7-count","0");
   repoTab.append(repoCount);installedTab.append(installedCount);
-  tabs.append(repoTab,installedTab);
+  const verificationTab=btn("تحتاج تحقق","v7-tab v7-verify-entry",()=>switchTab("verification"));
+  const verificationCount=el("span","v7-count","0");verificationTab.append(verificationCount);
+  tabs.append(repoTab,installedTab,verificationTab);
   const tools=el("div","v7-tools"),searchBox=el("label","v7-search"),search=el("input");
   search.type="search";search.autocomplete="off";search.placeholder="ابحث عن مصدر أو مستودع...";
-  search.dataset.addonSearch="";
+  search.dataset.addonSearch="";search.value=String(initialState.search||"");
   searchBox.append(ico("search"),search);
   const filterWrap=el("div","v7-filter-wrap");
   const filterButton=btn("كل الأنواع","v7-filter",()=>toggleMenu());
   const filterArrow=ico("down");filterButton.append(filterArrow);
   const filterMenu=el("div","v7-menu");filterMenu.hidden=true;
   filterWrap.append(filterButton,filterMenu);tools.append(searchBox,filterWrap);
-  const verificationBar=el("div","v7-verification-bar");verificationBar.hidden=true;
   const body=el("div","v7-body"),message=el("div","v7-diagnostic");
   message.setAttribute("role","status");message.setAttribute("aria-live","polite");
   const layer=el("div","v7-layer");layer.hidden=true;
   const dialog=el("section","v7-dialog");
   dialog.setAttribute("role","dialog");dialog.setAttribute("aria-modal","true");
   layer.append(dialog);
-  root.append(mast,head,tabs,tools,verificationBar,body,message,layer);
-  layer.addEventListener("click",e=>{if(e.target===layer && !busy)closeModal();});
+  root.append(head,tabs,tools,body,message,layer);
+  layer.addEventListener("click",e=>{if(e.target===layer)closeModal();});
   const fmtErr=e=>String(e?.message||e||"تعذر إكمال العملية").replace(/(?:https?:\/\/|stremio:\/\/)\S+/gi,"[رابط]");
   const notify=(s)=>{if(alive)message.textContent=s;};
   const invoke=(callback,...args)=>{
@@ -114,6 +110,7 @@ export function renderV7Addons({
     catch(err){notify(fmtErr(err));}
   };
   const sourcesChanged=()=>invoke(onSourcesChanged);
+  root.addEventListener("addon-configured",()=>{if(alive){void refresh();sourcesChanged();}});
   const later=(callback,delay)=>{
     const id=setTimeout(()=>{timers.delete(id);if(alive)callback();},delay);
     timers.add(id);
@@ -125,24 +122,11 @@ export function renderV7Addons({
   // The queue is a display of pending human verification; only an explicit
   // user click may launch Android's verification Activity.
   let pendingVerification=[];
-  function renderVerification(){
-    verificationBar.replaceChildren();
-    verificationBar.hidden=!pendingVerification.length;
-    if(!pendingVerification.length)return;
-    const action=btn("مصادر تحتاج تحقق ("+pendingVerification.length+")","v7-verify-entry",()=>{
-      showDialog("مصادر تحتاج تحقق","اختر موقعًا للتحقق. لن يفتح أي موقع تلقائيًا.");
-      for(const item of pendingVerification){
-        const line=el("div","v7-verification-item");
-        const title=el("div","v7-verification-name");
-        title.append(el("strong",null,item.sourceName||item.host),el("small",null,item.host));
-        const go=btn("تحقق","v7-btn",()=>{void verifyHost(item.host,go);});
-        line.append(title,go);
-        dialog.append(line);
-      }
-      dialog.append(btn("رجوع","v7-btn",()=>closeModal()));
-    });
-    action.prepend(ico("box"));
-    verificationBar.append(action);
+  function renderVerification(){draw();}
+  function receiveVerification(items){
+    if(!alive)return;
+    pendingVerification=Array.isArray(items)?items.filter(x=>typeof x?.host==="string"):[];
+    renderVerification();
   }
   async function verifyHost(host,button){
     if(!verification?.begin)return;
@@ -174,11 +158,13 @@ export function renderV7Addons({
       (item.sourceName && String(item.sourceName).trim().toLowerCase()===name)
     );
   }
-  let removeVerification=verification?.subscribe?.(items=>{
-    if(!alive)return;
-    pendingVerification=(items||[]).filter(x=>typeof x.host==="string");
-    renderVerification();
-  })||(()=>{});
+  let removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});
+  try{
+    const saved=verification?.list?.();
+    if(saved?.then)saved.then(receiveVerification).catch(err=>notify(fmtErr(err)));
+    else if(saved)receiveVerification(saved);
+  }catch(err){notify(fmtErr(err));}
+
 
   function logo(item,fallback,repo=false){
     const box=el("span","v7-logo"+(repo?" is-repo":""));
@@ -205,15 +191,41 @@ export function renderV7Addons({
   function sourceMeta(a){
     return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||""),a.version||""].filter(Boolean).join(" · ");
   }
+  function installedState(a){
+    const assessment=a.assessment||assessAddon(a,registry.runtimeName||"pwa");
+    if(sourceChallenges(a).length)return {state:"attention",label:"تحتاج انتباه",detail:"المصدر يحتاج تحققًا."};
+    const caps=supportedCapabilities(a,registry.runtimeName||"pwa");
+    const evidence=caps.map(cap=>a.health?.[cap]);
+    // Endpoint absence must be explicit. An individual chapter/cover failure,
+    // timeout or ordinary failed diagnostic cannot establish source removal.
+    if(a.availability?.confirmed===true && a.availability.state==="unavailable")
+      return {state:"unavailable",label:"غير متاحة",detail:a.availability.reason||assessment.detail};
+    if(evidence.some(h=>h?.scope==="source" && ["failed","cooling"].includes(h.state) && /^(HTTP[_ ]?(404|410)|SOURCE_REMOVED|SOURCE_NOT_FOUND)$/.test(h.reason||"")))
+      return {state:"unavailable",label:"غير متاحة",detail:evidence.find(h=>h?.scope==="source"&&h.reason)?.reason};
+    const observed=evidence.map((h,i)=>{
+      if(!Number.isFinite(h?.functionalSuccessAt)||!["healthy","empty"].includes(h.state))return 0;
+      const key=JSON.stringify([a.key||a.pkg||a.id||a.domain,caps[i],a.version,a.cacheEpoch]);
+      const times=functionalEvidence.get(key)||new Set();times.add(h.functionalSuccessAt);
+      if(times.size>2)times.delete(Math.min(...times));functionalEvidence.set(key,times);return times.size;
+    });
+    const repeated=assessment.level==="stable" && caps.length && evidence.every(h=>
+      Number.isFinite(h?.functionalSuccessAt) && h.functionalSuccessAt<=Date.now() && Date.now()-h.functionalSuccessAt<=7*86400000 &&
+      h.version===a.version && h.cacheEpoch===a.cacheEpoch) && observed.every(count=>count>=2);
+    if(repeated)return {state:"stable",label:"مستقرة",detail:assessment.detail};
+    return {state:"attention",label:"تحتاج انتباه",detail:a.loadError||a.disabledReason||a.error||assessment.detail||"لم تُفحص الإضافة بعد."};
+  }
+  function status(a){
+    const result=installedState(a),node=el("span","v7-status visible","مثبتة · "+result.label);
+    node.dataset.state=result.state;return node;
+  }
   function sourceRow(a,mode,parent){
     const row=el("article","v7-row");row.tabIndex=0;
     row.setAttribute("role","button");row.setAttribute("aria-label","تفاصيل "+a.name);
     const logoBox=logo(a,parent),info=el("div","v7-info");
     info.append(el("div","v7-name",a.name),el("div","v7-meta",sourceMeta(a)));
-    const statusSlot=el("div","v7-status-slot"),stateLabel=el("span","v7-status");
+    const statusSlot=el("div","v7-status-slot"),stateLabel=status(a);
     const isAdded=mode==="remote"?true:!!(a.installed||a.builtin||a.update);
-    stateLabel.textContent="● مثبتة";
-    if(isAdded)stateLabel.classList.add("visible");
+    if(!isAdded)stateLabel.classList.remove("visible");
     statusSlot.append(stateLabel);info.append(statusSlot);
     const actions=el("div","v7-actions");
     const foreign=mode==="native" && ((a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true));
@@ -281,7 +293,7 @@ export function renderV7Addons({
     const row=el("article","v7-row");
     const item={name:site.label||site.domain||"موقع مانجا",iconUrl:site.iconUrl||null};
     const info=el("div","v7-info");
-    info.append(el("div","v7-name",item.name),el("div","v7-meta",["موقع مانجا",site.engine,site.domain].filter(Boolean).join(" · ")));
+    info.append(el("div","v7-name",item.name),el("div","v7-meta",["موقع مانجا",site.engine,site.domain].filter(Boolean).join(" · ")),status(site));
     const actions=el("div","v7-actions");
     const details=btn("تفاصيل","v7-simple-btn",e=>{
       e.stopPropagation();
@@ -306,7 +318,7 @@ export function renderV7Addons({
       dialog.append(acts);
     });
     actions.append(details);
-    row.append(logo(item),info,actions);
+    row.append(logo({...site,...item}),info,actions);
     row.onclick=e=>{if(!e.target.closest("button"))details.click();};
     return row;
   }
@@ -326,7 +338,7 @@ export function renderV7Addons({
   }
   function fillKinds(items){
     const names=["الكل",...new Set(items.map(kindName))];
-    if(!names.includes(type))type="الكل";
+    if(items.length&&!names.includes(type))type="الكل";
     filterButton.firstChild.textContent=type==="الكل"?"كل الأنواع":type;
     filterMenu.replaceChildren(...names.map(name=>{
       const b=btn(name,name===type?"active":"",()=>{
@@ -343,7 +355,7 @@ export function renderV7Addons({
   }
   function nativeRecord(item,store,url){
     const local=installedMetadata.get(store.id)?.find(x=>x.pkg===item.pkg);
-    const record={...item,kind:store.kind,_store:store,_url:url};
+    const record={...item,...local,kind:store.kind,_store:store,_url:url};
     if(installedMetadata.has(store.id)){
       record.installed=local?(local.version||true):false;
       if(!local)record.update=false;
@@ -366,15 +378,17 @@ export function renderV7Addons({
     installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
     repoTab.classList.toggle("active",tab==="repos");
     installedTab.classList.toggle("active",tab==="installed");
+    verificationTab.classList.toggle("active",tab==="verification");
+    const installedRecords=[...allRemote,...installedNative,...siteRows.map(x=>({...x,name:x.label||x.domain,kind:"manga",_site:true}))];
+    const challenged=installedRecords.filter(a=>sourceChallenges(a).length);
+    const unknown=pendingVerification.filter(item=>!challenged.some(a=>sourceChallenges(a).some(x=>x.host===item.host)));
+    verificationCount.textContent=String(challenged.length+unknown.length);
     body.replaceChildren();
     body.setAttribute("aria-busy",String(loading));
     filterWrap.hidden=tab==="repos"&&!opened;
-    fillKinds(tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[]));
+    fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[]));
     if(tab==="repos"){
       if(opened){
-        const backRepo=btn("رجوع","v7-back",()=>{opened=null;search.value="";currentSearch="";draw();});
-        backRepo.prepend(ico("back"));
-        body.append(backRepo);
         body.append(section(opened.data.name,opened.group.kind==="anime"?"Aniyomi":"Mihon"));
         const list=el("div","v7-list");
         const ext=extensions.get(opened.key);
@@ -390,10 +404,19 @@ export function renderV7Addons({
       }else{
         if(!repos.length){if(loading){body.append(el("p","v7-notice","جارٍ تحميل المستودعات…"));return;}body.append(empty("ابدأ بإضافة مصدر لك","اضغط «أضف» لإضافة أول مستودع أو إضافة."));return;}
         const matches=repos.filter(r=>!currentSearch||(r.data.name||"").toLowerCase().includes(currentSearch));
-        body.append(section("المستودعات",String(matches.length)));
         const list=el("div","v7-list");matches.forEach(r=>list.append(storeRepoRow(r)));
         body.append(list);
       }
+    }else if(tab==="verification"){
+      const list=el("div","v7-list");
+      for(const a of filtered(challenged)){
+        if(a._site)list.append(siteRow(a));
+        else list.append(sourceRow(a,a._store?"native":"remote",repos.find(r=>r.data.url===a._url)?.data));
+        const challenges=sourceChallenges(a);
+        for(const item of challenges)list.append(verificationRow(item));
+      }
+      for(const item of unknown.filter(x=>!currentSearch||String(x.host+" "+(x.sourceName||"")).toLowerCase().includes(currentSearch)))list.append(verificationRow(item));
+      body.append(list.childElementCount?list:empty("لا توجد مصادر تحتاج تحققًا",""));
     }else{
       const filteredRemote=filtered(allRemote);
       const filteredNative=filtered(installedNative);
@@ -403,8 +426,15 @@ export function renderV7Addons({
       filteredNative.forEach(a=>list.append(sourceRow(a,"native",repos.find(r=>r.data.url===a._url)?.data)));
       filteredSites.forEach(a=>list.append(siteRow(a)));
       if(!filteredRemote.length&&!filteredNative.length&&!filteredSites.length)body.append(empty("ابدأ بإضافة مصدر لك","لم تُثبّت إضافات بعد."));
-      else{body.append(section("المثبتة",String(filteredRemote.length+filteredNative.length+filteredSites.length)),list);}
+      else{body.append(list);}
     }
+  }
+  function verificationRow(item){
+    const row=el("div","v7-verification-item");
+    const title=el("div","v7-verification-name");
+    title.append(el("strong",null,item.sourceName||item.host),el("small",null,item.host));
+    const go=btn("تحقق","v7-btn",()=>{void verifyHost(item.host,go);});
+    row.append(title,go);return row;
   }
   async function refresh(){
     if(!alive)return;
@@ -431,12 +461,16 @@ export function renderV7Addons({
       for(const key of extensions.keys())if(!saved.has(key))extensions.delete(key);
       for(const key of extensionErrors.keys())if(!saved.has(key))extensionErrors.delete(key);
       if(opened&&!saved.has(opened.key))opened=null;
+      if(restoreKey){opened=repos.find(r=>r.key===restoreKey)||null;restoreKey=null;}
       draw();
       // Read installed native sources without flooding bridges with every saved index at once.
       await Promise.all(repos.map(r=>loadExtensions(r,{force:true,run})));
       await sitesTask;
     }catch(err){if(alive&&run===generation)notify(fmtErr(err));}
-    finally{if(alive&&run===generation){loading=false;draw();}}
+    finally{if(alive&&run===generation){loading=false;draw();
+      if(restoreScroll){restoreScroll=false;root.scrollTop=Number(initialState.scrollTop)||0;
+        if(Number.isFinite(initialState.scrollY)&&typeof window?.scrollTo==="function")window.scrollTo({top:initialState.scrollY,behavior:"instant"});}
+    }}
   }
   function drainRequests(){
     while(alive&&activeRequests<4&&queue.length){
@@ -469,10 +503,13 @@ export function renderV7Addons({
     requests.set(r.key,promise);queue.push({repo:r,run,resolve});
     draw();drainRequests();return promise;
   }
-  function closeModal(force=false){if(busy&&!force)return;layer.hidden=true;dialog.replaceChildren();}
+  function cancelDiagnostic(){
+    if(diagnosticController){diagnosticController.abort();diagnosticController=null;busy=false;}
+  }
+  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;cancelDiagnostic();layer.hidden=true;dialog.replaceChildren();}
   function showDialog(title,description){
     if(!alive)return;
-    layer.hidden=false;dialog.replaceChildren();
+    cancelDiagnostic();layer.hidden=false;dialog.replaceChildren();
     dialog.append(el("h3",null,title));
     if(description)dialog.append(el("p",null,description));
   }
@@ -481,11 +518,35 @@ export function renderV7Addons({
     const yes=btn(primaryName,"v7-btn "+variant,primary),no=btn("رجوع","v7-btn",()=>closeModal());
     actions.append(yes,no);dialog.append(actions);return yes;
   }
+  function renderDiagnostics(a,container,actions){
+    const results=el("div","v7-checks");results.setAttribute("aria-live","polite");
+    const check=btn("فحص الإضافة","v7-btn",async()=>{
+      if(busy)return;busy=true;check.disabled=true;results.textContent="جارٍ فحص الإضافة…";
+      const controller=new AbortController();diagnosticController=controller;
+      try{
+        const result=await onCheck(a,{signal:controller.signal});
+        if(!alive||controller.signal.aborted||!dialog.contains(results))return;
+        results.replaceChildren();
+        const labels={passed:"نجح",failed:"مشكلة",untested:"لم يُفحص",unsupported:"غير مدعوم",empty:"لا نتائج",configuration:"يحتاج إعدادًا",disabled:"معطلة"};
+        const capabilities={home:"كتالوج",catalog:"كتالوج",search:"بحث",meta:"بيانات",details:"تفاصيل",streams:"روابط التشغيل",subtitles:"ترجمة",pages:"صفحات",chapters:"فصول",episodes:"حلقات",addon:"الإضافة",other:"قدرة إضافية"};
+        const checks=[...(result?.checks||[])];
+        for(const capability of a.capabilities||[])if(!checks.some(x=>x.capability===capability))
+          checks.push({capability,state:"untested",message:"لم يُرجع الفحص نتيجة لهذه القدرة."});
+        for(const item of checks){
+          const line=el("div","v7-check");line.dataset.state=item.state;
+          line.append(el("strong",null,[item.sourceName,labels[item.state]||"لم يُفحص",capabilities[item.capability]||"قدرة إضافية"].filter(Boolean).join(" · ")),el("span",null,fmtErr(item.message||"لم يُرجع الفحص تفاصيل.")));results.append(line);
+        }
+        if(!checks.length)results.append(el("p","v7-notice","لم يُرجع الفحص نتائج قابلة للتحقق."));
+        if(result?.assessment?.detail)results.append(el("p","v7-notice",fmtErr(result.assessment.detail)));draw();
+      }catch(err){if(alive&&!controller.signal.aborted&&dialog.contains(results))results.replaceChildren(el("p","v7-notice",fmtErr(err)));}
+      finally{if(diagnosticController===controller){diagnosticController=null;busy=false;}check.disabled=false;}
+    });actions.append(check);container.append(results);
+  }
   function showDetails(a,mode,parent){
     showDialog(a.name,a.description||"");
     const main=el("div","v7-fields");
     const field=(k,v)=>{const d=el("div","v7-field");d.append(el("strong",null,k),el("span",null,v||"—"));return d;};
-    main.append(field("النوع",kindName(a)),field("الإصدار",a.version||"—"),field("المستودع",parent?.name||"إضافات VANTARA"),field("اللغة",a.lang||a.languages?.[0]||"—"));
+    main.append(field("النوع",kindName(a)),field("الإصدار",a.version||"—"),field("المستودع",parent?.name||a.repository?.name||a.repositoryName||a.repository?.url||a.repo||a._url||a.origin||"غير معروف"),field("اللغة",a.lang||a.languages?.[0]||"—"));
     dialog.append(main);
     const challenges=sourceChallenges(a);
     if(challenges.length){
@@ -493,13 +554,14 @@ export function renderV7Addons({
       const verify=btn("تحقق من المصدر","v7-btn",()=>{void verifyHost(challenges[0].host,verify);});
       dialog.append(verify);
     }
-    const assessment=a.assessment;
+    const assessment=a.assessment||(mode==="remote"?assessAddon(a,registry.runtimeName||"pwa"):null);
     const knownFailure=a.loadError||a.disabledReason||a.error;
     dialog.append(el("p","v7-notice",knownFailure
       ? "حالة التشغيل: مشكلة في المصدر — "+fmtErr(knownFailure)
-      : assessment?.label
-        ? "حالة التشغيل: "+assessment.label
-        : "حالة التشغيل: لم تُفحص. ظهور «مثبتة» لا يعني أن المصدر يعمل."));
+      : assessment?.detail
+        ? "حالة التشغيل: "+fmtErr(assessment.detail)
+        : "حالة التشغيل: لم تُفحص."));
+    for(const [cap,h] of Object.entries(a.health||{}))if(h.reason)dialog.append(el("p","v7-notice",cap+": "+fmtErr(h.reason)));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");
       const open=btn("فتح في VANTARA","v7-btn primary",()=>openRemote(a));
@@ -518,24 +580,31 @@ export function renderV7Addons({
       const act=(title,fn)=>advancedActions.append(btn(title,"v7-btn",()=>void run(fn)));
       if(registry.enable && !a.bundled)act(a.enabled===false?"تفعيل":"تعطيل",()=>registry.enable(a.key,a.enabled===false));
       if(registry.pin)act(a.pinned?"إلغاء التثبيت بالأعلى":"تثبيت بالأعلى",()=>registry.pin(a.key,!a.pinned));
-      if(registry.stage && !a.bundled)act("فحص تحديث",()=>registry.stage(a.key));
+      if(registry.stage && !a.bundled){
+        const updateResult=el("p","v7-update-result");updateResult.setAttribute("role","status");
+        const update=btn("فحص تحديث","v7-btn",async()=>{
+          if(busy)return;busy=true;update.disabled=true;updateResult.textContent="جارٍ فحص التحديث…";
+          try{const result=await registry.stage(a.key);if(!alive||!dialog.contains(updateResult))return;
+            updateResult.dataset.state=result?.changed===true?"update":result?.changed===false?"noUpdate":"unknown";
+            updateResult.textContent=result?.changed===true?"يوجد تحديث جاهز للتطبيق.":result?.changed===false?"الإضافة محدّثة؛ لا يوجد تحديث جديد.":"لم يُرجع المصدر نتيجة تحديث واضحة.";
+            if(result?.changed===true){const fresh=registry.list?.().find(x=>x.key===a.key);if(fresh?.stagedVersion&&!advancedActions.querySelector('[data-apply-update]')){const apply=btn("تطبيق التحديث","v7-btn",()=>void run(()=>registry.activateStaged(a.key)));apply.dataset.applyUpdate="";advancedActions.append(apply);}}
+            draw();
+          }catch(err){if(alive){updateResult.dataset.state="error";updateResult.textContent=fmtErr(err);}}
+          finally{busy=false;update.disabled=false;}
+        });advancedActions.append(update);advanced.append(updateResult);
+      }
       if(registry.activateStaged && a.stagedVersion)act("تطبيق التحديث",()=>registry.activateStaged(a.key));
       if(registry.rollback && a.previousVersion)act("العودة للإصدار السابق",()=>registry.rollback(a.key));
       if(registry.reinstall && !a.bundled)act("إعادة التثبيت",()=>registry.reinstall(a.key));
-      if(onCheck)act("فحص الاتصال",()=>onCheck(a));
+      if(onCheck)renderDiagnostics(a,advanced,advancedActions);
       if(a.configuration?.configurable && registry.configurationUrl){
-        try{
-          const url=safe(registry.configurationUrl(a.key));
-          if(url){
-            const link=el("a","v7-btn","إعداد الإضافة");
-            link.href=url;link.target="_blank";link.rel="noopener noreferrer";
-            advancedActions.append(link);
-          }
-        }catch{/* Config URL is optional and must not break details. */}
+        try{const link=configureLink(a,registry);if(link){link.className="v7-btn";advancedActions.append(link);}}
+        catch{/* Optional configuration cannot prevent opening details. */}
       }
       if(advancedActions.childElementCount){advanced.append(advancedActions);dialog.append(advanced);}
     }else{
       const acts=el("div","v7-dialog-actions");
+      if(onCheck&&(a.installed||a.builtin||a.update))renderDiagnostics(a,dialog,acts);
       const wrongFamily=(a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true);
       if(wrongFamily){
         dialog.append(el("p","v7-notice",a._store?.kind==="anime"?"هذه إضافة مانجا؛ ثبّتها من مستودع مانجا.":"هذه إضافة أنمي؛ ثبّتها من مستودع أنمي."));
@@ -569,14 +638,14 @@ export function renderV7Addons({
       .some(c=>["catalog","home","search"].includes(c));
   }
   function openRemote(a){
+    if(sourceChallenges(a).length){showDetails(a,"remote");return;}
     if(!canOpenRemote(a))return notify("المصدر لا يوفر كتالوجًا مدعومًا.");
     closeModal();invoke(onOpenSource,a);
   }
   function openNative(a){
+    if(sourceChallenges(a).length){showDetails(a,"native",repos.find(r=>r.data.url===a._url)?.data);return;}
     closeModal();
     if(onOpenNativeSource){invoke(onOpenNativeSource,a);return;}
-    const match=(registry.list?.()||[]).find(x=>x.name===a.name && canOpenRemote(x));
-    if(match){invoke(onOpenSource,match);return;}
     notify("هذا المصدر مثبت في المحرك الأصلي. افتحه من قسم الأنمي أو المانجا في VANTARA.");
   }
   async function installNative(a){
@@ -718,15 +787,15 @@ export function renderV7Addons({
     }catch(e){note.textContent=fmtErr(e);}
   }
   function navigateBack(){
-    if(!layer.hidden){if(!busy)closeModal();return true;}
+    if(!layer.hidden){closeModal();return true;}
     if(menuOpen){menuOpen=false;filterMenu.hidden=true;return true;}
     if(opened){opened=null;type="الكل";currentSearch="";search.value="";draw();return true;}
-    if(tab==="installed"){switchTab("repos");return true;}
     return false;
   }
   root.back=navigateBack;
-  root.close=()=>{alive=false;removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
-  root.reload=()=>{alive=true;removeVerification=verification?.subscribe?.(items=>{pendingVerification=items||[];renderVerification();})||(()=>{});void refresh();};
+  root.snapshot=()=>({tab,openedKey:opened?.key||restoreKey||null,search:search.value,type,scrollTop:root.scrollTop||0,scrollY:window?.scrollY||0});
+  root.close=()=>{cancelDiagnostic();alive=false;removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
+  root.reload=()=>{alive=true;removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
   search.oninput=()=>{currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();
   return root;

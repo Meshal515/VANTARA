@@ -131,7 +131,7 @@ export async function configureInApp(link, plugin, href, registry) {
     if (note) setTimeout(() => { if (link.isConnected) link.textContent = label; }, 4000);
   }
 }
-function configureLink(a, registry, explicit) {
+export function configureLink(a, registry, explicit) {
   try {
     const value = explicit ?? registry.configurationUrl?.(a.key);
     if (!value) return null;

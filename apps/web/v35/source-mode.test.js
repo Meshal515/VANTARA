@@ -1,6 +1,90 @@
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { renderSourceMode } from "./source-mode.js";
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("loads native manga covers through the source session and renders the saved file", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const sourceId = "eu.kanade.tachiyomi.extension.ar.mangaswat#7657007209499352344";
+  const url = "https://images.example.com/native-session-cover.webp";
+  const cover = vi.fn(async () => ({ path: "/data/user/0/com.vantara.app.debug/files/covers/source.webp" }));
+  vi.stubGlobal("Capacitor", {
+    Plugins: { ExtensionEngine: { cover } },
+    convertFileSrc: path => "https://localhost/_capacitor_file_" + path,
+  });
+  const view = renderSourceMode({
+    addon: { name: "Native manga", protocol: "native", sourceId, capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1702288", title: "Work", thumbnailUrl: url }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(cover).toHaveBeenCalledWith({ sourceId, url });
+  expect(view.querySelector(".up-art img")?.getAttribute("src")).toBe("https://localhost/_capacitor_file_/data/user/0/com.vantara.app.debug/files/covers/source.webp");
+  view.close();
+});
+
+it("does not retry protected native covers as unauthenticated WebView image requests", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover: async () => { throw new Error("verification required"); } } } });
+  const view = renderSourceMode({
+    addon: { name: "Native manga", bundled: true, sourceId: "native-reader", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: "https://images.example.com/verification-cover.webp" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(view.querySelector(".up-art img")).toBeNull();
+  expect(view.querySelector(".up-title").textContent).toBe("Work");
+  view.close();
+});
+
+it("ignores cover responses after leaving the source screen", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  let finish;
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover: () => new Promise(resolve => { finish = resolve; }) } } });
+  const view = renderSourceMode({
+    addon: { name: "Native manga", protocol: "native", sourceId: "native-reader", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: "https://images.example.com/late-native-cover.webp" }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const art = view.querySelector(".up-art");
+  expect(finish).toBeTypeOf("function");
+  view.close();
+  finish({ path: "/saved/late-cover.webp" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(art.querySelector("img")).toBeNull();
+});
+
+it("keeps pending first-page covers when another source page is appended", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const pending = [];
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover: () => new Promise(resolve => pending.push(resolve)) } } });
+  const view = renderSourceMode({
+    addon: { name: "Native manga", protocol: "native", sourceId: "native-reader", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async page => ({ items: [{ url: String(page), title: "Page " + page, thumbnailUrl: `https://images.example.com/append-cover-${page}.webp` }], hasNextPage: page === 1 }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  view.querySelector(".addon-source-more").click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  pending[0]({ path: "/saved/first.webp" });
+  pending[1]({ path: "/saved/second.webp" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect([...view.querySelectorAll(".up-art img")].map(img => img.getAttribute("src"))).toEqual(["/saved/first.webp", "/saved/second.webp"]);
+  view.close();
+});
+
+it("leaves external add-on poster URLs on their existing public image route", async () => {
+  globalThis.document = parseHTML("<html><body></body></html>").document;
+  const cover = vi.fn();
+  vi.stubGlobal("Capacitor", { Plugins: { ExtensionEngine: { cover } } });
+  const url = "https://images.example.com/external-public-cover.webp";
+  const view = renderSourceMode({
+    addon: { name: "External manga", protocol: "stremio", capabilities: ["home"], contentTypes: ["manga"] },
+    adapter: { home: async () => ({ items: [{ url: "1", title: "Work", thumbnailUrl: url }] }) },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(view.querySelector(".up-art img")?.getAttribute("src")).toBe(url);
+  expect(cover).not.toHaveBeenCalled();
+  view.close();
+});
 
 it("shows actual source logos and replaces broken images with a clean glyph", () => {
   globalThis.document = parseHTML("<html><body></body></html>").document;

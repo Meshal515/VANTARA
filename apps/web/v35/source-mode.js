@@ -1,5 +1,6 @@
 import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
+import { nativeCover } from "./covers.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -72,6 +73,7 @@ export function renderSourceMode({
   note.setAttribute("role", "status");
   note.setAttribute("aria-live", "polite");
   let controller = null,
+    closed = false,
     generation = 0,
     pending = false,
     failures = 0,
@@ -334,12 +336,23 @@ export function renderSourceMode({
         if (image)
           try {
             const img = node("img", "poster");
-            img.src = publicUrl(image).href;
+            const url = publicUrl(image).href;
             img.alt = "";
             img.loading = "lazy";
             img.referrerPolicy = "no-referrer";
             img.onerror = () => img.remove();
-            art.append(img);
+            if (addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
+              // Same source client, cookies, headers and persistent cover cache as the library.
+              // A failed native request must stay in that pipeline (including verification).
+              void nativeCover(url, addon.sourceId).then(local => {
+                if (!local || closed || !root.contains(art)) return;
+                img.src = local;
+                art.append(img);
+              });
+            } else {
+              img.src = url;
+              art.append(img);
+            }
           } catch {}
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;
@@ -397,7 +410,7 @@ export function renderSourceMode({
     if (!adapter.catalog) state.tab = "search";
     void load();
   };
-  root.close = () => {
+  const stopLoading = () => {
     clearTimeout(retryTimer);
     retryTimer = null;
     io?.disconnect();
@@ -405,13 +418,18 @@ export function renderSourceMode({
     controller?.abort();
     pending = false;
   };
+  root.close = () => {
+    closed = true;
+    stopLoading();
+  };
   root.reload = load;
   root.pause = () => {
     if (pending) resumeLoad = activeLoad;
     state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
-    root.close();
+    stopLoading();
   };
   root.resume = () => {
+    closed = false;
     io?.observe(more);
     if (resumeLoad) {
       const options = resumeLoad; resumeLoad = null; void load(options);

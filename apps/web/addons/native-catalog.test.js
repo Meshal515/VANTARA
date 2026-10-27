@@ -1,10 +1,30 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { createNativeCatalog } from './native-catalog.js';
+import { createNativeCatalog, diagnoseManagedAddon } from './native-catalog.js';
 import { sourceWorkModel } from './work-view.js';
 import { renderSourceMode } from '../v35/source-mode.js';
 
 afterEach(()=>vi.unstubAllGlobals());
+
+it('diagnoses an installed native package through its actual canonical source, never its display name',async()=>{
+ const diagnose=vi.fn(async key=>({checks:[{capability:'home',state:'passed',message:key}]}));
+ const runtime={registry:{list:()=>[{key:'core|wrong',name:mangaRecord.name,sourceId:'unrelated'},{key:'core|actual',sourceId:'org.native.reader#123'}]},diagnose,reloadSources:async()=>{}};
+ const result=await diagnoseManagedAddon(mangaRecord,{runtime,plugins:{ExtensionEngine:mangaPlugin()}});
+ expect(result.checks).toContainEqual(expect.objectContaining({capability:'home',state:'passed',message:'core|actual'}));
+ expect(diagnose.mock.calls.map(x=>x[0])).toEqual(['core|actual']);
+});
+it('reports an unresolved native binding without pretending its network functions passed',async()=>{
+ const diagnose=vi.fn();
+ const result=await diagnoseManagedAddon(mangaRecord,{runtime:{registry:{list:()=>[]},diagnose},plugins:{ExtensionEngine:mangaPlugin()}});
+ expect(result.checks).toEqual([expect.objectContaining({capability:'integration',state:'failed'})]);expect(diagnose).not.toHaveBeenCalled();
+});
+it('retains existing remote diagnosis and cancels before native discovery',async()=>{
+ const diagnose=vi.fn(async()=>({checks:[{capability:'catalog',state:'empty'}]}));
+ const runtime={registry:{list:()=>[{key:'installed'}]},diagnose};
+ expect((await diagnoseManagedAddon({key:'installed'},{runtime})).checks[0].state).toBe('empty');
+ const c=new AbortController();c.abort();
+ await expect(diagnoseManagedAddon(mangaRecord,{runtime,signal:c.signal})).rejects.toMatchObject({name:'AbortError'});
+});
 const mangaRecord={pkg:'org.native.reader',name:'Installed Reader',_store:{kind:'manga'}};
 const mangaPlugin=(extra={})=>({
   sources:async()=>({sources:[{id:'org.native.reader#123',pkg:'org.native.reader',label:'Actual Source'}]}),

@@ -230,7 +230,7 @@ it('keeps verification quiet outside Add-ons and exposes the explicit in-page bu
   const view=renderV7Addons({registry:registry(),verification});d.body.append(view);await tick();
   expect(d.querySelector('[data-source-verification]')).toBeNull();
   const entry=view.querySelector('.v7-verify-entry');
-  expect(entry.textContent).toContain('مصادر تحتاج تحقق');
+  expect(entry.textContent).toContain('تحتاج تحقق');
   expect(begin).not.toHaveBeenCalled();
   entry.click();await tick();
   expect(begin).not.toHaveBeenCalled();
@@ -267,4 +267,129 @@ it('uses a neutral SVG fallback when no authentic icon is available',async()=>{
   expect(view.querySelector('.v7-row .v7-fallback svg')).toBeTruthy();
   expect(view.querySelector('.v7-row .v7-fallback').textContent).toBe('');
   view.close();
+});
+
+it('offers three counted tabs with verification sources retained in installed and no nested back controls',async()=>{
+  setup();const items=[{key:'verified',name:'Needs Verify',domain:'verify.example'},{key:'normal',name:'Normal'}];
+  const verification={list:()=>[{host:'verify.example'},{host:'unknown.example'}],subscribe:()=>()=>{},begin:vi.fn()};
+  const view=renderV7Addons({registry:registry(items),verification});await tick();
+  expect([...view.querySelectorAll('.v7-tab')].map(x=>x.textContent)).toEqual(['الإضافات0','المثبتة2','تحتاج تحقق2']);
+  expect(view.querySelector('.v7-mast')).toBeNull();expect(view.querySelector('.v7-back')).toBeNull();
+  installedTab(view).click();expect(view.querySelectorAll('.v7-row')).toHaveLength(2);
+  [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('تحتاج تحقق')).click();
+  expect(view.querySelector('.v7-body').textContent).toContain('Needs Verify');
+  expect(view.querySelector('.v7-body').textContent).toContain('unknown.example');
+  expect(verification.begin).not.toHaveBeenCalled();expect(view.back()).toBe(false);view.close();
+});
+
+it('gates challenged source opens until explicit verification without launching automatically',async()=>{
+  setup();const open=vi.fn(),begin=vi.fn();
+  const item={key:'verify',name:'Verify',domain:'verify.example',protocol:'stremio',capabilities:['catalog']};
+  const view=renderV7Addons({registry:registry([item]),verification:{list:()=>[{host:'verify.example'}],begin},onOpenSource:open});await tick();installedTab(view).click();
+  view.querySelector('.v7-simple-btn').click();expect(open).not.toHaveBeenCalled();expect(begin).not.toHaveBeenCalled();
+  expect(view.querySelector('.v7-dialog').textContent).toContain('تحقق من المصدر');view.close();
+});
+
+it('renders functional repeated evidence and confirmed failures distinctly from unknown and transient errors',async()=>{
+  setup();const now=Date.now();
+  const health={state:'healthy',version:'1',cacheEpoch:'v1',functionalSuccessAt:now,samples:[10,11]};
+  const base={version:'1',cacheEpoch:'v1',protocol:'stremio',capabilities:['catalog']};
+  const items=[{...base,key:'stable',name:'Stable',health:{catalog:health}},
+    {...base,key:'one',name:'One',health:{catalog:{...health,samples:[10]}}},
+    {...base,key:'unknown',name:'Unknown'},
+    {...base,key:'transient',name:'Transient',health:{catalog:{state:'failed',failures:1,reason:'timeout'}}},
+    {...base,key:'gone',name:'Gone',health:{catalog:{state:'failed',failures:3,reason:'HTTP_410',scope:'source'}}}];
+  const view=renderV7Addons({registry:registry(items)});await tick();installedTab(view).click();
+  const states=[...view.querySelectorAll('.v7-status')];
+  expect(states.map(x=>x.textContent)).toEqual(['مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · غير متاحة']);
+  expect(states.map(x=>x.dataset.state)).toEqual(['attention','attention','attention','attention','unavailable']);view.close();
+});
+
+it('shows actual diagnostic checklist including untested and unsupported without closing details',async()=>{
+  setup();const onCheck=vi.fn(async()=>({checks:[{capability:'catalog',state:'passed',message:'Catalog response'},
+    {capability:'streams',state:'untested',message:'No sample identity'},{capability:'subtitles',state:'unsupported',message:'Unsupported platform'},
+    {capability:'meta',state:'failed',message:'Actual request failed'}],assessment:{level:'broken',detail:'Actual assessment detail'}}));
+  const view=renderV7Addons({registry:registry([{key:'check',name:'Check'}]),onCheck});await tick();installedTab(view).click();view.querySelector('.v7-row').click();
+  const action=[...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فحص الإضافة');expect(action).toBeTruthy();action.click();await tick();
+  expect(view.querySelector('.v7-layer').hidden).toBe(false);
+  expect([...view.querySelectorAll('.v7-check')].map(x=>x.dataset.state)).toEqual(['passed','untested','unsupported','failed']);
+  expect(view.querySelector('.v7-dialog').textContent).toContain('Actual assessment detail');
+  expect(view.querySelector('.v7-dialog').textContent).toContain('No sample identity');
+  expect(view.querySelector('.v7-dialog').textContent).toContain('غير معروف');view.close();
+});
+
+it.each([{changed:true},{changed:false},{error:'Update request failed'}])('shows real stage result %j inside details',async result=>{
+  setup();const stage=async()=>{if(result.error)throw Error(result.error);return result;};
+  const view=renderV7Addons({registry:{...registry([{key:'update',name:'Update'}]),stage}});await tick();installedTab(view).click();view.querySelector('.v7-row').click();
+  [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فحص تحديث').click();await tick();
+  expect(view.querySelector('.v7-layer').hidden).toBe(false);
+  expect(view.querySelector('.v7-update-result').dataset.state).toBe(result.error?'error':result.changed?'update':'noUpdate');
+  if(result.error)expect(view.querySelector('.v7-update-result').textContent).toContain(result.error);view.close();
+});
+
+it('restores repository/search/type and reports a snapshot without turning tab changes into back history',async()=>{
+  setup();const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Native Source',pkg:'native.pkg'}]};
+  const view=renderV7Addons({registry:registry(),repositories:api,initialState:{tab:'repos',openedKey:'manga:https://repo.example/index.json',search:'NaTiVe',type:'مانجا',scrollTop:42,scrollY:99}});await tick();
+  expect(view.querySelector('[data-addon-search]').value).toBe('NaTiVe');expect(view.querySelector('.v7-body').textContent).toContain('Native Source');
+  expect(view.snapshot()).toMatchObject({tab:'repos',openedKey:'manga:https://repo.example/index.json',search:'NaTiVe',type:'مانجا'});
+  expect(view.querySelector('.v7-body .v7-back')).toBeNull();view.back();installedTab(view).click();expect(view.back()).toBe(false);view.close();
+});
+
+it('does not treat timing samples as repeated functional success and only turns green after a second observed success',async()=>{
+  setup();const now=Date.now();
+  const h={state:'healthy',version:'1',cacheEpoch:'v1',functionalSuccessAt:now-100,samples:[20,30]};
+  const item={key:'observed',name:'Observed',version:'1',cacheEpoch:'v1',protocol:'stremio',capabilities:['catalog'],health:{catalog:h}};
+  const view=renderV7Addons({registry:registry([item])});await tick();installedTab(view).click();
+  expect(view.querySelector('.v7-status').dataset.state).toBe('attention');
+  h.functionalSuccessAt=now;view.reload();await tick();
+  expect(view.querySelector('.v7-status').dataset.state).toBe('stable');
+  h.cacheEpoch='v2';item.cacheEpoch='v2';view.reload();await tick();
+  expect(view.querySelector('.v7-status').dataset.state).toBe('attention');view.close();
+});
+
+it('keeps native configuration inside VANTARA and refreshes the manager after Install',async()=>{
+  const d=setup(),changed=vi.fn();
+  const configure=vi.fn(async()=>({url:'https://addon.example/configured/manifest.json'}));
+  vi.stubGlobal('Capacitor',{isNativePlatform:()=>true,Plugins:{AddonEngine:{configure}}});
+  const preview={manifest:{key:'configured',name:'Configured Addon'}};
+  const install=vi.fn(async()=>preview),inspect=vi.fn(async()=>preview);
+  const view=renderV7Addons({registry:{...registry([{key:'configured',name:'Configured Addon',configuration:{configurable:true}}]),configurationUrl:()=> 'https://addon.example/configure',inspect,install},onSourcesChanged:changed});
+  d.body.append(view);await tick();installedTab(view).click();view.querySelector('.v7-row').click();view.querySelector('[data-configure]').click();await tick();
+  expect(configure).toHaveBeenCalledWith({url:'https://addon.example/configure'});
+  expect(inspect).toHaveBeenCalledWith('https://addon.example/configured/manifest.json');
+  expect(install).toHaveBeenCalledWith(preview);expect(changed).toHaveBeenCalledOnce();view.close();
+});
+
+it('retains one verification subscription after reload and releases it on close',async()=>{
+  setup();const listeners=new Set();
+  const subscribe=fn=>{listeners.add(fn);return()=>listeners.delete(fn);};
+  const view=renderV7Addons({registry:registry(),verification:{subscribe}});await tick();
+  view.reload();await tick();view.close();expect(listeners.size).toBe(0);
+});
+
+it('checks installed native addons using the actual diagnostic result with Arabic capability names and omitted capabilities untested',async()=>{
+  setup();const onCheck=vi.fn(async()=>({checks:[{capability:'home',state:'passed',message:'Native catalog responded'}]}));
+  const api={list:async()=>({repos:[{name:'Native Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Native Check',pkg:'native.check',installed:true,capabilities:['home','search']}]};
+  const view=renderV7Addons({registry:registry(),repositories:api,onCheck});await tick();browse(view);view.querySelector('.v7-row').click();
+  const check=[...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فحص الإضافة');expect(check).toBeTruthy();check.click();await tick();
+  expect(onCheck).toHaveBeenCalledWith(expect.objectContaining({pkg:'native.check'}),expect.objectContaining({signal:expect.any(AbortSignal)}));
+  expect([...view.querySelectorAll('.v7-check')].map(x=>x.dataset.state)).toEqual(['passed','untested']);
+  expect(view.querySelector('.v7-checks').textContent).toContain('كتالوج');expect(view.querySelector('.v7-checks').textContent).toContain('بحث');view.close();
+});
+
+it('aborts the actual diagnostic when details are dismissed and ignores late results',async()=>{
+  setup();const pending=deferred();let signal;
+  const view=renderV7Addons({registry:registry([{key:'abort',name:'Abort'}]),onCheck:(_a,options)=>{signal=options.signal;return pending.promise;}});await tick();installedTab(view).click();view.querySelector('.v7-row').click();
+  [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فحص الإضافة').click();
+  expect(view.back()).toBe(true);expect(signal.aborted).toBe(true);expect(view.querySelector('.v7-layer').hidden).toBe(true);
+  pending.resolve({checks:[{capability:'catalog',state:'passed',message:'Late result'}]});await tick();
+  expect(view.textContent).not.toContain('Late result');expect(view.querySelector('.v7-diagnostic').textContent).toBe('');view.close();
+});
+
+it('never routes a native package to a different addon sharing its display name',async()=>{
+  setup();const open=vi.fn();
+  const api={list:async()=>({repos:[{name:'Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Same Name',pkg:'native.actual',installed:true}]};
+  const view=renderV7Addons({registry:registry([{key:'remote.unrelated',name:'Same Name',protocol:'stremio',capabilities:['catalog']}]),repositories:api,onOpenSource:open});await tick();browse(view);view.querySelector('.v7-row').click();
+  [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فتح في VANTARA').click();
+  expect(open).not.toHaveBeenCalled();expect(view.querySelector('.v7-diagnostic').textContent).toContain('المحرك الأصلي');view.close();
 });

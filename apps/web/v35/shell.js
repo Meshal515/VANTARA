@@ -12,7 +12,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  * والشاشات التي لم تُنقل بعد (الإشعارات، ملفي…) تُفتح عبر `deps.go`.
  */
 
-import { createNativeCatalog } from '../addons/native-catalog.js';
+import { createNativeCatalog, diagnoseManagedAddon } from '../addons/native-catalog.js';
 import { createSourceVerification } from '../lib/source-verification.js';
 import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
@@ -3707,13 +3707,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (key === 'activity') return openSocial('friends');
   }
   let sourceView = null, addonHubView = null, sourceSnapshot = null, addonViewGeneration = 0;
+  let addonHubState = null, addonHubContext = null, addonSourcePending = false;
   function closeAddonSource() {
+    if(addonHubView?.snapshot)addonHubState={context:addonHubContext,value:addonHubView.snapshot()};
     addonHubView?.close?.(); addonHubView=null;
     sourceView?.close?.(); sourceView=null;
     sourceSnapshot?.release(); sourceSnapshot=null;
   }
   async function openAddons() {
     closeAddonSource();
+    addonSourcePending=false;
+    addonHubContext=`${sync.user?.userId??"local"}|${root.dataset.section??"all"}`;
     const run=++addonViewGeneration;
     q('utilityTitle').textContent = 'الإضافات';
     showPage('utility');
@@ -3735,13 +3739,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => addons.diagnose(addon.key, options), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
   async function openNativeAddonSource(record, sourceId) {
     const generation=++addonViewGeneration;
-    closeAddonSource();showPage('utility');
+    closeAddonSource();addonSourcePending=true;showPage('utility');
     q('utilityTitle').textContent=record.name??'المصدر';
     q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
     try{
@@ -3750,7 +3754,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(result.status==='select-source'){
         const list=el('div','addon-source-choices');
         for(const source of result.sources){const b=el('button','addon-button',source.name);b.disabled=source.enabled===false;b.onclick=()=>{void openNativeAddonSource(record,source.sourceId);};list.append(b);}
-        const back=el('button','addon-button','رجوع');back.onclick=()=>{void openAddons();};list.append(back);q('utilityBody').replaceChildren(list);return;
+        q('utilityBody').replaceChildren(list);return;
       }
       if(result.status!=='ready')throw new Error(result.reason??'محرك المصدر غير متاح على هذه المنصة');
       const addons=await getAddonRuntime();await addons.ready;await addons.reloadSources?.();
@@ -3758,13 +3762,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const canonical=addons.registry.list().find(addon=>addon.sourceId===result.sourceId);
       if(!canonical)throw new Error('المصدر مثبت، لكن المحرك لم يربطه بكتالوج صالح بعد. أعد فتح الإضافات.');
       await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter});
-    }catch(error){if(generation===addonViewGeneration&&currentPage()==='utility'){const message=el('p','work-meta',error.message??'تعذّر فتح المصدر');const back=el('button','addon-button','رجوع للإضافات');back.onclick=()=>{void openAddons();};q('utilityBody').replaceChildren(message,back);}}
+    }catch(error){if(generation===addonViewGeneration&&currentPage()==='utility')q('utilityBody').replaceChildren(el('p','work-meta',error.message??'تعذّر فتح المصدر'));}
   }
   async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter} = {}) {
     const run=++addonViewGeneration;
     const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
     if(run!==addonViewGeneration)return;
     closeAddonSource();
+    addonSourcePending=false;
     sourceSnapshot=addons.registry.snapshot();
     q('utilityTitle').textContent = addon.name;
     showPage('utility');
@@ -4168,7 +4173,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // داخل الإضافات: الرجوع خطوة واحدة (صفحة إضافة ← المتجر، مصدر ← المتجر) قبل مغادرة الإضافات كلها
     if (currentPage() === 'utility') {
       if (addonHubView?.back?.()) return true;
-      if (sourceView) { void openAddons(); return true; }
+      if (sourceView || addonSourcePending) { void openAddons(); return true; }
     }
     const prev = state.stack.pop();
     if (prev) {

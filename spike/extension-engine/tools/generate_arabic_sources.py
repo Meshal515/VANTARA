@@ -16,15 +16,20 @@ Why build-time instead of runtime:
 
 Specialized BL/GL sources remain visible in the snapshot/report, but are marked
 policy-blocked and the Android spike will never download or execute them.
+
+--local-apk-dir reproduces the tracked snapshot from bundled APK bytes after
+checking its index identity, all source metadata, and immutable SHA-256 pins.
 """
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import urllib.error
@@ -157,7 +162,72 @@ def kotlin_string(value: str) -> str:
     )
 
 
-def main() -> None:
+def verify_local_payloads(
+    selected: list[dict], index_sha256: str, manifest: Path, apk_dir: Path,
+) -> dict[str, tuple[str, int]]:
+    """Use bundled APKs only when they reproduce the reviewed snapshot exactly.
+
+    The tracked Kotlin manifest is the existing pin authority. The freshly read
+    index must match its commit, bytes, and every source field before any local
+    executable bytes are accepted. Missing/changed files never fall back online.
+    """
+    source = manifest.read_text(encoding="utf-8")
+    commit = re.findall(r'^const val GENERATED_INDEX_COMMIT = "([^"]+)"$', source, re.M)
+    index_hash = re.findall(r'^ \* index sha256: ([0-9a-f]{64})$', source, re.M)
+    if commit != [COMMIT] or index_hash != [index_sha256]:
+        raise RuntimeError("local payload manifest does not match the pinned index commit/hash")
+
+    pinned: dict[str, dict] = {}
+    for block in re.findall(r'^    SourceSpec\(\n(.*?)^    \),$', source, re.M | re.S):
+        fields = dict(re.findall(r'^        (\w+) = (.*),$', block, re.M))
+        try:
+            item = {
+                key: json.loads(fields[key])
+                for key in ["label", "apkUrl", "sha256", "versionName", "blockedReason"]
+            }
+            item["packageName"] = json.loads(fields["pkg"])
+            item["extensionLib"] = str(float(fields["expectedLib"]))
+            item["warning"] = fields["warning"].removeprefix("ContentWarning.")
+            for key, constructor in [("arabicSourceIds", "setOf"), ("arabicSourceNames", "listOf")]:
+                value = re.fullmatch(constructor + r'\((.*)\)', fields[key])
+                if value is None:
+                    raise ValueError(f"invalid {key}")
+                item[key] = json.loads("[" + value[1] + "]")
+        except (KeyError, ValueError) as exc:
+            raise RuntimeError("malformed local payload manifest") from exc
+        package = item["packageName"]
+        if not re.fullmatch(r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+', package) or package in pinned:
+            raise RuntimeError("invalid or duplicate local payload package")
+        if not re.fullmatch(r'[0-9a-f]{64}', item["sha256"]):
+            raise RuntimeError("invalid local payload SHA-256 pin")
+        pinned[package] = item
+
+    packages = [item["packageName"] for item in selected]
+    if not pinned or len(packages) != len(set(packages)) or set(packages) != set(pinned):
+        raise RuntimeError("selected packages do not match the local payload manifest")
+
+    result = {}
+    for item in selected:
+        package = item["packageName"]
+        expected = dict(pinned[package])
+        digest = expected.pop("sha256")
+        metadata = dict(item, extensionLib=str(float(item["extensionLib"])))
+        if metadata != expected:
+            raise RuntimeError(f"{package}: index metadata differs from local payload manifest")
+        data = (apk_dir / f"{package}.apk").read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise RuntimeError(f"{package}: local APK SHA-256 differs from the immutable pin")
+        result[package] = (digest, len(data))
+    return result
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--local-apk-dir", type=Path,
+        help="verify existing bundled APKs against the tracked snapshot instead of downloading",
+    )
+    args = parser.parse_args(argv)
     print(f"Fetching pinned Keiyoushi index: {COMMIT}")
     index_bytes = fetch_bytes(INDEX_URL, timeout=90)
     index_sha256 = hashlib.sha256(index_bytes).hexdigest()
@@ -200,7 +270,14 @@ def main() -> None:
     selected.sort(key=lambda x: (x["label"].casefold(), x["packageName"]))
     print(f"Selected Arabic extension packages: {len(selected)}")
 
+    local_hashes = None
+    if args.local_apk_dir is not None:
+        local_hashes = verify_local_payloads(selected, index_sha256, OUT_KT, args.local_apk_dir)
+        print(f"Verified {len(local_hashes)} bundled APKs against the unchanged index and snapshot pins")
+
     def hash_one(item: dict) -> tuple[str, int]:
+        if local_hashes is not None:
+            return local_hashes[item["packageName"]]
         data = fetch_bytes(item["apkUrl"], timeout=90)
         return hashlib.sha256(data).hexdigest(), len(data)
 

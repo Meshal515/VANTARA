@@ -76,5 +76,12 @@ class VerificationLedger(private val capacity: Int = 8, private val ttlMs: Long 
         entries.remove(host)
         return entry
     }
-    fun expire(now: Long): List<VerificationPending> = entries.values.filter { now - it.createdAt >= ttlMs }.also { expired -> expired.forEach { entries.remove(it.host) } }
+    fun retry(host: String, token: String, now: Long): VerificationPending? {
+        val entry = entries[host]?.takeIf { it.token == token } ?: return null
+        return entry.copy(createdAt = now, token = UUID.randomUUID().toString(), state = "required")
+            .also { entries[host] = it }
+    }
+    fun expire(now: Long): List<VerificationPending> = entries.values
+        .filter { now - it.createdAt >= ttlMs }
+        .mapNotNull { retry(it.host, it.token, now) }
 }
