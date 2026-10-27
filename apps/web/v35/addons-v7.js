@@ -648,6 +648,28 @@ export function renderV7Addons({
         note.textContent="أُضيف الموقع: "+(site?.label||parsed.hostname);
         closeModal(true);await refresh();sourcesChanged();return;
       }
+      // CloudStream's repo.json points at a pluginLists index of .cs3 packages.
+      // A valid index is NOT executable by native Mihon/Aniyomi APK runtimes.
+      // Recognize its format and report real compatibility rather than
+      // submitting it to unrelated engines or falsely saying it is installed.
+      if(/\/repo\.json$/i.test(parsed.pathname) && typeof fetch==="function"){
+        const controller=new AbortController();
+        const timeout=setTimeout(()=>controller.abort(),5000);
+        try{
+          const response=await fetch(uri,{method:"GET",credentials:"omit",signal:controller.signal});
+          if(response.ok && Number(response.headers?.get?.("content-length")||0)<65536){
+            const data=await response.text();
+            if(data.length<65536){
+              const index=JSON.parse(data);
+              if(Array.isArray(index.pluginLists)&&index.pluginLists.length){
+                note.textContent="هذا مستودع CloudStream صالح، لكن VANTARA لا يملك حاليًا محركًا ينفّذ إضافات .cs3. لم تُثبّت الإضافات، ولن نعرضها على أنها تعمل.";
+                return;
+              }
+            }
+          }
+        }catch{/* Offline/CORS: let native repositories validate their formats. */}
+        finally{clearTimeout(timeout);}
+      }
       const candidates=stores.filter(s=>s.api?.add);
       if(!candidates.length){note.textContent="لا يوجد محرك مستودعات متاح في هذا الجهاز.";return;}
       let matched=false, lastError="";
