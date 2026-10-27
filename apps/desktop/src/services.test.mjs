@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs } from './services.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
+import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 
 const hash = 'a'.repeat(40);
 test('HTTPS يرفض الأهداف الداخلية وكل DNS يحتوي عنوانًا داخليًا', async () => {
@@ -109,6 +111,15 @@ async function fixture(t, mode='normal', serviceOptions={}) {
   let services;
   t.after(async() => {await services?.close();await rm(dir,{recursive:true,force:true});});
   const rqbit=join(dir,'rqbit'), mpv=join(dir,'mpv');
+  if(process.platform==='win32'){
+    // Windows CreateProcess does not execute extensionless Node shebang files.
+    // Only these two test programs use a Node launcher; real binaries and the
+    // application's process launcher retain their normal behavior.
+    const nativeSpawn=cp.spawn;
+    t.mock.method(cp,'spawn',(binary,args,options)=>[rqbit,mpv].includes(binary)?nativeSpawn(process.execPath,[binary,...args],options):nativeSpawn(binary,args,options));
+    syncBuiltinESMExports();
+    t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+  }
   await writeFile(rqbit, `#!${process.execPath}\nimport http from 'node:http';import fs from 'node:fs';
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
 fs.appendFileSync(${JSON.stringify(join(dir,'rqbit-attempts'))},JSON.stringify(args)+'\\n');if(${JSON.stringify(mode)}==='dht-conflict'&&!args.includes('--disable-dht-persistence'))process.exit(1);
@@ -170,6 +181,30 @@ test('a prewarmed torrent is adopted by playback: one engine add, paused while w
   const all=await requests();
   assert.equal(all.filter(r=>r.url.startsWith('/torrents?')).length,1,'playback reuses the prewarmed engine and torrent');
   assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')));
+});
+for(const completed of [false,true])test(`adopted prewarm records replay only for its playback owner (completed=${completed})`,async t=>{
+  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',replayCache:true});
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  if(completed){
+    for(let i=0;i<200;i++){
+      const requests=(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).split('\n').filter(Boolean).map(JSON.parse);
+      if(requests.some(r=>r.url.endsWith('/pause')))break;
+      await new Promise(r=>setTimeout(r,25));
+    }
+  }
+  const anonymous=createTorrentReplayCache({userData:dir});
+  assert.equal(await anonymous.lookup({infoHash:hash,fileIdx:0}),null,'preparation must not create a guest-owned replay');await anonymous.close();
+  await services.startPlayback({session:'owned-prewarm',ownerId:'playback-owner',candidate:{infoHash:hash,fileIdx:0}});
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const url=commands.find(m=>m.command[0]==='loadfile').command[1];
+  const response=await fetch(url,{headers:{Range:'bytes=0-3'},signal:AbortSignal.timeout(4000)});
+  assert.equal(await response.text(),'abcd');
+  await services.stopPlayback({session:'owned-prewarm'});await services.close();
+  const cache=createTorrentReplayCache({userData:dir,ownerId:'playback-owner'});t.after(()=>cache.close());
+  const replay=await cache.lookup({infoHash:hash,fileIdx:0});
+  assert.ok(replay,'adoption must retain verified replay for the next app process');
+  assert.equal((await replay.read(0,4))?.toString(),'abcd');
+  for(const ownerId of ['guest','other-owner']){const other=createTorrentReplayCache({userData:dir,ownerId});assert.equal(await other.lookup({infoHash:hash,fileIdx:0}),null);await other.close();}
 });
 test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
   const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});

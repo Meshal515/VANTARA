@@ -627,8 +627,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!added)added=await addTorrent(state,options,'');assertSession(state);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
+    // Keep validated identity even for anonymous prewarming. Only playback,
+    // once its owner is known, may bind this descriptor to an owned replay.
+    state.replayDescriptor={root:chosen.root,infoHash:candidate.infoHash,fileIdx:index,fileLength:Number(files[index].length),filename:basename(String(files[index].name).replaceAll('\\','/'))};
     if(state.replayStore){
-      state.replayEntry??=await state.replayStore.remember({root:chosen.root,infoHash:candidate.infoHash,fileIdx:index,fileLength:Number(files[index].length),filename:basename(String(files[index].name).replaceAll('\\','/'))});
+      state.replayEntry??=await state.replayStore.remember(state.replayDescriptor);
       assertSession(state);
     }
     // Every rqbit HTTP reader contributes a 32 MiB priority window. Let mpv's
@@ -1022,6 +1025,14 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(state.replayEntry)void state.engineTask.catch(error=>{if(!state.stopped)void fail(state,error.message);});
         else await state.engineTask;
         assertSession(state);
+        state.replayStore=replayFor(ownerId);
+        if(state.replayStore&&state.replayDescriptor){
+          state.replayEntry=await state.replayStore.remember(state.replayDescriptor);
+          // This session already has a live, prefetched engine. Record its
+          // checked bytes, without reviving an older sparse replay read path.
+          state.suppressReplayRead=true;
+          assertSession(state);
+        }
         await state.prewarmPause;
         if(state.win?.paused){await localJSON(state.api,`/torrents/${state.torrentId}/start`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000});state.win.paused=false;}
         assertSession(state);url=await makeProxy(state,null,{},true);
