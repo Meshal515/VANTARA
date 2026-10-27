@@ -259,7 +259,10 @@ jobs:
       - name: Upgrade exact signed APK and stress Home and Addons on Android
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
-          api-level: 30
+          # V7 uses modern JS modules (including logical assignment operators).
+          # API 30's system WebView is too old and rejects valid shipped modules
+          # with "SyntaxError: Unexpected token '='"; use a current Android WebView.
+          api-level: 35
           target: google_apis
           arch: x86_64
           profile: pixel_3a
