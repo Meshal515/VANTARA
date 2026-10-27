@@ -373,10 +373,18 @@ export function renderV7Addons({
     if(!value){note.textContent="ألصق رابطًا أولًا.";return;}
     const uri=safe(value);
     if(!uri){note.textContent="يتطلب رابط HTTPS صالحًا.";return;}
+    const parsed=new URL(uri);
+    // Native repositories contain executable extension code. Require informed opt-in before calling add().
+    if(!parsed.pathname.endsWith("manifest.json") && yes.dataset.trustedUrl!==uri){
+      yes.dataset.trustedUrl=uri;
+      yes.textContent="أثق به، أضفه";
+      note.textContent="إضافات المستودع قد تنفّذ كودًا على جهازك. أضف مستودعات تثق بناشريها فقط؛ اضغط مجددًا للتأكيد.";
+      return;
+    }
     if(busy)return;
     busy=true;yes.disabled=true;note.textContent="جارٍ فحص الرابط…";
     try{
-      let url=new URL(uri);
+      let url=parsed;
       if(url.pathname.endsWith("manifest.json")){
         const preview=await registry.inspect(uri);
         note.textContent="الإضافة: "+preview.manifest.name+" · راجع المصدر قبل التثبيت.";
