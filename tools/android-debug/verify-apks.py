@@ -10,16 +10,43 @@ import subprocess
 PACKAGE = 'com.vantara.app.debug'
 
 
+def parse_single_signer(output):
+    """Fail closed on zero, multiple or conflicting APK signer certificates.
+
+    apksigner versions vary in whitespace/capitalization. No certificate pin is
+    weakened: the normalized digest still must match the hard-coded pin.
+    """
+    matches = re.findall(
+        r"^\s*Signer\s+#(\d+)\s+certificate\s+SHA-256\s+digest:\s*([0-9a-fA-F]{64})\s*$",
+        output, re.MULTILINE | re.IGNORECASE,
+    )
+    unique = {(int(index), digest.lower()) for index, digest in matches}
+    announced = {int(index) for index in re.findall(
+        r"^\s*Signer\s+#(\d+)\s+certificate\b", output, re.MULTILINE | re.IGNORECASE,
+    )}
+    if len(unique) != 1 or announced != {1} or {i for i, _ in unique} != {1}:
+        raise ValueError(
+            f"Expected exactly one signer with complete SHA-256 certificate; "
+            f"parsed={len(unique)}, announced={sorted(announced)}; "
+            f"apksigner output: {output[-1200:]!r}"
+        )
+    return next(iter(unique))[1]
+
+
 def inspect(apk, build_tools):
-    certs = subprocess.check_output([str(build_tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
-    signers = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$', certs, re.M)
-    if len(signers) != 1:
-        raise ValueError('Debug APK must have exactly one signer')
+    certs = subprocess.check_output(
+        [str(build_tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)],
+        text=True,
+    )
+    signer = parse_single_signer(certs)
     badging = subprocess.check_output([str(build_tools / 'aapt2'), 'dump', 'badging', str(apk)], text=True)
     match = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']*)'", badging, re.M)
     if not match:
         raise ValueError('Missing APK package/version metadata')
-    return dict(package=match[1], code=int(match[2]), name=match[3], certificate=signers[0], sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), size=apk.stat().st_size)
+    return dict(
+        package=match[1], code=int(match[2]), name=match[3], certificate=signer,
+        sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), size=apk.stat().st_size,
+    )
 
 
 def validate(previous, candidate, manifest, pinned, expected_code):
