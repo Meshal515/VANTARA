@@ -136,6 +136,7 @@ export function renderV7Addons({
     if(isAdded)stateLabel.classList.add("visible");
     statusSlot.append(stateLabel);info.append(statusSlot);
     const actions=el("div","v7-actions");
+    const foreign=mode==="native" && ((a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true));
     if(mode==="remote"){
       if(canOpenRemote(a)){
         const open=btn("فتح","v7-simple-btn",e=>{e.stopPropagation();openRemote(a);});
@@ -146,6 +147,10 @@ export function renderV7Addons({
         del.setAttribute("aria-label","حذف "+a.name);del.append(ico("trash"));actions.prepend(del);
       }
     }else if(mode==="native"){
+      if(foreign){
+        const wrong=btn("نوع مختلف","v7-simple-btn",e=>{e.stopPropagation();showDetails(a,"native",parent);});
+        actions.append(wrong);
+      }else{
       const slot=el("div","v7-trash-holder");
       const trash=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"native");});
       trash.append(ico("trash"));trash.setAttribute("aria-label","حذف "+a.name);slot.append(trash);
@@ -176,6 +181,7 @@ export function renderV7Addons({
         }catch(err){notify(fmtErr(err));}finally{flip.disabled=false;}
       };
       actions.append(slot,flip);
+      }
     }
     row.append(logoBox,info,actions);
     row.onclick=e=>{if(!e.target.closest("button"))showDetails(a,mode,parent);};
@@ -344,15 +350,58 @@ export function renderV7Addons({
       if(!canOpenRemote(a))open.disabled=true;
       acts.append(open,btn("رجوع","v7-btn",()=>closeModal()));dialog.append(acts);
       if(!canOpenRemote(a))dialog.append(el("p","v7-notice","هذه الإضافة لا تعرض كتالوجًا مباشرًا على هذا الجهاز؛ تبقى متاحة لوظائفها المدعومة."));
+      // Keep all existing Addon Fabric capabilities behind a compact advanced disclosure.
+      const advanced=el("details","v7-advanced");
+      advanced.append(el("summary",null,"إدارة الإضافة وإعداداتها"));
+      const advancedActions=el("div","v7-dialog-actions");
+      const run=async(action)=>{
+        if(busy)return;busy=true;
+        try{await action();closeModal(true);draw();onSourcesChanged();}
+        catch(err){notify(fmtErr(err));}finally{busy=false;}
+      };
+      const act=(title,fn)=>advancedActions.append(btn(title,"v7-btn",()=>void run(fn)));
+      if(registry.enable && !a.bundled)act(a.enabled===false?"تفعيل":"تعطيل",()=>registry.enable(a.key,a.enabled===false));
+      if(registry.pin)act(a.pinned?"إلغاء التثبيت بالأعلى":"تثبيت بالأعلى",()=>registry.pin(a.key,!a.pinned));
+      if(registry.stage && !a.bundled)act("فحص تحديث",()=>registry.stage(a.key));
+      if(registry.activateStaged && a.stagedVersion)act("تطبيق التحديث",()=>registry.activateStaged(a.key));
+      if(registry.rollback && a.previousVersion)act("العودة للإصدار السابق",()=>registry.rollback(a.key));
+      if(registry.reinstall && !a.bundled)act("إعادة التثبيت",()=>registry.reinstall(a.key));
+      if(onCheck)act("فحص الاتصال",()=>onCheck(a));
+      if(a.configuration?.configurable && registry.configurationUrl){
+        try{
+          const url=safe(registry.configurationUrl(a.key));
+          if(url){
+            const link=el("a","v7-btn","إعداد الإضافة");
+            link.href=url;link.target="_blank";link.rel="noopener noreferrer";
+            advancedActions.append(link);
+          }
+        }catch{/* Config URL is optional and must not break details. */}
+      }
+      if(advancedActions.childElementCount){advanced.append(advancedActions);dialog.append(advanced);}
     }else{
       const acts=el("div","v7-dialog-actions");
-      if(!a.installed&&!a.builtin){
+      const wrongFamily=(a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true);
+      if(wrongFamily){
+        dialog.append(el("p","v7-notice",a._store?.kind==="anime"?"هذه إضافة مانجا؛ ثبّتها من مستودع مانجا.":"هذه إضافة أنمي؛ ثبّتها من مستودع أنمي."));
+      }else if(!a.installed&&!a.builtin&&!a.update){
         acts.append(btn("تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
           try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
-      }else{
+        if(a._store?.kind==="anime"){
+          acts.append(btn("ثبّت في السينما","v7-btn",async()=>{
+            if(busy)return;busy=true;
+            try{await a._store.api.install(a._url,a.pkg,"cinema");closeModal(true);onSourcesChanged();await refresh();}
+            catch(err){notify(fmtErr(err));}finally{busy=false;}
+          }));
+        }
+      }else if(!wrongFamily){
+        if(a.update)acts.append(btn("تحديث","v7-btn primary",async()=>{
+          if(busy)return;busy=true;
+          try{await installNative(a);closeModal(true);onSourcesChanged();await refresh();}
+          catch(err){notify(fmtErr(err));}finally{busy=false;}
+        }));
         acts.append(btn("فتح في VANTARA","v7-btn primary",()=>openNative(a)));
         if(!a.builtin)acts.append(btn("حذف","v7-btn danger",()=>askDelete(a,"native")));
       }
