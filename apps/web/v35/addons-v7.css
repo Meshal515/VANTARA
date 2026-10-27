@@ -77,6 +77,12 @@
 .v7-addon .v7-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
 .v7-addon .v7-field{padding:12px;border:1px solid #272630;border-radius:14px;background:#0d0c11;min-width:0;overflow-wrap:anywhere}
 .v7-addon .v7-field strong{font-size:12px;color:#9d97aa;display:block;margin-bottom:3px}
+.v7-addon .v7-advanced{margin-top:16px;border-top:1px solid #262630;padding-top:12px}
+.v7-addon .v7-advanced summary{cursor:pointer;color:#c7c3ce;font-weight:750;list-style:none;padding:12px 2px;-webkit-tap-highlight-color:transparent}
+.v7-addon .v7-advanced summary::after{content:"⌄";float:left;color:#a59ba9}
+.v7-addon .v7-advanced[open] summary::after{content:"⌃"}
+.v7-addon .v7-advanced .v7-dialog-actions{flex-wrap:wrap;gap:10px}
+.v7-addon .v7-advanced a.v7-btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:inherit}
 .v7-addon .v7-notice{font-size:13px;line-height:1.65;color:#b9b0cb;margin-top:11px}
 .v7-addon .v7-confirm-actions{display:flex;align-items:center;gap:22px;margin-top:22px}
 .v7-addon .v7-diagnostic{color:#bd9cff;font-size:12px;margin-top:8px}
