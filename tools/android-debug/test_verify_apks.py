@@ -31,6 +31,30 @@ class UpgradeContract(unittest.TestCase):
                     self.check()
 
 
+    def test_current_apksigner_v2_single_signer_output(self):
+        cert = '0b5cce2127f3bb107a3ee01fe7e6c51b58d18ab3fe5292e6b944bbfe86a76bb0'
+        actual = (
+            'Verifies\n'
+            'Verified using v1 scheme (JAR signing): false\n'
+            'Verified using v2 scheme (APK Signature Scheme v2): true\n'
+            'Verified for SourceStamp: false\n'
+            'Number of signers: 1\n'
+            'V2 Signer: certificate DN: CN=VANTARA\n'
+            f'V2 Signer: certificate SHA-256 digest: {cert}\n'
+        )
+        self.assertEqual(verify.parse_single_signer(actual), cert)
+
+    def test_current_apksigner_must_report_exactly_one_signer(self):
+        good = 'Number of signers: 1\nV2 Signer: certificate SHA-256 digest: ' + 'a'*64 + '\n'
+        for bad in [
+            good.replace('Number of signers: 1', 'Number of signers: 2'),
+            good.replace('Number of signers: 1', 'Number of signers: 0'),
+            good + 'V3 Signer: certificate SHA-256 digest: ' + 'b'*64 + '\n',
+            good.replace('Number of signers: 1', 'No signer count'),
+        ]:
+            with self.subTest(output=bad), self.assertRaises(ValueError):
+                verify.parse_single_signer(bad)
+
     def test_single_signer_case_whitespace_and_stamp(self):
         certificate = 'A' * 64
         output = (
