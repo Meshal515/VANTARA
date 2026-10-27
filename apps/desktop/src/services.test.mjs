@@ -117,6 +117,16 @@ async function fixture(t, mode='normal', serviceOptions={}) {
     // application's process launcher retain their normal behavior.
     const nativeSpawn=cp.spawn;
     t.mock.method(cp,'spawn',(binary,args,options)=>[rqbit,mpv].includes(binary)?nativeSpawn(process.execPath,[binary,...args],options):nativeSpawn(binary,args,options));
+    // Contract fixtures use their temporary profile, not repeated CIM process
+    // startup. Actual volume discovery and NTFS are exercised by separate real
+    // Windows engine/NTFS tests, outside this mocked fixture process.
+    const nativeExecFile=cp.execFile;
+    t.mock.method(cp,'execFile',(binary,args,...rest)=>{
+      if(binary==='powershell.exe'&&args.at(-1)?.startsWith('[System.IO.DriveInfo]::GetDrives()')){
+        queueMicrotask(()=>rest.at(-1)(null,'',''));return {};
+      }
+      return nativeExecFile(binary,args,...rest);
+    });
     syncBuiltinESMExports();
     t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
   }
