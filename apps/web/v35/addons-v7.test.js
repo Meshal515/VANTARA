@@ -57,8 +57,8 @@ it('native source shows an installed state for an update and does not reinstall 
 it('preserves safe catalog routing and never advertises direct browsing for a stream-only addon',async()=>{
   const d=setup();const open=vi.fn();
   const items=[
-    {key:'first',name:'Catalog',enabled:true,capabilities:['catalog'],contentTypes:['anime']},
-    {key:'second',name:'Torrent only',enabled:true,capabilities:['streams'],contentTypes:['movie']}
+    {key:'first',name:'Catalog',enabled:true,protocol:'stremio',capabilities:['catalog'],contentTypes:['anime']},
+    {key:'second',name:'Torrent only',enabled:true,protocol:'stremio',capabilities:['streams'],contentTypes:['movie']}
   ];
   const view=renderV7Addons({registry:registry(items),onOpenSource:open});
   d.body.append(view);await tick();installedTab(view).click();
