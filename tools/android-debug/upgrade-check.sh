@@ -40,6 +40,10 @@ launch
 node tools/android-debug/webview-proof.mjs baseline
 adb shell run-as "$package" mkdir -p files
 adb shell run-as "$package" sh -c "'echo debug-native-data-20261027 > files/debug-upgrade-proof'"
+# Background the app normally so Chromium can flush LocalStorage/IndexedDB.
+# The subsequent force-stop and in-place install still enforce persistence.
+adb shell input keyevent KEYCODE_HOME
+sleep 2
 adb shell am force-stop "$package"
 adb install -r "$candidate" | tee "$out/install-upgrade.txt"
 adb shell run-as "$package" cat files/debug-upgrade-proof | tr -d '\r' | grep -qx debug-native-data-20261027
