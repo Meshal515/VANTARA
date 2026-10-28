@@ -57,6 +57,13 @@ public class BrokerHostTransportTest {
             assertEquals("SCOPE_MISMATCH",failure(transport,scope("second"),get()));assertEquals(0,server.getRequestCount());
         }
     }
+    @Test public void actualTlsResponseKeepsHttpCaseInsensitiveLookup() throws Exception {
+        server.enqueue(new MockResponse().addHeader("X-Result","kept").setBody("body"));
+        AndroidRuntimeClient.Scope owner=scope("account");
+        try(BrokerHostTransport transport=new BrokerHostTransport(owner,broker)){
+            assertEquals(Arrays.asList("kept"),transport.exchange(owner,get()).headers().get("X-Result"));
+        }
+    }
     @Test public void confirmedChallengeStaysSilentAndRequiresHostAcknowledgement() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));
         AndroidRuntimeClient.Scope owner=scope("account");

@@ -19,7 +19,7 @@ def prepare(observations, fetch, destination):
             if report['manifest'].get('requiresResources'):
                 raise ValueError('RESOURCE_PROFILE_UNSUPPORTED')
             raw = archive.read('classes.dex')
-        rows.append((package['internalName'], raw, {
+        rows.append((package['internalName'], raw, blobs[package['url']], {
             'name': package['internalName'], 'packageSha256': package['sha256'],
             'dexSha256': hashlib.sha256(raw).hexdigest(),
             'entry': report['manifest']['pluginClassName'],
@@ -28,8 +28,9 @@ def prepare(observations, fetch, destination):
     # Only after every package passes validation is a runnable test asset produced.
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    for name, raw, metadata in rows:
+    for name, raw, archive, metadata in rows:
         (destination / (name + '.dex')).write_bytes(raw)
+        (destination / (name + '.cs3')).write_bytes(archive)
         (destination / (name + '.json')).write_text(json.dumps(metadata, indent=2) + '\n')
     return len(rows)
 

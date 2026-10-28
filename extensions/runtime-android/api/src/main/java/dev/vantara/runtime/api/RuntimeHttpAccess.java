@@ -16,8 +16,11 @@ public interface RuntimeHttpAccess extends RuntimeAccess {
         public String url(){return url;}public int status(){return status;}public Map<String,List<String>> headers(){return headers;}public byte[] body(){return body.clone();}
     }
     static Map<String,List<String>> copyHeaders(Map<String,List<String>> headers) {
-        Objects.requireNonNull(headers);Map<String,List<String>> result=new LinkedHashMap<>();
-        headers.forEach((key,values)->result.put(Objects.requireNonNull(key),Collections.unmodifiableList(new ArrayList<>(values))));
+        Objects.requireNonNull(headers);Map<String,List<String>> result=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        headers.forEach((key,values)->{
+            Objects.requireNonNull(key);List<String> combined=new ArrayList<>(result.getOrDefault(key,Collections.emptyList()));
+            combined.addAll(values);result.put(key,Collections.unmodifiableList(combined));
+        });
         return Collections.unmodifiableMap(result);
     }
     Response exchange(Request request) throws Exception;

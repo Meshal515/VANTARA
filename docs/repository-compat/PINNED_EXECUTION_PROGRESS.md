@@ -60,6 +60,26 @@ This is a fixture-address correction, not a production TLS/policy bypass. The
 production HTTP adapter remains unaccepted until the unchanged native assertions
 pass on both API29/35.
 
+Run40746633964 on16f74108 reached42/43 passing per API: the TLS address correction
+worked, including confirmed challenge, bare403 and private-address denial. The
+remaining large-response fixture failed with PROVIDER_FAILED after host exchange
+succeeded. A real-TLS JVM reproduction proves the cause: HTTP response names are
+case-insensitive, but `RuntimeHttpAccess` copied them into a case-sensitive map;
+the authored provider's `X-Result` lookup failed on the actual broker's `x-result`.
+Three regressions failed before the fix (real TLS, direct lookup, repeated mixed
+case names). The API now retains HTTP case-insensitive lookup through IPC without
+dropping repeated values or permitting caller mutation. Assertions remain intact.
+
+The same candidate adds a native CS3 archive admission primitive for future
+installation: bounded ZIP entries/ratio/inflation, duplicate/path/CRC rejection,
+pinned outer SHA256, manifest shape/depth/duplicate-key checks, explicit resource/
+multidex limitations and DEX header/SHA1/Adler validation. This is format/integrity
+validation, NOT publisher authentication, source health or a completed installer.
+Eight authored-format JVM tests passed. A new Android test admits and registers
+all four actual pinned archives without site networking; it requires CI proof.
+The prepared full CS3 archives stay in ignored test assets, not Git or uploaded
+provider binaries. Existing39 process/source tests and four broker tests remain.
+
 ---
 
 The next Android lab candidate adds four offline registration tests using the
