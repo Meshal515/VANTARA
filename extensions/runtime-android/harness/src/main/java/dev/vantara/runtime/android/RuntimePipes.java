@@ -9,6 +9,9 @@ import java.util.function.BooleanSupplier;
 /** Local IPC deadlines, independent of network deadlines and worker cooperation. */
 final class RuntimePipes {
     static final long MAX_PIPE_MILLIS=2000;
+    // Stable Linux UAPI values on Android's supported ARM/x86 ABIs. OsConstants
+    // does not expose these flags. Per-call flags cannot be cleared by the peer.
+    private static final int MSG_DONTWAIT=0x40,MSG_NOSIGNAL=0x4000;
     private static final Semaphore writers=new Semaphore(4);
     private static void active(BooleanSupplier closed,long deadline) {
         if(closed.getAsBoolean())throw new RuntimeFailure("WORKER_CLOSED");
@@ -23,6 +26,15 @@ final class RuntimePipes {
         try(ParcelFileDescriptor original=incoming) {
             long deadline=SystemClock.elapsedRealtime()+MAX_PIPE_MILLIS;active(closed,deadline);
             StructStat before=Os.fstat(original.getFileDescriptor());
+            if((before.st_mode&OsConstants.S_IFMT)==OsConstants.S_IFSOCK) {
+                byte[] result=new byte[length];int offset=0;
+                while(offset<length) {
+                    ready(original.getFileDescriptor(),(short)(OsConstants.POLLIN|OsConstants.POLLHUP|OsConstants.POLLERR),closed,deadline);
+                    try{int n=Os.recvfrom(original.getFileDescriptor(),result,offset,Math.min(8192,length-offset),MSG_DONTWAIT,null);if(n==0)throw new RuntimeFailure("IPC_CONTRACT");offset+=n;}
+                    catch(ErrnoException e){if(e.errno!=OsConstants.EAGAIN&&e.errno!=OsConstants.EINTR)throw e;}
+                }
+                active(closed,deadline);return result;
+            }
             if((before.st_mode&OsConstants.S_IFMT)!=OsConstants.S_IFIFO)throw new RuntimeFailure("IPC_CONTRACT");
             // dup() would still share O_NONBLOCK with the malicious sender. Reopen
             // while keeping the original FD alive to obtain independent status flags.
@@ -46,9 +58,10 @@ final class RuntimePipes {
         ParcelFileDescriptor[] ends=null;
         try {
             if(closed.getAsBoolean())throw new RuntimeFailure("WORKER_CLOSED");
-            ends=ParcelFileDescriptor.createPipe();
-            int flags=Os.fcntlInt(ends[1].getFileDescriptor(),OsConstants.F_GETFL,0);
-            Os.fcntlInt(ends[1].getFileDescriptor(),OsConstants.F_SETFL,flags|OsConstants.O_NONBLOCK);
+            // Unix stream sockets support per-call nonblocking I/O across UIDs.
+            // Reopening a peer-owned FIFO is correctly denied by Android; mutable
+            // shared fcntl flags are not a safe substitute for MSG_DONTWAIT.
+            ends=ParcelFileDescriptor.createSocketPair();
             parcel.writeTypedObject(ends[0],0);ends[0].close();
             ParcelFileDescriptor output=ends[1];
             long deadline=SystemClock.elapsedRealtime()+MAX_PIPE_MILLIS;
@@ -57,7 +70,7 @@ final class RuntimePipes {
                     int offset=0;
                     while(offset<bytes.length) {
                         ready(owned.getFileDescriptor(),(short)(OsConstants.POLLOUT|OsConstants.POLLERR),closed,deadline);
-                        try{offset+=Os.write(owned.getFileDescriptor(),bytes,offset,Math.min(8192,bytes.length-offset));}
+                        try{offset+=Os.sendto(owned.getFileDescriptor(),bytes,offset,Math.min(8192,bytes.length-offset),MSG_DONTWAIT|MSG_NOSIGNAL,(java.net.InetAddress)null,0);}
                         catch(ErrnoException e){if(e.errno!=OsConstants.EAGAIN&&e.errno!=OsConstants.EINTR)throw e;}
                     }
                 }catch(IOException|ErrnoException|RuntimeFailure ignored){/* Receiver sees an incomplete frame, never success. */}

@@ -16,7 +16,7 @@ public final class FileCookieVaults implements HttpBroker.Vaults {
     private static String key(HttpBroker.Scope scope) {
         try {
             MessageDigest digest=MessageDigest.getInstance("SHA-256");
-            for(String field:List.of(scope.family(),scope.packageId(),scope.sourceId(),scope.sessionId())) {
+            for(String field:Arrays.asList(scope.family(),scope.packageId(),scope.sourceId(),scope.sessionId())) {
                 byte[] bytes=field.getBytes(StandardCharsets.UTF_8);
                 digest.update((byte)(bytes.length>>>24));digest.update((byte)(bytes.length>>>16));digest.update((byte)(bytes.length>>>8));digest.update((byte)bytes.length);digest.update(bytes);
             }

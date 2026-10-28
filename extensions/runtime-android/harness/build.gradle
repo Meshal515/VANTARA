@@ -23,5 +23,7 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
 }
 tasks.configureEach { task ->
-    if (task.name == 'mergeDebugAndroidTestAssets') task.dependsOn(':fixtures:dex')
+    // Every AndroidTest consumer (including lint models/analysis) reads the same
+    // generated external DEX assets, not just the merge-assets task.
+    if (task.name.contains('AndroidTest')) task.dependsOn(':fixtures:dex')
 }

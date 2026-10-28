@@ -65,7 +65,12 @@ jobs:
       - name: Validate and extract pinned published CS3 for offline registration tests
         run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
       - name: Build external DEX fixture and isolated harness
-        run: bash android/gradlew -p extensions/runtime-android :harness:assembleDebug :harness:assembleDebugAndroidTest --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
+          bash android/gradlew -p extensions/runtime-android :harness:assembleDebug :harness:assembleDebugAndroidTest :harness:lintDebug --no-daemon --stacktrace 2>&1 | tee runtime-lab-build.log
+          if rg -F 'Module was compiled with an incompatible version of Kotlin' runtime-lab-build.log; then
+            exit 1
+          fi
       - name: Execute actual DEX in isolated Android processes
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -86,4 +91,5 @@ jobs:
             extensions/runtime-android/harness/build/outputs/androidTest-results/
             extensions/runtime-android/harness/build/reports/androidTests/
             runtime-lab-logcat.txt
+            runtime-lab-build.log
           if-no-files-found: error

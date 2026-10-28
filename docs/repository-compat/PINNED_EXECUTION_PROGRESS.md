@@ -86,3 +86,24 @@ No network timeout or existing process assertion was relaxed.
 The same candidate fixes valid cross-path Set-Cookie acceptance/deletion and
 preserves declared response media type/charset across the broker. The cookie-path
 and Windows-1256 regressions failed before their fixes and pass locally afterward.
+
+Run40714140987 on2175d5b3 exercised34 tests per platform. All original
+process tests, four published registrations, catalogue parsing and the original
+three blocking-read regressions passed. API29 had four failures and API35 two:
+`fcntlInt` is a public API30 method, and reopening a peer-owned FIFO is not allowed
+across isolated UIDs. No assertion was reduced to hide either regression.
+
+The follow-up uses Unix stream socket pairs and per-call Linux nonblocking flags
+for large body transport. These flags cannot be disabled by changing the shared
+file-description status. Existing FIFO regressions remain and use independent
+reopening only for descriptors they can safely reopen. The exact same full HTTP
+request/response tests remain required. Two additional socket deadline/flag tests
+and an actual Android disk-cookie test are added. The latter also guards against
+accidentally using Java `List.of` (API30) on the lab's API29 minimum; replacing it
+with `Arrays.asList` preserves the cookie namespace hash and requires no migration.
+Android lint joins the build gate to catch minimum-API mistakes before execution.
+The standalone lab pins lint8.13.2 through AGP's supported override: its bundled
+older lint printed Kotlin2.2 metadata errors while returning success. The workflow
+now rejects that diagnostic explicitly, and the newer lint completed locally with
+zero errors and two lab manifest warnings (backup rules/icon). Production Gradle
+plugins and signing settings are unchanged.
