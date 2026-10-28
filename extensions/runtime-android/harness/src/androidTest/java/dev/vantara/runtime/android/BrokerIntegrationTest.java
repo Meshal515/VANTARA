@@ -37,7 +37,7 @@ public class BrokerIntegrationTest {
         HandshakeCertificates tls=new HandshakeCertificates.Builder().heldCertificate(cert).build();
         HandshakeCertificates trust=new HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate()).build();
         server=new MockWebServer();server.setProtocols(Arrays.asList(Protocol.HTTP_1_1));server.useHttps(tls.sslSocketFactory(),false);server.start();
-        base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.toProxyAddress())).sslSocketFactory(trust.sslSocketFactory(),trust.trustManager()).build();
+        base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory((InetSocketAddress)server.toProxyAddress().address())).sslSocketFactory(trust.sslSocketFactory(),trust.trustManager()).build();
         broker=new HttpBroker(base,hostname->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),address->address.isLoopbackAddress(),new FileCookieVaults(cookies),Clock.systemUTC());
     }
     @After public void cleanup() throws Exception {

@@ -27,7 +27,7 @@ public class BrokerHostTransportTest {
         HandshakeCertificates serverTls=new HandshakeCertificates.Builder().heldCertificate(certificate).build();
         HandshakeCertificates clientTls=new HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate()).build();
         server=new MockWebServer();server.useHttps(serverTls.sslSocketFactory(),false);server.start();
-        OkHttpClient base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.toProxyAddress()))
+        OkHttpClient base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory((InetSocketAddress)server.toProxyAddress().address()))
             .sslSocketFactory(clientTls.sslSocketFactory(),clientTls.trustManager()).build();
         broker=new HttpBroker(base,host->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),
             address->address.isLoopbackAddress(),new FileCookieVaults(temporary.getRoot().toPath()),Clock.systemUTC());
