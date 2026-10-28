@@ -1,0 +1,82 @@
+package dev.vantara.runtime.android;
+
+import android.content.Context;
+import androidx.test.platform.app.InstrumentationRegistry;
+import dev.vantara.runtime.http.*;
+import dev.vantara.runtime.api.RuntimeHttpAccess;
+import okhttp3.*;
+import okhttp3.mockwebserver.*;
+import okhttp3.tls.*;
+import okio.Buffer;
+import org.junit.*;
+import javax.net.SocketFactory;
+import java.io.*;
+import java.net.*;
+import java.nio.file.*;
+import java.security.MessageDigest;
+import java.time.Clock;
+import java.util.*;
+import java.util.concurrent.*;
+import static org.junit.Assert.*;
+
+/** Isolated DEX -> Binder/socket payloads -> production host broker -> actual local TLS. No source site traffic. */
+public class BrokerIntegrationTest {
+    private Context host;private File dex;private String hash;private Path cookies;
+    private MockWebServer server;private AndroidRuntimeClient client;private BrokerHostTransport transport;
+    private HttpBroker broker;private OkHttpClient base;
+    private AndroidRuntimeClient.Scope scope(){return new AndroidRuntimeClient.Scope("cloudstream","fixture-package","fixture-source","fixture-account",new HashSet<>(Arrays.asList("https://fixtures.example")));}
+    @Before public void prepare() throws Exception {
+        host=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        dex=File.createTempFile("broker-fixture-",".dex",host.getCacheDir());
+        try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("classes.dex")){Files.copy(in,dex.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+        StringBuilder h=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(dex.toPath())))h.append(String.format(Locale.ROOT,"%02x",b&255));hash=h.toString();assertTrue(dex.setReadOnly());
+        cookies=Files.createTempDirectory(host.getFilesDir().toPath(),"broker-cookies-");
+        HeldCertificate cert=new HeldCertificate.Builder().addSubjectAlternativeName("fixtures.example").build();
+        HandshakeCertificates tls=new HandshakeCertificates.Builder().heldCertificate(cert).build();
+        HandshakeCertificates trust=new HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate()).build();
+        server=new MockWebServer();server.setProtocols(Arrays.asList(Protocol.HTTP_1_1));server.useHttps(tls.sslSocketFactory(),false);server.start();
+        base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.getPort())).sslSocketFactory(trust.sslSocketFactory(),trust.trustManager()).build();
+        broker=new HttpBroker(base,hostname->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),address->address.isLoopbackAddress(),new FileCookieVaults(cookies),Clock.systemUTC());
+    }
+    @After public void cleanup() throws Exception {
+        if(client!=null)client.close();if(transport!=null)transport.close();if(server!=null)server.shutdown();
+        if(dex!=null)dex.delete();if(cookies!=null)try(java.util.stream.Stream<Path> paths=Files.walk(cookies)){for(Path p:paths.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList()))Files.deleteIfExists(p);}
+    }
+    private void start() throws Exception {
+        transport=new BrokerHostTransport(scope(),broker);client=new AndroidRuntimeClient(host,scope(),transport);
+        client.load(dex,hash,"dev.vantara.runtime.fixtures.HttpProvider").get(12,TimeUnit.SECONDS);
+    }
+    private String invokeFailure() throws Exception {
+        try{client.invoke("catalogue","{}",8000).get(10,TimeUnit.SECONDS);fail("Expected a broker failure");return "";}
+        catch(ExecutionException expected){assertTrue(expected.getCause() instanceof RuntimeFailure);return ((RuntimeFailure)expected.getCause()).code;}
+    }
+    @Test public void largePayloadReachesActualTlsServerAndReturnsAcrossIsolatedUid() throws Exception {
+        byte[] answer=new byte[256*1024];Arrays.fill(answer,(byte)23);
+        server.enqueue(new MockResponse().setResponseCode(207).addHeader("X-Result","kept").setBody(new Buffer().write(answer)));start();
+        assertEquals("207:262144:23:kept:https://fixtures.example/post",client.invoke("catalogue","{}",8000).get(10,TimeUnit.SECONDS));
+        RecordedRequest request=server.takeRequest(3,TimeUnit.SECONDS);assertNotNull(request);assertEquals("POST",request.getMethod());assertEquals("real",request.getHeader("X-Fixture"));
+        byte[] sent=new byte[160*1024];Arrays.fill(sent,(byte)17);assertArrayEquals(sent,request.getBody().readByteArray());
+    }
+    @Test public void confirmedChallengePreservesItsCodeAndDoesNotAutoRetry() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));start();
+        assertEquals("VERIFICATION_REQUIRED",invokeFailure());assertTrue(transport.needsVerification("https://fixtures.example"));assertFalse(client.isClosed());
+        assertEquals("VERIFICATION_REQUIRED",invokeFailure());assertEquals(1,server.getRequestCount());
+    }
+    @Test public void plainForbiddenStaysDistinctFromHumanVerification() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(403));start();
+        assertEquals("ACCESS_DENIED",invokeFailure());assertFalse(transport.needsVerification("https://fixtures.example"));
+    }
+    @Test public void defaultPublicAddressPolicyBlocksPrivateDestinationBeforeAnyConnection() throws Exception {
+        broker=new HttpBroker(base,hostname->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),new PublicAddresses(),new FileCookieVaults(cookies),Clock.systemUTC());start();
+        assertEquals("DNS_ADDRESS_DENIED",invokeFailure());assertEquals(0,server.getRequestCount());
+    }
+    private static final class LocalSocketFactory extends SocketFactory {
+        private final int port;LocalSocketFactory(int port){this.port=port;}
+        @Override public Socket createSocket(){return new Socket(){@Override public void connect(SocketAddress ignored,int timeout)throws IOException{super.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),port),timeout);}};}
+        private Socket connected()throws IOException{Socket socket=createSocket();socket.connect(new InetSocketAddress("127.0.0.1",port),3000);return socket;}
+        @Override public Socket createSocket(String host,int port)throws IOException{return connected();}
+        @Override public Socket createSocket(InetAddress host,int port)throws IOException{return connected();}
+        @Override public Socket createSocket(String host,int port,InetAddress local,int localPort)throws IOException{return connected();}
+        @Override public Socket createSocket(InetAddress host,int port,InetAddress local,int localPort)throws IOException{return connected();}
+    }
+}

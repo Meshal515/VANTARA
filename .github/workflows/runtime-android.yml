@@ -31,7 +31,7 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - name: Real TLS HTTP, disk session recovery and original CloudStream contract tests
-        run: bash android/gradlew -p extensions/runtime-android :http:test :cloudstream:testDebugUnitTest --no-daemon --stacktrace
+        run: bash android/gradlew -p extensions/runtime-android :http:test :cloudstream:testDebugUnitTest :executor:testDebugUnitTest --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,6 +39,7 @@ jobs:
           path: |
             extensions/runtime-android/http/build/test-results/
             extensions/runtime-android/cloudstream/build/test-results/
+            extensions/runtime-android/executor/build/test-results/
           if-no-files-found: error
   actual-dex-and-process:
     runs-on: ubuntu-latest
@@ -67,7 +68,7 @@ jobs:
       - name: Build external DEX fixture and isolated harness
         run: |
           set -euo pipefail
-          bash android/gradlew -p extensions/runtime-android :harness:assembleDebug :harness:assembleDebugAndroidTest :harness:lintDebug --no-daemon --stacktrace 2>&1 | tee runtime-lab-build.log
+          bash android/gradlew -p extensions/runtime-android :harness:assembleDebug :harness:assembleDebugAndroidTest :harness:lintDebug :executor:lintDebug --no-daemon --stacktrace 2>&1 | tee runtime-lab-build.log
           if rg -F 'Module was compiled with an incompatible version of Kotlin' runtime-lab-build.log; then
             exit 1
           fi

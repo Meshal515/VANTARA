@@ -14,6 +14,9 @@ android {
     sourceSets.androidTest.assets.srcDir(project(':fixtures').layout.buildDirectory.dir('dexAssets'))
     sourceSets.androidTest.assets.srcDir(layout.buildDirectory.dir('pinnedPackages'))
     testOptions { animationsDisabled true }
+    // Multiple test-only OkHttp jars include JVM multi-release OSGi metadata.
+    // Android does not load OSGi manifests; keep all license/notice resources.
+    packaging.resources.excludes.add('META-INF/versions/9/OSGI-INF/MANIFEST.MF')
 }
 dependencies {
     implementation project(':api')
@@ -21,6 +24,8 @@ dependencies {
     implementation project(':executor')
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'com.squareup.okhttp3:mockwebserver:5.3.2'
+    androidTestImplementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
 }
 tasks.configureEach { task ->
     // Every AndroidTest consumer (including lint models/analysis) reads the same

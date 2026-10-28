@@ -10,12 +10,35 @@ journey are deterministic authored HTML; this is not a live website or playback
 claim. The preceding RED run40722580722 failed only the unsupported-capability
 classification on both APIs; the published journey already passed there.
 
-Task3 candidate: extract the five worker/client/IPC classes without changes into
+Task3 extraction: move the five worker/client/IPC classes without changes into
 the Android `:executor` library. The isolated service manifest moves with them;
 the lab now exercises the same reusable artifact a future Debug adapter consumes.
-Local app/test assembly and both library/application lint passed. Emulator tests
-must run again on the moved code before the extraction is considered verified.
+Local app/test assembly and both library/application lint passed. Emulator run
+[40742467759](https://github.com/Meshal515/VANTARA/actions/runs/40742467759)
+on d280d662 passed both API29/35 and the HTTP/profile unit gate after the move.
 No original application files, identities, repositories or user stores change.
+
+Downloaded XML artifacts for984c1ae4 were inspected:39/39 native tests on each
+API,47/47 JVM tests, zero failures/errors/skips. No fatal exception or ANR found
+in the supplied filtered lab logcat; this is not a long-session production audit.
+
+Next Task3 candidate adds `BrokerHostTransport`: the isolated client now has a
+real adapter to the host's `HttpBroker.Session`, rather than only authored test
+backends. Its immutable owner identity must match every call. HTTP method,
+headers/body/status/finalURL are retained; typed challenge, DNS, rate-limit,
+access-denied and cookie-storage failures keep their codes. Closing it cancels
+the actual session. There is no UI or automatic verification interaction.
+
+Six JVM tests passed against a real local TLS server and disk cookie vault:
+largePOST/response bytes, account mismatch rejection before networking, confirmed
+challenge without retry until host acknowledgement, bare403 distinct from a
+challenge, cookie persistence/account separation, and physical pending-call
+cancellation. Production defaults remain public-address-only. Local loopback
+routing and the temporary CA exist only inside test classes. Four additional
+Android tests cover actual isolatedDEX→Binder/socketIPC→hostBroker→TLS plus silent
+challenge/access-denied distinctions and private-address denial. They are not
+counted passed until API29/35 CI results exist. The lab test APK excludes duplicate
+JVM-only OSGi multi-release manifests; license/notice resources are retained.
 
 ---
 
