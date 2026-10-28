@@ -5,10 +5,12 @@ on:
     paths:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
+      - 'tools/repository-compat/run_android_lab.sh'
   pull_request:
     paths:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
+      - 'tools/repository-compat/run_android_lab.sh'
   workflow_dispatch:
 permissions:
   contents: read
@@ -45,12 +47,10 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: |
-            adb logcat -c
-            bash android/gradlew -p extensions/runtime-android :harness:connectedDebugAndroidTest --no-daemon --stacktrace
+          script: bash tools/repository-compat/run_android_lab.sh
       - name: Capture lab logcat
         if: always()
-        run: adb logcat -d > runtime-lab-logcat.txt 2>&1 || true
+        run: test -f runtime-lab-logcat.txt || timeout 5s adb logcat -d > runtime-lab-logcat.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

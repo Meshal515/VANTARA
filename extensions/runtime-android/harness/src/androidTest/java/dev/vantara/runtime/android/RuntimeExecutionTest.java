@@ -150,4 +150,32 @@ public class RuntimeExecutionTest {
             assertEquals("preserve-host-data",new String(Files.readAllBytes(sentinel.toPath()),StandardCharsets.UTF_8));
         }
     }
+    @Test public void cancellationTerminatesAnActuallyRunningWorker() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        client = new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{entered.countDown();return "{}";});
+        client.connect().get(12,TimeUnit.SECONDS); load(); int pid=client.connect().get().pid();
+        CompletableFuture<String> pending=client.invoke("search","{\"fixtureAction\":\"hang\"}",4000);
+        assertTrue("Provider must actually enter operation",entered.await(2,TimeUnit.SECONDS));
+        assertEquals("WORKER_BUSY",failure(client.invoke("catalogue","{}",4000)));
+        assertTrue(pending.cancel(true)); assertProcessGone(pid); assertTrue(client.isClosed());
+    }
+    @Test public void resultSizeLimitDoesNotPoisonHealthyWorker() throws Exception {
+        open(); load();
+        assertEquals("PAYLOAD_LIMIT",failure(client.invoke("catalogue","{\"fixtureAction\":\"oversize\"}",4000)));
+        assertFalse(client.isClosed()); assertEquals(1,new JSONObject(call("catalogue","{}")).getJSONArray("items").length());
+    }
+    @Test public void generationCannotBeReplacedInPlace() throws Exception {
+        open(); load();
+        assertEquals("GENERATION_ALREADY_CLAIMED",failure(client.load(dex,digest,entry)));
+        assertEquals(1,new JSONObject(call("catalogue","{}")).getJSONArray("items").length());
+    }
+    @Test public void trustedOriginSetIsSnapshotted() throws Exception {
+        Set<String> origins=new HashSet<>(Arrays.asList("https://fixtures.example"));
+        AndroidRuntimeClient.Scope snapshot=new AndroidRuntimeClient.Scope("vantara-test","fixture.package","source-A","session-A",origins);
+        origins.add("https://injected.example");
+        assertEquals(1,snapshot.allowedOrigins().size());
+        try { snapshot.allowedOrigins().add("https://injected.example"); fail("Mutable trusted scope"); }
+        catch(UnsupportedOperationException expected) { }
+    }
+
 }

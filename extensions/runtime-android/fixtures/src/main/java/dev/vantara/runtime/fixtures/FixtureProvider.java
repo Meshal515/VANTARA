@@ -18,7 +18,8 @@ public final class FixtureProvider implements RuntimeProvider {
         JSONObject args = new JSONObject(input);
         switch (args.optString("fixtureAction")) {
             case "exit": System.exit(73); throw new AssertionError("Process exit returned");
-            case "hang": while (true) { Thread.yield(); }
+            case "hang": access.request("https://fixtures.example/hang-start"); while (true) { Thread.yield(); }
+            case "oversize": char[] text = new char[65537]; java.util.Arrays.fill(text,'x'); return new String(text);
             case "throw": throw new IllegalArgumentException("provider failure");
             case "broker": return access.request(args.getString("url"));
             case "probe":

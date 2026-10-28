@@ -1,19 +1,176 @@
 package dev.vantara.runtime.android;
 
-import android.content.Context;
+import android.content.*;
+import android.os.*;
 import java.io.File;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
 
-/** Deliberate RED checkpoint; replaced after the instrumentation acceptance test fails. */
+/** A single physical worker generation. It is never restarted or reused after retirement. */
 public final class AndroidRuntimeClient implements AutoCloseable {
-    public interface HostTransport { String request(Scope scope, String url) throws Exception; }
-    public record Scope(String family, String packageId, String sourceId, String sessionId, Set<String> allowedOrigins) {}
-    public record Identity(int pid, int uid) {}
-    public AndroidRuntimeClient(Context context, Scope scope, HostTransport transport) {}
-    public CompletableFuture<Identity> connect() { CompletableFuture result = new CompletableFuture(); result.completeExceptionally(new UnsupportedOperationException("WORKER_NOT_IMPLEMENTED")); return result; }
-    public CompletableFuture<Void> load(File dex, String hash, String entry) { CompletableFuture result = new CompletableFuture(); result.completeExceptionally(new UnsupportedOperationException("WORKER_NOT_IMPLEMENTED")); return result; }
-    public CompletableFuture<String> invoke(String operation, String input, long timeoutMs) { CompletableFuture result = new CompletableFuture(); result.completeExceptionally(new UnsupportedOperationException("WORKER_NOT_IMPLEMENTED")); return result; }
-    public boolean isClosed() { return true; }
-    public void close() {}
+    public interface HostTransport { String request(Scope scope,String url) throws Exception; }
+    public record Scope(String family,String packageId,String sourceId,String sessionId,Set<String> allowedOrigins) {
+        public Scope {
+            for(String value:Arrays.asList(family,packageId,sourceId,sessionId))
+                if(value==null || value.isEmpty() || value.length()>200) throw new IllegalArgumentException("Invalid runtime identity");
+            if(allowedOrigins==null || allowedOrigins.isEmpty() || allowedOrigins.size()>32) throw new IllegalArgumentException("Invalid origin permissions");
+            Set<String> origins=new HashSet<>();
+            for(String origin:allowedOrigins) origins.add(RuntimeProtocol.origin(origin));
+            allowedOrigins=Collections.unmodifiableSet(origins);
+        }
+    }
+    public record Identity(int pid,int uid) {}
+    private final Context context;
+    private final Scope scope;
+    private final HostTransport transport;
+    private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"vrt-call");t.setDaemon(true);return t;});
+    private final ScheduledExecutorService clock=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"vrt-deadline");t.setDaemon(true);return t;});
+    private final AtomicBoolean started=new AtomicBoolean(),closed=new AtomicBoolean(),busy=new AtomicBoolean(),brokerBusy=new AtomicBoolean();
+    private final CompletableFuture<Identity> ready=new CompletableFuture<>();
+    private final AtomicReference<CompletableFuture<?>> current=new AtomicReference<>();
+    private volatile IBinder endpoint;
+    private volatile Identity identity;
+    private boolean bound;
+    private final ServiceConnection connection=new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name,IBinder service) {
+            if(closed.get()) return;
+            endpoint=service;
+            try { service.linkToDeath(()->retire("PROCESS_DIED",false),0); }
+            catch(RemoteException e) { retire("PROCESS_DIED",false);return; }
+            try { io.execute(()->{
+                try {
+                    String[] fields=transact(RuntimeProtocol.HELLO,p->{}).split(":");
+                    if(fields.length!=2) throw new RuntimeFailure("IPC_CONTRACT");
+                    Identity id=new Identity(Integer.parseInt(fields[0]),Integer.parseInt(fields[1]));
+                    if(id.pid()<=0 || id.uid()<0 || id.pid()==android.os.Process.myPid() || id.uid()==android.os.Process.myUid()) throw new RuntimeFailure("ISOLATION_REQUIRED");
+                    identity=id;ready.complete(id);
+                } catch(Throwable e) { retire(e instanceof RuntimeFailure?((RuntimeFailure)e).code:"IPC_CONTRACT",true); }
+            }); } catch(RejectedExecutionException e) { retire("WORKER_CLOSED",true); }
+        }
+        @Override public void onServiceDisconnected(ComponentName name) { retire("PROCESS_DIED",false); }
+        @Override public void onBindingDied(ComponentName name) { retire("PROCESS_DIED",false); }
+        @Override public void onNullBinding(ComponentName name) { retire("BINDING_FAILED",false); }
+    };
+    public AndroidRuntimeClient(Context context,Scope scope,HostTransport transport) {
+        this.context=Objects.requireNonNull(context).getApplicationContext();
+        this.scope=Objects.requireNonNull(scope);this.transport=transport;
+    }
+    public CompletableFuture<Identity> connect() {
+        synchronized(this) {
+            if(closed.get()) return failed("WORKER_CLOSED");
+            if(started.compareAndSet(false,true)) {
+                try {
+                    bound=context.bindIsolatedService(new Intent(context,RuntimeWorkerService.class),Context.BIND_AUTO_CREATE,
+                        "generation_"+UUID.randomUUID().toString().replace("-",""),context.getMainExecutor(),connection);
+                    if(!bound) retire("BINDING_FAILED",false);
+                    else clock.schedule(()->{if(!ready.isDone()) retire("BINDING_TIMEOUT",true);},10000,TimeUnit.MILLISECONDS);
+                } catch(RuntimeException e) { retire("BINDING_FAILED",false); }
+            }
+        }
+        return ready;
+    }
+    public CompletableFuture<Void> load(File dex,String hash,String entry) {
+        if(dex==null || hash==null || entry==null) return failed("INVALID_DEX_INPUT");
+        return submit(10000,()->{
+            try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(dex,ParcelFileDescriptor.MODE_READ_ONLY)) {
+                transact(RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
+                return null;
+            }
+        });
+    }
+    public CompletableFuture<String> invoke(String operation,String input,long timeoutMs) {
+        if(closed.get()) return failed("WORKER_CLOSED");
+        if(!RuntimeProtocol.OPERATIONS.contains(operation)) return failed("CAPABILITY_UNSUPPORTED");
+        try { RuntimeProtocol.text(input); }
+        catch(RuntimeFailure e) { return failed(e.code); }
+        return submit(timeoutMs,()->transact(RuntimeProtocol.INVOKE,p->{p.writeString(operation);p.writeString(input);}));
+    }
+    private <T> CompletableFuture<T> submit(long timeoutMs,Callable<T> operation) {
+        if(closed.get()) return failed("WORKER_CLOSED");
+        if(timeoutMs<1 || timeoutMs>30000) return failed("INVALID_DEADLINE");
+        if(!busy.compareAndSet(false,true)) return failed("WORKER_BUSY");
+        CompletableFuture<T> result=new CompletableFuture<>();current.set(result);
+        final ScheduledFuture<?> deadline;
+        try { deadline=clock.schedule(()->{
+            if(!result.isDone()) retire("OPERATION_TIMEOUT",true);
+        },timeoutMs,TimeUnit.MILLISECONDS); }
+        catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return result; }
+        result.whenComplete((value,error)->{deadline.cancel(false);if(result.isCancelled()) retire("OPERATION_CANCELLED",true);});
+        connect().whenComplete((value,error)->{
+            if(error!=null) { finish(result,null,error);return; }
+            if(closed.get()) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
+            try { io.execute(()->{
+                if(closed.get()) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
+                try { T answer=operation.call();finish(result,answer,null); }
+                catch(Throwable cause) {
+                    if(cause instanceof DeadObjectException || cause instanceof RemoteException) {
+                        retire("PROCESS_DIED",false);finish(result,null,new RuntimeFailure("PROCESS_DIED"));
+                    } else finish(result,null,cause instanceof RuntimeFailure?cause:new RuntimeFailure("IPC_CONTRACT"));
+                }
+            }); } catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED")); }
+        });
+        return result;
+    }
+    private <T> void finish(CompletableFuture<T> result,T value,Throwable failure) {
+        if(current.compareAndSet(result,null)) busy.set(false);
+        if(failure==null) result.complete(value);else result.completeExceptionally(failure);
+    }
+    private interface Writer { void write(Parcel parcel) throws Exception; }
+    private String transact(int code,Writer writer) throws Exception {
+        IBinder target=endpoint;if(target==null) throw new RuntimeFailure("WORKER_CLOSED");
+        Parcel data=Parcel.obtain(),reply=Parcel.obtain();
+        try {
+            data.writeInterfaceToken(RuntimeProtocol.WORKER);writer.write(data);
+            if(!target.transact(code,data,reply,0)) throw new RuntimeFailure("IPC_CONTRACT");
+            return RuntimeProtocol.response(reply);
+        } finally { data.recycle();reply.recycle(); }
+    }
+    private final Binder broker=new Binder() {
+        @Override protected boolean onTransact(int code,Parcel data,Parcel reply,int flags) throws RemoteException {
+            if(code!=RuntimeProtocol.HELLO) return super.onTransact(code,data,reply,flags);
+            Identity worker=identity;
+            if(worker==null || closed.get() || Binder.getCallingUid()!=worker.uid() || Binder.getCallingPid()!=worker.pid()) throw new SecurityException("Not the owning worker generation");
+            data.enforceInterface(RuntimeProtocol.BROKER);
+            try {
+                String url=RuntimeProtocol.text(data.readString()), origin=RuntimeProtocol.origin(url);
+                if(!scope.allowedOrigins().contains(origin)) throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
+                if(transport==null) throw new RuntimeFailure("BROKER_UNAVAILABLE");
+                if(!brokerBusy.compareAndSet(false,true)) throw new RuntimeFailure("WORKER_BUSY");
+                final String response;
+                long callingIdentity=Binder.clearCallingIdentity();
+                try { response=RuntimeProtocol.text(transport.request(scope,url)); }
+                finally { Binder.restoreCallingIdentity(callingIdentity);brokerBusy.set(false); }
+                if(closed.get()) throw new RuntimeFailure("WORKER_CLOSED");
+                RuntimeProtocol.result(reply,"OK",response);
+            } catch(RuntimeFailure e) { RuntimeProtocol.result(reply,e.code,null); }
+            catch(Exception e) { RuntimeProtocol.result(reply,"TRANSPORT_FAILED",null); }
+            return true;
+        }
+    };
+    private void retire(String reason,boolean terminate) {
+        if(!closed.compareAndSet(false,true)) return;
+        ready.completeExceptionally(new RuntimeFailure(reason));
+        CompletableFuture<?> active=current.getAndSet(null);
+        if(active!=null) active.completeExceptionally(new RuntimeFailure(reason));
+        IBinder target=endpoint;
+        // Independent control transaction: a hung provider may occupy the call executor.
+        Thread control=new Thread(()->{
+            if(terminate && target!=null) {
+                Parcel data=Parcel.obtain(),reply=Parcel.obtain();
+                try { data.writeInterfaceToken(RuntimeProtocol.WORKER);target.transact(RuntimeProtocol.CLOSE,data,reply,0); }
+                catch(Exception ignored) { /* A dead generation must not be retried. */ }
+                finally {data.recycle();reply.recycle();}
+            }
+            synchronized(AndroidRuntimeClient.this) {
+                if(bound) {bound=false;try {context.unbindService(connection);}catch(IllegalArgumentException ignored) {}}
+            }
+        },"vrt-retire");
+        control.setDaemon(true);control.start();io.shutdownNow();clock.shutdownNow();
+    }
+    private static <T> CompletableFuture<T> failed(String code) {
+        CompletableFuture<T> result=new CompletableFuture<>();result.completeExceptionally(new RuntimeFailure(code));return result;
+    }
+    public boolean isClosed() { return closed.get(); }
+    @Override public void close() { retire("WORKER_CLOSED",true); }
 }
