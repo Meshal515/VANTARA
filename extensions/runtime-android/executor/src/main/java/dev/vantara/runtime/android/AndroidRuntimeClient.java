@@ -65,7 +65,10 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         this.context=Objects.requireNonNull(context).getApplicationContext();
         this.scope=Objects.requireNonNull(scope);this.transport=transport;
     }
+    /** Library can coexist with existing API26+ engines; named isolated workers require Android10/API29. */
+    public static boolean supportedOnThisPlatform(){return Build.VERSION.SDK_INT>=29;}
     public CompletableFuture<Identity> connect() {
+        if(Build.VERSION.SDK_INT<29){retire("PLATFORM_UNSUPPORTED",false);return ready;}
         synchronized(this) {
             if(closed.get()) return failed("WORKER_CLOSED");
             if(started.compareAndSet(false,true)) {

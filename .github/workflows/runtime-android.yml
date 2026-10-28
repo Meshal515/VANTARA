@@ -42,12 +42,17 @@ jobs:
             extensions/runtime-android/executor/build/test-results/
           if-no-files-found: error
   actual-dex-and-process:
+    name: ${{ matrix.profile }} (API ${{ matrix.api }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 35]
+        include:
+          - {api: 26, profile: unsupported-platform-guard}
+          - {api: 28, profile: unsupported-platform-guard}
+          - {api: 29, profile: full-execution}
+          - {api: 35, profile: full-execution}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -64,6 +69,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate and extract pinned published CS3 for offline registration tests
+        if: matrix.profile == 'full-execution'
         run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
       - name: Build external DEX fixture and isolated harness
         run: |
@@ -72,8 +78,10 @@ jobs:
           if rg -F 'Module was compiled with an incompatible version of Kotlin' runtime-lab-build.log; then
             exit 1
           fi
-      - name: Execute actual DEX in isolated Android processes
+      - name: Execute selected acceptance profile (old-API guard is NOT provider execution)
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          RUNTIME_LAB_PROFILE: ${{ matrix.profile }}
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
@@ -87,7 +95,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: runtime-lab-api-${{ matrix.api }}-offline-registration-NOT-live-source-health
+          name: runtime-lab-api-${{ matrix.api }}-${{ matrix.profile }}-NOT-live-source-health
           path: |
             extensions/runtime-android/harness/build/outputs/androidTest-results/
             extensions/runtime-android/harness/build/reports/androidTests/

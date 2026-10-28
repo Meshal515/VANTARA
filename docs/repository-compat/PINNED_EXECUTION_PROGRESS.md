@@ -80,6 +80,57 @@ all four actual pinned archives without site networking; it requires CI proof.
 The prepared full CS3 archives stay in ignored test assets, not Git or uploaded
 provider binaries. Existing39 process/source tests and four broker tests remain.
 
+Run [40747950069](https://github.com/Meshal515/VANTARA/actions/runs/40747950069)
+on14c96816 passed44/44 native tests on EACH API29/35 and65/65 JVM tests. Downloaded
+XML confirms zero failures/errors/skips; filtered lab logcat contains no fatal
+exception or ANR. This includes the actualTLS/largeIPC/challenge distinctions and
+all four actual archives through the native admission and registration gate.
+It does not prove manager integration, five live works or playback.
+
+Next Task3 candidate: `RuntimePackageStore` copies bounded package downloads into
+a dedicated new-family account namespace, stages format-checked read-only DEX,
+and publishes a stable package ID with an atomically replaced private record.
+Host code must complete actual isolated registration before activation; the store
+does not mark a package healthy. Failed/wrong-hash/lower-version updates leave
+the previous record intact; old objects remain available. It neither opens nor
+migrates existing repositories/libraries/accounts. Eight filesystem tests pass,
+including account separation, stable IDs after controller reconstruction,
+aborted staging, wrong hashes, downgrade prevention, path/symlink rejection and
+corrupted-object reuse rejection. The latter two first failed before hardening.
+Power-loss durability and a full app/account/APK upgrade are NOT claimed.
+
+A native regression now stages the actual Anime4up archive, registers it in an
+isolated process, activates it, reconstructs the store, and starts a second real
+worker from the persisted DEX with the same package ID; a second account sees no
+installed record and an unrelated repository sentinel remains unchanged. Native
+results must be collected before this candidate is accepted.
+
+For future coexistence with VANTARA's unchanged minSdk26, the NEW libraries/lab
+can install on API26. Named isolated-worker execution STILL requires API29.
+Client and IPC guards fail closed with PLATFORM_UNSUPPORTED on older releases,
+close descriptors and revoke unused transports. The official SDK database proves
+`bindIsolatedService` was added in29. CI runs only the explicitly named denial/
+availability probe on26/28, and the complete execution suite on29/35. Old-API
+guard successes must never be reported as provider-execution successes.
+
+The actual VANTARA app, its signing/build identities, torrent, player, subtitles
+and account stores remain byte-identical. In-app manager/verification-cookie
+handoff, real Debug APK upgrade, and PWA/Windows executable adapter acceptance
+are still open. The generic android-debug workflow uses default debug signing
+and does not pin a certificate; it is not proof of a compatible upgrade for an
+owner's previously installed Debug APK. Do not label its artifact an approved
+updatable runtime release without signature and actual upgrade verification.
+
+Follow-up inspection found the REAL signed Debug channel on openPR298 at
+f959ad673804ff36ebce0c23c2762f82ec0b9e4b, not in the main baseline used by this
+isolated cohort. It already pins the existing release certificate, checks the
+previous Debug APK/manifest and exercises install-r/storage retention/Home/Addons
+on an API35 Google-APIs emulator. Reuse that current Debug base and those gates
+for integration; do not rebuild its signing/update system from the generic
+workflow or replace it with the older main snapshot. Secret-list API access was
+403, which does NOT prove signing secrets are absent; the existing protected
+workflow references the known permanent signing secrets without exposing them.
+
 ---
 
 The next Android lab candidate adds four offline registration tests using the

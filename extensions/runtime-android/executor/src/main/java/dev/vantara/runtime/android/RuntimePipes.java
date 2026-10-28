@@ -24,6 +24,7 @@ final class RuntimePipes {
     static byte[] read(ParcelFileDescriptor incoming,int length,BooleanSupplier closed) throws IOException {
         FileDescriptor independent=null;
         try(ParcelFileDescriptor original=incoming) {
+            if(Build.VERSION.SDK_INT<29)throw new RuntimeFailure("PLATFORM_UNSUPPORTED");
             long deadline=SystemClock.elapsedRealtime()+MAX_PIPE_MILLIS;active(closed,deadline);
             StructStat before=Os.fstat(original.getFileDescriptor());
             if((before.st_mode&OsConstants.S_IFMT)==OsConstants.S_IFSOCK) {
