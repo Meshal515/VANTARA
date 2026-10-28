@@ -216,7 +216,18 @@ public class RuntimeExecutionTest {
         client=new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{mainEntered.countDown();return "{}";});
         int pid=client.connect().get(12,TimeUnit.SECONDS).pid(); load();
         assertTrue(new JSONObject(call("details","{\"fixtureAction\":\"block-main\"}")).getBoolean("mainBlocked"));
-        assertTrue(mainEntered.await(2,TimeUnit.SECONDS)); client.close(); assertProcessGone(pid);
+        assertTrue(mainEntered.await(2,TimeUnit.SECONDS));
+        // Keep the real binding alive: prove the worker control path itself can
+        // terminate a blocked main looper, independently of Android unbind cleanup.
+        java.lang.reflect.Field field=AndroidRuntimeClient.class.getDeclaredField("endpoint"); field.setAccessible(true);
+        android.os.IBinder endpoint=(android.os.IBinder)field.get(client);
+        android.os.Parcel request=android.os.Parcel.obtain(), reply=android.os.Parcel.obtain();
+        try {
+            request.writeInterfaceToken(RuntimeProtocol.WORKER);
+            endpoint.transact(RuntimeProtocol.CLOSE,request,reply,0);
+        } catch(android.os.RemoteException expectedDeath) { }
+        finally { request.recycle();reply.recycle(); }
+        assertProcessGone(pid);
     }
 
 }
