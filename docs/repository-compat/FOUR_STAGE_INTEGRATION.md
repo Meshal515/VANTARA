@@ -4,7 +4,7 @@
 
 ## Spec and constraints
 
-Owner explicitly requests the four remaining stages: actual CloudStream ABI, production network/session/storage broker, connection to existing addon engines, then real acceptance tests. Preserve torrent/player/subtitles/translation/accounts and all existing user repositories/IDs. No upstream GPL implementation reuse; public ABI signatures and permissive dependencies may be used with their notices. Built-in source separation and Git history changes are deferred. No automatic verification UI or silent CAPTCHA bypass. Avoid AnimeRift source requests while its IP-ban warning remains; isolated/offline execution is allowed.
+Owner explicitly requests the four remaining stages: actual CloudStream ABI, production network/session/storage broker, connection to existing addon engines, then real acceptance tests. Preserve torrent/player/subtitles/translation/accounts and all existing user repositories/IDs. No upstream GPL implementation reuse; public ABI signatures and permissive dependencies may be used with their notices. On the owner's subsequent instruction, built-in source separation/removal is a FOLLOW-UP after these four stages pass; Git history rewriting remains outside scope. No automatic verification UI or silent CAPTCHA bypass. Avoid AnimeRift source requests while its IP-ban warning remains; isolated/offline execution is allowed.
 
 ## Architecture
 
@@ -43,7 +43,31 @@ Run all baseline suites, JVM networking, actual Android instrumentation(API29/35
 
 ## Progress
 
-- [ ] Task1 HTTP/session broker
-- [ ] Task2 published package execution
+- [x] Task1 HTTP/session broker core: real TLS, bounded IPC and disk cookies passed; production host binding remains part of Task3.
+- [x] Task2 bounded published package execution: four registrations and the Anime4up offline catalogue/search/details/episodes/direct-link journey passed API29/35. This is not universal extractor compatibility or live-site playback.
 - [ ] Task3 Debug integration
 - [ ] Task4 acceptance/CI/review
+
+Task3 begins by moving the five existing worker/client/IPC classes unchanged from
+the lab application into a reusable Android `:executor` library. Its manifest
+retains the same unexported, isolated service; the lab is now a consumer of that
+library. Original VANTARA application files and stores remain unchanged. A host
+HTTP adapter and manager registration follow, with their own acceptance gates.
+
+## Follow-up: safely detach built-in sources
+
+Ruling: remove built-in provider implementations only AFTER replacement packages
+are proven functional and an upgrade migration preserves existing source IDs,
+settings, sessions and reading/watching progress. Registration alone is not proof
+that a source has a working replacement. Never remove torrent, player or subtitles.
+
+Inventory each built-in implementation and its license/origin, map it to a verified
+installable replacement, test a previous-install fixture and a clean install
+separately, then remove the mapped implementation from the application build and
+repository tree. Retain an idempotent compatibility mapping so existing users do
+not lose their sources or links. Missing or broken replacement blocks removal of
+that source; it does not justify silently deleting user data. Preserve all notices
+required for any redistributed code/packages. Do not rewrite shared Git history,
+claim old commits disappear, or promise a percentage reduction in GitHub takedown
+risk. A neutral description such as "separate source packages from the application"
+must remain factually accurate.

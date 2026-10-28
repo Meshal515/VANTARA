@@ -1,5 +1,24 @@
 # Published package execution gate
 
+## Latest verified gate and reusable executor candidate
+
+Run [40725070538](https://github.com/Meshal515/VANTARA/actions/runs/40725070538)
+on984c1ae4 completed successfully on both API29 and35, including the newly added
+published Anime4up search/details/episode/direct-video-link journey and the
+unsupported-capability classification regression. The source responses in that
+journey are deterministic authored HTML; this is not a live website or playback
+claim. The preceding RED run40722580722 failed only the unsupported-capability
+classification on both APIs; the published journey already passed there.
+
+Task3 candidate: extract the five worker/client/IPC classes without changes into
+the Android `:executor` library. The isolated service manifest moves with them;
+the lab now exercises the same reusable artifact a future Debug adapter consumes.
+Local app/test assembly and both library/application lint passed. Emulator tests
+must run again on the moved code before the extraction is considered verified.
+No original application files, identities, repositories or user stores change.
+
+---
+
 The next Android lab candidate adds four offline registration tests using the
 published SHA256-pinned CS3 packages in PACKAGE_OBSERVATIONS.json, plus three real
 isolated-process full-HTTP Binder tests. None contact a source site. In particular,
