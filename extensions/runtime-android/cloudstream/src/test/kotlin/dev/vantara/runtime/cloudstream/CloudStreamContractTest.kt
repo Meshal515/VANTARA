@@ -7,6 +7,9 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CloudStreamContractTest {
+    @org.junit.Test fun isolatedWorkerHasNoForegroundActivityForBackgroundPolling() {
+        org.junit.Assert.assertNull(com.lagradost.cloudstream3.CommonActivity.getActivity())
+    }
     private val source = object : MainAPI() { override var name = "VANTARA ABI Test"; override var mainUrl = "https://source.vantara.example" }
     @Test fun buildersPreserveOpaqueEpisodeDataAndInitializeRealModels() = runBlocking {
         val episode = source.newEpisode("opaque-not-url") { name = "الحلقة"; episode = 12; season = 2 }

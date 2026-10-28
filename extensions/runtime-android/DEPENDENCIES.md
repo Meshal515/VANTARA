@@ -14,6 +14,7 @@ Direct runtime dependencies, preserved as Maven artifacts with their license met
 | Kotlin serialization JSON | 1.8.1 | Apache-2.0 |
 | Jackson Kotlin module | 2.18.4 | Apache-2.0 |
 | jsoup | 1.22.2 | MIT |
+| AndroidX Fragment | 1.6.2 | Apache-2.0 |
 
 JUnit 4.13.2 (EPL-1.0), MockWebServer/okhttp-tls (Apache-2.0) and AndroidX tests
 (Apache-2.0) are test dependencies. No third-party CS3 provider package is committed

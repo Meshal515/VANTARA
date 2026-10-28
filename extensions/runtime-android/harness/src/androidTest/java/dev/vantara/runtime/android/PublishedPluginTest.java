@@ -33,6 +33,16 @@ public class PublishedPluginTest {
         for(int i=0;i<sources.length();i++){JSONObject source=sources.getJSONObject(i);assertFalse(source.getString("name").isEmpty());assertTrue(source.getString("mainUrl").startsWith("https://"));}
         assertEquals("Offline registration contacted a source",0,traffic.get());
         assertFalse(client.isClosed());
+        if(name.equals("Witanime")) {
+            // This published package starts a main-looper player monitor during load.
+            // Prove it remains alive after initialization, rather than racing its first callback.
+            for(int sample=0;sample<12;sample++) {
+                Thread.sleep(250);
+                assertFalse("Published background monitor killed isolated worker",client.isClosed());
+                assertTrue(new JSONObject(client.invoke("capabilities","{}",1000).get(2,TimeUnit.SECONDS)).getBoolean("executed"));
+            }
+            assertEquals(0,traffic.get());
+        }
     }
     @Test public void animeWitcherPublishedPackageActuallyLoadsAndRegisters() throws Exception{register("Animewitcher");}
     @Test public void anime4upPublishedPackageActuallyLoadsAndRegisters() throws Exception{register("Anime4up");}

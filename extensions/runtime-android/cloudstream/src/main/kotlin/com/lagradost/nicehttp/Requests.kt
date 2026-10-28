@@ -20,7 +20,7 @@ interface ResponseParser {
     fun <T:Any> parseSafe(text:String,kClass:KClass<T>):T?
     fun writeValueAsString(obj:Any):String
 }
-private object JacksonParser:ResponseParser {
+internal object JacksonParser:ResponseParser {
     override fun <T:Any> parse(text:String,kClass:KClass<T>):T=mapper.readValue(text,kClass.java)
     override fun <T:Any> parseSafe(text:String,kClass:KClass<T>):T?=runCatching{parse(text,kClass)}.getOrNull()
     override fun writeValueAsString(obj:Any):String=mapper.writeValueAsString(obj)

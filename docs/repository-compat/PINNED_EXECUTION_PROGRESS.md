@@ -25,3 +25,23 @@ This gate proves plugin initialization/registration only when it passes. It does
 prove catalogue/search/details/episode parsing, extraction, playback, live-source
 health, API26–28 support, production manager integration or app upgrade preservation.
 Those gates remain open. No production application files or Stable stores changed.
+
+## First actual run and justified follow-up
+
+Run40707787166 (a3314eb4): API29 and35 each ran27 tests:26 passed,
+one failed, zero skips. All20 original process tests and all three full-HTTP
+IPC tests passed. AnimeWitcher, Anime4up and AnimeRift published initialization
+passed. WitAnime died in its own main-looper background player monitor with
+`NoClassDefFoundError: androidx.fragment.app.Fragment`.
+
+The follow-up supplies the actual Apache-2.0 AndroidX Fragment dependency. The
+isolated worker reports no foreground Activity (`null`) when polled; explicit
+attempts to open an Activity remain unsupported. This does not expose or change
+VANTARA's player. A regression now samples WitAnime's worker for3seconds after
+initialization to avoid counting a race before its background callback as success.
+
+A new descriptor-resolution test also reproduced five missing host ABI members
+from the pinned packages (SearchResponseList builder/items and NiceResponse
+body/parser/success). They have original implementations, with a paginated search
+overload delegating to existing legacy search only for page1. Later pages are
+explicitly unsupported unless the provider implements them.

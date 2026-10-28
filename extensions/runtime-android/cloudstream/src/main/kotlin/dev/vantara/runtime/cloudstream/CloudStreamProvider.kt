@@ -52,7 +52,7 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
                 require(input.path("page").asInt(1)>0){"Invalid catalogue page"}
                 source.getMainPage(input.path("page").asInt(1),MainPageRequest(section.name,section.data,section.horizontalImages))?:throw IOException("NO_CATALOGUE_RESULT")
             }
-            "search"->{val query=input.path("query").asText("");require(query.isNotBlank()&&query.length<=500);mapOf("items" to (source.search(query)?:throw IOException("NO_SEARCH_RESULT")))}
+            "search"->{val query=input.path("query").asText("");val page=input.path("page").asInt(1);require(query.isNotBlank()&&query.length<=500&&page>0);source.search(query,page)?:throw IOException("NO_SEARCH_RESULT")}
             "details","episodes"->{
                 val url=input.path("url").asText("");require(url.isNotBlank());val detail=source.load(url)?:throw IOException("NO_DETAIL_RESULT")
                 if(operation=="details")mapOf("item" to detail)

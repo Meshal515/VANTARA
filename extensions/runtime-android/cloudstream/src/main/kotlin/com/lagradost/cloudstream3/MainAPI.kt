@@ -18,6 +18,10 @@ open class MainAPI {
     open val vpnStatus=VPNStatus.None
     var sourcePlugin:String?=null
     open suspend fun search(query:String):List<SearchResponse>? = throw UnsupportedOperationException("search")
+    open suspend fun search(query:String,page:Int):SearchResponseList? {
+        if(page!=1)throw UnsupportedOperationException("search pagination")
+        return search(query)?.let{SearchResponseList(it,false)}
+    }
     open suspend fun getMainPage(page:Int,request:MainPageRequest):HomePageResponse? = throw UnsupportedOperationException("catalogue")
     open suspend fun load(url:String):LoadResponse? = throw UnsupportedOperationException("details")
     open suspend fun loadLinks(data:String,isCasting:Boolean,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit):Boolean = throw UnsupportedOperationException("videoLinks")
@@ -40,6 +44,7 @@ fun MainAPI.newEpisode(data:Any,initializer:Episode.()->Unit):Episode {
 }
 fun newHomePageResponse(name:String,list:List<SearchResponse>,hasNext:Boolean?=null):HomePageResponse=HomePageResponse(listOf(HomePageList(name,list)),hasNext?:false)
 fun newHomePageResponse(list:List<HomePageList>,hasNext:Boolean?=null):HomePageResponse=HomePageResponse(list,hasNext?:false)
+fun newSearchResponseList(list:List<SearchResponse>,hasNext:Boolean?=null):SearchResponseList=SearchResponseList(list,hasNext?:false)
 suspend fun MainAPI.newTvSeriesLoadResponse(name:String,url:String,type:TvType,episodes:List<Episode>,initializer:suspend TvSeriesLoadResponse.()->Unit):TvSeriesLoadResponse {
     return TvSeriesLoadResponse(name,fixUrl(url),this.name,type,episodes).also {initializer(it)}
 }

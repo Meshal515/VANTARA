@@ -22,6 +22,7 @@ data class MainPageRequest(val name:String,val data:String,val horizontalImages:
 data class MainPageData(val name:String,val data:String,val horizontalImages:Boolean=false)
 data class HomePageList(val name:String,var list:List<SearchResponse>,val isHorizontalImages:Boolean=false)
 data class HomePageResponse(val items:List<HomePageList>,val hasNext:Boolean=false)
+data class SearchResponseList(val items:List<SearchResponse>,val hasNext:Boolean=false)
 interface SearchResponse {
     val name:String;val url:String;val apiName:String
     var type:TvType?;var posterUrl:String?;var posterHeaders:Map<String,String>?
