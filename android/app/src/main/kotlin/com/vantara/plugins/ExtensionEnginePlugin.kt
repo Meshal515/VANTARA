@@ -95,10 +95,9 @@ class ExtensionEnginePlugin : Plugin() {
         // حلّ تحدّي Cloudflare يفتح WebView، وWebView يحتاج Activity حيًّا.
         // بلا هذا السطر يسقط الاعتراض عند أول 403 ويبدو كأن المصدر محجوب.
         WebViewActivityHolder.set(activity)
-        // المحرّك مشترك مع الـspike، والـspike يفشل سريعًا أمام تحدّي Cloudflare
-        // كي لا تُسرق شاشة الدفعة. القارئ هنا يقلّب بيده: التحدّي المرئي هو
-        // الطريق الوحيد، وإلا قرأ «محجوب» ما كان يكفيه أن يحلّه
-        CloudflareInteractionMode.batchProbe = false
+        // المصادر الخلفية لا تفتح تحديًا فوق Activity. التحقق المرئي محصور
+        // في VerificationCoordinator وبطلب صريح من المستخدم.
+        CloudflareInteractionMode.batchProbe = true
         // الإضافات تطلب اعتمادياتها بـ`injectLazy()`. التسجيل قبل أول تحميل،
         // وإلا سقط أول مصدر بـIllegalStateException من injekt فيبدو عطل مصدر.
         //
@@ -120,7 +119,7 @@ class ExtensionEnginePlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
-        WebViewActivityHolder.set(null)
+        WebViewActivityHolder.clear(activity)
         scope.cancel()
     }
 
@@ -135,73 +134,98 @@ class ExtensionEnginePlugin : Plugin() {
      */
     @PluginMethod
     fun sources(call: PluginCall) {
-        val list = JSArray()
-        for (spec in SPIKE_SOURCES) {
-            if (spec.blockedReason != null) continue
-            list.put(
-                JSObject()
-                    .put("id", spec.pkg)
-                    .put("label", spec.label)
-                    .put("lib", spec.expectedLib)
-                    .put("version", spec.versionName)
-                    .put("warning", spec.warning.name)
-                    .put("names", JSArray(spec.arabicSourceNames))
-                    .put("lang", "ar")
-                    .put("ready", loaded.containsKey(spec.pkg)),
-            )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val st = userStore.state
+                val list = JSArray()
+                for (spec in SPIKE_SOURCES) {
+                    if (spec.blockedReason != null) continue
+                    list.put(
+                        JSObject()
+                            .put("id", spec.pkg)
+                            .put("pkg", spec.pkg)
+                            .put("label", spec.label)
+                            .put("lib", spec.expectedLib)
+                            .put("version", spec.versionName)
+                            .put("warning", spec.warning.name)
+                            .put("names", JSArray(spec.arabicSourceNames))
+                            .put("lang", "ar")
+                            .put("domain", runCatching { (loaded[spec.pkg] as? HttpSource)?.baseUrl }.getOrNull())
+                            .put("ready", loaded.containsKey(spec.pkg))
+                            .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
+                    )
+                }
+                // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
+                for (filler in FILLER_SOURCES) {
+                    val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
+                    val id = "${filler.pkg}@${filler.lang}"
+                    list.put(
+                        JSObject()
+                            .put("id", id)
+                            .put("pkg", filler.pkg)
+                            .put("label", filler.label)
+                            .put("lib", spec.expectedLib)
+                            .put("version", spec.versionName)
+                            .put("warning", spec.warning.name)
+                            .put("names", JSArray(listOf(filler.label)))
+                            .put("lang", filler.lang)
+                            .put("filler", true)
+                            .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
+                            .put("ready", loaded.containsKey(id))
+                            .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
+                    )
+                }
+                // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
+                for (ext in st.extensions) {
+                    val icon = NativeExtensionIcons.iconUrl(context, "extensions", ext.pkg, ext.sha256)
+                    for (src in ext.sources) {
+                        val id = "${ext.pkg}#${src.id}"
+                        list.put(
+                            JSObject()
+                                .put("id", id)
+                                .put("pkg", ext.pkg)
+                                .put("label", src.name)
+                                .put("lib", ext.lib)
+                                .put("version", ext.versionName)
+                                .put("warning", if (ext.nsfw) "MIXED" else "SAFE")
+                                .put("names", JSArray(listOf(src.name)))
+                                .put("lang", src.lang)
+                                .put("filler", !src.lang.equals("ar", ignoreCase = true))
+                                .put("user", true)
+                                .put("repo", st.repos.firstOrNull { it.url == ext.repoUrl }?.name)
+                                .put("repoUrl", ext.repoUrl)
+                                .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
+                                .put("ready", loaded.containsKey(id))
+                                .withIcon(icon),
+                        )
+                    }
+                }
+                call.resolve(JSObject().put("sources", list))
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
         }
-        // التكملة: تُعلن للواجهة بعلامتها، والواجهة لا تبني منها قوائم
-        for (filler in FILLER_SOURCES) {
-            val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
-            val id = "${filler.pkg}@${filler.lang}"
-            list.put(
-                JSObject()
-                    .put("id", id)
-                    .put("label", filler.label)
-                    .put("lib", spec.expectedLib)
-                    .put("version", spec.versionName)
-                    .put("warning", spec.warning.name)
-                    .put("names", JSArray(listOf(filler.label)))
-                    .put("lang", filler.lang)
-                    .put("filler", true)
-                    .put("ready", loaded.containsKey(id)),
-            )
-        }
-        // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
-        for (ext in userStore.state.extensions) {
-            for (src in ext.sources) {
-                val id = "${ext.pkg}#${src.id}"
-                list.put(
-                    JSObject()
-                        .put("id", id)
-                        .put("label", src.name)
-                        .put("lib", ext.lib)
-                        .put("version", ext.versionName)
-                        .put("warning", if (ext.nsfw) "MIXED" else "SAFE")
-                        .put("names", JSArray(listOf(src.name)))
-                        .put("lang", src.lang)
-                        .put("filler", !src.lang.equals("ar", ignoreCase = true))
-                        .put("user", true)
-                        .put("repo", userStore.state.repos.firstOrNull { it.url == ext.repoUrl }?.name ?: "")
-                        .put("ready", loaded.containsKey(id)),
-                )
-            }
-        }
-        call.resolve(JSObject().put("sources", list))
     }
 
     // ───────────────────────── مستودعات المستخدم ─────────────────────────
 
-    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name)
+    private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
+    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
 
     @PluginMethod
     fun repos(call: PluginCall) {
-        val st = userStore.state
-        call.resolve(
-            JSObject()
-                .put("repos", JSArray(st.repos.map { repoJson(it) }))
-                .put("installed", JSArray(st.extensions.map { JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl) })),
-        )
+        scope.launch {
+            try {
+                val st = userStore.state
+                call.resolve(
+                    JSObject()
+                        .put("repos", JSArray(st.repos.map { repoJson(it) }))
+                        .put("installed", JSArray(st.extensions.map {
+                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl)
+                                .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256)
+                                    ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
+                        })),
+                )
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
     }
 
     /** يضيف مستودعًا بعد قراءة repo.json (مفتاح التوقيع) وindex.min.json. */
@@ -212,7 +236,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 val (meta, list) = repoClient.read(base)
                 val count = list.size
-                val repo = UserRepo(base, meta.name, meta.fingerprint)
+                val repo = UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
                 userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", count))
             } catch (t: Throwable) {
@@ -257,7 +281,10 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("builtin", packageSpec(ext.pkg) != null)
                             .put("installed", mine?.versionName)
                             .put("update", mine != null && mine.versionName != ext.version)
-                            .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name })),
+                            .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name }))
+                            .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256) }
+                                ?: packageSpec(ext.pkg)?.let { NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256) }
+                                ?: ext.iconUrl ?: userStore.state.repos.firstOrNull { it.url == base }?.iconUrl),
                     )
                 }
                 call.resolve(JSObject().put("extensions", list))

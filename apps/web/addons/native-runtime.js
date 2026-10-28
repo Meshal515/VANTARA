@@ -72,12 +72,12 @@ export function getNativeAddonRuntime() {
     const out = [];
     if (plugins.AnimeEngine) {
       const anime = await plugins.AnimeEngine.sources().catch(() => ({ sources: [] }));
-      out.push(...anime.sources.filter((s) => s.enabled).map((s) => ({ ...s, label: s.name, content: s.content ?? "anime", version: 1, ...(String(s.id).startsWith("user-") ? { user: true } : {}) })));
+      out.push(...anime.sources.filter((s) => s.enabled).map((s) => ({ ...s, label: s.name, content: s.content ?? "anime", version: s.version ?? 1, ...(String(s.id).startsWith("user-") ? { user: true } : {}) })));
     }
     if (plugins.ExtensionEngine) {
       const manga = await plugins.ExtensionEngine.sources().catch(() => ({ sources: [] }));
       // إضافات التكملة المشحونة مخفية؛ ما ثبّته المستخدم يظهر بأي لغة كان
-      out.push(...manga.sources.filter((s) => !s.filler || s.user).map((s) => ({ ...s, content: "manga", domain: null, version: s.version ?? 1 })));
+      out.push(...manga.sources.filter((s) => !s.filler || s.user).map((s) => ({ ...s, content: "manga", domain: s.domain ?? null, version: s.version ?? 1 })));
     }
     return out;
   }
@@ -96,6 +96,7 @@ export function getNativeAddonRuntime() {
         return plugins.ExtensionEngine[method]({ sourceId: id, ...args });
       };
       return {
+        ...(typeof plugins.ExtensionEngine.catalogue === "function" ? { catalogue: (page = 1) => invoke("catalogue", { page }) } : {}),
         search: (query, page = 1) => invoke("search", { query, page }),
         latest: (page = 1) => invoke("latest", { page }),
         popular: (page = 1) => invoke("popular", { page }),

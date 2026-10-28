@@ -37,6 +37,14 @@
 
         </activity>
 
+        <!-- لا يُفتح إلا بطلب المستخدم؛ ملف WebView وrenderer معزولان عن الواجهة. -->
+        <activity
+            android:name="com.vantara.verification.VerificationActivity"
+            android:process=":verification"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="false" />
+
         <!-- مشغّل الأنمي: Media3 أصلي، بالعرض، فوق الواجهة -->
         <activity
             android:name="com.vantara.addons.AddonConfigureActivity"

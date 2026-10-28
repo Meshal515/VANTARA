@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # لقطة ثابتة حديثة: تجدد الروابط المنشورة بدل الاعتماد على أصول إصدار محذوفة.
+      # لقطة ثابتة؛ بايتات APK المتتبعة تُفحص مقابل الفهرس وmanifest وSHA-256.
       KEIYOUSHI_INDEX_COMMIT: aefdaeb21ab7e71e6b2c58f2262b2bcc1c9c3e12
       # Owner-approved diagnostic batch: 15 Arabic SAFE and Arabic MangaDex.
       # Dedicated NSFW packages are excluded from the delivered spike.
@@ -77,7 +77,9 @@ jobs:
       - name: Generate pinned Arabic source snapshot
         run: |
           set -euo pipefail
-          python3 tools/generate_arabic_sources.py
+          # The original upstream release assets can disappear. Reproduce the
+          # exact reviewed snapshot from tracked payloads; never refresh pins.
+          python3 tools/generate_arabic_sources.py --local-apk-dir ../../android/app/src/main/assets/extensions
           python3 - <<'PY'
           import json
           p = json.load(open('build/arabic-source-snapshot.json', encoding='utf-8'))

@@ -33,147 +33,7 @@ it("opens native external catalog addons without the obsolete subtitles-only not
   expect(onOpenSource).toHaveBeenCalledWith(addon);
   expect(view.textContent).not.toContain("ترجمات مستقلة فقط");
 });
-it("filters cards and searches addon names without changing application section", () => {
-  setup();
-  const view = renderAddons({
-    registry: {
-      list: () => [row("Anime", { contentTypes: ["anime"] }), row("Manga")],
-    },
-  });
-  click(view, "مانجا");
-  expect(view.querySelector(".addon-grid").textContent).toContain("Manga");
-  expect(view.querySelector(".addon-grid").textContent).not.toContain("Anime");
-  const search = view.querySelector("[data-addon-search]");
-  search.value = "no match";
-  search.dispatchEvent(new document.defaultView.Event("input"));
-  expect(view.querySelector(".addon-grid").textContent).toContain("لا توجد");
-});
-it("previews untrusted names as text and keeps configured URL secrets private", async () => {
-  setup();
-  let installed = 0;
-  const view = renderAddons({
-    registry: {
-      list: () => [],
-      inspect: async () => ({
-        manifest: row("<img src=x onerror=evil()>", {
-          permissions: { networkHosts: ["addon.test"] },
-        }),
-      }),
-      install: async () => installed++,
-    },
-  });
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/token/manifest.json";
-  submit(view);
-  await tick();
-  expect(installed).toBe(0);
-  expect(view.querySelector("img")).toBeNull();
-  expect(view.textContent).not.toContain("/token/");
-  click(view, "إلغاء");
-  expect(installed).toBe(0);
-});
-it("shows real discovery cards with configuration requirements and no invented stable health", () => {
-  setup();
-  const view = renderAddons({ registry: { list: () => [] } });
-  click(view, "استكشاف");
-  const cards = view.querySelector(".addon-grid");
-  expect(cards.textContent).toContain("Cinemeta");
-  expect(cards.textContent).toContain("SubDL");
-  expect(cards.textContent).toContain("SubSource");
-  expect(cards.textContent).toContain("يحتاج إعداد");
-  expect(cards.textContent).not.toContain("مستقرة");
-});
-it("previews partial JSON bundles with selection and reveals installed rows across previous filters", async () => {
-  setup();
-  const rows = [];
-  let selected;
-  const p = {
-    manifest: row("Subtitles", {
-      capabilities: ["subtitles"],
-      contentTypes: ["movie"],
-      bundled: false,
-    }),
-  };
-  const view = renderAddons({
-    registry: {
-      list: () => rows,
-      inspectData: async () => [
-        { name: "Subtitles", preview: p },
-        { name: "Invalid", error: { message: "SERVICE_URL_REQUIRED" } },
-      ],
-      install: async (x) => {
-        selected = x;
-        const a = { ...x.manifest };
-        rows.push(a);
-        return a;
-      },
-    },
-  });
-  click(view, "مانجا");
-  click(view, "JSON");
-  view.querySelector("textarea").value = "[]";
-  submit(view);
-  await tick();
-  expect(view.querySelectorAll("[data-preview-choice]").length).toBe(1);
-  expect(view.textContent).toContain("Invalid");
-  expect(view.textContent).toContain("رابط الخدمة");
-  click(view, "تثبيت المحدد");
-  await tick();
-  expect(selected).toBe(p);
-  expect(view.querySelector(".addon-grid").textContent).toContain("Subtitles");
-});
-it("installs only checked bundle previews and accepts multiple JSON files", async () => {
-  setup();
-  const installed = [];
-  const view = renderAddons({
-    registry: {
-      list: () => [],
-      inspectData: async (text) => [
-        { name: text, preview: { manifest: row(text) } },
-      ],
-      install: async (p) => {
-        installed.push(p.manifest.name);
-        return p.manifest;
-      },
-    },
-  });
-  click(view, "ملف");
-  const file = view.querySelector("[data-import-file]");
-  Object.defineProperty(file, "files", {
-    value: [
-      { name: "a.json", text: async () => "Alpha" },
-      { name: "b.json", text: async () => "Beta" },
-    ],
-  });
-  submit(view);
-  await tick();
-  const choices = view.querySelectorAll("[data-preview-choice]");
-  choices[1].checked = false;
-  click(view, "تثبيت المحدد");
-  await tick();
-  expect(installed).toEqual(["Alpha"]);
-});
-it("cancel aborts pending inspection and ignores late responses", async () => {
-  setup();
-  let done, signal;
-  const view = renderAddons({
-    registry: {
-      list: () => [],
-      inspect: (_, { signal: s }) => {
-        signal = s;
-        return new Promise((r) => (done = r));
-      },
-    },
-  });
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/manifest.json";
-  submit(view);
-  click(view, "إلغاء");
-  expect(signal.aborted).toBe(true);
-  done({ manifest: row("Late") });
-  await tick();
-  expect(view.textContent).not.toContain("Late");
-});
+
 it("configure opens only an HTTPS provider page in a new protected tab", () => {
   setup();
   const addon = row("Configured", {
@@ -190,6 +50,7 @@ it("configure opens only an HTTPS provider page in a new protected tab", () => {
   expect(link.rel).toContain("noopener");
   expect(view.querySelector("iframe")).toBeNull();
 });
+
 it("explains how to bring a provider's Stremio install link back into VANTARA beside configuration", () => {
   setup();
   const addon = row("Torrentio", {
@@ -208,19 +69,7 @@ it("explains how to bring a provider's Stremio install link back into VANTARA be
   expect(help?.textContent).toContain("stremio://");
   expect(help?.previousElementSibling).toBe(view.querySelector(".addon-actions"));
 });
-it("shows the same Stremio handoff instructions on discovery cards that open provider setup", () => {
-  setup();
-  const view = renderAddons({ registry: { list: () => [] } });
-  click(view, "استكشاف");
-  for (const card of view.querySelectorAll(".addon-card")) {
-    const help = card.querySelector(".addon-configure-help");
-    if (card.querySelector("[data-configure]")) {
-      expect(help).not.toBeNull();
-      expect(help?.textContent).toContain("انسخ رابط هذا الزر");
-      expect(help?.textContent).toContain("stremio://");
-    } else expect(help).toBeNull();
-  }
-});
+
 it("keeps network permissions and diagnostics collapsed and shows supplied assessment", () => {
   setup();
   const addon = row("Addon", {
@@ -232,6 +81,7 @@ it("keeps network permissions and diagnostics collapsed and shows supplied asses
   expect(view.querySelector("details").hasAttribute("open")).toBe(false);
   expect(view.querySelector("details").textContent).toContain("addon.test");
 });
+
 it("passes check action and prevents duplicated pending mutation", async () => {
   setup();
   let resolve;
@@ -247,6 +97,7 @@ it("passes check action and prevents duplicated pending mutation", async () => {
   resolve();
   await tick();
 });
+
 it("shows actual failed and untested diagnostics and refreshes returned assessment", async () => {
   setup();
   const view = renderAddonDetails({
@@ -273,28 +124,7 @@ it("shows actual failed and untested diagnostics and refreshes returned assessme
     "تم بنجاح",
   );
 });
-it("cancels active detail diagnostics when the hub closes", async () => {
-  setup();
-  let signal, done;
-  const view = renderAddons({
-    registry: { list: () => [row("Addon")] },
-    onCheck: (_, { signal: s }) => {
-      signal = s;
-      return new Promise((r) => (done = r));
-    },
-  });
-  click(view, "تفاصيل");
-  click(view, "فحص الإضافة");
-  view.close();
-  expect(signal.aborted).toBe(true);
-  done({
-    checks: [
-      { capability: "catalog", state: "failed", message: "Late diagnostics" },
-    ],
-  });
-  await tick();
-  expect(view.textContent).not.toContain("Late diagnostics");
-});
+
 it("reports an unchanged staged update without navigating away", async () => {
   setup();
   const onBack = vi.fn();
@@ -308,6 +138,7 @@ it("reports an unchanged staged update without navigating away", async () => {
   expect(view.textContent).toContain("لا توجد تحديثات");
   expect(onBack).not.toHaveBeenCalled();
 });
+
 it("offers configuration for a required provider even without configurable hint", () => {
   setup();
   const view = renderAddonDetails({
@@ -318,168 +149,7 @@ it("offers configuration for a required provider even without configurable hint"
   });
   expect(view.querySelector("[data-configure]")).not.toBeNull();
 });
-it("bounds multiple-file imports before reading oversized selections", async () => {
-  setup();
-  let reads = 0;
-  const view = renderAddons({
-    registry: { list: () => [], inspectData: async () => [] },
-  });
-  click(view, "ملف");
-  Object.defineProperty(view.querySelector("[data-import-file]"), "files", {
-    value: Array.from({ length: 101 }, (_, i) => ({
-      name: `${i}.json`,
-      text: async () => {
-        reads++;
-        return "{}";
-      },
-    })),
-  });
-  submit(view);
-  await tick();
-  expect(reads).toBe(0);
-  expect(view.textContent).toContain("100");
-});
-it("locks cancel while committing and reveals a delayed install after old filters", async () => {
-  setup();
-  const rows = [];
-  let finish;
-  const p = {
-    manifest: row("New subtitles", {
-      capabilities: ["subtitles"],
-      contentTypes: ["movie"],
-    }),
-  };
-  const view = renderAddons({
-    registry: {
-      list: () => rows,
-      inspect: async () => p,
-      install: () =>
-        new Promise((r) => {
-          finish = () => {
-            rows.push(p.manifest);
-            r(p.manifest);
-          };
-        }),
-    },
-  });
-  click(view, "مانجا");
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/manifest.json";
-  submit(view);
-  await tick();
-  click(view, "تثبيت");
-  const cancel = [...view.querySelectorAll("button")].find(
-    (b) => b.textContent === "إلغاء",
-  );
-  expect(cancel.disabled).toBe(true);
-  cancel.click();
-  finish();
-  await tick();
-  expect(view.querySelector(".addon-grid").textContent).toContain(
-    "New subtitles",
-  );
-});
-it("native import summary closure aborts a busy preview and ignores its late result", async () => {
-  setup();
-  let signal, finish;
-  const view = renderAddons({
-    registry: {
-      list: () => [],
-      inspect: (_, { signal: s }) => {
-        signal = s;
-        return new Promise((r) => (finish = r));
-      },
-    },
-  });
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/manifest.json";
-  submit(view);
-  const panel = view.querySelector(".addon-import");
-  panel.open = false;
-  panel.dispatchEvent(new document.defaultView.Event("toggle"));
-  expect(signal.aborted).toBe(true);
-  finish({ manifest: row("Late") });
-  await tick();
-  expect(view.textContent).not.toContain("Late");
-});
-it("navigation during commit ignores late DOM writes and reload reveals persisted rows", async () => {
-  setup();
-  const rows = [];
-  let finish;
-  const p = { manifest: row("Committed", { contentTypes: ["movie"] }) };
-  const view = renderAddons({
-    registry: {
-      list: () => rows,
-      inspect: async () => p,
-      install: () =>
-        new Promise((r) => {
-          finish = () => {
-            rows.push(p.manifest);
-            r(p.manifest);
-          };
-        }),
-    },
-  });
-  click(view, "مانجا");
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/manifest.json";
-  submit(view);
-  await tick();
-  click(view, "تثبيت");
-  const entry = view.querySelector(".addon-preview-entry");
-  view.close();
-  const html = view.innerHTML;
-  finish();
-  await tick();
-  expect(view.innerHTML).toBe(html);
-  expect(entry.textContent).not.toContain("تم التثبيت");
-  view.reload();
-  expect(view.querySelector(".addon-grid").textContent).toContain("Committed");
-});
-it("summary closure during commit preserves library reveal after persistence", async () => {
-  setup();
-  const rows = [];
-  let finish;
-  const p = { manifest: row("Committed", { contentTypes: ["movie"] }) };
-  const view = renderAddons({
-    registry: {
-      list: () => rows,
-      inspect: async () => p,
-      install: () =>
-        new Promise((r) => {
-          finish = () => {
-            rows.push(p.manifest);
-            r(p.manifest);
-          };
-        }),
-    },
-  });
-  click(view, "مانجا");
-  view.querySelector("[data-import-url]").value =
-    "https://addon.test/manifest.json";
-  submit(view);
-  await tick();
-  click(view, "تثبيت");
-  const panel = view.querySelector(".addon-import");
-  panel.open = false;
-  panel.dispatchEvent(new document.defaultView.Event("toggle"));
-  finish();
-  await tick();
-  expect(view.querySelector(".addon-grid").textContent).toContain("Committed");
-});
-it("disables inactive import fields so stale invalid URLs cannot block JSON or file submits", () => {
-  setup();
-  const view = renderAddons({ registry: { list: () => [] } });
-  view.querySelector("[data-import-url]").value = "invalid";
-  click(view, "JSON");
-  expect(view.querySelector("[data-import-url]").disabled).toBe(true);
-  click(view, "ملف");
-  expect(view.querySelector("[data-import-url]").disabled).toBe(true);
-  expect(view.querySelector("textarea").disabled).toBe(true);
-  click(view, "رابط");
-  expect(view.querySelector("[data-import-url]").disabled).toBe(false);
-  expect(view.querySelector('[aria-label="رابط الخدمة"]').disabled).toBe(true);
-});
+
 it("refreshes installed version actions after activation and rollback", async () => {
   setup();
   const onBack = vi.fn();
@@ -503,58 +173,7 @@ it("refreshes installed version actions after activation and rollback", async ()
   await tick();
   expect(onBack).toHaveBeenCalledTimes(2);
 });
-it("groups installed sources by section with their real pulse and probes due sources by itself", async () => {
-  setup();
-  const { createSourcePulse } = await import("../addons/source-pulse.js");
-  const m = new Map();
-  const pulse = createSourcePulse({ storage: { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) } });
-  pulse.record("core|lek", "ok", { ms: 900 });
-  const probed = [];
-  const onOpenSource = vi.fn();
-  vi.useFakeTimers();
-  const view = renderAddons({
-    registry: { runtimeName: "apk", list: () => [
-      row("مانجا ليك", { key: "core|lek", capabilities: ["home", "search"] }),
-      row("WitAnime", { key: "core|wit", contentTypes: ["anime"], capabilities: ["home", "search"] }),
-      row("Torrentio", { key: "t", bundled: false, protocol: "stremio", capabilities: ["streams"], contentTypes: ["movie"] }),
-    ] },
-    pulse,
-    onOpenSource,
-    onProbe: async (a) => { probed.push(a.key); pulse.record(a.key, "failed", { error: "timeout" }); },
-  });
-  const groups = [...view.querySelectorAll(".addon-group-head h3")].map((h) => h.textContent);
-  expect(groups).toEqual(["مصادر المانجا", "مصادر الأنمي", "إضافات Stremio والخدمات"]);
-  const lek = view.querySelector('[data-key="core|lek"]');
-  expect(lek.querySelector(".addon-pulse").textContent).toContain("يعمل");
-  expect(view.querySelector('[data-key="core|wit"] .addon-pulse').textContent).toContain("لم يُفحص بعد");
-  await vi.advanceTimersByTimeAsync(800);
-  vi.useRealTimers();
-  expect(probed).toEqual(["core|wit"]); // السليم حديثًا لا يُطرق
-  expect(view.querySelector('[data-key="core|wit"] .addon-pulse').textContent).toContain("لا يستجيب");
-  expect(view.querySelector(".addon-summary").textContent).toContain("1 من 2 مصدر يعمل");
-  lek.querySelector(".addon-row-main").click();
-  expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({ key: "core|lek" }));
-  view.close();
-});
 
-it('يعيد فحص المصدر المتعثر عند انتهاء المهلة ويوقف الفحص عند الخروج', async () => {
-  setup();
-  const { createSourcePulse } = await import('../addons/source-pulse.js');
-  vi.useFakeTimers();
-  try {
-    const pulse = createSourcePulse({ storage: null });
-    let calls = 0;
-    const view = renderAddons({ registry: { list: () => [row('Source', { key: 'core|x' })] }, pulse,
-      onProbe: async (a) => { calls++; pulse.record(a.key, 'failed'); } });
-    await vi.advanceTimersByTimeAsync(700);
-    expect(calls).toBe(1);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(calls).toBe(2);
-    view.close();
-    await vi.advanceTimersByTimeAsync(120_000);
-    expect(calls).toBe(2);
-  } finally { vi.useRealTimers(); }
-});
 it('previews a configured return link beside setup and replaces saved settings without duplicates', async () => {
   setup();
   const {createAddonRegistry}=await import('../addons/registry.js');
@@ -574,6 +193,7 @@ it('previews a configured return link beside setup and replaces saved settings w
   expect(again.list()[0].enabled).toBe(false);await again.enable(addon.key,true);
   expect(again.connection(addon.key).manifestUrl).toBe('https://addon.test/settings/manifest.json?token=private');
 });
+
 it('cancels a configured-link preview and rejects a different addon identity',async()=>{
  setup();let release;const install=vi.fn();
  const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
@@ -585,6 +205,7 @@ it('cancels a configured-link preview and rejects a different addon identity',as
  other.querySelector('[data-configured-url]').value='https://addon.test/other/manifest.json';click(other,'معاينة رابط الإعداد');await tick();
  expect(other.textContent).toContain('هوية الإضافة');expect(install).not.toHaveBeenCalled();
 });
+
 it('describes desktop automatic capture and browser or APK manual fallback honestly',()=>{
  setup();const addon=row('Demo',{bundled:false,configuration:{configurable:true}});
  const desktop=renderAddonDetails({addon,registry:{runtimeName:'desktop',configurationUrl:()=> 'https://addon.test/configure'}});
@@ -594,6 +215,7 @@ it('describes desktop automatic capture and browser or APK manual fallback hones
   expect(view.querySelector('.addon-configure-help').textContent).toContain('لا تضمن الخدمة العودة التلقائية');
  }
 });
+
 it('allows correcting the configured link while a slow preview is pending',async()=>{
  setup();let release;const addon=row('Demo',{id:'org.demo',bundled:false,configuration:{configurable:true}});
  const view=renderAddonDetails({addon,registry:{configurationUrl:()=> 'https://addon.test/configure',inspect:()=>new Promise(resolve=>{release=resolve;}),install:async()=>{}}});
@@ -602,6 +224,7 @@ it('allows correcting the configured link while a slow preview is pending',async
  expect([...view.querySelectorAll('button')].find(b=>b.textContent==='معاينة رابط الإعداد').disabled).toBe(false);
  release({manifest:{id:'org.demo',name:'Old'}});await tick();expect(view.textContent).not.toContain('Old');
 });
+
 it('reviews another host explicitly before replacing the configured addon without a duplicate',async()=>{
  setup();const {createAddonRegistry}=await import('../addons/registry.js');const {createStore}=await import('../pwa/cache/store.js');
  const manifest={id:'org.demo',name:'Demo',version:'1.0.0',types:['movie'],resources:['subtitles'],catalogs:[],behaviorHints:{configurable:true}};
@@ -613,6 +236,7 @@ it('reviews another host explicitly before replacing the configured addon withou
  click(view,'حفظ الإعداد');await tick();expect(registry.list()).toHaveLength(1);
  expect(registry.connection(addon.key).manifestUrl).toBe('https://other.test/manifest.json');
 });
+
 
 it("on the phone, Install inside the configure page installs the configured addon here instead of opening Stremio", async () => {
   setup();
@@ -640,33 +264,6 @@ it("on the phone, Install inside the configure page installs the configured addo
   expect(link.textContent).toBe("إعداد الإضافة");
 });
 
-it('offers Torrentio as a configuration-only source provider without fetching or installing', () => {
-  setup(); const inspect = vi.fn(), install = vi.fn();
-  const view = renderAddons({ registry: { list: () => [], inspect, install } });
-  click(view, 'استكشاف');
-  const card = [...view.querySelectorAll('.addon-card')].find(el => el.textContent.includes('Torrentio'));
-  expect(card.textContent).toContain('مزود روابط تورنت');
-  expect(card.querySelector('[data-configure]').href).toBe('https://torrentio.strem.fun/configure');
-  expect(card.textContent).toContain('يحتاج إعداد');
-  expect([...card.querySelectorAll('button')].map(b => b.textContent)).not.toContain('تثبيت');
-  expect(inspect).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled();
-});
-
-it.each([
-  [{}, 'مثبتة · لم تُختبر بعد'],
-  [{ enabled: false }, 'معطلة'],
-  [{ configuration: { required: true, configured: false } }, 'يحتاج إعداد'],
-  [{ assessment: { level: 'broken', label: 'تواجه مشكلة', detail: 'فشل الاتصال' } }, 'تواجه مشكلة'],
-])('shows the real existing Torrentio state in Explore and manages the existing entry', (extra, label) => {
-  setup(); const addon = row('Torrentio', { id: 'com.stremio.torrentio.addon', key: 'https://torrentio.strem.fun|com.stremio.torrentio.addon', bundled: false, capabilities: ['streams'], contentTypes: ['movie'], ...extra });
-  const view = renderAddons({ registry: { list: () => [addon] } });
-  click(view, 'استكشاف');
-  const cards = [...view.querySelectorAll('.addon-card')].filter(el => el.textContent.includes('Torrentio'));
-  expect(cards).toHaveLength(1); expect(cards[0].textContent).toContain(label);
-  expect(cards[0].querySelector('[data-configure]')).toBeNull();
-  click(cards[0], 'إدارة الإضافة المثبتة');
-  expect(view.querySelector('.addon-details').textContent).toContain('Torrentio');
-});
 
 it('keeps retry, update and actual reinstall distinct and prevents duplicate reinstall clicks', async () => {
   setup(); let release; const reinstall = vi.fn(() => new Promise(resolve => { release = resolve; }));
@@ -683,6 +280,7 @@ it('keeps retry, update and actual reinstall distinct and prevents duplicate rei
   release(); await tick(); expect(onBack).toHaveBeenCalledOnce();
 });
 
+
 it('keeps the installed detail visible and sanitizes a failed reinstall endpoint', async () => {
   setup(); const onBack = vi.fn();
   const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: async () => { throw new Error('failed https://addon.test/private-config/manifest.json?token=private'); } }, onBack });
@@ -693,6 +291,7 @@ it('keeps the installed detail visible and sanitizes a failed reinstall endpoint
   expect([...view.querySelectorAll('button')].find(b => b.textContent === 'إعادة تثبيت الإضافة').disabled).toBe(false);
 });
 
+
 it('cancels a pending reinstall when details close and ignores late navigation', async () => {
   setup(); let release, signal; const onBack = vi.fn();
   const view = renderAddonDetails({ addon: row('Torrentio', { bundled: false }), registry: { reinstall: (_key, options) => { signal = options.signal; return new Promise(resolve => { release = resolve; }); } }, onBack });
@@ -701,25 +300,104 @@ it('cancels a pending reinstall when details close and ignores late navigation',
   expect(onBack).not.toHaveBeenCalled();
 });
 
+
 it('shows disabled before configuration when both apply to an installed addon', () => {
   setup();
   const view = renderAddonDetails({ addon: row('Disabled', { bundled: false, enabled: false, configuration: { required: true, configured: false } }), registry: {} });
   expect(view.querySelector('.addon-health').textContent).toBe('معطلة');
 });
 
-it("an addon page fills the store alone, and back returns one step to the list where it was", () => {
+
+it("V7 starts with real stores only, three tabs, and no sample repositories", async () => {
   setup();
-  const addon = row("Torrentio", { id: "com.stremio.torrentio.addon", key: "https://torrentio.strem.fun|com.stremio.torrentio.addon", bundled: false, capabilities: ["streams"], contentTypes: ["movie"] });
-  const view = renderAddons({ registry: { list: () => [addon] } });
+  const view=renderAddons({registry:{list:()=>[]}});
+  await tick();
+  expect(view.querySelectorAll(".v7-tab").length).toBe(3);
+  expect(view.textContent).toContain("ابدأ بإضافة مصدر لك");
+  expect(view.textContent).not.toContain("استكشاف");
+  expect(view.textContent).not.toContain("MIHON");
+  expect(view.querySelector(".addon-grid")).toBeNull();
   expect(view.back()).toBe(false);
-  click(view, "استكشاف");
-  click(view, "إدارة الإضافة المثبتة");
-  // صفحة الإضافة وحدها: رأس المتجر والمستودعات مخفية بالصنف، و«رجوع» أول ما فيها
-  expect(view.classList.contains("addon-store--detail")).toBe(true);
-  expect(view.querySelector(".addon-grid button")?.textContent).toBe("رجوع");
+});
+it("V7 reads existing installed addons without clearing their registry", async () => {
+  setup();
+  const saved=[row("مصدري", {capabilities:["catalog","search"],contentTypes:["anime"]})];
+  const list=vi.fn(()=>saved);
+  const view=renderAddons({registry:{list,runtimeName:"pwa"}});
+  await tick();
+  expect(list).toHaveBeenCalled();
+  view.querySelectorAll(".v7-tab")[1].click();
+  expect(view.textContent).toContain("مصدري");
+  expect(saved).toHaveLength(1);
+  expect(view.querySelector(".v7-status-slot")).not.toBeNull();
+});
+it("V7 opens addon details from the entire row and respects nested back", async () => {
+  setup();
+  const view=renderAddons({registry:{list:()=>[row("Original", {capabilities:["catalog"]})]}});
+  await tick();
+  view.querySelectorAll(".v7-tab")[1].click();
+  view.querySelector(".v7-row").click();
+  expect(view.querySelector(".v7-layer").hidden).toBe(false);
+  expect(view.textContent).toContain("Original");
   expect(view.back()).toBe(true);
-  expect(view.classList.contains("addon-store--detail")).toBe(false);
-  expect(view.textContent).toContain("Torrentio");
-  // لا خطوة أخرى داخل المتجر: الرجوع التالي يخرج من الإضافات (shell.goBack)
+  expect(view.querySelector(".v7-layer").hidden).toBe(true);
   expect(view.back()).toBe(false);
+});
+it("V7 plus button in add dialog invokes the file input, not a fake import", async () => {
+  setup();
+  const view=renderAddons({registry:{list:()=>[]}});
+  click(view,"أضف");
+  const file=view.querySelector('[data-import-file]');
+  expect(file).not.toBeNull();
+  const open=vi.fn();
+  file.click=open;
+  view.querySelector(".v7-upload").click();
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(file.accept).toContain(".json");
+});
+it("V7 preserves native repositories and reads their sources through the real store", async () => {
+  setup();
+  const entry={pkg:"net.demo.source",name:"Original Mihon Source",lang:"en",installed:true,version:"1"};
+  const repos={kind:"manga",list:vi.fn(async()=>({repos:[{name:"My repo",url:"https://repo.test/repo.json"}]})),extensions:vi.fn(async()=>[entry])};
+  const view=renderAddons({registry:{list:()=>[]},repositories:repos});
+  await tick();await tick();
+  expect(view.textContent).toContain("My repo");
+  click(view,"استعراض");
+  await tick();
+  expect(view.textContent).toContain("Original Mihon Source");
+  expect(repos.extensions).toHaveBeenCalled();
+  expect(entry.installed).toBe(true);
+});
+it("V7 asks for explicit red delete confirmation; cancel never touches installed addon", async () => {
+  setup();
+  const saved=[row("Keep my addon",{bundled:false,key:"keep",capabilities:["catalog"]})];
+  const remove=vi.fn(async()=>saved.pop());
+  const view=renderAddons({registry:{list:()=>saved,remove}});
+  await tick();
+  view.querySelectorAll(".v7-tab")[1].click();
+  view.querySelector(".v7-trash").click();
+  expect(view.querySelector(".v7-dialog .danger")).not.toBeNull();
+  expect(remove).not.toHaveBeenCalled();
+  click(view,"رجوع");
+  expect(remove).not.toHaveBeenCalled();
+  expect(saved).toHaveLength(1);
+});
+it("V7 imports inspected JSON with explicit preview selection only", async () => {
+  setup();
+  const saved=[],install=vi.fn(async p=>saved.push(p.manifest));
+  const registry={list:()=>saved,inspectData:async()=>[{name:"Good",preview:{manifest:row("Good")}}, {name:"Bad",error:Error("Invalid") }],install};
+  const view=renderAddons({registry});
+  click(view,"أضف");
+  const file=view.querySelector('[data-import-file]');
+  Object.defineProperty(file,"files",{configurable:true,value:[{name:"one.json",size:30,text:async()=> "[]"}]});
+  file.dispatchEvent(new document.defaultView.Event("change"));
+  await tick();await tick();
+  const checks=view.querySelectorAll('.v7-dialog input[type="checkbox"]');
+  expect(checks).toHaveLength(2);
+  expect(checks[1].disabled).toBe(true);
+  expect(install).not.toHaveBeenCalled();
+  click(view,"تثبيت المحدد");
+  await tick();await tick();
+  expect(install).toHaveBeenCalledTimes(1);
+  expect(saved[0].name).toBe("Good");
 });
