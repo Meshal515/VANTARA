@@ -66,4 +66,35 @@ public class RuntimePackageStoreTest {
         File one=archive(1);Path link=temp.getRoot().toPath().resolve("linked.cs3");Files.createSymbolicLink(link,one.toPath());
         try{store("account").stage(link.toFile(),hash(one));fail("Accepted a linked source path");}catch(IOException expected){assertEquals("PACKAGE_ARCHIVE_INVALID",expected.getMessage());}
     }
+    @Test public void sourceMetadataAndBinaryRevisionAreActivatedTogether()throws Exception{
+        RuntimePackageStore store=store("account");File one=archive(1),two=archive(2);
+        try(RuntimePackageStore.Staged staged=store.stage(one,hash(one))){staged.activate("stable-id","{\"source\":\"first\"}");}
+        assertEquals("{\"source\":\"first\"}",store("account").current("stable-id").metadata());
+        try(RuntimePackageStore.Staged staged=store.stage(two,hash(two))){assertEquals("{\"source\":\"first\"}",store.current("stable-id").metadata());staged.activate("stable-id","{\"source\":\"second\"}");}
+        RuntimePackageStore.Installed current=store("account").current("stable-id");assertEquals(hash(two),current.packageHash());assertEquals("{\"source\":\"second\"}",current.metadata());
+    }
+    @Test public void oneCorruptInstalledRecordDoesNotHideTheOtherInstalledPackage()throws Exception{
+        RuntimePackageStore store=store("account");File one=archive(1);
+        for(String id:Arrays.asList("good-id","bad-id"))try(RuntimePackageStore.Staged staged=store.stage(one,hash(one))){staged.activate(id);}
+        Path broken;
+        try(java.util.stream.Stream<Path> files=Files.walk(temp.getRoot().toPath())){broken=files.filter(p->p.getFileName().toString().equals("bad-id.vri")).findFirst().get();}
+        Files.write(broken,new byte[]{1});RuntimePackageStore.Inventory inventory=store("account").inventory();
+        assertEquals(1,inventory.installed().size());assertEquals("good-id",inventory.installed().get(0).packageId());
+        assertEquals(1,inventory.unreadable().size());assertEquals("bad-id",inventory.unreadable().get(0).packageId());assertEquals("PACKAGE_REGISTRY_CORRUPT",inventory.unreadable().get(0).code());assertTrue(Files.exists(broken));
+    }
+    @Test public void legacyV1RecordWithoutMetadataIsReadableWithoutRewritingIt()throws Exception{
+        RuntimePackageStore store=store("account");File one=archive(1);
+        try(RuntimePackageStore.Staged staged=store.stage(one,hash(one))){staged.activate("legacy-id");}
+        Path pointer;try(java.util.stream.Stream<Path> paths=Files.walk(temp.getRoot().toPath())){pointer=paths.filter(p->p.getFileName().toString().equals("legacy-id.vri")).findFirst().get();}
+        byte[] now=Files.readAllBytes(pointer);DataInputStream input=new DataInputStream(new ByteArrayInputStream(now));input.readInt();for(int i=0;i<4;i++)input.readUTF();input.readInt();
+        byte[] old=Arrays.copyOf(now,now.length-input.available());Files.write(pointer,old);
+        RuntimePackageStore.Installed restored=store("account").current("legacy-id");assertEquals(hash(one),restored.packageHash());assertEquals("{}",restored.metadata());assertArrayEquals(old,Files.readAllBytes(pointer));
+    }
+    @Test public void oversizedMetadataCannotChangeTheActivePackage()throws Exception{
+        RuntimePackageStore store=store("account");File one=archive(1),two=archive(2);
+        try(RuntimePackageStore.Staged staged=store.stage(one,hash(one))){staged.activate("stable-id","{\"keep\":true}");}
+        char[] tooLarge=new char[16001];Arrays.fill(tooLarge,'x');
+        try(RuntimePackageStore.Staged staged=store.stage(two,hash(two))){try{staged.activate("stable-id",new String(tooLarge));fail("Metadata budget bypassed");}catch(IOException expected){assertEquals("PACKAGE_METADATA_LIMIT",expected.getMessage());}}
+        assertEquals(hash(one),store.current("stable-id").packageHash());assertEquals("{\"keep\":true}",store.current("stable-id").metadata());
+    }
 }

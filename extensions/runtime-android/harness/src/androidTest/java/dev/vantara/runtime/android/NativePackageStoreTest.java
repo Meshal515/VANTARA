@@ -30,11 +30,14 @@ public class NativePackageStoreTest {
             try(RuntimePackageStore.Staged candidate=store.stage(archive.toFile(),pin.getString("packageSha256"));AndroidRuntimeClient client=new AndroidRuntimeClient(host,scope,(owner,url)->{throw new AssertionError("No source traffic during registration");})){
                 assertNull(store.current(stableId));
                 client.loadCloudStream(candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry()).get(12,TimeUnit.SECONDS);
-                assertTrue(new JSONObject(client.invoke("capabilities","{}",3000).get(5,TimeUnit.SECONDS)).getJSONArray("sources").length()>0);
-                first=client.connect().get(1,TimeUnit.SECONDS);candidate.activate(stableId);
+                String registered=client.invoke("capabilities","{}",3000).get(5,TimeUnit.SECONDS);
+                assertTrue(new JSONObject(registered).getJSONArray("sources").length()>0);
+                first=client.connect().get(1,TimeUnit.SECONDS);candidate.activate(stableId,registered);
             }
             RuntimePackageStore.Installed installed=new RuntimePackageStore(owned,"account-one").current(stableId);
             assertEquals(stableId,installed.packageId());assertEquals(pin.getString("packageSha256"),installed.packageHash());assertEquals(pin.getString("dexSha256"),installed.dexHash());
+            assertTrue(new JSONObject(installed.metadata()).getJSONArray("sources").length()>0);
+            assertFalse(new JSONObject(installed.metadata()).getBoolean("sourceFunctionsTested"));
             try(AndroidRuntimeClient next=new AndroidRuntimeClient(host,scope,(owner,url)->{throw new AssertionError("No source traffic during reload");})){
                 next.loadCloudStream(installed.dexFile(),installed.dexHash(),installed.entry()).get(12,TimeUnit.SECONDS);
                 assertNotEquals(first.pid(),next.connect().get(1,TimeUnit.SECONDS).pid());assertTrue(new JSONObject(next.invoke("capabilities","{}",3000).get(5,TimeUnit.SECONDS)).getJSONArray("sources").length()>0);

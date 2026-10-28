@@ -11,7 +11,13 @@ import java.util.*;
 public final class RuntimePackageStore {
     private static final int MAGIC=0x56525031;
     private final Path root,objects,records,staging;
-    public record Installed(String packageId,String packageHash,String dexHash,String entry,int version,File dexFile){}
+    public record Installed(String packageId,String packageHash,String dexHash,String entry,int version,File dexFile,String metadata){
+        public Installed(String packageId,String packageHash,String dexHash,String entry,int version,File dexFile){this(packageId,packageHash,dexHash,entry,version,dexFile,"{}");}
+    }
+    public record Unreadable(String packageId,String code){}
+    public record Inventory(List<Installed> installed,List<Unreadable> unreadable){
+        public Inventory{installed=Collections.unmodifiableList(new ArrayList<>(installed));unreadable=Collections.unmodifiableList(new ArrayList<>(unreadable));}
+    }
 
     public RuntimePackageStore(Path ownedDirectory,String accountId)throws IOException {
         Objects.requireNonNull(ownedDirectory);
@@ -59,15 +65,31 @@ public final class RuntimePackageStore {
     public Installed current(String packageId)throws IOException {
         id(packageId);Path pointer=records.resolve(packageId+".vri");
         if(!Files.exists(pointer,LinkOption.NOFOLLOW_LINKS))return null;
-        if(!Files.isRegularFile(pointer,LinkOption.NOFOLLOW_LINKS)||Files.size(pointer)>8192)throw new IOException("PACKAGE_REGISTRY_CORRUPT");
+        if(!Files.isRegularFile(pointer,LinkOption.NOFOLLOW_LINKS)||Files.size(pointer)>65536)throw new IOException("PACKAGE_REGISTRY_CORRUPT");
         try(DataInputStream in=new DataInputStream(Files.newInputStream(pointer))){
             if(in.readInt()!=MAGIC||!packageId.equals(in.readUTF()))throw new IOException("PACKAGE_REGISTRY_CORRUPT");
             String archive=in.readUTF(),dex=in.readUTF(),entry=in.readUTF();int version=in.readInt();
-            if(!archive.matches("[0-9a-f]{64}")||!dex.matches("[0-9a-f]{64}")||entry.length()>512||version<0||in.read()!=-1)throw new IOException("PACKAGE_REGISTRY_CORRUPT");
+            // Old v1 records ended at version. Keep them readable without rewriting
+            // them; new public source metadata is part of the SAME atomic record.
+            String metadata=in.available()==0?"{}":in.readUTF();
+            if(!archive.matches("[0-9a-f]{64}")||!dex.matches("[0-9a-f]{64}")||entry.length()>512||version<0||metadata.length()>16000||in.read()!=-1)throw new IOException("PACKAGE_REGISTRY_CORRUPT");
             Path object=objects.resolve(archive),file=object.resolve("classes.dex");
             if(Files.isSymbolicLink(object)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS))throw new IOException("PACKAGE_OBJECT_MISSING");
-            return new Installed(packageId,archive,dex,entry,version,file.toFile());
+            return new Installed(packageId,archive,dex,entry,version,file.toFile(),metadata);
         }catch(EOFException e){throw new IOException("PACKAGE_REGISTRY_CORRUPT",e);}
+    }
+    public Inventory inventory()throws IOException {
+        List<Installed> good=new ArrayList<>();List<Unreadable> bad=new ArrayList<>();int count=0;
+        try(DirectoryStream<Path> files=Files.newDirectoryStream(records,"*.vri")){
+            for(Path file:files){
+                if(++count>512)throw new IOException("PACKAGE_STORE_CAPACITY");
+                String name=file.getFileName().toString(),packageId=name.substring(0,name.length()-4);
+                if(!packageId.matches("[A-Za-z0-9_-]{1,128}")){bad.add(new Unreadable("invalid-"+hash(name.getBytes(StandardCharsets.UTF_8)),"PACKAGE_REGISTRY_CORRUPT"));continue;}
+                try{Installed installed=current(packageId);if(installed!=null)good.add(installed);}
+                catch(IOException failure){String code=failure.getMessage();bad.add(new Unreadable(packageId,code!=null&&code.matches("PACKAGE_[A-Z_]+")?code:"PACKAGE_STORAGE_FAILED"));}
+            }
+        }
+        good.sort(Comparator.comparing(Installed::packageId));bad.sort(Comparator.comparing(Unreadable::packageId));return new Inventory(good,bad);
     }
     public final class Staged implements AutoCloseable {
         private final Path path;private final Cs3Package candidate;private boolean closed,moved;
@@ -75,8 +97,10 @@ public final class RuntimePackageStore {
         public Cs3Package candidate(){return candidate;}
         public synchronized File dexFile(){if(closed)throw new IllegalStateException("PACKAGE_CANDIDATE_CLOSED");return path.resolve("classes.dex").toFile();}
         /** Host calls this ONLY after successful isolated registration. It marks installed, never healthy/playable. */
-        public synchronized Installed activate(String packageId)throws IOException {
+        public Installed activate(String packageId)throws IOException{return activate(packageId,"{}");}
+        public synchronized Installed activate(String packageId,String metadata)throws IOException {
             id(packageId);if(closed)throw new IOException("PACKAGE_CANDIDATE_CLOSED");
+            if(metadata==null||metadata.length()>16000)throw new IOException("PACKAGE_METADATA_LIMIT");
             Path lockFile=root.resolve("activation.lock");if(Files.isSymbolicLink(lockFile))throw new IOException("PACKAGE_STORAGE_INVALID");
             try(FileChannel channel=FileChannel.open(lockFile,StandardOpenOption.CREATE,StandardOpenOption.WRITE)){
                 final FileLock lease;
@@ -91,9 +115,9 @@ public final class RuntimePackageStore {
                     }else{Files.move(path,object,StandardCopyOption.ATOMIC_MOVE);moved=true;}
                     ByteArrayOutputStream bytes=new ByteArrayOutputStream();
                     try(DataOutputStream out=new DataOutputStream(bytes)){
-                        out.writeInt(MAGIC);out.writeUTF(packageId);out.writeUTF(candidate.packageHash());out.writeUTF(candidate.dexHash());out.writeUTF(candidate.entry());out.writeInt(candidate.version());
+                        out.writeInt(MAGIC);out.writeUTF(packageId);out.writeUTF(candidate.packageHash());out.writeUTF(candidate.dexHash());out.writeUTF(candidate.entry());out.writeInt(candidate.version());out.writeUTF(metadata);
                     }
-                    Path pending=Files.createTempFile(records,"pending-",".vri");
+                    Path pending=Files.createTempFile(records,"pending-",".pending");
                     try{write(pending,bytes.toByteArray());Files.move(pending,records.resolve(packageId+".vri"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
                     finally{Files.deleteIfExists(pending);}
                     closed=true;if(!moved)removeCandidate(path);
