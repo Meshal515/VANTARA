@@ -1,5 +1,5 @@
 {
-  "purpose": "Observed public ABI call references only, not implementation code or a complete dynamic linking proof",
+  "purpose": "Observed direct host references and inherited lookup obligations; not implementation, resolved ABI proof or source execution. externalAncestors are candidates, not guessed defining classes.",
   "profiles": [
     {
       "name": "Animewitcher",
@@ -41,7 +41,17 @@
         "Lcom/lagradost/cloudstream3/TvType;->Anime:Lcom/lagradost/cloudstream3/TvType;",
         "Lcom/lagradost/cloudstream3/TvType;->AnimeMovie:Lcom/lagradost/cloudstream3/TvType;"
       ],
-      "executionTested": false
+      "executionTested": false,
+      "requiredInheritedHostLookups": [
+        {
+          "kind": "method",
+          "reference": "Lcom/animewitcher/animewitcherPlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestors": [
+            "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+          ]
+        }
+      ],
+      "abiResolution": "host_profile_required"
     },
     {
       "name": "Anime4up",
@@ -86,7 +96,17 @@
         "Lcom/lagradost/cloudstream3/TvType;->OVA:Lcom/lagradost/cloudstream3/TvType;",
         "Lcom/lagradost/cloudstream3/utils/AppUtils;->INSTANCE:Lcom/lagradost/cloudstream3/utils/AppUtils;"
       ],
-      "executionTested": false
+      "executionTested": false,
+      "requiredInheritedHostLookups": [
+        {
+          "kind": "method",
+          "reference": "Lcom/anime4up/eishkPlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestors": [
+            "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+          ]
+        }
+      ],
+      "abiResolution": "host_profile_required"
     },
     {
       "name": "AnimeRift",
@@ -152,7 +172,17 @@
         "Lcom/lagradost/cloudstream3/utils/Qualities;->P720:Lcom/lagradost/cloudstream3/utils/Qualities;",
         "Lcom/lagradost/cloudstream3/utils/Qualities;->Unknown:Lcom/lagradost/cloudstream3/utils/Qualities;"
       ],
-      "executionTested": false
+      "executionTested": false,
+      "requiredInheritedHostLookups": [
+        {
+          "kind": "method",
+          "reference": "Lcom/animerift/AnimeRiftPlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestors": [
+            "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+          ]
+        }
+      ],
+      "abiResolution": "host_profile_required"
     },
     {
       "name": "Witanime",
@@ -214,7 +244,24 @@
         "Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;->VIDEO:Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;",
         "Lcom/lagradost/cloudstream3/utils/Qualities;->Unknown:Lcom/lagradost/cloudstream3/utils/Qualities;"
       ],
-      "executionTested": false
+      "executionTested": false,
+      "requiredInheritedHostLookups": [
+        {
+          "kind": "method",
+          "reference": "Lcom/cimanow/WitAnimePlugin;->registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V",
+          "externalAncestors": [
+            "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+          ]
+        },
+        {
+          "kind": "method",
+          "reference": "Lcom/cimanow/WitAnimePlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestors": [
+            "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+          ]
+        }
+      ],
+      "abiResolution": "host_profile_required"
     }
   ]
 }

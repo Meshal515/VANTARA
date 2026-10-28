@@ -16,7 +16,14 @@
       "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
       "warning": "",
       "executed": false,
-      "runtimeExecution": "not_implemented"
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
     },
     {
       "name": "Anime4up",
@@ -30,7 +37,14 @@
       "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
       "warning": "",
       "executed": false,
-      "runtimeExecution": "not_implemented"
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
     },
     {
       "name": "AnimeRift",
@@ -42,9 +56,16 @@
       "externalMethodReferences": 185,
       "cloudstreamAndNiceHttpMethodReferences": 42,
       "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
-      "warning": "⚠️ تنبيه: يُرجى استخدام VPN لتجنب حظر عنوان الـ IP الخاص بك",
+      "warning": "\u26a0\ufe0f \u062a\u0646\u0628\u064a\u0647: \u064a\u064f\u0631\u062c\u0649 \u0627\u0633\u062a\u062e\u062f\u0627\u0645 VPN \u0644\u062a\u062c\u0646\u0628 \u062d\u0638\u0631 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0640 IP \u0627\u0644\u062e\u0627\u0635 \u0628\u0643",
       "executed": false,
-      "runtimeExecution": "not_implemented"
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
     },
     {
       "name": "Witanime",
@@ -58,7 +79,19 @@
       "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
       "warning": "",
       "executed": false,
-      "runtimeExecution": "not_implemented"
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        },
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
     }
   ]
 }

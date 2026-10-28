@@ -14,6 +14,10 @@ def probe(observations,fetch):
         blob=fetch(url)
         report=inspect_package(blob,expected_sha256=package['sha256'])
         if report['manifest']['version']!=package['version'] or report['bytes']!=package['bytes']:raise ValueError('PACKAGE_METADATA_MISMATCH')
+        entry='L'+report['manifest']['pluginClassName'].replace('.','/')+';'
+        for expected in package.get('expectedInheritedHostLookups',[]):
+            if not any(row['kind']==expected['kind'] and row['reference']==entry+'->'+expected['member'] and expected['externalAncestor'] in row['externalAncestors'] for row in report['inheritedMemberLookups']):
+                raise ValueError('ABI_LOOKUP_OBSERVATION_MISMATCH')
         reports.append({'name':package['name'],'inspectionPassed':True,'executionTested':False,**report})
     return reports
 
