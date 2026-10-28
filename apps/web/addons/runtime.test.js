@@ -1,6 +1,25 @@
 import { expect, it } from "vitest";
 import { createAddonRuntime } from "./runtime.js";
 import { createStore } from "../pwa/cache/store.js";
+it('diagnoses the full manga catalogue separately from an empty latest feed without discarding returned works',async()=>{
+ const def={id:'teamx',label:'Team X',content:'manga',version:'1.6.33'};
+ const calls=[];
+ const source={catalogue:async()=>{calls.push('catalogue');return {mangas:[{url:'/series/work',title:'Work'}],hasNextPage:false};},latest:async()=>{calls.push('latest');return {mangas:[],hasNextPage:false};}};
+ const r={ready:Promise.resolve(),store:createStore({indexedDB:null}),registry:{list:()=>[def],def:()=>def,source:()=>source,call:async(id,run)=>run(source)}};
+ const a=createAddonRuntime({runtime:r,transport:{}});await a.ready;
+ const result=await a.diagnose('core|teamx');
+ expect(result.checks).toMatchObject([{capability:'catalog',state:'passed'},{capability:'home',state:'empty'}]);
+ expect(result.checks[0].message).toContain('الكتالوج');
+ expect(result.checks[1].message).toContain('آخر التحديثات');
+ expect(calls).toEqual(['catalogue','latest']);
+ expect(await a.adapter('core|teamx').catalogue(1)).toMatchObject({mangas:[{url:'/series/work',title:'Work'}]});
+});
+it('preserves actual source artwork, language and repository metadata through the manager registry',async()=>{
+ const def={id:'native-id',label:'Source',content:'manga',version:'1.6.42',domain:'source.example',iconUrl:'data:image/png;base64,YWJj',pkg:'org.actual.source',repo:'Original Repository',lang:'ar'};
+ const r={ready:Promise.resolve(),store:createStore({indexedDB:null}),registry:{list:()=>[def],source:()=>({}),def:()=>def,call:async()=>[]}};
+ const a=createAddonRuntime({runtime:r,store:r.store,transport:{}});await a.ready;
+ expect(a.registry.list().find(x=>x.sourceId===def.id)).toMatchObject({iconUrl:def.iconUrl,pkg:def.pkg,repositoryName:def.repo,lang:'ar',version:'1.6.42'});
+});
 it("routes an installed Stremio episode by explicit video ID and keeps core available", async () => {
   const urls = [];
   const r = {

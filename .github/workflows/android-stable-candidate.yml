@@ -1,0 +1,196 @@
+name: Stable candidate validation (NO publish)
+
+# Independent Release build only: no release, deployment, channel update or main merge.
+on:
+  push:
+    branches: [feat/addons-v7-native-manager-20261027]
+    paths: [.github/workflows/android-stable-candidate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: stable-candidate-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CF_PAGES_PROJECT: vantara
+  WORKER_NAME: vantara-sync
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # نبني بالضبط الـSHA الذي اجتاز CI، لا HEAD أحدث وصل أثناء الانتظار.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify signing secrets exist
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read the actual published Stable version (read only)
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stable-baseline"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern VANTARA-stable.apk --dir "$RUNNER_TEMP/stable-baseline"
+          sdktools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$sdktools/aapt2" dump badging "$RUNNER_TEMP/stable-baseline/VANTARA-stable.apk" > "$RUNNER_TEMP/stable-baseline/badging.txt"
+          baseline=$(sed -n "s/^package: name='com.vantara.app' versionCode='\([0-9]*\)'.*/\1/p" "$RUNNER_TEMP/stable-baseline/badging.txt")
+          test -n "$baseline"
+          code=$((baseline + 1))
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=0.0.$code" >> "$GITHUB_OUTPUT"
+
+      # بصمة كل ما يُبنى في الـAPK ولا تحمله الواجهة (Kotlin، Manifest،
+      # الصلاحيات، المحرك، Capacitor). تُحسب قبل `cap sync` من ملفات git نفسها.
+      # الواجهة تُطبَّق فقط فوق APK بالبصمة نفسها؛ اختلافها يعرض تحديث الـAPK.
+      - name: Native fingerprint
+        id: native
+        run: |
+          set -euo pipefail
+          fp=$(node tools/native-fingerprint.mjs)
+          echo "fingerprint=$fp" >> "$GITHUB_OUTPUT"
+          echo "native fingerprint: $fp"
+
+      - name: Resolve endpoint URLs
+        id: urls
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          API_URL_VAR: ${{ vars.VANTARA_API_URL }}
+        run: |
+          set -euo pipefail
+          sync=''
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"               | jq -r '.result.subdomain // empty')
+            if [ -n "$sub" ]; then sync="https://$WORKER_NAME.$sub.workers.dev"; fi
+          fi
+          echo "sync=$sync" >> "$GITHUB_OUTPUT"
+          echo "api=${API_URL_VAR:-}" >> "$GITHUB_OUTPUT"
+          echo "updates=https://$CF_PAGES_PROJECT.pages.dev" >> "$GITHUB_OUTPUT"
+
+      - name: Bake endpoints and version into the APK web bundle
+        env:
+          SYNC_URL: ${{ steps.urls.outputs.sync }}
+          API_URL: ${{ steps.urls.outputs.api }}
+          UPDATES_URL: ${{ steps.urls.outputs.updates }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          path = 'apps/web/lib/config.js'
+          text = open(path, encoding='utf-8').read()
+          for token, value in (
+              ('__VANTARA_SYNC_URL__', os.environ['SYNC_URL']),
+              ('__VANTARA_API_URL__', os.environ['API_URL']),
+              ('__VANTARA_UPDATES_URL__', os.environ['UPDATES_URL']),
+              ('__VANTARA_VERSION__', os.environ['VERSION_NAME']),
+          ):
+              text = text.replace(token, value)
+          open(path, 'w', encoding='utf-8').write(text)
+          PY
+
+      - name: Copy web assets into Android
+        run: npx cap sync android
+
+      # هوية حزمة الواجهة: التطبيق يرفض حزمةً إصدارها أو بصمتها لا يطابقان
+      - name: Stamp the web bundle
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          NATIVE: ${{ steps.native.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          printf '{"version":"%s","native":"%s"}\n' "$VERSION_NAME" "$NATIVE" > android/app/src/main/assets/public/vantara-bundle.json
+          cat android/app/src/main/assets/public/vantara-bundle.json
+
+      - name: Decode stable signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/vantara.jks"
+          test -s "$RUNNER_TEMP/vantara.jks"
+
+      - name: Assemble stable signed APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/vantara.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: vantara
+          VANTARA_VERSION_NAME: ${{ steps.version.outputs.name }}
+          VANTARA_VERSION_CODE: ${{ steps.version.outputs.code }}
+          VANTARA_NATIVE: ${{ steps.native.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleRelease :app:testReleaseUnitTest
+
+      - name: Verify signature and stage artifact
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          apk=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          test -n "$apk" || { echo 'No stable APK produced'; exit 1; }
+          python3 tools/verify-android-bundle.py "$apk"
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee /tmp/apksigner.txt
+          grep -qE 'v2 scheme \(APK Signature Scheme v2\): true' /tmp/apksigner.txt             || { echo 'v2 signature missing'; exit 1; }
+          # نفس المفتاح في كل إصدار، وإلا رفض أندرويد التثبيت فوق السابق. البصمة
+          # المثبّتة هي نفسها التي يتحقق منها التطبيق قبل أي تثبيت (ApkCheck)
+          pinned=$(grep -oE 'STABLE_CERT_SHA256 = "[0-9a-f]{64}"' android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt | grep -oE '[0-9a-f]{64}')
+          # `--verbose` يطبع سطرًا لكل مخطط توقيع («V2 Signer: …»): كلها يجب أن تكون المفتاح المثبّت
+          grep -q "certificate SHA-256 digest: $pinned" /tmp/apksigner.txt             || { echo 'stable APK is not signed with the pinned VANTARA key'; exit 1; }
+          if grep 'certificate SHA-256 digest:' /tmp/apksigner.txt | grep -v "$pinned"; then
+            echo 'stable APK carries a signing certificate other than the pinned VANTARA key'; exit 1
+          fi
+          grep -q '^Number of signers: 1$' /tmp/apksigner.txt             || { echo 'stable APK must have exactly one signer'; exit 1; }
+          # إلى ملف لا عبر `head`: مع pipefail يموت aapt2 بـSIGPIPE فتفشل الخطوة
+          "$tools/aapt2" dump badging "$apk" > /tmp/badging.txt
+          sed -n 1p /tmp/badging.txt
+          grep -q "package: name='com.vantara.app' versionCode='${VERSION_CODE}' " /tmp/badging.txt             || { echo 'unexpected package id or versionCode'; exit 1; }
+          mkdir -p dist
+          cp "$apk" dist/VANTARA-stable.apk
+          sha256sum dist/VANTARA-stable.apk > dist/VANTARA-stable.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VANTARA-stable-candidate-NOT-PUBLISHED
+          path: |
+            dist/VANTARA-stable.apk
+            dist/VANTARA-stable.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove candidate signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vantara.jks"

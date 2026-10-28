@@ -34,11 +34,11 @@ object RepoIndex {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val SHA256 = Regex("^[0-9a-f]{64}$")
 
-    data class Meta(val name: String, val fingerprint: String)
+    data class Meta(val name: String, val fingerprint: String, val iconUrl: String? = null)
     data class Source(val id: String, val name: String, val lang: String, val baseUrl: String = "")
     data class Extension(
         val name: String, val pkg: String, val apkUrl: String, val lang: String, val version: String,
-        val lib: Double, val nsfw: Boolean, val sources: List<Source>,
+        val lib: Double, val nsfw: Boolean, val sources: List<Source>, val iconUrl: String? = null,
     ) {
         val anime: Boolean get() = pkg.contains(".animeextension.")
     }
@@ -64,8 +64,18 @@ object RepoIndex {
         val name = meta["name"]?.jsonPrimitive?.contentOrNull?.take(80)?.ifBlank { null } ?: error("المستودع بلا اسم")
         val fingerprint = meta["signingKeyFingerprint"]?.jsonPrimitive?.contentOrNull?.lowercase()?.replace(":", "")
         require(fingerprint != null && SHA256.matches(fingerprint)) { "المستودع لا يعلن مفتاح توقيع؛ لا نشغّل كودًا بلا توقيع معروف" }
-        return Meta(name, fingerprint)
+        return Meta(name, fingerprint, declaredIcon(meta))
     }
+
+    /** Only an actual HTTPS image reference supplied by the repository; no guessed paths. */
+    private fun declaredIcon(value: JsonObject): String? = sequenceOf("iconUrl", "logo", "icon")
+        .mapNotNull { key -> (value[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+        .firstOrNull { raw ->
+            raw.length <= 2048 && runCatching {
+                val uri = URI(raw)
+                uri.scheme.equals("https", true) && uri.host != null && uri.rawUserInfo == null && uri.port == -1
+            }.getOrDefault(false)
+        }
 
     fun parseIndex(text: String, base: String): List<Extension> {
         val list = json.parseToJsonElement(text) as? JsonArray ?: error("index.min.json ليس قائمة")
@@ -85,7 +95,7 @@ object RepoIndex {
             Extension(
                 name = (o["name"]?.jsonPrimitive?.contentOrNull ?: pkg).removePrefix("Tachiyomi: ").removePrefix("Aniyomi: "),
                 pkg = pkg, apkUrl = "$base/apk/$apk", lang = o["lang"]?.jsonPrimitive?.contentOrNull ?: "",
-                version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources,
+                version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources, iconUrl = declaredIcon(o),
             )
         }
     }
@@ -185,7 +195,7 @@ object RepoIndex {
 }
 
 @Serializable
-data class UserRepo(val url: String, val name: String, val fingerprint: String)
+data class UserRepo(val url: String, val name: String, val fingerprint: String, val iconUrl: String? = null)
 
 @Serializable
 data class UserSource(val id: String, val name: String, val lang: String)

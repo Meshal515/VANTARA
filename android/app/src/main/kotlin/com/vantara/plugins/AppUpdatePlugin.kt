@@ -102,6 +102,7 @@ class AppUpdatePlugin : Plugin() {
                 .put("versionCode", PackageInfoCompat.getLongVersionCode(pkg))
                 .put("versionName", pkg.versionName)
                 .put("native", BuildConfig.VANTARA_NATIVE)
+                .put("channel", if (BuildConfig.DEBUG) "debug" else "stable")
                 // للبيانات القديمة: نسخة 0.0.3 تقارن هذا الرقم
                 .put("nativeApi", NATIVE_API)
                 .put("official", signerDigests(installedInfo()) == setOf(ApkCheck.STABLE_CERT_SHA256))

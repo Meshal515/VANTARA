@@ -3,6 +3,8 @@
 import { appVersion } from './config.js';
 
 export const MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/latest/download/vantara-update.json';
+export const DEBUG_MANIFEST_URL = 'https://github.com/Meshal515/VANTARA/releases/download/debug-channel/vantara-debug-update.json';
+export const manifestForChannel = (channel) => channel === 'debug' ? DEBUG_MANIFEST_URL : MANIFEST_URL;
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const LAST_CHECK_KEY = 'vantara.update.checkedAt';
 const DISMISS_KEY = 'vantara.update.dismissed';
@@ -46,10 +48,16 @@ export function decideUpdate(manifest, device) {
       (manifest.minimumSupportedVersionCode ?? 0) > manifest.versionCode) return none;
   const artifact = (entry, filename) => {
     if (!entry || !/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '') || !Number.isSafeInteger(entry.size) || entry.size < 1) return false;
-    return entry.url === `https://github.com/Meshal515/VANTARA/releases/download/stable-${manifest.versionCode}/${filename}`;
+    const releasePath = device?.channel === 'debug'
+      ? 'debug-channel/' + (filename === 'VANTARA-stable.apk' ? 'VANTARA-debug.apk' : filename)
+      : 'stable-' + manifest.versionCode + '/' + filename;
+    return entry.url === 'https://github.com/Meshal515/VANTARA/releases/download/' + releasePath;
   };
   // بناء محلي (debug): لا بصمة، ولا مفتاح رسمي يثبت فوقه تحديث
   if (!/^[a-f0-9]{24}$/.test(device?.native ?? '') || !Number.isSafeInteger(device.versionCode) || device.versionCode < 1) return none;
+  // A debug build only trusts its own distribution channel, never Stable assets.
+  if (device?.channel === 'debug' && manifest.channel !== 'debug') return none;
+  if (device?.channel !== 'debug' && manifest.channel === 'debug') return none;
   const version = String(manifest.versionName ?? '');
   const changelog = Array.isArray(manifest.changelog) ? manifest.changelog.map(String).slice(0, 6) : [];
   const required = Number(device.versionCode) < Number(manifest.minimumSupportedVersionCode ?? 0);
@@ -57,7 +65,7 @@ export function decideUpdate(manifest, device) {
 
   let apk = null;
   const apkNewer = Number(manifest.versionCode) > Number(device.versionCode) && device.official !== false && artifact(manifest.apk, 'VANTARA-stable.apk');
-  if (apkNewer && (!sameNative || required)) {
+  if (apkNewer && (device?.channel === 'debug' || !sameNative || required)) {
     apk = { version, versionCode: Number(manifest.versionCode), changelog, required, ...manifest.apk };
   }
 
@@ -102,7 +110,9 @@ export async function findUpdate({ force = false } = {}) {
   if (!native) return null;
   if (!force && Date.now() - Number(storage(LAST_CHECK_KEY) ?? '0') < CHECK_EVERY_MS) return null;
   try {
-    const [device, raw] = await Promise.all([deviceInfo(), native.manifest({ url: MANIFEST_URL })]);
+    const device = await deviceInfo();
+    if (!device) return null;
+    const raw = await native.manifest({ url: manifestForChannel(device.channel) });
     storage(LAST_CHECK_KEY, String(Date.now()));
     if (!device) return null;
     return { ...decideUpdate(JSON.parse(raw.json), device), device };

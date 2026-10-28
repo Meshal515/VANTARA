@@ -97,4 +97,41 @@ class RepoIndexTest {
         assertEquals("Keiyoushi", ok.name)
         assertThrows(IllegalArgumentException::class.java) { RepoIndex.parseMeta("{\"meta\":{\"name\":\"X\"}}") }
     }
+
+    @Test fun onlyExposesDeclaredHttpsLogosAndNeverGuessesAnIconUrl() {
+        val fingerprint = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+        fun meta(logo: String) = RepoIndex.parseMeta("""{"meta":{"name":"Example","signingKeyFingerprint":"$fingerprint","logo":"$logo"}}""")
+        assertEquals("https://example.com/logo.png", meta("https://example.com/logo.png").iconUrl)
+        assertNull(meta("http://example.com/logo.png").iconUrl)
+        assertNull(meta("https://user:secret@example.com/logo.png").iconUrl)
+        assertNull(meta("/logo.png").iconUrl)
+        assertNull(meta("").iconUrl)
+        assertNull(RepoIndex.parseMeta("""{"meta":{"name":"Example","signingKeyFingerprint":"$fingerprint","logo":{"url":"https://example.com/logo.png"}}}""").iconUrl)
+        assertNull(RepoIndex.parseIndex(index, base)[0].iconUrl)
+        assertEquals("https://example.com/icon.png", RepoIndex.parseIndex(index.replace("\"nsfw\":0,", "\"nsfw\":0,\"iconUrl\":\"https://example.com/icon.png\","), base)[0].iconUrl)
+    }
+
+    @Test fun addingRepoLogosPreservesLegacyInstalledPackagesAndSourceIds() {
+        val directory = java.nio.file.Files.createTempDirectory("repo-icons-test").toFile()
+        try {
+            val file = java.io.File(directory, "user-repos.json")
+            file.writeText("""{
+              "repos":[{"url":"$base","name":"Example","fingerprint":"pinned"}],
+              "extensions":[{"repoUrl":"$base","name":"Installed","pkg":"example.extension",
+                "apkUrl":"$base/apk/installed.apk","sha256":"retained-sha","versionName":"1.4.1",
+                "lib":1.4,"lang":"ar","nsfw":false,"sources":[{"id":"-123","name":"Source","lang":"ar"}]}]
+            }""")
+            val store = UserExtensionStore(file)
+            val old = store.state
+            assertEquals(1, old.extensions.size)
+            assertNull(old.repos.single().iconUrl)
+            store.update { it.copy(repos = it.repos.map { repo -> repo.copy(iconUrl = "https://example.com/logo.png") }) }
+            val reloaded = UserExtensionStore(file).state
+            assertEquals(old.extensions, reloaded.extensions)
+            assertEquals(old.repos.single().url, reloaded.repos.single().url)
+            assertEquals("-123", reloaded.extensions.single().sources.single().id)
+            assertEquals("pinned", reloaded.repos.single().fingerprint)
+            assertEquals("https://example.com/logo.png", reloaded.repos.single().iconUrl)
+        } finally { directory.deleteRecursively() }
+    }
 }
