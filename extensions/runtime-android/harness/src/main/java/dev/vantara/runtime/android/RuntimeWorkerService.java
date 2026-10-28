@@ -123,6 +123,7 @@ public final class RuntimeWorkerService extends Service {
         catch(BrokerRejected e) { throw new RuntimeFailure(e.code); }
         catch(VirtualMachineError e) { throw e; }
         catch(LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
+        catch(UnsupportedOperationException e) { throw new RuntimeFailure("CAPABILITY_UNSUPPORTED"); }
         catch(Throwable e) { throw new RuntimeFailure("PROVIDER_FAILED"); }
         RuntimeProtocol.result(reply,"OK",RuntimeProtocol.text(result));
     }

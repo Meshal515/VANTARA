@@ -119,3 +119,11 @@ details, episodes and a direct video URL using its actual provider code. This is
 extraction, not video playback or live-site proof. A separate authored regression
 requires an unsupported runtime capability to remain distinct from a failed source;
 that classification test is expected RED before its targeted worker fix.
+
+Run40722580722 on352d66b5 ran39 tests per API:38 passed and exactly the
+authored unsupported-capability regression failed, zero skips. The actual published
+Anime4up search → details → episodes → direct video URL journey passed on API29
+and35 using the local HTML transport. It does not download/play the video or prove
+the live site. The failing classification returned PROVIDER_FAILED for a real
+UnsupportedOperationException; the targeted fix returns CAPABILITY_UNSUPPORTED
+without terminating a healthy generation or changing ordinary provider failures.
