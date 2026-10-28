@@ -40,6 +40,16 @@ challenge/access-denied distinctions and private-address denial. They are not
 counted passed until API29/35 CI results exist. The lab test APK excludes duplicate
 JVM-only OSGi multi-release manifests; license/notice resources are retained.
 
+Run [40743622094](https://github.com/Meshal515/VANTARA/actions/runs/40743622094)
+on16436e2b reproduced three native failures on BOTH APIs:43 tests,40 passed,
+3 failed, no skips. Default private-address denial and all39 prior regressions
+passed; the three actual TLS/403/challenge tests reported TRANSPORT_FAILED. The
+53-test JVM gate passed. This is NOT a successful Android broker acceptance run.
+The next candidate preserves the host's socket/TLS exception cause for diagnosis
+without sending it through IPC, and attaches it to failures in the local fixture
+test. A real disconnected-TLS JVM regression first failed because the cause was
+discarded. No assertions/timeouts were weakened and no TLS verification disabled.
+
 ---
 
 The next Android lab candidate adds four offline registration tests using the

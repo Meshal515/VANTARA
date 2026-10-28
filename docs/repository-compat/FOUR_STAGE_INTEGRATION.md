@@ -33,6 +33,18 @@ Inspect actual existing bridge/registry/configuration/catalogue routes before ed
 
 Run all baseline suites, JVM networking, actual Android instrumentation(API29/35 and API26–28 worker allocation where supported), upgrade/storage fixtures and functional source tests. Windows/PWA acceptance covers executable adapters and explicit unsupported native formats. Report live-source vs offline pinned provider vs authored fixture coverage distinctly. Push every code/test/doc change to experimental branch, inspect CI and artifacts. Do not mark all four complete if actual source functions or platform/data gates remain untested.
 
+Owner's additional acceptance condition: for EACH admitted source, verify at least
+five distinct available works spanning very popular, popular, moderately known,
+less known and obscure works, separately on APK Debug, PWA and Windows where that
+runtime is executable. For anime/cinema, reach details and episodes/direct media
+and prove actual playback; for manga, reach details, chapters and rendered page
+images. Record source/package version, platform/build, work identity, date and
+each operation's result. Missing source coverage, absent works, incompatible
+platforms and skipped playback must stay explicit; no manifest/catalogue-only
+success may be promoted to full acceptance. Existing torrent/subtitle/player
+engines remain outside modification scope. These cross-platform five-work checks
+have NOT been run in the isolated lab described by the current progress report.
+
 ## Review focus
 
 1. Immutable host identity and revocation on failed initialization.

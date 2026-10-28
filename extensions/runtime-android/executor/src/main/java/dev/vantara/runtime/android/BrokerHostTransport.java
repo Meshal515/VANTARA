@@ -26,7 +26,11 @@ public final class BrokerHostTransport implements AndroidRuntimeClient.HostHttpT
         try {
             HttpBroker.Output response=session.execute(new HttpBroker.Input(request.url(),request.method(),headers.build(),request.body(),request.followRedirects()));
             return new RuntimeHttpAccess.Response(response.url(),response.status(),response.headers().toMultimap(),response.body());
-        }catch(HttpBroker.Failure failure){throw new RuntimeFailure(failure.code);}
+        }catch(HttpBroker.Failure failure){
+            // Retain diagnosis only on the trusted host. IPC serializes the code,
+            // never exception causes, response bodies, URLs or session values.
+            RuntimeFailure mapped=new RuntimeFailure(failure.code);mapped.initCause(failure);throw mapped;
+        }
         catch(IllegalStateException failure){
             String code=failure.getMessage();
             if(!Arrays.asList("COOKIE_STORAGE_CORRUPT","COOKIE_STORAGE_LIMIT","COOKIE_STORAGE_FAILED").contains(code))code="COOKIE_STORAGE_FAILED";

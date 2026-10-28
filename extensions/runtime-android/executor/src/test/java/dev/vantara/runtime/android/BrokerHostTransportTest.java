@@ -96,6 +96,18 @@ public class BrokerHostTransportTest {
             assertEquals("SESSION_CLOSED",failure(transport,owner,get()));
         }finally{transport.close();calls.shutdownNow();}
     }
+    @Test public void transportFailureKeepsHostCauseWithoutPuttingItInThePublicCode() throws Exception {
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+        AndroidRuntimeClient.Scope owner=scope("account");
+        try(BrokerHostTransport transport=new BrokerHostTransport(owner,broker)){
+            try{transport.exchange(owner,get());fail("Expected failed TLS transport");}
+            catch(RuntimeFailure failure){
+                assertEquals("TRANSPORT_FAILED",failure.code);assertEquals("TRANSPORT_FAILED",failure.getMessage());
+                assertNotNull("Keep the host broker failure",failure.getCause());
+                assertNotNull("Keep the actual host socket/TLS failure",failure.getCause().getCause());
+            }
+        }
+    }
     /** Test-only routing retains the real HTTPS hostname/certificate and actual sockets. */
     private static final class LocalSocketFactory extends SocketFactory {
         private final int port;LocalSocketFactory(int port){this.port=port;}

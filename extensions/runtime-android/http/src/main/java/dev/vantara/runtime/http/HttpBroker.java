@@ -183,7 +183,7 @@ public final class HttpBroker {
                             if(closed.get())throw new Failure("SESSION_CLOSED");
                             if(e instanceof Failure)throw e;
                             for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof DeniedDns)throw new Failure(((DeniedDns)cause).code);
-                            throw new Failure("TRANSPORT_FAILED");
+                            Failure failure=new Failure("TRANSPORT_FAILED");failure.initCause(e);throw failure;
                         } finally {synchronized(active){active.remove(call);}}
                     } finally {release(host);}
                 }
