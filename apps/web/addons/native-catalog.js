@@ -126,10 +126,11 @@ export async function createNativeCatalog(record, {
       : await invoke('page', { sourceId: id, listing: name, page: number, query }, options);
     return page(result);
   };
-  const latestMethod = manga && typeof engine.latest !== 'function' ? 'catalogue' : 'latest';
   const adapter = {
-    home: (number, options) => listing(latestMethod, number, '', options),
-    latest: (number, options) => listing(latestMethod, number, '', options),
+    ...(!manga || typeof engine.latest === 'function' ? {
+      home: (number, options) => listing('latest', number, '', options),
+      latest: (number, options) => listing('latest', number, '', options),
+    } : {}),
     catalogue: (number, options) => listing(manga ? 'catalogue' : 'popular', number, '', options),
     search: (query, number, options) => listing('search', number, String(query ?? ''), options),
   };
@@ -161,7 +162,7 @@ export async function createNativeCatalog(record, {
       return result.episodes;
     };
   }
-  const capabilities = ['home', 'search', 'details', ...(manga ? ['pages'] : ['episodes'])];
+  const capabilities = [...(adapter.home ? ['home'] : []), 'search', 'details', ...(manga ? ['pages'] : ['episodes'])];
   const addon = {
     // The caller must resolve this sourceId in the refreshed runtime registry before opening works.
     key: `core|${id}`,

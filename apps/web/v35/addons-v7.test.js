@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { renderV7Addons } from './addons-v7.js';
+import { createSourcePulse } from '../addons/source-pulse.js';
+import { SHELL_HTML } from './markup.js';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 const tick = async () => { for(let i=0;i<8;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
@@ -293,17 +295,17 @@ it('gates challenged source opens until explicit verification without launching 
 
 it('renders functional repeated evidence and confirmed failures distinctly from unknown and transient errors',async()=>{
   setup();const now=Date.now();
-  const health={state:'healthy',version:'1',cacheEpoch:'v1',functionalSuccessAt:now,samples:[10,11]};
+  const health={state:'healthy',version:'1',cacheEpoch:'v1',functionalSuccessAt:now,functionalSuccessCount:2,samples:[10,11]};
   const base={version:'1',cacheEpoch:'v1',protocol:'stremio',capabilities:['catalog']};
   const items=[{...base,key:'stable',name:'Stable',health:{catalog:health}},
-    {...base,key:'one',name:'One',health:{catalog:{...health,samples:[10]}}},
+    {...base,key:'one',name:'One',health:{catalog:{...health,functionalSuccessCount:1,samples:[10]}}},
     {...base,key:'unknown',name:'Unknown'},
     {...base,key:'transient',name:'Transient',health:{catalog:{state:'failed',failures:1,reason:'timeout'}}},
     {...base,key:'gone',name:'Gone',health:{catalog:{state:'failed',failures:3,reason:'HTTP_410',scope:'source'}}}];
   const view=renderV7Addons({registry:registry(items)});await tick();installedTab(view).click();
   const states=[...view.querySelectorAll('.v7-status')];
-  expect(states.map(x=>x.textContent)).toEqual(['مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · تحتاج انتباه','مثبتة · غير متاحة']);
-  expect(states.map(x=>x.dataset.state)).toEqual(['attention','attention','attention','attention','unavailable']);view.close();
+  expect(states.map(x=>x.textContent)).toEqual(['مثبتة · مستقرة · كتالوج','مثبتة · تعمل · كتالوج','مثبتة · لم تُفحص','مثبتة · تحتاج انتباه','مثبتة · غير متاحة']);
+  expect(states.map(x=>x.dataset.state)).toEqual(['stable','working','untested','attention','unavailable']);view.close();
 });
 
 it('shows actual diagnostic checklist including untested and unsupported without closing details',async()=>{
@@ -336,16 +338,17 @@ it('restores repository/search/type and reports a snapshot without turning tab c
   expect(view.querySelector('.v7-body .v7-back')).toBeNull();view.back();installedTab(view).click();expect(view.back()).toBe(false);view.close();
 });
 
-it('does not treat timing samples as repeated functional success and only turns green after a second observed success',async()=>{
+it('does not infer repeated functional success from timing samples or require observing timestamps inside the manager',async()=>{
   setup();const now=Date.now();
   const h={state:'healthy',version:'1',cacheEpoch:'v1',functionalSuccessAt:now-100,samples:[20,30]};
-  const item={key:'observed',name:'Observed',version:'1',cacheEpoch:'v1',protocol:'stremio',capabilities:['catalog'],health:{catalog:h}};
+  const item={key:'observed',name:'Observed',version:'1',cacheEpoch:'v1',protocol:'stremio',capabilities:['catalog','streams'],health:{catalog:h}};
   const view=renderV7Addons({registry:registry([item])});await tick();installedTab(view).click();
-  expect(view.querySelector('.v7-status').dataset.state).toBe('attention');
-  h.functionalSuccessAt=now;view.reload();await tick();
+  expect(view.querySelector('.v7-status').dataset.state).toBe('working');
+  h.functionalSuccessCount=2;view.reload();await tick();
   expect(view.querySelector('.v7-status').dataset.state).toBe('stable');
-  h.cacheEpoch='v2';item.cacheEpoch='v2';view.reload();await tick();
-  expect(view.querySelector('.v7-status').dataset.state).toBe('attention');view.close();
+  view.querySelector('.v7-row').click();expect(view.querySelector('.v7-evidence-detail').textContent).toContain('روابط التشغيل');
+  h.cacheEpoch='v2';item.cacheEpoch='v3';view.reload();await tick();
+  expect(view.querySelector('.v7-status').dataset.state).toBe('untested');view.close();
 });
 
 it('keeps native configuration inside VANTARA and refreshes the manager after Install',async()=>{
@@ -375,7 +378,7 @@ it('checks installed native addons using the actual diagnostic result with Arabi
   const check=[...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='فحص الإضافة');expect(check).toBeTruthy();check.click();await tick();
   expect(onCheck).toHaveBeenCalledWith(expect.objectContaining({pkg:'native.check'}),expect.objectContaining({signal:expect.any(AbortSignal)}));
   expect([...view.querySelectorAll('.v7-check')].map(x=>x.dataset.state)).toEqual(['passed','untested']);
-  expect(view.querySelector('.v7-checks').textContent).toContain('كتالوج');expect(view.querySelector('.v7-checks').textContent).toContain('بحث');view.close();
+  expect(view.querySelector('.v7-checks').textContent).toContain('آخر التحديثات');expect(view.querySelector('.v7-checks').textContent).toContain('بحث');view.close();
 });
 
 it('aborts the actual diagnostic when details are dismissed and ignores late results',async()=>{
@@ -417,4 +420,42 @@ it.each(['remote','native'])('renders one challenged %s source card with Verify 
   const buttons=[...view.querySelectorAll('.v7-row button')];expect(buttons.some(x=>x.textContent.includes('فتح'))).toBe(false);
   const verify=buttons.find(x=>x.textContent==='تحقق');expect(verify).toBeTruthy();expect(begin).not.toHaveBeenCalled();verify.click();await tick();
   expect(begin).toHaveBeenCalledWith('verify.example');expect(open).not.toHaveBeenCalled();view.close();
+});
+
+
+it('uses only the actual shell heading and keeps the manager add action',async()=>{
+ const d=setup();d.body.innerHTML='<div class="v35">'+SHELL_HTML+'</div>';d.querySelector('#utilityTitle').textContent='الإضافات';
+ const view=renderV7Addons({registry:registry()});d.querySelector('#utilityBody').append(view);await tick();
+ expect([...d.querySelectorAll('#utility h1,#utility h2')].filter(x=>x.textContent==='الإضافات').length).toBe(1);
+ expect(view.querySelector('h2')).toBeNull();expect(view.querySelector('.v7-plus').textContent).toBe('أضف');view.close();
+});
+
+it('keeps unknown and unsupported sources neutral while actual errors, configuration and verification need attention',async()=>{
+ setup();const items=[{key:'unknown',name:'Unknown'},{key:'unsupported',name:'Unsupported',assessment:{level:'unsupported',detail:'Unavailable platform'}},
+ {key:'disabled',name:'Disabled',enabled:false},{key:'config',name:'Config',configuration:{required:true,configured:false}},
+ {key:'error',name:'Error',loadError:'Actual runtime error'},{key:'verify',name:'Verify',domain:'verify.example'}];
+ const view=renderV7Addons({registry:registry(items),verification:{list:()=>[{host:'verify.example'}]}});await tick();installedTab(view).click();
+ expect([...view.querySelectorAll('.v7-status')].map(x=>x.dataset.state)).toEqual(['untested','untested','attention','attention','attention','attention']);view.close();
+});
+
+it('uses persisted actual bundled browsing evidence without claiming untested playback functions work',async()=>{
+ setup();const memory=new Map();const storage={getItem:key=>memory.get(key)||null,setItem:(key,value)=>memory.set(key,value)};
+ const pulse=createSourcePulse({storage});const identity={version:'1',cacheEpoch:'core:1',capability:'home'};
+ await pulse.measure('core|actual',async()=>({items:[{url:'/work',title:'Work'}]}),identity);
+ await pulse.measure('core|actual',async()=>({items:[{url:'/work',title:'Work'}]}),identity);
+ const restored=createSourcePulse({storage});const addon={key:'core|actual',name:'Actual',bundled:true,version:'1',capabilities:['home','search','streams']};
+ const view=renderV7Addons({registry:registry([addon]),pulse:restored});await tick();installedTab(view).click();
+ expect(view.querySelector('.v7-status').textContent).toBe('مثبتة · مستقرة · آخر التحديثات');
+ view.querySelector('.v7-row').click();expect(view.querySelector('.v7-evidence-detail').textContent).toContain('روابط التشغيل');
+ restored.record('core|actual','failed',{error:'Actual timeout',...identity});expect(view.querySelector('.v7-status').dataset.state).toBe('attention');
+ view.close();restored.record('core|actual','ok',{items:1,...identity});expect(view.querySelector('.v7-layer').hidden).toBe(true);
+});
+
+it('maps installed native package status through actual package identity rather than display name',async()=>{
+ setup();const pulse=createSourcePulse({storage:null});const identity={version:'1',cacheEpoch:'core:1',capability:'catalog'};
+ pulse.record('core|real','ok',{items:2,...identity});pulse.record('core|real','ok',{items:2,...identity});
+ const records=[{key:'core|real',name:'Real source',pkg:'native.actual',bundled:true,version:'1',capabilities:['home']},{key:'core|wrong',name:'Native package',pkg:'different',bundled:true,version:'1'}];
+ const api={list:async()=>({repos:[],installed:[{name:'Native package',pkg:'native.actual',version:'1'}]}),extensions:async()=>[]};
+ const view=renderV7Addons({registry:registry(records),repositories:api,pulse});await tick();installedTab(view).click();
+ const row=[...view.querySelectorAll('.v7-row')].find(x=>x.querySelector('.v7-native-actions')&&x.querySelector('.v7-name').textContent==='Native package');expect(row.querySelector('.v7-status').textContent).toBe('مثبتة · مستقرة · كتالوج');view.close();
 });

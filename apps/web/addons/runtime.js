@@ -76,8 +76,13 @@ export function createAddonRuntime({
       if (!sourceDef) throw new Error("المصدر غير متاح");
       const raw = createBundledAdapter({ sourceDef, engine: r.registry });
       // كل تصفح فعلي للمصدر دليل على صحته: يُسجَّل في نبضه
-      const measured = (fn) => (...a) => pulse.measure(key, () => fn(...a), { signal: a.at(-1)?.signal });
-      return { ...raw, home: measured(raw.home), latest: measured(raw.latest), popular: measured(raw.popular), search: measured(raw.search) };
+      const measured = (fn, capability) => (...a) => pulse.measure(key, () => fn(...a), {
+        signal: a.at(-1)?.signal,
+        capability,
+        version: sourceDef.version == null ? undefined : String(sourceDef.version),
+        cacheEpoch: sourceDef.cacheEpoch ?? (sourceDef.version == null ? undefined : `core:${sourceDef.version}`),
+      });
+      return { ...raw, ...(raw.catalogue ? {catalogue: measured(raw.catalogue, "catalog")} : {}), home: measured(raw.home, "home"), latest: measured(raw.latest, "home"), popular: measured(raw.popular, "catalog"), search: measured(raw.search, "search") };
     }
     const c = registry.connection(key);
     if (c.manifest.configuration?.required && !c.manifest.configuration.configured)
@@ -415,20 +420,27 @@ export function createAddonRuntime({
         subtitles: (input) => adapter(m.key).subtitles(input),
       }));
   }
-  /** فحص مصدر مدمج بطلب حقيقي: آخر التحديثات إن وُجدت، وإلا بحث قصير. */
+  /** الكتالوج وآخر التحديثات قدرتان منفصلتان؛ فراغ إحداهما لا يصف الأخرى. */
   async function probeCore(addon, { signal } = {}) {
     const a = adapter(addon.key);
     const home = (addon.capabilities ?? []).includes("home");
-    let check;
-    try {
-      const out = await (home ? a.home(1, { signal }) : a.search("one", 1, { signal }));
-      const n = (out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : [])).length;
-      check = { capability: home ? "home" : "search", state: n ? "passed" : "empty", message: n ? `أعاد ${n} عملًا` : "استجاب بلا نتائج" };
-    } catch (error) {
-      if (error?.name === "AbortError" || signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
-      check = { capability: home ? "home" : "search", state: "failed", message: error?.name === "TimeoutError" ? "انتهت مهلة الفحص" : "تعذر الطلب من المصدر" };
+    const plans = [
+      ...(a.catalogue ? [{capability: "catalog", label: "الكتالوج", run: () => a.catalogue(1, {signal})}] : []),
+      ...(home ? [{capability: "home", label: "آخر التحديثات", run: () => a.home(1, {signal})}]
+        : !a.catalogue ? [{capability: "search", label: "البحث", run: () => a.search("one", 1, {signal})}] : []),
+    ];
+    const checks = [];
+    for (const {capability, label, run} of plans) {
+      try {
+        const out = await run();
+        const n = (out?.mangas ?? out?.items ?? (Array.isArray(out) ? out : [])).length;
+        checks.push({capability, state: n ? "passed" : "empty", message: `${label}: ${n ? `أعاد ${n} عملًا` : "استجاب بلا نتائج"}`});
+      } catch (error) {
+        if (error?.name === "AbortError" || signal?.aborted) throw new DOMException("ألغي فحص الإضافة", "AbortError");
+        checks.push({capability, state: "failed", message: `${label}: ${error?.name === "TimeoutError" ? "انتهت مهلة الفحص" : "تعذر الطلب من المصدر"}`});
+      }
     }
-    return { checks: [check], assessment: assessAddon(addon, runtimeName), pulse: pulse.get(addon.key) };
+    return { checks, assessment: assessAddon(addon, runtimeName), pulse: pulse.get(addon.key) };
   }
   async function diagnose(key, { signal, sample } = {}) {
     await ready;

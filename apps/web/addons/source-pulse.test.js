@@ -130,3 +130,36 @@ it('يطبق التحقق على browse الحقيقي المغلف في runtime
  await expect(adapter.home(1)).rejects.toMatchObject({code:'INVALID_SOURCE_RESPONSE'});expect(pulseView(pulse.get('core|native-reader')).level).toBe('failed');
  response={mangas:[],hasNextPage:false};expect(await adapter.search('no matches',1)).toBe(response);expect(pulseView(pulse.get('core|native-reader')).level).toBe('empty');
 });
+
+it('counts only nonempty validated browsing successes and preserves the count across sessions with release identity',async()=>{
+ let now=100;const storage=memory(),p=createSourcePulse({storage,now:()=>now});const identity={version:'1',cacheEpoch:'a'};
+ const run=()=>p.measure('core|x',async()=>({items:[{url:'/work',title:'Work'}]}),identity);
+ await run();now++;await run();expect(p.get('core|x')).toMatchObject({successfulBrowseCount:2,version:'1',cacheEpoch:'a'});
+ const restored=createSourcePulse({storage,now:()=>now});expect(restored.get('core|x').successfulBrowseCount).toBe(2);
+ await restored.measure('core|x',async()=>({items:[]}),identity);expect(restored.get('core|x').successfulBrowseCount).toBe(2);
+ for(let i=0;i<55;i++)await restored.measure('core|x',async()=>({items:[{url:'/work',title:'Work'}]}),identity);
+ expect(restored.get('core|x').successfulBrowseCount).toBe(50);
+});
+
+it('resets browse counts after failure, verification, release changes and stale success without clearing stored sources',async()=>{
+ let now=100;const p=createSourcePulse({storage:memory(),now:()=>now});const identity={version:'1',cacheEpoch:'a'};
+ p.record('core|x','ok',{items:1,...identity});p.record('core|x','ok',{items:1,...identity});
+ p.record('core|x','failed',{error:'timeout',...identity});expect(p.get('core|x').successfulBrowseCount).toBe(0);
+ p.record('core|x','ok',{items:1,...identity});p.record('core|x','verification',{...identity});expect(p.get('core|x').successfulBrowseCount).toBe(0);
+ p.record('core|x','ok',{items:1,...identity});p.record('core|x','ok',{items:1,version:'2',cacheEpoch:'a'});expect(p.get('core|x').successfulBrowseCount).toBe(1);
+ now+=31*60000;p.record('core|x','ok',{items:1,version:'2',cacheEpoch:'a'});expect(p.get('core|x').successfulBrowseCount).toBe(1);
+});
+
+it('preserves legacy pulse data and defaults its missing successful browse count to zero',()=>{
+ const storage=memory();storage.setItem('vantara.sourcePulse.v1',JSON.stringify({'core|legacy':{state:'ok',at:100,items:3}}));
+ expect(createSourcePulse({storage,now:()=>100}).get('core|legacy')).toMatchObject({state:'ok',items:3,successfulBrowseCount:0});
+});
+
+it('scopes repeated browsing evidence to the function actually measured',async()=>{
+ const p=createSourcePulse({storage:memory(),now:()=>100});const run=async()=>({items:[{url:'/work',title:'Work'}]});
+ await p.measure('core|x',run,{version:'1',cacheEpoch:'core:1',capability:'home'});
+ await p.measure('core|x',run,{version:'1',cacheEpoch:'core:1',capability:'home'});
+ expect(p.get('core|x')).toMatchObject({capability:'home',successfulBrowseCount:2});
+ await p.measure('core|x',run,{version:'1',cacheEpoch:'core:1',capability:'search'});
+ expect(p.get('core|x')).toMatchObject({capability:'search',successfulBrowseCount:1});
+});

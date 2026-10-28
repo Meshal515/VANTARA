@@ -58,7 +58,7 @@ const extraLabel = (name) =>
 export function renderSourceMode({
   addon,
   adapter,
-  state = { tab: "home", query: "", page: 1, scroll: 0 },
+  state = { query: "", page: 1, scroll: 0 },
   onOpenWork = () => {},
   onBack = () => {},
   pulse = null,
@@ -71,6 +71,8 @@ export function renderSourceMode({
     grid = node("div", "addon-source-grid up-list"),
     note = node("p", "addon-source-note");
   root.dir = "rtl";
+  const fullCatalogue = (addon.contentTypes ?? []).includes("manga") && typeof adapter.catalogue === "function";
+  state.tab ??= fullCatalogue ? "catalogue" : "home";
   note.setAttribute("role", "status");
   note.setAttribute("aria-live", "polite");
   let controller = null,
@@ -188,6 +190,7 @@ export function renderSourceMode({
   const choices = catalogs.length
     ? catalogs.map((c) => [`${c.type}|${c.id}`, c.name ?? c.id])
     : [
+        ...(fullCatalogue ? [["catalogue", "الكتالوج"]] : []),
         ...((addon.capabilities ?? []).includes("home")
           ? [["home", "آخر التحديثات"]]
           : []),
@@ -297,6 +300,8 @@ export function renderSourceMode({
         (addon.capabilities ?? []).includes("search")
       )
         out = await adapter.search(state.query, state.page, options);
+      else if (state.tab === "catalogue" && fullCatalogue)
+        out = await adapter.catalogue(state.page, options);
       else if (state.tab === "popular" && adapter.popular)
         out = await adapter.popular(state.page, options);
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
@@ -397,6 +402,8 @@ export function renderSourceMode({
         ? ""
         : state.query
           ? `لا نتائج لـ«${state.query}» في ${addon.name}.`
+          : state.tab === "catalogue" ? "الكتالوج استجاب بلا أعمال الآن."
+          : state.tab === "home" ? "آخر التحديثات بلا أعمال الآن."
           : "المصدر استجاب بلا أعمال الآن.";
       failures = 0;
       autoMore = true;

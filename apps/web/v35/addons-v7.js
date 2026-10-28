@@ -45,6 +45,7 @@ const safeIcon=(value)=>{
   if(text.length<=90*1024&&/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(text))return text;
   return safe(value);
 };
+const capabilityLabel=cap=>({home:"آخر التحديثات",catalog:"كتالوج",catalogue:"كتالوج",browse:"التصفح",search:"بحث",meta:"بيانات",details:"تفاصيل",streams:"روابط التشغيل",subtitles:"ترجمة",pages:"صفحات",chapters:"فصول",episodes:"حلقات",addon:"الإضافة",integration:"ربط المحرك",other:"قدرة إضافية"}[cap]||"قدرة إضافية");
 const kindName=(a)=>{
   if(a.content==="cinema"||a.kind==="cinema")return "سينما";
   if(a.kind==="anime" || a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
@@ -57,7 +58,7 @@ const kindName=(a)=>{
 };
 
 export function renderV7Addons({
-  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null, verification=null,
+  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null, verification=null, pulse=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
 }={}){
   const root=el("section","v7-addon addon-v7");
@@ -66,17 +67,17 @@ export function renderV7Addons({
   let alive=true, tab=["repos","installed","verification"].includes(initialState.tab)?initialState.tab:"repos", opened=null, currentSearch=String(initialState.search||"").trim().toLocaleLowerCase(), type=String(initialState.type||"الكل");
   let restoreKey=initialState.openedKey||null, restoreScroll=true;
   let busy=false, generation=0, lifecycle=0, menuOpen=false, diagnosticController=null;
-  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), functionalEvidence=new Map();
+  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), diagnosticResults=new Map();
   let requests=new Map(), queue=[], activeRequests=0;
   const stores=[
     ...(animeRepositories?[{id:"anime",kind:"anime",api:animeRepositories}]:[]),
     ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[])
   ];
   let repos=[], extensions=new Map(), siteRows=[], loading=false;
-  const head=el("header","v7-heading"),heading=el("h2",null,"الإضافات");
+  const head=el("div","v7-heading");
   const add=btn("أضف","v7-plus",()=>showImport());
   add.prepend(ico("plus"));
-  head.append(heading,add);
+  head.append(add);
   const tabs=el("nav","v7-tabs");
   const repoTab=btn("الإضافات","v7-tab",()=>switchTab("repos"));
   const installedTab=btn("المثبتة","v7-tab",()=>switchTab("installed"));
@@ -191,32 +192,68 @@ export function renderV7Addons({
   function sourceMeta(a){
     return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||""),a.version||""].filter(Boolean).join(" · ");
   }
+  const diagnosticKey=a=>JSON.stringify([a._store?.id,a.key||a.pkg||a.id||a.domain,a.version,a.cacheEpoch]);
   function installedState(a){
-    const assessment=a.assessment||assessAddon(a,registry.runtimeName||"pwa");
     if(sourceChallenges(a).length)return {state:"attention",label:"تحتاج انتباه",detail:"المصدر يحتاج تحققًا."};
-    const caps=supportedCapabilities(a,registry.runtimeName||"pwa");
-    const evidence=caps.map(cap=>a.health?.[cap]);
-    // Endpoint absence must be explicit. An individual chapter/cover failure,
-    // timeout or ordinary failed diagnostic cannot establish source removal.
-    if(a.availability?.confirmed===true && a.availability.state==="unavailable")
-      return {state:"unavailable",label:"غير متاحة",detail:a.availability.reason||assessment.detail};
-    if(evidence.some(h=>h?.scope==="source" && ["failed","cooling"].includes(h.state) && /^(HTTP[_ ]?(404|410)|SOURCE_REMOVED|SOURCE_NOT_FOUND)$/.test(h.reason||"")))
-      return {state:"unavailable",label:"غير متاحة",detail:evidence.find(h=>h?.scope==="source"&&h.reason)?.reason};
-    const observed=evidence.map((h,i)=>{
-      if(!Number.isFinite(h?.functionalSuccessAt)||!["healthy","empty"].includes(h.state))return 0;
-      const key=JSON.stringify([a.key||a.pkg||a.id||a.domain,caps[i],a.version,a.cacheEpoch]);
-      const times=functionalEvidence.get(key)||new Set();times.add(h.functionalSuccessAt);
-      if(times.size>2)times.delete(Math.min(...times));functionalEvidence.set(key,times);return times.size;
-    });
-    const repeated=assessment.level==="stable" && caps.length && evidence.every(h=>
-      Number.isFinite(h?.functionalSuccessAt) && h.functionalSuccessAt<=Date.now() && Date.now()-h.functionalSuccessAt<=7*86400000 &&
-      h.version===a.version && h.cacheEpoch===a.cacheEpoch) && observed.every(count=>count>=2);
-    if(repeated)return {state:"stable",label:"مستقرة",detail:assessment.detail};
-    return {state:"attention",label:"تحتاج انتباه",detail:a.loadError||a.disabledReason||a.error||assessment.detail||"لم تُفحص الإضافة بعد."};
+    if(a.enabled===false)return {state:"attention",label:"تحتاج انتباه",detail:"الإضافة معطلة."};
+    if(a.configuration?.required&&!a.configuration.configured)return {state:"attention",label:"تحتاج انتباه",detail:"الإضافة تحتاج إعدادًا."};
+    const actualError=a.loadError||a.disabledReason||a.error;
+    if(actualError)return {state:"attention",label:"تحتاج انتباه",detail:fmtErr(actualError)};
+    if(a.availability?.confirmed===true&&a.availability.state==="unavailable")
+      return {state:"unavailable",label:"غير متاحة",detail:a.availability.reason||"أكد المحرك أن المصدر غير متاح."};
+    // Native packages may expose several canonical sources. Package identity is
+    // authoritative; a matching display name never supplies health evidence.
+    const bound=a._store&&a.pkg?(registry.list?.()||[]).filter(x=>x.pkg===a.pkg):[];
+    const sources=bound.length?bound:[a],passed=[],untested=[],errors=[];
+    let empty=false;
+    const recent=(at,age)=>Number.isFinite(at)&&at<=Date.now()&&Date.now()-at<=age;
+    for(const source of sources){
+      const caps=supportedCapabilities(source,registry.runtimeName||"pwa");
+      const checked=new Set();
+      for(const cap of caps){
+        const h=source.health?.[cap];
+        if(!h||(h.version!=null&&h.version!==source.version)||(h.cacheEpoch!=null&&h.cacheEpoch!==source.cacheEpoch))continue;
+        if(["failed","cooling","configuration"].includes(h.state)){
+          if(h.scope==="source"&&/^(HTTP[_ ]?(404|410)|SOURCE_REMOVED|SOURCE_NOT_FOUND)$/.test(h.reason||""))
+            return {state:"unavailable",label:"غير متاحة",detail:h.reason};
+          errors.push(capabilityLabel(cap)+": "+(h.reason||"فشل الطلب الفعلي"));
+        }
+        if(["healthy","empty"].includes(h.state)&&h.version===source.version&&h.cacheEpoch===source.cacheEpoch&&recent(h.functionalSuccessAt,7*86400000)){
+          passed.push({cap,stable:h.functionalSuccessCount>=2});checked.add(cap);
+        }else if(h.state==="empty")empty=true;
+      }
+      const p=pulse?.get?.(source.key);
+      const release=p&&p.version===String(source.version)&&p.cacheEpoch===(source.cacheEpoch??"core:"+source.version);
+      if(release){
+        if(["failed","verification"].includes(p.state))errors.push(p.error|| (p.state==="verification"?"المصدر يحتاج تحققًا.":"فشل طلب التصفح الفعلي."));
+        if(p.state==="ok"&&Number.isInteger(p.items)&&p.items>0&&recent(p.at,30*60000)){
+          const cap=p.capability||"browse";passed.push({cap,stable:p.successfulBrowseCount>=2});checked.add(cap);
+          if(cap==="catalog")checked.add("catalogue");
+        }else if(p.state==="empty"&&p.items===0&&recent(p.at,30*60000))empty=true;
+      }
+      for(const cap of caps)if(!checked.has(cap))untested.push(capabilityLabel(cap));
+    }
+    const diagnosis=diagnosticResults.get(diagnosticKey(a));
+    for(const check of diagnosis?.checks||[]){
+      if(["failed","configuration","disabled"].includes(check.state))errors.push(check.message||"فشل الفحص الفعلي.");
+      else if(check.state==="passed"&&!["addon","integration","other"].includes(check.capability)&&!passed.some(x=>x.cap===check.capability))
+        passed.push({cap:check.capability,stable:false});
+      else if(check.state==="empty")empty=true;
+    }
+    if(errors.length)return {state:"attention",label:"تحتاج انتباه",detail:errors.map(fmtErr).join(" · ")};
+    if(passed.length){
+      const labels=[...new Set(passed.map(x=>capabilityLabel(x.cap)))];
+      const missing=[...new Set(untested)].filter(x=>!labels.includes(x));
+      const stable=passed.every(x=>x.stable);
+      return {state:stable?"stable":"working",label:(stable?"مستقرة":"تعمل")+" · "+labels.join("، "),
+        detail:"نجح وظيفيًا: "+labels.join("، ")+"."+(missing.length?" لم تُفحص: "+missing.join("، ")+".":"")+" الحالة تخص الوظائف المذكورة فقط."};
+    }
+    if(empty)return {state:"empty",label:"تستجيب بلا نتائج",detail:"استجابة فعلية صالحة بلا نتائج لهذا الطلب؛ لا تثبت توفر المحتوى."};
+    return {state:"untested",label:"لم تُفحص",detail:"لا توجد أدلة وظيفية حديثة لهذه الإضافة."};
   }
   function status(a){
     const result=installedState(a),node=el("span","v7-status visible","مثبتة · "+result.label);
-    node.dataset.state=result.state;return node;
+    node.dataset.state=result.state;node.title=result.detail;return node;
   }
   function sourceRow(a,mode,parent){
     const row=el("article","v7-row");row.tabIndex=0;
@@ -539,18 +576,19 @@ export function renderV7Addons({
       try{
         const result=await onCheck(a,{signal:controller.signal});
         if(!alive||controller.signal.aborted||!dialog.contains(results))return;
+        diagnosticResults.set(diagnosticKey(a),result);
         results.replaceChildren();
         const labels={passed:"نجح",failed:"مشكلة",untested:"لم يُفحص",unsupported:"غير مدعوم",empty:"لا نتائج",configuration:"يحتاج إعدادًا",disabled:"معطلة"};
-        const capabilities={home:"كتالوج",catalog:"كتالوج",search:"بحث",meta:"بيانات",details:"تفاصيل",streams:"روابط التشغيل",subtitles:"ترجمة",pages:"صفحات",chapters:"فصول",episodes:"حلقات",addon:"الإضافة",other:"قدرة إضافية"};
         const checks=[...(result?.checks||[])];
         for(const capability of a.capabilities||[])if(!checks.some(x=>x.capability===capability))
           checks.push({capability,state:"untested",message:"لم يُرجع الفحص نتيجة لهذه القدرة."});
         for(const item of checks){
           const line=el("div","v7-check");line.dataset.state=item.state;
-          line.append(el("strong",null,[item.sourceName,labels[item.state]||"لم يُفحص",capabilities[item.capability]||"قدرة إضافية"].filter(Boolean).join(" · ")),el("span",null,fmtErr(item.message||"لم يُرجع الفحص تفاصيل.")));results.append(line);
+          line.append(el("strong",null,[item.sourceName,labels[item.state]||"لم يُفحص",capabilityLabel(item.capability)].filter(Boolean).join(" · ")),el("span",null,fmtErr(item.message||"لم يُرجع الفحص تفاصيل.")));results.append(line);
         }
         if(!checks.length)results.append(el("p","v7-notice","لم يُرجع الفحص نتائج قابلة للتحقق."));
-        if(result?.assessment?.detail)results.append(el("p","v7-notice",fmtErr(result.assessment.detail)));draw();
+        if(result?.assessment?.detail)results.append(el("p","v7-notice",fmtErr(result.assessment.detail)));
+        const detail=dialog.querySelector(".v7-evidence-detail");if(detail)detail.textContent=installedState(a).detail;draw();
       }catch(err){if(alive&&!controller.signal.aborted&&dialog.contains(results))results.replaceChildren(el("p","v7-notice",fmtErr(err)));}
       finally{if(diagnosticController===controller){diagnosticController=null;busy=false;}check.disabled=false;}
     });actions.append(check);container.append(results);
@@ -574,6 +612,7 @@ export function renderV7Addons({
       : assessment?.detail
         ? "حالة التشغيل: "+fmtErr(assessment.detail)
         : "حالة التشغيل: لم تُفحص."));
+    dialog.append(el("p","v7-notice v7-evidence-detail",installedState(a).detail));
     for(const [cap,h] of Object.entries(a.health||{}))if(h.reason)dialog.append(el("p","v7-notice",cap+": "+fmtErr(h.reason)));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");
@@ -807,8 +846,9 @@ export function renderV7Addons({
   }
   root.back=navigateBack;
   root.snapshot=()=>({tab,openedKey:opened?.key||restoreKey||null,search:search.value,type,scrollTop:root.scrollTop||0,scrollY:window?.scrollY||0});
-  root.close=()=>{cancelDiagnostic();alive=false;removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
-  root.reload=()=>{alive=true;removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
+  let removePulse=pulse?.onChange?.(()=>{if(alive)draw();})||(()=>{});
+  root.close=()=>{cancelDiagnostic();alive=false;removePulse();removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
+  root.reload=()=>{alive=true;removePulse();removePulse=pulse?.onChange?.(()=>{if(alive)draw();})||(()=>{});removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
   search.oninput=()=>{currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();
   return root;

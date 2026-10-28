@@ -14,6 +14,19 @@ const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   return {a,key:p.manifest.key,requests};
 };
 const manifest={id:'org.sub',name:'Sub',version:'1.0.0',resources:['subtitles'],types:['movie'],catalogs:[]};
+it('routes the Team X catalogue through the existing native catalogue contract instead of latest',async()=>{
+ const sourceId='eu.kanade.tachiyomi.extension.ar.teamx';
+ const catalogue=vi.fn(async({page})=>({mangas:[{url:`/series/work-${page}`,title:`Catalogue ${page}`,memo:'native'}],hasNextPage:page===1}));
+ const latest=vi.fn(async()=>({mangas:[],hasNextPage:false}));
+ const prepare=vi.fn(async()=>({ok:true}));
+ const {a}=await setup(manifest,{ExtensionEngine:{sources:async()=>({sources:[{id:sourceId,label:'Team X',version:'1.6.33'}]}),prepare,catalogue,latest}});
+ const adapter=a.adapter(`core|${sourceId}`);
+ expect(await adapter.catalogue(2)).toMatchObject({mangas:[{title:'Catalogue 2',memo:'native'}],hasNextPage:false});
+ expect(catalogue).toHaveBeenCalledWith({sourceId,page:2});
+ expect(latest).not.toHaveBeenCalled();
+ expect(prepare).toHaveBeenCalledWith({sourceId});
+ expect(await adapter.home(1)).toMatchObject({mangas:[]});
+});
 it('retains native declared versions and loaded manga domain instead of overwriting metadata',async()=>{
  vi.stubGlobal('fetch',async()=>{throw new Error('no remote configuration in this fixture');});
  const {a}=await setup(manifest,{

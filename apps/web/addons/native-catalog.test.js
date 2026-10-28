@@ -33,6 +33,30 @@ const mangaPlugin=(extra={})=>({
   series:async({manga})=>({manga,chapters:[{url:'/chapter/1',name:'One'}]}),chapters:async()=>({chapters:[]}),pages:async()=>({pages:[]}),...extra,
 });
 const animeRecord={pkg:'org.native.video',name:'Installed Video',_store:{kind:'anime'}};
+it('does not relabel the full catalogue as latest when an older native bridge has no latest method',async()=>{
+ const out=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:mangaPlugin({latest:undefined})}});
+ expect(out.adapter.home).toBeUndefined();
+ expect(out.adapter.latest).toBeUndefined();
+ expect(out.addon.capabilities).not.toContain('home');
+ expect((await out.adapter.catalogue(1)).items[0].title).toBe('Native Manga');
+});
+it('opens the Team X full catalogue and paginates while leaving latest as a separate empty listing',async()=>{
+ const {document,window}=parseHTML('<html><body></body></html>');vi.stubGlobal('document',document);vi.stubGlobal('window',window);
+ const engine=mangaPlugin({catalogue:vi.fn(async({page})=>({mangas:[{url:'/series/work-'+page,title:'Catalogue '+page,memo:'preserved'}],hasNextPage:page===1})),latest:vi.fn(async()=>({mangas:[],hasNextPage:false}))});
+ const out=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:engine}});
+ const view=renderSourceMode(out);document.body.append(view);await new Promise(r=>setTimeout(r,0));
+ expect(view.querySelector('.up-title')?.textContent).toBe('Catalogue 1');
+ expect(engine.latest).not.toHaveBeenCalled();
+ view.querySelector('.addon-source-more').click();await new Promise(r=>setTimeout(r,0));
+ expect([...view.querySelectorAll('.up-title')].map(x=>x.textContent)).toEqual(['Catalogue 1','Catalogue 2']);
+ expect(engine.catalogue).toHaveBeenLastCalledWith({sourceId:'org.native.reader#123',page:2});
+ expect(view.querySelector('.addon-source-more').hidden).toBe(true);
+ view.querySelector('[data-tab="home"]').click();await new Promise(r=>setTimeout(r,0));
+ expect(engine.latest).toHaveBeenCalledTimes(1);
+ expect(view.querySelectorAll('.up-card')).toHaveLength(0);
+ expect(view.querySelector('.addon-source-note').textContent).toContain('بلا أعمال');
+ view.close();
+});
 const animePlugin=(extra={})=>({sources:async()=>({sources:[{id:'real-video-id',pkg:'org.native.video',name:'Actual Video',content:'anime',enabled:true}]}),page:async()=>({page:{items:[{sourceId:'real-video-id',url:'/video/1',title:'Native Anime'}],hasNext:true}}),details:async({anime})=>({anime}),episodes:async()=>({episodes:[{url:'/episode/1',name:'One',number:1}]}),...extra});
 
 it('resolves the real manga package source and preserves memo through catalogue, details and work model',async()=>{
@@ -99,11 +123,11 @@ it('ignores late native discovery and catalogue completion after cancellation',a
  const cancel=new AbortController(),request=out.adapter.catalogue(1,{signal:cancel.signal});await Promise.resolve();await Promise.resolve();cancel.abort();await expect(request).rejects.toMatchObject({name:'AbortError'});finish({mangas:[],hasNextPage:false});
 });
 
-it('renders the existing source screen using real native page results and pagination',async()=>{
+it('renders the explicitly selected latest screen using real native page results and pagination',async()=>{
  const {document,window}=parseHTML('<html><body></body></html>');vi.stubGlobal('document',document);vi.stubGlobal('window',window);
  const engine=mangaPlugin({latest:async({page})=>({mangas:[{url:'/work/'+page,title:'Real Native '+page}],hasNextPage:page===1})});
  const out=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:engine}});
- const view=renderSourceMode(out);document.body.append(view);await new Promise(r=>setTimeout(r,0));
+ const view=renderSourceMode({...out,state:{tab:'home',page:1,query:''}});document.body.append(view);await new Promise(r=>setTimeout(r,0));
  expect(view.querySelector('.up-title').textContent).toBe('Real Native 1');view.querySelector('.addon-source-more').click();await new Promise(r=>setTimeout(r,0));
  expect([...view.querySelectorAll('.up-title')].map(x=>x.textContent)).toEqual(['Real Native 1','Real Native 2']);expect(view.querySelector('.addon-source-more').hidden).toBe(true);view.close();
 });

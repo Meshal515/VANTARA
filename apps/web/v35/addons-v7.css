@@ -1,6 +1,6 @@
 
 /* VANTARA Addons V7 — all selectors scoped; no library/progress changes. */
-.v7-addon{--v7-ink:#f6f5f8;--v7-muted:#93909b;--v7-line:#23232b;--v7-accent:#b6a2ff;direction:rtl;color:var(--v7-ink);background:#000;max-width:960px;margin:0 auto;padding:18px clamp(16px,4vw,30px) 72px;min-width:0;font:14px/1.55 system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif}
+.v7-addon{--v7-ink:#f6f5f8;--v7-muted:#93909b;--v7-line:#23232b;--v7-accent:#b6a2ff;direction:rtl;color:var(--v7-ink);background:transparent;max-width:960px;margin:0 auto;padding:0 clamp(16px,4vw,30px) 72px;min-width:0;font:14px/1.55 system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif}
 .v7-addon *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .v7-addon button,.v7-addon input{font:inherit}
 .v7-addon button{border:0;cursor:pointer}
@@ -8,7 +8,7 @@
 .v7-addon button:focus-visible{outline:2px solid var(--v7-accent);outline-offset:3px}
 .v7-addon input::selection{background:#b6a2ff4b}
 .v7-addon svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none}
-.v7-addon .v7-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}
+.v7-addon .v7-heading{display:flex;justify-content:flex-end;align-items:center;gap:16px;margin-bottom:8px}
 .v7-addon .v7-heading h2{font-size:28px;font-weight:790;letter-spacing:-1px;margin:0;line-height:1.15}
 .v7-addon .v7-heading p{font-size:13px;color:var(--v7-muted);margin:8px 0 0}
 .v7-addon .v7-plus{height:44px;padding:0 15px;display:inline-flex;gap:9px;align-items:center;justify-content:center;border-radius:12px;background:#c2b0ff;color:#17131f;font-weight:850;min-width:80px;flex:none}
@@ -18,12 +18,12 @@
 .v7-addon .v7-tab.active{border-color:var(--v7-accent);color:#f7f5fb}
 .v7-addon .v7-count{font-size:12px;color:#a39cae;margin-inline-start:6px}
 .v7-addon .v7-tools{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.v7-addon .v7-search{flex:1;display:flex;align-items:center;gap:9px;padding:0 14px;height:44px;min-width:0;border-radius:16px;background:#0b0b0e;border:1px solid #26262e;color:#a5a0b0}
+.v7-addon .v7-search{flex:1;display:flex;align-items:center;gap:9px;padding:0 14px;height:44px;min-width:0;border-radius:16px;background:var(--surface-1,#121019);border:1px solid #26262e;color:#a5a0b0}
 .v7-addon .v7-search input{border:0;background:none;color:#fff;text-align:right;min-width:0;width:100%;height:100%}
 .v7-addon .v7-search input::placeholder{color:#76717d}
 .v7-addon .v7-filter-wrap{position:relative;flex:none}
-.v7-addon .v7-filter{height:44px;min-width:124px;border-radius:16px;border:1px solid #26262e;background:#0b0b0e;color:#e9e6ed;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 13px}
-.v7-addon .v7-menu{position:absolute;top:calc(100% + 8px);left:0;right:auto;width:180px;max-width:calc(100vw - 32px);background:#18181c;border:1px solid #31313b;box-shadow:0 20px 48px #000a;border-radius:15px;padding:7px;z-index:9;min-width:0;max-height:min(320px,50vh);overflow-y:auto}
+.v7-addon .v7-filter{height:44px;min-width:124px;border-radius:16px;border:1px solid #26262e;background:var(--surface-1,#121019);color:#e9e6ed;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 13px}
+.v7-addon .v7-menu{position:absolute;top:calc(100% + 8px);left:0;right:auto;width:180px;max-width:calc(100vw - 32px);background:var(--surface-2,#18161f);border:1px solid #31313b;box-shadow:0 20px 48px #000a;border-radius:15px;padding:7px;z-index:9;min-width:0;max-height:min(320px,50vh);overflow-y:auto}
 .v7-addon .v7-menu[hidden]{display:none}
 .v7-addon .v7-menu button{background:none;color:#f0eff4;text-align:right;padding:10px 12px;width:100%;border-radius:9px;display:flex;justify-content:space-between}
 .v7-addon .v7-menu button:hover,.v7-addon .v7-menu button.active{background:#302a3f}
@@ -34,9 +34,9 @@
 .v7-addon .v7-row{min-height:88px;border-bottom:1px solid #ffffff12;display:flex;align-items:center;gap:12px;padding:12px 0;cursor:pointer;position:relative}
 .v7-addon .v7-row:hover{background:#ffffff03}
 .v7-addon .v7-row:focus-visible{outline:2px solid var(--v7-accent);outline-offset:2px}
-.v7-addon .v7-logo{width:54px;height:54px;flex:none;border-radius:17px;overflow:hidden;background:#15131a;border:1px solid #33303b;display:flex;align-items:center;justify-content:center;position:relative;color:#d1c5e7}
+.v7-addon .v7-logo{width:54px;height:54px;flex:none;border-radius:17px;overflow:hidden;background:var(--surface-2,#18161f);border:1px solid #33303b;display:flex;align-items:center;justify-content:center;position:relative;color:#d1c5e7}
 .v7-addon .v7-logo.is-repo{width:54px;height:54px;border-radius:19px}
-.v7-addon .v7-logo img{position:absolute;inset:0;width:100%;height:100%;padding:5px;object-fit:contain;background:#111114}
+.v7-addon .v7-logo img{position:absolute;inset:0;width:100%;height:100%;padding:5px;object-fit:contain;background:var(--surface-1,#121019)}
 .v7-addon .v7-fallback{font-weight:850;font-size:19px;text-transform:uppercase}
 .v7-addon .v7-info{flex:1;min-width:0}
 .v7-addon .v7-name{font-size:16px;font-weight:750;line-height:1.24;overflow-wrap:anywhere}
@@ -45,7 +45,8 @@
 .v7-addon .v7-status{visibility:hidden;font-size:12px;color:#edb665;opacity:0;transition:opacity 100ms;white-space:normal}
 .v7-addon .v7-status.visible{opacity:1;visibility:visible;display:inline-flex;align-items:center;gap:6px;line-height:1.4}
 .v7-addon .v7-status::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
-.v7-addon .v7-status[data-state="stable"]{color:#76dbab}
+.v7-addon .v7-status[data-state="stable"],.v7-addon .v7-status[data-state="working"]{color:#76dbab}
+.v7-addon .v7-status[data-state="untested"],.v7-addon .v7-status[data-state="empty"]{color:var(--v7-muted)}
 .v7-addon .v7-status[data-state="unavailable"]{color:#ff8391}
 .v7-addon .v7-actions{flex:none;display:flex;align-items:center;gap:9px;direction:ltr}
 .v7-addon .v7-native-actions{width:162px;min-width:162px;justify-content:flex-end}
@@ -54,28 +55,28 @@
 .v7-addon .v7-flip.installed .v7-rotor{transform:rotateY(-180deg)}
 .v7-addon .v7-face{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;border-radius:13px;font-weight:800;backface-visibility:hidden;-webkit-backface-visibility:hidden}
 .v7-addon .v7-front{background:#f0ebfa;color:#17131d}
-.v7-addon .v7-rear{background:#08080a;color:#faf9fb;border:1px solid #2c2c34;transform:rotateY(-180deg)}
+.v7-addon .v7-rear{background:var(--surface-1,#121019);color:#faf9fb;border:1px solid #2c2c34;transform:rotateY(-180deg)}
 .v7-addon .v7-trash-holder{width:45px;min-width:45px;opacity:0;visibility:hidden;overflow:hidden;transform:translateX(5px) scale(.92);transition:opacity 180ms ease,transform 180ms ease;pointer-events:none}
 .v7-addon .v7-trash-holder.visible{opacity:1;visibility:visible;transform:none;pointer-events:auto}
-.v7-addon .v7-trash{width:45px;height:46px;background:#08080a;color:#f0ecf5;border:1px solid #2c2c34;border-radius:13px;display:grid;place-items:center}
-.v7-addon .v7-simple-btn{height:44px;min-width:106px;background:#08080a;border:1px solid #2b2b34;border-radius:13px;color:#efedf4;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px}
+.v7-addon .v7-trash{width:45px;height:46px;background:var(--surface-1,#121019);color:#f0ecf5;border:1px solid #2c2c34;border-radius:13px;display:grid;place-items:center}
+.v7-addon .v7-simple-btn{height:44px;min-width:106px;background:var(--surface-1,#121019);border:1px solid #2b2b34;border-radius:13px;color:#efedf4;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px}
 .v7-addon .v7-empty{min-height:48vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:15px;text-align:center}
-.v7-addon .v7-empty-symbol{width:82px;height:82px;border-radius:25px;border:1px solid #24232b;background:#0d0c12;display:grid;place-items:center}
+.v7-addon .v7-empty-symbol{width:82px;height:82px;border-radius:25px;border:1px solid #24232b;background:var(--surface-1,#121019);display:grid;place-items:center}
 .v7-addon .v7-empty h3{font-size:27px;margin:0}.v7-addon .v7-empty p{font-size:14px;margin:0;color:var(--v7-muted)}
 .v7-addon .v7-layer{position:fixed;inset:0;background:#000b;backdrop-filter:blur(10px);z-index:20000;display:flex;align-items:flex-start;justify-content:center;padding: min(16vh,110px) 16px 16px;overflow-y:auto}
 .v7-addon .v7-layer[hidden]{display:none}
-.v7-addon .v7-dialog{width:min(520px,100%);background:#111015;border:1px solid #2b2931;border-radius:25px;box-shadow:0 20px 60px #0009;padding:24px;max-height:calc(100vh - 120px);overflow-y:auto}
+.v7-addon .v7-dialog{width:min(520px,100%);background:var(--surface-2,#18161f);border:1px solid #2b2931;border-radius:25px;box-shadow:0 20px 60px #0009;padding:24px;max-height:calc(100vh - 120px);overflow-y:auto}
 .v7-addon .v7-dialog h3{font-size:27px;line-height:1.25;margin:0 0 8px;font-weight:820}
 .v7-addon .v7-dialog p{color:#a6a0b0;margin:0 0 19px}
 .v7-addon .v7-dialog-actions{display:flex;gap:13px;margin-top:20px;align-items:center;flex-wrap:wrap}
-.v7-addon .v7-btn{height:45px;min-width:93px;border-radius:14px;background:#17161b;color:#fff;border:1px solid #2e2c34;padding:0 15px;font-weight:760}
+.v7-addon .v7-btn{height:45px;min-width:93px;border-radius:14px;background:var(--surface-2,#18161f);color:#fff;border:1px solid #2e2c34;padding:0 15px;font-weight:760}
 .v7-addon .v7-btn.primary{background:#f0ebfa;color:#18131c;border-color:transparent}
 .v7-addon .v7-btn.danger{background:#8a2530;color:white;border-color:#ac3844}
 .v7-addon .v7-upload{width:49px;height:44px;flex:none;display:grid;place-items:center;background:none;color:#aaa3b8}
 .v7-addon .v7-add-input{flex:1;min-width:0}
 .v7-addon .v7-add-input input{font-size:14px}
 .v7-addon .v7-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
-.v7-addon .v7-field{padding:12px;border:1px solid #272630;border-radius:14px;background:#0d0c11;min-width:0;overflow-wrap:anywhere}
+.v7-addon .v7-field{padding:12px;border:1px solid #272630;border-radius:14px;background:var(--surface-1,#121019);min-width:0;overflow-wrap:anywhere}
 .v7-addon .v7-field strong{font-size:12px;color:#9d97aa;display:block;margin-bottom:3px}
 .v7-addon .v7-advanced{margin-top:16px;border-top:1px solid #262630;padding-top:12px}
 .v7-addon .v7-advanced summary{cursor:pointer;color:#c7c3ce;font-weight:750;list-style:none;padding:12px 2px;-webkit-tap-highlight-color:transparent}

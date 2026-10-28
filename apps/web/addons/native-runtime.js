@@ -96,6 +96,7 @@ export function getNativeAddonRuntime() {
         return plugins.ExtensionEngine[method]({ sourceId: id, ...args });
       };
       return {
+        ...(typeof plugins.ExtensionEngine.catalogue === "function" ? { catalogue: (page = 1) => invoke("catalogue", { page }) } : {}),
         search: (query, page = 1) => invoke("search", { query, page }),
         latest: (page = 1) => invoke("latest", { page }),
         popular: (page = 1) => invoke("popular", { page }),

@@ -1,9 +1,12 @@
 /** صحة لكل إضافة/قدرة/runtime؛ manifest ناجح لا يعني سيرفر جاهز. */
 export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
+  const boundedCount = value => Number.isInteger(value) && value > 0 ? Math.min(value, 50) : 0;
+  const sameRelease = (old, evidence) => Boolean(evidence.version && evidence.cacheEpoch && old.version === evidence.version && old.cacheEpoch === evidence.cacheEpoch);
+  const recentSuccess = old => Number.isFinite(old.functionalSuccessAt) && old.functionalSuccessAt <= clock() && clock() - old.functionalSuccessAt <= 7 * 86400000;
   const map = new Map(),
     key = (a, c, r) => JSON.stringify([a, c, r]);
   const state = (a, c, r = "pwa") =>
-    map.get(key(a, c, r)) ?? { state: "unknown", failures: 0, retryAt: 0 };
+    map.get(key(a, c, r)) ?? { state: "unknown", failures: 0, retryAt: 0, functionalSuccessCount: 0 };
   function measured(old, ms) {
     const samples = [
       ...(old.samples ?? []),
@@ -30,6 +33,9 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       reason: null,
       probing: false,
       functionalSuccessAt: evidence.version && evidence.cacheEpoch ? clock() : old.functionalSuccessAt ?? null,
+      functionalSuccessCount: evidence.version && evidence.cacheEpoch
+        ? Math.min(50, (sameRelease(old, evidence) && recentSuccess(old) && ["healthy", "empty"].includes(old.state) ? boundedCount(old.functionalSuccessCount) : 0) + 1)
+        : boundedCount(old.functionalSuccessCount),
     });
     onChange();
   }
@@ -54,6 +60,7 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       at: clock(),
       probing: false,
       ...evidence,
+      functionalSuccessCount: 0,
     });
     onChange();
   }
@@ -63,6 +70,7 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       ...old, ...measured(old, latencyMs), ...evidence,
       state: "empty", failures: 0, retryAt: 0, reason: null, probing: false, at: clock(),
       functionalSuccessAt: evidence.version && evidence.cacheEpoch && (old.version !== evidence.version || old.cacheEpoch !== evidence.cacheEpoch) ? null : old.functionalSuccessAt ?? null,
+      functionalSuccessCount: sameRelease(old, evidence) && recentSuccess(old) ? boundedCount(old.functionalSuccessCount) : 0,
     });
     onChange();
   }
@@ -70,7 +78,7 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
     const old = state(a, c, r);
     map.set(key(a, c, r), {
       ...old, ...measured(old, latencyMs), ...evidence,
-      state: "configuration", failures: 0, retryAt: 0, reason: "CONFIG_REQUIRED", probing: false, at: clock(),
+      state: "configuration", failures: 0, retryAt: 0, reason: "CONFIG_REQUIRED", probing: false, at: clock(), functionalSuccessCount: 0,
     });
     onChange();
   }
@@ -103,6 +111,7 @@ export function createHealth({ clock = Date.now, onChange = () => {} } = {}) {
       )
         map.set(key, {
           ...row,
+          functionalSuccessCount: boundedCount(row.functionalSuccessCount),
           samples: (Array.isArray(row.samples) ? row.samples : [])
             .filter(Number.isFinite)
             .slice(-50),

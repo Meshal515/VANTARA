@@ -56,3 +56,27 @@ it('does not transfer successful release evidence through an empty response from
  const h=createHealth({clock:()=>1000});h.success('a','streams','pwa',1,{version:'1.0.0',cacheEpoch:'old'});
  h.empty('a','streams','pwa',1,{version:'1.0.0',cacheEpoch:'new'});expect(h.state('a','streams','pwa').functionalSuccessAt).toBeNull();
 });
+
+it('persists bounded counts of actual version-scoped functional successes without counting timing samples or generic callbacks',()=>{
+ let now=100;const h=createHealth({clock:()=>now});const identity={version:'1',cacheEpoch:'a'};
+ h.success('x','catalog','apk',10,identity);now++;h.success('x','catalog','apk',20,identity);
+ expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(2);
+ h.success('x','catalog','apk');h.empty('x','catalog','apk',30,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(2);
+ const restored=createHealth({clock:()=>now});restored.restore(JSON.parse(JSON.stringify(h.snapshot())));expect(restored.state('x','catalog','apk').functionalSuccessCount).toBe(2);
+ for(let i=0;i<60;i++)restored.success('x','catalog','apk',10,identity);expect(restored.state('x','catalog','apk').functionalSuccessCount).toBe(50);
+});
+
+it('resets functional counts on actual failure, configuration, version or epoch changes and stale evidence',()=>{
+ let now=100;const h=createHealth({clock:()=>now});let identity={version:'1',cacheEpoch:'a'};
+ const twice=()=>{h.success('x','catalog','apk',10,identity);h.success('x','catalog','apk',10,identity);};
+ twice();h.failure('x','catalog','apk','TIMEOUT',10,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(0);
+ twice();h.configuration('x','catalog','apk',10,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(0);
+ twice();identity={version:'2',cacheEpoch:'a'};h.success('x','catalog','apk',10,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(1);
+ identity={version:'2',cacheEpoch:'b'};h.empty('x','catalog','apk',10,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(0);
+ twice();now+=8*86400000;h.success('x','catalog','apk',10,identity);expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(1);
+});
+
+it('defaults restored legacy health counters to zero without inferring success history from latency samples',()=>{
+ const h=createHealth({clock:()=>100});h.restore([[JSON.stringify(['x','catalog','apk']),{state:'healthy',failures:0,retryAt:0,version:'1',cacheEpoch:'a',functionalSuccessAt:90,samples:[1,2,3]}]]);
+ expect(h.state('x','catalog','apk').functionalSuccessCount).toBe(0);
+});

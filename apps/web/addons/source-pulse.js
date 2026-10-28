@@ -35,6 +35,7 @@ function browseItems(out) {
     throw Object.assign(new Error('لم يُرجع المصدر قائمة أعمال صالحة.'), { code: 'INVALID_SOURCE_RESPONSE' });
   return list;
 }
+const boundedCount = value => Number.isInteger(value) && value > 0 ? Math.min(value, 50) : 0;
 const hasBrowseEvidence = p => Number.isInteger(p?.items) && (p.state === 'ok' ? p.items > 0 : p.state === 'empty' && p.items === 0);
 
 function readAll(storage) {
@@ -53,15 +54,24 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
     try { storage?.setItem(KEY, JSON.stringify(all)); } catch {}
     for (const fn of listeners) try { fn(); } catch {}
   };
-  const get = (key) => all[key] ?? null;
+  const get = (key) => all[key] ? {...all[key], successfulBrowseCount: boundedCount(all[key].successfulBrowseCount)} : null;
 
-  function record(key, state, { ms = null, items = null, error = null } = {}) {
+  function record(key, state, { ms = null, items = null, error = null, version = null, cacheEpoch = null, capability = "browse" } = {}) {
     const old = all[key] ?? {};
+    const sameRelease = old.version === version && old.cacheEpoch === cacheEpoch && old.capability === capability;
+    const recent = Number.isFinite(old.lastOkAt) && old.lastOkAt <= now() && now() - old.lastOkAt <= FRESH_MS;
+    const previousCount = sameRelease && recent && !["failed", "verification"].includes(old.state) ? boundedCount(old.successfulBrowseCount) : 0;
     const failures = state === 'failed' ? (old.failures ?? 0) + 1 : 0;
     all = {
       ...all,
       [key]: {
         state,
+        version,
+        cacheEpoch,
+        capability,
+        successfulBrowseCount: state === 'ok' && Number.isInteger(items) && items > 0
+          ? Math.min(50, previousCount + 1)
+          : state === 'empty' ? previousCount : 0,
         at: now(),
         ms: Number.isFinite(ms) ? Math.round(ms) : null,
         items: Number.isFinite(items) ? items : null,
@@ -75,7 +85,7 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
   }
 
   /** يقيس تصفحًا أو بحثًا: النجاح يحتاج أعمالًا صالحة، والفراغ الصالح مستقل عن الفشل. */
-  async function measure(key, run, { signal, timeoutMs = 20_000 } = {}) {
+  async function measure(key, run, { signal, timeoutMs = 20_000, version = null, cacheEpoch = null, capability = "browse" } = {}) {
     const started = now();
     let timer, abort;
     try {
@@ -90,10 +100,10 @@ export function createSourcePulse({ storage = globalThis.localStorage, now = () 
       if (signal?.aborted) throw new DOMException('ألغي الطلب', 'AbortError');
       if (confirmedVerification(out)) throw Object.assign(new Error('المصدر يطلب تحققًا منك.'), { code: 'VERIFICATION_REQUIRED', needsHuman: true });
       const list = browseItems(out);
-      record(key, list.length === 0 ? 'empty' : 'ok', { ms: now() - started, items: list.length });
+      record(key, list.length === 0 ? 'empty' : 'ok', { ms: now() - started, items: list.length, version, cacheEpoch, capability });
       return out;
     } catch (error) {
-      if (error?.name !== 'AbortError') record(key, confirmedVerification(error) ? 'verification' : 'failed', { ms: now() - started, error: error?.message });
+      if (error?.name !== 'AbortError') record(key, confirmedVerification(error) ? 'verification' : 'failed', { ms: now() - started, error: error?.message, version, cacheEpoch, capability });
       throw error;
     } finally {
       clearTimeout(timer);
