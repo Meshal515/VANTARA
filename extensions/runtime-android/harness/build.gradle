@@ -12,10 +12,13 @@ android {
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     sourceSets.androidTest.assets.srcDir(project(':fixtures').layout.buildDirectory.dir('dexAssets'))
+    sourceSets.androidTest.assets.srcDir(layout.buildDirectory.dir('pinnedPackages'))
     testOptions { animationsDisabled true }
 }
 dependencies {
     implementation project(':api')
+    implementation project(':http')
+    implementation project(':cloudstream')
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
 }

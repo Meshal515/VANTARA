@@ -2,6 +2,7 @@ package dev.vantara.runtime.android;
 
 import android.content.*;
 import android.os.*;
+import dev.vantara.runtime.api.RuntimeHttpAccess;
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.*;
@@ -10,6 +11,13 @@ import java.util.concurrent.atomic.*;
 /** A single physical worker generation. It is never restarted or reused after retirement. */
 public final class AndroidRuntimeClient implements AutoCloseable {
     public interface HostTransport { String request(Scope scope,String url) throws Exception; }
+    public interface HostHttpTransport extends HostTransport,AutoCloseable {
+        RuntimeHttpAccess.Response exchange(Scope scope,RuntimeHttpAccess.Request request) throws Exception;
+        @Override default String request(Scope scope,String url) throws Exception {
+            return new String(exchange(scope,new RuntimeHttpAccess.Request(url,"GET",Collections.emptyMap(),null,true)).body(),java.nio.charset.StandardCharsets.UTF_8);
+        }
+        @Override default void close(){}
+    }
     public record Scope(String family,String packageId,String sourceId,String sessionId,Set<String> allowedOrigins) {
         public Scope {
             for(String value:Arrays.asList(family,packageId,sourceId,sessionId))
@@ -71,10 +79,17 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         return ready;
     }
     public CompletableFuture<Void> load(File dex,String hash,String entry) {
+        return loadProfile(dex,hash,entry,false);
+    }
+    public CompletableFuture<Void> loadCloudStream(File dex,String hash,String entry) {
+        if(!"cloudstream".equals(scope.family()))return failed("PROFILE_IDENTITY_MISMATCH");
+        return loadProfile(dex,hash,entry,true);
+    }
+    private CompletableFuture<Void> loadProfile(File dex,String hash,String entry,boolean cloudstream) {
         if(dex==null || hash==null || entry==null) return failed("INVALID_DEX_INPUT");
         return submit(10000,true,()->{
             try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(dex,ParcelFileDescriptor.MODE_READ_ONLY)) {
-                transact(RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
+                transact(cloudstream?RuntimeProtocol.LOAD_CLOUDSTREAM:RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
                 return null;
             }
         });
@@ -147,10 +162,11 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     }
     private final Binder broker=new Binder() {
         @Override protected boolean onTransact(int code,Parcel data,Parcel reply,int flags) throws RemoteException {
-            if(code!=RuntimeProtocol.HELLO) return super.onTransact(code,data,reply,flags);
+            if(code!=RuntimeProtocol.HELLO&&code!=RuntimeProtocol.HTTP_EXCHANGE) return super.onTransact(code,data,reply,flags);
             Identity worker=identity;
             if(worker==null || closed.get() || Binder.getCallingUid()!=worker.uid() || Binder.getCallingPid()!=worker.pid()) throw new SecurityException("Not the owning worker generation");
             data.enforceInterface(RuntimeProtocol.BROKER);
+            if(code==RuntimeProtocol.HTTP_EXCHANGE){exchange(data,reply);return true;}
             try {
                 String url=RuntimeProtocol.text(data.readString()), origin=RuntimeProtocol.origin(url);
                 if(!scope.allowedOrigins().contains(origin)) throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
@@ -167,6 +183,22 @@ public final class AndroidRuntimeClient implements AutoCloseable {
             return true;
         }
     };
+    private void exchange(Parcel data,Parcel reply) {
+        try {
+            RuntimeHttpAccess.Request request=RuntimeProtocol.readRequest(data);
+            if(!scope.allowedOrigins().contains(RuntimeProtocol.origin(request.url())))throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
+            if(!(transport instanceof HostHttpTransport))throw new RuntimeFailure("FULL_HTTP_UNSUPPORTED");
+            if(!brokerBusy.compareAndSet(false,true))throw new RuntimeFailure("WORKER_BUSY");
+            RuntimeHttpAccess.Response response;long identity=Binder.clearCallingIdentity();
+            try {response=((HostHttpTransport)transport).exchange(scope,request);}
+            finally {Binder.restoreCallingIdentity(identity);brokerBusy.set(false);}
+            if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
+            Parcel payload=Parcel.obtain();
+            try {RuntimeProtocol.writeHttpResponse(payload,response);reply.writeNoException();reply.writeString("OK");reply.appendFrom(payload,0,payload.dataSize());}
+            finally {payload.recycle();}
+        }catch(RuntimeFailure failure){RuntimeProtocol.result(reply,failure.code,null);}
+        catch(Exception failure){RuntimeProtocol.result(reply,"TRANSPORT_FAILED",null);}
+    }
     private void retire(String reason,boolean terminate) { retire(reason,terminate,null); }
     private void retire(String reason,boolean terminate,OperationFuture<?> cancelled) {
         if(!closed.compareAndSet(false,true)) return;
@@ -186,6 +218,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
                 synchronized(AndroidRuntimeClient.this) {
                     if(bound) {bound=false;try {context.unbindService(connection);}catch(IllegalArgumentException ignored) {}}
                 }
+                if(transport instanceof HostHttpTransport)try{((HostHttpTransport)transport).close();}catch(RuntimeException ignored){}
             }
         },"vrt-retire");
         control.setDaemon(true);control.start();io.shutdownNow();clock.shutdownNow();

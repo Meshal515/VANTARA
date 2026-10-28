@@ -6,6 +6,8 @@ import android.os.*;
 import dalvik.system.InMemoryDexClassLoader;
 import dev.vantara.runtime.api.RuntimeAccess;
 import dev.vantara.runtime.api.RuntimeProvider;
+import dev.vantara.runtime.api.RuntimeHttpAccess;
+import dev.vantara.runtime.cloudstream.CloudStreamProvider;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
@@ -19,7 +21,7 @@ public final class RuntimeWorkerService extends Service {
     private volatile RuntimeAccess access;
     private final Binder endpoint=new Binder() {
         @Override protected boolean onTransact(int code,Parcel data,Parcel reply,int flags) throws RemoteException {
-            if(code<RuntimeProtocol.HELLO || code>RuntimeProtocol.CLOSE) return super.onTransact(code,data,reply,flags);
+            if(code<RuntimeProtocol.HELLO || code>RuntimeProtocol.LOAD_CLOUDSTREAM) return super.onTransact(code,data,reply,flags);
             if(Binder.getCallingUid()!=getApplicationInfo().uid) throw new SecurityException("Not the owning host");
             data.enforceInterface(RuntimeProtocol.WORKER);
             if(code==RuntimeProtocol.HELLO) {
@@ -34,7 +36,7 @@ public final class RuntimeWorkerService extends Service {
             }
             if(!busy.compareAndSet(false,true)) { RuntimeProtocol.result(reply,"WORKER_BUSY",null);return true; }
             try {
-                if(code==RuntimeProtocol.LOAD) load(data,reply);
+                if(code==RuntimeProtocol.LOAD||code==RuntimeProtocol.LOAD_CLOUDSTREAM) load(data,reply,code==RuntimeProtocol.LOAD_CLOUDSTREAM);
                 else invoke(data,reply);
             } catch(VirtualMachineError fatal) {
                 android.os.Process.killProcess(android.os.Process.myPid()); throw fatal;
@@ -62,7 +64,7 @@ public final class RuntimeWorkerService extends Service {
             return dex;
         }
     }
-    private void load(Parcel data,Parcel reply) throws Exception {
+    private void load(Parcel data,Parcel reply,boolean cloudstream) throws Exception {
         String expected=data.readString(), entry=data.readString();
         ParcelFileDescriptor descriptor=data.readTypedObject(ParcelFileDescriptor.CREATOR);
         IBinder broker=data.readStrongBinder();
@@ -76,11 +78,25 @@ public final class RuntimeWorkerService extends Service {
         try {
             InMemoryDexClassLoader loader=new InMemoryDexClassLoader(ByteBuffer.wrap(dex),RuntimeProvider.class.getClassLoader());
             Class<?> type=Class.forName(entry,false,loader);
-            if(type.getClassLoader()!=loader || !RuntimeProvider.class.isAssignableFrom(type)) throw new RuntimeFailure("ABI_MISMATCH");
-            candidate=(RuntimeProvider)type.getDeclaredConstructor().newInstance();
+            if(type.getClassLoader()!=loader)throw new RuntimeFailure("ABI_MISMATCH");
+            if(cloudstream)candidate=new CloudStreamProvider(this,loader,entry);
+            else {
+                if(!RuntimeProvider.class.isAssignableFrom(type))throw new RuntimeFailure("ABI_MISMATCH");
+                candidate=(RuntimeProvider)type.getDeclaredConstructor().newInstance();
+            }
         } catch(RuntimeFailure e) { throw e; }
-        catch(ReflectiveOperationException | LinkageError e) { throw new RuntimeFailure("ABI_MISMATCH"); }
-        RuntimeAccess candidateAccess=url->{
+        catch(ReflectiveOperationException | LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
+        RuntimeAccess candidateAccess=new RuntimeHttpAccess() {
+        @Override public RuntimeHttpAccess.Response exchange(RuntimeHttpAccess.Request input) throws Exception {
+            Parcel request=Parcel.obtain(),answer=Parcel.obtain();
+            try {
+                request.writeInterfaceToken(RuntimeProtocol.BROKER);RuntimeProtocol.writeRequest(request,input);
+                if(!broker.transact(RuntimeProtocol.HTTP_EXCHANGE,request,answer,0))throw new BrokerRejected("BROKER_UNAVAILABLE");
+                answer.readException();String code=answer.readString();if(!"OK".equals(code))throw new BrokerRejected(code==null?"IPC_CONTRACT":code);
+                return RuntimeProtocol.readHttpResponse(answer);
+            }finally{request.recycle();answer.recycle();}
+        }
+        @Override public String request(String url) throws Exception {
             RuntimeProtocol.text(url);
             Parcel request=Parcel.obtain(), answer=Parcel.obtain();
             try {
@@ -89,11 +105,11 @@ public final class RuntimeWorkerService extends Service {
                 try { return RuntimeProtocol.response(answer); }
                 catch(RuntimeFailure e) { throw new BrokerRejected(e.code); }
             } finally { request.recycle();answer.recycle(); }
-        };
+        }};
         try { candidate.initialize(candidateAccess); }
         catch(VirtualMachineError e) { throw e; }
-        catch(LinkageError e) { throw new RuntimeFailure("ABI_MISMATCH"); }
-        catch(Throwable e) { throw new RuntimeFailure("PROVIDER_INITIALIZATION_FAILED"); }
+        catch(LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
+        catch(Throwable e) {logAbi(e);throw new RuntimeFailure("PROVIDER_INITIALIZATION_FAILED"); }
         // Publication is the final step; failed candidates never become callable.
         access=candidateAccess;provider=candidate;
         RuntimeProtocol.result(reply,"OK","");
@@ -106,12 +122,23 @@ public final class RuntimeWorkerService extends Service {
         try { result=current.invoke(operation,input,access); }
         catch(BrokerRejected e) { throw new RuntimeFailure(e.code); }
         catch(VirtualMachineError e) { throw e; }
-        catch(LinkageError e) { throw new RuntimeFailure("ABI_MISMATCH"); }
+        catch(LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
         catch(Throwable e) { throw new RuntimeFailure("PROVIDER_FAILED"); }
         RuntimeProtocol.result(reply,"OK",RuntimeProtocol.text(result));
     }
     private static final class BrokerRejected extends Exception {
         final String code;
         BrokerRejected(String code) { super(code);this.code=code; }
+    }
+    /** Only ABI symbols are logged. No source exception messages, URLs, bodies or credentials. */
+    private static void logAbi(Throwable failure) {
+        for(int depth=0;failure!=null&&depth<4;failure=failure.getCause(),depth++) {
+            String symbol="";
+            if(failure instanceof LinkageError&&failure.getMessage()!=null) {
+                java.util.regex.Matcher match=java.util.regex.Pattern.compile("L[A-Za-z0-9_$/]+;|[A-Za-z_$][A-Za-z0-9_$]*\\([A-Za-z0-9_$/;\\[]*\\)[A-Za-z0-9_$/;\\[]+").matcher(failure.getMessage());
+                if(match.find())symbol=match.group().substring(0,Math.min(300,match.group().length()));
+            }
+            android.util.Log.w("VantaraRuntimeAbi",failure.getClass().getSimpleName()+" "+symbol);
+        }
     }
 }

@@ -1,4 +1,4 @@
-name: VANTARA Runtime isolated Android execution (authored DEX)
+name: VANTARA Runtime isolated Android execution (authored and pinned CS3 DEX)
 on:
   push:
     branches: [feat/repository-compat-runtime-20261028]
@@ -6,11 +6,13 @@ on:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
       - 'tools/repository-compat/run_android_lab.sh'
+      - 'tools/repository-compat/prepare_execution_fixtures.py'
   pull_request:
     paths:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
       - 'tools/repository-compat/run_android_lab.sh'
+      - 'tools/repository-compat/prepare_execution_fixtures.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -57,6 +59,11 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate and extract pinned published CS3 for offline registration tests
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
       - name: Build external DEX fixture and isolated harness
         run: bash android/gradlew -p extensions/runtime-android :harness:assembleDebug :harness:assembleDebugAndroidTest --no-daemon --stacktrace
       - name: Execute actual DEX in isolated Android processes
@@ -70,11 +77,11 @@ jobs:
           script: bash tools/repository-compat/run_android_lab.sh
       - name: Capture lab logcat
         if: always()
-        run: test -f runtime-lab-logcat.txt || timeout 5s adb logcat -d > runtime-lab-logcat.txt 2>&1 || true
+        run: test -f runtime-lab-logcat.txt || timeout 5s adb logcat -d VantaraRuntimeAbi:V AndroidRuntime:E ActivityManager:I TestRunner:I '*:S' > runtime-lab-logcat.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: runtime-lab-api-${{ matrix.api }}-NOT-third-party-CS3
+          name: runtime-lab-api-${{ matrix.api }}-offline-registration-NOT-live-source-health
           path: |
             extensions/runtime-android/harness/build/outputs/androidTest-results/
             extensions/runtime-android/harness/build/reports/androidTests/
