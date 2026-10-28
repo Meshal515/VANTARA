@@ -54,6 +54,16 @@ public class HttpBrokerTest {
         char[] chars=new char[128*1024];Arrays.fill(chars,'x');String value=new String(chars);first.enqueue(new MockResponse().setBody(value));
         try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals(value,body(s.execute(input(one+"/large"))));}
     }
+    @Test public void providerEncodingHeadersCannotDisableSafeResponseDecompression() throws Exception {
+        byte[] compressed;try(ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            try(java.util.zip.GZIPOutputStream gzip=new java.util.zip.GZIPOutputStream(bytes)){gzip.write("<html>عمل عربي</html>".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+            compressed=bytes.toByteArray();
+        }
+        first.enqueue(new MockResponse().addHeader("Content-Encoding","gzip").setBody(new okio.Buffer().write(compressed)));
+        HttpBroker.Input request=new HttpBroker.Input(one+"/compressed","GET",new Headers.Builder().add("Accept-Encoding","gzip, deflate, br").build(),null,true);
+        try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals("<html>عمل عربي</html>",body(s.execute(request)));}
+        assertEquals("gzip",first.takeRequest(2,TimeUnit.SECONDS).getHeader("Accept-Encoding"));
+    }
     @Test public void eachRedirectRequiresOriginPermission() throws Exception {
         first.enqueue(new MockResponse().setResponseCode(302).addHeader("Location",two+"/next"));
         HttpBroker.Scope restricted=new HttpBroker.Scope("cloudstream","test.package","source","A",new HashSet<>(Arrays.asList(one)));

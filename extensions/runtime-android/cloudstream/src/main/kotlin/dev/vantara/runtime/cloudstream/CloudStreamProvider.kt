@@ -47,10 +47,7 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
         val source=if(requested.isEmpty())all.singleOrNull()?:throw IllegalArgumentException("SOURCE_SELECTION_REQUIRED") else all.singleOrNull{it.name==requested}?:throw IllegalArgumentException("SOURCE_NOT_FOUND")
         val output:Any=when(operation) {
             "catalogue"->{
-                if(!source.hasMainPage)throw UnsupportedOperationException("catalogue")
-                val index=input.path("section").asInt(0);val section=source.mainPage.getOrNull(index)?:throw UnsupportedOperationException("catalogue section")
-                require(input.path("page").asInt(1)>0){"Invalid catalogue page"}
-                source.getMainPage(input.path("page").asInt(1),MainPageRequest(section.name,section.data,section.horizontalImages))?:throw IOException("NO_CATALOGUE_RESULT")
+                SourceOperations.catalogue(source,input.path("page").asInt(1),input.path("section").asInt(0))
             }
             "search"->{val query=input.path("query").asText("");val page=input.path("page").asInt(1);require(query.isNotBlank()&&query.length<=500&&page>0);source.search(query,page)?:throw IOException("NO_SEARCH_RESULT")}
             "details","episodes"->{

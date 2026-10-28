@@ -137,7 +137,9 @@ public final class HttpBroker {
                 for(int hop=0;hop<=5;hop++) {
                     admit(url);Host host=acquireHost(url.host());
                     try {
-                        Headers.Builder sent=headers.newBuilder();List<Cookie> jar=cookies.load(url);
+                        // Let the transport negotiate/decode gzip. Provider headers must
+                        // not disable OkHttp's bounded, transparent decompression.
+                        Headers.Builder sent=headers.newBuilder().removeAll("Accept-Encoding");List<Cookie> jar=cookies.load(url);
                         if(headers.get("Cookie")==null&&!jar.isEmpty()){
                             StringBuilder cookie=new StringBuilder();for(Cookie c:jar){if(cookie.length()>0)cookie.append("; ");cookie.append(c.name()).append('=').append(c.value());}sent.set("Cookie",cookie.toString());
                         }
@@ -168,6 +170,8 @@ public final class HttpBroker {
                                 if((status==303&&!method.equals("HEAD"))||((status==301||status==302)&&method.equals("POST"))){method="GET";body=null;nextHeaders.removeAll("Content-Type");}
                                 headers=nextHeaders.build();url=next;continue;
                             }
+                            String encoding=response.header("Content-Encoding");
+                            if(encoding!=null&&!"identity".equalsIgnoreCase(encoding))throw new Failure("UNSUPPORTED_CONTENT_ENCODING");
                             ByteArrayOutputStream bytes=new ByteArrayOutputStream();ResponseBody stream=response.body();
                             if(stream!=null) {
                                 if(stream.contentLength()>MAX_RESPONSE_BYTES)throw new Failure("RESPONSE_BODY_LIMIT");

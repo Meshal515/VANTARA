@@ -45,3 +45,26 @@ from the pinned packages (SearchResponseList builder/items and NiceResponse
 body/parser/success). They have original implementations, with a paginated search
 overload delegating to existing legacy search only for page1. Later pages are
 explicitly unsupported unless the provider implements them.
+
+Run40709198655 on5601dd56 passed all27 native tests on each of API29
+and35, including all four published registrations and the extended WitAnime
+background test. HTTP24 and profile15 tests passed in that workflow. This is
+registration/lifecycle proof, not a live-source health verdict.
+
+The next candidate tests actual Anime4up catalogue parsing against original
+deterministic HTML delivered over the real isolated HTTP IPC. The package's
+declared origin is pinned to `https://w1.anime4up.rest`; the fixture transport
+opens no sockets. A legacy provider may implement `getMainPage` without a
+`mainPage` section list. The new dispatcher invokes that real provider method
+with the empty section request instead of incorrectly declaring it unsupported.
+Four unit tests cover legacy/declared sections, base unsupported and honest search
+pagination. HTTP also reproduces and fixes an encoding trap: a provider's explicit
+`Accept-Encoding` header disabled OkHttp decompression. The broker now owns
+negotiation/decompression and rejects unsupported encodings explicitly.
+
+An independent read-only review identified unbounded worker-supplied pipe reads
+before host admission. Three new native regressions intentionally expose trailing
+writer descriptors, waiting for EOF after a complete frame, and a never-written
+pipe. The next CI candidate is a RED reproduction gate for these new tests. It
+must not be interpreted as a release candidate. Cookie path acceptance and response
+charset preservation also require targeted fixes before further integration.
