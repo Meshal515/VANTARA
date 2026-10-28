@@ -16,6 +16,27 @@ const registry = (items=[]) => ({runtimeName:'apk', list:()=>items});
 const installedTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المثبتة'));
 const repositoryTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المستودعات'));
 
+it('uses the measured CloudStream store for real manager actions and keeps installed sources after unlinking its repository',async()=>{
+ const d=setup();const installed=[{pkg:'cs3_package',name:'Published provider',version:1,installed:true,protocol:'cloudstream',anime:true,enabled:true,repo:'https://repo.example/repo.json',repositoryName:'Actual repository'}];
+ const repo={url:'https://repo.example/repo.json',name:'Actual repository'};let linked=true;
+ const api={list:vi.fn(async()=>({repos:linked?[repo]:[],installed})),extensions:vi.fn(async()=>installed),
+  remove:vi.fn(async()=>{linked=false;}),enable:vi.fn(async(pkg,enabled)=>{installed[0].enabled=enabled;}),uninstall:vi.fn(async()=>installed.splice(0)),install:vi.fn()};
+ const open=vi.fn();const view=renderV7Addons({registry:registry(),cloudstreamRepositories:api,onOpenNativeSource:open});d.body.append(view);await tick();
+ expect(view.querySelector('.v7-body').textContent).toContain('CloudStream');
+ const trash=view.querySelector('.v7-body .v7-trash');trash.click();await tick();
+ expect(view.querySelector('.v7-dialog').textContent).toContain('تبقى محفوظة');
+ [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='إزالة').click();await tick();
+ expect(api.remove).toHaveBeenCalledWith(repo.url);expect(api.uninstall).not.toHaveBeenCalled();
+ installedTab(view).click();await tick();
+ expect(view.querySelector('.v7-body').textContent).toContain('Published provider');
+ view.querySelector('.v7-row .v7-flip').click();await tick();
+ expect(open).toHaveBeenCalledWith(expect.objectContaining({pkg:'cs3_package',protocol:'cloudstream'}));
+ view.querySelector('.v7-row').click();await tick();
+ [...view.querySelectorAll('.v7-dialog button')].find(x=>x.textContent==='تعطيل').click();await tick();
+ expect(api.enable).toHaveBeenCalledWith('cs3_package',false);
+ view.close();
+});
+
 it('shows real existing direct addons and saved manga sites; starts with the saved additions without presets', async () => {
   const d=setup();
   const sites={list:vi.fn(async()=>[{id:'site-9',label:'My Manga',domain:'reader.example',engine:'madara'}]),remove:vi.fn(async()=>{})};

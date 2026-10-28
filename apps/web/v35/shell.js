@@ -178,6 +178,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // Capacitor plugin must never strand the app on the static splash screen.
   deps.mount(root);
   let followTimeClosed = false;
+  // Optional Debug family binds its private store to the already selected profile.
+  // Shell mounting remains synchronous; unavailable bridges never block startup.
+  if(globalThis.Capacitor?.Plugins?.VantaraRuntime)queueMicrotask(()=>{
+    void getAddonRuntime().then(async addons=>{
+      await addons.ready;if(followTimeClosed)return;
+      await addons.registry.setProfile(sync.user?.userId ?? 'local');
+      if(!followTimeClosed)await addons.reloadSources?.();
+    }).catch(()=>{});
+  });
   let stopFollowTime = () => {};
   queueMicrotask(() => {
     if (followTimeClosed) return;
@@ -3723,7 +3732,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage('utility');
     q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
     try {
-      const addons = await getAddonRuntime(); await addons.ready; await addons.reloadSources?.(); addons.registry.setProfile(sync.user?.userId ?? "local");
+      const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local"); await addons.reloadSources?.();
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
@@ -3739,7 +3748,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
@@ -3766,7 +3775,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter} = {}) {
     const run=++addonViewGeneration;
-    const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
+    const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local");
     if(run!==addonViewGeneration)return;
     closeAddonSource();
     addonSourcePending=false;

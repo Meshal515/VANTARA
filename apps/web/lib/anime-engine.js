@@ -13,6 +13,7 @@
 import { verifySourceDomains, nativeVerificationPlugin } from './source-verification.js';
 import { addonCopies } from '../addons/video.js';
 import { getAddonRuntime } from '../addons/runtime.js';
+import { isNativeRuntimeCopy } from '../addons/cloudstream-runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
 import { isNative, webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { withImdbEpisode } from './anime-imdb.js';
@@ -363,7 +364,7 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   }
   const context = { identity: identity ? { ...identity, episode: Number(episode) } : null };
   addonDiscoverySessions.set(id, context);
-  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && copies.some(c => !c.sourceId?.startsWith('addon|'));
+  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && copies.some(isNativeRuntimeCopy);
   const discovery = deferMapping ? withAddonCopies([], context.identity).catch(() => []) : null;
   const attachDiscovery = () => {
     if (!discovery) return;
@@ -383,7 +384,7 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
     const plan = nativeAddonPreparation({ runtime, copies, episode });
     await configure();
     if (nativeAddonSessions.get(id) !== state) return null;
-    const out = await plugin.prepare({ copies: copies.filter(c => !c.sourceId?.startsWith('addon|')), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
+    const out = await plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);

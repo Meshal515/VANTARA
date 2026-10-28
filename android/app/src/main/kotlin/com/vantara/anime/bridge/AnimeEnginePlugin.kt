@@ -271,24 +271,25 @@ class AnimeEnginePlugin : Plugin() {
                 val st = userStore.state
                 val list = JSArray()
                 for (s in engine.sources()) {
+                    val runtime = engine.runtimeSource(s.id)
                     val rec = engine.health.get(HealthStore.sourceKey(s.id))
                     val installed = s.extension?.let { ref -> st.extensions.firstOrNull { it.pkg == ref.pkg } }
                     val icon = s.extension?.let { ref -> NativeExtensionIcons.iconUrl(context, "anime-extensions", ref.pkg, ref.sha256) }
                     list.put(
                         JSObject()
                             .put("id", s.id).put("name", s.name).put("content", s.content)
-                            .put("pkg", s.extension?.pkg)
+                            .put("pkg", s.extension?.pkg ?: runtime?.packageId)
                             .put("lang", s.lang)
-                            .put("version", s.extension?.version)
-                            .put("user", installed != null)
-                            .put("repo", installed?.let { ext -> st.repos.firstOrNull { it.url == ext.repoUrl }?.name })
-                            .put("repoUrl", installed?.repoUrl)
+                            .put("version", s.extension?.version ?: runtime?.version)
+                            .put("user", installed != null || runtime != null)
+                            .put("repo", installed?.let { ext -> st.repos.firstOrNull { it.url == ext.repoUrl }?.name } ?: runtime?.repository)
+                            .put("repoUrl", installed?.repoUrl ?: runtime?.repositoryUrl)
                             .put("enabled", s.enabled && s.disabledReason == null)
                             .put("disabledReason", s.disabledReason)
                             .put("loadError", engine.loadError(s.id))
                             .put("domain", rec?.domain ?: s.domains.current)
                             .put("catalog", engine.catalogCursor(s.id)?.let { JSONObject(json.encodeToString(com.vantara.anime.catalog.CatalogCursor.serializer(), it)) })
-                            .withIcon(icon),
+                            .withIcon(icon ?: runtime?.iconUrl),
                     )
                 }
                 call.resolve(JSObject().put("sources", list))

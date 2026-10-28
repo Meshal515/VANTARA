@@ -91,6 +91,36 @@ public final class RuntimePackageStore {
         }
         good.sort(Comparator.comparing(Installed::packageId));bad.sort(Comparator.comparing(Unreadable::packageId));return new Inventory(good,bad);
     }
+    private interface Mutation<T>{T run()throws IOException;}
+    private <T> T locked(Mutation<T> action)throws IOException {
+        Path lockFile=root.resolve("activation.lock");if(Files.isSymbolicLink(lockFile))throw new IOException("PACKAGE_STORAGE_INVALID");
+        try(FileChannel channel=FileChannel.open(lockFile,StandardOpenOption.CREATE,StandardOpenOption.WRITE)){
+            final FileLock lease;try{lease=channel.tryLock();}catch(OverlappingFileLockException busy){throw new IOException("PACKAGE_STORE_BUSY");}
+            if(lease==null)throw new IOException("PACKAGE_STORE_BUSY");
+            try(FileLock held=lease){return action.run();}
+        }
+    }
+    private void pointer(Installed value)throws IOException {
+        if(value.metadata()==null||value.metadata().length()>16000)throw new IOException("PACKAGE_METADATA_LIMIT");
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(DataOutputStream out=new DataOutputStream(bytes)){
+            out.writeInt(MAGIC);out.writeUTF(value.packageId());out.writeUTF(value.packageHash());out.writeUTF(value.dexHash());out.writeUTF(value.entry());out.writeInt(value.version());out.writeUTF(value.metadata());
+        }
+        Path pending=Files.createTempFile(records,"pending-",".pending");
+        try{write(pending,bytes.toByteArray());Files.move(pending,records.resolve(value.packageId()+".vri"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
+        finally{Files.deleteIfExists(pending);}
+    }
+    /** Manual new-family settings only; binaries, cookies and other accounts are not rewritten. */
+    public Installed updateMetadata(String packageId,String metadata)throws IOException {
+        id(packageId);return locked(()->{
+            Installed old=current(packageId);if(old==null)throw new IOException("PACKAGE_NOT_INSTALLED");
+            pointer(new Installed(old.packageId(),old.packageHash(),old.dexHash(),old.entry(),old.version(),old.dexFile(),metadata));return current(packageId);
+        });
+    }
+    /** Explicit uninstall removes this account's registration, retaining immutable objects for recovery. */
+    public void uninstall(String packageId)throws IOException {
+        id(packageId);locked(()->{Files.deleteIfExists(records.resolve(packageId+".vri"));return null;});
+    }
     public final class Staged implements AutoCloseable {
         private final Path path;private final Cs3Package candidate;private boolean closed,moved;
         private Staged(Path path,Cs3Package candidate){this.path=path;this.candidate=candidate;}
@@ -113,13 +143,7 @@ public final class RuntimePackageStore {
                     if(Files.exists(object,LinkOption.NOFOLLOW_LINKS)){
                         if(Files.isSymbolicLink(object)||!Cs3Package.read(object.resolve("original.cs3").toFile(),candidate.packageHash()).dexHash().equals(candidate.dexHash())||!dexHash(object.resolve("classes.dex")).equals(candidate.dexHash()))throw new IOException("PACKAGE_OBJECT_CORRUPT");
                     }else{Files.move(path,object,StandardCopyOption.ATOMIC_MOVE);moved=true;}
-                    ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-                    try(DataOutputStream out=new DataOutputStream(bytes)){
-                        out.writeInt(MAGIC);out.writeUTF(packageId);out.writeUTF(candidate.packageHash());out.writeUTF(candidate.dexHash());out.writeUTF(candidate.entry());out.writeInt(candidate.version());out.writeUTF(metadata);
-                    }
-                    Path pending=Files.createTempFile(records,"pending-",".pending");
-                    try{write(pending,bytes.toByteArray());Files.move(pending,records.resolve(packageId+".vri"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
-                    finally{Files.deleteIfExists(pending);}
+                    pointer(new Installed(packageId,candidate.packageHash(),candidate.dexHash(),candidate.entry(),candidate.version(),object.resolve("classes.dex").toFile(),metadata));
                     closed=true;if(!moved)removeCandidate(path);
                     return current(packageId);
                 }

@@ -59,7 +59,15 @@ export async function createNativeCatalog(record, {
   plugins = globalThis.Capacitor?.Plugins ?? {}, sourceId, signal,
 } = {}) {
   const family = record?._store?.kind ?? record?.kind;
-  if (/cloudstream/i.test(String(record?.protocol ?? record?.engine ?? family)) || !['manga', 'anime', 'cinema'].includes(family))
+  const cloudstream = /cloudstream/i.test(String(record?.protocol ?? record?.engine ?? family));
+  if (cloudstream) {
+    let measured;
+    try { measured = await nativeCall(() => plugins.VantaraRuntime?.capabilities?.(),signal); }
+    catch (error) { if(error.name==='AbortError')throw error; }
+    if(measured?.cloudstream!==true || measured?.platform!=='android')
+      return incompatible('UNSUPPORTED_NATIVE_ENGINE','محرك هذه الحزمة غير متاح على هذه المنصة.');
+  }
+  if (!['manga', 'anime', 'cinema'].includes(family))
     return incompatible('UNSUPPORTED_NATIVE_ENGINE', 'لا يوجد محرك تشغيل أصلي متوافق لهذه الإضافة في هذا الإصدار.');
   const manga = family === 'manga';
   if ((manga && record.anime === true) || (!manga && record.anime === false))
@@ -80,6 +88,7 @@ export async function createNativeCatalog(record, {
   const explicit = new Set([record.sourceId, ...(Array.isArray(record.sourceIds) ? record.sourceIds : [])].filter(validId));
   const matches = declared.sources.filter(row => {
     if (!validId(row?.id)) return false;
+    if (cloudstream && !row.id.startsWith('addon|cs3|cs3_')) return false;
     const owner = row.pkg ?? row.extension?.pkg;
     if (pkg && owner) return owner === pkg;
     if (explicit.has(row.id)) return true;

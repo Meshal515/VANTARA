@@ -13,6 +13,23 @@ import static org.junit.Assert.*;
 
 /** Real filesystem transactions; authored package bytes, not executed source-health evidence. */
 public class RuntimePackageStoreTest {
+    @Test public void manualMetadataChangesAndRemovalStayWithinSelectedAccount()throws Exception{
+        RuntimePackageStore first=store("first"),second=store("second");File one=archive(1);
+        for(RuntimePackageStore s:Arrays.asList(first,second))try(RuntimePackageStore.Staged candidate=s.stage(one,hash(one))){candidate.activate("same-id","{\"enabled\":true}");}
+        java.lang.reflect.Method update=null,remove=null;
+        for(java.lang.reflect.Method m:RuntimePackageStore.class.getMethods()){
+            if(m.getName().equals("updateMetadata"))update=m;
+            if(m.getName().equals("uninstall"))remove=m;
+        }
+        assertNotNull("Missing atomic package settings API",update);assertNotNull("Missing explicit scoped uninstall API",remove);
+        File binary=first.current("same-id").dexFile();
+        update.invoke(first,"same-id","{\"enabled\":false}");
+        assertEquals("{\"enabled\":false}",store("first").current("same-id").metadata());
+        assertEquals("{\"enabled\":true}",second.current("same-id").metadata());
+        remove.invoke(first,"same-id");
+        assertNull(store("first").current("same-id"));assertNotNull(second.current("same-id"));
+        assertTrue("Uninstall must not erase shared immutable objects or session files",binary.isFile());
+    }
     @Rule public TemporaryFolder temp=new TemporaryFolder();
     private File archive(int version)throws Exception{
         byte[] dex=new byte[112];System.arraycopy("dex\n035\0".getBytes(StandardCharsets.US_ASCII),0,dex,0,8);

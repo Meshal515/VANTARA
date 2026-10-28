@@ -79,6 +79,7 @@ class AnimeEngine(context: Context) {
     /** إضافات Aniyomi التي ثبّتها المستخدم من مستودعاته (UserAnime.kt). */
     @Volatile private var userSources: List<com.vantara.anime.registry.SourceEntry> = emptyList()
     private val adapters = ConcurrentHashMap<String, AnimeAdapter>()
+    @Volatile private var runtimeSources: Map<String, RuntimeSourceBinding> = emptyMap()
     private val loadErrors = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val sessions = ConcurrentHashMap<String, PlaybackSession>()
@@ -118,13 +119,24 @@ class AnimeEngine(context: Context) {
         apply()
     }
 
+    /** Experimental Debug supplies real adapters; the default/Release map stays empty. */
+    @Synchronized fun setRuntimeSources(list: List<RuntimeSourceBinding>) {
+        check(com.vantara.app.BuildConfig.DEBUG) { "RUNTIME_DEBUG_ONLY" }
+        require(list.size <= 128 && list.all { it.entry.id.startsWith("addon|cs3|") && it.adapter.id == it.entry.id })
+        require(list.map { it.entry.id }.distinct().size == list.size)
+        runtimeSources = list.associateBy { it.entry.id }
+        apply()
+    }
+    fun runtimeSource(id: String): RuntimeSourceBinding? = runtimeSources[id]
+
     /** هل الحزمة جزء من البيان المشحون (فلا تُثبَّت مرة ثانية من مستودع)؟ */
     fun shipsPackage(pkg: String): Boolean = shipped.sources.any { it.extension?.pkg == pkg }
 
     @Synchronized private fun apply() {
-        val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources)
+        val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
         manifest = parsed
         for (s in parsed.sources) {
+            if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
             AnimeHostRouter.register(s.id, s.domains.plan(null))
             // حجب «تحويل غريب» حُكم بقواعد الدومين القديمة: البيان الجديد قد يقبله
             // (بصمة أو مرآة)، فيُجرَّب المصدر من جديد بدل أن ينتظر تبريده
@@ -153,6 +165,7 @@ class AnimeEngine(context: Context) {
 
     /** المصدر جاهزًا للعمل، أو null مع سبب في [loadErrors]. */
     suspend fun adapter(id: String): AnimeAdapter? {
+        runtimeSources[id]?.let { return it.adapter.takeIf { _ -> it.entry.enabled && it.entry.disabledReason == null } }
         adapters[id]?.let { return it }
         val e = entry(id) ?: return null
         if (!e.enabled || e.disabledReason != null) return null

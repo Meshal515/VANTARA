@@ -59,7 +59,7 @@ const kindName=(a)=>{
 };
 
 export function renderV7Addons({
-  registry={}, filter="all", repositories=null, animeRepositories=null, sites=null, verification=null, pulse=null,
+  registry={}, filter="all", repositories=null, animeRepositories=null, cloudstreamRepositories=null, sites=null, verification=null, pulse=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
 }={}){
   const root=el("section","v7-addon addon-v7");
@@ -71,6 +71,7 @@ export function renderV7Addons({
   const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), diagnosticResults=new Map();
   let requests=new Map(), queue=[], activeRequests=0;
   const stores=[
+    ...(cloudstreamRepositories?[{id:"cloudstream",kind:"anime",family:"cloudstream",api:cloudstreamRepositories}]:[]),
     ...(animeRepositories?[{id:"anime",kind:"anime",api:animeRepositories}]:[]),
     ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[])
   ];
@@ -134,7 +135,7 @@ export function renderV7Addons({
     if(!verification?.begin)return;
     if(button){button.disabled=true;button.textContent="جارٍ التحقق…";}
     try{
-      const result=await verification.begin(host);
+      const result=(await cloudstreamRepositories?.verify?.(host)) ?? await verification.begin(host);
       if(!alive)return;
       if(result?.ok===true||result?.state==="verified"){
         if(button)button.textContent="تم التحقق";
@@ -372,13 +373,13 @@ export function renderV7Addons({
     const row=el("article","v7-row");
     row.append(logo(r.data,null,true));
     const info=el("div","v7-info");
-    info.append(el("div","v7-name",r.data.name),el("div","v7-meta",(r.group.kind==="anime"?"Aniyomi":"Mihon")+" · "+(r.data.count??"")+" إضافة"));
+    info.append(el("div","v7-name",r.data.name),el("div","v7-meta",(r.group.family==="cloudstream"?"CloudStream":r.group.kind==="anime"?"Aniyomi":"Mihon")+" · "+(r.data.count??"")+" إضافة"));
     row.append(info);
     const go=btn("استعراض","v7-simple-btn",()=>{opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);});
     go.prepend(ico("chevron"));row.append(go);
     if(r.group.api?.remove){
       const remove=btn("","v7-trash",()=>{
-        showDialog("إزالة المستودع؟","ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");
+        showDialog("إزالة المستودع؟",r.group.family==="cloudstream"?"سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة.":"ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");
         const actions=el("div","v7-confirm-actions"),result=el("p","v7-notice");result.setAttribute("role","status");
         const cancel=btn("رجوع","v7-btn",()=>closeModal());
         const confirm=btn("إزالة","v7-btn danger",async()=>{
@@ -450,7 +451,7 @@ export function renderV7Addons({
     fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[...direct,...siteRows.map(x=>({kind:"manga",name:x.label})),...repos.map(r=>({kind:r.group.kind,name:r.data.name}))]));
     if(tab==="repos"){
       if(opened){
-        body.append(section(opened.data.name,opened.group.kind==="anime"?"Aniyomi":"Mihon"));
+        body.append(section(opened.data.name,opened.group.family==="cloudstream"?"CloudStream":opened.group.kind==="anime"?"Aniyomi":"Mihon"));
         const list=el("div","v7-list");
         const ext=extensions.get(opened.key);
         const failure=extensionErrors.get(opened.key);
@@ -698,6 +699,11 @@ export function renderV7Addons({
         acts.append(btn("فتح في VANTARA","v7-btn primary",()=>openNative(a)));
         if(!a.builtin)acts.append(btn("حذف","v7-btn danger",()=>askDelete(a,"native")));
       }
+      if(a._store?.api?.enable && a.installed)acts.append(btn(a.enabled===false?"تفعيل":"تعطيل","v7-btn",async()=>{
+        if(busy)return;busy=true;
+        try{await a._store.api.enable(a.pkg,a.enabled===false);closeModal(true);sourcesChanged();await refresh();}
+        catch(error){notify(fmtErr(error));}finally{busy=false;}
+      }));
       acts.append(btn("رجوع","v7-btn",()=>closeModal()));dialog.append(acts);
     }
   }
@@ -711,6 +717,7 @@ export function renderV7Addons({
     closeModal();invoke(onOpenSource,a);
   }
   function openNative(a){
+    if(a.enabled===false)return notify("هذه الإضافة معطلة؛ فعّلها من تفاصيلها أولًا.");
     if(sourceChallenges(a).length){showDetails(a,"native",repos.find(r=>r.data.url===a._url)?.data);return;}
     closeModal();
     if(onOpenNativeSource){invoke(onOpenNativeSource,a);return;}
@@ -797,7 +804,15 @@ export function renderV7Addons({
       // A valid index is NOT executable by native Mihon/Aniyomi APK runtimes.
       // Recognize its format and report real compatibility rather than
       // submitting it to unrelated engines or falsely saying it is installed.
-      if(/\/repo\.json$/i.test(parsed.pathname) && typeof fetch==="function"){
+      const cloudstream=stores.find(s=>s.family==="cloudstream");
+      if(/\/repo\.json$/i.test(parsed.pathname) && cloudstream){
+        try{
+          await cloudstream.api.add(uri);closeModal(true);await refresh();sourcesChanged();return;
+        }catch(error){
+          if(!/NOT_CLOUDSTREAM_REPOSITORY/.test(String(error?.code||error?.message)))throw error;
+        }
+      }
+      if(/\/repo\.json$/i.test(parsed.pathname) && !cloudstream && typeof fetch==="function"){
         const controller=new AbortController();
         const timeout=setTimeout(()=>controller.abort(),5000);
         try{
@@ -815,7 +830,7 @@ export function renderV7Addons({
         }catch{/* Offline/CORS: let native repositories validate their formats. */}
         finally{clearTimeout(timeout);}
       }
-      const candidates=stores.filter(s=>s.api?.add);
+      const candidates=stores.filter(s=>s.api?.add&&s.family!=="cloudstream");
       if(!candidates.length){note.textContent="لا يوجد محرك مستودعات متاح في هذا الجهاز.";return;}
       let matched=false, lastError="";
       // Real engines validate format and signing; do not substitute a simulated repository.

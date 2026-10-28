@@ -14,6 +14,18 @@ const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   return {a,key:p.manifest.key,requests};
 };
 const manifest={id:'org.sub',name:'Sub',version:'1.0.0',resources:['subtitles'],types:['movie'],catalogs:[]};
+it('waits for the selected account before collecting optional CloudStream sources',async()=>{
+  let selected='local';const calls=[];
+  const runtimePlugin={capabilities:async()=>({cloudstream:true,platform:'android'}),setProfile:async({profile})=>{await Promise.resolve();selected=profile;calls.push(profile);},
+    list:async()=>({repos:[],installed:[]}),addRepository:async()=>{},removeRepository:async()=>{},extensions:async()=>({extensions:[]}),install:async()=>{},uninstall:async()=>{},enable:async()=>{}};
+  vi.stubGlobal('fetch',async()=>({json:async()=>({sources:[]})}));
+  const {a}=await setup(manifest,{VantaraRuntime:runtimePlugin,AnimeEngine:{configure:async()=>{},capabilities:async()=>({}),sources:async()=>({sources:selected==='local'?[]:[{id:'addon|cs3|cs3_'+selected+'|provider',name:'Owned source',content:'anime',enabled:true,user:true,pkg:'cs3_'+selected}]})}});
+  a.registry.setProfile('one');await a.reloadSources();
+  expect(a.sources.list('anime').map(x=>x.id)).toEqual(['addon|cs3|cs3_one|provider']);
+  a.registry.setProfile('two');await a.reloadSources();
+  expect(a.sources.list('anime').map(x=>x.id)).toEqual(['addon|cs3|cs3_two|provider']);
+  expect(calls).toEqual(['one','two']);
+});
 it('routes the Team X catalogue through the existing native catalogue contract instead of latest',async()=>{
  const sourceId='eu.kanade.tachiyomi.extension.ar.teamx';
  const catalogue=vi.fn(async({page})=>({mangas:[{url:`/series/work-${page}`,title:`Catalogue ${page}`,memo:'native'}],hasNextPage:page===1}));

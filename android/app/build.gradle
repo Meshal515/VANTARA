@@ -32,6 +32,7 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 // بصمة الكود الأصلي (tools/native-fingerprint.mjs). حزمة واجهة تُعرض فقط فوق
 // الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
+def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
 
 android {
     namespace "com.vantara.app"
@@ -156,6 +157,10 @@ repositories {
 }
 
 dependencies {
+    if (runtimeDebug) {
+        debugImplementation 'dev.vantara.runtime:executor:1'
+        debugImplementation 'dev.vantara.runtime:bootstrap:1'
+    }
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
@@ -226,6 +231,14 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+if (runtimeDebug) {
+    // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
+    android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
+    android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
+    android.sourceSets.androidTest.java.srcDir('../../extensions/runtime-android/integration/src/androidTest/kotlin')
+    android.sourceSets.androidTest.assets.srcDir('../../extensions/runtime-android/harness/build/pinnedPackages')
+}
 
 try {
     def servicesJSON = file('google-services.json')

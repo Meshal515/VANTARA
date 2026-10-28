@@ -6,6 +6,18 @@ import { renderSourceMode } from '../v35/source-mode.js';
 
 afterEach(()=>vi.unstubAllGlobals());
 
+it('admits CloudStream only after Android measures a real runtime and declares this installed package source',async()=>{
+  const id='addon|cs3|cs3_123|provider';
+  const record={pkg:'cs3_123',protocol:'cloudstream',_store:{kind:'anime'}};
+  const engine={sources:async()=>({sources:[{id,pkg:'cs3_123',name:'Actual provider',content:'anime'}]}),
+    page:async()=>({page:{items:[{sourceId:id,url:'https://source.test/work',title:'Actual work'}],hasNext:false}}),details:async()=>({}),episodes:async()=>({episodes:[]})};
+  expect((await createNativeCatalog(record,{plugins:{AnimeEngine:engine}})).status).toBe('incompatible');
+  const result=await createNativeCatalog(record,{plugins:{AnimeEngine:engine,VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'android'})}}});
+  expect(result.status).toBe('ready');
+  expect((await result.adapter.catalogue(1)).items[0].sourceId).toBe(id);
+  expect((await createNativeCatalog(record,{plugins:{AnimeEngine:engine,VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'desktop'})}}})).status).toBe('incompatible');
+});
+
 it('diagnoses an installed native package through its actual canonical source, never its display name',async()=>{
  const diagnose=vi.fn(async key=>({checks:[{capability:'home',state:'passed',message:key}]}));
  const runtime={registry:{list:()=>[{key:'core|wrong',name:mangaRecord.name,sourceId:'unrelated'},{key:'core|actual',sourceId:'org.native.reader#123'}]},diagnose,reloadSources:async()=>{}};
