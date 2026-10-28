@@ -459,3 +459,13 @@ it('maps installed native package status through actual package identity rather 
  const view=renderV7Addons({registry:registry(records),repositories:api,pulse});await tick();installedTab(view).click();
  const row=[...view.querySelectorAll('.v7-row')].find(x=>x.querySelector('.v7-native-actions')&&x.querySelector('.v7-name').textContent==='Native package');expect(row.querySelector('.v7-status').textContent).toBe('مثبتة · مستقرة · كتالوج');view.close();
 });
+
+it('shows the recorded verification failure only inside source management',async()=>{
+ const d=setup();const message='توقفت صفحة التحقق. تقدر تعيد المحاولة يدويًا.';
+ const verification={list:()=>[{host:'mesh.example',message}],subscribe:()=>()=>{},begin:vi.fn()};
+ const view=renderV7Addons({registry:registry(),verification});d.body.append(view);await tick();
+ expect(view.querySelector('.v7-verification-item')).toBeNull();
+ view.querySelector('.v7-verify-entry').click();await tick();
+ expect(view.querySelector('.v7-verification-item').textContent).toContain(message);
+ expect(verification.begin).not.toHaveBeenCalled();view.close();
+});

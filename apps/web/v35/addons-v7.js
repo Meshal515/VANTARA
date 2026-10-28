@@ -483,6 +483,7 @@ export function renderV7Addons({
     const row=el("div","v7-verification-item");
     const title=el("div","v7-verification-name");
     title.append(el("strong",null,item.sourceName||item.host),el("small",null,item.host));
+    if(item.message)title.append(el("small",null,fmtErr(item.message)));
     const go=btn("تحقق","v7-btn",()=>{void verifyHost(item.host,go);});
     row.append(title,go);return row;
   }
@@ -601,7 +602,7 @@ export function renderV7Addons({
     dialog.append(main);
     const challenges=sourceChallenges(a);
     if(challenges.length){
-      dialog.append(el("p","v7-notice","هذا المصدر يحتاج تحققًا قبل إعادة المحاولة."));
+      dialog.append(el("p","v7-notice",challenges[0].message?fmtErr(challenges[0].message):"هذا المصدر يحتاج تحققًا قبل إعادة المحاولة."));
       const verify=btn("تحقق من المصدر","v7-btn",()=>{void verifyHost(challenges[0].host,verify);});
       dialog.append(verify);
     }

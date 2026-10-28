@@ -71,6 +71,23 @@ describe('explicit source verification without unsolicited overlay',()=>{
     expect(c.list()[0].message).toContain('أُلغي');
     c.close();
   });
+  it('retains the precise native failure without retrying content or changing the screen',async()=>{
+    const f=fixture(),retry=vi.fn();
+    f.plugin.begin.mockResolvedValue({host:'source.example',state:'failed',reason:'unsupported_webview'});
+    const c=createSourceVerification(f);await c.ready;c.require({host:'source.example',retry});
+    const result=await c.begin('source.example');
+    expect(result.error).toContain('إصدار Android');
+    expect(c.list()[0]).toMatchObject({reason:'unsupported_webview',message:result.error});
+    expect(retry).not.toHaveBeenCalled();expect(f.plugin.begin).toHaveBeenCalledOnce();
+    expect(f.document.body.textContent).toBe('المحتوى الأصلي');c.close();
+  });
+  it('explains background renderer failure silently and retains the source for manual retry',async()=>{
+    const f=fixture(),c=createSourceVerification(f);await c.ready;
+    f.listeners.get('state')({host:'source.example',state:'failed',reason:'renderer_gone'});
+    expect(c.list()[0].message).toContain('صفحة التحقق');
+    expect(f.plugin.begin).not.toHaveBeenCalled();
+    expect(f.document.body.textContent).toBe('المحتوى الأصلي');c.close();
+  });
   it('never registers malformed or private hosts',async()=>{
     const f=fixture(),c=createSourceVerification(f);await c.ready;
     for(const host of ['<img onerror=x>','127.0.0.1','localhost','source.example/path','https://source.example'])c.require({host});
@@ -97,4 +114,12 @@ describe('explicit source verification without unsolicited overlay',()=>{
     expect(f.document.body.textContent).toBe('المحتوى الأصلي');
     c.close();
   });
+});
+
+it('never exposes another host verification as success to the caller',async()=>{
+ const f=fixture(),retry=vi.fn();f.plugin.begin.mockResolvedValue({host:'other.example',state:'verified',ok:true});
+ const c=createSourceVerification(f);await c.ready;c.require({host:'source.example',retry});
+ const result=await c.begin('source.example');
+ expect(result.ok).toBe(false);expect(result.state).toBe('failed');
+ expect(c.list()).toMatchObject([{host:'source.example'}]);expect(retry).not.toHaveBeenCalled();c.close();
 });
