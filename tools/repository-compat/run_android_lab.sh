@@ -2,7 +2,11 @@
 set -euo pipefail
 # Collect while the emulator is alive; emulator-runner tears it down on return.
 trap 'timeout 15s adb logcat -d VantaraRuntimeAbi:V AndroidRuntime:E ActivityManager:I TestRunner:I "*:S" > runtime-lab-logcat.txt 2>&1 || true' EXIT
-adb logcat -c
+# Android8 emulators can reject clearing the main buffer. Clearing old logs is
+# housekeeping, never the acceptance gate: retain logs and still RUN the tests.
+if ! adb logcat -c; then
+  printf '%s\n' 'Log buffer could not be cleared; retaining timestamps and running required tests.' >&2
+fi
 args=()
 case "${RUNTIME_LAB_PROFILE:-full-execution}" in
   full-execution) ;;
