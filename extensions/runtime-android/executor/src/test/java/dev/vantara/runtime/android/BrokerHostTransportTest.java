@@ -27,7 +27,7 @@ public class BrokerHostTransportTest {
         HandshakeCertificates serverTls=new HandshakeCertificates.Builder().heldCertificate(certificate).build();
         HandshakeCertificates clientTls=new HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate()).build();
         server=new MockWebServer();server.useHttps(serverTls.sslSocketFactory(),false);server.start();
-        OkHttpClient base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.getPort()))
+        OkHttpClient base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.toProxyAddress()))
             .sslSocketFactory(clientTls.sslSocketFactory(),clientTls.trustManager()).build();
         broker=new HttpBroker(base,host->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),
             address->address.isLoopbackAddress(),new FileCookieVaults(temporary.getRoot().toPath()),Clock.systemUTC());
@@ -110,9 +110,9 @@ public class BrokerHostTransportTest {
     }
     /** Test-only routing retains the real HTTPS hostname/certificate and actual sockets. */
     private static final class LocalSocketFactory extends SocketFactory {
-        private final int port;LocalSocketFactory(int port){this.port=port;}
-        @Override public Socket createSocket(){return new Socket(){@Override public void connect(SocketAddress ignored,int timeout)throws IOException{super.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),port),timeout);}};}
-        private Socket connected()throws IOException{Socket socket=createSocket();socket.connect(new InetSocketAddress("127.0.0.1",port),3000);return socket;}
+        private final InetSocketAddress endpoint;LocalSocketFactory(InetSocketAddress endpoint){this.endpoint=endpoint;}
+        @Override public Socket createSocket(){return new Socket(){@Override public void connect(SocketAddress ignored,int timeout)throws IOException{super.connect(endpoint,timeout);}};}
+        private Socket connected()throws IOException{Socket socket=createSocket();socket.connect(endpoint,3000);return socket;}
         @Override public Socket createSocket(String host,int port)throws IOException{return connected();}
         @Override public Socket createSocket(InetAddress host,int port)throws IOException{return connected();}
         @Override public Socket createSocket(String host,int port,InetAddress local,int localPort)throws IOException{return connected();}

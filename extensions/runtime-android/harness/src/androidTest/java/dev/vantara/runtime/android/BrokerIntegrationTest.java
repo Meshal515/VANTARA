@@ -37,7 +37,7 @@ public class BrokerIntegrationTest {
         HandshakeCertificates tls=new HandshakeCertificates.Builder().heldCertificate(cert).build();
         HandshakeCertificates trust=new HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate()).build();
         server=new MockWebServer();server.setProtocols(Arrays.asList(Protocol.HTTP_1_1));server.useHttps(tls.sslSocketFactory(),false);server.start();
-        base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.getPort())).sslSocketFactory(trust.sslSocketFactory(),trust.trustManager()).build();
+        base=new OkHttpClient.Builder().socketFactory(new LocalSocketFactory(server.toProxyAddress())).sslSocketFactory(trust.sslSocketFactory(),trust.trustManager()).build();
         broker=new HttpBroker(base,hostname->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),address->address.isLoopbackAddress(),new FileCookieVaults(cookies),Clock.systemUTC());
     }
     @After public void cleanup() throws Exception {
@@ -86,9 +86,11 @@ public class BrokerIntegrationTest {
         assertEquals("DNS_ADDRESS_DENIED",invokeFailure());assertEquals(0,server.getRequestCount());
     }
     private static final class LocalSocketFactory extends SocketFactory {
-        private final int port;LocalSocketFactory(int port){this.port=port;}
-        @Override public Socket createSocket(){return new Socket(){@Override public void connect(SocketAddress ignored,int timeout)throws IOException{super.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),port),timeout);}};}
-        private Socket connected()throws IOException{Socket socket=createSocket();socket.connect(new InetSocketAddress("127.0.0.1",port),3000);return socket;}
+        private final InetSocketAddress endpoint;LocalSocketFactory(InetSocketAddress endpoint){this.endpoint=endpoint;}
+        // Android's generic loopback is ::1; MockWebServer may bind IPv4.
+        // Route to its actual bound address, preserving TLS hostname checking.
+        @Override public Socket createSocket(){return new Socket(){@Override public void connect(SocketAddress ignored,int timeout)throws IOException{super.connect(endpoint,timeout);}};}
+        private Socket connected()throws IOException{Socket socket=createSocket();socket.connect(endpoint,3000);return socket;}
         @Override public Socket createSocket(String host,int port)throws IOException{return connected();}
         @Override public Socket createSocket(InetAddress host,int port)throws IOException{return connected();}
         @Override public Socket createSocket(String host,int port,InetAddress local,int localPort)throws IOException{return connected();}

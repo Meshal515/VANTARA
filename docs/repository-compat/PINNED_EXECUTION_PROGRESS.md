@@ -50,6 +50,16 @@ without sending it through IPC, and attaches it to failures in the local fixture
 test. A real disconnected-TLS JVM regression first failed because the cause was
 discarded. No assertions/timeouts were weakened and no TLS verification disabled.
 
+Run40745314337 (90f19c25) exposes the actual cause in the Android XML:
+`ConnectException ... ip6-localhost/::1 ... ECONNREFUSED`. The TEST socket router
+used Android's generic loopback (::1), while MockWebServer was bound to IPv4.
+The candidate routes to the server's actual bound `toProxyAddress()` in both
+fixture helpers. The same HTTPS hostname, temporary CA, certificate validation,
+broker policy, byte assertions, challenge assertions and deadlines remain.
+This is a fixture-address correction, not a production TLS/policy bypass. The
+production HTTP adapter remains unaccepted until the unchanged native assertions
+pass on both API29/35.
+
 ---
 
 The next Android lab candidate adds four offline registration tests using the
