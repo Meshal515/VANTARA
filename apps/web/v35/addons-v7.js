@@ -5,6 +5,7 @@
 import { assessAddon, supportedCapabilities } from "../addons/assessment.js";
 
 import { configureLink } from "./addons-view.js";
+import { manifestEndpoint } from "../addons/import.js";
 
 const icons = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -375,6 +376,20 @@ export function renderV7Addons({
     row.append(info);
     const go=btn("استعراض","v7-simple-btn",()=>{opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);});
     go.prepend(ico("chevron"));row.append(go);
+    if(r.group.api?.remove){
+      const remove=btn("","v7-trash",()=>{
+        showDialog("إزالة المستودع؟","ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");
+        const actions=el("div","v7-confirm-actions"),result=el("p","v7-notice");result.setAttribute("role","status");
+        const cancel=btn("رجوع","v7-btn",()=>closeModal());
+        const confirm=btn("إزالة","v7-btn danger",async()=>{
+          if(busy)return;busy=true;confirm.disabled=true;
+          try{await r.group.api.remove(r.data.url);opened=null;closeModal(true);sourcesChanged();await refresh();}
+          catch(error){result.textContent=fmtErr(error);}finally{busy=false;confirm.disabled=false;}
+        });
+        actions.append(cancel,confirm);dialog.append(actions,result);
+      });
+      remove.append(ico("trash"));remove.dataset.removeRepo="";remove.setAttribute("aria-label","إزالة المستودع "+r.data.name);row.append(remove);
+    }
     return row;
   }
   function switchTab(t){tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";draw();}
@@ -705,7 +720,7 @@ export function renderV7Addons({
     const api=a._store?.api;
     if(!api)throw Error("تعذر تحديد محرك الإضافة.");
     // Preserve native distinction: Aniyomi can target anime/cinema; manga uses its own engine.
-    await api.install(a._url,a.pkg,a._store.kind==="anime"?"anime":undefined);
+    await api.install(a._url,a.pkg,a._store.kind==="anime"?(a.content==="cinema"?"cinema":"anime"):undefined);
   }
   function askDelete(a,mode){
     showDialog("حذف المصدر؟","هل تريد حذف «"+a.name+"» من الإضافات المثبتة؟");
@@ -740,11 +755,12 @@ export function renderV7Addons({
   }
   async function processInput(value,note,yes){
     if(!value){note.textContent="ألصق رابطًا أولًا.";return;}
-    const uri=safe(value);
+    let uri;
+    try{uri=safe(/^stremio:\/\//i.test(value)?manifestEndpoint(value):value);}catch{}
     if(!uri){note.textContent="يتطلب رابط HTTPS صالحًا.";return;}
     const parsed=new URL(uri);
     // Native repositories contain executable extension code. Require informed opt-in before calling add().
-    if(!parsed.pathname.endsWith("manifest.json") && yes.dataset.trustedUrl!==uri){
+    if(!/\/manifest\.json\/?$/i.test(parsed.pathname) && yes.dataset.trustedUrl!==uri){
       yes.dataset.trustedUrl=uri;
       yes.textContent="أثق به، أضفه";
       note.textContent="إضافات المستودع قد تنفّذ كودًا على جهازك. أضف مستودعات تثق بناشريها فقط؛ اضغط مجددًا للتأكيد.";
@@ -753,9 +769,16 @@ export function renderV7Addons({
     if(busy)return;
     busy=true;yes.disabled=true;note.textContent="جارٍ فحص الرابط…";
     try{
-      let url=parsed;
-      if(url.pathname.endsWith("manifest.json")){
-        const preview=await registry.inspect(uri);
+      const explicitManifest=/\/manifest\.json\/?$/i.test(parsed.pathname);
+      let preview;
+      // Stable accepts service roots as well as manifest/install links. Probe
+      // through its existing registry before considering a plain website.
+      if(!explicitManifest && !/\.json\/?$/i.test(parsed.pathname) && registry.inspect){
+        try{preview=await registry.inspect(uri);}catch{/* Not a Manifest: existing site/repository flow validates next. */}
+        if(!alive||!dialog.contains(note))return;
+      }
+      if(explicitManifest||preview){
+        preview??=await registry.inspect(uri);
         note.textContent="الإضافة: "+preview.manifest.name+" · راجع المصدر قبل التثبيت.";
         yes.textContent="تأكيد التثبيت";yes.onclick=async()=>{
           if(busy)return;busy=true;yes.disabled=true;

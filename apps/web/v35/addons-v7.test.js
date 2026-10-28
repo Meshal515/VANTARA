@@ -469,3 +469,50 @@ it('shows the recorded verification failure only inside source management',async
  expect(view.querySelector('.v7-verification-item').textContent).toContain(message);
  expect(verification.begin).not.toHaveBeenCalled();view.close();
 });
+
+it('keeps an installed Aniyomi Cinema extension in Cinema when updating from its repository',async()=>{
+ const d=setup(),install=vi.fn(async()=>{});
+ const url='https://repo.example/cinema',pkg='eu.kanade.tachiyomi.animeextension.ar.cinemafixture';
+ const api={list:async()=>({repos:[{url,name:'Saved Cinema Repo'}],installed:[{pkg,name:'Cinema Fixture',version:'1.0',content:'cinema',repo:url}]}),
+   extensions:async()=>[{pkg,name:'Cinema Fixture',version:'2.0',installed:'1.0',update:true,anime:true}],install};
+ const view=renderV7Addons({registry:registry(),animeRepositories:api});d.body.append(view);await tick();
+ installedTab(view).click();view.querySelector('.v7-row').click();await tick();
+ const update=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='تحديث');
+ expect(update).toBeTruthy();update.click();await tick();
+ expect(install).toHaveBeenCalledWith(url,pkg,'cinema');view.close();
+});
+
+it.each(['stremio://addon.example/configured/manifest.json','https://addon.example/configured/manifest.json/','https://addon.example/configured'])('keeps the Stable manual manifest import path for %s',async input=>{
+ const d=setup(),preview={manifest:{key:'configured',name:'Configured Manifest'}},inspect=vi.fn(async()=>preview),install=vi.fn(async()=>{});
+ const sites={list:async()=>[],add:vi.fn(async()=>({label:'Wrong website route'}))};
+ const view=renderV7Addons({registry:{...registry(),inspect,install},sites});d.body.append(view);await tick();
+ view.querySelector('.v7-plus').click();const field=view.querySelector('.v7-add-input');field.value=input;
+ let add=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='أضف');add.click();await tick();
+ if(add.textContent==='أثق به، أضفه'){add.click();await tick();}
+ expect(inspect).toHaveBeenCalledOnce();expect(sites.add).not.toHaveBeenCalled();
+ expect(view.querySelector('.v7-dialog').textContent).toContain('Configured Manifest');
+ const confirm=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='تأكيد التثبيت');expect(confirm).toBeTruthy();confirm.click();await tick();
+ expect(install).toHaveBeenCalledWith(preview);view.close();
+});
+
+it('removes a saved native repository only after explicitly warning about its installed extensions',async()=>{
+ const d=setup();let saved=true;
+ const remove=vi.fn(async()=>{saved=false;});const url='https://repo.example/saved';
+ const api={list:async()=>({repos:saved?[{url,name:'Saved Repo'}]:[]}),extensions:async()=>[],remove};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
+ const action=view.querySelector('[data-remove-repo]');expect(action).toBeTruthy();action.click();await tick();
+ expect(view.querySelector('.v7-dialog').textContent).toContain('إضافاته المثبتة');expect(remove).not.toHaveBeenCalled();
+ [...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='رجوع').click();expect(remove).not.toHaveBeenCalled();
+ view.querySelector('[data-remove-repo]').click();[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='إزالة').click();await tick();
+ expect(remove).toHaveBeenCalledOnce();expect(remove).toHaveBeenCalledWith(url);
+ expect(view.querySelector('.v7-body').textContent).not.toContain('Saved Repo');view.close();
+});
+
+it('keeps repository-removal errors in the confirmation and preserves the saved repository',async()=>{
+ const d=setup(),remove=vi.fn(async()=>{throw Error('تعذرت إزالة المستودع');});
+ const api={list:async()=>({repos:[{url:'https://repo.example/saved',name:'Saved Repo'}]}),extensions:async()=>[],remove};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
+ view.querySelector('[data-remove-repo]').click();const confirm=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='إزالة');confirm.click();await tick();
+ expect(view.querySelector('.v7-dialog').textContent).toContain('تعذرت إزالة المستودع');expect(confirm.disabled).toBe(false);
+ expect(view.querySelector('.v7-body').textContent).toContain('Saved Repo');view.close();
+});
