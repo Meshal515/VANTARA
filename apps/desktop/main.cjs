@@ -6,6 +6,7 @@ const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
 const { firstPartyRequest } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
+const { selectTorrentPreview } = require('./torrent-preview.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
 
@@ -146,9 +147,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }
+  const torrentPreview=selectTorrentPreview({argv:process.argv,platform:process.platform,packaged:app.isPackaged,nativeDir:native});
   services = createDesktopServices({
     userData: app.getPath('userData'),
-    binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
+    binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe'), ...torrentPreview.binaries },
+    torrentBackend: torrentPreview.torrentBackend,
     platform: process.platform,
     videoHost,
     inputConf:path.join(__dirname,'native-host/input.conf'),
