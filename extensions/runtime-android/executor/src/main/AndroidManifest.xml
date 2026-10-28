@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name="dev.vantara.runtime.android.RuntimeWorkerService"
+            android:exported="false" android:isolatedProcess="true"
+            android:process=":runtime_worker" android:stopWithTask="true" />
+    </application>
+</manifest>
