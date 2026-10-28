@@ -1,7 +1,7 @@
 name: Repository compatibility core (experimental; NO plugin execution)
 on:
   push:
-    branches: [feat/repository-compat-runtime-20261028]
+    branches: [feat/repository-compat-runtime-20261028, feat/runtime-debug-integration-20261028]
   pull_request:
     paths:
       - 'extensions/runtime-core/**'
