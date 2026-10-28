@@ -21,7 +21,7 @@ public final class RuntimeWorkerService extends Service {
     private volatile RuntimeAccess access;
     private final Binder endpoint=new Binder() {
         @Override protected boolean onTransact(int code,Parcel data,Parcel reply,int flags) throws RemoteException {
-            if(code<RuntimeProtocol.HELLO || code>RuntimeProtocol.LOAD_CLOUDSTREAM) return super.onTransact(code,data,reply,flags);
+            if(code<RuntimeProtocol.HELLO || code>RuntimeProtocol.INVOKE_JSON) return super.onTransact(code,data,reply,flags);
             if(Binder.getCallingUid()!=getApplicationInfo().uid) throw new SecurityException("Not the owning host");
             data.enforceInterface(RuntimeProtocol.WORKER);
             if(code==RuntimeProtocol.HELLO) {
@@ -37,7 +37,7 @@ public final class RuntimeWorkerService extends Service {
             if(!busy.compareAndSet(false,true)) { RuntimeProtocol.result(reply,"WORKER_BUSY",null);return true; }
             try {
                 if(code==RuntimeProtocol.LOAD||code==RuntimeProtocol.LOAD_CLOUDSTREAM) load(data,reply,code==RuntimeProtocol.LOAD_CLOUDSTREAM);
-                else invoke(data,reply);
+                else invoke(data,reply,code==RuntimeProtocol.INVOKE_JSON);
             } catch(VirtualMachineError fatal) {
                 android.os.Process.killProcess(android.os.Process.myPid()); throw fatal;
             } catch(RuntimeFailure failure) { RuntimeProtocol.result(reply,failure.code,null); }
@@ -114,7 +114,7 @@ public final class RuntimeWorkerService extends Service {
         access=candidateAccess;provider=candidate;
         RuntimeProtocol.result(reply,"OK","");
     }
-    private void invoke(Parcel data,Parcel reply) {
+    private void invoke(Parcel data,Parcel reply,boolean largeJson)throws IOException {
         String operation=RuntimeProtocol.text(data.readString()), input=RuntimeProtocol.text(data.readString());
         if(!RuntimeProtocol.OPERATIONS.contains(operation)) throw new RuntimeFailure("CAPABILITY_UNSUPPORTED");
         RuntimeProvider current=provider; if(current==null) throw new RuntimeFailure("PROVIDER_NOT_READY");
@@ -125,7 +125,8 @@ public final class RuntimeWorkerService extends Service {
         catch(LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
         catch(UnsupportedOperationException e) { throw new RuntimeFailure("CAPABILITY_UNSUPPORTED"); }
         catch(Throwable e) { throw new RuntimeFailure("PROVIDER_FAILED"); }
-        RuntimeProtocol.result(reply,"OK",RuntimeProtocol.text(result));
+        if(largeJson)RuntimeProtocol.jsonResult(reply,result);
+        else RuntimeProtocol.result(reply,"OK",RuntimeProtocol.text(result));
     }
     private static final class BrokerRejected extends Exception {
         final String code;

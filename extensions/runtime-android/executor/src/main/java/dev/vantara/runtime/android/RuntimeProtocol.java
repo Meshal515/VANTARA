@@ -11,7 +11,7 @@ import java.util.*;
 
 final class RuntimeProtocol {
     static final String WORKER="dev.vantara.runtime.worker.v1", BROKER="dev.vantara.runtime.broker.v1";
-    static final int HELLO=IBinder.FIRST_CALL_TRANSACTION, LOAD=HELLO+1, INVOKE=HELLO+2, CLOSE=HELLO+3,LOAD_CLOUDSTREAM=HELLO+4;
+    static final int HELLO=IBinder.FIRST_CALL_TRANSACTION, LOAD=HELLO+1, INVOKE=HELLO+2, CLOSE=HELLO+3,LOAD_CLOUDSTREAM=HELLO+4,INVOKE_JSON=HELLO+5;
     static final int MAX_TEXT=65536, MAX_DEX=8*1024*1024;
     static final int HTTP_EXCHANGE=HELLO+1, MAX_REQUEST=1024*1024, MAX_RESPONSE=4*1024*1024;
     static final Set<String> OPERATIONS=Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
@@ -37,6 +37,22 @@ final class RuntimeProtocol {
         reply.readException(); String code=reply.readString();
         if(!"OK".equals(code)) throw new RuntimeFailure(code==null?"IPC_CONTRACT":code);
         return text(reply.readString());
+    }
+    /** Explicit new transport; the legacy text contract retains its64KiB bound. */
+    static void jsonResult(Parcel reply,String result)throws IOException {
+        if(result==null||result.length()>MAX_RESPONSE)throw new RuntimeFailure("PAYLOAD_LIMIT");
+        byte[] bytes=result.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if(bytes.length>MAX_RESPONSE)throw new RuntimeFailure("PAYLOAD_LIMIT");
+        Parcel payload=Parcel.obtain();
+        try{writeBytes(payload,bytes,MAX_RESPONSE);reply.writeNoException();reply.writeString("OK");reply.appendFrom(payload,0,payload.dataSize());}
+        finally{payload.recycle();}
+    }
+    static String jsonResponse(Parcel reply,BooleanSupplier closed)throws IOException {
+        reply.readException();String code=reply.readString();
+        if(!"OK".equals(code))throw new RuntimeFailure(code==null?"IPC_CONTRACT":code);
+        byte[] bytes=readBytes(reply,MAX_RESPONSE,closed);if(bytes==null)throw new RuntimeFailure("IPC_CONTRACT");
+        try{return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
+        catch(java.nio.charset.CharacterCodingException invalid){throw new RuntimeFailure("IPC_CONTRACT");}
     }
     static void writeHeaders(Parcel parcel,Map<String,List<String>> headers) {
         if(headers.size()>64)throw new RuntimeFailure("HEADER_LIMIT");parcel.writeInt(headers.size());int bytes=0;

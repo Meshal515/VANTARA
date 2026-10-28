@@ -105,6 +105,13 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         catch(RuntimeFailure e) { return failed(e.code); }
         return submit(timeoutMs,false,()->transact(RuntimeProtocol.INVOKE,p->{p.writeString(operation);p.writeString(input);}));
     }
+    /** Bounded UTF8 JSON result over existing FD transport; caller still validates its operation-specific JSON shape. */
+    public CompletableFuture<String> invokeJson(String operation,String input,long timeoutMs) {
+        if(closed.get())return failed("WORKER_CLOSED");
+        if(!RuntimeProtocol.OPERATIONS.contains(operation))return failed("CAPABILITY_UNSUPPORTED");
+        try{RuntimeProtocol.text(input);}catch(RuntimeFailure failure){return failed(failure.code);}
+        return submit(timeoutMs,false,()->transact(RuntimeProtocol.INVOKE_JSON,p->{p.writeString(operation);p.writeString(input);}));
+    }
     private final class OperationFuture<T> extends CompletableFuture<T> {
         volatile boolean cancellationRequested;
         volatile ScheduledFuture<?> deadline;
@@ -161,7 +168,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         try {
             data.writeInterfaceToken(RuntimeProtocol.WORKER);writer.write(data);
             if(!target.transact(code,data,reply,0)) throw new RuntimeFailure("IPC_CONTRACT");
-            return RuntimeProtocol.response(reply);
+            return code==RuntimeProtocol.INVOKE_JSON?RuntimeProtocol.jsonResponse(reply,closed::get):RuntimeProtocol.response(reply);
         } finally { data.recycle();reply.recycle(); }
     }
     private final Binder broker=new Binder() {

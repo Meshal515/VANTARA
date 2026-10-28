@@ -75,4 +75,31 @@ public class PublishedCatalogueTest {
         assertTrue(calls.get()>=4);
     }
     private JSONObject call(String operation,JSONObject input) throws Exception{return new JSONObject(client.invoke(operation,input.toString(),4000).get(6,TimeUnit.SECONDS));}
+    @Test public void longPublishedEpisodeListKeepsLegacyLimitAndUsesBoundedLargeJsonTransport() throws Exception {
+        StringBuilder blocks=new StringBuilder("<div id='episodesList'>"),list=new StringBuilder("<ul class='all-episodes-list'>");
+        for(int i=1;i<=1200;i++){
+            String link="<a href='"+ORIGIN+"/episode/vantara-test-"+i+"/'>الحلقة "+i+"</a>";
+            blocks.append("<div class='themexblock'>").append(link).append("</div>");list.append("<li>").append(link).append("</li>");
+        }
+        String html=DETAIL.substring(0,DETAIL.indexOf("<div id='episodesList'>"))+blocks+"</div>"+list+"</ul></body></html>";
+        client=new AndroidRuntimeClient(host,new AndroidRuntimeClient.Scope("cloudstream",pin.getString("packageSha256"),"Anime4up","offline-lab",new HashSet<>(Arrays.asList(ORIGIN))),new AndroidRuntimeClient.HostHttpTransport(){
+            public RuntimeHttpAccess.Response exchange(AndroidRuntimeClient.Scope scope,RuntimeHttpAccess.Request request){
+                assertTrue(request.url().startsWith(ORIGIN+"/"));
+                return new RuntimeHttpAccess.Response(request.url(),200,Collections.singletonMap("Content-Type",Arrays.asList("text/html; charset=utf-8")),html.getBytes(StandardCharsets.UTF_8));
+            }
+        });
+        client.loadCloudStream(dex,pin.getString("dexSha256"),pin.getString("entry")).get(12,TimeUnit.SECONDS);
+        String input=new JSONObject().put("url",ORIGIN+"/anime/vantara-test/").toString();
+        try{client.invoke("episodes",input,4000).get(6,TimeUnit.SECONDS);fail("Legacy Binder text limit disappeared");}
+        catch(ExecutionException expected){assertEquals("PAYLOAD_LIMIT",((RuntimeFailure)expected.getCause()).code);}
+        String result=client.invokeJson("episodes",input,4000).get(6,TimeUnit.SECONDS);
+        assertTrue("Fixture must exceed the unchanged legacy limit",result.length()>65536);
+        JSONArray episodes=new JSONObject(result).getJSONArray("items");assertEquals(1200,episodes.length());
+        Set<Integer> ids=new HashSet<>();
+        for(int i=0;i<episodes.length();i++){
+            String data=episodes.getJSONObject(i).getString("data");
+            java.util.regex.Matcher match=java.util.regex.Pattern.compile("/episode/vantara-test-([0-9]+)/").matcher(data);assertTrue(data,match.find());ids.add(Integer.parseInt(match.group(1)));
+        }
+        for(int i=1;i<=1200;i++)assertTrue("Missing episode "+i,ids.contains(i));
+    }
 }

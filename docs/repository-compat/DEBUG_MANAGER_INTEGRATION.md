@@ -39,3 +39,15 @@ source removal, account migration or torrent/player/subtitle change occurred.
 
 The inherited generic Debug build can compile this foundation without exposing
 the new runtime in the app. It must NOT be sent as a completed runtime update.
+
+## Long-work transport gate
+
+Before the app adapter consumes episode JSON, the candidate adds an explicit
+`invokeJson` opcode using the already bounded FD transport (4MiB UTF8 output).
+Legacy `invoke` stays64KiB and all its existing rejection assertions remain.
+The real published Anime4up parser receives a local authored1200-episode page;
+the test requires the old call to reject it and the new call to return ALL1200
+distinct opaque episode URLs. Native frame tests reject malformed UTF8, trailing
+payload and multibyte text above the byte budget. This is not a live-source or
+five-work acceptance claim. Local73 JVM tests, APK/test assembly and lint pass;
+the expanded native suite must pass before adopting the new transport in UI.
