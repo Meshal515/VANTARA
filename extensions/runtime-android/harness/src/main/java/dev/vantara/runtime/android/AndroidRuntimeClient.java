@@ -28,7 +28,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private final ScheduledExecutorService clock=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"vrt-deadline");t.setDaemon(true);return t;});
     private final AtomicBoolean started=new AtomicBoolean(),closed=new AtomicBoolean(),busy=new AtomicBoolean(),brokerBusy=new AtomicBoolean();
     private final CompletableFuture<Identity> ready=new CompletableFuture<>();
-    private final AtomicReference<CompletableFuture<?>> current=new AtomicReference<>();
+    private final AtomicReference<OperationFuture<?>> current=new AtomicReference<>();
     private volatile IBinder endpoint;
     private volatile Identity identity;
     private boolean bound;
@@ -72,7 +72,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     }
     public CompletableFuture<Void> load(File dex,String hash,String entry) {
         if(dex==null || hash==null || entry==null) return failed("INVALID_DEX_INPUT");
-        return submit(10000,()->{
+        return submit(10000,true,()->{
             try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(dex,ParcelFileDescriptor.MODE_READ_ONLY)) {
                 transact(RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
                 return null;
@@ -84,19 +84,30 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         if(!RuntimeProtocol.OPERATIONS.contains(operation)) return failed("CAPABILITY_UNSUPPORTED");
         try { RuntimeProtocol.text(input); }
         catch(RuntimeFailure e) { return failed(e.code); }
-        return submit(timeoutMs,()->transact(RuntimeProtocol.INVOKE,p->{p.writeString(operation);p.writeString(input);}));
+        return submit(timeoutMs,false,()->transact(RuntimeProtocol.INVOKE,p->{p.writeString(operation);p.writeString(input);}));
     }
-    private <T> CompletableFuture<T> submit(long timeoutMs,Callable<T> operation) {
+    private final class OperationFuture<T> extends CompletableFuture<T> {
+        volatile boolean cancellationRequested;
+        volatile ScheduledFuture<?> deadline;
+        @Override public boolean cancel(boolean interrupt) {
+            if(isDone()) return false;
+            cancellationRequested=true;
+            // Run independently of the order/blocking behavior of user callbacks.
+            retire("OPERATION_CANCELLED",true,this);
+            return super.cancel(interrupt);
+        }
+    }
+    private <T> CompletableFuture<T> submit(long timeoutMs,boolean initialLoad,Callable<T> operation) {
         if(closed.get()) return failed("WORKER_CLOSED");
         if(timeoutMs<1 || timeoutMs>30000) return failed("INVALID_DEADLINE");
         if(!busy.compareAndSet(false,true)) return failed("WORKER_BUSY");
-        CompletableFuture<T> result=new CompletableFuture<>();current.set(result);
+        OperationFuture<T> result=new OperationFuture<>();current.set(result);
         final ScheduledFuture<?> deadline;
         try { deadline=clock.schedule(()->{
-            if(!result.isDone()) retire("OPERATION_TIMEOUT",true);
+            if(current.get()==result) retire("OPERATION_TIMEOUT",true);
         },timeoutMs,TimeUnit.MILLISECONDS); }
         catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return result; }
-        result.whenComplete((value,error)->{deadline.cancel(false);if(result.isCancelled()) retire("OPERATION_CANCELLED",true);});
+        result.deadline=deadline;
         connect().whenComplete((value,error)->{
             if(error!=null) { finish(result,null,error);return; }
             if(closed.get()) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
@@ -106,14 +117,22 @@ public final class AndroidRuntimeClient implements AutoCloseable {
                 catch(Throwable cause) {
                     if(cause instanceof DeadObjectException || cause instanceof RemoteException) {
                         retire("PROCESS_DIED",false);finish(result,null,new RuntimeFailure("PROCESS_DIED"));
-                    } else finish(result,null,cause instanceof RuntimeFailure?cause:new RuntimeFailure("IPC_CONTRACT"));
+                    } else {
+                        RuntimeFailure failure=cause instanceof RuntimeFailure?(RuntimeFailure)cause:new RuntimeFailure("IPC_CONTRACT");
+                        // A rejected repeat load did not run candidate code. Every
+                        // failed initial candidate loses its process and capabilities.
+                        if(initialLoad && !"GENERATION_ALREADY_CLAIMED".equals(failure.code)) retire(failure.code,true);
+                        finish(result,null,failure);
+                    }
                 }
             }); } catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED")); }
         });
         return result;
     }
-    private <T> void finish(CompletableFuture<T> result,T value,Throwable failure) {
+    private <T> void finish(OperationFuture<T> result,T value,Throwable failure) {
+        if(result.cancellationRequested) return;
         if(current.compareAndSet(result,null)) busy.set(false);
+        if(result.deadline!=null) result.deadline.cancel(false);
         if(failure==null) result.complete(value);else result.completeExceptionally(failure);
     }
     private interface Writer { void write(Parcel parcel) throws Exception; }
@@ -148,25 +167,30 @@ public final class AndroidRuntimeClient implements AutoCloseable {
             return true;
         }
     };
-    private void retire(String reason,boolean terminate) {
+    private void retire(String reason,boolean terminate) { retire(reason,terminate,null); }
+    private void retire(String reason,boolean terminate,OperationFuture<?> cancelled) {
         if(!closed.compareAndSet(false,true)) return;
-        ready.completeExceptionally(new RuntimeFailure(reason));
-        CompletableFuture<?> active=current.getAndSet(null);
-        if(active!=null) active.completeExceptionally(new RuntimeFailure(reason));
+        OperationFuture<?> active=current.getAndSet(null);
         IBinder target=endpoint;
-        // Independent control transaction: a hung provider may occupy the call executor.
+        // Initiate guaranteed cleanup BEFORE notifying any user-controlled future
+        // callback. Never wait for an acknowledgement from a possibly hung worker.
         Thread control=new Thread(()->{
-            if(terminate && target!=null) {
-                Parcel data=Parcel.obtain(),reply=Parcel.obtain();
-                try { data.writeInterfaceToken(RuntimeProtocol.WORKER);target.transact(RuntimeProtocol.CLOSE,data,reply,0); }
-                catch(Exception ignored) { /* A dead generation must not be retried. */ }
-                finally {data.recycle();reply.recycle();}
-            }
-            synchronized(AndroidRuntimeClient.this) {
-                if(bound) {bound=false;try {context.unbindService(connection);}catch(IllegalArgumentException ignored) {}}
+            try {
+                if(terminate && target!=null) {
+                    Parcel data=Parcel.obtain();
+                    try { data.writeInterfaceToken(RuntimeProtocol.WORKER);target.transact(RuntimeProtocol.CLOSE,data,null,IBinder.FLAG_ONEWAY); }
+                    finally { data.recycle(); }
+                }
+            } catch(Exception ignored) { /* Retired generations are never reused. */ }
+            finally {
+                synchronized(AndroidRuntimeClient.this) {
+                    if(bound) {bound=false;try {context.unbindService(connection);}catch(IllegalArgumentException ignored) {}}
+                }
             }
         },"vrt-retire");
         control.setDaemon(true);control.start();io.shutdownNow();clock.shutdownNow();
+        ready.completeExceptionally(new RuntimeFailure(reason));
+        if(active!=null && active!=cancelled) active.completeExceptionally(new RuntimeFailure(reason));
     }
     private static <T> CompletableFuture<T> failed(String code) {
         CompletableFuture<T> result=new CompletableFuture<>();result.completeExceptionally(new RuntimeFailure(code));return result;

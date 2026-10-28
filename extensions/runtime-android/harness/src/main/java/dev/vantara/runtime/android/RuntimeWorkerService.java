@@ -26,8 +26,10 @@ public final class RuntimeWorkerService extends Service {
                 RuntimeProtocol.result(reply,"OK",android.os.Process.myPid()+":"+android.os.Process.myUid()); return true;
             }
             if(code==RuntimeProtocol.CLOSE) {
-                RuntimeProtocol.result(reply,"OK","");
-                new Handler(Looper.getMainLooper()).postDelayed(()->android.os.Process.killProcess(android.os.Process.myPid()),10);
+                if(reply!=null) RuntimeProtocol.result(reply,"OK","");
+                // The provider can block the main looper. Termination belongs to
+                // this independent Binder control transaction, not that looper.
+                android.os.Process.killProcess(android.os.Process.myPid());
                 return true;
             }
             if(!busy.compareAndSet(false,true)) { RuntimeProtocol.result(reply,"WORKER_BUSY",null);return true; }

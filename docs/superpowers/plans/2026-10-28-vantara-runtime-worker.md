@@ -21,15 +21,15 @@
 - Restart must create a fresh PID and preserve host data.
 
 ## Task 1 — engine lifecycle study
-- [ ] Read pinned loader/manager/source/network/storage contracts and record evidence with source paths, ranges and limitations.
-- [ ] Document cross-family lifecycle and concrete decisions; distinguish source reading from reproduced upstream defects.
+- [x] Read pinned loader/manager/source/network/storage contracts and record evidence with source paths, ranges and limitations.
+- [x] Document cross-family lifecycle and concrete decisions; distinguish source reading from reproduced upstream defects.
 
 ## Task 2 — actual isolated Android execution
-- [ ] Author instrumented acceptance tests and external DEX fixture before implementing the service/client.
-- [ ] Prove failing behavior, implement bounded API/Binder/client/service, compile and run tests.
-- [ ] Cover SHA/entry/ABI errors, process death, timeout and successful operations with real DEX.
+- [x] Author instrumented acceptance tests and external DEX fixture before implementing the service/client.
+- [x] Prove failing behavior, implement bounded API/Binder/client/service, compile and run tests.
+- [x] Cover SHA/entry/ABI errors, process death, timeout and successful operations with real DEX.
 
 ## Task 3 — CI and review
-- [ ] Add independent emulator CI (API29/35), preserve reports/logcat and inspect failures.
+- [x] Add independent emulator CI (API29/35), preserve reports/logcat and inspect failures.
 - [ ] Run original core/regression/scope checks and review the whole change.
 - [ ] Push experimental branch, wait CI, report actual coverage and remaining ABI work. No merge or release.

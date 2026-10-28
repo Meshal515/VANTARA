@@ -200,7 +200,10 @@ public class RuntimeExecutionTest {
         assertTrue(entered.await(2,TimeUnit.SECONDS));
         pending.whenComplete((v,e)->{
             callbackEntered.countDown();
-            try { release.await(10,TimeUnit.SECONDS); } catch(InterruptedException ignored) { }
+            long until=android.os.SystemClock.elapsedRealtime()+10000;
+            while(release.getCount()!=0 && android.os.SystemClock.elapsedRealtime()<until) {
+                try { release.await(100,TimeUnit.MILLISECONDS); } catch(InterruptedException ignored) { }
+            }
         });
         Thread canceller=null;
         if(cancel) { canceller=new Thread(()->pending.cancel(true));canceller.setDaemon(true);canceller.start(); }
