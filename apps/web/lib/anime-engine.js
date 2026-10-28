@@ -10,6 +10,7 @@
  * والـPWA لها جسر حقيقي بنفس الواجهة: محركات ويب عبر جالب الويب.
  */
 
+import { verifySourceDomains, nativeVerificationPlugin } from './source-verification.js';
 import { addonCopies } from '../addons/video.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
@@ -110,6 +111,11 @@ export function onNeedsHuman(fn) {
 /** «تحقّق»: يُظهر صفحة تحقق المصدر بملء الشاشة، ثم يبحث فيه مرة. `{ok, error}`. */
 export async function verify(sourceId) {
   try {
+    if(nativeVerificationPlugin()){
+      const sources=(await call('sources'))?.sources??[];
+      const source=sources.find(s=>s.id===sourceId);
+      return await verifySourceDomains({domains:[source?.domain].filter(Boolean),sourceName:source?.name,retry:()=>call('verify',{sourceId})});
+    }
     return (await call('verify', { sourceId })) ?? { ok: false, error: 'المحرك غير متاح' };
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) };

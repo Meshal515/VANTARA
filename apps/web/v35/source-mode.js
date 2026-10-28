@@ -1,11 +1,52 @@
 import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
+import { nativeCover } from "./covers.js";
+import { imageLoadingNode, imageFallbackNode } from "./image-loading.js";
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
   return n;
 };
+function sourceLogo(addon) {
+  const mark = node("span", "addon-logo");
+  mark.setAttribute("aria-hidden", "true");
+  const fallback = () => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "28");
+    svg.setAttribute("height", "28");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3ZM8 8h8M8 12h8M8 16h5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linecap", "round");
+    svg.append(path);
+    mark.replaceChildren(svg);
+  };
+  let url;
+  for (const value of [addon.iconUrl, addon.logo, addon.icon, addon.imageUrl]) {
+    if (typeof value !== "string") continue;
+    if (value.length <= 90 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+      url = value;
+      break;
+    }
+    try { url = publicUrl(value).href; break; } catch {}
+  }
+  if (url) {
+    const image = node("img");
+    image.alt = "";
+    image.referrerPolicy = "no-referrer";
+    image.style.width = "100%";
+    image.style.height = "100%";
+    image.style.objectFit = "contain";
+    image.onerror = fallback;
+    image.src = url;
+    mark.append(image);
+  } else fallback();
+  return mark;
+}
 const extraLabel = (name) =>
   ({
     genre: "التصنيف",
@@ -17,7 +58,7 @@ const extraLabel = (name) =>
 export function renderSourceMode({
   addon,
   adapter,
-  state = { tab: "home", query: "", page: 1, scroll: 0 },
+  state = { query: "", page: 1, scroll: 0 },
   onOpenWork = () => {},
   onBack = () => {},
   pulse = null,
@@ -30,9 +71,12 @@ export function renderSourceMode({
     grid = node("div", "addon-source-grid up-list"),
     note = node("p", "addon-source-note");
   root.dir = "rtl";
+  const fullCatalogue = (addon.contentTypes ?? []).includes("manga") && typeof adapter.catalogue === "function";
+  state.tab ??= fullCatalogue ? "catalogue" : "home";
   note.setAttribute("role", "status");
   note.setAttribute("aria-live", "polite");
   let controller = null,
+    closed = false,
     generation = 0,
     pending = false,
     failures = 0,
@@ -49,7 +93,7 @@ export function renderSourceMode({
   // رأس المصدر: اسمه وحالته الفعلية الآن (من نبضه)، بلا شعار عام
   const header = node("section", "addon-source-head"),
     heading = node("div", "addon-source-title"),
-    mark = node("span", "addon-logo", addon.name?.trim().slice(0, 2).toUpperCase() || "✦"),
+    mark = sourceLogo(addon),
     status = node("p", "addon-pulse");
   const name = node("h2", null, addon.name);
   name.dir = "auto";
@@ -146,6 +190,7 @@ export function renderSourceMode({
   const choices = catalogs.length
     ? catalogs.map((c) => [`${c.type}|${c.id}`, c.name ?? c.id])
     : [
+        ...(fullCatalogue ? [["catalogue", "الكتالوج"]] : []),
         ...((addon.capabilities ?? []).includes("home")
           ? [["home", "آخر التحديثات"]]
           : []),
@@ -255,6 +300,8 @@ export function renderSourceMode({
         (addon.capabilities ?? []).includes("search")
       )
         out = await adapter.search(state.query, state.page, options);
+      else if (state.tab === "catalogue" && fullCatalogue)
+        out = await adapter.catalogue(state.page, options);
       else if (state.tab === "popular" && adapter.popular)
         out = await adapter.popular(state.page, options);
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
@@ -291,17 +338,61 @@ export function renderSourceMode({
           state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
           onOpenWork(work, { addon, adapter, state });
         };
+        const imageState = (value, label) => {
+          art.dataset.imageState = value;
+          art.setAttribute("role", "img");
+          art.setAttribute("aria-busy", String(value === "loading"));
+          art.setAttribute("aria-label", label);
+          art.title = label;
+        };
+        const imageFailed = () => {
+          imageState("failed", "تعذّر تحميل الغلاف");
+          art.replaceChildren(imageFallbackNode("—"));
+        };
         const image = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
-        if (image)
+        if (image) {
+          imageState("loading", "جارٍ تحميل الغلاف");
+          art.style.position = "relative";
+          art.append(imageLoadingNode());
           try {
             const img = node("img", "poster");
-            img.src = publicUrl(image).href;
+            const url = publicUrl(image).href;
             img.alt = "";
             img.loading = "lazy";
             img.referrerPolicy = "no-referrer";
-            img.onerror = () => img.remove();
-            art.append(img);
-          } catch {}
+            // Keep the placeholder in the host until the browser decodes the image.
+            img.style.position = "absolute";
+            img.style.inset = "0";
+            img.style.opacity = "0";
+            img.onload = () => {
+              if (closed || !root.contains(art)) return;
+              imageState("ready", `غلاف ${work.title ?? work.name ?? "العمل"}`);
+              img.style.position = "";
+              img.style.inset = "";
+              img.style.opacity = "";
+              art.replaceChildren(img);
+            };
+            img.onerror = () => {
+              if (!closed && root.contains(art)) imageFailed();
+            };
+            if (addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
+              // Same source client, cookies, headers and persistent cover cache as the library.
+              // A failed native request must stay in that pipeline (including verification).
+              void nativeCover(url, addon.sourceId).then(local => {
+                if (closed || !root.contains(art)) return;
+                if (!local) return imageFailed();
+                img.src = local;
+                art.append(img);
+              });
+            } else {
+              img.src = url;
+              art.append(img);
+            }
+          } catch { imageFailed(); }
+        } else {
+          imageState("missing", "لا يوجد غلاف من المصدر");
+          art.append(imageFallbackNode("—"));
+        }
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;
         if (unit) card.append(node("span", "up-unit", String(unit)));
@@ -311,6 +402,8 @@ export function renderSourceMode({
         ? ""
         : state.query
           ? `لا نتائج لـ«${state.query}» في ${addon.name}.`
+          : state.tab === "catalogue" ? "الكتالوج استجاب بلا أعمال الآن."
+          : state.tab === "home" ? "آخر التحديثات بلا أعمال الآن."
           : "المصدر استجاب بلا أعمال الآن.";
       failures = 0;
       autoMore = true;
@@ -358,7 +451,7 @@ export function renderSourceMode({
     if (!adapter.catalog) state.tab = "search";
     void load();
   };
-  root.close = () => {
+  const stopLoading = () => {
     clearTimeout(retryTimer);
     retryTimer = null;
     io?.disconnect();
@@ -366,13 +459,18 @@ export function renderSourceMode({
     controller?.abort();
     pending = false;
   };
+  root.close = () => {
+    closed = true;
+    stopLoading();
+  };
   root.reload = load;
   root.pause = () => {
     if (pending) resumeLoad = activeLoad;
     state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
-    root.close();
+    stopLoading();
   };
   root.resume = () => {
+    closed = false;
     io?.observe(more);
     if (resumeLoad) {
       const options = resumeLoad; resumeLoad = null; void load(options);

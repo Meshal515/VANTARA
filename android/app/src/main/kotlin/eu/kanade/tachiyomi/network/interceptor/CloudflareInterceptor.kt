@@ -39,13 +39,10 @@ import android.webkit.WebResourceResponse
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import dev.vantara.spike.ChromeUserAgent
-import dev.vantara.spike.CloudflareInteractiveAction
-import dev.vantara.spike.CloudflareInteractionMode
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -93,7 +90,13 @@ class CloudflareInterceptor(
             return response
         }
 
-        Log.i(TAG, "Cloudflare challenge detected for ${request.url}")
+        Log.i(TAG, "Cloudflare challenge detected for ${request.url.host}")
+        // A background request may report a challenge, never start a human UI.
+        // The coordinator opens its isolated browser only after an explicit tap.
+        if (classifyCloudflareRequest(response.code, response.header("Server"), response.header("cf-mitigated"), request.isImageRequest()) == CloudflareRequestKind.HUMAN_CHALLENGE) {
+            response.close()
+            throw interactiveError(request)
+        }
         response.close()
 
         synchronized(solveLock) {
@@ -163,11 +166,15 @@ class CloudflareInterceptor(
      * open the site in a visible WebView where the user solves it in seconds,
      * and the resulting cookie is shared with OkHttp.
      */
-    private fun interactiveError(request: Request): IOException =
-        CloudflareBypassException(
+    private fun interactiveError(request: Request): IOException {
+        SourceVerificationRequests.require(
+            request.url, request.header("User-Agent") ?: defaultUserAgentProvider(),
+        )
+        return CloudflareBypassException(
             "Cloudflare wants a human check for ${request.url.host}; open the site in the WebView to pass it",
             interactive = true,
         )
+    }
 
     private fun rendererGoneError(request: Request): IOException =
         CloudflareBypassException(
@@ -193,10 +200,7 @@ class CloudflareInterceptor(
      * the bytes directly, so for those we still fall through to the byte-fetch.
      */
     private fun Response.isChallenge(): Boolean {
-        val fromCloudflare = header("Server") in SERVER_CHECK
-        if (!fromCloudflare) return false
-        if (header("cf-mitigated").equals("challenge", ignoreCase = true)) return true
-        return code in ERROR_CODES && request.isImageRequest()
+        return classifyCloudflareRequest(code, header("Server"), header("cf-mitigated"), request.isImageRequest()) != CloudflareRequestKind.NONE
     }
 
     private fun Request.isImageRequest(): Boolean {
@@ -229,8 +233,7 @@ class CloudflareInterceptor(
             .toString()
         val cookieUrl = request.url
         val userAgent = request.header("User-Agent") ?: defaultUserAgentProvider()
-        // Drop any stale clearance so we detect the *appearance* of a fresh one.
-        cookieManager.remove(request.url, COOKIE_NAMES, 0)
+        // Existing host cookies belong to the user; verification never deletes them.
         Log.i(TAG, "Solving Cloudflare clearance via $rootUrl")
 
         fun isBypassed(): Boolean = cookieManager.get(cookieUrl).any { it.name == "cf_clearance" }
@@ -250,7 +253,10 @@ class CloudflareInterceptor(
         }
         handler.post {
             if (!active.get()) return@post
-            val view = newWebView(userAgent)
+            val view = try { newWebView(userAgent) } catch (_: RuntimeException) {
+                latch.countDown()
+                return@post
+            }
             webView.set(view)
             if (!active.get()) {
                 destroyOnMain(webView.getAndSet(null))
@@ -265,17 +271,9 @@ class CloudflareInterceptor(
                     fun interactiveDetected() {
                         Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
                         interactive.set(true)
-                        // مضيفات مسجّلة «مخفي فقط» (محرك الأنمي): لا صفحة تحقق أمام
-                        // المستخدم أبدًا؛ يفشل الطلب وينتقل المحرك لمصدر آخر
-                        val action = if (eu.kanade.tachiyomi.network.HostRouting.hiddenOnly(request.url.host)) {
-                            CloudflareInteractiveAction.FAIL_FAST
-                        } else {
-                            CloudflareInteractionMode.action()
-                        }
-                        when (action) {
-                            CloudflareInteractiveAction.FAIL_FAST -> finish(SolveOutcome.INTERACTIVE)
-                            CloudflareInteractiveAction.SHOW_BROWSER -> showInteractive(view, request.url.host)
-                        }
+                        // Detection is non-interactive even during explicit catalogue browsing.
+                        // A separate user action is required to launch verification.
+                        finish(SolveOutcome.INTERACTIVE)
                     }
                 },
                 "kagari",
@@ -377,7 +375,10 @@ class CloudflareInterceptor(
 
         handler.post {
             if (!active.get()) return@post
-            val view = newWebView(userAgent)
+            val view = try { newWebView(userAgent) } catch (_: RuntimeException) {
+                latch.countDown()
+                return@post
+            }
             webView.set(view)
             if (!active.get()) {
                 destroyOnMain(webView.getAndSet(null))
@@ -462,13 +463,7 @@ class CloudflareInterceptor(
         val major = version.substringBefore('.').toIntOrNull() ?: return
         if (major >= MINIMUM_WEBVIEW_VERSION) return
         warnedOutdated = true
-        handler.post {
-            Toast.makeText(
-                context,
-                "Android System WebView $version is too old to pass Cloudflare checks. Update it from the Play Store.",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
+        Log.w(TAG, "Android System WebView is older than the supported verification baseline")
     }
 
     @Volatile
@@ -480,7 +475,7 @@ class CloudflareInterceptor(
         // Prefer the live Activity as context and attach to its window so the
         // challenge JS actually runs; fall back to app context when backgrounded.
         val activity = WebViewActivityHolder.get()
-        val view = WebView(activity ?: context)
+        val view = WebView(activity ?: throw IllegalStateException("No foreground WebView owner"))
         @Suppress("DEPRECATION")
         view.settings.apply {
             javaScriptEnabled = true
@@ -499,24 +494,6 @@ class CloudflareInterceptor(
             decor.addView(view)
         }
         return view
-    }
-
-    /** Make a human-solvable Turnstile visible instead of failing a hidden 1×1 browser. */
-    private fun showInteractive(view: WebView, host: String) {
-        handler.post {
-            view.alpha = 1f
-            view.layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            view.setBackgroundColor(android.graphics.Color.WHITE)
-            view.bringToFront()
-            Toast.makeText(
-                context,
-                "أكمل تحقق Cloudflare لـ $host، وسيعود الفحص تلقائيًا",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
     }
 
     /**
@@ -557,10 +534,10 @@ class CloudflareInterceptor(
             also()
             view?.let {
                 (it.parent as? ViewGroup)?.removeView(it)
-                it.stopLoading()
-                it.removeJavascriptInterface("ImgFetch")
-                it.removeJavascriptInterface("kagari")
-                it.destroy()
+                runCatching { it.stopLoading() }
+                runCatching { it.removeJavascriptInterface("ImgFetch") }
+                runCatching { it.removeJavascriptInterface("kagari") }
+                runCatching { it.destroy() }
             }
         }
     }

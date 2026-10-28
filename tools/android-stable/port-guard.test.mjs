@@ -1,0 +1,5 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {assertPreserved} from './port-guard.mjs';
+test('selective port preserves shipped engines, bundles, updates, accounts and configuration',()=>{assert.ok(assertPreserved().protectedFiles>50);});
+test('rejects an altered Team X binary even when the UI tests pass',()=>{assert.throws(()=>assertPreserved(p=>p.endsWith('/eu.kanade.tachiyomi.extension.ar.teamx.apk')?Buffer.from('changed'):readFileSync(p)),/Stable contract changed/);});
+test('rejects a changed manga extraction path',()=>{assert.throws(()=>assertPreserved(p=>p.endsWith('/ExtensionEnginePlugin.kt')?Buffer.from(readFileSync(p,'utf8').replace('    fun catalogue(', '    fun removedCatalogue(')):readFileSync(p)),/Stable extraction changed/);});
+test('rejects redirecting the stable in-app configuration flow',()=>{assert.throws(()=>assertPreserved(p=>p==='apps/web/v35/addons-view.js'?Buffer.from(readFileSync(p,'utf8').replace('export async function configureInApp(', 'export async function removedConfigure(')):readFileSync(p)),/Stable in-app configuration changed/);});

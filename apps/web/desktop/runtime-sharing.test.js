@@ -31,7 +31,13 @@ it('يشارك UI وconfigured-install وplayback سجلًا واحدًا حتى
   expect(uiRuntime.addons.registry.list()).toMatchObject([{ name: 'Torrentio' }]);
   expect((await bridges.AddonFabric.runtime()).getRuntime()).toBe(uiRuntime);
   await app.openAddons();
-  expect(g.document.querySelector('.addon-hub').textContent).toContain('Torrentio');
+  // V7 initially shows repositories; installed additions live on their own tab.
+  const addonView = g.document.querySelector('.v7-addon');
+  expect(addonView).toBeTruthy();
+  const installedTab = addonView.querySelectorAll('.v7-tab')[1];
+  expect(installedTab.textContent).toContain('المثبتة');
+  installedTab.click();
+  expect(addonView.textContent).toContain('Torrentio');
   const key = uiRuntime.addons.registry.list()[0].key;
   const done = new Promise(resolve => bridges.AnimeEngine.addListener('prepared', resolve));
   await bridges.AnimeEngine.prepare({ session: 'shared', episode: 1, copies: [{ sourceId: `addon|${key}`, id: 'tt0137523', url: 'tt0137523', type: 'movie' }] });

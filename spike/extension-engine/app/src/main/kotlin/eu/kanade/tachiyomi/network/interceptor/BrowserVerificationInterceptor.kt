@@ -114,7 +114,10 @@ class BrowserVerificationInterceptor(
         handler.post {
             if (!active.get()) return@post
             val activity = WebViewActivityHolder.get()
-            val view = WebView(activity ?: context)
+            if (activity == null) { latch.countDown(); return@post }
+            val view = try { WebView(activity) } catch (_: RuntimeException) {
+                latch.countDown(); return@post
+            }
             webView.set(view)
             view.settings.apply {
                 javaScriptEnabled = true
@@ -170,8 +173,8 @@ class BrowserVerificationInterceptor(
         handler.post {
             view?.let {
                 (it.parent as? ViewGroup)?.removeView(it)
-                it.stopLoading()
-                it.destroy()
+                runCatching { it.stopLoading() }
+                runCatching { it.destroy() }
             }
         }
     }

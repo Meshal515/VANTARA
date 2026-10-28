@@ -6,6 +6,8 @@ export function createBundledAdapter({ sourceDef, engine }) {
       return s[name](...args);
     });
   return {
+    ...(sourceDef.content === "manga" && typeof engine.source?.(sourceDef.id)?.catalogue === "function"
+      ? { catalogue: (...a) => invoke("catalogue", ...a) } : {}),
     search: (...a) => invoke("search", ...a),
     home: (...a) => invoke("latest", ...a),
     popular: (...a) => invoke("popular", ...a),

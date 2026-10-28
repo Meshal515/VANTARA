@@ -9,8 +9,11 @@ it('يعيد استعمال مدير الإضافات ويوفر دخول الح
   const data = new Map();
   const runtime = { store: { get: async (ns,key) => data.get(ns+key), set: async (ns,key,value) => data.set(ns+key,{value}) }, addons: { ready: Promise.resolve(), registry: { list: () => [], setProfile() {} } } };
   const app = await createDesktopApp({ root: document.getElementById('root'), runtime });
-  expect(document.querySelector('.addon-hub')).toBeTruthy();
-  expect(document.querySelector('[data-import-url]')).toBeTruthy();
+  expect(document.querySelector('.v7-addon')).toBeTruthy();
+  // The add form is intentionally hidden until the user requests it in V7.
+  document.querySelector('.v7-plus').click();
+  expect(document.querySelector('.v7-add-input')).toBeTruthy();
+  expect(document.querySelector('[data-import-file]')).toBeTruthy();
   expect(document.querySelector('[data-desktop-accounts]').getAttribute('href')).toBe('/index.html');
   expect(document.querySelector('[data-desktop-section="cinema"]')).toBeTruthy();
   expect(document.querySelector('[data-desktop-section="anime"]')).toBeTruthy();
