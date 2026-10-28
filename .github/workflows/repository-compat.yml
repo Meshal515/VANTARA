@@ -1,0 +1,42 @@
+name: Repository compatibility core (experimental; NO plugin execution)
+on:
+  push:
+    branches: [feat/repository-compat-runtime-20261028]
+  pull_request:
+    paths:
+      - 'extensions/runtime-core/**'
+      - 'tools/repository-compat/**'
+      - 'docs/repository-compat/**'
+      - '.github/workflows/repository-compat.yml'
+permissions:
+  contents: read
+concurrency:
+  group: repository-compat-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core-and-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prove protected runtime files are unchanged
+        run: node tools/repository-compat/scope-guard.mjs
+      - name: Original core policy and executor-boundary tests
+        run: node --test extensions/runtime-core/*.test.mjs
+      - name: Archive and DEX corruption tests
+        run: python3 -m unittest discover -s tools/repository-compat -p 'test_*.py'
+      - name: Inspect pinned published CS3 bytes (no DEX execution; no source site traffic)
+        run: python3 tools/repository-compat/probe_pinned_packages.py --output package-format-evidence.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-format-evidence-NOT-runtime-or-playback-success
+          path: package-format-evidence.json
+          if-no-files-found: error
