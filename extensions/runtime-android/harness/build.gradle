@@ -1,0 +1,24 @@
+apply plugin: 'com.android.application'
+android {
+    namespace 'dev.vantara.runtime.lab'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.vantara.runtime.lab'
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName 'experimental-1'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    sourceSets.androidTest.assets.srcDir(project(':fixtures').layout.buildDirectory.dir('dexAssets'))
+    testOptions { animationsDisabled true }
+}
+dependencies {
+    implementation project(':api')
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+}
+tasks.configureEach { task ->
+    if (task.name == 'mergeDebugAndroidTestAssets') task.dependsOn(':fixtures:dex')
+}

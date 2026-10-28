@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="VANTARA Runtime Lab" android:allowBackup="false" android:supportsRtl="true">
+        <service android:name="dev.vantara.runtime.android.RuntimeWorkerService"
+            android:exported="false" android:isolatedProcess="true"
+            android:process=":runtime_worker" android:stopWithTask="true" />
+    </application>
+</manifest>
