@@ -98,14 +98,16 @@ public class RuntimeExecutionTest {
     }
     @Test public void rejectsHashMismatchBeforeProviderExecution() throws Exception {
         open(); assertEquals("HASH_MISMATCH",failure(client.load(dex,String.join("",Collections.nCopies(64,"0")),entry)));
-        assertEquals("PROVIDER_NOT_READY",failure(client.invoke("catalogue","{}",4000)));
+        assertTrue(client.isClosed());
+        assertEquals("WORKER_CLOSED",failure(client.invoke("catalogue","{}",4000)));
     }
     @Test public void failedInitializationNeverPublishesProvider() throws Exception {
         open(); assertEquals("PROVIDER_INITIALIZATION_FAILED",failure(client.load(dex,digest,"dev.vantara.runtime.fixtures.FailingProvider")));
-        assertEquals("PROVIDER_NOT_READY",failure(client.invoke("catalogue","{}",4000)));
+        assertTrue(client.isClosed());
+        assertEquals("WORKER_CLOSED",failure(client.invoke("catalogue","{}",4000)));
     }
     @Test public void missingEntryIsExplicitAbiFailure() throws Exception {
-        open(); assertEquals("ABI_MISMATCH",failure(client.load(dex,digest,"dev.vantara.runtime.fixtures.MissingProvider")));
+        open(); assertEquals("ABI_MISMATCH",failure(client.load(dex,digest,"dev.vantara.runtime.fixtures.MissingProvider"))); assertTrue(client.isClosed());
     }
     @Test public void providerExceptionDoesNotKillHostOrHealthyGeneration() throws Exception {
         open(); load(); assertEquals("PROVIDER_FAILED",failure(client.invoke("search","{\"fixtureAction\":\"throw\"}",4000)));
@@ -119,8 +121,12 @@ public class RuntimeExecutionTest {
         assertEquals(1,new JSONObject(call("catalogue","{}")).getJSONArray("items").length());
     }
     @Test public void noncooperativeTimeoutRetiresPhysicalWorker() throws Exception {
-        open(); load(); int oldPid=client.connect().get().pid();
-        assertEquals("OPERATION_TIMEOUT",failure(client.invoke("search","{\"fixtureAction\":\"hang\"}",300)));
+        CountDownLatch entered=new CountDownLatch(1);
+        client=new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{entered.countDown();return "{}";});
+        client.connect().get(12,TimeUnit.SECONDS); load(); int oldPid=client.connect().get().pid();
+        CompletableFuture<String> pending=client.invoke("search","{\"fixtureAction\":\"hang\"}",300);
+        assertTrue("Operation must really start before timeout",entered.await(2,TimeUnit.SECONDS));
+        assertEquals("OPERATION_TIMEOUT",failure(pending));
         assertTrue(client.isClosed()); assertProcessGone(oldPid);
         assertEquals("WORKER_CLOSED",failure(client.invoke("search","{}",4000)));
     }
@@ -176,6 +182,41 @@ public class RuntimeExecutionTest {
         assertEquals(1,snapshot.allowedOrigins().size());
         try { snapshot.allowedOrigins().add("https://injected.example"); fail("Mutable trusted scope"); }
         catch(UnsupportedOperationException expected) { }
+    }
+
+    @Test public void failedInitializerLosesRetainedBrokerCapabilityAndProcess() throws Exception {
+        CountDownLatch leakedRequest=new CountDownLatch(1);
+        client=new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{leakedRequest.countDown();return "{}";});
+        int pid=client.connect().get(12,TimeUnit.SECONDS).pid();
+        assertEquals("PROVIDER_INITIALIZATION_FAILED",failure(client.load(dex,digest,"dev.vantara.runtime.fixtures.FailingProvider")));
+        assertFalse("Failed initializer retained broker access",leakedRequest.await(700,TimeUnit.MILLISECONDS));
+        assertTrue(client.isClosed()); assertProcessGone(pid);
+    }
+    private void blockedCompletionCannotHoldRetirement(boolean cancel) throws Exception {
+        CountDownLatch entered=new CountDownLatch(1), callbackEntered=new CountDownLatch(1), release=new CountDownLatch(1);
+        client=new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{entered.countDown();return "{}";});
+        int pid=client.connect().get(12,TimeUnit.SECONDS).pid(); load();
+        CompletableFuture<String> pending=client.invoke("search","{\"fixtureAction\":\"hang\"}",1000);
+        assertTrue(entered.await(2,TimeUnit.SECONDS));
+        pending.whenComplete((v,e)->{
+            callbackEntered.countDown();
+            try { release.await(10,TimeUnit.SECONDS); } catch(InterruptedException ignored) { }
+        });
+        Thread canceller=null;
+        if(cancel) { canceller=new Thread(()->pending.cancel(true));canceller.setDaemon(true);canceller.start(); }
+        try {
+            assertTrue("Completion callback did not enter",callbackEntered.await(3,TimeUnit.SECONDS));
+            assertProcessGone(pid); assertTrue(client.isClosed());
+        } finally { release.countDown();if(canceller!=null)canceller.join(2000); }
+    }
+    @Test public void blockingTimeoutCallbackCannotPreventPhysicalRetirement() throws Exception { blockedCompletionCannotHoldRetirement(false); }
+    @Test public void blockingCancellationCallbackCannotPreventPhysicalRetirement() throws Exception { blockedCompletionCannotHoldRetirement(true); }
+    @Test public void blockedMainLooperCannotPreventPhysicalRetirement() throws Exception {
+        CountDownLatch mainEntered=new CountDownLatch(1);
+        client=new AndroidRuntimeClient(context,scope("source-A","session-A"),(s,u)->{mainEntered.countDown();return "{}";});
+        int pid=client.connect().get(12,TimeUnit.SECONDS).pid(); load();
+        assertTrue(new JSONObject(call("details","{\"fixtureAction\":\"block-main\"}")).getBoolean("mainBlocked"));
+        assertTrue(mainEntered.await(2,TimeUnit.SECONDS)); client.close(); assertProcessGone(pid);
     }
 
 }

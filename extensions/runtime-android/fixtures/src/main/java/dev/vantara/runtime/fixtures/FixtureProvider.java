@@ -22,6 +22,15 @@ public final class FixtureProvider implements RuntimeProvider {
             case "oversize": char[] text = new char[65537]; java.util.Arrays.fill(text,'x'); return new String(text);
             case "throw": throw new IllegalArgumentException("provider failure");
             case "broker": return access.request(args.getString("url"));
+            case "block-main":
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    try { access.request("https://fixtures.example/main-entered"); } catch (Exception ignored) { }
+                    long until=android.os.SystemClock.elapsedRealtime()+30000;
+                    while(android.os.SystemClock.elapsedRealtime()<until) {
+                        try { Thread.sleep(25); } catch (InterruptedException ignored) { }
+                    }
+                });
+                return "{\"mainBlocked\":true}";
             case "probe":
                 boolean fileDenied = false, socketDenied = false;
                 try (FileInputStream stream = new FileInputStream(args.getString("hostFile"))) {
