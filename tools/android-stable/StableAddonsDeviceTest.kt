@@ -103,7 +103,12 @@ class StableAddonsDeviceTest {
             }
             shell("input keyevent KEYCODE_BACK")
             waitFor("cancelled verification returns to same manager", 15_000) { bool("!!document.querySelector('#utility.active .v7-addon .v7-verification-item')") }
-            waitFor("cancelled verification retains a retry button", 10_000) { bool("!document.querySelector('.v7-verification-item button')?.disabled") }
+            waitFor("cancelled verification retains a retry button", 10_000) { bool("!!document.querySelector('.v7-verification-item button') && !document.querySelector('.v7-verification-item button').disabled") }
+            val cancelled = async("""
+                const out=await Capacitor.Plugins.Verification.pending();
+                return {required:out.pending.some(x=>x.host==='example.org'&&x.state==='required'),active:out.pending.some(x=>x.state==='active')};
+            """)
+            assertTrue(cancelled.toString(),cancelled.getBoolean("required"));assertFalse(cancelled.toString(),cancelled.getBoolean("active"))
             assertEquals(nativeFixture, native.readText())
             assertEquals("No unhandled UI errors", "[]", raw("JSON.stringify(window.__stableErrors)").let { JSONTokener(it).nextValue() as String })
             proof.put("explicitVerificationOpened", true).put("cancellationReturned", true)

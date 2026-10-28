@@ -51,6 +51,7 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vantara/domain build
       - name: Preserve Stable engines and configuration; require web regressions
         run: |
           node --test tools/android-stable/port-guard.test.mjs
