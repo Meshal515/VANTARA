@@ -82,7 +82,8 @@ class StableAddonsDeviceTest {
                 waitFor("recorded source in verification tab", 10_000) { bool("document.querySelector('.v7-verification-item')?.textContent.includes('example.org')") }
                 assertFalse("No automatic challenge overlay", bool("!!document.querySelector('[data-source-verification]')"))
                 assertTrue("Background challenge started verification", shell("pidof com.vantara.app:verification").isBlank())
-                assertTrue("MainActivity lost foreground", shell("dumpsys activity activities").lineSequence().any { (it.contains("mResumedActivity") || it.contains("topResumedActivity")) && it.contains("com.vantara.app.MainActivity") })
+                val focus=shell("dumpsys activity activities")
+                assertTrue("MainActivity lost foreground: "+focus.lineSequence().filter { it.contains("ResumedActivity") }.joinToString(), resumed(focus,"com.vantara.app.MainActivity"))
                 assertFalse("App lost focus", activity.isFinishing || activity.isDestroyed)
                 raw("window.__stableShell.handleBack();true")
                 waitFor("root Back returns Home, not another Addons tab", 10_000) { bool("!!document.querySelector('#home.active')") }
@@ -99,7 +100,7 @@ class StableAddonsDeviceTest {
             waitFor("verify button", 10_000) { bool("!!document.querySelector('.v7-verification-item button')") }
             raw("document.querySelector('.v7-verification-item button').click();true")
             waitFor("explicit isolated verification Activity", 15_000) {
-                shell("dumpsys activity activities").lineSequence().any { (it.contains("mResumedActivity") || it.contains("topResumedActivity")) && it.contains("VerificationActivity") }
+                resumed(shell("dumpsys activity activities"),"com.vantara.verification.VerificationActivity")
             }
             shell("input keyevent KEYCODE_BACK")
             waitFor("cancelled verification returns to same manager", 15_000) { bool("!!document.querySelector('#utility.active .v7-addon .v7-verification-item')") }
@@ -118,6 +119,21 @@ class StableAddonsDeviceTest {
             if (::activity.isInitialized) ins.runOnMainSync { activity.finish() }
         }
     }
+    @Test fun activityIdentityAcceptsAndroidShortAndFullComponentNamesOnly() {
+        assertTrue(resumed("mResumedActivity: ActivityRecord{abc u0 com.vantara.app/.MainActivity t9}", "com.vantara.app.MainActivity"))
+        assertTrue(resumed("topResumedActivity=ActivityRecord{abc u0 com.vantara.app/com.vantara.app.MainActivity t9}", "com.vantara.app.MainActivity"))
+        assertFalse(resumed("mResumedActivity: ActivityRecord{abc u0 com.vantara.app/com.vantara.verification.VerificationActivity t9}", "com.vantara.app.MainActivity"))
+        assertFalse(resumed("lastPausedActivity: com.vantara.app/.MainActivity", "com.vantara.app.MainActivity"))
+        assertFalse(resumed("mResumedActivity: com.vantara.app.evil/.MainActivity", "com.vantara.app.MainActivity"))
+    }
+    private fun resumed(dump: String, expected: String): Boolean = dump.lineSequence()
+        .filter { it.contains("mResumedActivity") || it.contains("topResumedActivity") }
+        .any { line ->
+            Regex("com\\.vantara\\.app/([^\\s}]+)").find(line)?.let { match ->
+                val name=match.groupValues[1]
+                (if(name.startsWith(".")) "com.vantara.app$name" else name)==expected
+            } ?: false
+        }
     private fun shell(command: String): String = ins.uiAutomation.executeShellCommand(command).use { fd ->
         FileInputStream(fd.fileDescriptor).bufferedReader().use { it.readText().trim() }
     }
