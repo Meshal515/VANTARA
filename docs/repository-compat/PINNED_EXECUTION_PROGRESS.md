@@ -107,3 +107,15 @@ older lint printed Kotlin2.2 metadata errors while returning success. The workfl
 now rejects that diagnostic explicitly, and the newer lint completed locally with
 zero errors and two lab manifest warnings (backup rules/icon). Production Gradle
 plugins and signing settings are unchanged.
+
+Run40718472023 on64372ed3 passed all37 native tests on each of API29 and35,
+zero failures/errors/skips, plus47 JVM tests. Artifacts were downloaded and XML
+checked. This includes actual Android cookie persistence, full cross-UID HTTP and
+socket/FIFO cancellation/resource tests. All13 GitHub checks on that commit passed.
+Filtered emulator logcat contains no FATAL EXCEPTION, ANR or OutOfMemoryError.
+
+The next39-test candidate expands the published Anime4up fixture journey to search,
+details, episodes and a direct video URL using its actual provider code. This is
+extraction, not video playback or live-site proof. A separate authored regression
+requires an unsupported runtime capability to remain distinct from a failed source;
+that classification test is expected RED before its targeted worker fix.

@@ -113,6 +113,11 @@ public class RuntimeExecutionTest {
         open(); load(); assertEquals("PROVIDER_FAILED",failure(client.invoke("search","{\"fixtureAction\":\"throw\"}",4000)));
         assertFalse(client.isClosed()); assertEquals(1,new JSONObject(call("search","{}")).getJSONArray("items").length());
     }
+    @Test public void unsupportedRuntimeCapabilityIsNotReportedAsFailedSource() throws Exception {
+        open();client.load(dex,digest,"dev.vantara.runtime.fixtures.UnsupportedProvider").get(12,TimeUnit.SECONDS);
+        assertEquals("CAPABILITY_UNSUPPORTED",failure(client.invoke("videoLinks","{}",4000)));
+        assertFalse(client.isClosed());
+    }
     @Test public void physicalProcessExitAndRestartPreserveHostData() throws Exception {
         open(); load(); int oldPid=client.connect().get().pid();
         assertEquals("PROCESS_DIED",failure(client.invoke("catalogue","{\"fixtureAction\":\"exit\"}",4000)));
