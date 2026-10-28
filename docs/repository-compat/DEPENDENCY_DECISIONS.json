@@ -1,0 +1,25 @@
+{
+  "scope": "New VANTARA Runtime only; not a legal clearance or an audit of every existing repository dependency",
+  "runtimeImplementation": "Original code; no upstream engine implementation bundled",
+  "decisions": [
+    {
+      "dependency": "com.github.Blatzar:NiceHttp:0.4.18",
+      "repository": "https://github.com/Blatzar/NiceHttp",
+      "commit": "f1dee9dfc5b86a24c65bf8c6e8403d336341dd3e",
+      "tag": "0.4.18",
+      "license": "GPL-3.0",
+      "licenseGitBlob": "f288702d2fa16d3cdf0035b15a9fcbc552cd88e7",
+      "licenseEvidence": "https://github.com/Blatzar/NiceHttp/blob/f1dee9dfc5b86a24c65bf8c6e8403d336341dd3e/LICENSE",
+      "decision": "Do not import implementation; original interoperable network contract remains to be implemented",
+      "linkedInRuntime": false
+    },
+    {
+      "dependency": "junit:junit:4.13.2",
+      "license": "EPL-1.0",
+      "scope": "Android instrumentation tests only",
+      "linkedInRuntime": false,
+      "evidence": "https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom"
+    }
+  ],
+  "existingBundledSourceSeparation": "Deferred by owner; no deletion, history rewrite or migration in this cohort"
+}
