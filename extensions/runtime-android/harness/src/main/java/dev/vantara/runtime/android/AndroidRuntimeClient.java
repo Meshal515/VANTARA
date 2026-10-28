@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.*;
 
 /** A single physical worker generation. It is never restarted or reused after retirement. */
 public final class AndroidRuntimeClient implements AutoCloseable {
+    private static final Semaphore httpIngress=new Semaphore(4);
     public interface HostTransport { String request(Scope scope,String url) throws Exception; }
     public interface HostHttpTransport extends HostTransport,AutoCloseable {
         RuntimeHttpAccess.Response exchange(Scope scope,RuntimeHttpAccess.Request request) throws Exception;
@@ -184,20 +185,24 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         }
     };
     private void exchange(Parcel data,Parcel reply) {
+        boolean admitted=false,owned=false;
         try {
-            RuntimeHttpAccess.Request request=RuntimeProtocol.readRequest(data);
+            if(!httpIngress.tryAcquire())throw new RuntimeFailure("ENGINE_BUSY");admitted=true;
+            if(!brokerBusy.compareAndSet(false,true))throw new RuntimeFailure("WORKER_BUSY");owned=true;
+            RuntimeHttpAccess.Request request=RuntimeProtocol.readRequest(data,closed::get);
+            if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
             if(!scope.allowedOrigins().contains(RuntimeProtocol.origin(request.url())))throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
             if(!(transport instanceof HostHttpTransport))throw new RuntimeFailure("FULL_HTTP_UNSUPPORTED");
-            if(!brokerBusy.compareAndSet(false,true))throw new RuntimeFailure("WORKER_BUSY");
             RuntimeHttpAccess.Response response;long identity=Binder.clearCallingIdentity();
             try {response=((HostHttpTransport)transport).exchange(scope,request);}
-            finally {Binder.restoreCallingIdentity(identity);brokerBusy.set(false);}
+            finally {Binder.restoreCallingIdentity(identity);}
             if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
             Parcel payload=Parcel.obtain();
-            try {RuntimeProtocol.writeHttpResponse(payload,response);reply.writeNoException();reply.writeString("OK");reply.appendFrom(payload,0,payload.dataSize());}
+            try {RuntimeProtocol.writeHttpResponse(payload,response,closed::get);reply.writeNoException();reply.writeString("OK");reply.appendFrom(payload,0,payload.dataSize());}
             finally {payload.recycle();}
         }catch(RuntimeFailure failure){RuntimeProtocol.result(reply,failure.code,null);}
         catch(Exception failure){RuntimeProtocol.result(reply,"TRANSPORT_FAILED",null);}
+        finally{if(owned)brokerBusy.set(false);if(admitted)httpIngress.release();}
     }
     private void retire(String reason,boolean terminate) { retire(reason,terminate,null); }
     private void retire(String reason,boolean terminate,OperationFuture<?> cancelled) {

@@ -54,7 +54,7 @@ public final class FileCookieVaults implements HttpBroker.Vaults {
             List<Cookie> merged=read();
             for(Cookie cookie:incoming) {
                 // A transport response cannot mint a cookie for an unrelated host.
-                if(!cookie.matches(url))continue;
+                if(!url.host().equals(cookie.domain())&&(cookie.hostOnly()||!url.host().endsWith("."+cookie.domain())))continue;
                 merged.removeIf(old->old.name().equals(cookie.name())&&old.domain().equals(cookie.domain())&&old.path().equals(cookie.path()));
                 if(cookie.expiresAt()>System.currentTimeMillis())merged.add(cookie);
             }

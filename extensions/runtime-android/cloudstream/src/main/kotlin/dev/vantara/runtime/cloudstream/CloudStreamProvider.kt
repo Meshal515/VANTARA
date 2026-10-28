@@ -24,8 +24,7 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
         NetworkBridge.install{request,follow->
             val bytes=request.body?.let{body->val buffer=okio.Buffer();body.writeTo(buffer);if(buffer.size>1024*1024)throw IOException("REQUEST_BODY_LIMIT");buffer.readByteArray()}
             val answer=http.exchange(RuntimeHttpAccess.Request(request.url.toString(),request.method,request.headers.toMultimap(),bytes,follow))
-            val finalRequest=request.newBuilder().url(answer.url()).build()
-            Response.Builder().request(finalRequest).protocol(Protocol.HTTP_1_1).code(answer.status()).message("Broker response").apply{answer.headers().forEach{(name,values)->values.forEach{addHeader(name,it)}}}.body(answer.body().toResponseBody()).build()
+            BrokerResponses.convert(request,answer)
         }
         try {
             val result=Registration.collect {

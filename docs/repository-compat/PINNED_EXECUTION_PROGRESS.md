@@ -68,3 +68,21 @@ writer descriptors, waiting for EOF after a complete frame, and a never-written
 pipe. The next CI candidate is a RED reproduction gate for these new tests. It
 must not be interpreted as a release candidate. Cookie path acceptance and response
 charset preservation also require targeted fixes before further integration.
+
+Run40711414466 on77a803b8 reproduced exactly the three pipe failures on
+both API29/35:31 tests,28 passed,3 failed, zero skips per platform. The
+published Anime4up catalogue fixture passed on both platforms, including actual
+parsed name, absolute work URL and poster URL.
+
+The security candidate now admits HTTP work before body parsing, rejects trailing
+Parcel data, bounds local IPC reads/writes to2seconds and four active host writers,
+and polls generation cancellation. Incoming FIFO reads reopen an independent
+nonblocking file description instead of sharing mutable flags with untrusted code;
+unsupported Android FD reopening fails closed. This capability must pass the actual
+cross-UID HTTP tests before integration. Tests also cover exact-length completion,
+cancellation, independent status flags and bounded unconsumed outbound writers.
+No network timeout or existing process assertion was relaxed.
+
+The same candidate fixes valid cross-path Set-Cookie acceptance/deletion and
+preserves declared response media type/charset across the broker. The cookie-path
+and Windows-1256 regressions failed before their fixes and pass locally afterward.

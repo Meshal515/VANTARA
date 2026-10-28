@@ -5,6 +5,7 @@ import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import dev.vantara.runtime.api.RuntimeHttpAccess;
 import java.io.*;
+import java.util.function.BooleanSupplier;
 import java.net.URI;
 import java.util.*;
 
@@ -56,33 +57,40 @@ final class RuntimeProtocol {
     }
     /** Only small bodies are inline. Pipes keep the Binder transaction below its shared budget. */
     static void writeBytes(Parcel parcel,byte[] bytes,int maximum) throws IOException {
+        writeBytes(parcel,bytes,maximum,()->false);
+    }
+    static void writeBytes(Parcel parcel,byte[] bytes,int maximum,BooleanSupplier closed) throws IOException {
         if(bytes==null){parcel.writeInt(-1);return;}
         if(bytes.length>maximum)throw new RuntimeFailure("PAYLOAD_LIMIT");
         parcel.writeInt(bytes.length);boolean pipe=bytes.length>8192;parcel.writeInt(pipe?1:0);
         if(!pipe){parcel.writeByteArray(bytes);return;}
-        ParcelFileDescriptor[] ends=ParcelFileDescriptor.createPipe();
-        try{parcel.writeTypedObject(ends[0],0);}catch(Throwable failure){ends[1].close();throw failure;}finally{ends[0].close();}
-        Thread writer=new Thread(()->{try(OutputStream output=new ParcelFileDescriptor.AutoCloseOutputStream(ends[1])){output.write(bytes);}catch(IOException ignored){/* Receiver/worker retirement closes the peer. */}},"vrt-pipe");
-        writer.setDaemon(true);writer.start();
+        RuntimePipes.write(parcel,bytes,closed);
     }
     static byte[] readBytes(Parcel parcel,int maximum) throws IOException {
-        int expected=parcel.readInt();if(expected==-1)return null;if(expected<0||expected>maximum)throw new RuntimeFailure("PAYLOAD_LIMIT");
-        int framed=parcel.readInt();if(framed==0){byte[] inline=parcel.createByteArray();if(inline==null||inline.length!=expected)throw new RuntimeFailure("IPC_CONTRACT");return inline;}
+        return readBytes(parcel,maximum,()->false);
+    }
+    static byte[] readBytes(Parcel parcel,int maximum,BooleanSupplier closed) throws IOException {
+        int expected=parcel.readInt();if(expected==-1){if(parcel.dataAvail()!=0)throw new RuntimeFailure("IPC_CONTRACT");return null;}if(expected<0||expected>maximum)throw new RuntimeFailure("PAYLOAD_LIMIT");
+        int framed=parcel.readInt();if(framed==0){byte[] inline=parcel.createByteArray();if(inline==null||inline.length!=expected||parcel.dataAvail()!=0)throw new RuntimeFailure("IPC_CONTRACT");return inline;}
         if(framed!=1)throw new RuntimeFailure("IPC_CONTRACT");
         ParcelFileDescriptor fd=parcel.readTypedObject(ParcelFileDescriptor.CREATOR);if(fd==null)throw new RuntimeFailure("IPC_CONTRACT");
-        try(InputStream input=new ParcelFileDescriptor.AutoCloseInputStream(fd);ByteArrayOutputStream output=new ByteArrayOutputStream()) {
-            byte[] chunk=new byte[8192];int count;while((count=input.read(chunk))!=-1){if(output.size()+count>expected)throw new RuntimeFailure("PAYLOAD_LIMIT");output.write(chunk,0,count);}
-            if(output.size()!=expected)throw new RuntimeFailure("IPC_CONTRACT");return output.toByteArray();
-        }
+        if(parcel.dataAvail()!=0){fd.close();throw new RuntimeFailure("IPC_CONTRACT");}
+        return RuntimePipes.read(fd,expected,closed);
     }
     static void writeRequest(Parcel parcel,RuntimeHttpAccess.Request request) throws IOException {
         parcel.writeString(text(request.url()));parcel.writeString(text(request.method()));writeHeaders(parcel,request.headers());parcel.writeInt(request.followRedirects()?1:0);writeBytes(parcel,request.body(),MAX_REQUEST);
     }
     static RuntimeHttpAccess.Request readRequest(Parcel parcel) throws IOException {
-        String url=text(parcel.readString()),method=text(parcel.readString());Map<String,List<String>> headers=readHeaders(parcel);int follow=parcel.readInt();if(follow!=0&&follow!=1)throw new RuntimeFailure("IPC_CONTRACT");return new RuntimeHttpAccess.Request(url,method,headers,readBytes(parcel,MAX_REQUEST),follow==1);
+        return readRequest(parcel,()->false);
+    }
+    static RuntimeHttpAccess.Request readRequest(Parcel parcel,BooleanSupplier closed) throws IOException {
+        String url=text(parcel.readString()),method=text(parcel.readString());Map<String,List<String>> headers=readHeaders(parcel);int follow=parcel.readInt();if(follow!=0&&follow!=1)throw new RuntimeFailure("IPC_CONTRACT");return new RuntimeHttpAccess.Request(url,method,headers,readBytes(parcel,MAX_REQUEST,closed),follow==1);
     }
     static void writeHttpResponse(Parcel parcel,RuntimeHttpAccess.Response response) throws IOException {
-        parcel.writeString(text(response.url()));parcel.writeInt(response.status());writeHeaders(parcel,response.headers());writeBytes(parcel,response.body(),MAX_RESPONSE);
+        writeHttpResponse(parcel,response,()->false);
+    }
+    static void writeHttpResponse(Parcel parcel,RuntimeHttpAccess.Response response,BooleanSupplier closed) throws IOException {
+        parcel.writeString(text(response.url()));parcel.writeInt(response.status());writeHeaders(parcel,response.headers());writeBytes(parcel,response.body(),MAX_RESPONSE,closed);
     }
     static RuntimeHttpAccess.Response readHttpResponse(Parcel parcel) throws IOException {
         String url=text(parcel.readString());int status=parcel.readInt();Map<String,List<String>> headers=readHeaders(parcel);byte[] body=readBytes(parcel,MAX_RESPONSE);

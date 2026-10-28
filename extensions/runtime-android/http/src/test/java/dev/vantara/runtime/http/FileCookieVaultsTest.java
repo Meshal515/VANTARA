@@ -49,4 +49,20 @@ public class FileCookieVaultsTest {
         catch(IllegalStateException expected){assertEquals("COOKIE_STORAGE_CORRUPT",expected.getMessage());}
         assertArrayEquals(corrupt,Files.readAllBytes(file));
     }
+    @Test public void loginMaySetAndDeleteCookiesForAnotherPath() {
+        HttpUrl login=HttpUrl.get("https://source.vantara.example/login");
+        HttpUrl catalogue=HttpUrl.get("https://source.vantara.example/catalogue/list");
+        var vaults=new FileCookieVaults(directory);var handle=vaults.forScope(owner());
+        handle.save(login,List.of(Cookie.parse(login,"session=actual; Path=/catalogue; Secure; HttpOnly")));
+        assertEquals("actual",new FileCookieVaults(directory).forScope(owner()).load(catalogue).get(0).value());
+        assertTrue(handle.load(login).isEmpty());
+        handle.save(login,List.of(Cookie.parse(login,"session=deleted; Path=/catalogue; Max-Age=0; Secure")));
+        assertTrue(new FileCookieVaults(directory).forScope(owner()).load(catalogue).isEmpty());
+    }
+    @Test public void responseCannotMintCookieForUnrelatedHost() {
+        var vault=new FileCookieVaults(directory).forScope(owner());
+        Cookie unrelated=new Cookie.Builder().name("invalid").value("secret").domain("other.example").path("/").secure().build();
+        vault.save(url,List.of(unrelated));
+        assertTrue(vault.load(HttpUrl.get("https://other.example/")).isEmpty());
+    }
 }
