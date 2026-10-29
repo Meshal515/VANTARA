@@ -251,7 +251,14 @@ export function createServerSheet(body, o) {
 
   // ── معلومات الحلقة: الصورة والشعار، ثم سطر الحقائق والعنوان والوصف ──
   const info = el('section', 'ss-info');
+  // أعلى الورقة بلغة صفحة العمل: لقطة الحلقة بطاقة في المنتصف فوق جوّ مأخوذ من الصورة نفسها
+  // (لا بانر من الحافة للحافة)، والشعار فوقها، وزر «شغّل الأفضل» على البطاقة نفسها
   const art = el('div', 'ss-art');
+  const amb = el('img', 'ss-amb');
+  amb.alt = '';
+  amb.decoding = 'async';
+  amb.setAttribute('aria-hidden', 'true');
+  const card = el('div', 'ss-card');
   const shot = el('img', 'ss-art-img');
   shot.alt = '';
   shot.decoding = 'async';
@@ -266,8 +273,15 @@ export function createServerSheet(body, o) {
     };
     if (media.backdropPosition) shot.style.objectPosition = media.backdropPosition;
     shot.src = sources[0];
-    art.append(shot);
-  } else art.classList.add('ss-art--none');
+    amb.onload = () => amb.classList.add('loaded');
+    amb.onerror = () => amb.remove();
+    amb.src = sources[0];
+    card.append(shot);
+    art.append(amb, card);
+  } else {
+    art.classList.add('ss-art--none');
+    art.append(card);
+  }
   const brand = el('div', 'ss-brand');
   const name = auto('h2', 'ss-title', media.title ?? '');
   brand.append(name);
@@ -349,7 +363,7 @@ export function createServerSheet(body, o) {
   const src = el('section', 'ss-src');
   const tools = el('div', 'ss-tools');
   const toolsHead = el('div', 'ss-tools-head');
-  toolsHead.append(el('b', null, 'المصادر'));
+  // لا عنوان «المصادر»: المرشّحات أول ما تحت الحلقة، وسطر الحالة يظهر وقت التجهيز فقط
   const status = el('div', 'an-srv-status');
   toolsHead.append(status);
   const filters = el('div', 'an-pick-filters');
@@ -360,14 +374,27 @@ export function createServerSheet(body, o) {
   const scroll = el('div', 'an-pick-scroll');
   scroll.append(info, src);
 
-  const foot = el('footer', 'an-pick-foot');
   const best = btn('an-pick-best');
-  foot.append(best, ...(o.extraFoot ?? []));
+  // على الهاتف: «شغّل الأفضل» على البطاقة، و«شاهد مع أصدقائك» رمز في أعلى الورقة. على الشاشة
+  // العريضة يبقيان في تذييل لوحة المصادر كما صُمّمت
+  const extras = el('div', 'ss-bar-extras');
+  const foot = el('footer', 'an-pick-foot');
+  bar.append(extras);
   body.append(bar, scroll, foot);
 
   // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
   const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);
   const wide = mq('(min-width: 900px)');
+  const placeActions = () => {
+    if (wide?.matches) foot.append(best, ...(o.extraFoot ?? []));
+    else {
+      card.append(best);
+      extras.append(...(o.extraFoot ?? []));
+    }
+    foot.hidden = !wide?.matches;
+  };
+  placeActions();
+  wide?.addEventListener?.('change', placeActions);
   const still = mq('(prefers-reduced-motion: reduce)');
   let ticking = false;
   let lastSpan = -1;
@@ -380,7 +407,8 @@ export function createServerSheet(body, o) {
       return;
     }
     const y = Math.max(0, scroll.scrollTop || 0);
-    const span = Math.max(1, (art.offsetHeight || 0) - (bar.offsetHeight || 0));
+    // المدى حتى نهاية بطاقة اللقطة تحت الترويسة (البطاقة لم تعد بارتفاع البانر كله)
+    const span = Math.max(1, (art.offsetTop || 0) + (art.offsetHeight || 0) - (bar.offsetHeight || 0));
     const p = Math.min(1, y / span);
     // الشريط يمتلئ في آخر ثلث الانكماش، والشعار المضغوط يظهر معه
     const solid = Math.min(1, Math.max(0, (p - 0.62) / 0.38));
@@ -547,8 +575,10 @@ export function createServerSheet(body, o) {
     b.disabled = pending;
     const qb = b.querySelector('.ss-q');
     qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
-    // HDR/DV وبقية المواصفات في التفاصيل تحت السهم، لا تحت الجودة
+    // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
     qb.lastElementChild.textContent = '';
+    qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
+    qb.lastElementChild.setAttribute('aria-hidden', 'true');
     b.querySelector('.ss-name').textContent = d.name;
     const host = b.querySelector('.ss-host');
     // اسم إصدار التورنت الطويل (بأعلامه) ليس مما يُختار به: مكانه التفاصيل
