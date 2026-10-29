@@ -1377,6 +1377,10 @@
 .v35 .an-er.seen .an-er-title {
   color: var(--text-2);
 }
+/* المشاهدة تقولها علامة ✓ وحدها؛ الصف يبهت قليلًا بدل كلمة «شوهدت» */
+.v35 .an-er.seen .an-er-art {
+  opacity: 0.62;
+}
 .v35 .an-er-icon {
   flex: none;
   width: 40px;
@@ -2729,7 +2733,8 @@
   transition: background-color 0.22s ease;
 }
 .v35 .aw-bar.collapsed .aw-tools {
-  background: var(--surface-1, rgba(255, 255, 255, 0.05));
+  /* الترويسة صارت صلبة: الحاوية كانت لقراءة الرموز فوق الصورة فقط، وتحتها تصير حاوية داخل حاوية */
+  background: transparent;
   backdrop-filter: none;
 }
 .v35 .aw-tool {
@@ -2857,16 +2862,16 @@
   }
 }
 @keyframes aw-banner-out {
-  from { transform: none; opacity: 1; }
+  from { transform: perspective(900px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
   to { transform: perspective(900px) translate3d(0, calc(var(--aw-span) * 0.42), -140px) rotateX(34deg) scale(1.14); opacity: 0; }
 }
 @keyframes aw-cover-out {
-  0% { transform: perspective(800px) translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
+  0% { transform: perspective(800px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
   45% { opacity: 1; }
   100% { transform: perspective(800px) translate3d(0, -40px, -90px) rotateX(38deg) scale(0.84); opacity: 0; }
 }
 @keyframes aw-mark-out {
-  0% { transform: perspective(700px) translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
+  0% { transform: perspective(700px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
   40% { opacity: 1; }
   100% { transform: perspective(700px) translate3d(0, -26px, -60px) rotateX(46deg) scale(0.86); opacity: 0; }
 }

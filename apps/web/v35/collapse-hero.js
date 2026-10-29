@@ -31,10 +31,22 @@ export function heroFrame(scrollY, p, { still = false } = {}) {
 }
 
 /**
- * @param {{ hero: HTMLElement, bar: HTMLElement, bg?: HTMLElement|null, head?: HTMLElement|null, active: () => boolean }} o
+ * طبقة عمق إضافية لها معادلة CSS نفسها: `range(span, vh)` يعطي بداية المدى ونهايته بالبكسل،
+ * و`at(t, span)` قيم الطبقة عند نسبة t من 0 إلى 1. يُكتب منها فقط حين لا يدعم المحرك الخط الزمني،
+ * أو أثناء الانزلاق بعد رفع الإصبع؛ فالمعادلتان يجب أن تتطابقا وإلا قفزت الطبقة عند التسليم.
+ * @typedef {{ node: HTMLElement, range: (span: number, vh: number) => [number, number], at: (t: number, span: number) => { transform: string, opacity: number } }} DepthLayer
+ */
+
+/** قيمة خطية بين a وb عند t (نفس استيفاء CSS لـkeyframes ذات الدوال المتطابقة). */
+export const lerp = (a, b, t) => a + (b - a) * t;
+/** نسبة التقدم داخل مدى [start, end] من التمرير، محصورة بين 0 و1. */
+export const rangeProgress = (y, [start, end]) => clamp((y - start) / Math.max(1, end - start));
+
+/**
+ * @param {{ hero: HTMLElement, bar: HTMLElement, bg?: HTMLElement|null, head?: HTMLElement|null, layers?: DepthLayer[], active: () => boolean }} o
  * @returns {() => void} فكّ الربط
  */
-export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }) {
+export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers = [], active }) {
   let queued = false;
   let last = null;
   const still = reduced();
@@ -42,7 +54,8 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
   // من هنا متأخرة إطارًا عن التمرير وهي سبب الاهتزاز. يبقى هذا المسار للمحركات التي لا تدعمه.
   const scrollDriven = (node) => !!node && (globalThis.getComputedStyle?.(node)?.animationName ?? 'none') !== 'none';
   const cssBg = scrollDriven(bg), cssHead = scrollDriven(head);
-  const cssNodes = [cssBg ? bg : null, cssHead ? head : null].filter(Boolean);
+  const cssLayers = layers.filter((l) => scrollDriven(l.node));
+  const cssNodes = [cssBg ? bg : null, cssHead ? head : null, ...cssLayers.map((l) => l.node)].filter(Boolean);
   // WebView من 153 إلى 156 يحبس الانزلاق بعد رفع الإصبع ما دامت على الصفحة حركة مربوطة بالتمرير
   // ثم يلقيه دفعة واحدة (crbug 572898003). فالسحب بالإصبع لـCSS، والانزلاق بعده لهذا المسار
   // بنفس القيم حتى يتوقف، ثم يعود CSS.
@@ -66,6 +79,13 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     if (head && (!cssHead || handed)) {
       if (f.head) head.style.transform = f.head;
       head.style.opacity = String(f.headOpacity);
+    }
+    const vh = globalThis.innerHeight || window.innerHeight || 800;
+    for (const l of layers) {
+      if (still || (cssLayers.includes(l) && !handed)) continue;
+      const v = l.at(rangeProgress(y, l.range(span, vh)), span);
+      l.node.style.transform = v.transform;
+      l.node.style.opacity = String(v.opacity);
     }
     if (f.collapsed !== last) {
       last = f.collapsed;

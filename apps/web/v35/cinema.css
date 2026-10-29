@@ -583,6 +583,13 @@
     backdrop-filter: blur(14px) saturate(140%);
     border-radius: 999px;
   }
+  /* الترويسة صلبة بعد التمرير: حاويات الأزرار كانت لقراءتها فوق البانر، وتحتها حاوية داخل حاوية */
+  .v35[data-section='cinema'].cn-scrolled #home > .header .header-end,
+  .v35[data-section='cinema'].cn-scrolled #home > .header .header-start .icon-btn {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
   .v35[data-section='cinema'] #home > .header .header-end {
     gap: 2px;
     padding-inline: 6px;

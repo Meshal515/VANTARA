@@ -29,6 +29,7 @@ import { createServerSheet, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
+import { animeDepthLayers } from './anime-depth.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -673,7 +674,7 @@ export function createAnime(deps) {
     page.replaceChildren(wrap);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    state.view.unbind = bindCollapsingHero({ hero, bar, bg, head: null, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    state.view.unbind = bindCollapsingHero({ hero, bar, layers: animeDepthLayers({ bg, cover, mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
   }
 
   /** التفاصيل وصلت: كل مكان يُملأ في موضعه. */
@@ -1212,7 +1213,7 @@ export function createAnime(deps) {
         art.append(bar);
       } else bar.firstElementChild.style.width = `${(ratio * 100).toFixed(1)}%`;
     } else bar?.remove();
-    row.querySelector('.an-er-sub').textContent = e.done ? 'شوهدت' : minutesLeft(e) ?? (m.duration ? `${m.duration} د` : '');
+    row.querySelector('.an-er-sub').textContent = e.done ? (m.duration ? `${m.duration} د` : '') : minutesLeft(e) ?? (m.duration ? `${m.duration} د` : '');
     const icon = row.querySelector('.an-er-icon');
     // لم تُشاهد: حلقة رفيعة فارغة؛ شوهدت: ✓ بلون القسم (لا مربع خلفها)
     if (icon.dataset.on !== String(e.done)) {
