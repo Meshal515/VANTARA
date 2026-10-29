@@ -413,30 +413,79 @@
   align-items: center;
   margin-inline-start: auto;
 }
-.v35 .ss-addon-select {
-  max-width: 150px;
-  padding-block: 11px 12px;
-  padding-inline: 0 20px;
+.v35 .ss-addon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 170px;
+  padding: 11px 0 12px;
   border: 0;
   background: none;
+  font: inherit;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-2);
-  text-overflow: ellipsis;
-  appearance: none;
-  field-sizing: content;
   cursor: pointer;
 }
-.v35 .ss-addon-select option {
+.v35 .ss-addon-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* قائمة المصدر: تنزل من الزر نفسه بتصميم الورقة، لا نافذة النظام */
+.v35 .ss-addon-menu {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 14px;
   background: var(--surface-2);
+  box-shadow: 0 18px 40px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line);
+  animation: ss-menu-in 0.18s var(--ease, ease) both;
+}
+.v35 .ss-addon-menu[hidden] {
+  display: none;
+}
+@keyframes ss-menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+.v35 .ss-addon-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
   color: var(--text-1);
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .ss-addon-opt:active {
+  background: var(--surface-1);
+}
+.v35 .ss-addon-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+.v35 .ss-addon-opt[aria-selected='true'] .ss-addon-dot {
+  box-shadow: inset 0 0 0 5px var(--accent);
 }
 .v35 .ss-addon-chev {
-  position: absolute;
-  inset-inline-end: 0;
+  flex: none;
   color: var(--text-3);
   transform: rotate(-90deg);
-  pointer-events: none;
+  transition: transform 0.18s ease;
+}
+.v35 .ss-addon.open .ss-addon-chev {
+  transform: rotate(90deg);
 }
 
 /* ── القائمة ── */
@@ -477,7 +526,7 @@
 .v35 .ss-row {
   position: relative;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   width: calc(100% + 16px);
@@ -1081,7 +1130,7 @@
     font-size: 15px;
   }
   .v35 .ss-tab,
-  .v35 .ss-addon-select,
+  .v35 .ss-addon-btn,
   .v35 .sheet .ss-none,
   .v35 .an-pick-together {
     font-size: 15.5px;
@@ -1099,4 +1148,77 @@
   .v35 .an-pick {
     grid-template-columns: clamp(480px, 32vw, 600px) minmax(0, 1fr);
   }
+}
+
+/* سهم التفاصيل في طرف صف التورنت: يفتح المواصفات تحته، ولمسه لا يشغّل */
+.v35 .ss-chev {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-inline: -4px -6px;
+  border-radius: 50%;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+.v35 .ss-row--open .ss-chev {
+  color: var(--text-1);
+  transform: rotate(90deg);
+}
+.v35 .ss-details {
+  grid-column: 2 / -1;
+  display: none;
+  gap: 4px;
+  padding-bottom: 2px;
+  font-size: var(--fs-caption, 12px);
+  color: var(--text-3);
+  cursor: default;
+  user-select: text;
+}
+.v35 .ss-row--open .ss-details {
+  display: grid;
+}
+.v35 .ss-detail {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.v35 .ss-detail b {
+  flex: none;
+  min-width: 64px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.v35 .ss-detail bdi {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* الصورة والشعار مع تمرير الورقة على خيط الرسم (بنفس معادلات --ss-y/--ss-p أعلاه)؛ أثناء
+   الانزلاق بعد رفع الإصبع (.ss-handed) تتوقف لتعمل المتغيرات فلا يُحبس الانزلاق في WebView */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) and (max-width: 899px) {
+    .v35 .an-pick-scroll {
+      scroll-timeline: --ss-scroll block;
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-art-img {
+      animation: ss-art-depth linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-brand {
+      animation: ss-brand-depth linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+  }
+}
+@keyframes ss-art-depth {
+  from { transform: translate3d(0, 0px, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--ss-span, 300px) * 0.5), 0) scale(1.06); }
+}
+@keyframes ss-brand-depth {
+  from { transform: translate3d(0, 0px, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--ss-span, 300px) * 0.3), 0) scale(0.78); }
 }

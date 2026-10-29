@@ -25,7 +25,7 @@ import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
-import { createServerSheet, sourceLabel } from './server-sheet.js';
+import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
@@ -1878,7 +1878,11 @@ export function createAnime(deps) {
   }
   engine.on('outbox', () => void flushOutbox());
   // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
-  engine.on('playstat', (e) => reportSource(e));
+  engine.on('playstat', (e) => {
+    reportSource(e);
+    // زمن البدء الحقيقي على هذا الجهاز يدخل ترشيح «الأفضل» القادم (server-sheet.js)
+    learnStart(e);
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void flushOutbox();
   });

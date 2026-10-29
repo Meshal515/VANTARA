@@ -48,33 +48,37 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   await vi.advanceTimersByTimeAsync(1);
   if (process.env.VANTARA_PICKER_CAPTURE) (await import('node:fs')).writeFileSync(process.env.VANTARA_PICKER_CAPTURE, sheet.innerHTML);
   expect(state.open).not.toHaveBeenCalled();
-  // التورنت قسم واحد بعد المباشر: الأصح سربًا أولًا ثم الأعلى جودة؛ الميت والـCAM مطويّان
+  // التورنت بترتيب الترشيح: الجاهزية الحقيقية أولًا (المشاركون لوغاريتميًا، ثم العربية والجودة
+  // والترميز، والحجم الضخم يتأخر)؛ الميت والـCAM مطويّان
   const group = sheet.querySelector('.ss-group--torrent');
   const visible = [...group.querySelectorAll(':scope > .an-srv-grid .an-srv')];
   const folded = [...group.querySelectorAll('details .an-srv')];
   expect(visible.map((b) => b.title)).toEqual([
-    'Fight.Club.1999.2160p.UHD.BluRay.REMUX.HEVC.DV.HDR10Plus.TrueHD.Atmos.7.1-FGT',
-    'Fight.Club.1999.2160p.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1',
     'Fight.Club.1999.1080p.BluRay.x264.AAC-YTS',
+    'Fight.Club.1999.2160p.UHD.BluRay.REMUX.HEVC.DV.HDR10Plus.TrueHD.Atmos.7.1-FGT',
     'Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed',
+    'Fight.Club.1999.2160p.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1',
     'Fight.Club.1999.2160p.WEB-DL.x265.HDR.DDP5.1-NOGRP',
   ]);
   expect(folded.map((b) => b.title)).toEqual(['Fight.Club.1999.1080p.BluRay.x265', 'Fight.Club.1999.2160p.HDCAM']);
-  const best = visible[0];
-  // صف بشري: الجودة وHDR، الإضافة والموقع والفرقة، اللغة والمواصفات، والمشاركون بمقياس
-  expect(best.querySelector(".ss-q").textContent).toBe("4KDV");
+  const best = visible[1];
+  // صف يُختار منه: الجودة، الإضافة، اللغة والحجم، والمشاركون. اسم الإصدار وDV وREMUX تحت السهم
+  expect(best.querySelector('.ss-q').textContent).toBe('4K');
   expect(best.querySelector('.ss-name').textContent).toBe('Torrentio');
-  expect(best.querySelector('.ss-host').textContent).toBe('ThePirateBay · FGT');
-  expect([...best.querySelectorAll('.ss-chip')].map((c) => c.textContent)).toEqual(['عربي', 'صوت متعدد', '61 GB', 'REMUX']);
+  expect(best.querySelector('.ss-host').hidden).toBe(true);
+  expect([...best.querySelectorAll('.ss-chip')].map((c) => c.textContent)).toEqual(['عربي', 'صوت متعدد', '61 GB']);
+  expect(best.querySelector('.ss-details').textContent).toContain('ThePirateBay · FGT');
+  expect(best.querySelector('.ss-details').textContent).toContain('REMUX');
   expect(best.querySelector('.an-srv-lang--ar').textContent).toBe('عربي');
   expect(best.querySelector('.an-srv-seeds').textContent).toBe('412');
   expect(best.querySelectorAll('.ss-meter i.on').length).toBe(4);
   expect(best.className).toContain('an-srv--swarm-strong');
   expect(visible[4].querySelectorAll('.ss-meter i.on').length).toBe(1);
   expect(folded[0].className).toContain('an-srv--swarm-dead');
-  // المقترح: سرب قوي بحجم يُبثّ (لا ريمكس 61 GB) — كلمة صغيرة على صفّه، وسببه تحت «شغّل الأفضل»
+  // المقترح: أكثر مشاركين بحجم يُبثّ وترميز سهل (لا ريمكس 61 GB) — أول صف، وسببه تحت «شغّل الأفضل»
   const top = sheet.querySelectorAll('.ss-row--top');
   expect(top).toHaveLength(1);
+  expect(top[0]).toBe(visible[0]);
   expect(top[0].title).toBe('Fight.Club.1999.1080p.BluRay.x264.AAC-YTS');
   expect(top[0].querySelector('.ss-tag').hidden).toBe(false);
   expect(best.querySelector('.ss-tag').hidden).toBe(true);

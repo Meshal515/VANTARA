@@ -130,9 +130,9 @@ it('a movie without logo or episode shows its name as text and no episode line',
   expect(body.querySelector('.ss-art').className).toContain('ss-art--none');
 });
 
-const choose = (select, value) => {
-  for (const o of select.querySelectorAll('option')) o.toggleAttribute('selected', o.value === value);
-  select.onchange();
+const choose = (body, value) => {
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  [...body.querySelectorAll('.ss-addon-opt')].find((o) => o.dataset.value === value).onclick({ stopPropagation() {} });
 };
 
 it('filters by quality, language and source as quiet tabs plus one source menu', () => {
@@ -148,15 +148,16 @@ it('filters by quality, language and source as quiet tabs plus one source menu',
   ui.update({ routes, settled: true, status: { text: '4 جاهزة' } });
   const tabs = [...body.querySelectorAll('.ss-tab')].map((b) => b.textContent);
   expect(tabs).toEqual(['الكل', '4K', '1080p', '720p', 'مترجم', 'مدبلج']);
-  const select = body.querySelector('.ss-addon-select');
-  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
-  choose(select, 'Comet');
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  expect([...body.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  choose(body, 'Comet');
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-name').textContent)).toEqual(['Comet']);
   // المقترح والزر يتبعان المرشّح
   expect(body.querySelector('.ss-row--top .ss-name').textContent).toBe('Comet');
   body.querySelector('.an-pick-best').onclick();
   expect(onPick).toHaveBeenLastCalledWith(routes[3]);
-  choose(body.querySelector('.ss-addon-select'), 'all');
+  choose(body, 'all');
   [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
   expect(body.querySelector('.ss-tab.on').textContent).toBe('الكل');
@@ -176,4 +177,57 @@ it('says plainly when nothing is ready, without a hero card, and offers a retry'
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
   expect(onRetry).toHaveBeenCalled();
+});
+
+import { rank, learnStart } from './server-sheet.js';
+import { rememberStart, startFeatures } from '../lib/start-memory.js';
+
+const tor = (label, extra = {}) => ({ id: label, sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true, label, ...extra });
+const score = (r) => rank(r, describeRoute(r));
+
+it('«الأفضل» من جاهزية التورنت: المشاركون أولًا، والعربية ترجّح المتقاربين فقط، و1080 قبل 4K، وAV1 يتأخر', () => {
+  globalThis.localStorage?.clear?.();
+  const many = tor('A.1080p.WEB.x264\n👤 1000 💾 1.4 GB ⚙️ Nyaa', { quality: 1080 });
+  const fewAr = tor('B.1080p.WEB.x264 Arabic\n👤 100 💾 1.4 GB ⚙️ Nyaa\n🇸🇦', { quality: 1080 });
+  expect(score(many)).toBeGreaterThan(score(fewAr));
+  const closeAr = tor('C.1080p.WEB.x264 Arabic\n👤 800 💾 1.4 GB ⚙️ Nyaa\n🇸🇦', { quality: 1080 });
+  expect(score(closeAr)).toBeGreaterThan(score(many));
+  const uhd = tor('D.2160p.WEB.x264\n👤 1000 💾 6 GB ⚙️ Nyaa', { quality: 2160 });
+  expect(score(many)).toBeGreaterThan(score(uhd));
+  const av1 = tor('E.1080p.WEB.AV1\n👤 1000 💾 331 MB ⚙️ Nyaa', { quality: 1080 });
+  expect(score(many)).toBeGreaterThan(score(av1));
+});
+
+it('ما بدأ على هذا الجهاز ببطء يتأخر في الترشيح التالي (زمن المشغّل الأصلي الحقيقي)', () => {
+  const store = new Map();
+  const saved = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), clear: () => store.clear() };
+  try {
+    const hevc = tor('F.1080p.WEB.HEVC-GRP\n👤 600 💾 1 GB ⚙️ Nyaa', { quality: 1080 });
+    const avc = tor('G.1080p.WEB.x264-OTHER\n👤 500 💾 1 GB ⚙️ Nyaa', { quality: 1080 });
+    expect(score(hevc)).toBeGreaterThan(score(avc) - 5e7);
+    rememberStart(startFeatures(describeRoute(hevc)), 28000, true);
+    expect(score(avc)).toBeGreaterThan(score(hevc));
+    // learnStart لا ينسب زمنًا بلا صف لُمس
+    learnStart({ stage: 'server', outcome: 'ok', ms: 1000 });
+  } finally { globalThis.localStorage = saved; }
+});
+
+it('صف التورنت: الجودة والمصدر واللغة والحجم والمشاركون فقط، والباقي تحت السهم ولا يشغّل', () => {
+  const { el, body } = dom();
+  const onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick });
+  const r = tor('[NyaaSi] Show Dubbed / Multi Subs 🇬🇧/🇷🇺 2160p WEB-DL HEVC DV DDP5.1\n👤 1100 💾 2.5 GB ⚙️ Nyaa\nMulti Audio / 🇸🇦', { quality: 2160 });
+  ui.update({ routes: [r], settled: true, status: { text: '1' } });
+  const row = body.querySelector('.ss-row');
+  expect(row.querySelector('.ss-host').hidden).toBe(true);
+  expect(row.querySelector('.ss-q small').textContent).toBe('');
+  const meta = row.querySelector('.ss-meta').textContent;
+  expect(meta).toContain('2.5 GB');
+  expect(meta).not.toMatch(/HEVC|WEB-DL|DDP/);
+  const chev = row.querySelector('.ss-chev');
+  chev.onclick({ stopPropagation() {} });
+  expect(row.classList.contains('ss-row--open')).toBe(true);
+  expect(row.querySelector('.ss-details').textContent).toContain('HEVC');
+  expect(onPick).not.toHaveBeenCalled();
 });
