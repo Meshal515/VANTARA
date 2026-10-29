@@ -239,3 +239,16 @@ responses for five works, opaque episodes and direct-link headers with ZERO
 source sockets. It does not prove persistent source identity across worker
 generations or authorize live requests. No VPN, identity rotation, clearance
 bypass or user storage deletion was added. Rift live support remains incomplete.
+
+Run40818930610 passed51 native execution tests on EACH ofAPI29/35, with0 failures,
+errors or skips in downloaded XML. This includes Rift's five-work offline flow.
+Run40818930355 passed the Witcher five-work app-adapter journey and the two prior
+app cases. Its fourth test incorrectly force-unwrapped the public engine's null
+adapter for a restricted Rift source. Keep that restriction: assert null from the
+public router, then exercise the retained binding directly and require rejection
+BEFORE transport creation. The same zero-HTTP assertion remains. Full rerun needed.
+
+Preparing the existing signed Debug pipeline to opt into runtime only on its
+owner-approved branch. The same commit must pass reusable app and kernel gates
+before signing, then previous-APK signature/version and real install-r/storage/UI
+acceptance before publication. Stable/default build selection is unchanged.

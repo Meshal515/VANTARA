@@ -100,7 +100,9 @@ class RuntimeAppIntegrationTest {
             val pin=instrumentation.context.assets.open("AnimeRift.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
             val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/rift","AnimeRift"),buildJsonObject { put("internalName","AnimeRift");put("content","anime");put("enabled",true) })
             val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
-            try { engine.adapter(id)!!.page(Listing.POPULAR,1);fail("Restricted source emitted traffic") }
+            assertNull("Restricted source was exposed by the public engine router",engine.adapter(id))
+            // Even a retained direct binding must not bypass the public router's denial.
+            try { engine.runtimeSource(id)!!.adapter.page(Listing.POPULAR,1);fail("Restricted source emitted traffic") }
             catch(expected:IllegalStateException){assertEquals("SOURCE_NETWORK_REVIEW_REQUIRED",expected.message)}
             assertEquals(0,calls.get())
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
