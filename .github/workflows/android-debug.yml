@@ -18,6 +18,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  runtime-validation:
+    if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/runtime-app-debug.yml
+
+  runtime-kernel-validation:
+    if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/runtime-android.yml
+
   apk:
     # Ordinary debug artifacts for all other branches are intentionally ephemeral.
     if: github.ref != 'refs/heads/feat/addons-v7-native-manager-20261027'
@@ -129,11 +141,17 @@ jobs:
   # The owner-approved feature branch gets a persistent signed QA build.
   # Other branches NEVER receive production signing secrets or release rights.
   upgradeable-debug:
+    # No signing/publishing before the SAME commit passes actual-app and
+    # isolated-kernel acceptance. Stable/default builds do not opt into runtime.
+    needs: [runtime-validation, runtime-kernel-validation]
     if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: write
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
