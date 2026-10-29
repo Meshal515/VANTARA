@@ -38,6 +38,19 @@ suspend fun newExtractorLink(source:String,name:String,url:String,type:Extractor
 }
 suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit) {
     val parsed=URI(url);require(parsed.scheme=="https"||parsed.scheme=="http");require(parsed.rawUserInfo==null)
+    // A provider's extractor owns its sharing-page paths, including filenames
+    // ending in .mp4. Such a suffix alone cannot override the host's contract.
+    ExtractorRegistry.find(parsed.host)?.let { it.getUrl(url,referer,subtitleCallback,callback);return }
+    if(parsed.host.equals("pixeldrain.com",true)) {
+        val path=parsed.rawPath.orEmpty()
+        if(parsed.scheme=="https" && parsed.port in listOf(-1,443) && parsed.rawQuery==null && parsed.rawFragment==null &&
+            path.matches(Regex("/(?:u|api/file)/[A-Za-z0-9_-]{8}"))) {
+            val id=path.substringAfterLast('/')
+            callback(newExtractorLink("Pixeldrain","Pixeldrain","https://pixeldrain.com/api/file/$id",ExtractorLinkType.VIDEO){this.referer=referer.orEmpty()});return
+        }
+        throw UnsupportedExtractor(parsed.host)
+    }
+    if(parsed.host.equals("streamtape.com",true) || parsed.host.endsWith(".streamtape.com",true))throw UnsupportedExtractor(parsed.host)
     val path=parsed.path?.lowercase().orEmpty()
     if(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")){
         val type=if(path.endsWith(".m3u8"))ExtractorLinkType.M3U8 else if(path.endsWith(".mpd"))ExtractorLinkType.DASH else ExtractorLinkType.VIDEO

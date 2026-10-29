@@ -29,4 +29,18 @@ class RuntimeSettingsOriginTest {
         for(id in listOf("*","localhost","127.0.0.1","evil.example","TVNESH8OZY-dsn.algolia.net.evil","TVNESH8OZY/evil"))assertNull(learn(id))
         assertNull(learn(data="not JSON".toByteArray()));assertNull(learn(data=ByteArray(65537)))
     }
+    private val servers=endpoint.replace("Settings/constants","anime_list/work-1/episodes/episode-1/servers2/all_servers")
+    private fun serverBody(link:String)="""{"fields":{"servers":{"arrayValue":{"values":[{"mapValue":{"fields":{"name":{"stringValue":"PD"},"link":{"stringValue":"$link"}}}}]}}}}""".toByteArray()
+    @Test fun onlyReviewedPixeldrainMediaDeclaredByTheRealSourceDocumentGrantsAccess() {
+        assertEquals("https://pixeldrain.com",learn(requestUrl=servers,responseUrl=servers,data=serverBody("https://pixeldrain.com/u/AbCd1234")))
+    }
+    @Test fun aServerDocumentCannotGrantArbitraryMediaHostsOrRedirectedDocuments() {
+        for(url in listOf("https://pixeldrain.com.evil.example/u/AbCd1234","http://pixeldrain.com/u/AbCd1234","https://user:pass@pixeldrain.com/u/AbCd1234","https://pixeldrain.com/u/AbCd1234?redirect=evil","https://127.0.0.1/u/AbCd1234","https://pixeldrain.com/api/file/AbCd1234/info"))
+            assertNull(learn(requestUrl=servers,responseUrl=servers,data=serverBody(url)))
+        for(url in listOf(servers.replace("animewitcher-1c66d","foreign-project"),servers.replace("all_servers","other"),servers.replace("firestore.googleapis.com","attacker.example"))) {
+            assertNull(learn(requestUrl=url,responseUrl=servers,data=serverBody("https://pixeldrain.com/u/AbCd1234")))
+            assertNull(learn(requestUrl=servers,responseUrl=url,data=serverBody("https://pixeldrain.com/u/AbCd1234")))
+        }
+        assertNull(learn(pin="0".repeat(64),requestUrl=servers,responseUrl=servers,data=serverBody("https://pixeldrain.com/u/AbCd1234")))
+    }
 }

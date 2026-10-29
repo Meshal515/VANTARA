@@ -55,7 +55,7 @@ class RuntimeHost(
     private val activeVerifications = ConcurrentHashMap<String,Retry>()
     private data class DependencyKey(val owner:String,val pkg:String,val hash:String,val source:String)
     // Only exact origins attested by source-owned settings, never keys/cookies.
-    private val dependencyOrigins=HashMap<DependencyKey,String>()
+    private val dependencyOrigins=HashMap<DependencyKey,Set<String>>()
 
     fun setProfile(id: String) = synchronized(lock) {
         check(!closed) { "PROFILE_CHANGED" }
@@ -253,19 +253,25 @@ class RuntimeHost(
     private suspend fun invoke(o: Owner,installed: RuntimePackageStore.Installed,source: JsonObject,id: String,operation: String,input: JsonObject): JsonObject = slots.withPermit {
         val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
         val origins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),
-            synchronized(lock) { checkOwner(o);dependencyOrigins[key] })
-        val learned=java.util.concurrent.atomic.AtomicReference<String?>()
+            synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
+        val learned=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val started=System.nanoTime()
-        try { invokeOnce(o,installed,source,id,operation,input,origins,learned::set) }
-        catch(failure:RuntimeFailure) {
-            val replacement=learned.get()
-            if(failure.code!="ORIGIN_NOT_ALLOWED" || operation !in setOf("catalogue","search","details","episodes") || replacement==null || replacement in origins)throw failure
+        var rejected:RuntimeFailure?=null
+        val initial=try { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) }
+        catch(failure:RuntimeFailure) { rejected=failure;null }
+        val permissionChanged=learned.any { it !in origins }
+        // Some published providers catch a denied media request and return an
+        // empty result. Attested media still needs the same single scope sync.
+        if(!permissionChanged || operation !in setOf("catalogue","search","details","episodes","videoLinks") || (rejected!=null && rejected.code!="ORIGIN_NOT_ALLOWED")) {
+            rejected?.let { throw it };return@withPermit initial!!
+        }
+        run {
             // A permission sync replay, once, only after an attested settings
             // migration. Keep the original load10s + operation15s total budget.
             val remaining=25000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
             if(remaining<=0)throw IllegalStateException("OPERATION_TIMEOUT")
-            val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),replacement)
-            try { withTimeout(remaining) { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,learned::set) } }
+            val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
+            try { withTimeout(remaining) { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } }
             catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
         }
     }
@@ -289,7 +295,9 @@ class RuntimeHost(
                     RuntimeNetworkPolicy.trustedSettingsOrigin(installed.packageHash(),source.text("mainUrl"),outbound,result)?.let { origin ->
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
-                            dependencyOrigins[DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)]=origin
+                            val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
+                            val retained=dependencyOrigins[key].orEmpty().filterNot { origin.endsWith("-dsn.algolia.net") && it.endsWith("-dsn.algolia.net") }.toSet()
+                            dependencyOrigins[key]=retained+origin
                             learned(origin)
                         }
                     }

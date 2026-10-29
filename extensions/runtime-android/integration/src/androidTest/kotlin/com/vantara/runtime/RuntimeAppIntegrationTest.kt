@@ -39,9 +39,15 @@ class RuntimeAppIntegrationTest {
                     val data=when(uri.host) {
                         "d8lh9i7zl7-dsn.algolia.net"->{code=403;"""{"message":"old application settings"}"""}
                         "firestore.googleapis.com"->{
-                            assertTrue(uri.path.endsWith("/Settings/constants"))
-                            """{"fields":{"search_settings":{"mapValue":{"fields":{"app_id_v3":{"stringValue":"TVNESH8OZY"},"api_key":{"stringValue":"authored-key"}}}}}}"""
+                            when {
+                                uri.path.endsWith("/Settings/constants")->"""{"fields":{"search_settings":{"mapValue":{"fields":{"app_id_v3":{"stringValue":"TVNESH8OZY"},"api_key":{"stringValue":"authored-key"}}}}}}"""
+                                uri.path.endsWith("/episodes_summery/summery")->"""{"fields":{"episodes":{"arrayValue":{"values":[{"mapValue":{"fields":{"doc_id":{"stringValue":"ep-1"},"name":{"stringValue":"Episode 1"},"number":{"integerValue":"1"}}}}]}}}}"""
+                                uri.path.endsWith("/servers2/all_servers")->"""{"fields":{"servers":{"arrayValue":{"values":[{"mapValue":{"fields":{"name":{"stringValue":"PD"},"quality":{"stringValue":"480p"},"link":{"stringValue":"https://pixeldrain.com/u/AbCd1234"}}}}]}}}}"""
+                                uri.path.contains("/Settings/servers/servers/")->"""{"fields":{}}"""
+                                else->error("Unexpected offline Firestore document")
+                            }
                         }
+                        "pixeldrain.com"->{assertTrue(scope.allowedOrigins().contains("https://pixeldrain.com"));"""<html><meta property="og:video" content="https://pixeldrain.com/api/file/AbCd1234"></html>"""}
                         "tvnesh8ozy-dsn.algolia.net"->{
                             assertTrue(scope.allowedOrigins().contains(replacement))
                             assertEquals("TVNESH8OZY",r.headers()["X-Algolia-Application-Id"]?.single())
@@ -75,7 +81,77 @@ class RuntimeAppIntegrationTest {
             host.setProfile(account+"-other");host.setProfile(account)
             engine.adapter(id)!!.page(Listing.POPULAR,1)
             assertEquals(7,scopes.size);assertFalse(scopes[5].contains(replacement))
+            val work=engine.adapter(id)!!.page(Listing.POPULAR,1).items.single()
+            val episode=engine.adapter(id)!!.episodes(work).single()
+            val beforeMedia=scopes.size
+            assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
+            assertEquals(beforeMedia+2,scopes.size);assertFalse(scopes[beforeMedia].contains("https://pixeldrain.com"));assertTrue(scopes[beforeMedia+1].contains("https://pixeldrain.com"))
+            assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
+            assertEquals(beforeMedia+3,scopes.size)
+            host.enable(pkg,false);host.enable(pkg,true)
+            val beforeRevoked=scopes.size
+            assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
+            assertEquals(beforeRevoked+2,scopes.size);assertFalse(scopes[beforeRevoked].contains("https://pixeldrain.com"))
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
+    }
+    @androidx.annotation.OptIn(markerClass=[androidx.media3.common.util.UnstableApi::class])
+    @Test fun witcherLiveEpisodeRunsInTheExistingPlayerWithSustainedClockAndBothSeeks()=runBlocking {
+        val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
+        ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context)
+        val host=RuntimeHost(context,engine,"VANTARA live playback validation")
+        val archive=File.createTempFile("witcher-playback-",".cs3",context.cacheDir)
+        val sessionId="live-player-"+UUID.randomUUID()
+        var activity:com.vantara.anime.player.PlayerActivity?=null
+        try {
+            host.setProfile("live-playback-"+UUID.randomUUID())
+            ins.context.assets.open("Animewitcher.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
+            val pin=ins.context.assets.open("Animewitcher.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
+            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/live-playback","Animewitcher"),buildJsonObject { put("internalName","Animewitcher");put("version",3);put("content","anime");put("enabled",true) })
+            val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            val adapter=engine.adapter(id)!!;val work=adapter.page(Listing.POPULAR,1).items.first();val episode=adapter.episodes(work).first()
+            val candidates=adapter.candidates(episode).filter { java.net.URI(it.url).host=="pixeldrain.com" }
+            assertTrue("Live episode has no supported media candidate",candidates.isNotEmpty())
+            // Real candidates produced by the installed package; only the session
+            // fixture is registered here. Production player/network stay untouched.
+            val sessionsField=AnimeEngine::class.java.getDeclaredField("sessions").apply { isAccessible=true }
+            @Suppress("UNCHECKED_CAST")
+            val sessions=sessionsField.get(engine) as MutableMap<String,com.vantara.anime.stream.PlaybackSession>
+            sessions[sessionId]=com.vantara.anime.stream.PlaybackSession(candidates,engine.health)
+            val launch=com.vantara.anime.player.PlayerActivity.Launch(session=sessionId,title=work.title,episode=episode.number,candidate=candidates.last().id)
+            activity=ins.startActivitySync(com.vantara.anime.player.PlayerActivity.intent(context,launch).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as com.vantara.anime.player.PlayerActivity
+            val playerField=com.vantara.anime.player.PlayerActivity::class.java.getDeclaredField("player").apply { isAccessible=true }
+            val player=playerField.get(activity) as androidx.media3.exoplayer.ExoPlayer
+            fun <T> onMain(read:()->T):T { val value=AtomicReference<T>();ins.runOnMainSync { value.set(read()) };return value.get() }
+            fun awaitPosition(target:Long,upper:Long=Long.MAX_VALUE) {
+                val deadline=android.os.SystemClock.elapsedRealtime()+30000
+                while(android.os.SystemClock.elapsedRealtime()<deadline) {
+                    val error=onMain { player.playerError?.errorCodeName };assertNull("Production player reported $error",error)
+                    if(onMain { player.isPlaying && player.currentPosition in target..upper })return
+                    Thread.sleep(100)
+                }
+                fail("Production video clock did not reach $target ms")
+            }
+            onMain { player.volume=0f };awaitPosition(1000)
+            val start=onMain { player.currentPosition };val began=android.os.SystemClock.elapsedRealtime()
+            val framesAtStart=onMain { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
+            val droppedAtStart=onMain { player.videoDecoderCounters?.droppedBufferCount ?: 0 }
+            while(android.os.SystemClock.elapsedRealtime()-began<30000) {
+                assertNull(onMain { player.playerError?.errorCodeName });Thread.sleep(200)
+            }
+            val advanced=onMain { player.currentPosition }-start
+            assertTrue("Video clock lagged real time: $advanced ms",advanced>=25000)
+            val rendered=onMain { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }-framesAtStart
+            val dropped=onMain { player.videoDecoderCounters?.droppedBufferCount ?: 0 }-droppedAtStart
+            assertTrue("No sustained decoded video frames",rendered>=200)
+            assertTrue("Excessive dropped frames: $dropped/$rendered",dropped*10<=rendered+dropped)
+            val forward=onMain { player.currentPosition+60000 };onMain { player.seekTo(forward) };awaitPosition(forward+1000,forward+5000)
+            val backward=(forward-30000).coerceAtLeast(0);onMain { player.seekTo(backward) };awaitPosition(backward+1000,backward+5000)
+            val dimensions=onMain { "${player.videoFormat?.width}x${player.videoFormat?.height}" }
+            android.util.Log.i("VantaraRuntime","LIVE_WITCHER_PLAYER:existing Activity/transport; elapsed=30000; advanced=$advanced; rendered=$rendered; dropped=$dropped; dimensions=$dimensions; forward/backward passed")
+        }finally {
+            activity?.let { current->ins.runOnMainSync { current.finish() } }
+            engine.closeSession(sessionId);host.close();archive.delete();engine.setRuntimeSources(emptyList())
+        }
     }
     @Test fun witcherLiveCatalogueSearchDetailsAndEpisodesForFiveWorks()=runBlocking {
         val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext

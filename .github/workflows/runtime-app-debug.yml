@@ -1,7 +1,7 @@
 name: VANTARA Runtime actual Debug app integration (experimental)
 on:
   push:
-    branches: [feat/runtime-debug-integration-20261028, fix/witcher-verified-origin-refresh-20261029]
+    branches: [feat/runtime-debug-integration-20261028, fix/witcher-verified-origin-refresh-20261029, fix/witcher-pixeldrain-extraction-20261029]
     paths:
       - 'android/**'
       - 'extensions/runtime-android/**'
