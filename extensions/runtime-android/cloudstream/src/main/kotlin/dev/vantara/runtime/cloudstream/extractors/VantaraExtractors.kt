@@ -14,7 +14,7 @@ interface VantaraExtractor {
     suspend fun extract(url:String,referer:String?,subtitles:(SubtitleFile)->Unit,links:(ExtractorLink)->Unit):Boolean
 }
 object VantaraExtractors {
-    private val all:List<VantaraExtractor> = listOf(Pixeldrain)
+    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood)
     private fun matches(host:String,known:String)=host.equals(known,true)||host.endsWith(".$known",true)
     fun find(host:String):VantaraExtractor?=all.firstOrNull{e->e.hosts.any{matches(host,it)}}
     /**

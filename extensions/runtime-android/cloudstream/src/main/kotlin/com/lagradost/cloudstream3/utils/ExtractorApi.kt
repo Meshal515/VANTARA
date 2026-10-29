@@ -45,9 +45,15 @@ suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleF
     val parsed=runCatching{URI(url)}.getOrNull()?:return false
     if(!(parsed.scheme.equals("https",true)||parsed.scheme.equals("http",true))||parsed.rawUserInfo!=null||parsed.host==null)return false
     val host=parsed.host
-    ExtractorRegistry.find(host)?.let { it.getUrl(url,referer,subtitleCallback,callback);return true }
+    // Like the original getSafeUrl: one server's extractor failing must not stop the provider's other servers.
+    ExtractorRegistry.find(host)?.let { e->
+        try { e.getUrl(url,referer,subtitleCallback,callback);return true }
+        catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
+        catch(_:Throwable){dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url);return false}
+    }
     dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(host)?.let { e->
-        if(e.extract(url,referer,subtitleCallback,callback))return true
+        val resolved=try{e.extract(url,referer,subtitleCallback,callback)}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Throwable){false}
+        if(resolved)return true
         dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url);return false
     }
     val path=parsed.path?.lowercase().orEmpty()
