@@ -89,7 +89,8 @@ export function renderV7Addons({
   repoTab.append(repoCount);installedTab.append(installedCount);
   const verificationTab=btn("تحتاج تحقق","v7-tab v7-verify-entry",()=>switchTab("verification"));
   const verificationCount=el("span","v7-count","0");verificationTab.append(verificationCount);
-  tabs.append(repoTab,installedTab,verificationTab);
+  // «أضف» في طرف صف التبويبات نفسه: لا صف مستقل له يترك فراغًا بجانبه
+  tabs.append(repoTab,installedTab,verificationTab,add);
   const tools=el("div","v7-tools"),searchBox=el("label","v7-search"),search=el("input");
   search.type="search";search.autocomplete="off";search.placeholder="ابحث عن مصدر أو مستودع...";
   search.dataset.addonSearch="";search.value=String(initialState.search||"");
@@ -105,7 +106,7 @@ export function renderV7Addons({
   const dialog=el("section","v7-dialog");
   dialog.setAttribute("role","dialog");dialog.setAttribute("aria-modal","true");
   layer.append(dialog);
-  root.append(head,tabs,tools,body,message,layer);
+  root.append(tabs,tools,body,message,layer);
   layer.addEventListener("click",e=>{if(e.target===layer)closeModal();});
   const fmtErr=e=>String(e?.message||e||"تعذر إكمال العملية").replace(/(?:https?:\/\/|stremio:\/\/)\S+/gi,"[رابط]");
   const notify=(s)=>{if(alive)message.textContent=s;};

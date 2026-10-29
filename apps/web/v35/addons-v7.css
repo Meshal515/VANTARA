@@ -176,3 +176,14 @@
 .v7-addon .v7-btn.danger{background:#ff83911f;color:#ff8391}
 .v7-addon .v7-verification-item{border-bottom:1px solid var(--v7-line)}
 @media(max-width:380px){.v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:66px;min-width:66px}.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:40px;height:40px}}
+/* بلا حاويات: «أضف» في طرف التبويبات، البحث والنوع سطر نصي بلا صناديق، والأيقونات بلا بلاط */
+.v7-addon .v7-tabs{align-items:center;margin-top:0}
+.v7-addon .v7-tabs .v7-plus{margin-inline-start:auto;height:34px;padding:0 12px 0 10px}
+.v7-addon .v7-tools{gap:14px;margin:2px 0 4px;padding-bottom:10px;border-bottom:1px solid var(--v7-line)}
+.v7-addon .v7-search,.v7-addon .v7-filter{height:38px;padding:0;border-radius:0;background:transparent}
+.v7-addon .v7-search{gap:8px;color:var(--text-3,#99949f)}
+.v7-addon .v7-search input::placeholder{color:var(--text-4,#77727f)}
+.v7-addon .v7-filter{gap:6px;color:var(--text-2,#d6d2dd);font-weight:600}
+.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{background:transparent;border-radius:12px}
+.v7-addon .v7-logo img{padding:0;border-radius:10px}
+.v7-addon .v7-fallback svg{width:24px;height:24px;stroke:var(--text-4,#77727f)}
