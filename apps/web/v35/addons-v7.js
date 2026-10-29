@@ -47,6 +47,8 @@ const safeIcon=(value)=>{
   return safe(value);
 };
 const capabilityLabel=cap=>({home:"آخر التحديثات",catalog:"كتالوج",catalogue:"كتالوج",browse:"التصفح",search:"بحث",meta:"بيانات",details:"تفاصيل",streams:"روابط التشغيل",subtitles:"ترجمة",pages:"صفحات",chapters:"فصول",episodes:"حلقات",addon:"الإضافة",integration:"ربط المحرك",other:"قدرة إضافية"}[cap]||"قدرة إضافية");
+// رموز اللغة كما يقولها الناس: «ar» ← العربية
+const LANG_AR={en:"الإنجليزية",ja:"اليابانية",ko:"الكورية",zh:"الصينية",fr:"الفرنسية",es:"الإسبانية",tr:"التركية",id:"الإندونيسية",multi:"متعددة",all:"متعددة"};
 const kindName=(a)=>{
   if(a.content==="cinema"||a.kind==="cinema")return "سينما";
   if(a.kind==="anime" || a.anime || (a.contentTypes||[]).includes("anime"))return "أنمي";
@@ -193,7 +195,8 @@ export function renderV7Addons({
   }
   function sourceMeta(a){
     // الإصدار في التفاصيل؛ الرقم المجرد في الصف لا يعني شيئًا للمستخدم
-    return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||"")].filter(Boolean).join(" · ");
+    const code=String(a.lang||a.languages?.[0]||"").toLowerCase();
+    return [kindName(a),a.arabic||code==="ar"?"العربية":(LANG_AR[code]??code)].filter(Boolean).join(" · ");
   }
   const diagnosticKey=a=>JSON.stringify([a._store?.id,a.key||a.pkg||a.id||a.domain,a.version,a.cacheEpoch]);
   function installedState(a){
@@ -254,9 +257,16 @@ export function renderV7Addons({
     if(empty)return {state:"empty",label:"تستجيب بلا نتائج",detail:"استجابة فعلية صالحة بلا نتائج لهذا الطلب؛ لا تثبت توفر المحتوى."};
     return {state:"untested",label:"لم تُفحص",detail:"لا توجد أدلة وظيفية حديثة لهذه الإضافة."};
   }
+  // الحالة تظهر حين تهم فقط (مشكلة بسببها)؛ «مثبتة ·» داخل التبويب نفسه زائدة فتُخفى بصريًا
   function status(a){
-    const result=installedState(a),node=el("span","v7-status visible","مثبتة · "+result.label);
+    const result=installedState(a),node=el("span","v7-status visible");
+    node.append(el("span","v7-status-pre","مثبتة · "),el("span","v7-status-label",result.label));
     node.dataset.state=result.state;node.title=result.detail;return node;
+  }
+  function why(a){
+    const result=installedState(a);
+    if(!["attention","unavailable"].includes(result.state)||!result.detail)return null;
+    const node=el("span","v7-why",result.detail);node.dir="auto";return node;
   }
   function sourceRow(a,mode,parent){
     const row=el("article","v7-row");row.tabIndex=0;
@@ -266,7 +276,9 @@ export function renderV7Addons({
     const statusSlot=el("div","v7-status-slot"),stateLabel=status(a);
     const isAdded=mode==="remote"?true:!!(a.installed||a.builtin||a.update);
     if(!isAdded)stateLabel.classList.remove("visible");
-    statusSlot.append(stateLabel);info.append(statusSlot);
+    statusSlot.append(stateLabel);
+    const reason=isAdded?why(a):null;if(reason)statusSlot.append(reason);
+    info.append(statusSlot);
     const actions=el("div","v7-actions");
     const challenges=sourceChallenges(a);
     const verifyButton=()=>{const verify=btn("تحقق","v7-simple-btn",e=>{e.stopPropagation();void verifyHost(challenges[0].host,verify);});return verify;};
@@ -374,10 +386,20 @@ export function renderV7Addons({
     const row=el("article","v7-row");
     row.append(logo(r.data,null,true));
     const info=el("div","v7-info");
-    info.append(el("div","v7-name",r.data.name),el("div","v7-meta",(r.group.family==="cloudstream"?"CloudStream":r.group.kind==="anime"?"Aniyomi":"Mihon")+" · "+(r.data.count??"")+" إضافة"));
+    // نوع المستودع وعدد إضافاته إن أعلنه؛ بلا عدد يبقى «مستودع» لا كلمة «إضافة» وحدها
+    const count=Number(r.data.count);
+    const family=r.group.family==="cloudstream"?"CloudStream":r.group.kind==="anime"?"Aniyomi":"Mihon";
+    // اسم المنصة اللاتيني معزول اتجاهه فلا يقلب ترتيب السطر العربي
+    const meta=el("div","v7-meta"),fam=el("bdi",null,family);fam.dir="ltr";
+    meta.append(fam," · "+(Number.isFinite(count)&&count>0?count+" إضافة":"مستودع"));
+    info.append(el("div","v7-name",r.data.name),meta);
     row.append(info);
-    const go=btn("استعراض","v7-simple-btn",()=>{opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);});
+    const browse=()=>{opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);};
+    const go=btn("استعراض","v7-simple-btn v7-go",browse);
+    go.setAttribute("aria-label","استعراض "+r.data.name);
     go.prepend(ico("chevron"));row.append(go);
+    // الصف كله يفتح المستودع، والأزرار تبقى لما خُصصت له
+    row.onclick=e=>{if(!e.target.closest("button"))browse();};
     if(r.group.api?.remove){
       const remove=btn("","v7-trash",()=>{
         showDialog("إزالة المستودع؟",r.group.family==="cloudstream"?"سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة.":"ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");

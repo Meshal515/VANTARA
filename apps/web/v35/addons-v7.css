@@ -109,3 +109,70 @@
 @media(max-width:380px){.v7-addon{padding-inline:12px}.v7-addon .v7-tabs{gap:14px}.v7-addon .v7-tab{font-size:13px}.v7-addon .v7-count{margin-inline-start:4px}.v7-addon .v7-tools{gap:8px}.v7-addon .v7-search{padding-inline:10px}.v7-addon .v7-logo{width:44px;height:44px}.v7-addon .v7-native-actions{width:112px;min-width:112px}.v7-addon .v7-flip{min-width:72px;width:72px}.v7-addon .v7-trash-holder,.v7-addon .v7-trash{width:34px;min-width:34px}.v7-addon .v7-actions{gap:6px}.v7-addon .v7-simple-btn{min-width:72px}}
 
 .v7-addon .v7-group-title{font-size:13px;font-weight:650;color:#a69bb6;margin:20px 0 8px}
+
+/* ═══ صفحة الإضافات: هرمية واضحة بلا صناديق ═══
+ * الاسم هو الأهم، ثم سطر واحد يقول ما هو (النوع · المصدر)، والحالة لا تظهر إلا حين تهم (مشكلة
+ * بسببها). الأفعال رموز وكلمات خفيفة بلا إطارات؛ لون القسم للفعل الأساسي وحده. */
+.v7-addon{--v7-line:#ffffff0f;--v7-accent:var(--accent,#b6a2ff);--v7-soft:color-mix(in srgb,var(--v7-accent) 16%,transparent);padding:0 16px 72px;font-size:14px}
+.v7-addon .v7-heading{margin:4px 0 2px}
+.v7-addon .v7-plus{height:36px;min-width:0;padding:0 14px 0 12px;gap:6px;border-radius:999px;background:var(--v7-soft);color:var(--v7-accent);font-weight:700;font-size:14px}
+.v7-addon .v7-plus svg{width:17px;height:17px;stroke-width:2.2}
+.v7-addon .v7-tabs{gap:22px;margin:4px 0 12px}
+.v7-addon .v7-tab{padding:12px 0 13px;font-size:14.5px;font-weight:650;color:var(--text-3,#99949f)}
+.v7-addon .v7-tab.active{color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-count{font-size:12px;font-weight:600;color:var(--text-4,#77727f)}
+.v7-addon .v7-tab.active .v7-count{color:var(--v7-accent)}
+.v7-addon .v7-tools{gap:8px;margin-bottom:6px}
+.v7-addon .v7-search,.v7-addon .v7-filter{height:42px;border:0;border-radius:12px;background:var(--surface-1,#121019)}
+.v7-addon .v7-filter{min-width:0;gap:8px;padding:0 12px;font-size:13.5px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-menu{border:0;box-shadow:0 18px 44px #000b,0 0 0 1px var(--v7-line)}
+.v7-addon .v7-section-head{margin:18px 0 2px}
+.v7-addon .v7-section-head h3,.v7-addon .v7-group-title{font-size:12.5px;font-weight:650;color:var(--text-3,#99949f);letter-spacing:.01em}
+.v7-addon .v7-section-head span{font-size:12px;color:var(--text-4,#77727f)}
+.v7-addon .v7-list{border-top:0}
+.v7-addon .v7-row{min-height:64px;gap:12px;padding:10px 0;border-bottom:1px solid var(--v7-line)}
+.v7-addon .v7-row:last-child{border-bottom:0}
+.v7-addon .v7-row:active{background:#ffffff05}
+.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:44px;height:44px;border:0;border-radius:12px;background:var(--surface-2,#18161f)}
+.v7-addon .v7-logo img{padding:4px;background:transparent}
+.v7-addon .v7-fallback svg{width:21px;height:21px;stroke:var(--text-3,#99949f)}
+.v7-addon .v7-name{font-size:15px;font-weight:650;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
+.v7-addon .v7-meta{margin-top:2px;font-size:12.5px;color:var(--text-3,#99949f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
+/* الحالة: لا شيء حين لا مشكلة (لم يُفحص/تعمل)، وسطر واحد بلونه وسببه حين تهم */
+.v7-addon .v7-status-slot{min-height:0;margin-top:0;gap:6px;min-width:0}
+.v7-addon .v7-status-slot:not(:has(.v7-status[data-state="attention"],.v7-status[data-state="unavailable"])){display:none}
+.v7-addon .v7-status-pre{display:none}
+.v7-addon .v7-status.visible{margin-top:3px;font-size:12px;font-weight:600;gap:5px;flex:none}
+.v7-addon .v7-status::before{width:5px;height:5px}
+.v7-addon .v7-why{margin-top:3px;min-width:0;font-size:12px;color:var(--text-3,#99949f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v7-addon .v7-why::before{content:"· ";color:var(--text-4,#77727f)}
+/* الأفعال: بلا إطارات. «تثبيت» بلون القسم الخفيف، و«فتح» كلمة؛ الحذف رمز */
+.v7-addon .v7-actions{gap:4px}
+.v7-addon .v7-native-actions,.v7-addon .v7-native-actions[class]{width:auto;min-width:0}
+.v7-addon .v7-simple-btn{height:36px;min-width:0;padding:0 10px;border:0;border-radius:999px;background:transparent;color:var(--v7-accent);font-size:13.5px;font-weight:700}
+.v7-addon .v7-go{width:36px;padding:0;font-size:0;color:var(--text-3,#99949f)}
+.v7-addon .v7-go svg{width:18px;height:18px}
+.v7-addon .v7-trash,.v7-addon .v7-trash-holder{width:36px;min-width:36px}
+.v7-addon .v7-trash{height:36px;border:0;border-radius:50%;background:transparent;color:var(--text-3,#99949f)}
+.v7-addon .v7-trash:active{color:#ff8391;background:#ff83911a}
+.v7-addon .v7-trash svg{width:18px;height:18px}
+.v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:74px;min-width:74px;height:34px}
+.v7-addon .v7-face{border-radius:999px;font-size:13.5px;font-weight:700;gap:5px}
+.v7-addon .v7-front{background:var(--v7-soft);color:var(--v7-accent)}
+.v7-addon .v7-rear{background:transparent;border:0;color:var(--v7-accent)}
+.v7-addon .v7-rear svg{width:16px;height:16px}
+/* فارغ: هادئ ومختصر، لا صندوق كبير */
+.v7-addon .v7-empty{min-height:38vh;gap:10px}
+.v7-addon .v7-empty-symbol{width:56px;height:56px;border:0;border-radius:16px;background:var(--surface-1,#121019);color:var(--text-3,#99949f)}
+.v7-addon .v7-empty h3{font-size:19px;font-weight:700}
+.v7-addon .v7-empty p{font-size:13.5px}
+.v7-addon .v7-diagnostic:empty{display:none}
+/* النافذة: سطوح بلا حدود */
+.v7-addon .v7-dialog{border:0;border-radius:22px;box-shadow:0 24px 70px #000c,0 0 0 1px var(--v7-line)}
+.v7-addon .v7-dialog h3{font-size:22px}
+.v7-addon .v7-field{border:0;border-radius:12px}
+.v7-addon .v7-btn{border:0;border-radius:999px;height:42px;font-weight:700}
+.v7-addon .v7-btn.primary{background:var(--v7-accent);color:#fff}
+.v7-addon .v7-btn.danger{background:#ff83911f;color:#ff8391}
+.v7-addon .v7-verification-item{border-bottom:1px solid var(--v7-line)}
+@media(max-width:380px){.v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:66px;min-width:66px}.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:40px;height:40px}}
