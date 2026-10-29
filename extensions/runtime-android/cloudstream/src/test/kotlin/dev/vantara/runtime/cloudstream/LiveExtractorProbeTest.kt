@@ -25,7 +25,11 @@ class LiveExtractorProbeTest {
         NetworkBridge.install{request,follow->client.newBuilder().followRedirects(follow).followSslRedirects(follow).build().newCall(request).execute()}
         for(url in list!!.readLines().map{it.trim()}.filter{it.startsWith("http")}) {
             val links=mutableListOf<ExtractorLink>()
-            val handled=runCatching{runBlocking{loadExtractor(url,null,{},links::add)}}
+            // VANTARA_LIVE_GENERIC=1 runs the shared player-page engine on every URL, to learn which hosts it reads.
+            val handled=runCatching{runBlocking{
+                if(System.getenv("VANTARA_LIVE_GENERIC")=="1")dev.vantara.runtime.cloudstream.extractors.PlayerPage.extract("probe",url,null,{},links::add)
+                else loadExtractor(url,null,{},links::add)
+            }}
             val verdicts=links.map{link->
                 val request=Request.Builder().url(link.url).header("Range","bytes=0-2047").apply{
                     if(link.referer.isNotBlank())header("Referer",link.referer);link.headers.forEach{(k,v)->header(k,v)}
