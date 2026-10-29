@@ -105,7 +105,8 @@ export async function createNativeCatalog(record, {
   };
   const selected = choices.find(row => row.id === sourceId) ?? choices[0];
   if (selected.enabled === false)
-    return incompatible('NATIVE_SOURCE_DISABLED', 'هذا المصدر معطّل في المحرك الأصلي.');
+    return incompatible('NATIVE_SOURCE_DISABLED', typeof selected.disabledReason==='string' && selected.disabledReason.trim()
+      ? selected.disabledReason.slice(0,300) : 'هذا المصدر معطّل في المحرك الأصلي.');
   const content = manga ? 'manga' : selected.content ?? record.content;
   if (!['manga', 'anime', 'cinema'].includes(content))
     return incompatible('SOURCE_CONTENT_UNDECLARED', 'لم يحدد المحرك نوع محتوى هذا المصدر.');

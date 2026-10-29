@@ -58,6 +58,12 @@ const mangaPlugin=(extra={})=>({
   series:async({manga})=>({manga,chapters:[{url:'/chapter/1',name:'One'}]}),chapters:async()=>({chapters:[]}),pages:async()=>({pages:[]}),...extra,
 });
 const animeRecord={pkg:'org.native.video',name:'Installed Video',_store:{kind:'anime'}};
+it('shows the native publisher/network restriction instead of claiming a source outage',async()=>{
+ const reason='يتطلب هذا المصدر مراجعة اتصال آمن وفق تحذير ناشره؛ لم تُرسل إليه طلبات.';
+ const engine=animePlugin({sources:async()=>({sources:[{id:'real-video-id',pkg:animeRecord.pkg,content:'anime',enabled:false,disabledReason:reason}]}),page:vi.fn()});
+ const out=await createNativeCatalog(animeRecord,{plugins:{AnimeEngine:engine}});
+ expect(out).toMatchObject({status:'incompatible',code:'NATIVE_SOURCE_DISABLED',reason});expect(engine.page).not.toHaveBeenCalled();
+});
 it('does not relabel the full catalogue as latest when an older native bridge has no latest method',async()=>{
  const out=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:mangaPlugin({latest:undefined})}});
  expect(out.adapter.home).toBeUndefined();
