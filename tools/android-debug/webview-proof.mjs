@@ -93,6 +93,36 @@ try {
     proof.optionalRuntime = await evaluate('Capacitor.Plugins.VantaraRuntime.capabilities()');
     if(proof.optionalRuntime?.cloudstream!==true || proof.optionalRuntime?.platform!=='android')
       throw new Error('Optional runtime did not initialize through the actual MainActivity/Capacitor bootstrap');
+    if(phase==='candidate') {
+      // Real owner-supplied repository -> native HTTP -> complete index -> JS
+      // bridge. No source-site/catalogue/package-install request is made here.
+      proof.runtimeRepository = await evaluate(`(async()=>{
+        const plugin=Capacitor.Plugins.VantaraRuntime;
+        await plugin.setProfile({profile:'local'});
+        const before=await plugin.list();
+        const url='https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json';
+        await plugin.addRepository({url});
+        const result=await plugin.extensions({url}),rows=result.extensions;
+        if(!Array.isArray(rows)||rows.length<43)throw new Error('Real repository index is missing entries');
+        for(const name of ['Animewitcher','AnimeRift','Aia2tv 2'])
+          if(!rows.some(row=>row.internalName===name))throw new Error('Missing actual repository package: '+name);
+        if(!rows.every(row=>/^cs3_[0-9a-f]{32}$/.test(row.pkg)))throw new Error('Invalid package storage identity');
+        const spaced=rows.find(row=>row.internalName==='Aia2tv 2');
+        if(!spaced.url.endsWith('/Aia2tv%202.cs3'))throw new Error('Spaced artifact path is not canonicalized');
+        const after=await plugin.list();
+        if(JSON.stringify(before.installed)!==JSON.stringify(after.installed))throw new Error('Repository browsing mutated installed packages');
+        if(!after.repos.some(repo=>repo.url===url))throw new Error('Repository was not saved');
+        return {entries:rows.length,spaceNamedEntry:true,encodedArtifactPath:true,installedPackagesUnchanged:true,sourceSiteRequests:false};
+      })()`);
+    } else if(phase==='restart') {
+      proof.runtimeRepository = await evaluate(`(async()=>{
+        const plugin=Capacitor.Plugins.VantaraRuntime;await plugin.setProfile({profile:'local'});
+        const data=await plugin.list();
+        const retained=data.repos.some(repo=>repo.url==='https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json');
+        if(!retained)throw new Error('Actual runtime repository was lost after process restart');
+        return {retainedAfterProcessRestart:true};
+      })()`);
+    }
   }
   // A sentinel in both web storage systems and the real native identity must
   // survive a package replacement and then a complete process restart.

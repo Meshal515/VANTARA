@@ -135,12 +135,7 @@ class RuntimeHost(
             val data = RuntimeJson.parse(fetch(o,list.jsonPrimitive.content).decodeToString()).jsonArray
             require(rows.size + data.size <= 512) { "REPOSITORY_INDEX_LIMIT" }
             for (entry in data) {
-                val value=entry.jsonObject
-                val internal=value.text("internalName")
-                require(internal.matches(Regex("[A-Za-z0-9_.-]{1,160}"))) { "INVALID_PACKAGE_ID" }
-                endpoint(value.text("url"))
-                val pkg=packageId(url,internal)
-                rows.add(JsonObject(value + mapOf("pkg" to JsonPrimitive(pkg),"repoName" to repo.getValue("name"),"repoUrl" to JsonPrimitive(url))))
+                rows.add(RuntimeRepositoryEntry.decode(entry.jsonObject,url,repo.text("name")))
             }
         }
         checkOwner(o); val result=JsonArray(rows.distinctBy { it.jsonObject.text("pkg") }); indexes[key]=System.currentTimeMillis() to result; result

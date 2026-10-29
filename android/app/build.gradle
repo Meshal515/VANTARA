@@ -236,6 +236,7 @@ if (runtimeDebug) {
     // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
     android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
     android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
+    android.sourceSets.testDebug.resources.srcDir('../../extensions/runtime-android/integration/src/test/resources')
     android.sourceSets.androidTest.java.srcDir('../../extensions/runtime-android/integration/src/androidTest/kotlin')
     android.sourceSets.androidTest.assets.srcDir('../../extensions/runtime-android/harness/build/pinnedPackages')
 }
