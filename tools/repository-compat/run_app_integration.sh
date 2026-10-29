@@ -12,9 +12,9 @@ mkdir -p "$DEBUG_EVIDENCE"
 # candidate APK again before starting the separate real-WebView acceptance phase.
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 adb shell am force-stop com.vantara.app.debug
-adb shell am start -n com.vantara.app.debug/com.vantara.app.MainActivity
+adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs baseline
 node tools/android-debug/webview-proof.mjs candidate
 adb shell am force-stop com.vantara.app.debug
-adb shell am start -n com.vantara.app.debug/com.vantara.app.MainActivity
+adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs restart

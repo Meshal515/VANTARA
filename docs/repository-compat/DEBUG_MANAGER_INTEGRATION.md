@@ -206,3 +206,9 @@ CDP phase; it still does not claim a signed upgrade. Full rerun is required.
 Local checks for this follow-up:1844 web tests in200 files passed;55 safety and
 fingerprint checks passed; actual app unit/build and instrumentation APK compile
 passed. No main/Stable change, source separation, or live playback acceptance.
+
+Run40816658851 executed both actual-app instrumentation cases successfully,
+including real WebView cookie profile isolation. The CDP phase then queried pidof
+before Android finished updating its PID map (query04:20:53.18, map04:20:53.20).
+Use Activity Manager's existing `start -W` completion handshake before CDP on
+both launches; no assertion or timeout is weakened. Full acceptance rerun pending.
