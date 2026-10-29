@@ -258,7 +258,7 @@ class RuntimeHost(
         val metadata=RuntimeJson.parse(current.metadata()).jsonObject
         check(metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false) { "SOURCE_DISABLED" }
         check(!metadata.text("description").contains("VPN",true) && !metadata.text("internalName").equals("AnimeRift",true)) { "SOURCE_NETWORK_REVIEW_REQUIRED" }
-        val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,setOf(HttpBroker.origin(endpoint(source.text("mainUrl")))))
+        val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl")))
         val bound=sourceTransport(scope,broker)
         val transport=object: AndroidRuntimeClient.HostHttpTransport {
             override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {

@@ -212,3 +212,30 @@ including real WebView cookie profile isolation. The CDP phase then queried pido
 before Android finished updating its PID map (query04:20:53.18, map04:20:53.20).
 Use Activity Manager's existing `start -W` completion handshake before CDP on
 both launches; no assertion or timeout is weakened. Full acceptance rerun pending.
+
+Run40817738069 on355f4b49 passed the complete actual-app pipeline, including both
+instrumentation cases, MainActivity's real Capacitor runtime capability,30 UI
+cycles, and force-stop/restart. Standalone Chromium also passed30 source/catalogue
+navigation cycles over141 seconds with no uncaught JS errors or popups. These
+remain offline/anonymous UI proofs, not real authentication or media playback.
+
+## Priority providers: Witcher and Rift
+
+Pinned Witcher4c639f93 uses the exact Algolia application origin and Firestore
+outside its declared website origin. The app previously admitted only mainUrl.
+An exact-archive network profile admits these two observed HTTPS dependencies
+while unknown/updated package bytes receive no extra permissions. Public DNS,
+TLS, redirect checking, per-source cookies and bounded IPC remain in force. The
+new app instrumentation exercises five authored works through the REAL published
+DEX and existing AnimeEngine adapter: catalogue/search/details/episodes/direct
+links. This is NOT five live works or actual playback. The new two policy JVM
+tests were observed RED then GREEN. Device execution is required.
+
+Rift's pinned package generates device/session state and has a publisher IP-ban
+warning. The app retains the source silently and denies source transport pending
+network review; a new actual-installation test must prove zero transport creation.
+A separate isolated harness test exercises its real DEX against authored API
+responses for five works, opaque episodes and direct-link headers with ZERO
+source sockets. It does not prove persistent source identity across worker
+generations or authorize live requests. No VPN, identity rotation, clearance
+bypass or user storage deletion was added. Rift live support remains incomplete.

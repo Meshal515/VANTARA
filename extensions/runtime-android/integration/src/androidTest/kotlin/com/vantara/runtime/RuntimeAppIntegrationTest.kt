@@ -26,6 +26,85 @@ import java.util.concurrent.atomic.AtomicReference
 /** Actual published DEX -> optional app bridge host -> existing AnimeEngine adapters.
  * Authored offline HTTP fixtures, NOT a live-site, five-work, or real playback claim. */
 class RuntimeAppIntegrationTest {
+    @Test fun witcherPublishedPackageTraversesFiveOfflineWorksThroughActualAppAdapter()=runBlocking {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val context=instrumentation.targetContext
+        ensureEngineInjekt(context.applicationContext as Application)
+        val engine=AnimeEngine.get(context)
+        val seen=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        fun scalar(value:String)=buildJsonObject { put("stringValue",value) }
+        fun fields(value:JsonObject)=buildJsonObject { put("fields",value) }
+        fun arrayField(value:JsonObject)=buildJsonObject { put("arrayValue",buildJsonObject { put("values",JsonArray(listOf(buildJsonObject { put("mapValue",fields(value)) }))) }) }
+        fun item(n:Int)=buildJsonObject {
+            put("objectID","work-$n");put("anime_id","work-$n");put("name","VANTARA Offline Work $n")
+            put("doc_ref","anime_list/work-$n");put("poster_uri","https://images.example/work-$n.jpg");put("story","Offline plot $n")
+        }
+        val host=RuntimeHost(context,engine,"VANTARA offline compatibility test",sourceTransport={scope,_->
+            assertEquals(setOf("https://animewitcher.com","https://d8lh9i7zl7-dsn.algolia.net","https://firestore.googleapis.com"),scope.allowedOrigins())
+            object:AndroidRuntimeClient.HostHttpTransport {
+                override fun exchange(caller:AndroidRuntimeClient.Scope,r:RuntimeHttpAccess.Request):RuntimeHttpAccess.Response {
+                    val url=java.net.URI(r.url());seen.add(url.host)
+                    val response=when(url.host) {
+                        "d8lh9i7zl7-dsn.algolia.net"->{
+                            assertEquals("POST",r.method())
+                            val params=RuntimeJson.parse(r.body()!!.decodeToString()).jsonObject.text("params")
+                            val selected=Regex("work-([1-5])").find(params)?.groupValues?.get(1)?.toInt()
+                            buildJsonObject { put("hits",JsonArray((selected?.let { listOf(it) } ?: (1..5).toList()).map(::item))) }
+                        }
+                        "firestore.googleapis.com"->{
+                            val n=Regex("anime_list/work-([1-5])/").find(url.path)?.groupValues?.get(1)?.toInt()
+                            when {
+                                url.path.endsWith("/episodes_summery/summery")->fields(buildJsonObject { put("episodes",arrayField(buildJsonObject { put("doc_id",scalar("ep-$n"));put("name",scalar("الحلقة $n"));put("number",buildJsonObject { put("integerValue",n.toString()) }) })) })
+                                url.path.endsWith("/servers2/all_servers")->fields(buildJsonObject { put("servers",arrayField(buildJsonObject { put("name",scalar("MF"));put("quality",scalar("1080p"));put("link",scalar("https://media.fixture.example/work-$n.mp4")) })) })
+                                url.path.contains("/Settings/servers/servers/")->fields(buildJsonObject {})
+                                else->error("Unexpected offline Firestore request: ${url.path}")
+                            }
+                        }
+                        else->error("Unexpected offline origin: ${url.host}")
+                    }
+                    return RuntimeHttpAccess.Response(r.url(),200,mapOf("Content-Type" to listOf("application/json")),response.toString().toByteArray())
+                }
+            }
+        })
+        val archive=File.createTempFile("witcher-app-",".cs3",context.cacheDir)
+        try {
+            host.setProfile("witcher-offline-"+UUID.randomUUID())
+            instrumentation.context.assets.open("Animewitcher.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
+            val pin=instrumentation.context.assets.open("Animewitcher.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
+            val metadata=buildJsonObject { put("internalName","Animewitcher");put("version",3);put("repoName","Offline fixture repository");put("repoUrl","https://repo.example/witcher");put("content","anime");put("enabled",true) }
+            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/witcher","Animewitcher"),metadata)
+            assertTrue("Registration emitted source traffic",seen.isEmpty())
+            val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            val adapter=engine.adapter(id)!!
+            val works=adapter.page(Listing.POPULAR,1).items
+            assertEquals(5,works.size);assertEquals(5,works.map { it.url }.distinct().size)
+            for(n in 1..5) {
+                val work=works.single { it.title=="VANTARA Offline Work $n" }
+                assertTrue(adapter.page(Listing.SEARCH,1,"work-$n").items.any { it.title==work.title })
+                assertEquals("Offline plot $n",adapter.details(work).description)
+                val episode=adapter.episodes(work).single();assertEquals(n.toFloat(),episode.number)
+                assertEquals("work-$n|ep-$n",episode.url)
+                assertEquals("https://media.fixture.example/work-$n.mp4",adapter.candidates(episode).single().url)
+            }
+            assertEquals(setOf("d8lh9i7zl7-dsn.algolia.net","firestore.googleapis.com"),seen)
+        }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
+    }
+    @Test fun riftPublisherRestrictionPreventsSourceTrafficAfterActualInstallation()=runBlocking {
+        val instrumentation=InstrumentationRegistry.getInstrumentation();val context=instrumentation.targetContext
+        ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context);val calls=AtomicInteger()
+        val host=RuntimeHost(context,engine,"VANTARA offline restriction test",sourceTransport={_,_->calls.incrementAndGet();error("Restricted source transport must not be created")})
+        val archive=File.createTempFile("rift-app-",".cs3",context.cacheDir)
+        try {
+            host.setProfile("rift-offline-"+UUID.randomUUID())
+            instrumentation.context.assets.open("AnimeRift.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
+            val pin=instrumentation.context.assets.open("AnimeRift.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
+            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/rift","AnimeRift"),buildJsonObject { put("internalName","AnimeRift");put("content","anime");put("enabled",true) })
+            val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            try { engine.adapter(id)!!.page(Listing.POPULAR,1);fail("Restricted source emitted traffic") }
+            catch(expected:IllegalStateException){assertEquals("SOURCE_NETWORK_REVIEW_REQUIRED",expected.message)}
+            assertEquals(0,calls.get())
+        }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
+    }
     @Test fun browserVerificationProfilesKeepAccountCookiesSeparateAndReusable() {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val context=instrumentation.targetContext
