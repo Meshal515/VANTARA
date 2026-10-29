@@ -1582,33 +1582,8 @@ export function createAnime(deps) {
     text.title = names.join('، ');
   }
 
-  // مصدر يطلب تحقق إنسان من Cloudflare: شريحة صغيرة «تحقّق» لعشر ثوانٍ ثم تختفي،
-  // مرة لكل مصدر في الجلسة. لا شيء يظهر من تلقاء نفسه بعدها: التحقق متاح أيضًا
-  // من «المصادر» في الإعدادات متى شئت.
-  const askedVerify = new Set();
-  engine.onNeedsHuman((id) => {
-    if (askedVerify.has(id)) return;
-    askedVerify.add(id);
-    showVerifyPill(id);
-  });
-  function showVerifyPill(id) {
-    const pill = el('div', 'an-verify');
-    pill.setAttribute('role', 'status');
-    pill.append(el('span', 'an-verify-text', `${sourceName(id)} يطلب تحقق`));
-    let timer = 0;
-    const close = () => {
-      clearTimeout(timer);
-      pill.classList.remove('in');
-      setTimeout(() => pill.remove(), 250);
-    };
-    pill.append(button('an-verify-go', 'تحقّق', () => {
-      close();
-      void verifySource(id);
-    }));
-    (deps.root ?? document.body).append(pill);
-    requestAnimationFrame(() => pill.classList.add('in'));
-    timer = setTimeout(close, 10_000);
-  }
+  // Background needsHuman events remain diagnostic state. Verification is
+  // managed explicitly by the Add-ons queue; this view must not append an overlay.
   /** يفتح صفحة التحقق، وبعد نجاحه يعيد البحث عن الأنمي المفتوح ليضم المصدر. */
   async function verifySource(id) {
     toast(`نفتح تحقق ${sourceName(id)}…`);
