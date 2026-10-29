@@ -95,7 +95,7 @@ class RuntimeAppIntegrationTest {
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
     }
     @androidx.annotation.OptIn(markerClass=[androidx.media3.common.util.UnstableApi::class])
-    @Test fun witcherLiveEpisodeRunsInTheExistingPlayerWithSustainedClockAndBothSeeks()=runBlocking {
+    @Test fun witcherLiveEpisodeRunsInTheExistingPlayerWithSustainedClockAndBothSeeks():Unit=runBlocking {
         val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
         ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context)
         val host=RuntimeHost(context,engine,"VANTARA live playback validation")
