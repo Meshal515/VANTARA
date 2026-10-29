@@ -40,9 +40,7 @@ final class RuntimeProtocol {
     }
     /** Explicit new transport; the legacy text contract retains its64KiB bound. */
     static void jsonResult(Parcel reply,String result)throws IOException {
-        if(result==null||result.length()>MAX_RESPONSE)throw new RuntimeFailure("PAYLOAD_LIMIT");
-        byte[] bytes=result.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        if(bytes.length>MAX_RESPONSE)throw new RuntimeFailure("PAYLOAD_LIMIT");
+        byte[] bytes=RuntimeUtf8.encodeBounded(result,MAX_RESPONSE);
         Parcel payload=Parcel.obtain();
         try{writeBytes(payload,bytes,MAX_RESPONSE);reply.writeNoException();reply.writeString("OK");reply.appendFrom(payload,0,payload.dataSize());}
         finally{payload.recycle();}

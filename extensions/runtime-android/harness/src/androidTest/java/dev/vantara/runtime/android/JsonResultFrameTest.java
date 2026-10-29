@@ -15,7 +15,7 @@ public class JsonResultFrameTest {
     }
     @Test public void byteLimitStillAppliesToMultibyteText()throws Exception{
         char[] large=new char[1500000];Arrays.fill(large,'中');Parcel frame=Parcel.obtain();
-        try{try{RuntimeProtocol.jsonResult(frame,new String(large));fail("UTF8 byte budget bypassed");}catch(RuntimeFailure expected){assertEquals("PAYLOAD_LIMIT",expected.code);}}
+        try{try{RuntimeProtocol.jsonResult(frame,new String(large));fail("UTF8 byte budget bypassed");}catch(RuntimeFailure expected){assertEquals("PAYLOAD_LIMIT",expected.code);assertEquals("Rejected result wrote a partial success frame",0,frame.dataSize());}}
         finally{frame.recycle();}
     }
     @Test public void resultFrameCannotSmuggleTrailingPayload()throws Exception{
