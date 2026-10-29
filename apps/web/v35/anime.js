@@ -28,6 +28,8 @@ import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
+import { currentLayout, detectDebugChannel, mountSwitcher, placePieces } from './work-hero-lab.js';
+import { deviceInfo } from '../lib/updater.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
@@ -126,6 +128,9 @@ export function createAnime(deps) {
     art: null,
     libraryTab: 'history',
   };
+
+  // معاينة تكوينات صفحة العمل لنسخة Debug وحدها (القناة يبلّغها التطبيق الأصلي)
+  void detectDebugChannel(deviceInfo);
 
   // ───────────── عناصر صغيرة ─────────────
 
@@ -537,6 +542,7 @@ export function createAnime(deps) {
       state.art = { ...art, id: m.id };
       paintLogo(state.detail);
       patchStills(state.detail);
+      paintSide(state.detail);
       // وصل بعد المهلة والغلاف ظاهر: يُرقّى للخلفية الدعائية (لا يمسّ صورة عريضة)
       paintHero(state.detail);
       return art;
@@ -639,6 +645,13 @@ export function createAnime(deps) {
     head.append(mark, meta, genres);
     hero.append(head);
 
+    // قطع التكوينات (work-hero-lab.js): الغلاف، وموعد الحلقة القادمة، ولقطة الحلقة، ومنصة بين البنر والجسم
+    const stage = el('div', 'aw-stage');
+    const cover = el('div', 'aw-cover');
+    const side = el('div', 'aw-side');
+    const still = el('button', 'aw-still');
+    still.type = 'button';
+
     const body = el('div', 'aw-body');
     const cta = el('div', 'aw-cta');
     const actions = el('div', 'aw-actions');
@@ -651,17 +664,28 @@ export function createAnime(deps) {
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
     body.append(cta, actions, sources, about, insightHost, eps, more);
-    wrap.append(bar, hero, body);
+    wrap.append(bar, hero, stage, body);
 
-    state.view = { id: m.id, token, page, bar, barTitle, hero, bg, head, mark, meta, genres, cta, actions, sources, about, insightHost, eps, more, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, hero, bg, head, mark, meta, genres, stage, cover, side, still, cta, actions, sources, about, insightHost, eps, more, body, layout: '0', heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
+    placePieces(state.view, currentLayout());
+    paintCover(m);
     paintMeta(m);
     paintCta(m);
     paintActions(m);
     paintSources(m);
     paintAbout(m, { pending: !m.description });
     eps.append(...Array.from({ length: 3 }, () => el('div', 'an-skel an-skel-ep')));
+    paintSide(m);
     page.replaceChildren(wrap);
     paintLogo(m);
+    mountSwitcher(state.view, (id) => {
+      const v = state.view;
+      if (!v) return;
+      placePieces(v, id);
+      paintMeta(state.detail ?? m);
+      paintSide(state.detail ?? m);
+      window.scrollTo?.({ top: 0, behavior: 'instant' });
+    });
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
     state.view.unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
   }
@@ -676,6 +700,8 @@ export function createAnime(deps) {
     v.barTitle.querySelector('.aw-bar-text').textContent = m.title;
     paintMeta(m);
     paintCta(m);
+    paintCover(m);
+    paintSide(m);
     paintAbout(m);
     renderEpisodes(v.eps, m);
     paintBelow(m);
@@ -787,6 +813,52 @@ export function createAnime(deps) {
     v.mark.prepend(logo);
   }
 
+  /** الغلاف قطعة مستقلة (لا يُدمج مع البنر). بلا غلاف: يختفي ويعيد التكوين ترتيب نفسه. */
+  function paintCover(m) {
+    const v = state.view;
+    const src = m?.poster ?? m?.posterSmall ?? null;
+    if (!v || v.id !== m?.id) return;
+    v.wrap.classList.toggle('no-cover', !src);
+    if (!src || v.cover.dataset.src === src) return;
+    v.cover.dataset.src = src;
+    v.cover.replaceChildren(image(src, 'an-img', { eager: true, position: 'center 20%' }));
+  }
+
+  /**
+   * ما يخص المشاهدة غير الزر: موعد الحلقة القادمة إن كان العمل يُعرض. لا يُخترع شيء
+   * لملء المكان؛ بلا موعد تبقى فارغة وتختفي. وفي «الحلقة أولًا» لقطة الحلقة هي الزر.
+   */
+  function paintSide(m) {
+    const v = state.view;
+    if (!v || v.id !== m?.id) return;
+    const next = m.next?.at && m.next.at > Date.now() ? m.next : null;
+    v.side.replaceChildren();
+    if (next) {
+      const line = el('span', 'aw-next');
+      line.append(el('b', null, `الحلقة ${next.episode ?? ''}`.trim()), el('span', null, meccaTime(next.at)));
+      v.side.append(line);
+    }
+    v.side.hidden = !next;
+    if (v.layout !== '5') return;
+    const point = resumePoint(m);
+    const shot = episodeStill(m, point.episode, artOf(m));
+    const title = episodeTitleOf(m, point.episode, { mal: state.malTitles, art: artOf(m) });
+    v.still.replaceChildren();
+    v.still.onclick = () => playEpisode(m, point.episode);
+    v.still.classList.toggle('aw-still--cover', !shot?.still);
+    if (shot?.src) v.still.append(image(shot.src, 'an-img', { eager: true, position: shot.still ? 'center' : 'center 22%' }));
+    const cap = el('span', 'aw-still-cap');
+    cap.append(el('span', 'aw-still-play', ''), el('b', null, `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`));
+    cap.querySelector('.aw-still-play').innerHTML = glyph('play', { size: 22, filled: true });
+    if (title && typeof title === 'string') {
+      const t = el('span', 'aw-still-title', title);
+      t.dir = 'auto';
+      cap.append(t);
+    }
+    v.still.append(cap);
+    v.stage.querySelector('.aw-ident-row')?.after(v.still);
+  }
+
   /** سطر واحد هادئ: النوع · الموسم · ★ · الاستوديو · الحالة. وتحته الأنواع روابطَ. */
   function paintMeta(m) {
     const v = state.view;
@@ -805,7 +877,9 @@ export function createAnime(deps) {
       s.innerHTML = `${glyph('star', { size: 12, filled: true })}<b>${m.score.toFixed(1)}</b>`;
       parts.push(s);
     }
-    add(m.studio);
+    // في التكوينات الجديدة: عدد الحلقات بدل الاستوديو (الاستوديو في «معلومات» أسفل الصفحة)
+    if (v.layout && v.layout !== '0') add(m.episodes ? `${m.episodes} حلقة` : null);
+    else add(m.studio);
     if (m.status) add(STATUS_AR[m.status], `aw-status aw-status--${String(m.status).toLowerCase()}`);
     // الفواصل عناصر بين الأجزاء لا ‎::before‎: جزء لاتيني (الاستوديو، التقييم) لا يقلب موضعها
     v.meta.replaceChildren(...parts.flatMap((part, i) => (i ? [el('i', 'aw-sep', '·'), part] : [part])));

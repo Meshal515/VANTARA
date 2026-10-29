@@ -2511,3 +2511,523 @@
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   }
 }
+
+/* ═══════════ تكوينات أعلى صفحة العمل (معاينة Debug: work-hero-lab.js) ═══════════
+ * القطع نفسها في كل تكوين؛ هنا مكانها وأحجامها وعمقها فقط. «0» لا يتأثر بشيء هنا.
+ * العمق لكل تكوين: --d-bg-y (سرعة الخلفية من التمرير) و--d-bg-s (تكبيرها)، و--d-cover-y
+ * و--d-cover-r و--d-cover-s (صعود الغلاف وميله وحجمه)، و--d-head-r (ميل الشعار داخل البنر).
+ */
+.v35 .aw-stage,
+.v35 .aw-still {
+  display: none;
+}
+.v35 .aw:where([data-layout]:not([data-layout='0'])) {
+  --d-bg-y: 0.5;
+  --d-bg-s: 0.12;
+  --d-cover-y: -40;
+  --d-cover-r: 10deg;
+  --d-cover-s: 0.94;
+  --cover-w: clamp(124px, 36vw, 210px);
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  padding-inline: var(--gutter);
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-cover {
+  width: var(--cover-w);
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 30%, var(--surface-2));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 22px 44px -12px rgba(0, 0, 0, 0.7),
+    0 6px 14px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 100%;
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-cover .an-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .aw.no-cover .aw-cover {
+  display: none;
+}
+/* الغلاف ظاهر منفصلًا: لو لم تتوفر خلفية عريضة لا يتكرر نفسه حادًّا خلفه، بل جوًّا ضبابيًا */
+.v35 .aw[data-layout]:not([data-layout='0']):not(.no-cover) .aw-bg-img--poster {
+  filter: blur(26px) saturate(1.25) brightness(0.72);
+  transform: scale(1.25);
+}
+/* الشعار والاسم في خانة واحدة تتراكب: لا قفزة حين يحل الشعار محل الاسم */
+.v35 .aw[data-layout]:not([data-layout='0']) .an-mark {
+  display: grid;
+  height: auto;
+  min-height: 0;
+  align-items: end;
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .an-mark > * {
+  grid-area: 1 / 1;
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .an-mark-logo {
+  position: static;
+  max-height: var(--logo-h, 72px);
+  max-width: min(100%, 320px);
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.55));
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .an-mark-text {
+  font-size: var(--title-size, 24px);
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage :is(.aw-meta, .aw-genre, .aw-genres .aw-sep) {
+  color: var(--text-2);
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage .aw-score b,
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage .an-mark-text {
+  color: var(--text-1);
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage .aw-meta {
+  column-gap: 14px;
+  row-gap: 2px;
+}
+/* فاصل النقطة يبقى أول السطر أو آخره حين يلتف؛ المسافة وحدها تفصل هنا */
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage :is(.aw-meta, .aw-genres) > .aw-sep {
+  display: none;
+}
+.v35 .aw[data-layout]:not([data-layout='0']) .aw-stage .aw-genres {
+  column-gap: 12px;
+}
+.v35 .aw-side[hidden] {
+  display: none !important;
+}
+.v35 .aw-next {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.v35 .aw-next b {
+  font-weight: 650;
+  color: #86e3b6;
+}
+
+/* 1 — المركزي: الغلاف على حافة البنر في الوسط، اللوقو تحته، ثم سطر واحد ثم الزر */
+.v35 .aw[data-layout='1'] .aw-hero {
+  height: min(clamp(230px, 64vw, 440px), 54svh);
+}
+.v35 .aw[data-layout='1'] .aw-stage {
+  margin-top: calc(var(--cover-w) * -0.92);
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  --logo-h: 76px;
+}
+.v35 .aw[data-layout='1'] .an-mark {
+  justify-items: center;
+  margin-top: 6px;
+}
+.v35 .aw[data-layout='1'] .an-mark-text {
+  text-align: center;
+}
+.v35 .aw[data-layout='1'] :is(.aw-meta, .aw-genres) {
+  justify-content: center;
+}
+.v35 .aw[data-layout='1'] .aw-body {
+  padding-top: 16px;
+}
+.v35 .aw.no-cover[data-layout='1'] .aw-stage {
+  margin-top: -64px;
+}
+
+/* 2 — المتوازن: هوية العمل يمين الغلاف، وقرار المشاهدة يساره */
+.v35 .aw[data-layout='2'] {
+  --cover-w: clamp(108px, 28vw, 200px);
+}
+.v35 .aw[data-layout='2'] .aw-hero {
+  height: min(clamp(220px, 60vw, 420px), 52svh);
+}
+.v35 .aw[data-layout='2'] .aw-stage {
+  margin-top: calc(var(--cover-w) * -0.78);
+  grid-template-columns: minmax(0, 1fr) var(--cover-w) minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+  --logo-h: 54px;
+  --title-size: 17px;
+}
+.v35 .aw[data-layout='2'] .aw-col {
+  display: grid;
+  gap: 8px;
+  align-content: end;
+  min-width: 0;
+}
+.v35 .aw[data-layout='2'] .aw-col--ident .aw-meta {
+  font-size: 11.5px;
+  row-gap: 2px;
+}
+.v35 .aw[data-layout='2'] .aw-col--ident .aw-genres {
+  display: none;
+}
+.v35 .aw[data-layout='2'] .aw-col--watch .aw-play {
+  height: 44px;
+  gap: 5px;
+  padding-inline: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  border-radius: 12px;
+}
+.v35 .aw[data-layout='2'] .aw-col--watch .aw-play .icon {
+  width: 16px;
+  height: 16px;
+}
+.v35 .aw[data-layout='2'] .aw-col--watch .aw-progress {
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.v35 .aw.no-cover[data-layout='2'] .aw-stage {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: -56px;
+}
+.v35 .aw[data-layout='2'] .aw-body {
+  padding-top: 12px;
+}
+
+/* 3 — الجانبي: الغلاف يمين البنر، وكل ما يعرّف بالعمل بجانبه */
+.v35 .aw[data-layout='3'] {
+  --cover-w: clamp(112px, 32vw, 196px);
+  --d-cover-r: 0deg;
+  --d-cover-y: -64;
+  --d-cover-s: 0.9;
+}
+.v35 .aw[data-layout='3'] .aw-hero {
+  height: min(clamp(200px, 54vw, 400px), 48svh);
+}
+.v35 .aw[data-layout='3'] .aw-stage {
+  margin-top: calc(var(--cover-w) * -0.62);
+  grid-template-columns: var(--cover-w) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+  --logo-h: 62px;
+  --title-size: 21px;
+}
+.v35 .aw[data-layout='3'] .aw-col {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.v35 .aw[data-layout='3'] .an-mark-logo {
+  object-position: right bottom;
+}
+.v35 .aw.no-cover[data-layout='3'] .aw-stage {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: -72px;
+}
+.v35 .aw[data-layout='3'] .aw-body {
+  padding-top: 16px;
+}
+
+/* 4 — السينمائي: البنر هو المشهد، اللوقو والزر في منطقته الهادئة، والغلاف صغير مع التفاصيل */
+.v35 .aw[data-layout='4'] {
+  --cover-w: 78px;
+  --d-bg-y: 0.62;
+  --d-bg-s: 0.18;
+  --d-cover-y: -10;
+  --d-cover-r: 0deg;
+  --d-cover-s: 1;
+}
+.v35 .aw[data-layout='4'] .aw-hero {
+  height: min(clamp(400px, 120vw, 660px), 78svh);
+}
+.v35 .aw[data-layout='4'] .aw-shade {
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.38) 0,
+    transparent 18%,
+    transparent 46%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 72%,
+    var(--bg) 100%
+  );
+}
+.v35 .aw[data-layout='4'] .aw-head {
+  justify-items: center;
+  gap: 18px;
+  bottom: 20px;
+  --logo-h: 104px;
+  --title-size: 30px;
+}
+.v35 .aw[data-layout='4'] .aw-head .an-mark {
+  justify-items: center;
+}
+.v35 .aw[data-layout='4'] .aw-head .an-mark-text {
+  text-align: center;
+}
+.v35 .aw[data-layout='4'] .aw-head .aw-cta {
+  justify-items: center;
+  width: 100%;
+}
+.v35 .aw[data-layout='4'] .aw-head .aw-play {
+  width: min(100%, 300px);
+  border-radius: 999px;
+  box-shadow: 0 12px 30px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.v35 .aw[data-layout='4'] .aw-head .aw-progress {
+  width: min(100%, 300px);
+  color: rgba(255, 255, 255, 0.72);
+}
+.v35 .aw[data-layout='4'] .aw-stage {
+  grid-template-columns: var(--cover-w) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding-top: 4px;
+}
+.v35 .aw[data-layout='4'] .aw-cover {
+  border-radius: 10px;
+}
+.v35 .aw[data-layout='4'] .aw-col {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.v35 .aw[data-layout='4'] .aw-body {
+  padding-top: 8px;
+}
+
+/* 5 — الحلقة أولًا: الهوية سطر مضغوط، ولقطة الحلقة التي ستشاهدها هي الزر */
+.v35 .aw[data-layout='5'] {
+  --cover-w: 84px;
+  --d-bg-y: 0.35;
+  --d-bg-s: 0.08;
+  --d-cover-y: -18;
+  --d-cover-r: 6deg;
+  --d-cover-s: 0.96;
+}
+.v35 .aw[data-layout='5'] .aw-hero {
+  height: min(clamp(170px, 46vw, 340px), 40svh);
+}
+.v35 .aw[data-layout='5'] .aw-stage {
+  margin-top: -78px;
+  gap: 14px;
+  --logo-h: 50px;
+  --title-size: 20px;
+}
+.v35 .aw[data-layout='5'] .aw-ident-row {
+  display: grid;
+  grid-template-columns: var(--cover-w) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+.v35 .aw.no-cover[data-layout='5'] .aw-ident-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+.v35 .aw[data-layout='5'] .aw-ident-row .aw-col {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.v35 .aw[data-layout='5'] .aw-ident-row .aw-genres {
+  display: none;
+}
+.v35 .aw[data-layout='5'] .aw-still {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 46svh;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 28%, var(--surface-2));
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7);
+}
+.v35 .aw[data-layout='5'] .aw-still .an-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .aw[data-layout='5'] .aw-still--cover .an-img {
+  filter: blur(14px) brightness(0.7);
+  transform: scale(1.15);
+}
+.v35 .aw[data-layout='5'] .aw-still::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.1) 55%, transparent);
+}
+.v35 .aw[data-layout='5'] .aw-still-cap {
+  position: absolute;
+  inset-inline: 14px;
+  bottom: 12px;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+}
+.v35 .aw[data-layout='5'] .aw-still-play {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 8px 20px -6px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.v35 .aw[data-layout='5'] .aw-still-cap b {
+  font-size: 16px;
+  font-weight: 750;
+}
+.v35 .aw[data-layout='5'] .aw-still-title {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .aw[data-layout='5'] .aw-still:active {
+  transform: scale(0.985);
+}
+/* الزر نفسه في اللقطة؛ يبقى شريط التقدم وحده تحتها */
+.v35 .aw[data-layout='5'] .aw-stage .aw-play {
+  display: none;
+}
+.v35 .aw[data-layout='5'] .aw-body {
+  padding-top: 6px;
+}
+
+/* الشاشات العريضة: لا يُضغط ترتيب الجوال، بل تتسع الأعمدة ويكبر الغلاف */
+@media (min-width: 900px) {
+  .v35 .aw:where([data-layout]:not([data-layout='0'])) {
+    --cover-w: 220px;
+  }
+  .v35 .aw[data-layout='1'] .aw-stage {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+  .v35 .aw[data-layout='1'] .aw-body,
+  .v35 .aw[data-layout='3'] .aw-body {
+    max-width: 960px;
+    margin-inline: auto;
+  }
+  .v35 .aw[data-layout='2'] .aw-stage {
+    max-width: 1100px;
+    margin-inline: auto;
+    gap: 36px;
+    --logo-h: 96px;
+  }
+  .v35 .aw[data-layout='2'] .aw-col--ident .aw-meta {
+    font-size: 13px;
+  }
+  .v35 .aw[data-layout='2'] .aw-col--ident .aw-genres {
+    display: flex;
+  }
+  .v35 .aw[data-layout='3'] .aw-stage {
+    max-width: 960px;
+    margin-inline: auto;
+    --logo-h: 110px;
+  }
+  .v35 .aw[data-layout='4'] {
+    --cover-w: 92px;
+  }
+  .v35 .aw[data-layout='4'] .aw-head {
+    --logo-h: 150px;
+  }
+  .v35 .aw[data-layout='4'] :is(.aw-stage, .aw-body) {
+    max-width: 960px;
+    margin-inline: auto;
+  }
+  .v35 .aw[data-layout='5'] {
+    --cover-w: 120px;
+  }
+  .v35 .aw[data-layout='5'] .aw-stage {
+    max-width: 960px;
+    margin-inline: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    align-items: end;
+    column-gap: 28px;
+  }
+  .v35 .aw[data-layout='5'] .aw-stage > :not(.aw-ident-row, .aw-still) {
+    grid-column: 1;
+  }
+  .v35 .aw[data-layout='5'] .aw-still {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+  .v35 .aw[data-layout='5'] .aw-body {
+    max-width: 960px;
+    margin-inline: auto;
+  }
+}
+
+/* العمق مع التمرير لكل تكوين: الخلفية بقيم التكوين، والغلاف يصعد ويميل للخلف */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .v35 .aw[data-layout]:not([data-layout='0']) .aw-bg {
+      animation-name: aw-bg-depth-v;
+    }
+    .v35 .aw[data-layout]:not([data-layout='0']) .aw-cover {
+      animation: aw-cover-depth linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 60svh;
+    }
+  }
+}
+@keyframes aw-bg-depth-v {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--aw-span) * var(--d-bg-y)), 0) scale(calc(1 + var(--d-bg-s))); }
+}
+@keyframes aw-cover-depth {
+  from { transform: perspective(900px) translate3d(0, 0, 0) rotateX(0deg) scale(1); }
+  to { transform: perspective(900px) translate3d(0, calc(var(--d-cover-y) * 1px), 0) rotateX(var(--d-cover-r)) scale(var(--d-cover-s)); }
+}
+
+/* شريط المقارنة (Debug) */
+.v35 .aw-lab {
+  position: fixed;
+  inset-inline: 10px;
+  bottom: calc(var(--nav-h, 64px) + var(--safe-bottom, 0px) + 10px);
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line);
+}
+.v35 .aw-lab-why {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.v35 .aw-lab-row {
+  display: flex;
+  gap: 6px;
+}
+.v35 .aw-lab button {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.v35 .aw-lab button[aria-selected='true'] {
+  background: var(--accent);
+  color: #fff;
+}
