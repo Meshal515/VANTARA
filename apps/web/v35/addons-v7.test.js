@@ -141,6 +141,13 @@ it('preserves refresh errors after drawing and redacts source URLs', async()=>{
   expect(view.textContent).not.toContain('token=secret');view.close();
 });
 
+it('does not report a repository store the web build does not provide as a refresh failure', async()=>{
+  setup();
+  const api={list:async()=>{throw Object.assign(Error('list غير متاح في نسخة الويب'),{code:'UNSUPPORTED_ON_WEB'});},extensions:async()=>[]};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();
+  expect(view.querySelector('.v7-diagnostic').textContent).toBe('');view.close();
+});
+
 it('removes cached installed sources only after their saved repository is actually removed', async()=>{
   setup();let saved=true;
   const api={list:async()=>({repos:saved?[{url:'https://repo.example/index.json',name:'Saved Repo'}]:[]}),extensions:async()=>[{name:'Old Source',pkg:'old',installed:true}]};

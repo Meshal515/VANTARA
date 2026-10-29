@@ -192,7 +192,8 @@ export function renderV7Addons({
     return d;
   }
   function sourceMeta(a){
-    return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||""),a.version||""].filter(Boolean).join(" · ");
+    // الإصدار في التفاصيل؛ الرقم المجرد في الصف لا يعني شيئًا للمستخدم
+    return [kindName(a),a.arabic?"العربية":(a.lang||a.languages?.[0]||"")].filter(Boolean).join(" · ");
   }
   const diagnosticKey=a=>JSON.stringify([a._store?.id,a.key||a.pkg||a.id||a.domain,a.version,a.cacheEpoch]);
   function installedState(a){
@@ -525,7 +526,7 @@ export function renderV7Addons({
       if(!alive||run!==generation)return;
       const failedKinds=new Set(stores.filter((g,i)=>settled[i]?.status==="rejected").map(g=>g.id));
       repos=[...repos.filter(r=>failedKinds.has(r.group.id)),...settled.filter(x=>x.status==="fulfilled").flatMap(x=>x.value)];
-      for(const result of settled)if(result.status==="rejected")notify("تعذر تحديث المستودعات: "+fmtErr(result.reason));
+      for(const result of settled)if(result.status==="rejected"&&result.reason?.code!=="UNSUPPORTED_ON_WEB")notify("تعذر تحديث المستودعات: "+fmtErr(result.reason));
       const saved=new Set(repos.map(r=>r.key));
       for(const key of extensions.keys())if(!saved.has(key))extensions.delete(key);
       for(const key of extensionErrors.keys())if(!saved.has(key))extensionErrors.delete(key);
