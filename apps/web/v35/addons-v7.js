@@ -172,15 +172,39 @@ export function renderV7Addons({
   }catch(err){notify(fmtErr(err));}
 
 
+  /**
+   * صورة حقيقية لكل إضافة ومستودع، من مصادرها بالترتيب: ما أعلنته (شعار Stremio، أيقونة
+   * CloudStream بعد تعويض %size%، أيقونة APK المثبتة)، ثم أيقونة الحزمة في مستودعها نفسه
+   * (Mihon/Aniyomi: icon/<pkg>.png)، ثم صورة مالك المستودع على GitHub، ثم أيقونة الموقع نفسه
+   * (apple-touch-icon ثم favicon، من الموقع مباشرة بلا طرف ثالث). بلا شيء: الحرف الأول بلون القسم.
+   */
+  function logoCandidates(item,fallback,repo){
+    const out=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo];
+    const indexUrl=item._url||item.repo||item.repoUrl||(repo?item.url:null);
+    try{
+      const index=new URL(String(indexUrl||""));
+      if(item.pkg&&/\.json$/i.test(index.pathname))out.push(new URL("icon/"+item.pkg+".png",index).href);
+      const gh=index.hostname==="raw.githubusercontent.com"?index.pathname.split("/")[1]:/^([a-z0-9-]+)\.github\.io$/i.exec(index.hostname)?.[1];
+      if(repo&&gh)out.push("https://avatars.githubusercontent.com/"+gh+"?size=96");
+    }catch{}
+    const site=[item.baseUrl,item.mainUrl,item.siteUrl,item.domain&&("https://"+String(item.domain).replace(/^https?:\/\//,"")),item.transportUrl,item.manifestUrl].find(Boolean);
+    try{const host=new URL(String(site||"")).origin;if(/^https:/.test(host)&&!repo)out.push(host+"/apple-touch-icon.png",host+"/favicon.ico");}catch{}
+    return [...new Set(out.map(u=>typeof u==="string"?u.replace(/%size%/g,"128"):u).map(safeIcon).filter(Boolean))];
+  }
   function logo(item,fallback,repo=false){
     const box=el("span","v7-logo"+(repo?" is-repo":""));
-    const abbr=el("span","v7-fallback");abbr.append(ico("box"));box.append(abbr);
-    const urls=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo].map(safeIcon).filter(Boolean);
+    // بلا صورة: الحرف الأول من الاسم بلون القسم (لا رمز عام متكرر على كل صف)
+    const abbr=el("span","v7-fallback");
+    const initial=Array.from(String(item.name||fallback?.name||"").trim())[0]||"";
+    if(initial){abbr.textContent=initial.toLocaleUpperCase();abbr.classList.add("v7-initial");}else abbr.append(ico("box"));
+    box.append(abbr);
+    const urls=logoCandidates(item,fallback,repo);
     let idx=0;
     const next=()=>{
       if(!alive||idx>=urls.length)return;
       const img=el("img");img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";
-      img.onload=()=>{if(img.naturalWidth<16){img.remove();next();}else{abbr.hidden=true;}};
+      // أيقونة 16px (favicon افتراضي) لا تُقرأ في مربع 44: التالية بدلها
+      img.onload=()=>{if(img.naturalWidth<=16){img.remove();next();}else{abbr.hidden=true;}};
       img.onerror=()=>{img.remove();next();};
       img.src=urls[idx++];box.append(img);
     };next();return box;

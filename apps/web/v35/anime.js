@@ -27,7 +27,7 @@ import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
-import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
+import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
@@ -138,11 +138,13 @@ export function createAnime(deps) {
     if (!eager) img.loading = 'lazy';
     if (position) img.style.objectPosition = position;
     img.onload = () => img.classList.add('loaded');
+    // بدائل بالترتيب (أصلية 1920 ← 780 ← TVDB ← الغلاف): كل واحد مرة، لا إطار فارغ
+    const chain = (Array.isArray(fallback) ? fallback : [fallback]).filter((f) => f && f !== src);
     img.onerror = () => {
-      // لقطة مكسورة: الغلاف مكانها مرة واحدة، لا إطار فارغ
-      if (fallback && img.src !== fallback && !img.dataset.fellBack) {
+      const next = chain.shift();
+      if (next) {
         img.dataset.fellBack = '1';
-        img.src = fallback;
+        img.src = next;
         return;
       }
       img.classList.add('failed');
@@ -539,6 +541,13 @@ export function createAnime(deps) {
       paintLogo(state.detail);
       patchStills(state.detail);
       paintSide(state.detail);
+      // لقطات 1920×1080 حين تُطابَق الحلقات بالتاريخ: تحل محل لقطات TVDB الصغيرة بعد تحميلها
+      void loadHdStills(art).then((hd) => {
+        if (token !== state.detailToken || state.art?.id !== m.id || !Object.keys(hd).length) return;
+        state.art = { ...state.art, hd };
+        upgradeStills(state.detail);
+        paintSide(state.detail);
+      });
       // وصل بعد المهلة والغلاف ظاهر: يُرقّى للخلفية الدعائية (لا يمسّ صورة عريضة)
       paintHero(state.detail);
       return art;
@@ -837,7 +846,7 @@ export function createAnime(deps) {
     const title = episodeTitleOf(m, point.episode, { mal: state.malTitles, art: artOf(m) });
     v.still.replaceChildren();
     v.still.classList.toggle('aw-still--cover', !shot?.still);
-    if (shot?.src) v.still.append(image(shot.src, 'an-img', { eager: true, position: shot.still ? 'center' : 'center 22%' }));
+    if (shot?.src) v.still.append(image(shot.src, 'an-img', { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] }));
     const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
     const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
     const cap = el('span', 'aw-still-cap');
@@ -1172,7 +1181,7 @@ export function createAnime(deps) {
     const shot = episodeStill(m, n, artOf(m));
     const cover = m.poster ?? m.banner ?? null;
     const art = el('span', `an-er-art${shot.still ? '' : ' an-er-art--cover'}`);
-    art.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.still ? cover : null }));
+    art.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.still ? [...shot.fallbacks, cover] : null }));
     const chip = el('span', 'an-er-chip');
     chip.innerHTML = glyph('play', { size: 9, filled: true });
     chip.append(el('b', null, String(n)));
@@ -1467,6 +1476,24 @@ export function createAnime(deps) {
   }
 
   /** لقطات ani.zip وصلت: كل صف بغلاف العمل يأخذ لقطته بعد أن تُحمَّل (لا وميض). */
+  /** صفوف تعرض لقطة أصغر من المتاح: تُحمَّل الأعلى دقة أولًا ثم تحل محلها بلا وميض. */
+  function upgradeStills(m) {
+    if (!m) return;
+    for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) {
+      const img = row.querySelector('.an-er-art img');
+      const shot = episodeStill(m, Number(row.dataset.ep), artOf(m));
+      if (!img || !shot.still || img.src === shot.src) continue;
+      const pre = new Image();
+      pre.onload = () => {
+        if (!img.isConnected) return;
+        img.src = shot.src;
+        img.style.objectPosition = 'center';
+        row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover');
+      };
+      pre.src = shot.src;
+    }
+  }
+
   function patchStills(m) {
     if (!m) return;
     for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) {
@@ -1932,6 +1959,7 @@ export function createAnime(deps) {
         title: m.title,
         logo: art?.logo ?? null,
         backdrop: thumb ?? m.banner ?? m.poster,
+        backdropFallbacks: thumb ? shot.fallbacks : [],
         backdropFallback: m.banner ?? m.poster ?? null,
         backdropPosition: thumb || m.banner ? null : 'center 25%',
         label: `الحلقة ${n}`,

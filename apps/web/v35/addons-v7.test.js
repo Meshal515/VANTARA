@@ -298,13 +298,16 @@ it('offers verification on matching source details without confusing it with ins
   view.close();
 });
 
-it('uses a neutral SVG fallback when no authentic icon is available',async()=>{
+it('a package gets its real icon from its own repository, and only the initial when nothing loads',async()=>{
   const d=setup(),api={list:async()=>({repos:[{url:'https://repo.example/index.json',name:'Repo'}]}),
     extensions:async()=>[{name:'Missing Icon',pkg:'pkg.noicon'}]};
   const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
   browse(view);await tick();
-  expect(view.querySelector('.v7-row .v7-fallback svg')).toBeTruthy();
-  expect(view.querySelector('.v7-row .v7-fallback').textContent).toBe('');
+  const row=[...view.querySelectorAll('.v7-row')].find(r=>r.textContent.includes('Missing Icon'));
+  // أيقونة الحزمة في مستودعها (icon/<pkg>.png) تُطلب، وحتى تصل يظهر الحرف الأول لا رمز عام
+  expect(row.querySelector('.v7-logo img').getAttribute('src')).toBe('https://repo.example/icon/pkg.noicon.png');
+  expect(row.querySelector('.v7-fallback').textContent).toBe('M');
+  expect(row.querySelector('.v7-fallback svg')).toBeNull();
   view.close();
 });
 

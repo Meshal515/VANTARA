@@ -262,7 +262,8 @@ export function createServerSheet(body, o) {
   const shot = el('img', 'ss-art-img');
   shot.alt = '';
   shot.decoding = 'async';
-  const sources = [media.backdrop, media.backdropFallback].filter(Boolean);
+  // لقطة الحلقة بأعلى دقة ثم بدائلها (780 ← TVDB) ثم البانر/الغلاف
+  const sources = [...new Set([media.backdrop, ...(media.backdropFallbacks ?? []), media.backdropFallback].filter(Boolean))];
   if (sources.length) {
     let i = 0;
     shot.onload = () => shot.classList.add('loaded');
@@ -388,7 +389,8 @@ export function createServerSheet(body, o) {
   const placeActions = () => {
     if (wide?.matches) foot.append(best, ...(o.extraFoot ?? []));
     else {
-      card.append(best);
+      // تحت البطاقة لا عليها: الصورة تبقى واضحة كاملة
+      art.append(best);
       extras.append(...(o.extraFoot ?? []));
     }
     foot.hidden = !wide?.matches;

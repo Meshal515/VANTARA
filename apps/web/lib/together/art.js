@@ -44,7 +44,7 @@ function remember(key, data, now) {
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
 const inflight = new Map();
 export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0 } = {}) {
-  const key = `az3-${anilistId}`;
+  const key = `az4-${anilistId}`;
   const hit = cached(key, now);
   if (hit) return Promise.resolve(hit);
   // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
@@ -52,7 +52,7 @@ export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.
   return inflight.get(key);
 }
 async function aniZip(anilistId, fetchImpl, now, depth) {
-  const key = `az3-${anilistId}`;
+  const key = `az4-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
   // 404: عمل جديد لم يصل ani.zip بعد — يبقى له Cinemeta والسلسلة أدناه
   const d = r.ok ? await r.json() : null;
@@ -64,6 +64,9 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
     const rating = Number.parseFloat(e?.rating);
     episodes[n] = {
       image: typeof e?.image === 'string' ? e.image : null,
+      // ترقيم TVDB للحلقة (موسم/رقم): به تُطابق صورها عالية الدقة من metahub (anime-art.js)
+      season: Number.isInteger(e?.seasonNumber) ? e.seasonNumber : null,
+      number: Number.isInteger(e?.episodeNumber) ? e.episodeNumber : null,
       title,
       overview: typeof e?.overview === 'string' && e.overview.trim() ? e.overview.trim() : null,
       airDate: e?.airDate ?? e?.airdate ?? null,

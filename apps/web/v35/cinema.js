@@ -349,7 +349,9 @@ export function createCinema(deps) {
   const sharpBackground = (src, force = false) => (src && (force || bigScreen()) ? src.replace(/(metahub\.space\/background)\/(?:small|medium)\//, '$1/large/') : src);
   function image(src, cls = 'cn-img', { eager = false, fallback = null, hero = false, sharp = false } = {}) {
     src = sharpPoster(src);
-    fallback = sharpPoster(fallback);
+    // بدائل بالترتيب (مثل لقطة الحلقة: الأصلية ← 780 ← خلفية العمل): الأولى هنا، والباقي بعدها
+    const more = Array.isArray(fallback) ? fallback.slice(1).filter(Boolean) : [];
+    fallback = sharpPoster(Array.isArray(fallback) ? fallback[0] ?? null : fallback);
     // الأصل الكبير للّوحات العريضة وحدها (البانر وصفحة العمل)، لا لكل بطاقة صغيرة.
     // sharp: لوحة تقصّ الصورة وتكبّرها حتى على الجوال (البانر البديل) فتحتاج الأصل دائمًا
     const sharper = hero ? sharpBackground(src, sharp) : src;
@@ -373,6 +375,7 @@ export function createCinema(deps) {
       }
       // صورة الحلقة غير موجودة بعد: خلفية العمل بدل مربع فارغ
       if (fallback && img.src !== new URL(fallback, location.href).href) img.src = fallback;
+      else if (more.length) img.src = more.shift();
       else img.classList.add('failed');
     };
     if (first) img.src = first;
@@ -1659,7 +1662,7 @@ export function createCinema(deps) {
       row.type = 'button';
       row.disabled = Boolean(upcoming);
       const art = el('span', 'cn-ep-art');
-      art.append(image(e.thumb ?? m.background ?? m.poster, 'cn-img', { fallback: m.background ?? m.poster }));
+      art.append(image(e.thumbHd ?? e.thumb ?? m.background ?? m.poster, 'cn-img', { fallback: [e.thumbHd ? e.thumb : null, m.background ?? m.poster].filter(Boolean) }));
       if (!upcoming) {
         const playMark = el('span', 'cn-ep-play');
         playMark.innerHTML = glyph('play', { size: 14, filled: true });
@@ -1730,7 +1733,8 @@ export function createCinema(deps) {
       const media = {
         title: displayTitle(m),
         logo: m.logo ?? null,
-        backdrop: thumb ?? m.background ?? m.poster,
+        backdrop: epMeta?.thumbHd ?? thumb ?? m.background ?? m.poster,
+        backdropFallbacks: epMeta?.thumbHd && thumb ? [thumb] : [],
         backdropFallback: m.background ?? m.poster ?? null,
         code: series ? `S${two(season)}E${two(n)}` : null,
         label: series ? heading : null,

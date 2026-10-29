@@ -187,3 +187,14 @@
 .v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{background:transparent;border-radius:12px}
 .v7-addon .v7-logo img{padding:0;border-radius:10px}
 .v7-addon .v7-fallback svg{width:24px;height:24px;stroke:var(--text-4,#77727f)}
+/* الحرف الأول بلون القسم الخفيف حين لا صورة للإضافة */
+.v7-addon .v7-fallback.v7-initial{width:100%;height:100%;display:grid;place-items:center;border-radius:12px;background:var(--v7-soft);color:var(--v7-accent);font-size:18px;font-weight:750;text-transform:none}
+/* «أضف»: فعل نصي بلون القسم في طرف التبويبات، بلا كبسولة */
+.v7-addon .v7-tabs .v7-plus{height:34px;padding:0 4px;gap:5px;border-radius:0;background:none;color:var(--v7-accent);font-size:14.5px;font-weight:700}
+.v7-addon .v7-tabs .v7-plus svg{width:18px;height:18px;stroke-width:2.3}
+.v7-addon .v7-tabs .v7-plus:active{opacity:.7}
+/* كل ما بقي بنفسجيًا ثابتًا يتبع لون القسم */
+.v7-addon input::selection{background:color-mix(in srgb,var(--v7-accent) 30%,transparent)}
+.v7-addon .v7-menu button:hover,.v7-addon .v7-menu button.active{background:var(--v7-soft)}
+.v7-addon .v7-diagnostic,.v7-addon .v7-update-result{color:var(--v7-accent)}
+.v7-addon .v7-advanced summary::after{color:var(--text-3,#99949f)}

@@ -1301,11 +1301,7 @@
     opacity: calc(1 - var(--ss-p) * 0.9);
   }
   .v35 .ss-card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.08) 58%, transparent);
-    pointer-events: none;
+    display: none;
   }
   .v35 .ss-art-img,
   .v35 .ss-art-img.loaded {
@@ -1338,41 +1334,44 @@
     justify-items: start;
     padding-top: 16px;
   }
-  /* «شغّل الأفضل» على البطاقة: دائرة التشغيل بلا توهج، والسبب سطر صغير بجانبها */
-  .v35 .ss-card .an-pick-best,
-  .v35 .ss-card .an-pick-best.waiting,
-  .v35 .ss-card .an-pick-best:disabled {
-    position: absolute;
-    inset-inline: 14px;
-    bottom: 12px;
+  /* «شغّل الأفضل» تحت البطاقة مباشرة: دائرة التشغيل بلا توهج، وبجانبها الفعل وسببه */
+  .v35 .ss-art > .an-pick-best,
+  .v35 .ss-art > .an-pick-best.waiting,
+  .v35 .ss-art > .an-pick-best:disabled {
+    position: relative;
     z-index: 1;
+    width: calc(100% - 2 * var(--gutter));
+    max-width: 560px;
     justify-content: flex-start;
     gap: 12px;
     height: auto;
+    margin-top: 14px;
     padding: 0;
     border-radius: 0;
     background: none;
-    color: #fff;
+    color: var(--text-1);
   }
-  .v35 .ss-card .an-pick-best > .icon {
+  .v35 .ss-art > .an-pick-best > .icon {
     box-sizing: content-box;
     width: 20px;
     height: 20px;
     padding: 14px;
     border-radius: 50%;
     background: var(--accent);
-    transform: translateX(0);
+    color: #fff;
   }
-  .v35 .ss-card .an-pick-best.waiting > .icon,
-  .v35 .ss-card .an-pick-best:disabled > .icon {
-    background: rgba(255, 255, 255, 0.16);
+  .v35 .ss-art > .an-pick-best.waiting > .icon,
+  .v35 .ss-art > .an-pick-best:disabled > .icon {
+    background: var(--surface-2);
+    color: var(--text-2);
   }
-  .v35 .ss-card .an-pick-best:not(:disabled):active > .icon {
+  .v35 .ss-art > .an-pick-best:not(:disabled):active > .icon {
     background: var(--accent-press);
     transform: scale(0.94);
   }
-  .v35 .ss-card .ss-best-copy small {
-    opacity: 0.78;
+  .v35 .ss-art > .an-pick-best .ss-best-copy small {
+    color: var(--text-3);
+    opacity: 1;
   }
   /* المصادر بلا عنوان ولا خطوط: المرشّحات ثم الصفوف مباشرة */
   .v35 .ss-tools {
