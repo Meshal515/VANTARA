@@ -89,6 +89,11 @@ try {
   // a live screen so we cannot remove the root while app.js is importing.
   await waitFor("document.querySelector('#root .gate button,#root .v35,#root .vpin')", 'mounted APK account gate, configuration screen, or Home');
   proof.startup = await evaluate(`({gate:!!document.querySelector('.gate'),home:!!document.querySelector('.v35'),pin:!!document.querySelector('.vpin')})`);
+  if(process.env.VANTARA_RUNTIME_DEBUG==='true' && phase!=='baseline') {
+    proof.optionalRuntime = await evaluate('Capacitor.Plugins.VantaraRuntime.capabilities()');
+    if(proof.optionalRuntime?.cloudstream!==true || proof.optionalRuntime?.platform!=='android')
+      throw new Error('Optional runtime did not initialize through the actual MainActivity/Capacitor bootstrap');
+  }
   // A sentinel in both web storage systems and the real native identity must
   // survive a package replacement and then a complete process restart.
   proof.retention = await evaluate(`(async()=>{

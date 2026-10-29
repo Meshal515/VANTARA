@@ -45,14 +45,17 @@ class RuntimeHost(
     private val slots = Semaphore(2)
     private val workers = ConcurrentHashMap<AndroidRuntimeClient,AndroidRuntimeClient.Scope>()
     private var epoch = 0L
+    @Volatile private var closed=false
+    private val packageEpochs=HashMap<String,Long>()
     private data class Owner(val id: String, val epoch: Long, val store: RuntimePackageStore)
     @Volatile private var owner = Owner("local",0,RuntimePackageStore(File(directory,"packages").toPath(),"local"))
     private val indexes = ConcurrentHashMap<String,Pair<Long,JsonArray>>()
-    private data class Retry(val owner: Owner,val installed: RuntimePackageStore.Installed,val source: JsonObject,val id: String,val operation: String,val input: JsonObject,val url: String,val userAgent: String,val scope: AndroidRuntimeClient.Scope)
+    private data class Retry(val owner: Owner,val generation: Long,val installed: RuntimePackageStore.Installed,val source: JsonObject,val id: String,val operation: String,val input: JsonObject,val url: String,val userAgent: String,val scope: AndroidRuntimeClient.Scope)
     private val pending = ConcurrentHashMap<String,Retry>()
     private val activeVerifications = ConcurrentHashMap<String,Retry>()
 
     fun setProfile(id: String) = synchronized(lock) {
+        check(!closed) { "PROFILE_CHANGED" }
         require(id.isNotBlank() && id.length <= 200) { "PROFILE_REQUIRED" }
         if (owner.id != id) {
             workers.keys.forEach { it.close() }; workers.clear(); epoch++
@@ -63,7 +66,10 @@ class RuntimeHost(
         }
         refresh(owner)
     }
-    private fun checkOwner(captured: Owner) { check(owner === captured) { "PROFILE_CHANGED" } }
+    private fun checkOwner(captured: Owner) { check(!closed && owner === captured) { "PROFILE_CHANGED" } }
+    private fun checkPackage(o: Owner,pkg: String,generation: Long) {
+        checkOwner(o);check((packageEpochs[pkg] ?: 0L)==generation) { "PACKAGE_CHANGED" }
+    }
     private fun repositoryFile(o: Owner) = AtomicFile(File(directory,"repositories/${digest(o.id)}.json"))
     private fun repositories(o: Owner): JsonArray {
         val f = repositoryFile(o)
@@ -151,7 +157,7 @@ class RuntimeHost(
         val o=owner;val inventory=o.store.inventory()
         val unreadable=inventory.unreadable().map { buildJsonObject { put("pkg",it.packageId());put("error",it.code()) } }.toMutableList()
         val installed=inventory.installed().mapNotNull {
-            try { installedRow(it) } catch (_: Exception) { unreadable.add(buildJsonObject { put("pkg",it.packageId());put("error","PACKAGE_METADATA_UNREADABLE") });null }
+            try { installedRow(it,o.id) } catch (_: Exception) { unreadable.add(buildJsonObject { put("pkg",it.packageId());put("error","PACKAGE_METADATA_UNREADABLE") });null }
         }
         return buildJsonObject {
             put("repos",repositories(o))
@@ -159,12 +165,12 @@ class RuntimeHost(
             put("unreadable",JsonArray(unreadable))
         }
     }
-    private fun installedRow(installed: RuntimePackageStore.Installed): JsonObject {
+    private fun installedRow(installed: RuntimePackageStore.Installed,account: String): JsonObject {
         val metadata=RuntimeJson.parse(installed.metadata()).jsonObject
         return JsonObject(metadata + mapOf("pkg" to JsonPrimitive(installed.packageId()),"version" to JsonPrimitive(installed.version()),
             "installed" to JsonPrimitive(true),"protocol" to JsonPrimitive("cloudstream"),"anime" to JsonPrimitive(true),
             "repo" to JsonPrimitive(metadata.text("repoUrl")),"repositoryName" to JsonPrimitive(metadata.text("repoName")),
-            "sourceIds" to JsonArray(metadata["registration"]?.jsonObject?.get("sources")?.jsonArray.orEmpty().map { source -> JsonPrimitive(sourceId(installed.packageId(),source.jsonObject.text("name"))) })))
+            "sourceIds" to JsonArray(metadata["registration"]?.jsonObject?.get("sources")?.jsonArray.orEmpty().map { source -> JsonPrimitive(sourceId(installed.packageId(),source.jsonObject.text("name"),account)) })))
     }
     suspend fun install(repo: String,pkg: String,content: String): JsonObject = withContext(Dispatchers.IO) {
         val o=owner
@@ -183,18 +189,17 @@ class RuntimeHost(
     suspend fun installFile(file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = installFile(owner,file,hash,pkg,metadata)
     private suspend fun installFile(o: Owner,file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = slots.withPermit {
         require(pkg.matches(Regex("cs3_[0-9a-f]{32}"))) { "INVALID_PACKAGE_ID" }
+        val generation=synchronized(lock) { checkOwner(o);packageEpochs[pkg] ?: 0L }
         o.store.stage(file,hash).use { candidate ->
             // Registration has no network permission. A plugin's load() cannot probe a source site.
-            val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,"registration",o.id,setOf("https://registration.invalid"))
-            val registration=worker(scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
+            val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,"registration",o.id,setOf("https://registration.example"))
+            val registration=worker(o,generation,scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
                 AndroidRuntimeClient.HostTransport { _,_ -> throw IOException("INITIALIZATION_NETWORK_DENIED") }) { client ->
                 RuntimeJson.parse(client.invokeJson("capabilities","{}",3000).await()).jsonObject
             }
-            val sources=registration["sources"]?.jsonArray ?: error("NO_REGISTERED_SOURCES")
-            require(sources.size in 1..32) { "SOURCE_COUNT_LIMIT" }
-            sources.forEach { source -> val s=source.jsonObject;require(s.text("name").length in 1..160);endpoint(s.text("mainUrl")) }
+            val sources=RuntimeRegistration.validate(registration,pkg)
             val installed=synchronized(lock) {
-                checkOwner(o)
+                checkPackage(o,pkg,generation)
                 val previous=o.store.current(pkg)?.let { RuntimeJson.parse(it.metadata()).jsonObject }
                 val stored=JsonObject(metadata+mapOf("registration" to registration,"enabled" to (previous?.get("enabled") ?: metadata["enabled"] ?: JsonPrimitive(true))))
                 val retained=o.store.inventory().installed().filter { it.packageId()!=pkg }
@@ -202,7 +207,7 @@ class RuntimeHost(
                 require(retained.size<128 && retainedCount+sources.size<=128) { "RUNTIME_SOURCE_LIMIT" }
                 candidate.activate(pkg,stored.toString()).also { stopPackage(pkg);refresh(o) }
             }
-            installedRow(installed)
+            installedRow(installed,o.id)
         }
     }
     fun enable(pkg: String,enabled: Boolean) = synchronized(lock) {
@@ -211,7 +216,14 @@ class RuntimeHost(
         o.store.updateMetadata(pkg,JsonObject(data+mapOf("enabled" to JsonPrimitive(enabled))).toString()); if(!enabled)stopPackage(pkg);refresh(o)
     }
     fun uninstall(pkg: String) = synchronized(lock) { val o=owner;o.store.uninstall(pkg);stopPackage(pkg);refresh(o) }
+    suspend fun seasons(anime: SourceAnime): List<SourceAnime> {
+        val o=owner;checkOwner(o)
+        require(anime.sourceId.startsWith("addon|cs3|cs3_") && engine.runtimeSource(anime.sourceId)!=null) { "SOURCE_NOT_INSTALLED" }
+        val adapter=engine.adapter(anime.sourceId) ?: error("SOURCE_DISABLED")
+        val result=adapter.seasons(anime);checkOwner(o);return result
+    }
     private fun stopPackage(pkg: String) {
+        packageEpochs[pkg]=(packageEpochs[pkg] ?: 0L)+1L
         workers.filterValues { it.packageId()==pkg }.keys.forEach { it.close();workers.remove(it) }
         pending.entries.removeAll { it.value.installed.packageId()==pkg }
         activeVerifications.entries.removeAll { it.value.installed.packageId()==pkg }
@@ -224,21 +236,23 @@ class RuntimeHost(
                 val metadata=RuntimeJson.parse(installed.metadata()).jsonObject
                 val enabled=metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false
                 val content=metadata.text("content").takeIf { it in setOf("anime","cinema") } ?: "anime"
-                for (raw in metadata.getValue("registration").jsonObject.getValue("sources").jsonArray) {
-                    val source=raw.jsonObject;val id=sourceId(installed.packageId(),source.text("name"));val origin=endpoint(source.text("mainUrl"))
+                val packageBindings=mutableListOf<RuntimeSourceBinding>()
+                for (raw in RuntimeRegistration.validate(metadata.getValue("registration").jsonObject,installed.packageId())) {
+                    val source=raw.jsonObject;val id=sourceId(installed.packageId(),source.text("name"),o.id);val origin=endpoint(source.text("mainUrl"))
                     val name=source.text("name")
                     val restricted=metadata.text("description").contains("VPN",true) || metadata.text("internalName").equals("AnimeRift",true)
                     val entry=SourceEntry(id,name,source.text("lang").ifBlank { "und" },enabled=enabled,content=content,domains=Domains(origin.toString()),
                         disabledReason=if(restricted) "يتطلب هذا المصدر مراجعة اتصال آمن وفق تحذير ناشره؛ لم تُرسل إليه طلبات." else null)
                     val adapter=RuntimeSourceAdapter(id,name) { operation,input -> invoke(o,installed,source,id,operation,input) }
-                    bindings.add(RuntimeSourceBinding(entry,adapter,installed.packageId(),installed.version().toString(),metadata.text("repoName"),metadata.text("repoUrl"),metadata.text("iconUrl").ifBlank { null }))
+                    packageBindings.add(RuntimeSourceBinding(entry,adapter,installed.packageId(),installed.version().toString(),metadata.text("repoName"),metadata.text("repoUrl"),metadata.text("iconUrl").ifBlank { null }))
                 }
+                require(bindings.size+packageBindings.size<=128) { "RUNTIME_SOURCE_LIMIT" };bindings.addAll(packageBindings)
             } catch (_: Exception) { android.util.Log.w("VantaraRuntime","PACKAGE_METADATA_UNREADABLE:${installed.packageId()}") }
         }
         engine.setRuntimeSources(bindings)
     }
     private suspend fun invoke(o: Owner,installed: RuntimePackageStore.Installed,source: JsonObject,id: String,operation: String,input: JsonObject): JsonObject = slots.withPermit {
-        checkOwner(o)
+        val generation=synchronized(lock) { checkOwner(o);packageEpochs[installed.packageId()] ?: 0L }
         val current=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
         check(current.packageHash()==installed.packageHash()) { "PACKAGE_CHANGED" }
         val metadata=RuntimeJson.parse(current.metadata()).jsonObject
@@ -248,6 +262,7 @@ class RuntimeHost(
         val bound=sourceTransport(scope,broker)
         val transport=object: AndroidRuntimeClient.HostHttpTransport {
             override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
+                synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
                 val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER);headers.putAll(request.headers())
                 headers.putIfAbsent("User-Agent",listOf(userAgent))
                 return try { bound.exchange(caller,RuntimeHttpAccess.Request(request.url(),request.method(),headers,request.body(),request.followRedirects())) }
@@ -255,8 +270,8 @@ class RuntimeHost(
                     if(failure.code=="VERIFICATION_REQUIRED") {
                         val actualUserAgent=headers["User-Agent"]?.firstOrNull() ?: userAgent
                         synchronized(lock) {
-                            checkOwner(o)
-                            pending[id]=Retry(o,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
+                            checkPackage(o,installed.packageId(),generation)
+                            pending[id]=Retry(o,generation,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
                             VerificationCoordinator.require(endpoint(request.url()),actualUserAgent,sourceName=source.text("name"))
                         }
                     }
@@ -267,22 +282,26 @@ class RuntimeHost(
         }
         val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
         try {
-            val result=worker(scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),15000).await()) }
-            checkOwner(o)
+            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),15000).await()) }
+            synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
             // Search's published ABI returns a list; all other operations return objects.
             if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
         } finally { transport.close() }
     }
-    private suspend fun <T> worker(scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
-        val client=AndroidRuntimeClient(app,scope,transport);workers[client]=scope
+    private suspend fun <T> worker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
+        val client=synchronized(lock) {
+            checkPackage(o,scope.packageId(),generation)
+            AndroidRuntimeClient(app,scope,transport).also { workers[it]=scope }
+        }
         try { client.loadCloudStream(dex,hash,entry).await();return run(client) }
         finally { workers.remove(client);client.close() }
     }
     fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { endpoint(it.url).host }.distinct()
     fun beginVerification(host: String): VerificationPending = synchronized(lock) {
         val retry=pending.values.firstOrNull { it.owner===owner && endpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
+        checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
         val original=VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
         require(original.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
         val item=VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")
@@ -291,7 +310,7 @@ class RuntimeHost(
     suspend fun completeVerification(item: VerificationPending,clearance: String): JsonObject {
         val retry=activeVerifications.remove(item.token) ?: error("VERIFICATION_EXPIRED")
         synchronized(lock) {
-            checkOwner(retry.owner)
+            checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
             require(VerificationCoordinator.pending().any { it.host==item.host && it.token==item.token && it.state=="active" }) { "VERIFICATION_EXPIRED" }
             require(VerificationPolicy.clearance("cf_clearance=$clearance")==clearance) { "INVALID_CLEARANCE" }
             val url=endpoint(retry.url)
@@ -308,12 +327,12 @@ class RuntimeHost(
         pending.remove(retry.id,retry)
         return buildJsonObject { put("ok",true);put("host",item.host);put("state","verified");put("replayedOperation",retry.operation);put("result",response) }
     }
-    fun close() { workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear() }
+    fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear() }
     companion object {
         fun digest(value: String)=digest(value.toByteArray())
         fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         fun packageId(repository: String,internalName: String)="cs3_"+digest(repository+"\u0000"+internalName).take(32)
-        fun sourceId(pkg: String,name: String)="addon|cs3|$pkg|"+digest(name).take(24)
+        fun sourceId(pkg: String,name: String,account: String="local")="addon|cs3|$pkg|"+digest(name).take(24)+"|u"+digest(account).take(24)
     }
 }
 

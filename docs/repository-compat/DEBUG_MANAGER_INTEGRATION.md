@@ -103,3 +103,43 @@ and preview artifacts. CloudStream is the bounded original v1 Android profile,
 not all upstream APIs/extractors/resource/dependency profiles. AnimeRift source
 traffic stays refused; unsupported dependencies remain explicit failures. No claim
 that parsing a .cs3 repository makes Android DEX executable on PWA/Windows.
+
+## Review follow-up — revocation, registration, seasons and actual WebView gate
+
+The e325a0ea actual-app device run reached the real app and failed before provider
+execution: `registration.invalid` is correctly refused by RuntimeProtocol's
+reserved-host policy. Use the admitted reserved `registration.example` origin
+while keeping the registration transport categorically network-denied. Do not
+weaken the origin policy or call the original failure a source-site outage.
+Evidence: Actions40770634449, artifact12853036343, actual instrumentation XML.
+
+Concrete review findings addressed in the candidate:
+- Put worker admission and insertion under the same lifecycle lock as revocation;
+  check account/package generations at transport ingress and result publication.
+  Closing a host revokes future workers too. Device acceptance now deliberately
+  pauses before worker registration, switches account, then requires ZERO HTTP
+  from the late invocation. Duplicate SDK source names/origin mismatches are
+  validated before registry activation; malformed package records stay isolated.
+- The manager's previous contract had no season picker. Add optional-family season
+  enumeration through its own bridge, use the existing sheet UI, keep the actual
+  provider URL intact, and preserve selected-season identity when restoring a work.
+- Scope new-family source IDs to the stable account as well as package/provider.
+  A reproduced JVM failure showed EpisodeResolver returning a cached list AFTER
+  the runtime adapter was revoked. The added guard/adapter-generation check and
+  transient new-family cache revocation prevent that. Legacy cache behavior and
+  all persistent user data remain unchanged.
+- Avoid showing the same CloudStream package twice as a managed install and a
+  canonical runtime source. The canonical registry entry remains available.
+
+Local follow-up verification: actual app/test APK assembly;535 app cases with
+533 passed and the same two pre-existing live matrices skipped;1839 web cases
+passed;54 repository-safety cases plus the optional fingerprint case passed.
+Duplicate identity rejection, revoked-cache access, missing season routing and
+package-count regressions were observed failing before their respective fixes.
+
+The actual-app workflow additionally launches MainActivity, measures the new
+Capacitor plugin from the REAL WebView, runs the inherited30 Home/Addons cycles,
+and force-stops/restarts the candidate process. All three phases use the SAME
+candidate APK: this is deliberately NOT a signed APK-upgrade claim. Reports and
+screenshots are retained. Human CAPTCHA and five-work playback acceptance are
+still outstanding; no Stable merge or publication is authorized by this gate.

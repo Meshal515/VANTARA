@@ -7,9 +7,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RuntimeSourceAdapterTest {
+    @Test fun revokedRuntimeSourceCannotReturnPreviouslyCachedEpisodes()=runBlocking {
+        val dir=kotlin.io.path.createTempDirectory("runtime-episodes-").toFile()
+        try {
+            var active: AnimeAdapter?=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"data":"private-episode-token","episode":1}]}""") }
+            val resolver=com.vantara.anime.episodes.EpisodeResolver({ active },com.vantara.anime.health.HealthStore(java.io.File(dir,"health.json")))
+            val copy=com.vantara.anime.episodes.EpisodeResolver.Copy(id,work)
+            assertEquals(1,resolver.episodes(copy).size);active=null
+            assertTrue("Removed/disabled runtime adapter leaked its previous cached episodes",resolver.episodes(copy).isEmpty())
+        }finally{dir.deleteRecursively()}
+    }
+    @Test fun duplicateRegisteredSourceNamesAreRejectedBeforeActivation() {
+        val validator=runCatching { Class.forName("com.vantara.runtime.RuntimeRegistration") }.getOrNull()
+        assertNotNull("Registration must validate identities before writing an installed record",validator)
+        val method=validator!!.getMethod("validate",JsonObject::class.java,String::class.java)
+        val duplicate=objectOf("""{"sources":[{"name":"Repeated","mainUrl":"https://source.example"},{"name":"Repeated","mainUrl":"https://source.example"}]}""")
+        try { method.invoke(null,duplicate,"cs3_0123456789abcdef0123456789abcdef");fail("Ambiguous source names admitted") }
+        catch(expected:java.lang.reflect.InvocationTargetException){assertEquals("DUPLICATE_SOURCE_ID",expected.targetException.message)}
+    }
     private val id="addon|cs3|cs3_0123456789abcdef0123456789abcdef|provider"
     private val work=SourceAnime(id,"https://source.example/work","العمل")
     private fun objectOf(value: String)=RuntimeJson.parse(value).jsonObject
+    @Test fun selectedSeasonDetailsDoNotRequestSeasonSelectionAgain()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"item":{"name":"Work","url":"https://source.example/work","episodes":{"Subbed":[{"data":"one","season":1},{"data":"two","season":2}]}}}""") }
+        assertFalse(adapter.details(work.copy(requestedSeason=2,seasonNumber=2.0)).hasSeasons)
+    }
     @Test fun unknownEpisodeNumberIsNeverReplacedWithItsListPosition()=runBlocking {
         val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"data":"opaque-A","name":"مقدمة"},{"data":"opaque-B","name":"الحلقة 12"}]}""") }
         val episodes=adapter.episodes(work)
@@ -42,6 +64,8 @@ class RuntimeSourceAdapterTest {
         assertEquals(first,RuntimeHost.packageId("https://repo.example/repo.json","Provider"))
         assertNotEquals(first,RuntimeHost.packageId("https://other.example/repo.json","Provider"))
         assertNotEquals(RuntimeHost.sourceId(first,"One"),RuntimeHost.sourceId(first,"Two"))
+        assertEquals(RuntimeHost.sourceId(first,"One","account-a"),RuntimeHost.sourceId(first,"One","account-a"))
+        assertNotEquals(RuntimeHost.sourceId(first,"One","account-a"),RuntimeHost.sourceId(first,"One","account-b"))
     }
     @Test fun excessiveJsonNestingIsRejectedBeforeRecursiveDecoder() {
         try{RuntimeJson.parse("[".repeat(33)+"0"+"]".repeat(33));fail("Accepted excessive nesting")}

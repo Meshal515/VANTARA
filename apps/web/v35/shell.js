@@ -3783,15 +3783,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('utilityTitle').textContent = addon.name;
     showPage('utility');
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async (item) => {
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async function openSelectedWork(item) {
       try {
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);
         if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');
-        const copy = { ...item, url: item.url ?? item.id, type: item.type };
+        let copy = { ...item, url: item.url ?? item.id, type: item.type };
+        if(sourceId.startsWith('addon|cs3|') && !copy._nativeDetailsLoaded && nativeAdapter?.series){
+          const details=await nativeAdapter.series(copy);if(run!==addonViewGeneration)return;
+          copy={...copy,...details.work,_nativeDetailsLoaded:true};
+        }
+        if(sourceId.startsWith('addon|cs3|') && copy.hasSeasons && copy.requestedSeason==null){
+          if(!nativeAdapter?.seasons)throw new Error('اختيار مواسم هذا المصدر غير متاح في نسخة التطبيق الحالية.');
+          const seasons=await nativeAdapter.seasons(copy);if(run!==addonViewGeneration)return;
+          if(!seasons.length)throw new Error('لم يُرجع المصدر مواسم قابلة للفتح.');
+          openSheet(body=>{
+            body.append(el('h3',null,'اختر الموسم'));
+            for(const season of seasons)body.append(sheetItem('layers',season.title,()=>{
+              closeSheet();if(run===addonViewGeneration)void openSelectedWork({...copy,...season,_nativeDetailsLoaded:true});
+            }));
+          });return;
+        }
         const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
         if(run!==addonViewGeneration)return;
-        const work = sourceWorkModel(item, { addon, episodes });
+        const work = sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes });
         if (work._work) { root.dataset.section = 'manga'; buildDrawer(); await openWork(work); }
         else if (addon.contentTypes.includes('anime')) { root.dataset.section = 'anime'; buildDrawer(); await anime.openAnime(work); }
         else { root.dataset.section = 'cinema'; buildDrawer(); await cinema.openWork(work); }

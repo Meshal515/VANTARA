@@ -426,7 +426,9 @@ export function renderV7Addons({
   }
   function draw(){
     if(!alive)return;
-    const allRemote=registry.list?.()||[];
+    const managedCloudStream=new Set((installedMetadata.get('cloudstream')||[]).map(item=>item.pkg));
+    const allRemote=(registry.list?.()||[]).filter(item=>
+      !String(item.sourceId||'').startsWith('addon|cs3|') || !managedCloudStream.has(item.pkg));
     const nativeByPackage=new Map();
     for(const x of extensions.values())for(const ext of x.items)nativeByPackage.set(x.store.id+":"+ext.pkg,nativeRecord(ext,x.store,x.url));
     for(const store of stores)for(const item of installedMetadata.get(store.id)||[]){

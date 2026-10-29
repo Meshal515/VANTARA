@@ -125,6 +125,7 @@ class AnimeEngine(context: Context) {
         require(list.size <= 128 && list.all { it.entry.id.startsWith("addon|cs3|") && it.adapter.id == it.entry.id })
         require(list.map { it.entry.id }.distinct().size == list.size)
         runtimeSources = list.associateBy { it.entry.id }
+        resolver.revokeRuntimeEpisodes()
         apply()
     }
     fun runtimeSource(id: String): RuntimeSourceBinding? = runtimeSources[id]

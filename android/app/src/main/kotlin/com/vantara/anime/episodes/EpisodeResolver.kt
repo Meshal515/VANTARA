@@ -32,13 +32,17 @@ class EpisodeResolver(
 ) {
     data class Copy(val sourceId: String, val anime: SourceAnime)
 
-    private data class Cached(val at: Long, val episodes: List<SourceEpisode>)
+    private data class Cached(val at: Long, val episodes: List<SourceEpisode>, val runtimeAdapter: AnimeAdapter? = null)
     private val episodeCache = ConcurrentHashMap<String, Cached>()
+    /** Revokes only transient entries of the optional new family, never user storage or legacy source caches. */
+    fun revokeRuntimeEpisodes() { episodeCache.keys.removeAll { it.startsWith("addon|cs3|") } }
 
     suspend fun episodes(copy: Copy): List<SourceEpisode> {
+        val runtime=copy.sourceId.startsWith("addon|cs3|")
+        val runtimeAdapter=if(runtime)adapterOf(copy.sourceId) ?: return emptyList() else null
         val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}"
-        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS }?.let { return it.episodes }
-        val adapter = adapterOf(copy.sourceId) ?: return emptyList()
+        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS && (!runtime || it.runtimeAdapter===runtimeAdapter) }?.let { return it.episodes }
+        val adapter = runtimeAdapter ?: adapterOf(copy.sourceId) ?: return emptyList()
         val season = copy.anime.requestedSeason
         val selected = if (season != null && season > 0 && copy.anime.hasSeasons) {
             adapter.seasons(copy.anime).firstOrNull {
@@ -47,9 +51,10 @@ class EpisodeResolver(
             } ?: return emptyList()
         } else copy.anime
         val list = adapter.episodes(selected)
+        if(runtime && adapterOf(copy.sourceId)!==adapter)return emptyList()
         // قائمة فارغة قد تكون محلّلًا تغيّر موقعه أو تحديًا عابرًا، لا «عمل بلا حلقات»:
         // لا تُخبّأ فتحجب المحاولة التالية عشر دقائق
-        if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list)
+        if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list, runtimeAdapter)
         return list
     }
 

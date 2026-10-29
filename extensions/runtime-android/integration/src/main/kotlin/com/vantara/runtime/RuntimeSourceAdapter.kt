@@ -23,7 +23,8 @@ class RuntimeSourceAdapter(
             item.text("plot").ifBlank { previous?.description },
             (item["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: previous?.genres.orEmpty(),
             when(item.text("showStatus")) { "Ongoing" -> 1;"Completed" -> 2;else -> previous?.status ?: 0 },
-            hasSeasons=seasons.size>1,seasonNumber=previous?.seasonNumber ?: -1.0,requestedSeason=previous?.requestedSeason)
+            hasSeasons=seasons.size>1 && previous?.requestedSeason==null && (previous?.seasonNumber ?: -1.0)<0,
+            seasonNumber=previous?.seasonNumber ?: -1.0,requestedSeason=previous?.requestedSeason)
     }
     override suspend fun page(listing: Listing,page: Int,query: String): SourcePage {
         require(page>0)

@@ -79,6 +79,7 @@ jobs:
             android/app/build/reports/androidTests/
             android/app/build/test-results/
             runtime-app-logcat.txt
+            runtime-app-webview/
             release-runtime-classpath.txt
           if-no-files-found: error
           retention-days: 14

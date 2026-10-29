@@ -15,6 +15,14 @@ const setup = () => {
 const registry = (items=[]) => ({runtimeName:'apk', list:()=>items});
 const installedTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المثبتة'));
 const repositoryTab = view => [...view.querySelectorAll('.v7-tab')].find(x=>x.textContent.includes('المستودعات'));
+it('counts a managed CloudStream package once while keeping its canonical source in the runtime registry',async()=>{
+ const d=setup(),id='addon|cs3|cs3_same|source';
+ const canonical={key:`core|${id}`,sourceId:id,pkg:'cs3_same',name:'Source',bundled:true,user:true,contentTypes:['anime'],capabilities:['home']};
+ const api={list:async()=>({repos:[],installed:[{pkg:'cs3_same',name:'Package',protocol:'cloudstream',installed:true,anime:true,sourceIds:[id]}]}),extensions:async()=>[]};
+ const view=renderV7Addons({registry:registry([canonical]),cloudstreamRepositories:api});d.body.append(view);await tick();installedTab(view).click();
+ expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');
+ expect(view.querySelectorAll('.v7-body .v7-row')).toHaveLength(1);view.close();
+});
 
 it('uses the measured CloudStream store for real manager actions and keeps installed sources after unlinking its repository',async()=>{
  const d=setup();const installed=[{pkg:'cs3_package',name:'Published provider',version:1,installed:true,protocol:'cloudstream',anime:true,enabled:true,repo:'https://repo.example/repo.json',repositoryName:'Actual repository'}];

@@ -6,6 +6,19 @@ import { renderSourceMode } from '../v35/source-mode.js';
 
 afterEach(()=>vi.unstubAllGlobals());
 
+it('routes CloudStream seasons through its actual optional bridge and gives each selection a distinct local work identity',async()=>{
+ const id='addon|cs3|cs3_123|source',url='https://source.test/work';
+ const plugins={VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'android'}),seasons:async()=>({seasons:[{sourceId:id,url,title:'Work · 1',requestedSeason:1,hasSeasons:false},{sourceId:id,url,title:'Work · 2',requestedSeason:2,hasSeasons:false}]})},
+  AnimeEngine:{sources:async()=>({sources:[{id,pkg:'cs3_123',name:'Source',content:'anime'}]}),page:async()=>{},details:async()=>{},episodes:async()=>({episodes:[]})}};
+ const result=await createNativeCatalog({pkg:'cs3_123',protocol:'cloudstream',_store:{kind:'anime'}},{plugins});
+ expect(typeof result.adapter.seasons).toBe('function');
+ const seasons=await result.adapter.seasons({sourceId:id,url,title:'Work',hasSeasons:true});
+ expect(seasons.map(x=>x.url)).toEqual([url,url]);
+ const works=seasons.map(item=>sourceWorkModel(item,{addon:result.addon}));
+ expect(works[0].id).not.toBe(works[1].id);
+ expect(works[1]._sourceCopy).toMatchObject({url,requestedSeason:2});
+});
+
 it('admits CloudStream only after Android measures a real runtime and declares this installed package source',async()=>{
   const id='addon|cs3|cs3_123|provider';
   const record={pkg:'cs3_123',protocol:'cloudstream',_store:{kind:'anime'}};

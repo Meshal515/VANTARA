@@ -7,13 +7,16 @@ import com.vantara.anime.adapters.Listing
 import com.vantara.plugins.ensureEngineInjekt
 import dev.vantara.runtime.android.AndroidRuntimeClient
 import dev.vantara.runtime.api.RuntimeHttpAccess
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Actual published DEX -> optional app bridge host -> existing AnimeEngine adapters.
  * Authored offline HTTP fixtures, NOT a live-site, five-work, or real playback claim. */
@@ -41,7 +44,10 @@ class RuntimeAppIntegrationTest {
         ensureEngineInjekt(context.applicationContext as Application)
         val engine=AnimeEngine.get(context)
         val calls=AtomicInteger()
+        val blockNext=AtomicBoolean(false)
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
         val factory: (AndroidRuntimeClient.Scope,dev.vantara.runtime.http.HttpBroker)->AndroidRuntimeClient.HostHttpTransport={ _,_ ->
+            if(blockNext.compareAndSet(true,false)) { entered.countDown();check(release.await(5,TimeUnit.SECONDS)) { "TEST_FACTORY_RELEASE_TIMEOUT" } }
             object: AndroidRuntimeClient.HostHttpTransport {
                 override fun exchange(scope: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
                     calls.incrementAndGet();assertTrue(request.url().startsWith(ORIGIN+"/"))
@@ -81,7 +87,14 @@ class RuntimeAppIntegrationTest {
             next.setProfile(account)
             assertNull(engine.adapter(id));assertEquals(pkg,next.list().getValue("installed").jsonArray.single().jsonObject.text("pkg"))
             next.enable(pkg,true);assertNotNull(engine.adapter(id))
+            val selected=engine.adapter(id)!!
+            val before=calls.get();blockNext.set(true)
+            val deferred=async(Dispatchers.IO) { runCatching { selected.page(Listing.POPULAR,1) } }
+            assertTrue("Invocation did not reach the pre-worker registration boundary",entered.await(5,TimeUnit.SECONDS))
             next.setProfile(account+"-new")
+            release.countDown()
+            assertTrue(deferred.await().isFailure)
+            assertEquals("A revoked account emitted HTTP from a late worker",before,calls.get())
             assertTrue(next.list().getValue("installed").jsonArray.isEmpty());assertNull(engine.adapter(id))
             try { adapter.page(Listing.POPULAR,1);fail("Old profile adapter retained access") } catch(expected:IllegalStateException) { assertEquals("PROFILE_CHANGED",expected.message) }
             next.setProfile(account);assertNotNull(engine.adapter(id))

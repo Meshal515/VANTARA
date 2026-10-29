@@ -47,6 +47,10 @@ class RuntimePlugin : Plugin() {
     @PluginMethod fun install(call: PluginCall)=run(call) { host.install(call.getString("url") ?: error("REPOSITORY_REQUIRED"),call.getString("pkg") ?: error("PACKAGE_REQUIRED"),call.getString("content") ?: "anime") }
     @PluginMethod fun uninstall(call: PluginCall)=run(call) { host.uninstall(call.getString("pkg") ?: error("PACKAGE_REQUIRED"));buildJsonObject { put("ok",true) } }
     @PluginMethod fun enable(call: PluginCall)=run(call) { host.enable(call.getString("pkg") ?: error("PACKAGE_REQUIRED"),call.getBoolean("enabled") ?: error("ENABLED_REQUIRED"));buildJsonObject { put("ok",true) } }
+    @PluginMethod fun seasons(call: PluginCall)=run(call) {
+        val anime=Json { ignoreUnknownKeys=true }.decodeFromString(com.vantara.anime.adapters.SourceAnime.serializer(),call.getObject("anime")?.toString() ?: error("WORK_REQUIRED"))
+        buildJsonObject { put("seasons",JsonArray(host.seasons(anime).map { Json.encodeToJsonElement(com.vantara.anime.adapters.SourceAnime.serializer(),it) })) }
+    }
     @PluginMethod fun verificationPending(call: PluginCall)=run(call) { buildJsonObject { put("hosts",JsonArray(host.verificationHosts().map(::JsonPrimitive))) } }
     /** Explicit manager button only. No repository load/background path calls this method. */
     @PluginMethod fun verify(call: PluginCall) { activity.runOnUiThread {

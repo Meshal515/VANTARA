@@ -161,6 +161,15 @@ export async function createNativeCatalog(record, {
       return result.pages;
     };
   } else {
+    if(cloudstream && typeof plugins.VantaraRuntime?.seasons==='function')adapter.seasons=async(work,options={})=>{
+      const result=await nativeCall(()=>plugins.VantaraRuntime.seasons({anime:item(work)}),options.signal);
+      if(!Array.isArray(result?.seasons))throw failure('INVALID_NATIVE_RESPONSE','لم يُرجع المصدر قائمة مواسم صالحة.');
+      return result.seasons.map(season=>{
+        const value=item(season),number=value.requestedSeason;
+        if(!Number.isInteger(number)||number<0)throw failure('INVALID_NATIVE_RESPONSE','أعاد المصدر موسمًا بلا رقم صالح.');
+        return {...value,season:number};
+      });
+    };
     adapter.series = async (work, options) => {
       const result = await invoke('details', { anime: item(work) }, options);
       return { work: item(result?.anime) };
