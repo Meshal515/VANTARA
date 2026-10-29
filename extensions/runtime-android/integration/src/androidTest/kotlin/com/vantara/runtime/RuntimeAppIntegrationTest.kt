@@ -135,18 +135,27 @@ class RuntimeAppIntegrationTest {
             val start=onMain { player.currentPosition };val began=android.os.SystemClock.elapsedRealtime()
             val framesAtStart=onMain { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
             val droppedAtStart=onMain { player.videoDecoderCounters?.droppedBufferCount ?: 0 }
+            var minimumBuffer=Long.MAX_VALUE;var bufferingSamples=0
             while(android.os.SystemClock.elapsedRealtime()-began<30000) {
-                assertNull(onMain { player.playerError?.errorCodeName });Thread.sleep(200)
+                assertNull(onMain { player.playerError?.errorCodeName })
+                onMain { minimumBuffer=minOf(minimumBuffer,player.totalBufferedDuration);if(player.playbackState==androidx.media3.common.Player.STATE_BUFFERING)bufferingSamples++ }
+                Thread.sleep(200)
             }
             val advanced=onMain { player.currentPosition }-start
-            assertTrue("Video clock lagged real time: $advanced ms",advanced>=25000)
             val rendered=onMain { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }-framesAtStart
             val dropped=onMain { player.videoDecoderCounters?.droppedBufferCount ?: 0 }-droppedAtStart
+            val dimensions=onMain { "${player.videoFormat?.width}x${player.videoFormat?.height}" }
+            val speed=onMain { player.playbackParameters.speed }
+            val elapsed=android.os.SystemClock.elapsedRealtime()-began
+            android.util.Log.i("VantaraRuntime","LIVE_WITCHER_METRICS:elapsed=$elapsed;advanced=$advanced;rendered=$rendered;dropped=$dropped;dimensions=$dimensions;speed=$speed;minimumBuffer=$minimumBuffer;bufferingSamples=$bufferingSamples")
+            val diagnostic=com.vantara.anime.player.PlayerActivity::class.java.getDeclaredField("diag").apply { isAccessible=true }.get(activity) as com.vantara.anime.player.PlaybackDiagnostics
+            val facts=onMain { com.vantara.anime.player.PlaybackDiagnostics.PlayerFacts(player.playbackState,player.currentPosition,player.totalBufferedDuration,player.duration,player.videoFormat?.containerMimeType,dimensions,null,player.currentTracks.groups.count { it.type==androidx.media3.common.C.TRACK_TYPE_TEXT },player.currentTracks.groups.count { it.type==androidx.media3.common.C.TRACK_TYPE_AUDIO }) }
+            android.util.Log.i("VantaraRuntime",diagnostic.report(null,facts))
+            assertTrue("Video clock lagged real time: $advanced ms",advanced>=25000)
             assertTrue("No sustained decoded video frames",rendered>=200)
             assertTrue("Excessive dropped frames: $dropped/$rendered",dropped*10<=rendered+dropped)
             val forward=onMain { player.currentPosition+60000 };onMain { player.seekTo(forward) };awaitPosition(forward+1000,forward+5000)
             val backward=(forward-30000).coerceAtLeast(0);onMain { player.seekTo(backward) };awaitPosition(backward+1000,backward+5000)
-            val dimensions=onMain { "${player.videoFormat?.width}x${player.videoFormat?.height}" }
             android.util.Log.i("VantaraRuntime","LIVE_WITCHER_PLAYER:existing Activity/transport; elapsed=30000; advanced=$advanced; rendered=$rendered; dropped=$dropped; dimensions=$dimensions; forward/backward passed")
         }finally {
             activity?.let { current->ins.runOnMainSync { current.finish() } }
