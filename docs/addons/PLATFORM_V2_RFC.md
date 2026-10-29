@@ -88,12 +88,18 @@ Manga: respect `search/home/details/chapters/pages` contracts, chapter IDs, page
 - Copyable **diagnostics pack** (private tokens redacted), built-in test explorer, source-specific screenshots and source profile — no global spam toasts on app startup.
 - `create` / `dev` / `test` / `pack` / `publish` CLI; first slice delivers `create` and working local Node preview. Deploy/publish API and no-code Studio are **not implemented**.
 
+### Built-in source extraction and rights
+
+This RFC defines the add-on platform. The **eventual extraction of every built-in anime, cinema and manga source** is specified in [the source-transition plan](../SOURCES_TRANSITION.md); do not interpret this document as an instruction to keep manga providers embedded permanently. The **16 existing stable manga sources are the last migration milestone**, with a required parity/backup/rollback gate. Their intended private distribution must not leak source code, tokens, or packages through the public VANTARA repository or public CI artifacts; do not assume that private access grants copyright redistribution rights. Until ownership and license checks are complete, keep them in their current stable form.
+
+The repo remains **one GitHub project, VANTARA**. External plugin repositories are imported as user-provided sources; this work does not require hosting a VANTARA-specific public add-on catalog. Choice of VANTARA's open-source license (including a possible AGPL-3.0 license) requires a deliberate owner decision and LICENSE file rather than assumptions in an RFC.
+
 ### Delivery milestones and release gates
 
 1. **Platform diagnostics (P0):** inventory all saved sources and formats without mutating state. Restore installer/back navigation/Cloudflare explicit interaction; zero Android crashes.
 2. **Actual adapter parity (P1):** Stremio request/response contract tests, Android remote implementation, correct image extraction, real source navigation; unique provenance and safe migrations.
 3. **Manga parity (P2):** Mihon native integration end-to-end; canonical chapters/pages + reader; Android tested. Windows/PWA use a *separate* remote runtime rather than pretend to execute APK.
-4. **CloudStream (P2):** independent clean-room JVM compatibility design; plugin classloader/extractors; sample `AnimeRift`, `AnimeWitcher`, `Witanime` as gates (when licensed and permitted). Do not copy CloudStream GPL implementation into proprietary VANTARA.
+4. **CloudStream (P2):** independent clean-room JVM compatibility design; plugin classloader/extractors; sample `AnimeRift`, `AnimeWitcher`, `Witanime` as gates (when licensed and permitted). Do not copy CloudStream GPL implementation into VANTARA without documented license compatibility and distribution obligations, regardless of VANTARA's eventual license.
 5. **Addon SDK/Studio (P3):** one-click templates, in-app builder, validation, local testing, manifests and error explorer.
 6. **Source quality (P3):** per-capability health, long-running playback seek tests, metadata fidelity, source failover, import/export/backup.
 
