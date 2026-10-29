@@ -75,10 +75,11 @@ public class BrokerHostTransportTest {
             assertEquals(200,transport.exchange(owner,get()).status());assertFalse(transport.needsVerification(ORIGIN));
         }
     }
+    /** A bare 403 reaches the provider as a response it can read, and is not a Cloudflare challenge. */
     @Test public void bareForbiddenIsNotCloudflareVerification() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(403));AndroidRuntimeClient.Scope owner=scope("account");
         try(BrokerHostTransport transport=new BrokerHostTransport(owner,broker)){
-            assertEquals("ACCESS_DENIED",failure(transport,owner,get()));assertFalse(transport.needsVerification(ORIGIN));
+            assertEquals(403,transport.exchange(owner,get()).status());assertFalse(transport.needsVerification(ORIGIN));
         }
     }
     @Test public void cookiesSurviveTransportRestartAndStayAccountScoped() throws Exception {

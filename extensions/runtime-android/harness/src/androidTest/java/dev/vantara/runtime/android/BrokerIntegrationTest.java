@@ -77,9 +77,14 @@ public class BrokerIntegrationTest {
         String first=invokeFailure();assertEquals(hostDiagnosis(),"VERIFICATION_REQUIRED",first);assertTrue(transport.needsVerification("https://fixtures.example"));assertFalse(client.isClosed());
         assertEquals("VERIFICATION_REQUIRED",invokeFailure());assertEquals(1,server.getRequestCount());
     }
+    /** A plain 403 is a response the provider reads itself; it is neither a host failure nor a challenge. */
     @Test public void plainForbiddenStaysDistinctFromHumanVerification() throws Exception {
-        server.enqueue(new MockResponse().setResponseCode(403));start();
-        String result=invokeFailure();assertEquals(hostDiagnosis(),"ACCESS_DENIED",result);assertFalse(transport.needsVerification("https://fixtures.example"));
+        server.enqueue(new MockResponse().setResponseCode(403).addHeader("X-Result","denied").setBody("x"));start();
+        final String result;
+        try{result=client.invoke("catalogue","{}",8000).get(10,TimeUnit.SECONDS);}
+        catch(ExecutionException failure){throw new AssertionError(hostDiagnosis(),failure);}
+        assertEquals("403:1:120:denied:https://fixtures.example/post",result);
+        assertNull(hostDiagnosis(),hostFailure.get());assertFalse(transport.needsVerification("https://fixtures.example"));
     }
     @Test public void defaultPublicAddressPolicyBlocksPrivateDestinationBeforeAnyConnection() throws Exception {
         broker=new HttpBroker(base,hostname->Arrays.asList(InetAddress.getByAddress(new byte[]{127,0,0,1})),new PublicAddresses(),new FileCookieVaults(cookies),Clock.systemUTC());start();
