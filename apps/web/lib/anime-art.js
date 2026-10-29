@@ -19,10 +19,12 @@ export const anilistIdOf = (id) => (/^\d+$/.test(String(id ?? '')) && Number(id)
  * 4. غلاف العمل (ثم بنره). `fallbacks` تُجرَّب واحدة بعد الأخرى إن تعذّر تحميل ما قبلها.
  * @returns {{ src: string|null, still: boolean, fallbacks: string[] }}
  */
-export function episodeStill(m, n, art = null) {
+export function episodeStill(m, n, art = null, { full = false } = {}) {
   const hd = art?.hd?.[String(n)] ?? null;
   const low = [m?.thumbs?.[n]?.thumbnail, art?.episodes?.[String(n)]?.image].filter(Boolean);
-  const chain = [hd?.src, hd?.mid, ...low].filter(Boolean);
+  // 1920 للصورة الكبيرة وحدها؛ صفوف الحلقات (عرضها ~170px) تكفيها 780، وعشرات الصور بدقة 1920
+  // كانت تؤخر ظهور الصفوف على الجوال
+  const chain = (full ? [hd?.src, hd?.mid, ...low] : [hd?.mid, ...low]).filter(Boolean);
   if (chain.length) return { src: chain[0], still: true, fallbacks: [...new Set(chain.slice(1))] };
   return { src: m?.poster ?? m?.posterSmall ?? m?.banner ?? null, still: false, fallbacks: [] };
 }

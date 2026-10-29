@@ -152,6 +152,23 @@ export function createAnime(deps) {
     if (src) img.src = src;
     return img;
   }
+  /**
+   * صورة ظاهرة تُستبدل بأخرى بلا وميض: الجديدة تُحمَّل وتُفك خارج الصفحة ثم تحل محلها في إطار
+   * واحد. تبديل src مباشرة كان يُفرغ الإطار لحظة (تختفي الصورة جزءًا من الثانية ثم ترجع).
+   */
+  function swapWhenReady(cur, src, opts = {}, onSwap = null) {
+    if (!cur || !src || cur.dataset.want === src) return;
+    cur.dataset.want = src;
+    const next = image(src, cur.className.replace(/\s*\bloaded\b/, '') || 'an-img', { ...opts, eager: true });
+    next.dataset.want = src;
+    const done = () => {
+      if (!cur.isConnected || cur.dataset.want !== src) return;
+      next.classList.add('loaded');
+      cur.replaceWith(next);
+      onSwap?.(next);
+    };
+    next.addEventListener('load', () => void (next.decode?.() ?? Promise.resolve()).then(done, done), { once: true });
+  }
   const button = (cls, html, onClick, label) => {
     const b = el('button', cls);
     b.type = 'button';
@@ -552,6 +569,11 @@ export function createAnime(deps) {
       paintHero(state.detail);
       return art;
     });
+    // خلفية ظهرت لهذا العمل من قبل: تُرسم الآن (غالبًا من كاش الصور) بلا انتظار الفن
+    if (heroMemory.get(m.id) && state.view?.id === m.id) {
+      state.view.artSettled = true;
+      paintHero(state.detail ?? m);
+    }
     // البطل لا يُرسم قبل أن يستقر ربط IMDb (أو تمضي المهلة): رسمه مبكرًا كان يثبّت
     // بانر AniList قبل وصول الخلفية الدعائية فلا تُستبدل بعده
     void Promise.race([artReady, new Promise((r) => setTimeout(r, 1200))]).then(() => {
@@ -714,12 +736,35 @@ export function createAnime(deps) {
    * الشاشة العريضة التي يناسبها شكله. تُختار مرة بعد استقرار ربط IMDb؛ لا تُستبدل إلا
    * لو كانت الغلافَ ووصل ما هو عريض. الصورة تُفكّ قبل أن تظهر ثم تتلاشى فوق لون العمل.
    */
+  /**
+   * خلفية البطل التي ظهرت فعلًا لكل عمل: الفتح التالي يرسمها فورًا من كاش الصور بدل انتظار
+   * سلسلة ani.zip ← AniList ← Cinemeta (ثوانٍ في عمل جديد بلا IMDb) قبل أن يُعرف رابطها.
+   */
+  const HERO_KEY = 'vantara.heroPick.v1';
+  const heroMemory = {
+    get(id) {
+      try { return JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}')?.[id] ?? null; } catch { return null; }
+    },
+    set(id, src) {
+      try {
+        const all = JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}') ?? {};
+        if (src) all[id] = src;
+        else delete all[id];
+        const keys = Object.keys(all);
+        for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k];
+        globalThis.localStorage?.setItem(HERO_KEY, JSON.stringify(all));
+      } catch { /* تخزين محجوب: البطل ينتظر الفن كما كان */ }
+    },
+  };
+
   function paintHero(m) {
     const v = state.view;
     if (!v || v.id !== m?.id || !v.artSettled) return;
     const imdb = artOf(m)?.imdb;
     const wide = globalThis.matchMedia?.('(min-width: 900px)').matches === true;
+    const known = heroMemory.get(m.id);
     const list = [
+      known ? { src: known, rank: -1 } : null,
       // large مباشرة (البطل يقصّ الصورة ويكبّرها على الجوال فتُخسف medium ‏1280)، صورةً واحدة
       // بلا تبديل لاحق — large في metahub قد تكون لقطة غير medium؛ medium إن تعذّرت
       /^tt\d+$/.test(imdb ?? '') ? { src: `https://images.metahub.space/background/large/${imdb}/img`, rank: 0 } : null,
@@ -733,6 +778,7 @@ export function createAnime(deps) {
     if (!pick || pick.rank >= v.heroRank) return;
     // صورة ظاهرة عريضة لا تُستبدل؛ الغلاف الطولي وحده يُرقّى
     if (v.heroShown && v.heroRank < 2) return;
+    // في الطريق صورة أفضل: الحالية تبقى حتى تحل محلها بتلاشٍ، لا فراغ بينهما
     v.heroRank = pick.rank;
     v.heroTried.add(pick.src);
     const img = new Image();
@@ -742,9 +788,12 @@ export function createAnime(deps) {
     const show = () => {
       if (state.view !== v) return;
       v.bg.append(img);
+      // نسخة مضبّبة ثابتة خلف البنر: حين ينطوي بالعمق تملأ الأطراف بألوانه هو لا بفراغ
+      v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
       v.heroShown = true;
       // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
       v.heroSrc = pick.rank < 2 ? pick.src : null;
+      if (pick.rank < 1) heroMemory.set(m.id, pick.src);
       requestAnimationFrame(() => {
         img.classList.add('in');
         // ما تحتها يُزال بعد أن تغطيه
@@ -753,6 +802,7 @@ export function createAnime(deps) {
     };
     img.onload = () => (img.decode ? img.decode().catch(() => {}).then(show) : show());
     img.onerror = () => {
+      if (pick.rank === -1) heroMemory.set(m.id, null);
       if (state.view !== v) return;
       v.heroRank = Infinity;
       if (v.heroShown) return;
@@ -818,6 +868,9 @@ export function createAnime(deps) {
     v.wrap.classList.toggle('no-cover', !src);
     if (!src || v.cover.dataset.src === src) return;
     v.cover.dataset.src = src;
+    // غلاف القائمة ظاهر ووصل الأكبر من التفاصيل: يُحمَّل ثم يحل محله، لا يختفي ويعود
+    const shown = v.cover.querySelector('.an-img.loaded');
+    if (shown) return swapWhenReady(shown, src, { position: 'center 20%' });
     v.cover.replaceChildren(image(src, 'an-img', { eager: true, position: 'center 20%' }));
   }
 
@@ -842,11 +895,24 @@ export function createAnime(deps) {
     v.still.hidden = upcoming;
     if (upcoming) return v.still.replaceChildren();
     const point = resumePoint(m);
-    const shot = episodeStill(m, point.episode, artOf(m));
+    const shot = episodeStill(m, point.episode, artOf(m), { full: true });
     const title = episodeTitleOf(m, point.episode, { mal: state.malTitles, art: artOf(m) });
+    // الصورة الظاهرة تبقى بين إعادات الرسم (وصول الفن ثم الدقة الأعلى): تُستبدل بعد تحميل البديل
+    // لا تُعاد من الصفر، فلا تختفي وتعود
+    const prev = v.still.querySelector(':scope > .an-img');
     v.still.replaceChildren();
-    v.still.classList.toggle('aw-still--cover', !shot?.still);
-    if (shot?.src) v.still.append(image(shot.src, 'an-img', { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] }));
+    if (shot?.src) {
+      const opts = { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] };
+      if (prev && !prev.classList.contains('failed')) {
+        v.still.append(prev);
+        swapWhenReady(prev, shot.src, opts, () => v.still.classList.toggle('aw-still--cover', !shot.still));
+      } else {
+        const img = image(shot.src, 'an-img', opts);
+        img.dataset.want = shot.src;
+        v.still.append(img);
+        v.still.classList.toggle('aw-still--cover', !shot.still);
+      }
+    }
     const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
     const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
     const cap = el('span', 'aw-still-cap');
@@ -1483,14 +1549,7 @@ export function createAnime(deps) {
       const img = row.querySelector('.an-er-art img');
       const shot = episodeStill(m, Number(row.dataset.ep), artOf(m));
       if (!img || !shot.still || img.src === shot.src) continue;
-      const pre = new Image();
-      pre.onload = () => {
-        if (!img.isConnected) return;
-        img.src = shot.src;
-        img.style.objectPosition = 'center';
-        row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover');
-      };
-      pre.src = shot.src;
+      swapWhenReady(img, shot.src, { position: 'center', fallback: shot.fallbacks }, () => row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover'));
     }
   }
 
@@ -1513,9 +1572,7 @@ export function createAnime(deps) {
         swap();
         continue;
       }
-      const pre = new Image();
-      pre.onload = swap;
-      pre.src = shot.src;
+      swapWhenReady(img, shot.src, { position: 'center', fallback: shot.fallbacks }, () => art.classList.remove('an-er-art--cover'));
     }
     patchTitles(m);
   }
@@ -1950,7 +2007,7 @@ export function createAnime(deps) {
     deps.openSheet((body) => {
       // رأس الورقة (server-sheet.js): لقطة الحلقة بشعار العمل، ثم تقييمها وتاريخها ومدتها ووصفها من ani.zip
       const art = state.art?.id === m.id ? state.art : null;
-      const shot = episodeStill(m, n, art);
+      const shot = episodeStill(m, n, art, { full: true });
       const thumb = shot.still ? shot.src : null;
       const epTitle = episodeTitleOf(m, n, { mal: state.malTitles, art });
       const epArt = art?.episodes?.[String(n)] ?? null;

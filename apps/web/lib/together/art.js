@@ -85,19 +85,19 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
     // اسم العمل وسنته وعلاقاته من AniList (طلب واحد)، حتى لو لم يعرفه ani.zip
     const info = await anilistInfo(anilistId, fetchImpl).catch(() => undefined);
     if (info === undefined) settled = false;
-    // جديد بلا IMDb في ani.zip: Cinemeta (مصدر Stremio) يعرفه بالاسم والسنة
-    imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
+    // جديد بلا IMDb في ani.zip: Cinemeta (مصدر Stremio) يعرفه بالاسم والسنة.
     // موسم/جزء/فيلم تكميلي («Gachiakuta Season 2»): فن السلسلة نفسها من الجزء السابق أو
-    // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم
-    if (!imdb && depth < 4 && info) {
-      for (const id of info.ups) {
-        const z = await aniZipArt(id, { fetchImpl, now, depth: depth + 1 }).catch(() => undefined);
-        if (z === undefined) settled = false;
-        if (!z?.imdb) continue;
-        imdb = z.imdb;
-        fanart ??= z.fanart ?? null;
-        break;
-      }
+    // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم.
+    // الطريقان معًا لا بالتتابع؛ نتيجة Cinemeta تُقدَّم كما كانت
+    const ups = !(depth < 4 && info) ? [] : info.ups.map((id) => aniZipArt(id, { fetchImpl, now, depth: depth + 1 }).catch(() => undefined));
+    imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
+    for (const up of imdb ? [] : ups) {
+      const z = await up;
+      if (z === undefined) settled = false;
+      if (!z?.imdb) continue;
+      imdb = z.imdb;
+      fanart ??= z.fanart ?? null;
+      break;
     }
   }
   if (!d && !imdb) return null;
@@ -142,17 +142,22 @@ const normTitle = (t) => String(t ?? '').toLowerCase().normalize('NFKD').replace
  */
 export async function imdbFromCinemeta({ names = [], year = null, movie = false } = {}, fetchImpl = globalThis.fetch) {
   const types = movie ? ['movie', 'series'] : ['series', 'movie'];
-  for (const name of names) {
-    for (const type of types) {
+  // كل البحوث معًا لا واحدًا بعد الآخر (كانت حتى أربع رحلات متتالية قبل أن يظهر بنر عمل جديد)؛
+  // الترتيب نفسه يحسم: الاسم الأول والنوع الأول أولًا
+  const tries = names.flatMap((name) => types.map((type) => ({ name, type })));
+  const found = await Promise.all(tries.map(async ({ name, type }) => {
+    try {
       const r = await fetchImpl(`https://v3-cinemeta.strem.io/catalog/${type}/top/search=${encodeURIComponent(name)}.json`);
-      if (!r?.ok) continue;
+      if (!r?.ok) return null;
       const metas = (await r.json())?.metas ?? [];
       const exact = metas.filter((m) => /^tt\d+$/.test(m?.id ?? '') && normTitle(m.name) === normTitle(name));
       const fits = year ? exact.filter((m) => Math.abs((Number.parseInt(m.releaseInfo, 10) || 0) - year) <= 1) : exact.length === 1 ? exact : [];
-      if (fits.length) return fits[0].id;
+      return fits[0]?.id ?? null;
+    } catch {
+      return null;
     }
-  }
-  return null;
+  }));
+  return found.find(Boolean) ?? null;
 }
 
 /**

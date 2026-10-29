@@ -2526,6 +2526,18 @@
 .v35 .aw-hero {
   height: min(clamp(230px, 64vw, 440px), 54svh);
 }
+/* خلف البنر: صورته نفسها مضبّبة ومشبعة بلون العمل، ثابتة لا تتحرك. حين يميل البنر للخلف
+   ويصغر تظهر الأطراف بألوانه (كأحمر Cyberpunk) بدل فراغ داكن */
+.v35 .aw-hero::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  background:
+    linear-gradient(color-mix(in srgb, var(--art) 24%, transparent), color-mix(in srgb, var(--art) 24%, transparent)),
+    var(--aw-amb, none) center 30% / cover no-repeat;
+  filter: blur(32px) saturate(1.6) brightness(0.72);
+  pointer-events: none;
+}
 .v35 .aw-stage {
   position: relative;
   z-index: 2;
@@ -2647,9 +2659,9 @@
   height: 100%;
   object-fit: cover;
 }
+/* بلا لقطة للحلقة: نفس صورة العمل التي في صفوف الحلقات، واضحة بلا ضباب */
 .v35 .aw-still--cover .an-img {
-  filter: blur(14px) brightness(0.7);
-  transform: scale(1.15);
+  object-position: center 22%;
 }
 .v35 .aw-still::after {
   content: '';

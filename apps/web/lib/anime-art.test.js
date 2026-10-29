@@ -74,8 +74,10 @@ describe('لقطات الحلقات بدقة 1920×1080', () => {
     const art = { imdb: 'tt1', episodes: { 1: { season: 1, number: 1, airDate: '2022-09-13', image: 'https://tvdb/1.jpg' } } };
     const hd = await loadHdStills(art, { fetchImpl });
     expect(hd['1']).toEqual({ src: 'https://episodes.metahub.space/tt1/1/1/original.jpg', mid: 'https://episodes.metahub.space/tt1/1/1/w780.jpg' });
-    const shot = episodeStill({}, 1, { ...art, hd });
+    const shot = episodeStill({}, 1, { ...art, hd }, { full: true });
     expect(shot).toEqual({ src: hd['1'].src, still: true, fallbacks: [hd['1'].mid, 'https://tvdb/1.jpg'] });
+    // صفوف الحلقات: 780 لا 1920
+    expect(episodeStill({}, 1, { ...art, hd })).toEqual({ src: hd['1'].mid, still: true, fallbacks: ['https://tvdb/1.jpg'] });
   });
   it('ترقيم مختلف وتاريخ مختلف: لا صورة؛ وحلقتان في اليوم نفسه بلا ترقيم مطابق: لا تخمين', async () => {
     const wrongDate = { imdb: 'tt1', episodes: { 1: { season: 1, number: 1, airDate: '2021-01-01' } } };
