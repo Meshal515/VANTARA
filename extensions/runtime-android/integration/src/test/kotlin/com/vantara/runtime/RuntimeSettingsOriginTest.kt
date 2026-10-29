@@ -13,10 +13,9 @@ class RuntimeSettingsOriginTest {
     @Test fun actualSourceSettingsRotationAdmitsOnlyTheNewExactAlgoliaApplicationOrigin() {
         assertEquals("https://tvnesh8ozy-dsn.algolia.net",learn())
         assertEquals("https://newapp1234-dsn.algolia.net",learn("NEWAPP1234"))
-        assertFalse(RuntimeNetworkPolicy.sourceOrigins(hash,"https://animewitcher.com").contains("https://tvnesh8ozy-dsn.algolia.net"))
-        val synchronized=RuntimeNetworkPolicy.sourceOrigins(hash,"https://animewitcher.com",learn())
-        assertEquals(setOf("https://animewitcher.com","https://firestore.googleapis.com","https://tvnesh8ozy-dsn.algolia.net"),synchronized)
-        assertEquals(RuntimeNetworkPolicy.sourceOrigins("0".repeat(64),"https://animewitcher.com"),RuntimeNetworkPolicy.sourceOrigins("0".repeat(64),"https://animewitcher.com",learn()))
+        // The rotated application is reachable on the public scope already; learning it changes no grant.
+        assertEquals(setOf("*"),RuntimeNetworkPolicy.sourceOrigins(hash,"https://animewitcher.com"))
+        assertEquals(setOf("*"),RuntimeNetworkPolicy.sourceOrigins(hash,"https://animewitcher.com",learn()))
     }
     @Test fun matchingDisplayNamesOrUnreviewedPackageBytesDoNotGrantAccess() { assertNull(learn(pin="0".repeat(64))) }
     @Test fun foreignOrRedirectedSettingsAreNotPermissionEvidence() {

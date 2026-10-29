@@ -36,28 +36,33 @@ suspend fun newExtractorLink(source:String,name:String,url:String,type:Extractor
     val parsed=URI(url);require(parsed.scheme=="https"||parsed.scheme=="http");require(parsed.rawUserInfo==null)
     return ExtractorLink(source,name,url,type).also{initializer(it)}
 }
-suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit) {
-    val parsed=URI(url);require(parsed.scheme=="https"||parsed.scheme=="http");require(parsed.rawUserInfo==null)
-    // A provider's extractor owns its sharing-page paths, including filenames
-    // ending in .mp4. Such a suffix alone cannot override the host's contract.
-    ExtractorRegistry.find(parsed.host)?.let { it.getUrl(url,referer,subtitleCallback,callback);return }
-    if(parsed.host.equals("pixeldrain.com",true)) {
-        val path=parsed.rawPath.orEmpty()
-        if(parsed.scheme=="https" && parsed.port in listOf(-1,443) && parsed.rawQuery==null && parsed.rawFragment==null &&
-            path.matches(Regex("/(?:u|api/file)/[A-Za-z0-9_-]{8}"))) {
-            val id=path.substringAfterLast('/')
-            callback(newExtractorLink("Pixeldrain","Pixeldrain","https://pixeldrain.com/api/file/$id",ExtractorLinkType.VIDEO){this.referer=referer.orEmpty()});return
-        }
-        throw UnsupportedExtractor(parsed.host)
+/**
+ * Resolves an embed/share page to media links, in this order: extractors the provider registered itself,
+ * VANTARA's own extractors, then direct media URLs. Like the original contract it reports `false` instead of
+ * throwing when nothing handles the host, so a provider's remaining servers still run.
+ */
+suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit):Boolean {
+    val parsed=runCatching{URI(url)}.getOrNull()?:return false
+    if(!(parsed.scheme.equals("https",true)||parsed.scheme.equals("http",true))||parsed.rawUserInfo!=null||parsed.host==null)return false
+    val host=parsed.host
+    ExtractorRegistry.find(host)?.let { it.getUrl(url,referer,subtitleCallback,callback);return true }
+    dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(host)?.let { e->
+        if(e.extract(url,referer,subtitleCallback,callback))return true
+        dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host);return false
     }
-    if(parsed.host.equals("streamtape.com",true) || parsed.host.endsWith(".streamtape.com",true))throw UnsupportedExtractor(parsed.host)
     val path=parsed.path?.lowercase().orEmpty()
-    if(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")){
+    if(!dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.isSharingPage(host)&&(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")||path.endsWith(".mkv")||path.endsWith(".webm"))){
         val type=if(path.endsWith(".m3u8"))ExtractorLinkType.M3U8 else if(path.endsWith(".mpd"))ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
-        callback(newExtractorLink(parsed.host,parsed.host,url,type){this.referer=referer.orEmpty()});return
+        callback(newExtractorLink(host,host,url,type){this.referer=referer.orEmpty()});return true
     }
-    val extractor=ExtractorRegistry.find(parsed.host)?:throw UnsupportedExtractor(parsed.host)
-    extractor.getUrl(url,referer,subtitleCallback,callback)
+    dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host)
+    return false
 }
-/** Marker for inlined provider helper receivers; no extraction success is inferred from its presence. */
-object AppUtils
+val INFER_TYPE:ExtractorLinkType=ExtractorLinkType.INFERRED
+val schemaStripRegex=Regex("""^(https:|)//(www\.|)""")
+suspend fun loadExtractor(url:String,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit)=loadExtractor(url,null,subtitleCallback,callback)
+object AppUtils {
+    fun toJson(value:Any?):String=if(value is String)value else com.lagradost.cloudstream3.mapper.writeValueAsString(value)
+    inline fun <reified T> parseJson(value:String):T=com.lagradost.cloudstream3.mapper.readValue(value,T::class.java)
+    inline fun <reified T> tryParseJson(value:String?):T?=value?.let{runCatching{parseJson<T>(it)}.getOrNull()}
+}

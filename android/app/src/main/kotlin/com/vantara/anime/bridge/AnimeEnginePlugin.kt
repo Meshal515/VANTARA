@@ -286,6 +286,7 @@ class AnimeEnginePlugin : Plugin() {
                             .put("repoUrl", installed?.repoUrl ?: runtime?.repositoryUrl)
                             .put("enabled", s.enabled && s.disabledReason == null)
                             .put("disabledReason", s.disabledReason)
+                            .put("advisory", s.advisory)
                             .put("loadError", engine.loadError(s.id))
                             .put("domain", rec?.domain ?: s.domains.current)
                             .put("catalog", engine.catalogCursor(s.id)?.let { JSONObject(json.encodeToString(com.vantara.anime.catalog.CatalogCursor.serializer(), it)) })

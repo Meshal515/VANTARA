@@ -31,12 +31,14 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
                 val type=Class.forName(entry,false,loader)
                 check(type.classLoader===loader&&Plugin::class.java.isAssignableFrom(type)){"ABI_MISMATCH"}
                 val candidate=type.getDeclaredConstructor().newInstance() as Plugin
-                candidate.load(WorkerContext(context,loader));plugin=candidate
+                val worker=WorkerContext(context,loader)
+                WorkerState.install(worker)
+                candidate.load(worker);plugin=candidate
             }
             check(result.sources.isNotEmpty()){"NO_REGISTERED_SOURCES"}
             result.extractors.forEach{ExtractorRegistry.add(it)}
             sources=result.sources
-        }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();plugin=null;throw failure}
+        }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();WorkerState.reset();plugin=null;throw failure}
     }
     override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String {
         val all=checkNotNull(sources){"PROVIDER_NOT_READY"}
@@ -56,14 +58,24 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             "details","episodes"->{
                 val url=input.path("url").asText("");require(url.isNotBlank());val detail=source.load(url)?:throw IOException("NO_DETAIL_RESULT")
                 if(operation=="details")mapOf("item" to detail)
-                else mapOf("items" to when(detail){is TvSeriesLoadResponse->detail.episodes;is AnimeLoadResponse->detail.episodes.values.flatten();else->throw UnsupportedOperationException("episodes")})
+                else mapOf("items" to when(detail){
+                    is TvSeriesLoadResponse->detail.episodes
+                    is AnimeLoadResponse->detail.episodes.values.flatten()
+                    // A movie or a live channel is one playable item: its data is what loadLinks expects.
+                    is MovieLoadResponse->listOf(Episode(detail.dataUrl,detail.name))
+                    is LiveStreamLoadResponse->listOf(Episode(detail.dataUrl,detail.name))
+                    else->throw UnsupportedOperationException("episodes")
+                })
             }
             "videoLinks"->{
-                val data=input.path("data").asText("");require(data.isNotBlank());val links=mutableListOf<ExtractorLink>()
-                // ABI callback is intentionally not connected to the existing subtitle engine.
-                source.loadLinks(data,false,{},{link->check(links.size<128){"LINK_RESULT_LIMIT"};links.add(link)})
-                if(links.isEmpty())throw IOException("NO_VIDEO_LINKS")
-                mapOf("items" to links)
+                val data=input.path("data").asText("");require(data.isNotBlank());val links=mutableListOf<ExtractorLink>();val subtitles=mutableListOf<SubtitleFile>()
+                WorkerState.takeMissingExtractors()
+                // Subtitles travel with the links; the host decides whether its subtitle engine uses them.
+                source.loadLinks(data,false,{file->if(subtitles.size<64)subtitles.add(file)},{link->check(links.size<128){"LINK_RESULT_LIMIT"};links.add(link)})
+                val missing=WorkerState.takeMissingExtractors()
+                // An empty answer still says which media hosts lacked an extractor; that is the actionable part.
+                if(links.isEmpty()&&missing.isEmpty())throw IOException("NO_VIDEO_LINKS")
+                mapOf("items" to links,"subtitles" to subtitles,"missingExtractors" to missing)
             }
             else->throw UnsupportedOperationException(operation)
         }
@@ -73,7 +85,8 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
     private class WorkerContext(base:Context,private val providerLoader:ClassLoader):ContextWrapper(base) {
         override fun getApplicationContext():Context=this
         override fun getClassLoader():ClassLoader=providerLoader
-        override fun getSharedPreferences(name:String,mode:Int):SharedPreferences=throw UnsupportedOperationException("SCOPED_STORAGE_REQUIRED")
+        // Every name resolves to the provider's own scoped store; the host's preferences are unreachable.
+        override fun getSharedPreferences(name:String,mode:Int):SharedPreferences=WorkerState.preferences
         override fun getSystemService(name:String):Any=throw UnsupportedOperationException("SYSTEM_SERVICE_UNSUPPORTED")
         override fun startActivity(intent:Intent)=throw UiCapabilityRequired()
         override fun startActivity(intent:Intent,options:Bundle?)=throw UiCapabilityRequired()

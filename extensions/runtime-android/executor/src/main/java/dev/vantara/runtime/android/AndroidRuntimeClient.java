@@ -10,7 +10,9 @@ import java.util.concurrent.atomic.*;
 
 /** A single physical worker generation. It is never restarted or reused after retirement. */
 public final class AndroidRuntimeClient implements AutoCloseable {
-    private static final Semaphore httpIngress=new Semaphore(4);
+    private static final Semaphore httpIngress=new Semaphore(8);
+    /** In-flight HTTP exchanges one worker generation may hold; providers fan out across an episode's servers. */
+    private final Semaphore workerExchanges=new Semaphore(6);
     public interface HostTransport { String request(Scope scope,String url) throws Exception; }
     public interface HostHttpTransport extends HostTransport,AutoCloseable {
         RuntimeHttpAccess.Response exchange(Scope scope,RuntimeHttpAccess.Request request) throws Exception;
@@ -25,7 +27,8 @@ public final class AndroidRuntimeClient implements AutoCloseable {
                 if(value==null || value.isEmpty() || value.length()>200) throw new IllegalArgumentException("Invalid runtime identity");
             if(allowedOrigins==null || allowedOrigins.isEmpty() || allowedOrigins.size()>32) throw new IllegalArgumentException("Invalid origin permissions");
             Set<String> origins=new HashSet<>();
-            for(String origin:allowedOrigins) origins.add(RuntimeProtocol.origin(origin));
+            if(allowedOrigins.contains(RuntimeProtocol.PUBLIC_INTERNET)) origins.add(RuntimeProtocol.PUBLIC_INTERNET);
+            else for(String origin:allowedOrigins) origins.add(RuntimeProtocol.origin(origin));
             allowedOrigins=Collections.unmodifiableSet(origins);
         }
     }
@@ -197,11 +200,12 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private void exchange(Parcel data,Parcel reply) {
         boolean admitted=false,owned=false;
         try {
-            if(!httpIngress.tryAcquire())throw new RuntimeFailure("ENGINE_BUSY");admitted=true;
-            if(!brokerBusy.compareAndSet(false,true))throw new RuntimeFailure("WORKER_BUSY");owned=true;
+            if(!httpIngress.tryAcquire(15,TimeUnit.SECONDS))throw new RuntimeFailure("ENGINE_BUSY");admitted=true;
+            if(!workerExchanges.tryAcquire())throw new RuntimeFailure("WORKER_BUSY");owned=true;
             RuntimeHttpAccess.Request request=RuntimeProtocol.readRequest(data,closed::get);
             if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
-            if(!scope.allowedOrigins().contains(RuntimeProtocol.origin(request.url())))throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
+            if(scope.allowedOrigins().contains(RuntimeProtocol.PUBLIC_INTERNET)) RuntimeProtocol.publicUrl(request.url());
+            else if(!scope.allowedOrigins().contains(RuntimeProtocol.origin(request.url())))throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
             if(!(transport instanceof HostHttpTransport))throw new RuntimeFailure("FULL_HTTP_UNSUPPORTED");
             RuntimeHttpAccess.Response response;long identity=Binder.clearCallingIdentity();
             try {response=((HostHttpTransport)transport).exchange(scope,request);}
@@ -212,7 +216,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
             finally {payload.recycle();}
         }catch(RuntimeFailure failure){RuntimeProtocol.result(reply,failure.code,null);}
         catch(Exception failure){RuntimeProtocol.result(reply,"TRANSPORT_FAILED",null);}
-        finally{if(owned)brokerBusy.set(false);if(admitted)httpIngress.release();}
+        finally{if(owned)workerExchanges.release();if(admitted)httpIngress.release();}
     }
     private void retire(String reason,boolean terminate) { retire(reason,terminate,null); }
     private void retire(String reason,boolean terminate,OperationFuture<?> cancelled) {

@@ -12,13 +12,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Original host-owned HTTP broker. No UI, player, provider code or automatic retries. */
 public final class HttpBroker {
     public static final int MAX_REQUEST_BYTES=1024*1024, MAX_RESPONSE_BYTES=4*1024*1024;
+    /**
+     * Scope origin meaning "any public HTTP(S) host". Media providers reach CDNs, APIs and video hosts the
+     * package cannot list in advance (as Mihon/Aniyomi/CloudStream allow). Isolation still holds: DNS answers
+     * must pass {@link AddressPermission} (no private/loopback/link-local), cookies stay per account and source,
+     * and the worker never sees host-app data.
+     */
+    public static final String PUBLIC_INTERNET="*";
+    /** Parallel requests one host may receive; providers fetch an episode's servers concurrently. */
+    public static final int DEFAULT_PER_HOST=6;
     public record Scope(String family,String packageId,String sourceId,String sessionId,Set<String> origins) {
         public Scope {
             for(String value:Arrays.asList(family,packageId,sourceId,sessionId))
                 if(value==null||value.isEmpty()||value.length()>200)throw new IllegalArgumentException("Invalid broker identity");
             if(origins==null||origins.isEmpty()||origins.size()>32)throw new IllegalArgumentException("Invalid broker origins");
             Set<String> normalized=new HashSet<>();
-            for(String value:origins)normalized.add(origin(checkedUrl(value)));
+            if(origins.contains(PUBLIC_INTERNET)) normalized.add(PUBLIC_INTERNET);
+            else for(String value:origins)normalized.add(origin(checkedOrigin(value)));
             origins=Collections.unmodifiableSet(normalized);
         }
     }
@@ -45,9 +55,12 @@ public final class HttpBroker {
     private final Clock clock;
     private final LinkedHashMap<String,Host> hosts=new LinkedHashMap<>();
     private final Set<Challenge> challenges=new HashSet<>();
-    private final Semaphore total=new Semaphore(4);
+    private final Semaphore total=new Semaphore(8);
+    private final int perHost;
 
-    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock) {
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock) {this(base,resolver,addresses,vaults,clock,DEFAULT_PER_HOST);}
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost) {
+        if(perHost<1||perHost>16)throw new IllegalArgumentException("Invalid per-host limit");this.perHost=perHost;
         this.vaults=Objects.requireNonNull(vaults);this.clock=Objects.requireNonNull(clock);
         Objects.requireNonNull(resolver);Objects.requireNonNull(addresses);
         Dns checked=hostname->{
@@ -68,12 +81,18 @@ public final class HttpBroker {
         client=isolated.build();
     }
     public Session open(Scope scope) {return new Session(Objects.requireNonNull(scope),Objects.requireNonNull(vaults.forScope(scope)));}
+    /** Request URLs may be plain HTTP: several video hosts still are. Origin grants stay HTTPS-only. */
     private static HttpUrl checkedUrl(String value) {
         if(value==null||value.length()>8192||value.matches("(?s).*[\\x00-\\x20\\x7f].*"))throw new IllegalArgumentException("INVALID_ENDPOINT");
         final HttpUrl parsed;
         try{parsed=HttpUrl.get(value);}catch(IllegalArgumentException e){throw new IllegalArgumentException("INVALID_ENDPOINT");}
-        if(!parsed.isHttps()||!parsed.username().isEmpty()||!parsed.password().isEmpty())throw new IllegalArgumentException("INVALID_ENDPOINT");
+        if(!parsed.username().isEmpty()||!parsed.password().isEmpty())throw new IllegalArgumentException("INVALID_ENDPOINT");
         return parsed.newBuilder().fragment(null).build();
+    }
+    private static HttpUrl checkedOrigin(String value) {
+        HttpUrl parsed=checkedUrl(value);
+        if(!parsed.isHttps())throw new IllegalArgumentException("INVALID_ENDPOINT");
+        return parsed;
     }
     public static String origin(HttpUrl url){return url.scheme()+"://"+(url.host().contains(":")?"["+url.host()+"]":url.host())+(url.port()==443?"":":"+url.port());}
     private Challenge challenge(Scope s,String origin){return new Challenge(s.family(),s.packageId(),s.sourceId(),s.sessionId(),origin);}
@@ -90,7 +109,7 @@ public final class HttpBroker {
                 }
                 state=new Host();hosts.put(name,state);
             }
-            if(state.active!=0)throw new Failure("HOST_BUSY");
+            if(state.active>=perHost)throw new Failure("HOST_BUSY");
             if(state.retryAt>clock.millis())throw new Failure("HOST_COOLDOWN",state.retryAt);
             state.active++;return state;
         }
@@ -120,7 +139,7 @@ public final class HttpBroker {
         public boolean needsVerification(String origin){synchronized(challenges){return challenges.contains(challenge(scope,origin));}}
         private void admit(HttpUrl url) throws Failure {
             if(closed.get())throw new Failure("SESSION_CLOSED");
-            if(!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
+            if(!scope.origins().contains(PUBLIC_INTERNET)&&!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
             if(needsVerification(origin(url)))throw new Failure("VERIFICATION_REQUIRED");
         }
         public Output execute(Input input) throws IOException {
@@ -132,7 +151,9 @@ public final class HttpBroker {
             if((method.equals("GET")||method.equals("HEAD"))&&body!=null)throw new Failure("INVALID_REQUEST_BODY");
             Headers headers=input.headers();
             for(String name:headers.names())if(Arrays.asList("host","connection","content-length","transfer-encoding","proxy-authorization").contains(name.toLowerCase(Locale.ROOT)))throw new Failure("REQUEST_HEADER_FORBIDDEN");
-            if(!total.tryAcquire())throw new Failure("ENGINE_BUSY");
+            // Wait for a slot like any HTTP client; a provider's parallel fan-out must not fail instantly.
+            try{if(!total.tryAcquire(15,TimeUnit.SECONDS))throw new Failure("ENGINE_BUSY");}
+            catch(InterruptedException e){Thread.currentThread().interrupt();throw new Failure("SESSION_CLOSED");}
             try {
                 for(int hop=0;hop<=5;hop++) {
                     admit(url);Host host=acquireHost(url.host());
@@ -155,12 +176,12 @@ public final class HttpBroker {
                                 throw new Failure("VERIFICATION_REQUIRED");
                             }
                             if(response.code()==429){cooldown(host,retryAfter(response));throw new Failure("RATE_LIMITED",host.retryAt);}
-                            if(response.code()==403){cooldown(host,30000);throw new Failure("ACCESS_DENIED");}
-                            if(response.code()>=500){cooldown(host,5000);throw new Failure("HTTP_SERVER_ERROR");}
+                            // A bare 403/5xx is an ordinary response: providers read the status and try their next
+                            // server. Failing here (and cooling the host) broke every fallback inside a provider.
                             String location=response.header("Location");int status=response.code();
                             if(input.followRedirects()&&location!=null&&Arrays.asList(301,302,303,307,308).contains(status)) {
                                 if(hop==5)throw new Failure("REDIRECT_LIMIT");
-                                HttpUrl next=url.resolve(location);if(next==null||!next.isHttps()||!next.username().isEmpty()||!next.password().isEmpty())throw new Failure("INVALID_REDIRECT");
+                                HttpUrl next=url.resolve(location);if(next==null||!next.username().isEmpty()||!next.password().isEmpty())throw new Failure("INVALID_REDIRECT");
                                 admit(next);
                                 Headers.Builder nextHeaders=headers.newBuilder();
                                 if(!origin(url).equals(origin(next))) {

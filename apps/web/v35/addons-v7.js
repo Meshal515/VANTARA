@@ -632,6 +632,8 @@ export function renderV7Addons({
         ? "حالة التشغيل: "+fmtErr(assessment.detail)
         : "حالة التشغيل: لم تُفحص."));
     dialog.append(el("p","v7-notice v7-evidence-detail",installedState(a).detail));
+    // تنبيه الناشر يُعرض كما هو، والمصدر يبقى قابلًا للاستعمال
+    if(typeof a.advisory==="string"&&a.advisory.trim())dialog.append(el("p","v7-notice v7-advisory",a.advisory.slice(0,300)));
     for(const [cap,h] of Object.entries(a.health||{}))if(h.reason)dialog.append(el("p","v7-notice",cap+": "+fmtErr(h.reason)));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");

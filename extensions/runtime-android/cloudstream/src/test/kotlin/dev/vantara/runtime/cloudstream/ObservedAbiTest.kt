@@ -11,8 +11,11 @@ class ObservedAbiTest {
         !type.isPrimitive->"L"+type.name.replace('.','/')+";"
         else->mapOf(Void.TYPE to "V",Boolean::class.javaPrimitiveType to "Z",Byte::class.javaPrimitiveType to "B",Char::class.javaPrimitiveType to "C",Short::class.javaPrimitiveType to "S",Int::class.javaPrimitiveType to "I",Long::class.javaPrimitiveType to "J",Float::class.javaPrimitiveType to "F",Double::class.javaPrimitiveType to "D").getValue(type)
     }
-    @Test fun everyPinnedPublicHostReferenceHasExactExecutableDescriptor() {
-        val data=mapper.readTree(javaClass.getResourceAsStream("/API_REQUIREMENTS.json")?:error("Pinned ABI observations missing"))
+    @Test fun everyPinnedPublicHostReferenceHasExactExecutableDescriptor()=assertResolves("/API_REQUIREMENTS.json")
+    /** All 43 plugins of the Arabic 3rabi repository, not only the four originally pinned packages. */
+    @Test fun everyArabicRepositoryHostReferenceHasExactExecutableDescriptor()=assertResolves("/CS3_HOST_SURFACE_ARB.json")
+    private fun assertResolves(resource:String) {
+        val data=mapper.readTree(javaClass.getResourceAsStream(resource)?:error("ABI observations missing: $resource"))
         val absent=linkedSetOf<String>()
         for(profile in data.path("profiles")) {
             for(reference in profile.path("requiredHostMethods")) {

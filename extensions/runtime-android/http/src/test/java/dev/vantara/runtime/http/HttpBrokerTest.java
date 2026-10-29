@@ -94,7 +94,10 @@ public class HttpBrokerTest {
         try(HttpBroker.Session a=broker.open(scope("A"));HttpBroker.Session b=broker.open(scope("B"))) {
             assertEquals("VERIFICATION_REQUIRED",failure(a,input(one+"/challenge")));assertTrue(a.needsVerification(one));assertFalse(b.needsVerification(one));
             assertEquals("VERIFICATION_REQUIRED",failure(a,input(one+"/no-repeat")));assertEquals(1,first.getRequestCount());
-            first.enqueue(new MockResponse().setResponseCode(403));assertEquals("ACCESS_DENIED",failure(b,input(one+"/denied")));assertFalse(b.needsVerification(one));
+            // A bare 403 reaches the provider as a response so it can try its next server; it is not a challenge.
+            first.enqueue(new MockResponse().setResponseCode(403).setBody("denied"));HttpBroker.Output denied=b.execute(input(one+"/denied"));
+            assertEquals(403,denied.status());assertEquals("denied",body(denied));assertFalse(b.needsVerification(one));
+            first.enqueue(new MockResponse().setBody("next"));assertEquals("next",body(b.execute(input(one+"/next-server"))));
         }
     }
     @Test public void redirectsCanBeReturnedWithoutFollowingAnd307PreservesPost() throws Exception {
@@ -116,7 +119,7 @@ public class HttpBrokerTest {
         broker=new HttpBroker(new OkHttpClient.Builder().sslSocketFactory(new HandshakeCertificates.Builder().addTrustedCertificate(certificate).build().sslSocketFactory(),new HandshakeCertificates.Builder().addTrustedCertificate(certificate).build().trustManager()).build(),h->{
             if(calls.getAndIncrement()==0){entered.countDown();try{release.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new UnknownHostException("interrupted");}}
             return Arrays.asList(InetAddress.getByName("127.0.0.1"));
-        },InetAddress::isLoopbackAddress,scope->new Vault(),clock);
+        },InetAddress::isLoopbackAddress,scope->new Vault(),clock,1);
         ExecutorService pool=Executors.newSingleThreadExecutor();
         try(HttpBroker.Session a=broker.open(scope("A"));HttpBroker.Session b=broker.open(scope("B"))) {
             Future<String> running=pool.submit(()->failure(a,input(one+"/blocked-dns")));
@@ -125,6 +128,26 @@ public class HttpBrokerTest {
             release.countDown();assertEquals("SESSION_CLOSED",running.get(3,TimeUnit.SECONDS));
             first.enqueue(new MockResponse().setBody("released"));assertEquals("released",body(b.execute(input(one+"/after-release"))));
         } finally {release.countDown();pool.shutdownNow();}
+    }
+    @Test public void serverErrorsAreResponsesAndDoNotCoolTheHost() throws Exception {
+        first.enqueue(new MockResponse().setResponseCode(503).setBody("down"));first.enqueue(new MockResponse().setBody("up"));
+        try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals(503,s.execute(input(one+"/a")).status());assertEquals("up",body(s.execute(input(one+"/b"))));}
+    }
+    @Test public void publicInternetScopeReachesAnyPublicHostButStillRefusesPrivateAddresses() throws Exception {
+        HttpBroker.Scope open=new HttpBroker.Scope("cloudstream","pkg","s","A",new HashSet<>(Arrays.asList(HttpBroker.PUBLIC_INTERNET)));
+        first.enqueue(new MockResponse().setBody("cdn"));second.enqueue(new MockResponse().setBody("video-host"));
+        try(HttpBroker.Session s=broker.open(open)){assertEquals("cdn",body(s.execute(input(one+"/x"))));assertEquals("video-host",body(s.execute(input(two+"/y"))));}
+        // Loopback stood in for "public" above; a resolver answer the permission rejects is still refused.
+        broker=new HttpBroker(new OkHttpClient(),h->Arrays.asList(InetAddress.getByName("127.0.0.1")),a->false,scope->new Vault(),clock);
+        try(HttpBroker.Session s=broker.open(open)){assertEquals("DNS_ADDRESS_DENIED",failure(s,input(one+"/private")));}
+    }
+    @Test public void oneHostServesParallelRequestsOfOneEpisode() throws Exception {
+        first.setDispatcher(new okhttp3.mockwebserver.Dispatcher(){public MockResponse dispatch(RecordedRequest r){try{Thread.sleep(300);}catch(InterruptedException e){Thread.currentThread().interrupt();}return new MockResponse().setBody("server");}});
+        ExecutorService pool=Executors.newFixedThreadPool(4);
+        try(HttpBroker.Session s=broker.open(scope("A"))) {
+            List<Future<String>> all=new ArrayList<>();for(int i=0;i<4;i++){final int n=i;all.add(pool.submit(()->body(s.execute(input(one+"/server"+n)))));}
+            for(Future<String> f:all)assertEquals("server",f.get(5,TimeUnit.SECONDS));
+        } finally {pool.shutdownNow();}
     }
     @Test public void bodyLimitRejectsOversizeWithoutTruncatingSuccess() throws Exception {
         first.enqueue(new MockResponse().setBody("x").setHeader("Content-Length",HttpBroker.MAX_RESPONSE_BYTES+1));

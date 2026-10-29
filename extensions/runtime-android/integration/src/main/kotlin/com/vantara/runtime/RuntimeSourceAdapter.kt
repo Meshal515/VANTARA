@@ -6,6 +6,16 @@ import com.vantara.addons.NativeAddonCandidates
 import kotlinx.serialization.json.*
 
 /** Only maps public results to existing VANTARA contracts; it never extracts source HTML. */
+/** CloudStream's INFERRED links name no type; the URL decides, as in the original player. */
+internal fun mediaType(declared:String,url:String):String = when(declared) {
+    "M3U8"->"hls"
+    "DASH"->"dash"
+    "VIDEO"->"direct"
+    else -> {
+        val path=runCatching{java.net.URI(url).path.orEmpty().lowercase()}.getOrDefault("")
+        when { path.endsWith(".m3u8")||path.contains(".m3u8")->"hls"; path.endsWith(".mpd")->"dash"; else->"direct" }
+    }
+}
 class RuntimeSourceAdapter(
     override val id: String,
     override val name: String,
@@ -69,7 +79,7 @@ class RuntimeSourceAdapter(
             buildJsonObject {
                 put("url",link.text("url"));put("name",link.text("name"));put("title",link.text("name"))
                 put("quality",link["quality"] ?: JsonNull);put("headers",JsonObject(headers))
-                put("type",when(link.text("type")) { "M3U8"->"hls";"DASH"->"dash";else->"direct" })
+                put("type",mediaType(link.text("type"),link.text("url")))
             }
         })
         // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.

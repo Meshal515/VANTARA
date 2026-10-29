@@ -5,32 +5,24 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import dev.vantara.runtime.api.RuntimeHttpAccess
 import kotlinx.serialization.json.*
 
-/** Reviewed dependency origins belong to exact archive bytes, never a display name.
- * Updated/unreviewed packages retain their declared origin; no wildcard grants. */
+/**
+ * Network grant for a CloudStream package. Every package may reach the public internet, like the same
+ * provider does inside CloudStream, Mihon or Aniyomi: providers depend on CDNs, APIs and video hosts they
+ * cannot list in advance. A per-package allowlist turned working providers into empty pages.
+ *
+ * What still holds: the host broker resolves DNS itself and refuses private, loopback and link-local
+ * answers; cookies are kept per account and source; the worker runs in its own UID without host data.
+ */
 internal object RuntimeNetworkPolicy {
+    const val PUBLIC_INTERNET="*"
     private const val WITCHER="4c639f9392d46e45f4ee84e8799c810cc1d11fba2f13ff7e32865c71987c2fb4"
     @JvmStatic fun sourceOrigins(hash:String,mainUrl:String):Set<String> {
         val url=mainUrl.toHttpUrl()
-        require(url.isHttps && url.username.isEmpty() && url.password.isEmpty()) { "INVALID_ENDPOINT" }
-        val own=HttpBroker.origin(url)
-        return if(hash==WITCHER && own=="https://animewitcher.com")
-            setOf(own,"https://d8lh9i7zl7-dsn.algolia.net","https://firestore.googleapis.com")
-        else setOf(own)
+        require(url.username.isEmpty() && url.password.isEmpty()) { "INVALID_ENDPOINT" }
+        return setOf(PUBLIC_INTERNET)
     }
-    fun sourceOrigins(hash:String,mainUrl:String,attested:String?):Set<String> {
-        val base=sourceOrigins(hash,mainUrl)
-        if(hash!=WITCHER || HttpBroker.origin(mainUrl.toHttpUrl())!="https://animewitcher.com" || attested==null ||
-            !attested.matches(Regex("https://[a-z0-9]{10}-dsn\\.algolia\\.net")))return base
-        // Retire the bootstrap application instead of repeatedly sending its
-        // stale key after the source has published replacement settings.
-        return (base-"https://d8lh9i7zl7-dsn.algolia.net")+attested
-    }
-    fun sourceOrigins(hash:String,mainUrl:String,attested:Set<String>):Set<String> {
-        val search=attested.singleOrNull { it.matches(Regex("https://[a-z0-9]{10}-dsn\\.algolia\\.net")) }
-        val base=sourceOrigins(hash,mainUrl,search)
-        return if(hash==WITCHER && HttpBroker.origin(mainUrl.toHttpUrl())=="https://animewitcher.com" && "https://pixeldrain.com" in attested)
-            base+"https://pixeldrain.com" else base
-    }
+    @Suppress("UNUSED_PARAMETER") fun sourceOrigins(hash:String,mainUrl:String,attested:String?):Set<String> =sourceOrigins(hash,mainUrl)
+    @Suppress("UNUSED_PARAMETER") fun sourceOrigins(hash:String,mainUrl:String,attested:Set<String>):Set<String> =sourceOrigins(hash,mainUrl)
     /** Only a successful TLS response from this reviewed source's own settings
      * document can attest its replacement Algolia application. No wildcard. */
     @JvmStatic fun trustedSettingsOrigin(hash:String,mainUrl:String,request:RuntimeHttpAccess.Request,response:RuntimeHttpAccess.Response):String? {

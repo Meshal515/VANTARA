@@ -41,6 +41,8 @@ data class SourceEntry(
     val catalog: CatalogHint = CatalogHint(),
     /** سبب إيقاف معروف (دومين ميت…): يظهر في شاشة الصحة ولا يُحمَّل. */
     val disabledReason: String? = null,
+    /** تنبيه من ناشر المصدر (مثل احتمال حظر الشبكة): يُعرض للمستخدم والمصدر يعمل. */
+    val advisory: String? = null,
 )
 
 @Serializable

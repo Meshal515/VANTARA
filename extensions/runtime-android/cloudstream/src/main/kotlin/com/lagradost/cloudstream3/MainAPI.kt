@@ -45,10 +45,35 @@ fun MainAPI.newEpisode(data:Any,initializer:Episode.()->Unit):Episode {
 fun newHomePageResponse(name:String,list:List<SearchResponse>,hasNext:Boolean?=null):HomePageResponse=HomePageResponse(listOf(HomePageList(name,list)),hasNext?:false)
 fun newHomePageResponse(list:List<HomePageList>,hasNext:Boolean?=null):HomePageResponse=HomePageResponse(list,hasNext?:false)
 fun newSearchResponseList(list:List<SearchResponse>,hasNext:Boolean?=null):SearchResponseList=SearchResponseList(list,hasNext?:false)
-suspend fun MainAPI.newTvSeriesLoadResponse(name:String,url:String,type:TvType,episodes:List<Episode>,initializer:suspend TvSeriesLoadResponse.()->Unit):TvSeriesLoadResponse {
+suspend fun MainAPI.newTvSeriesLoadResponse(name:String,url:String,type:TvType,episodes:List<Episode>,initializer:suspend TvSeriesLoadResponse.()->Unit={}):TvSeriesLoadResponse {
     return TvSeriesLoadResponse(name,fixUrl(url),this.name,type,episodes).also {initializer(it)}
 }
 suspend fun MainAPI.newAnimeLoadResponse(name:String,url:String,type:TvType,fix:Boolean=true,initializer:suspend AnimeLoadResponse.()->Unit={}):AnimeLoadResponse {
     return AnimeLoadResponse(name,if(fix)fixUrl(url)else url,this.name,type).also {initializer(it)}
 }
 fun addEpisodes(response:AnimeLoadResponse,status:DubStatus,episodes:List<Episode>){response.episodes[status]=episodes.toList()}
+
+/** `null` stays null; anything else resolves like [fixUrl]. */
+fun MainAPI.fixUrlNull(url:String?):String?=if(url.isNullOrBlank())null else fixUrl(url)
+fun mainPageOf(vararg elements:Pair<String,String>):List<MainPageData> =elements.map{(data,name)->MainPageData(name,data)}
+fun MainAPI.newEpisode(url:String,initializer:Episode.()->Unit={},fix:Boolean=true):Episode=Episode(if(fix)fixUrl(url)else url).apply(initializer)
+fun newHomePageResponse(list:HomePageList,hasNext:Boolean?=null):HomePageResponse=HomePageResponse(listOf(list),hasNext?:false)
+fun newHomePageResponse(data:MainPageRequest,list:List<SearchResponse>,hasNext:Boolean?=null):HomePageResponse=
+    HomePageResponse(listOf(HomePageList(data.name,list,data.horizontalImages)),hasNext?:false)
+fun MainAPI.newMovieSearchResponse(name:String,url:String,type:TvType=TvType.Movie,fix:Boolean=true,initializer:MovieSearchResponse.()->Unit={}):MovieSearchResponse=
+    MovieSearchResponse(name,if(fix)fixUrl(url)else url,this.name,type).apply(initializer)
+fun MainAPI.newTvSeriesSearchResponse(name:String,url:String,type:TvType=TvType.TvSeries,fix:Boolean=true,initializer:TvSeriesSearchResponse.()->Unit={}):TvSeriesSearchResponse=
+    TvSeriesSearchResponse(name,if(fix)fixUrl(url)else url,this.name,type).apply(initializer)
+fun MainAPI.newLiveSearchResponse(name:String,url:String,type:TvType=TvType.Live,fix:Boolean=true,initializer:LiveSearchResponse.()->Unit={}):LiveSearchResponse=
+    LiveSearchResponse(name,if(fix)fixUrl(url)else url,this.name,type).apply(initializer)
+suspend fun MainAPI.newMovieLoadResponse(name:String,url:String,type:TvType,dataUrl:String,initializer:suspend MovieLoadResponse.()->Unit={}):MovieLoadResponse=
+    MovieLoadResponse(name,fixUrl(url),this.name,type,dataUrl).also{initializer(it)}
+suspend fun MainAPI.newLiveStreamLoadResponse(name:String,url:String,dataUrl:String,initializer:suspend LiveStreamLoadResponse.()->Unit={}):LiveStreamLoadResponse=
+    LiveStreamLoadResponse(name,fixUrl(url),this.name,dataUrl).also{initializer(it)}
+suspend fun newSubtitleFile(lang:String,url:String,initializer:suspend SubtitleFile.()->Unit={}):SubtitleFile=SubtitleFile(lang,url).also{initializer(it)}
+fun SearchResponse.addPoster(url:String?,headers:Map<String,String>?=null){posterUrl=url;posterHeaders=headers}
+fun AnimeSearchResponse.addDubStatus(isDub:Boolean,episodes:Int?=null) {
+    val status=if(isDub)DubStatus.Dubbed else DubStatus.Subbed
+    dubStatus=(dubStatus?:java.util.EnumSet.noneOf(DubStatus::class.java)).also{it.add(status)}
+    if(episodes!=null&&episodes>0)this.episodes[status]=episodes
+}

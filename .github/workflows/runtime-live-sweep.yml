@@ -1,0 +1,83 @@
+name: VANTARA Runtime live repository sweep (opt-in)
+# Installs every plugin of a real CloudStream repository through the actual Debug app host and runs
+# catalogue → details → episodes → video links against the sources' live sites. The report records each
+# step's PASS/FAIL and reason; it is evidence about the sources from this runner's network, not a gate.
+on:
+  push:
+    branches: ['claude/addons-debug-foundation']
+    paths:
+      - 'extensions/runtime-android/**'
+      - 'tools/repository-compat/run_live_sweep.sh'
+      - '.github/workflows/runtime-live-sweep.yml'
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: CloudStream repository URL (repo.json)
+        required: false
+        default: https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json
+      only:
+        description: Optional comma-separated plugin names
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: runtime-live-sweep-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Pinned provider fixtures used by the androidTest assets directory
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Package this branch's actual web assets
+        run: npx cap sync android
+      - name: Build the actual Debug app with the runtime and its instrumentation
+        run: bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Live sweep through the actual app host
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          SWEEP_REPOSITORY: ${{ inputs.repository }}
+          SWEEP_ONLY: ${{ inputs.only }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: bash tools/repository-compat/run_live_sweep.sh
+      - name: Summarize the sweep
+        if: always()
+        run: node tools/repository-compat/summarize_live_sweep.mjs live-sweep.jsonl >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-repository-sweep
+          path: |
+            live-sweep.jsonl
+            live-sweep-logcat.txt
+            android/app/build/outputs/androidTest-results/

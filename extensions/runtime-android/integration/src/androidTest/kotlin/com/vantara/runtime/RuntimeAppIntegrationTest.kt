@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
 /** Published DEX -> app host -> existing AnimeEngine adapters. Offline fixtures
  * and the explicitly named live metadata journey are separate. Neither proves playback. */
 class RuntimeAppIntegrationTest {
-    @Test fun witcherSettingsRotationReplaysOnceAndRevokesLearnedPermissions()=runBlocking {
+    @Test fun witcherSettingsRotationNeedsNoPermissionReplayOnThePublicScope()=runBlocking {
         val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
         ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context)
         val scopes=java.util.concurrent.CopyOnWriteArrayList<Set<String>>()
@@ -47,9 +47,9 @@ class RuntimeAppIntegrationTest {
                                 else->error("Unexpected offline Firestore document")
                             }
                         }
-                        "pixeldrain.com"->{assertTrue(scope.allowedOrigins().contains("https://pixeldrain.com"));"""<html><meta property="og:video" content="https://pixeldrain.com/api/file/AbCd1234"></html>"""}
+                        "pixeldrain.com"->{assertEquals(setOf("*"),scope.allowedOrigins());"""<html><meta property="og:video" content="https://pixeldrain.com/api/file/AbCd1234"></html>"""}
                         "tvnesh8ozy-dsn.algolia.net"->{
-                            assertTrue(scope.allowedOrigins().contains(replacement))
+                            assertEquals(setOf("*"),scope.allowedOrigins())
                             assertEquals("TVNESH8OZY",r.headers()["X-Algolia-Application-Id"]?.single())
                             assertEquals("authored-key",r.headers()["X-Algolia-API-Key"]?.single())
                             """{"hits":[{"objectID":"work-1","anime_id":"work-1","name":"Rotated offline work","poster_uri":"https://images.example/poster.jpg"}]}"""
@@ -70,28 +70,20 @@ class RuntimeAppIntegrationTest {
             val pkg=RuntimeHost.packageId("https://repo.example/settings","Animewitcher")
             val installed=host.installFile(archive,pin.text("packageSha256"),pkg,buildJsonObject { put("internalName","Animewitcher");put("version",3);put("content","anime");put("enabled",true) })
             val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            // The source's own settings rotate its search application; the public scope follows without a replay.
             assertEquals("Rotated offline work",engine.adapter(id)!!.page(Listing.POPULAR,1).items.single().title)
-            assertEquals(2,scopes.size);assertFalse(scopes[0].contains(replacement));assertTrue(scopes[1].contains(replacement))
-            assertFalse("Stale bootstrap permission remained after source migration",scopes[1].contains("https://d8lh9i7zl7-dsn.algolia.net"))
+            assertEquals(1,scopes.size)
             assertEquals(1,engine.adapter(id)!!.page(Listing.SEARCH,1,"work").items.size)
-            assertEquals("Attested origins should avoid a second permission replay",3,scopes.size)
+            assertEquals(2,scopes.size)
             host.enable(pkg,false);host.enable(pkg,true)
             engine.adapter(id)!!.page(Listing.POPULAR,1)
-            assertEquals(5,scopes.size);assertFalse(scopes[3].contains(replacement));assertTrue(scopes[4].contains(replacement))
             host.setProfile(account+"-other");host.setProfile(account)
-            engine.adapter(id)!!.page(Listing.POPULAR,1)
-            assertEquals(7,scopes.size);assertFalse(scopes[5].contains(replacement))
             val work=engine.adapter(id)!!.page(Listing.POPULAR,1).items.single()
             val episode=engine.adapter(id)!!.episodes(work).single()
             val beforeMedia=scopes.size
             assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
-            assertEquals(beforeMedia+2,scopes.size);assertFalse(scopes[beforeMedia].contains("https://pixeldrain.com"));assertTrue(scopes[beforeMedia+1].contains("https://pixeldrain.com"))
-            assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
-            assertEquals(beforeMedia+3,scopes.size)
-            host.enable(pkg,false);host.enable(pkg,true)
-            val beforeRevoked=scopes.size
-            assertEquals("https://pixeldrain.com/api/file/AbCd1234",engine.adapter(id)!!.candidates(episode).single().url)
-            assertEquals(beforeRevoked+2,scopes.size);assertFalse(scopes[beforeRevoked].contains("https://pixeldrain.com"))
+            assertEquals("One media resolution is one worker scope",beforeMedia+1,scopes.size)
+            assertTrue(scopes.all { it==setOf("*") })
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
     }
     @androidx.annotation.OptIn(markerClass=[androidx.media3.common.util.UnstableApi::class])
@@ -200,7 +192,7 @@ class RuntimeAppIntegrationTest {
             put("doc_ref","anime_list/work-$n");put("poster_uri","https://images.example/work-$n.jpg");put("story","Offline plot $n")
         }
         val host=RuntimeHost(context,engine,"VANTARA offline compatibility test",sourceTransport={scope,_->
-            assertEquals(setOf("https://animewitcher.com","https://d8lh9i7zl7-dsn.algolia.net","https://firestore.googleapis.com"),scope.allowedOrigins())
+            assertEquals(setOf("*"),scope.allowedOrigins())
             object:AndroidRuntimeClient.HostHttpTransport {
                 override fun exchange(caller:AndroidRuntimeClient.Scope,r:RuntimeHttpAccess.Request):RuntimeHttpAccess.Response {
                     val url=java.net.URI(r.url());seen.add(url.host)
@@ -249,22 +241,23 @@ class RuntimeAppIntegrationTest {
             assertEquals(setOf("d8lh9i7zl7-dsn.algolia.net","firestore.googleapis.com"),seen)
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
     }
-    @Test fun riftPublisherRestrictionPreventsSourceTrafficAfterActualInstallation()=runBlocking {
+    @Test fun riftPublisherWarningIsShownWhileTheSourceStaysUsable()=runBlocking {
         val instrumentation=InstrumentationRegistry.getInstrumentation();val context=instrumentation.targetContext
         ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context);val calls=AtomicInteger()
-        val host=RuntimeHost(context,engine,"VANTARA offline restriction test",sourceTransport={_,_->calls.incrementAndGet();error("Restricted source transport must not be created")})
+        val host=RuntimeHost(context,engine,"VANTARA offline advisory test",sourceTransport={_,_->calls.incrementAndGet();error("offline test transport")})
         val archive=File.createTempFile("rift-app-",".cs3",context.cacheDir)
         try {
             host.setProfile("rift-offline-"+UUID.randomUUID())
             instrumentation.context.assets.open("AnimeRift.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
             val pin=instrumentation.context.assets.open("AnimeRift.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
-            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/rift","AnimeRift"),buildJsonObject { put("internalName","AnimeRift");put("content","anime");put("enabled",true) })
+            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/rift","AnimeRift"),buildJsonObject { put("internalName","AnimeRift");put("content","anime");put("enabled",true);put("description","Use a VPN if the site blocks you") })
             val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
-            assertNull("Restricted source was exposed by the public engine router",engine.adapter(id))
-            // Even a retained direct binding must not bypass the public router's denial.
-            try { engine.runtimeSource(id)!!.adapter.page(Listing.POPULAR,1);fail("Restricted source emitted traffic") }
-            catch(expected:IllegalStateException){assertEquals("SOURCE_NETWORK_REVIEW_REQUIRED",expected.message)}
-            assertEquals(0,calls.get())
+            // The publisher's note is surfaced, and the user can still use the source.
+            assertNotNull("Publisher advisory was dropped",engine.runtimeSource(id)!!.entry.advisory)
+            assertNull(engine.runtimeSource(id)!!.entry.disabledReason)
+            assertNotNull("A source with a publisher advisory must stay usable",engine.adapter(id))
+            try { engine.adapter(id)!!.page(Listing.POPULAR,1) } catch(_:Exception) { /* offline transport */ }
+            assertTrue("The source never reached its network transport",calls.get()>0)
         }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
     }
     @Test fun browserVerificationProfilesKeepAccountCookiesSeparateAndReusable() {

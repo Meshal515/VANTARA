@@ -13,6 +13,9 @@ import { publicUrl } from "./manifest.js";
 import { plainObject } from "./contracts.js";
 import { createSourcePulse } from "./source-pulse.js";
 
+// معرّفات إضافات الويب (Stremio/Remote) تبدأ بـ addon|. مصادر CloudStream الأصلية تبدأ بـ addon|cs3| أيضًا
+// لكنها في سجل المحرك الأصلي؛ معاملتها كإضافة ويب جعلت فتح أعمالها يفشل («فتحه غير مدعوم»).
+const webAddonId = (id) => String(id).startsWith("addon|") && !String(id).startsWith("addon|cs3|");
 const section = (m) =>
   m.contentTypes.includes("manga")
     ? "manga"
@@ -196,7 +199,7 @@ export function createAddonRuntime({
           !(x.configuration?.required && !x.configuration.configured),
       );
   function def(id) {
-    if (!id.startsWith("addon|")) return r.registry.def(id);
+    if (!webAddonId(id)) return r.registry.def(id);
     const key = registry.resolveKey(id.slice(6));
     const m = external().find((x) => x.key === key && x.contentTypes.some((t) => ["manga", "anime", "movie", "series"].includes(t)));
     return m
@@ -212,7 +215,7 @@ export function createAddonRuntime({
       : null;
   }
   function source(id) {
-    if (!id.startsWith("addon|")) return r.registry.source(id);
+    if (!webAddonId(id)) return r.registry.source(id);
     const d = def(id);
     if (!d) return null;
     const m = d.manifest,
@@ -389,12 +392,12 @@ export function createAddonRuntime({
     def,
     source,
     async call(id, fn) {
-      if (!id.startsWith("addon|")) return r.registry.call(id, fn);
+      if (!webAddonId(id)) return r.registry.call(id, fn);
       const s = source(id);
       if (!s) throw new Error("الإضافة معطلة أو غير متاحة");
       return fn(s);
     },
-    cooling: (id) => (id.startsWith("addon|") ? false : r.registry.cooling(id)),
+    cooling: (id) => (webAddonId(id) ? false : r.registry.cooling(id)),
   };
   function subtitleProviders() {
     return external()

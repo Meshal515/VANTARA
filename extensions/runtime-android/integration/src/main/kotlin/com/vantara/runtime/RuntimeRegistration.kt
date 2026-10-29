@@ -15,10 +15,12 @@ internal object RuntimeRegistration {
             require(name.isNotBlank() && name.length<=160) { "INVALID_SOURCE_NAME" }
             require(ids.add(RuntimeHost.sourceId(pkg,name))) { "DUPLICATE_SOURCE_ID" }
             val url=source.text("mainUrl").toHttpUrl()
-            require(url.isHttps && url.username.isEmpty() && url.password.isEmpty() && url.fragment==null) { "INVALID_ENDPOINT" }
-            // Validate the actual worker-origin contract before any installed pointer is changed.
-            AndroidRuntimeClient.Scope("cloudstream",pkg,RuntimeHost.sourceId(pkg,name),"registration",setOf(HttpBroker.origin(url)))
+            require(url.username.isEmpty() && url.password.isEmpty() && url.fragment==null) { "INVALID_ENDPOINT" }
+            // Validate the actual worker scope contract before any installed pointer is changed.
+            AndroidRuntimeClient.Scope("cloudstream",pkg,RuntimeHost.sourceId(pkg,name),"registration",setOf(RuntimeNetworkPolicy.PUBLIC_INTERNET))
         }
         return sources
     }
+    /** The provider's own declaration (CloudStream `vpnStatus`), recorded at registration. */
+    @JvmStatic fun vpnMightBeNeeded(source: JsonObject): Boolean = source.text("vpnStatus")=="MightBeNeeded"
 }

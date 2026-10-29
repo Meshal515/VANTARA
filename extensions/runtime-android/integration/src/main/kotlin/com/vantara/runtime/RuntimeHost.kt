@@ -56,6 +56,8 @@ class RuntimeHost(
     private data class DependencyKey(val owner:String,val pkg:String,val hash:String,val source:String)
     // Only exact origins attested by source-owned settings, never keys/cookies.
     private val dependencyOrigins=HashMap<DependencyKey,Set<String>>()
+    /** Bound operations per visible source id, for diagnostics that need the raw provider answer. */
+    private val invokers=ConcurrentHashMap<String,suspend (String,JsonObject)->JsonObject>()
 
     fun setProfile(id: String) = synchronized(lock) {
         check(!closed) { "PROFILE_CHANGED" }
@@ -92,6 +94,13 @@ class RuntimeHost(
         require(url.length in 1..8192 && url.none { it.code < 33 || it.code == 127 }) { "INVALID_ENDPOINT" }
         val value = url.toHttpUrl()
         require(value.isHttps && value.username.isEmpty() && value.password.isEmpty() && value.fragment == null) { "INVALID_ENDPOINT" }
+        return value
+    }
+    /** A source's own site may still be plain HTTP; repositories and packages stay HTTPS-only. */
+    private fun sourceEndpoint(url: String): HttpUrl {
+        require(url.length in 1..8192 && url.none { it.code < 33 || it.code == 127 }) { "INVALID_ENDPOINT" }
+        val value = url.toHttpUrl()
+        require(value.username.isEmpty() && value.password.isEmpty() && value.fragment == null) { "INVALID_ENDPOINT" }
         return value
     }
     private fun repositoryOrigins(url: HttpUrl): Set<String> {
@@ -213,6 +222,14 @@ class RuntimeHost(
         val data=RuntimeJson.parse(current.metadata()).jsonObject
         o.store.updateMetadata(pkg,JsonObject(data+mapOf("enabled" to JsonPrimitive(enabled))).toString()); if(!enabled)stopPackage(pkg);refresh(o)
     }
+    /**
+     * The provider's raw answer for one operation (for example `videoLinks` with its `missingExtractors`).
+     * Same worker, scope and policy as normal use; only the result is not reshaped.
+     */
+    suspend fun diagnose(sourceId: String,operation: String,input: JsonObject): JsonObject {
+        val call=invokers[sourceId] ?: error("SOURCE_NOT_INSTALLED")
+        return call(operation,input)
+    }
     fun uninstall(pkg: String) = synchronized(lock) { val o=owner;o.store.uninstall(pkg);stopPackage(pkg);refresh(o) }
     suspend fun seasons(anime: SourceAnime): List<SourceAnime> {
         val o=owner;checkOwner(o)
@@ -237,12 +254,15 @@ class RuntimeHost(
                 val content=metadata.text("content").takeIf { it in setOf("anime","cinema") } ?: "anime"
                 val packageBindings=mutableListOf<RuntimeSourceBinding>()
                 for (raw in RuntimeRegistration.validate(metadata.getValue("registration").jsonObject,installed.packageId())) {
-                    val source=raw.jsonObject;val id=sourceId(installed.packageId(),source.text("name"),o.id);val origin=endpoint(source.text("mainUrl"))
+                    val source=raw.jsonObject;val id=sourceId(installed.packageId(),source.text("name"),o.id);val origin=sourceEndpoint(source.text("mainUrl"))
                     val name=source.text("name")
-                    val restricted=metadata.text("description").contains("VPN",true) || metadata.text("internalName").equals("AnimeRift",true)
-                    val entry=SourceEntry(id,name,source.text("lang").ifBlank { "und" },enabled=enabled,content=content,domains=Domains(origin.toString()),
-                        disabledReason=if(restricted) "يتطلب هذا المصدر مراجعة اتصال آمن وفق تحذير ناشره؛ لم تُرسل إليه طلبات." else null)
-                    val adapter=RuntimeSourceAdapter(id,name) { operation,input -> invoke(o,installed,source,id,operation,input) }
+                    // A publisher's VPN note is shown to the user, never turned into a block: the decision is theirs.
+                    val advisory=if(metadata.text("description").contains("VPN",true) || RuntimeRegistration.vpnMightBeNeeded(source))
+                        "ينبّه ناشر هذا المصدر إلى أن الموقع قد يحظر بعض الشبكات؛ إن تعذّر التحميل جرّب شبكة أخرى أو VPN." else null
+                    val entry=SourceEntry(id,name,source.text("lang").ifBlank { "und" },enabled=enabled,content=content,domains=Domains(origin.toString()),advisory=advisory)
+                    val call:suspend (String,JsonObject)->JsonObject={ operation,input -> invoke(o,installed,source,id,operation,input) }
+                    invokers[id]=call
+                    val adapter=RuntimeSourceAdapter(id,name,call)
                     packageBindings.add(RuntimeSourceBinding(entry,adapter,installed.packageId(),installed.version().toString(),metadata.text("repoName"),metadata.text("repoUrl"),metadata.text("iconUrl").ifBlank { null }))
                 }
                 require(bindings.size+packageBindings.size<=128) { "RUNTIME_SOURCE_LIMIT" };bindings.addAll(packageBindings)
@@ -259,7 +279,7 @@ class RuntimeHost(
         var rejected:RuntimeFailure?=null
         val initial=try { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) }
         catch(failure:RuntimeFailure) { rejected=failure;null }
-        val permissionChanged=learned.any { it !in origins }
+        val permissionChanged=RuntimeNetworkPolicy.PUBLIC_INTERNET !in origins && learned.any { it !in origins }
         // Some published providers catch a denied media request and return an
         // empty result. Attested media still needs the same single scope sync.
         if(!permissionChanged || operation !in setOf("catalogue","search","details","episodes","videoLinks") || (rejected!=null && rejected.code!="ORIGIN_NOT_ALLOWED")) {
@@ -281,7 +301,6 @@ class RuntimeHost(
         check(current.packageHash()==installed.packageHash()) { "PACKAGE_CHANGED" }
         val metadata=RuntimeJson.parse(current.metadata()).jsonObject
         check(metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false) { "SOURCE_DISABLED" }
-        check(!metadata.text("description").contains("VPN",true) && !metadata.text("internalName").equals("AnimeRift",true)) { "SOURCE_NETWORK_REVIEW_REQUIRED" }
         val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,origins)
         val bound=sourceTransport(scope,broker)
         val transport=object: AndroidRuntimeClient.HostHttpTransport {
@@ -309,7 +328,7 @@ class RuntimeHost(
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
                             pending[id]=Retry(o,generation,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
-                            VerificationCoordinator.require(endpoint(request.url()),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
+                            VerificationCoordinator.require(sourceEndpoint(request.url()),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
                         }
                     }
                     throw failure
@@ -335,9 +354,9 @@ class RuntimeHost(
         try { client.loadCloudStream(dex,hash,entry).await();return run(client) }
         finally { workers.remove(client);client.close() }
     }
-    fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { endpoint(it.url).host }.distinct()
+    fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { sourceEndpoint(it.url).host }.distinct()
     fun beginVerification(host: String): VerificationPending = synchronized(lock) {
-        val retry=pending.values.firstOrNull { it.owner===owner && endpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
+        val retry=pending.values.firstOrNull { it.owner===owner && sourceEndpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
         checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
         val original=VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
         require(original.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
@@ -355,7 +374,7 @@ class RuntimeHost(
             checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
             require(VerificationCoordinator.pending().any { it.host==item.host && it.token==item.token && it.state=="active" }) { "VERIFICATION_EXPIRED" }
             require(VerificationPolicy.clearance("cf_clearance=$clearance")==clearance) { "INVALID_CLEARANCE" }
-            val url=endpoint(retry.url)
+            val url=sourceEndpoint(retry.url)
             require(url.host==item.host && HttpBroker.origin(url)==item.origin && item.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
             val scope=HttpBroker.Scope(retry.scope.family(),retry.scope.packageId(),retry.scope.sourceId(),retry.scope.sessionId(),retry.scope.allowedOrigins())
             // Precisely one host-only clearance, scoped to the challenged source/account.

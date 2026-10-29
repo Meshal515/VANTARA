@@ -8,7 +8,7 @@ import org.junit.Test
 
 /** Sharing-page suffixes are not evidence of a direct media resource. */
 class MediaHostCompatibilityTest {
-    @After fun clear() = ExtractorRegistry.clear()
+    @After fun clear() { ExtractorRegistry.clear();WorkerState.takeMissingExtractors() }
     private fun resolve(url:String):List<ExtractorLink> = runBlocking {
         val links=mutableListOf<ExtractorLink>()
         loadExtractor(url,"https://animewitcher.com",{},links::add)
@@ -30,12 +30,16 @@ class MediaHostCompatibilityTest {
         assertEquals("https://media.example/actual.m3u8",resolve("https://sharing.example/v/123/episode.mp4").single().url)
     }
     @Test fun streamtapeSharingPageIsNotPassedToThePlayerAsADirectMp4() {
-        try { resolve("https://streamtape.com/v/1234/episode.mp4");fail("HTML sharing page was emitted as direct video") }
-        catch(expected:UnsupportedExtractor){assertEquals("streamtape.com",expected.host)}
+        assertTrue("HTML sharing page was emitted as direct video",resolve("https://streamtape.com/v/1234/episode.mp4").isEmpty())
+        assertEquals(listOf("streamtape.com"),WorkerState.takeMissingExtractors())
+    }
+    @Test fun anUnhandledServerReportsFalseSoTheProviderKeepsItsOtherServers() = runBlocking {
+        assertFalse(loadExtractor("https://unknown-host.example/e/abc",null,{},{}))
+        assertEquals(listOf("unknown-host.example"),WorkerState.takeMissingExtractors())
     }
     @Test fun pixeldrainLookalikesAndNonMediaApiPathsStayUnsupported() {
         for(url in listOf("https://pixeldrain.com.evil.example/u/AbCd1234","https://pixeldrain.com/api/file/AbCd1234/info","https://pixeldrain.com/u/AbCd1234?redirect=https://evil.example","https://pixeldrain.com/u/short")) {
-            try { resolve(url);fail("Unsupported endpoint resolved: $url") } catch(expected:UnsupportedExtractor) { /* precise unsupported capability */ }
+            assertTrue("Unsupported endpoint resolved: $url",resolve(url).isEmpty())
         }
     }
 }

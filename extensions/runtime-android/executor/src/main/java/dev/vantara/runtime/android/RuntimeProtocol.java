@@ -20,6 +20,18 @@ final class RuntimeProtocol {
         if(value==null || value.length()>MAX_TEXT) throw new RuntimeFailure("PAYLOAD_LIMIT");
         return value;
     }
+    /** Scope grant for "any public host"; the host broker still refuses private/loopback answers by DNS. */
+    static final String PUBLIC_INTERNET="*";
+    /** A request URL a public-internet scope may send: HTTP(S), no credentials, a public-looking host name. */
+    static String publicUrl(String value) {
+        if(value==null || value.length()>8192 || value.matches("(?s).*[\\x00-\\x20\\x7f].*")) throw new RuntimeFailure("INVALID_ENDPOINT");
+        try {
+            URI u=new URI(value); String host=u.getHost(); String scheme=u.getScheme();
+            if(scheme==null || !(scheme.equalsIgnoreCase("https")||scheme.equalsIgnoreCase("http")) || host==null || u.getRawUserInfo()!=null ||
+                host.matches("(?i).*\\.(local|internal|localhost|lan|invalid)") || host.equalsIgnoreCase("localhost")) throw new RuntimeFailure("INVALID_ENDPOINT");
+            return value;
+        } catch(java.net.URISyntaxException e) { throw new RuntimeFailure("INVALID_ENDPOINT"); }
+    }
     static String origin(String value) {
         if(value==null || value.length()>8192 || value.matches("(?s).*[\\x00-\\x20\\x7f].*")) throw new RuntimeFailure("INVALID_ENDPOINT");
         try {
