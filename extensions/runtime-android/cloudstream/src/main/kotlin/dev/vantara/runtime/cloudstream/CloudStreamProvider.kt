@@ -38,10 +38,14 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             sources=result.sources
         }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();plugin=null;throw failure}
     }
-    override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String=runBlocking {
+    override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String {
         val all=checkNotNull(sources){"PROVIDER_NOT_READY"}
+        if(operation=="capabilities") {
+            kotlinx.serialization.json.Json.parseToJsonElement(inputJson)
+            return SourceCapabilities.encode(all)
+        }
+        return runBlocking {
         val input=mapper.readTree(inputJson)
-        if(operation=="capabilities")return@runBlocking mapper.writeValueAsString(mapOf("profile" to "cloudstream-original-v1","sources" to all.map{mapOf("name" to it.name,"mainUrl" to it.mainUrl,"lang" to it.lang,"hasMainPage" to it.hasMainPage,"mainPages" to it.mainPage)},"executed" to true,"sourceFunctionsTested" to false))
         val requested=input.path("source").asText("")
         val source=if(requested.isEmpty())all.singleOrNull()?:throw IllegalArgumentException("SOURCE_SELECTION_REQUIRED") else all.singleOrNull{it.name==requested}?:throw IllegalArgumentException("SOURCE_NOT_FOUND")
         val output:Any=when(operation) {
@@ -64,6 +68,7 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             else->throw UnsupportedOperationException(operation)
         }
         mapper.writeValueAsString(output)
+        }
     }
     private class WorkerContext(base:Context,private val providerLoader:ClassLoader):ContextWrapper(base) {
         override fun getApplicationContext():Context=this

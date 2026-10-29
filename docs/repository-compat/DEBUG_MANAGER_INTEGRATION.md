@@ -143,3 +143,23 @@ and force-stops/restarts the candidate process. All three phases use the SAME
 candidate APK: this is deliberately NOT a signed APK-upgrade claim. Reports and
 screenshots are retained. Human CAPTCHA and five-work playback acceptance are
 still outstanding; no Stable merge or publication is authorized by this gate.
+
+## Cold metadata follow-up (device regression still required)
+
+Actions40810669209 passed build/unit/Release-isolation gates and reached the real
+isolated app worker. Its XML reports OPERATION_TIMEOUT at5.719s of test execution.
+The initial load has a10s budget and later source operations15s; the intervening
+first capabilities call has the unchanged3s budget. Worker logcat shows the
+arm64-only application executing through Berberis on the x86_64 emulator. No
+source-site request or ABI exception was reported. The minimal harness's50-case
+execution/guard workflow40810674601 and full project CI40810674519 passed.
+
+Candidate optimization: the host-owned fixed metadata schema no longer enters
+runBlocking, initializes the Jackson input parser, or uses reflective DTO encoding.
+Use a synchronous kotlinx JSON builder while preserving the profile/field names,
+sourceFunctionsTested=false, escaping and valid-input parsing. Actual source
+operations retain the existing provider code and mapper. The3s acceptance deadline
+is unchanged. A new metadata contract test was observed RED then GREEN; all79
+kernel JVM cases pass and harness/test assembly/lint pass locally. The actual-app
+emulator regression must decide whether this resolves the cold metadata timeout;
+no device success or completed runtime release is claimed yet.
