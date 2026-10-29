@@ -58,7 +58,9 @@ it('the work page is built once and filled in place: no re-render when details a
   // نفس العقد بعد وصول التفاصيل: مُلئت أماكنها، لم تُستبدل الصفحة
   expect(root.querySelector('#anime .aw')).toBe(page);
   expect(root.querySelector('#animeTitleMark')).toBe(mark);
-  expect(root.querySelector('.aw-meta').textContent).toContain('OLM');
+  // سطر المعلومات: النوع والموسم والتقييم وعدد الحلقات والحالة؛ الاستوديو في «معلومات» أسفل الصفحة
+  expect(root.querySelector('.aw-meta').textContent).toContain('3 حلقة');
+  expect(root.querySelector('.aw-info').textContent).toContain('OLM');
   expect(root.querySelector('.aw-meta').textContent).toContain('8.8');
   expect([...root.querySelectorAll('.an-er')].map((r) => r.dataset.ep)).toEqual(['1', '2', '3']);
   expect(root.querySelector('.aw-person-name').textContent).toBe('Maomao');

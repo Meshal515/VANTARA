@@ -28,8 +28,6 @@ import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, sourceLabel } from './server-sheet.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt } from '../lib/anime-art.js';
-import { currentLayout, detectDebugChannel, mountSwitcher, placePieces } from './work-hero-lab.js';
-import { deviceInfo } from '../lib/updater.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
@@ -128,9 +126,6 @@ export function createAnime(deps) {
     art: null,
     libraryTab: 'history',
   };
-
-  // معاينة تكوينات صفحة العمل لنسخة Debug وحدها (القناة يبلّغها التطبيق الأصلي)
-  void detectDebugChannel(deviceInfo);
 
   // ───────────── عناصر صغيرة ─────────────
 
@@ -613,26 +608,32 @@ export function createAnime(deps) {
 
   /** الهيكل الكامل للصفحة بما يُعرف من البطاقة التي لُمست. */
   function buildWork(m, token) {
+    closeMenu();
     state.view?.unbind?.();
     const page = q('anime');
     page.style.removeProperty('--art');
     tint(page, m.color);
     const wrap = el('article', 'aw');
 
-    // الترويسة: رجوع، والشعار صغيرًا حين ينطوي البطل. صلبة متى ظهرت (لا شفافة)
+    // الترويسة: رجوع، والشعار صغيرًا حين ينطوي البطل، وفي الجهة المقابلة المفضلة ورشّح والمزيد
+    // رموزًا بلا كلام. تبقى ظاهرة مع التمرير؛ صلبة متى انطوى البطل (لا محتوى من خلفها)
     const bar = el('header', 'aw-bar');
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
     const barTitle = el('div', 'aw-bar-title');
     const barText = el('span', 'aw-bar-text', m.title);
     barText.dir = 'auto';
     barTitle.append(barText);
-    bar.append(barTitle);
+    const tools = el('div', 'aw-tools');
+    const menu = el('div', 'aw-menu');
+    menu.setAttribute('role', 'menu');
+    bar.append(barTitle, tools, menu);
 
-    // البطل: طبقة الخلفية وطبقة الشعار، بسرعتين مختلفتين عند التمرير
+    // البنر خلفية عريضة؛ الغلاف في الوسط عند حافته السفلى، واللوقو تحته، ثم المعلومات ولقطة الحلقة
     const hero = el('div', 'aw-hero');
     const bg = el('div', 'aw-bg');
     hero.append(bg, el('div', 'aw-shade'));
-    const head = el('div', 'aw-head');
+    const stage = el('div', 'aw-stage');
+    const cover = el('div', 'aw-cover');
     // ضغطة مطوّلة على الاسم أو الشعار: «نسخ» و«مشاركة» (نفس ورقة المانجا، `data-copyable`)
     const mark = el('div', 'an-mark');
     mark.id = 'animeTitleMark';
@@ -642,19 +643,13 @@ export function createAnime(deps) {
     mark.append(h1);
     const meta = el('div', 'aw-meta');
     const genres = el('div', 'aw-genres');
-    head.append(mark, meta, genres);
-    hero.append(head);
-
-    // قطع التكوينات (work-hero-lab.js): الغلاف، وموعد الحلقة القادمة، ولقطة الحلقة، ومنصة بين البنر والجسم
-    const stage = el('div', 'aw-stage');
-    const cover = el('div', 'aw-cover');
     const side = el('div', 'aw-side');
-    const still = el('button', 'aw-still');
-    still.type = 'button';
+    const still = el('div', 'aw-still');
+    const cta = el('div', 'aw-cta');
+    stage.append(cover, mark, meta, genres, side, still, cta);
 
     const body = el('div', 'aw-body');
-    const cta = el('div', 'aw-cta');
-    const actions = el('div', 'aw-actions');
+    // المصادر تظهر في ورقة السيرفرات عند التشغيل؛ صفحة العمل لا تعرض حالتها (لا رسائل سلبية هنا)
     const sources = el('div', 'an-sources');
     sources.id = 'animeSources';
     const about = el('section', 'aw-about');
@@ -663,31 +658,22 @@ export function createAnime(deps) {
     const eps = el('section', 'aw-episodes');
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
-    body.append(cta, actions, sources, about, insightHost, eps, more);
+    body.append(about, insightHost, eps, more);
     wrap.append(bar, hero, stage, body);
 
-    state.view = { id: m.id, token, page, wrap, bar, barTitle, hero, bg, head, mark, meta, genres, stage, cover, side, still, cta, actions, sources, about, insightHost, eps, more, body, layout: '0', heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
-    placePieces(state.view, currentLayout());
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
     paintCover(m);
     paintMeta(m);
     paintCta(m);
-    paintActions(m);
+    paintTools(m);
     paintSources(m);
     paintAbout(m, { pending: !m.description });
     eps.append(...Array.from({ length: 3 }, () => el('div', 'an-skel an-skel-ep')));
     paintSide(m);
     page.replaceChildren(wrap);
     paintLogo(m);
-    mountSwitcher(state.view, (id) => {
-      const v = state.view;
-      if (!v) return;
-      placePieces(v, id);
-      paintMeta(state.detail ?? m);
-      paintSide(state.detail ?? m);
-      window.scrollTo?.({ top: 0, behavior: 'instant' });
-    });
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    state.view.unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    state.view.unbind = bindCollapsingHero({ hero, bar, bg, head: null, active: () => deps.currentPage() === 'anime' && state.detailToken === token });
   }
 
   /** التفاصيل وصلت: كل مكان يُملأ في موضعه. */
@@ -702,6 +688,7 @@ export function createAnime(deps) {
     paintCta(m);
     paintCover(m);
     paintSide(m);
+    paintTools(m);
     paintAbout(m);
     renderEpisodes(v.eps, m);
     paintBelow(m);
@@ -825,8 +812,9 @@ export function createAnime(deps) {
   }
 
   /**
-   * ما يخص المشاهدة غير الزر: موعد الحلقة القادمة إن كان العمل يُعرض. لا يُخترع شيء
-   * لملء المكان؛ بلا موعد تبقى فارغة وتختفي. وفي «الحلقة أولًا» لقطة الحلقة هي الزر.
+   * موعد الحلقة القادمة إن كان العمل يُعرض، ولقطة الحلقة التي ستشاهدها. لا يُخترع شيء لملء
+   * المكان: بلا موعد يختفي السطر، وعمل لم يُعرض بعد يبقى له زر «يبدأ…» وحده بلا لقطة.
+   * الضغط على زر التشغيل وحده يشغّل؛ لمسة الصورة تنبّه للزر فقط، فلا تشغيل بالغلط.
    */
   function paintSide(m) {
     const v = state.view;
@@ -839,24 +827,32 @@ export function createAnime(deps) {
       v.side.append(line);
     }
     v.side.hidden = !next;
-    if (v.layout !== '5') return;
+    const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
+    const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;
+    v.still.hidden = upcoming;
+    if (upcoming) return v.still.replaceChildren();
     const point = resumePoint(m);
     const shot = episodeStill(m, point.episode, artOf(m));
     const title = episodeTitleOf(m, point.episode, { mal: state.malTitles, art: artOf(m) });
     v.still.replaceChildren();
-    v.still.onclick = () => playEpisode(m, point.episode);
     v.still.classList.toggle('aw-still--cover', !shot?.still);
     if (shot?.src) v.still.append(image(shot.src, 'an-img', { eager: true, position: shot.still ? 'center' : 'center 22%' }));
+    const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
     const cap = el('span', 'aw-still-cap');
-    cap.append(el('span', 'aw-still-play', ''), el('b', null, `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`));
-    cap.querySelector('.aw-still-play').innerHTML = glyph('play', { size: 22, filled: true });
+    cap.append(play, el('b', null, label));
     if (title && typeof title === 'string') {
       const t = el('span', 'aw-still-title', title);
       t.dir = 'auto';
       cap.append(t);
     }
     v.still.append(cap);
-    v.stage.querySelector('.aw-ident-row')?.after(v.still);
+    v.still.onclick = (e) => {
+      if (e.target.closest('.aw-still-play')) return;
+      play.classList.remove('nudge');
+      void play.offsetWidth;
+      play.classList.add('nudge');
+    };
   }
 
   /** سطر واحد هادئ: النوع · الموسم · ★ · الاستوديو · الحالة. وتحته الأنواع روابطَ. */
@@ -877,9 +873,8 @@ export function createAnime(deps) {
       s.innerHTML = `${glyph('star', { size: 12, filled: true })}<b>${m.score.toFixed(1)}</b>`;
       parts.push(s);
     }
-    // في التكوينات الجديدة: عدد الحلقات بدل الاستوديو (الاستوديو في «معلومات» أسفل الصفحة)
-    if (v.layout && v.layout !== '0') add(m.episodes ? `${m.episodes} حلقة` : null);
-    else add(m.studio);
+    // عدد الحلقات بدل الاستوديو (الاستوديو في «معلومات» أسفل الصفحة)
+    add(m.episodes ? `${m.episodes} حلقة` : null);
     if (m.status) add(STATUS_AR[m.status], `aw-status aw-status--${String(m.status).toLowerCase()}`);
     // الفواصل عناصر بين الأجزاء لا ‎::before‎: جزء لاتيني (الاستوديو، التقييم) لا يقلب موضعها
     v.meta.replaceChildren(...parts.flatMap((part, i) => (i ? [el('i', 'aw-sep', '·'), part] : [part])));
@@ -920,45 +915,106 @@ export function createAnime(deps) {
     v.cta.replaceChildren(main, line);
   }
 
-  /** الأفعال رموزًا بأسمائها تحتها، بلون واحد؛ المفعّل وحده بلون القسم. */
-  function paintActions(m) {
+  /**
+   * أدوات الترويسة: المفضلة ورشّح رمزين بلا كلام، و«المزيد» نقاطًا ثلاثًا تفتح دوائر تحت
+   * بعضها (أتابعها، لاحقًا، علّم حلقات، أفضل 5) كل واحدة باسمها الصغير. الحالة المفعّلة بلون القسم.
+   */
+  function paintTools(m) {
     const v = state.view;
     if (!v) return;
-    const act = (icon, label, onClick, { pressed, filled } = {}) => {
-      const b = button('aw-act', `${glyph(icon, { size: 22, filled: Boolean(filled) })}<span>${label}</span>`, onClick, label);
+    const work = () => state.detail ?? m;
+    const tool = (icon, label, onClick, { pressed, filled } = {}) => {
+      const b = button('aw-tool', glyph(icon, { size: 21, filled: Boolean(filled) }), onClick, label);
       if (pressed !== undefined) b.setAttribute('aria-pressed', String(Boolean(pressed)));
       return b;
     };
     const items = [];
+    if (signedIn()) {
+      const fav = Boolean(account?.inCollection('favorite', m.id));
+      items.push(tool('heart', fav ? 'في المفضلة' : 'المفضلة', () => {
+        const now = !account?.inCollection('favorite', m.id);
+        account?.setCollection('favorite', work(), now);
+        paintTools(m);
+        pop(v.tools.querySelector('.aw-tool'));
+        toast(now ? 'في المفضلة' : 'أُزيل من المفضلة');
+      }, { pressed: fav, filled: fav }));
+    }
+    items.push(tool(deps.share ? 'send' : 'share', deps.share ? 'رشّح' : 'شارك', () => shareCurrent()));
+    const moreBtn = tool('more', 'المزيد', () => toggleMenu());
+    moreBtn.setAttribute('aria-haspopup', 'menu');
+    moreBtn.setAttribute('aria-expanded', String(v.menu.classList.contains('open')));
+    items.push(moreBtn);
+    v.tools.replaceChildren(...items);
+    paintMenu(m);
+  }
+
+  function paintMenu(m) {
+    const v = state.view;
+    if (!v) return;
+    const work = () => state.detail ?? m;
+    const entry = (icon, label, onClick, { pressed = false } = {}) => {
+      const b = button('aw-menu-item', `<span class="aw-menu-dot">${glyph(icon, { size: 20 })}</span><span class="aw-menu-label">${label}</span>`, () => {
+        onClick();
+      }, label);
+      b.setAttribute('role', 'menuitem');
+      if (pressed) b.setAttribute('aria-pressed', 'true');
+      return b;
+    };
+    const rows = [];
     const listName = signedIn() ? 'أتابعها' : 'قائمتي';
-    const listBtn = () => {
-      const on = inList(m.id);
-      const b = act(on ? 'check' : 'plus', listName, () => {
-        const now = toggleList(state.detail ?? m);
-        const next = listBtn();
-        b.replaceWith(next);
-        pop(next);
-        toast(now ? `أُضيف إلى ${listName}` : `أُزيل من ${listName}`);
-      }, { pressed: on });
-      return b;
+    const inMine = inList(m.id);
+    rows.push(entry(inMine ? 'check' : 'plus', listName, () => {
+      const now = toggleList(work());
+      paintMenu(m);
+      toast(now ? `أُضيف إلى ${listName}` : `أُزيل من ${listName}`);
+    }, { pressed: inMine }));
+    if (signedIn()) {
+      const later = Boolean(account?.inCollection('read_later', m.id));
+      rows.push(entry(later ? 'check' : 'clock', 'لاحقًا', () => {
+        const now = !account?.inCollection('read_later', m.id);
+        account?.setCollection('read_later', work(), now);
+        paintMenu(m);
+        toast(now ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
+      }, { pressed: later }));
+      const w = work();
+      const total = w.aired || w.episodes || 0;
+      if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
+    }
+    if (deps.openWorkMenu) rows.push(entry('star', 'أفضل 5', () => {
+      closeMenu();
+      deps.openWorkMenu({ ref: `anime:${m.id}`, title: work().title, cover: m.posterSmall ?? m.poster ?? null });
+    }));
+    rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
+    v.menu.replaceChildren(...rows);
+  }
+
+  function toggleMenu(force) {
+    const v = state.view;
+    if (!v) return;
+    const open = force ?? !v.menu.classList.contains('open');
+    v.menu.classList.toggle('open', open);
+    v.tools.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    // لمسة خارج القائمة أو Esc تغلقها
+    const away = (e) => {
+      if (e.type === 'keydown' && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && (v.menu.contains(e.target) || v.tools.contains(e.target))) return;
+      closeMenu();
     };
-    items.push(listBtn());
-    const collection = (kind, icon, label, onToast, offToast) => {
-      const on = Boolean(account?.inCollection(kind, m.id));
-      const b = act(on && kind === 'read_later' ? 'check' : icon, label, () => {
-        const now = !account?.inCollection(kind, m.id);
-        account?.setCollection(kind, state.detail ?? m, now);
-        const next = collection(kind, icon, label, onToast, offToast);
-        b.replaceWith(next);
-        pop(next);
-        toast(now ? onToast : offToast);
-      }, { pressed: on, filled: on && kind === 'favorite' });
-      return b;
-    };
-    if (signedIn()) items.push(collection('read_later', 'clock', 'لاحقًا', 'في «شاهد لاحقًا»', 'أُزيل من «شاهد لاحقًا»'), collection('favorite', 'heart', 'المفضلة', 'في المفضلة', 'أُزيل من المفضلة'));
-    items.push(act(deps.share ? 'send' : 'share', deps.share ? 'رشّح' : 'شارك', () => shareCurrent()));
-    if (deps.openWorkMenu) items.push(act('more', 'المزيد', () => deps.openWorkMenu({ ref: `anime:${m.id}`, title: (state.detail ?? m).title, cover: m.posterSmall ?? m.poster ?? null })));
-    v.actions.replaceChildren(...items);
+    v.menuAway = away;
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', away, true);
+  }
+  function closeMenu() {
+    const v = state.view;
+    if (!v) return;
+    v.menu.classList.remove('open');
+    v.tools.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', 'false');
+    if (v.menuAway) {
+      document.removeEventListener('pointerdown', v.menuAway, true);
+      document.removeEventListener('keydown', v.menuAway, true);
+      v.menuAway = null;
+    }
   }
 
   /** القصة: ثلاثة أسطر، بخط أصغر واتجاهها من نصّها، و«المزيد» إن كان أطول. */
