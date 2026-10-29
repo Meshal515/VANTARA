@@ -64,6 +64,21 @@ public class HttpBrokerTest {
         try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals("<html>عمل عربي</html>",body(s.execute(request)));}
         assertEquals("gzip",first.takeRequest(2,TimeUnit.SECONDS).getHeader("Accept-Encoding"));
     }
+    @Test public void transportHeadersCopiedByOkHttpProvidersAreDroppedNotRefused() throws Exception {
+        first.enqueue(new MockResponse().setBody("ok"));
+        HttpBroker.Input r=new HttpBroker.Input(one+"/page","GET",new Headers.Builder().add("Host","spoofed.example").add("Connection","close").add("Content-Length","0").add("X-Source","kept").build(),null,true);
+        try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals("ok",body(s.execute(r)));}
+        RecordedRequest sent=first.takeRequest(2,TimeUnit.SECONDS);assertEquals("kept",sent.getHeader("X-Source"));assertNotEquals("spoofed.example",sent.getHeader("Host"));assertNotEquals("close",sent.getHeader("Connection"));
+    }
+    @Test public void redirectChainsLongerThanFiveHopsAreFollowedUpToOkHttpsLimit() throws Exception {
+        for(int i=0;i<8;i++)first.enqueue(new MockResponse().setResponseCode(302).addHeader("Location","/hop"+(i+1)));
+        first.enqueue(new MockResponse().setBody("arrived"));
+        try(HttpBroker.Session s=broker.open(scope("A"))){HttpBroker.Output out=s.execute(input(one+"/hop0"));assertEquals("arrived",body(out));assertTrue(out.url().endsWith("/hop8"));}
+    }
+    @Test public void endlessRedirectLoopsStillStopAtTheLimit() throws Exception {
+        for(int i=0;i<=HttpBroker.MAX_REDIRECTS;i++)first.enqueue(new MockResponse().setResponseCode(302).addHeader("Location","/loop"));
+        try(HttpBroker.Session s=broker.open(scope("A"))){assertEquals("REDIRECT_LIMIT",failure(s,input(one+"/loop")));}
+    }
     @Test public void eachRedirectRequiresOriginPermission() throws Exception {
         first.enqueue(new MockResponse().setResponseCode(302).addHeader("Location",two+"/next"));
         HttpBroker.Scope restricted=new HttpBroker.Scope("cloudstream","test.package","source","A",new HashSet<>(Arrays.asList(one)));

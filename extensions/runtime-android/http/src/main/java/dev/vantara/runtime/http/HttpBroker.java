@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Original host-owned HTTP broker. No UI, player, provider code or automatic retries. */
 public final class HttpBroker {
     public static final int MAX_REQUEST_BYTES=1024*1024, MAX_RESPONSE_BYTES=4*1024*1024;
+    /** Same limit as OkHttp's own redirect follower; sites behind cookie or locale hops exceed five. */
+    public static final int MAX_REDIRECTS=20;
     /**
      * Scope origin meaning "any public HTTP(S) host". Media providers reach CDNs, APIs and video hosts the
      * package cannot list in advance (as Mihon/Aniyomi/CloudStream allow). Isolation still holds: DNS answers
@@ -149,13 +151,16 @@ public final class HttpBroker {
             String method=input.method();if(!Arrays.asList("GET","HEAD","POST","PUT").contains(method))throw new Failure("METHOD_UNSUPPORTED");
             byte[] body=input.body();if(body!=null&&body.length>MAX_REQUEST_BYTES)throw new Failure("REQUEST_BODY_LIMIT");
             if((method.equals("GET")||method.equals("HEAD"))&&body!=null)throw new Failure("INVALID_REQUEST_BODY");
-            Headers headers=input.headers();
-            for(String name:headers.names())if(Arrays.asList("host","connection","content-length","transfer-encoding","proxy-authorization").contains(name.toLowerCase(Locale.ROOT)))throw new Failure("REQUEST_HEADER_FORBIDDEN");
+            // Transport-owned headers are dropped, not refused: providers written for OkHttp commonly copy them
+            // (Host, Content-Length…) and OkHttp sets its own. Refusing them failed whole sources.
+            Headers.Builder cleaned=input.headers().newBuilder();
+            for(String name:Arrays.asList("Host","Connection","Content-Length","Transfer-Encoding","Proxy-Authorization"))cleaned.removeAll(name);
+            Headers headers=cleaned.build();
             // Wait for a slot like any HTTP client; a provider's parallel fan-out must not fail instantly.
             try{if(!total.tryAcquire(15,TimeUnit.SECONDS))throw new Failure("ENGINE_BUSY");}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new Failure("SESSION_CLOSED");}
             try {
-                for(int hop=0;hop<=5;hop++) {
+                for(int hop=0;hop<=MAX_REDIRECTS;hop++) {
                     admit(url);Host host=acquireHost(url.host());
                     try {
                         // Let the transport negotiate/decode gzip. Provider headers must
@@ -180,7 +185,7 @@ public final class HttpBroker {
                             // server. Failing here (and cooling the host) broke every fallback inside a provider.
                             String location=response.header("Location");int status=response.code();
                             if(input.followRedirects()&&location!=null&&Arrays.asList(301,302,303,307,308).contains(status)) {
-                                if(hop==5)throw new Failure("REDIRECT_LIMIT");
+                                if(hop==MAX_REDIRECTS)throw new Failure("REDIRECT_LIMIT");
                                 HttpUrl next=url.resolve(location);if(next==null||!next.username().isEmpty()||!next.password().isEmpty())throw new Failure("INVALID_REDIRECT");
                                 admit(next);
                                 Headers.Builder nextHeaders=headers.newBuilder();
