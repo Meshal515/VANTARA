@@ -59,7 +59,8 @@ class RuntimePlugin : Plugin() {
             val item=host.beginVerification(call.getString("host") ?: error("HOST_REQUIRED"));active=item
             startActivityForResult(call,Intent(context,VerificationActivity::class.java)
                 .putExtra("host",item.host).putExtra("origin",item.origin).putExtra("url",item.url)
-                .putExtra("userAgent",item.userAgent).putExtra("sourceName",item.sourceName).putExtra("token",item.token),"verified")
+                .putExtra("userAgent",item.userAgent).putExtra("sourceName",item.sourceName).putExtra("token",item.token)
+                .putExtra("runtimeProfile",host.verificationProfile(item)),"verified")
         }catch(_:Exception){ active?.let { VerificationCoordinator.finish(it.host,it.token,"failed","launch_failed") };active=null;call.reject("تعذر فتح التحقق","VERIFICATION_LAUNCH_FAILED") }
     } }
     @ActivityCallback private fun verified(call: PluginCall?,result: ActivityResult) {

@@ -22,6 +22,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.LinearLayout
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import android.widget.TextView
 import java.io.ByteArrayInputStream
 import java.util.concurrent.Executors
@@ -34,6 +36,8 @@ class VerificationActivity : Activity() {
     private var endpoint: VerificationPolicy.Endpoint? = null
     private var token = ""
     private var initialClearance: String? = null
+    private var selectedCookies: CookieManager? = null
+    private var runtimeProfile: String? = null
     private var completed = false
     private var resumed = false
     private var navigations = 0
@@ -43,9 +47,8 @@ class VerificationActivity : Activity() {
         override fun run() {
             if (completed || !resumed) return
             val current = endpoint ?: return
-            val clearance = VerificationPolicy.clearance(CookieManager.getInstance().getCookie(current.origin + "/"))
+            val clearance = VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin + "/"))
             if (clearance != null && clearance != initialClearance) {
-                CookieManager.getInstance().flush()
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
             else main.postDelayed(this, 500)
@@ -56,6 +59,8 @@ class VerificationActivity : Activity() {
         super.onCreate(savedInstanceState)
         endpoint = VerificationPolicy.endpoint(intent.getStringExtra("url").orEmpty())
         token = intent.getStringExtra("token").orEmpty()
+        runtimeProfile = intent.getStringExtra("runtimeProfile")
+        if(runtimeProfile?.matches(Regex("runtime_[0-9a-f]{64}"))==false) { complete("failed","invalid_endpoint");return }
         val current = endpoint
         if (current == null || current.host != intent.getStringExtra("host") || current.origin != intent.getStringExtra("origin") || token.length !in 1..100) {
             complete("failed", "invalid_endpoint"); return
@@ -97,6 +102,15 @@ class VerificationActivity : Activity() {
             text = "أكمل التحقق في صفحة المصدر. ستعود تلقائيًا عند نجاحه."
             setTextColor(Color.DKGRAY); setPadding(dp(16), dp(4), dp(16), dp(8))
         })
+        if(runtimeProfile!=null)container.addView(Button(this).apply {
+            text="تحققت، متابعة"
+            setOnClickListener {
+                // A previously valid cookie may be unchanged. Only an explicit
+                // click may submit it; the host still replays and validates the source request.
+                val value=VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin+"/"))
+                if(value!=null)complete("verified",null,value)
+            }
+        })
         setContentView(container)
     }
 
@@ -104,9 +118,15 @@ class VerificationActivity : Activity() {
     private fun createBrowser() {
         val current = endpoint ?: return
         try {
-            initialClearance = VerificationPolicy.clearance(CookieManager.getInstance().getCookie(current.origin + "/"))
             val view = WebView(this)
             browser = view
+            val profile=runtimeProfile
+            selectedCookies=if(profile!=null) {
+                if(!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) { complete("failed","unsupported_profile");return }
+                WebViewCompat.setProfile(view,profile)
+                WebViewCompat.getProfile(view).cookieManager
+            } else CookieManager.getInstance()
+            initialClearance=VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin+"/"))
             view.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -117,7 +137,7 @@ class VerificationActivity : Activity() {
                 setSupportMultipleWindows(false)
                 intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { userAgentString = it }
             }
-            CookieManager.getInstance().apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
+            selectedCookies?.apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
@@ -158,6 +178,7 @@ class VerificationActivity : Activity() {
 
     private fun complete(state: String, reason: String?, clearance: String? = null) {
         if (completed) return
+        if (state == "verified") selectedCookies?.flush()
         completed = true
         main.removeCallbacks(timeout); main.removeCallbacks(poll)
         val result = Intent().putExtra("host", endpoint?.host).putExtra("token", token).putExtra("state", state)

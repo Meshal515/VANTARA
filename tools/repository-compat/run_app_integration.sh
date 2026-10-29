@@ -8,6 +8,9 @@ bash android/gradlew -p android :app:connectedDebugAndroidTest \
 # not an upgrade from another signed APK. No account authentication is simulated.
 export DEBUG_EVIDENCE=runtime-app-webview
 mkdir -p "$DEBUG_EVIDENCE"
+# Gradle UTP removes its test installation during teardown. Install the exact
+# candidate APK again before starting the separate real-WebView acceptance phase.
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 adb shell am force-stop com.vantara.app.debug
 adb shell am start -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs baseline

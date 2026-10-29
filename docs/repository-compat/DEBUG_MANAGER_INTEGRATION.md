@@ -179,3 +179,30 @@ strict episode1 assertion, and strengthen the standalone published-parser test t
 assert the raw episode field is1 too. No production parser/numbering logic or
 acceptance assertion is loosened. Both instrumentation APKs compile locally; the
 updated device run is required before reporting the complete journey successful.
+
+## 2026-10-29 — silent legacy prompt and private browser profiles
+
+The separate signed Debug hotfix e8e587dc removes the old anime.js needsHuman
+listener/pill that displayed `Egy Dead يطلب تحقق` over unrelated pages. Three
+DOM regression contexts failed before removal and pass after it. Manual source
+verification and passive challenge reporting remain. This integration includes
+the same fix; its new runtime is not part of that signed hotfix release.
+
+Runtime challenges now carry the cloudstream kind and route only to the opt-in
+runtime bridge. They must not fall back to the legacy shared-cookie verifier or
+replay twice in JS after native replay. Explicit browser verification selects an
+AndroidX WebView profile keyed by the scoped account/package/source identity,
+before navigation. Unsupported profiles fail closed without clearing sessions.
+The legacy verification route retains its existing profile. A new device test
+requires actual MULTI_PROFILE support, distinct cookie jars, no default-jar
+leakage, and profile reuse after recreating a WebView; compilation alone is not
+device acceptance or proof of human CAPTCHA completion.
+
+Run40813919915 passed the original actual-app instrumentation journey. Its next
+MainActivity launch failed because Gradle UTP had uninstalled the test target.
+The acceptance script now reinstalls the same candidate APK before its separate
+CDP phase; it still does not claim a signed upgrade. Full rerun is required.
+
+Local checks for this follow-up:1844 web tests in200 files passed;55 safety and
+fingerprint checks passed; actual app unit/build and instrumentation APK compile
+passed. No main/Stable change, source separation, or live playback acceptance.

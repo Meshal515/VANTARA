@@ -18,6 +18,19 @@ function fixture(){
 }
 
 describe('explicit source verification without unsolicited overlay',()=>{
+  it('never routes a private runtime challenge to the legacy shared-cookie verifier',async()=>{
+    const f=fixture(),retry=vi.fn(),runtimePlugin={verify:vi.fn(async({host})=>({host,state:'verified',ok:true}))};
+    const c=createSourceVerification({...f,runtimePlugin});await c.ready;
+    c.require({host:'source.example',kind:'cloudstream',state:'required',retry});
+    expect(f.plugin.begin).not.toHaveBeenCalled();
+    expect(await c.begin('source.example')).toMatchObject({ok:true});
+    expect(runtimePlugin.verify).toHaveBeenCalledWith({host:'source.example'});expect(f.plugin.begin).not.toHaveBeenCalled();expect(retry).not.toHaveBeenCalled();c.close();
+  });
+  it('keeps a private challenge pending when its private bridge is absent',async()=>{
+    const f=fixture(),c=createSourceVerification({...f,runtimePlugin:null});await c.ready;
+    c.require({host:'source.example',kind:'cloudstream',state:'required'});
+    expect(await c.begin('source.example')).toMatchObject({ok:false});expect(f.plugin.begin).not.toHaveBeenCalled();expect(c.list()).toHaveLength(1);c.close();
+  });
   it('keeps an expired challenge pending silently until explicit verification succeeds',async()=>{
     const f=fixture(),c=createSourceVerification(f);await c.ready;
     c.require({host:'source.example',state:'required'});

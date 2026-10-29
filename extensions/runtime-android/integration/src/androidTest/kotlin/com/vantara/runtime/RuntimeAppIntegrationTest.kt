@@ -17,10 +17,48 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import android.webkit.WebView
+import android.webkit.CookieManager
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import java.util.concurrent.atomic.AtomicReference
 
 /** Actual published DEX -> optional app bridge host -> existing AnimeEngine adapters.
  * Authored offline HTTP fixtures, NOT a live-site, five-work, or real playback claim. */
 class RuntimeAppIntegrationTest {
+    @Test fun browserVerificationProfilesKeepAccountCookiesSeparateAndReusable() {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val context=instrumentation.targetContext
+        val suffix=UUID.randomUUID().toString()
+        val profiles=listOf("runtime_"+RuntimeHost.digest("one-$suffix"),"runtime_"+RuntimeHost.digest("two-$suffix"))
+        val cookieName="vantara_scope_"+RuntimeHost.digest(suffix).take(12)
+        val views=mutableListOf<WebView>();val jars=mutableListOf<CookieManager>()
+        val failure=AtomicReference<Throwable>();val accepted=AtomicInteger();val callbacks=CountDownLatch(2)
+        instrumentation.runOnMainSync {
+            try {
+                check(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) { "Required verification profile support unavailable on this runner" }
+                for(index in profiles.indices) {
+                    val view=WebView(context);views.add(view);WebViewCompat.setProfile(view,profiles[index])
+                    val jar=WebViewCompat.getProfile(view).cookieManager;jars.add(jar)
+                    jar.setCookie("https://profile-fixture.example/","$cookieName=account-$index; Path=/; Max-Age=60; Secure") { ok -> if(ok)accepted.incrementAndGet();callbacks.countDown() }
+                }
+            }catch(error:Throwable){failure.set(error)}
+        }
+        try {
+            failure.get()?.let { throw AssertionError("Verification profile setup failed",it) }
+            assertTrue(callbacks.await(5,TimeUnit.SECONDS));assertEquals(2,accepted.get())
+            instrumentation.runOnMainSync {
+                try {
+                    assertTrue(jars[0].getCookie("https://profile-fixture.example/").contains("$cookieName=account-0"))
+                    assertTrue(jars[1].getCookie("https://profile-fixture.example/").contains("$cookieName=account-1"))
+                    assertFalse(CookieManager.getInstance().getCookie("https://profile-fixture.example/").orEmpty().contains(cookieName))
+                    val restored=WebView(context);views.add(restored);WebViewCompat.setProfile(restored,profiles[0])
+                    assertTrue(WebViewCompat.getProfile(restored).cookieManager.getCookie("https://profile-fixture.example/").contains("$cookieName=account-0"))
+                }catch(error:Throwable){failure.set(error)}
+            }
+            failure.get()?.let { throw AssertionError("Verification profile isolation failed",it) }
+        }finally { instrumentation.runOnMainSync { views.forEach { it.destroy() } } }
+    }
     companion object {
         const val ORIGIN="https://w1.anime4up.rest"
         val HTML="<!doctype html><html><head><title>VANTARA offline catalogue</title></head><body>"+

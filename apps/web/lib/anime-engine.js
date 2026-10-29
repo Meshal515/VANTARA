@@ -102,7 +102,7 @@ export async function search(query, content = 'anime') {
 const humanListeners = new Set();
 /**
  * مصدر يطلب من Cloudflare تحقق إنسان (الطلبات المخفية لا تستطيع حلّه):
- * `fn(sourceId)` لتعرض الواجهة «تحقّق» لحظات. يرجع دالة إلغاء الاشتراك.
+ * `fn(sourceId)` لمتابعة الحالة بصمت. لا يُفتح تحقق أو إشعار تلقائي. يرجع دالة إلغاء الاشتراك.
  */
 export function onNeedsHuman(fn) {
   humanListeners.add(fn);

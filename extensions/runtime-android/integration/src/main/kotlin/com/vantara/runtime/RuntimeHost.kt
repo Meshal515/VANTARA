@@ -272,7 +272,7 @@ class RuntimeHost(
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
                             pending[id]=Retry(o,generation,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
-                            VerificationCoordinator.require(endpoint(request.url()),actualUserAgent,sourceName=source.text("name"))
+                            VerificationCoordinator.require(endpoint(request.url()),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
                         }
                     }
                     throw failure
@@ -306,6 +306,11 @@ class RuntimeHost(
         require(original.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
         val item=VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")
         activeVerifications[item.token]=retry;item
+    }
+    fun verificationProfile(item: VerificationPending): String = synchronized(lock) {
+        val retry=activeVerifications[item.token] ?: error("VERIFICATION_EXPIRED")
+        checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
+        "runtime_"+digest(retry.scope.sourceId()) // sourceId already includes stable account and package identity.
     }
     suspend fun completeVerification(item: VerificationPending,clearance: String): JsonObject {
         val retry=activeVerifications.remove(item.token) ?: error("VERIFICATION_EXPIRED")
