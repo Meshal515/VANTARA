@@ -83,6 +83,7 @@ class LiveRepositorySweepTest {
                         put("links",links?.get("items")?.jsonArray?.size ?: 0)
                         put("linkHosts",JsonArray(links?.get("items")?.jsonArray.orEmpty().mapNotNull { runCatching { java.net.URI(it.jsonObject["url"]!!.jsonPrimitive.content).host }.getOrNull() }.distinct().map(::JsonPrimitive)))
                         put("missingExtractors",links?.get("missingExtractors") ?: JsonArray(emptyList()))
+                        put("missingSamples",links?.get("missingSamples") ?: JsonObject(emptyMap()))
                         put("subtitles",links?.get("subtitles")?.jsonArray?.size ?: 0)
                     } }))
                 }

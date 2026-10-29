@@ -20,8 +20,15 @@ object WorkerState {
     fun clearanceCookies():Map<String,Map<String,String>> =clearance
     private val missing=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     /** Hosts a provider handed to loadExtractor that no extractor handles; reported with the operation's result. */
-    fun missingExtractor(host:String){if(missing.size<64)missing.add(host.lowercase(java.util.Locale.ROOT).removePrefix("www."))}
+    // One embed link per unhandled host: diagnostic evidence for writing and testing that host's extractor.
+    private val samples=java.util.concurrent.ConcurrentHashMap<String,String>()
+    fun missingExtractor(host:String,url:String?=null){
+        val key=host.lowercase(java.util.Locale.ROOT).removePrefix("www.")
+        if(missing.size<64)missing.add(key)
+        if(url!=null&&url.length<=512&&samples.size<64)samples.putIfAbsent(key,url)
+    }
     fun takeMissingExtractors():List<String> =missing.toList().sorted().also{missing.clear()}
+    fun takeMissingSamples():Map<String,String> =samples.toSortedMap().also{samples.clear()}
     fun install(context:Context?,saved:Map<String,String> = emptyMap(),cookies:Map<String,Map<String,String>> = emptyMap()) {
         this.context=context;values.clear();values.putAll(saved);clearance=cookies
     }

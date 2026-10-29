@@ -69,13 +69,13 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             }
             "videoLinks"->{
                 val data=input.path("data").asText("");require(data.isNotBlank());val links=mutableListOf<ExtractorLink>();val subtitles=mutableListOf<SubtitleFile>()
-                WorkerState.takeMissingExtractors()
+                WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()
                 // Subtitles travel with the links; the host decides whether its subtitle engine uses them.
                 source.loadLinks(data,false,{file->if(subtitles.size<64)subtitles.add(file)},{link->check(links.size<128){"LINK_RESULT_LIMIT"};links.add(link)})
                 val missing=WorkerState.takeMissingExtractors()
                 // An empty answer still says which media hosts lacked an extractor; that is the actionable part.
                 if(links.isEmpty()&&missing.isEmpty())throw IOException("NO_VIDEO_LINKS")
-                mapOf("items" to links,"subtitles" to subtitles,"missingExtractors" to missing)
+                mapOf("items" to links,"subtitles" to subtitles,"missingExtractors" to missing,"missingSamples" to WorkerState.takeMissingSamples())
             }
             else->throw UnsupportedOperationException(operation)
         }

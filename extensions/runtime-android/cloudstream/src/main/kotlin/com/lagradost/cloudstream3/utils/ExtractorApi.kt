@@ -48,14 +48,14 @@ suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleF
     ExtractorRegistry.find(host)?.let { it.getUrl(url,referer,subtitleCallback,callback);return true }
     dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(host)?.let { e->
         if(e.extract(url,referer,subtitleCallback,callback))return true
-        dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host);return false
+        dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url);return false
     }
     val path=parsed.path?.lowercase().orEmpty()
     if(!dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.isSharingPage(host)&&(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")||path.endsWith(".mkv")||path.endsWith(".webm"))){
         val type=if(path.endsWith(".m3u8"))ExtractorLinkType.M3U8 else if(path.endsWith(".mpd"))ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
         callback(newExtractorLink(host,host,url,type){this.referer=referer.orEmpty()});return true
     }
-    dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host)
+    dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url)
     return false
 }
 val INFER_TYPE:ExtractorLinkType=ExtractorLinkType.INFERRED
