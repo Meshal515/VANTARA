@@ -62,6 +62,24 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Provide a real virtual audio clock for playback validation
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
+          vantara_audio="$RUNNER_TEMP/vantara-ci-audio"
+          mkdir -p "$vantara_audio"
+          chmod 700 "$vantara_audio"
+          pulseaudio -n --daemonize=yes --use-pid-file=no --exit-idle-time=-1 \
+            --log-target="file:$GITHUB_WORKSPACE/runtime-pulse-log.txt" \
+            --load="module-native-protocol-unix socket=$vantara_audio/native" \
+            --load="module-null-sink sink_name=vantara_ci rate=48000 channels=2"
+          export PULSE_SERVER="unix:$vantara_audio/native"
+          pactl set-default-sink vantara_ci
+          pactl set-default-source vantara_ci.monitor
+          pactl info > runtime-pulse-info.txt
+          pactl list short sinks >> runtime-pulse-info.txt
+          printf 'PULSE_SERVER=%s\nQEMU_AUDIO_DRV=pa\n' "$PULSE_SERVER" >> "$GITHUB_ENV"
       - name: Execute published provider through the actual VANTARA app adapter
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -75,7 +93,10 @@ jobs:
           cores: 4
           ram-size: 4096M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # -noaudio yielded ranchu pcmWrite I/O errors while media data was
+          # already buffered. Keep audio enabled against the private null sink;
+          # the app's real audio/video synchronization remains under test.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
           script: bash tools/repository-compat/run_app_integration.sh
       - uses: actions/upload-artifact@v4
         if: always()
@@ -86,6 +107,8 @@ jobs:
             android/app/build/reports/androidTests/
             android/app/build/test-results/
             runtime-app-logcat.txt
+            runtime-pulse-log.txt
+            runtime-pulse-info.txt
             runtime-app-webview/
             release-runtime-classpath.txt
           if-no-files-found: error
