@@ -23,9 +23,84 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import java.util.concurrent.atomic.AtomicReference
 
-/** Actual published DEX -> optional app bridge host -> existing AnimeEngine adapters.
- * Authored offline HTTP fixtures, NOT a live-site, five-work, or real playback claim. */
+/** Published DEX -> app host -> existing AnimeEngine adapters. Offline fixtures
+ * and the explicitly named live metadata journey are separate. Neither proves playback. */
 class RuntimeAppIntegrationTest {
+    @Test fun witcherSettingsRotationReplaysOnceAndRevokesLearnedPermissions()=runBlocking {
+        val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
+        ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context)
+        val scopes=java.util.concurrent.CopyOnWriteArrayList<Set<String>>()
+        val replacement="https://tvnesh8ozy-dsn.algolia.net"
+        val factory:(AndroidRuntimeClient.Scope,dev.vantara.runtime.http.HttpBroker)->AndroidRuntimeClient.HostHttpTransport={scope,_->
+            scopes.add(scope.allowedOrigins())
+            object:AndroidRuntimeClient.HostHttpTransport {
+                override fun exchange(caller:AndroidRuntimeClient.Scope,r:RuntimeHttpAccess.Request):RuntimeHttpAccess.Response {
+                    val uri=java.net.URI(r.url());var code=200
+                    val data=when(uri.host) {
+                        "d8lh9i7zl7-dsn.algolia.net"->{code=403;"""{"message":"old application settings"}"""}
+                        "firestore.googleapis.com"->{
+                            assertTrue(uri.path.endsWith("/Settings/constants"))
+                            """{"fields":{"search_settings":{"mapValue":{"fields":{"app_id_v3":{"stringValue":"TVNESH8OZY"},"api_key":{"stringValue":"authored-key"}}}}}}"""
+                        }
+                        "tvnesh8ozy-dsn.algolia.net"->{
+                            assertTrue(scope.allowedOrigins().contains(replacement))
+                            assertEquals("TVNESH8OZY",r.headers()["X-Algolia-Application-Id"]?.single())
+                            assertEquals("authored-key",r.headers()["X-Algolia-API-Key"]?.single())
+                            """{"hits":[{"objectID":"work-1","anime_id":"work-1","name":"Rotated offline work","poster_uri":"https://images.example/poster.jpg"}]}"""
+                        }
+                        else->error("Unattested offline origin")
+                    }
+                    return RuntimeHttpAccess.Response(r.url(),code,mapOf("Content-Type" to listOf("application/json")),data.toByteArray())
+                }
+            }
+        }
+        val host=RuntimeHost(context,engine,"VANTARA compatibility test",sourceTransport=factory)
+        val archive=File.createTempFile("witcher-settings-",".cs3",context.cacheDir)
+        val account="settings-"+UUID.randomUUID()
+        try {
+            host.setProfile(account)
+            ins.context.assets.open("Animewitcher.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
+            val pin=ins.context.assets.open("Animewitcher.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
+            val pkg=RuntimeHost.packageId("https://repo.example/settings","Animewitcher")
+            val installed=host.installFile(archive,pin.text("packageSha256"),pkg,buildJsonObject { put("internalName","Animewitcher");put("version",3);put("content","anime");put("enabled",true) })
+            val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            assertEquals("Rotated offline work",engine.adapter(id)!!.page(Listing.POPULAR,1).items.single().title)
+            assertEquals(2,scopes.size);assertFalse(scopes[0].contains(replacement));assertTrue(scopes[1].contains(replacement))
+            assertFalse("Stale bootstrap permission remained after source migration",scopes[1].contains("https://d8lh9i7zl7-dsn.algolia.net"))
+            assertEquals(1,engine.adapter(id)!!.page(Listing.SEARCH,1,"work").items.size)
+            assertEquals("Attested origins should avoid a second permission replay",3,scopes.size)
+            host.enable(pkg,false);host.enable(pkg,true)
+            engine.adapter(id)!!.page(Listing.POPULAR,1)
+            assertEquals(5,scopes.size);assertFalse(scopes[3].contains(replacement));assertTrue(scopes[4].contains(replacement))
+            host.setProfile(account+"-other");host.setProfile(account)
+            engine.adapter(id)!!.page(Listing.POPULAR,1)
+            assertEquals(7,scopes.size);assertFalse(scopes[5].contains(replacement))
+        }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
+    }
+    @Test fun witcherLiveCatalogueSearchDetailsAndEpisodesForFiveWorks()=runBlocking {
+        val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
+        ensureEngineInjekt(context.applicationContext as Application);val engine=AnimeEngine.get(context)
+        val host=RuntimeHost(context,engine,"VANTARA live compatibility validation")
+        val archive=File.createTempFile("witcher-live-",".cs3",context.cacheDir)
+        try {
+            host.setProfile("live-witcher-"+UUID.randomUUID())
+            ins.context.assets.open("Animewitcher.cs3").use { input->archive.outputStream().use { input.copyTo(it) } }
+            val pin=ins.context.assets.open("Animewitcher.json").bufferedReader().use { RuntimeJson.parse(it.readText()).jsonObject }
+            val installed=host.installFile(archive,pin.text("packageSha256"),RuntimeHost.packageId("https://repo.example/live-witcher","Animewitcher"),buildJsonObject { put("internalName","Animewitcher");put("version",3);put("content","anime");put("enabled",true) })
+            val id=installed.getValue("sourceIds").jsonArray.single().jsonPrimitive.content
+            val adapter=engine.adapter(id)!!
+            val works=adapter.page(Listing.POPULAR,1).items.distinctBy { java.net.URI(it.url).path }.take(5)
+            assertEquals("Live catalogue did not contain five distinct works",5,works.size)
+            for((index,work) in works.withIndex()) {
+                assertEquals(id,work.sourceId)
+                val found=adapter.page(Listing.SEARCH,1,work.title).items
+                assertTrue("Live search did not return the selected work",found.any { java.net.URI(it.url).path==java.net.URI(work.url).path })
+                val detail=adapter.details(work);assertEquals(id,detail.sourceId);assertTrue(detail.title.isNotBlank())
+                val episodes=adapter.episodes(work);assertTrue("Live work returned no episodes",episodes.isNotEmpty());assertTrue(episodes.all { it.sourceId==id && it.url.isNotBlank() })
+                android.util.Log.i("VantaraRuntime","LIVE_WITCHER_WORK_${index+1}:catalogue/search/details/episodes passed; episodes=${episodes.size}; playback=NOT_TESTED")
+            }
+        }finally{host.close();archive.delete();engine.setRuntimeSources(emptyList())}
+    }
     @Test fun witcherPublishedPackageTraversesFiveOfflineWorksThroughActualAppAdapter()=runBlocking {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val context=instrumentation.targetContext

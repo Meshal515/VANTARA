@@ -53,6 +53,9 @@ class RuntimeHost(
     private data class Retry(val owner: Owner,val generation: Long,val installed: RuntimePackageStore.Installed,val source: JsonObject,val id: String,val operation: String,val input: JsonObject,val url: String,val userAgent: String,val scope: AndroidRuntimeClient.Scope)
     private val pending = ConcurrentHashMap<String,Retry>()
     private val activeVerifications = ConcurrentHashMap<String,Retry>()
+    private data class DependencyKey(val owner:String,val pkg:String,val hash:String,val source:String)
+    // Only exact origins attested by source-owned settings, never keys/cookies.
+    private val dependencyOrigins=HashMap<DependencyKey,String>()
 
     fun setProfile(id: String) = synchronized(lock) {
         check(!closed) { "PROFILE_CHANGED" }
@@ -62,7 +65,7 @@ class RuntimeHost(
             engine.setRuntimeSources(emptyList())
             owner = Owner(id,epoch,RuntimePackageStore(File(directory,"packages").toPath(),id))
             indexes.clear()
-            pending.clear();activeVerifications.clear()
+            pending.clear();activeVerifications.clear();dependencyOrigins.clear()
         }
         refresh(owner)
     }
@@ -222,6 +225,7 @@ class RuntimeHost(
         workers.filterValues { it.packageId()==pkg }.keys.forEach { it.close();workers.remove(it) }
         pending.entries.removeAll { it.value.installed.packageId()==pkg }
         activeVerifications.entries.removeAll { it.value.installed.packageId()==pkg }
+        dependencyOrigins.keys.removeAll { it.pkg==pkg }
     }
     private fun refresh(o: Owner) {
         checkOwner(o)
@@ -247,20 +251,50 @@ class RuntimeHost(
         engine.setRuntimeSources(bindings)
     }
     private suspend fun invoke(o: Owner,installed: RuntimePackageStore.Installed,source: JsonObject,id: String,operation: String,input: JsonObject): JsonObject = slots.withPermit {
+        val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
+        val origins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),
+            synchronized(lock) { checkOwner(o);dependencyOrigins[key] })
+        val learned=java.util.concurrent.atomic.AtomicReference<String?>()
+        val started=System.nanoTime()
+        try { invokeOnce(o,installed,source,id,operation,input,origins,learned::set) }
+        catch(failure:RuntimeFailure) {
+            val replacement=learned.get()
+            if(failure.code!="ORIGIN_NOT_ALLOWED" || operation !in setOf("catalogue","search","details","episodes") || replacement==null || replacement in origins)throw failure
+            // A permission sync replay, once, only after an attested settings
+            // migration. Keep the original load10s + operation15s total budget.
+            val remaining=25000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
+            if(remaining<=0)throw IllegalStateException("OPERATION_TIMEOUT")
+            val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),replacement)
+            try { withTimeout(remaining) { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,learned::set) } }
+            catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
+        }
+    }
+    private suspend fun invokeOnce(o:Owner,installed:RuntimePackageStore.Installed,source:JsonObject,id:String,operation:String,input:JsonObject,origins:Set<String>,learned:(String)->Unit):JsonObject {
         val generation=synchronized(lock) { checkOwner(o);packageEpochs[installed.packageId()] ?: 0L }
         val current=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
         check(current.packageHash()==installed.packageHash()) { "PACKAGE_CHANGED" }
         val metadata=RuntimeJson.parse(current.metadata()).jsonObject
         check(metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false) { "SOURCE_DISABLED" }
         check(!metadata.text("description").contains("VPN",true) && !metadata.text("internalName").equals("AnimeRift",true)) { "SOURCE_NETWORK_REVIEW_REQUIRED" }
-        val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl")))
+        val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,origins)
         val bound=sourceTransport(scope,broker)
         val transport=object: AndroidRuntimeClient.HostHttpTransport {
             override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
                 synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
                 val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER);headers.putAll(request.headers())
                 headers.putIfAbsent("User-Agent",listOf(userAgent))
-                return try { bound.exchange(caller,RuntimeHttpAccess.Request(request.url(),request.method(),headers,request.body(),request.followRedirects())) }
+                val outbound=RuntimeHttpAccess.Request(request.url(),request.method(),headers,request.body(),request.followRedirects())
+                return try {
+                    val result=bound.exchange(caller,outbound)
+                    RuntimeNetworkPolicy.trustedSettingsOrigin(installed.packageHash(),source.text("mainUrl"),outbound,result)?.let { origin ->
+                        synchronized(lock) {
+                            checkPackage(o,installed.packageId(),generation)
+                            dependencyOrigins[DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)]=origin
+                            learned(origin)
+                        }
+                    }
+                    result
+                }
                 catch (failure: RuntimeFailure) {
                     if(failure.code=="VERIFICATION_REQUIRED") {
                         val actualUserAgent=headers["User-Agent"]?.firstOrNull() ?: userAgent
@@ -282,7 +316,7 @@ class RuntimeHost(
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
             // Search's published ABI returns a list; all other operations return objects.
-            if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
+            return if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
         } finally { transport.close() }
     }
     private suspend fun <T> worker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
@@ -327,7 +361,7 @@ class RuntimeHost(
         pending.remove(retry.id,retry)
         return buildJsonObject { put("ok",true);put("host",item.host);put("state","verified");put("replayedOperation",retry.operation);put("result",response) }
     }
-    fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear() }
+    fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear() }
     companion object {
         fun digest(value: String)=digest(value.toByteArray())
         fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
