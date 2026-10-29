@@ -338,7 +338,7 @@ class RuntimeHost(
         }
         val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
         try {
-            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),15000).await()) }
+            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),if(operation=="videoLinks")30000 else 15000).await()) }
             synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }

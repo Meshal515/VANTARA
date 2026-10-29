@@ -15,6 +15,9 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.IOException
 
 /** One published package per isolated generation. It never receives the host Activity or stores. */
+/** Worker-side budget for collecting video links; the host allows the operation 30 s in total. */
+private const val LINKS_BUDGET_MS=26_000L
+
 class CloudStreamProvider(private val context:Context,private val loader:ClassLoader,private val entry:String):RuntimeProvider {
     private var sources:List<MainAPI>?=null
     private var plugin:Plugin?=null
@@ -68,14 +71,13 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
                 })
             }
             "videoLinks"->{
-                val data=input.path("data").asText("");require(data.isNotBlank());val links=mutableListOf<ExtractorLink>();val subtitles=mutableListOf<SubtitleFile>()
+                val data=input.path("data").asText("");require(data.isNotBlank())
                 WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()
-                // Subtitles travel with the links; the host decides whether its subtitle engine uses them.
-                source.loadLinks(data,false,{file->if(subtitles.size<64)subtitles.add(file)},{link->check(links.size<128){"LINK_RESULT_LIMIT"};links.add(link)})
+                val collected=LinkCollector.collect(LINKS_BUDGET_MS){sub,cb->source.loadLinks(data,false,sub,cb)}
                 val missing=WorkerState.takeMissingExtractors()
                 // An empty answer still says which media hosts lacked an extractor; that is the actionable part.
-                if(links.isEmpty()&&missing.isEmpty())throw IOException("NO_VIDEO_LINKS")
-                mapOf("items" to links,"subtitles" to subtitles,"missingExtractors" to missing,"missingSamples" to WorkerState.takeMissingSamples())
+                if(collected.links.isEmpty()&&missing.isEmpty())throw collected.failure ?: IOException(if(collected.complete)"NO_VIDEO_LINKS" else "OPERATION_TIMEOUT")
+                mapOf("items" to collected.links,"subtitles" to collected.subtitles,"missingExtractors" to missing,"missingSamples" to WorkerState.takeMissingSamples(),"complete" to collected.complete)
             }
             else->throw UnsupportedOperationException(operation)
         }
