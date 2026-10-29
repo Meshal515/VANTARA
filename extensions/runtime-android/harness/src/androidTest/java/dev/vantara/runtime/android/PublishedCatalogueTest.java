@@ -26,10 +26,11 @@ public class PublishedCatalogueTest {
     static final String DETAIL="<!doctype html><html><head><title>VANTARA Offline Test</title></head><body>"+
         "<h1 class='anime-details-title'>VANTARA Offline Test</h1><div class='anime-thumbnail'><img src='https://images.example/poster.jpg'></div>"+
         "<p class='anime-story'>وصف مصدر اختباري</p><div class='anime-info'>2026</div><ul class='anime-genres'><li><a>Action</a></li></ul>"+
-        "<div id='episodesList'><div class='themexblock'><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></div></div>"+
+        "<div id='episodesList'><div class='themexblock'><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a><div class='badge light-soft'><span>الحلقة 1</span></div></div></div>"+
         "<ul class='all-episodes-list'><li><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></li></ul></body></html>";
     static final String EPISODE="<!doctype html><html><head><title>VANTARA test episode</title></head><body>"+
         "<div class='anime-page-link'><a href='"+ORIGIN+"/anime/vantara-test/'>VANTARA Offline Test</a></div>"+
+        "<ul class='all-episodes-list'><li><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></li></ul>"+
         "<div class='download-list'><table class='table'><tbody><tr><td>1080p</td><td class='td-link'><a href='https://video.fixture.example/direct.mp4'>Direct</a></td></tr></tbody></table></div></body></html>";
     @Before public void prepare() throws Exception {
         host=InstrumentationRegistry.getInstrumentation().getTargetContext();Context tests=InstrumentationRegistry.getInstrumentation().getContext();
@@ -68,7 +69,7 @@ public class PublishedCatalogueTest {
         String url=search.getJSONObject(0).getString("url");assertEquals(ORIGIN+"/anime/vantara-test/",url);
         JSONObject detail=call("details",new JSONObject().put("url",url)).getJSONObject("item");
         assertEquals("VANTARA Offline Test",detail.getString("name"));assertEquals("وصف مصدر اختباري",detail.getString("plot"));
-        JSONArray episodes=call("episodes",new JSONObject().put("url",url)).getJSONArray("items");assertEquals(1,episodes.length());
+        JSONArray episodes=call("episodes",new JSONObject().put("url",url)).getJSONArray("items");assertEquals(1,episodes.length());assertEquals(1,episodes.getJSONObject(0).getInt("episode"));
         String opaque=episodes.getJSONObject(0).getString("data");assertTrue(opaque.contains("/episode/vantara-test-1/"));
         JSONArray links=call("videoLinks",new JSONObject().put("data",opaque)).getJSONArray("items");
         assertTrue("Published extraction returned no actual link",links.length()>0);assertEquals("https://video.fixture.example/direct.mp4",links.getJSONObject(0).getString("url"));

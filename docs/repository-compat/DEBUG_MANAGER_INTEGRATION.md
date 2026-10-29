@@ -163,3 +163,19 @@ is unchanged. A new metadata contract test was observed RED then GREEN; all79
 kernel JVM cases pass and harness/test assembly/lint pass locally. The actual-app
 emulator regression must decide whether this resolves the cold metadata timeout;
 no device success or completed runtime release is claimed yet.
+
+## Device fixture correction after cold metadata passes
+
+Actions40812632153 progressed beyond registration, catalogue and details under the
+same3s metadata deadline, then failed expected1.0 versus actual-1.0 for an episode.
+Inspection of the pinned CS3 DEX confirms `.badge.light-soft span` and
+`ul.all-episodes-list li a`. The authored detail fixture omitted the badge; its
+separate episode-page fixture omitted the sidebar list, so the actual provider
+returned its fallback name `Episode` and no number. VANTARA correctly preserved
+that as unknown rather than inventing a list-position number.
+
+Complete the authored fixtures with both actual markup shapes, retain the app's
+strict episode1 assertion, and strengthen the standalone published-parser test to
+assert the raw episode field is1 too. No production parser/numbering logic or
+acceptance assertion is loosened. Both instrumentation APKs compile locally; the
+updated device run is required before reporting the complete journey successful.

@@ -32,10 +32,11 @@ class RuntimeAppIntegrationTest {
         val DETAIL="<!doctype html><html><head><title>VANTARA Offline Test</title></head><body>"+
         "<h1 class='anime-details-title'>VANTARA Offline Test</h1><div class='anime-thumbnail'><img src='https://images.example/poster.jpg'></div>"+
         "<p class='anime-story'>وصف مصدر اختباري</p><div class='anime-info'>2026</div><ul class='anime-genres'><li><a>Action</a></li></ul>"+
-        "<div id='episodesList'><div class='themexblock'><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></div></div>"+
+        "<div id='episodesList'><div class='themexblock'><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a><div class='badge light-soft'><span>الحلقة 1</span></div></div></div>"+
         "<ul class='all-episodes-list'><li><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></li></ul></body></html>"
         val EPISODE="<!doctype html><html><head><title>VANTARA test episode</title></head><body>"+
         "<div class='anime-page-link'><a href='"+ORIGIN+"/anime/vantara-test/'>VANTARA Offline Test</a></div>"+
+        "<ul class='all-episodes-list'><li><a href='"+ORIGIN+"/episode/vantara-test-1/'>الحلقة 1</a></li></ul>"+
         "<div class='download-list'><table class='table'><tbody><tr><td>1080p</td><td class='td-link'><a href='https://video.fixture.example/direct.mp4'>Direct</a></td></tr></tbody></table></div></body></html>"
     }
     @Test fun publishedPackageUsesActualAppCatalogueAndKeepsAccountsAndDisabledStateAcrossReload()=runBlocking {
