@@ -41,7 +41,10 @@ class LiveExtractorProbeTest {
                     "${if(media)"MEDIA" else "NOT_MEDIA"} ${r.code} $type"
                 }}.getOrElse{"ERROR ${it.javaClass.simpleName}: ${it.message?.take(80)}"}
             }
-            println("PROBE ${java.net.URI(url).host} handled=${handled.getOrElse{"error:"+it.message}} links=${links.size} ${verdicts.joinToString(" | ")} missing=${WorkerState.takeMissingExtractors()}")
+            val line="PROBE ${java.net.URI(url).host} handled=${handled.getOrElse{"error:"+it.javaClass.simpleName}} links=${links.size} ${links.zip(verdicts).joinToString(" | "){(l,v)->"${l.quality}p $v"}} missing=${WorkerState.takeMissingExtractors()}"
+            println(line)
+            // VANTARA_LIVE_OUT: التقرير في ملف يقرؤه CI (مخرجات الاختبار لا تظهر في سجل Gradle)
+            System.getenv("VANTARA_LIVE_OUT")?.let{File(it).appendText(line+"\n")}
         }
     }
 }

@@ -73,11 +73,34 @@ jobs:
       - name: Summarize the sweep
         if: always()
         run: node tools/repository-compat/summarize_live_sweep.mjs live-sweep.jsonl >> "$GITHUB_STEP_SUMMARY" || true
+      # من شبكة هذا الجهاز نفسه (الصفحة والفيديو من عنوان واحد كما في هاتف المستخدم): كل رابط سيرفر حقيقي
+      # جمعه الفحص أو حُفظ سابقًا يمر بمستخرجات VANTARA، ولا يُحتسب رابطًا إلا إن أعاد السيرفر فيديو أو HLS فعلًا
+      - name: Live extractor probe (real server samples)
+        if: always()
+        run: |
+          python3 - <<'PY' > extractor-samples.txt
+          import json
+          seen=set()
+          for line in open('tools/repository-compat/extractor-samples.txt'):
+              u=line.strip()
+              if u.startswith('http') and u not in seen: seen.add(u);print(u)
+          try:
+              for line in open('live-sweep.jsonl'):
+                  if not line.startswith('{'): continue
+                  for s in json.loads(line).get('sources',[]):
+                      for u in (s.get('missingSamples') or {}).values():
+                          if u not in seen: seen.add(u);print(u)
+          except FileNotFoundError: pass
+          PY
+          VANTARA_LIVE_EXTRACTORS="$PWD/extractor-samples.txt" VANTARA_LIVE_OUT="$PWD/extractor-probe.txt" \
+            bash android/gradlew -p extensions/runtime-android :cloudstream:testDebugUnitTest --tests '*LiveExtractorProbeTest*' --no-daemon || true
+          { echo '### Live extractor probe'; echo '```'; cat extractor-probe.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: live-repository-sweep
           path: |
+            extractor-probe.txt
             live-sweep.jsonl
             live-sweep-logcat.txt
             android/app/build/outputs/androidTest-results/

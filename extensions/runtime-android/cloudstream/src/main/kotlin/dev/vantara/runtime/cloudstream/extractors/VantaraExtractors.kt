@@ -25,7 +25,7 @@ object PlayerPageHosts:VantaraExtractor {
         PlayerPage.extract(java.net.URI(url).host.substringBefore('.').replaceFirstChar{it.uppercase()},url,referer,subtitles,links)
 }
 object VantaraExtractors {
-    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood,PlayerPageHosts)
+    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood,PlayerPageHosts,OkRu,Mixdrop)
     private fun matches(host:String,known:String)=host.equals(known,true)||host.endsWith(".$known",true)
     fun find(host:String):VantaraExtractor?=all.firstOrNull{e->e.hosts.any{matches(host,it)}}
     /**

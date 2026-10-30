@@ -57,4 +57,20 @@ class ExtractorFixtureTest {
     @Test fun playerPageResolvesProtocolRelativeAndEscapedAddresses() {
         assertEquals(listOf("https://cdn.example/v.mp4"),PlayerPage.mediaUrls("""sources:[{src:"\/\/cdn.example\/v.mp4",type:"video/mp4"}]""".replace("\\/","/").let{"""{file:"//cdn.example/v.mp4"}"""},"https://host.example/e/1"))
     }
+    // من صفحة ok.ru الحقيقية: الجودات المسماة في data-options (JSON مهرّب) وقائمة HLS
+    @Test fun okRuGivesEveryNamedQualityItsRealHeight() {
+        val meta="""{"videos":[{"name":"mobile","url":"https://vd1.okcdn.example/?q=0"},{"name":"sd","url":"https://vd1.okcdn.example/?q=3"},{"name":"full","url":"https://vd1.okcdn.example/?q=5"}],"hlsManifestUrl":"https://vd1.okcdn.example/video.m3u8?x=1"}"""
+        val options="""{"flashvars":{"metadata":"${meta.replace("\"","\\\"")}"}}""".replace("&","&amp;").replace("\"","&quot;")
+        serve(mapOf("https://ok.ru/videoembed/123" to """<div data-module="OKVideo" data-options="$options"></div>"""))
+        val links=resolve("https://ok.ru/videoembed/123")
+        assertEquals(listOf(144,480,1080,-1),links.map{it.quality})
+        assertEquals("https://vd1.okcdn.example/?q=5",links[2].url);assertEquals(ExtractorLinkType.M3U8,links[3].type)
+        assertEquals("https://ok.ru/",links[0].referer)
+    }
+    @Test fun mixdropReadsOnlyTheWurlAssignment() {
+        serve(mapOf("https://mixdrop.ag/e/abc" to """<script>MDCore.poster="//cdn.example/thumbs/abc.jpg";MDCore.furl=" ";MDCore.wurl="//cdn.example/v2/abc.mp4?s=1&e=2";</script>"""))
+        val link=resolve("https://mixdrop.ag/f/abc").single()
+        assertEquals("https://cdn.example/v2/abc.mp4?s=1&e=2",link.url);assertEquals("https://mixdrop.ag/",link.referer)
+    }
 }
+
