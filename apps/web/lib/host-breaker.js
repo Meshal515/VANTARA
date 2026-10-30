@@ -30,7 +30,7 @@ export class HostCoolingError extends Error {
 
 /** `Retry-After` بالثواني أو بتاريخ HTTP، بالمللي ثانية، أو null. */
 export function retryAfterMs(value, now = Date.now()) {
-  const v = String(value ?? '').trim();
+  const v = String(value ?? '').trim().slice(0, 64);
   if (!v) return null;
   if (/^\d{1,10}$/.test(v)) return Number(v) * 1000;
   if (/^-?\d+$/.test(v)) return null;

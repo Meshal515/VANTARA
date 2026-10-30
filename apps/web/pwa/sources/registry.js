@@ -150,7 +150,7 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
           next.lkg = null;
           next.restored = { at: now(), reason: 'النسخة الفاعلة تالفة على الجهاز؛ عادت آخر نسخة سليمة' };
         }
-        if (next.stable) state[id] = next;
+        if (next.stable && !RESERVED.test(id)) state[id] = next;
       }
       return;
     }
@@ -218,7 +218,7 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
             const to = targets[0].def.id;
             log(`رُحّل ${id} إلى ${to} (تطابق وحيد بالاسم واللغة)`);
             for (const [from, target] of Object.entries(aliases)) if (target === id) aliases[from] = to;
-            aliases[id] = to;
+            if (to !== id) aliases[id] = to;
             delete state[id];
             live.delete(id);
             continue;
