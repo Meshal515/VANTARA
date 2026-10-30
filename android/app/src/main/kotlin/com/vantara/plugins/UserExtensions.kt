@@ -14,6 +14,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.net.URI
 import java.security.MessageDigest
@@ -34,11 +35,16 @@ object RepoIndex {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val SHA256 = Regex("^[0-9a-f]{64}$")
 
-    data class Meta(val name: String, val fingerprint: String, val iconUrl: String? = null)
+    /** `extensionListUrl` (الحقل 102): قائمة الإضافات في ملف مستقل؛ تُتبع مرة واحدة لا أكثر. */
+    data class Meta(val name: String, val fingerprint: String, val iconUrl: String? = null, val extensionListUrl: String? = null)
+    /** اسم حزمة Android: مقاطع تبدأ بحرف، فلا «..» ولا فواصل مسار تصل لمسار ملف. */
+    val PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     data class Source(val id: String, val name: String, val lang: String, val baseUrl: String = "")
     data class Extension(
         val name: String, val pkg: String, val apkUrl: String, val lang: String, val version: String,
         val lib: Double, val nsfw: Boolean, val sources: List<Source>, val iconUrl: String? = null,
+        /** رقم الإصدار كما يعلنه الفهرس (منع الرجوع لإصدار أقدم)؛ 0 = غير معلن فلا مقارنة. */
+        val versionCode: Long = 0,
     ) {
         val anime: Boolean get() = pkg.contains(".animeextension.")
     }
@@ -82,7 +88,7 @@ object RepoIndex {
         require(list.size <= 5000) { "المستودع أكبر من الحد" }
         return list.mapNotNull { element ->
             val o = element as? JsonObject ?: return@mapNotNull null
-            val pkg = o["pkg"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val pkg = o["pkg"]?.jsonPrimitive?.contentOrNull?.takeIf { PKG.matches(it) } ?: return@mapNotNull null
             val apk = o["apk"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
             if (!Regex("^[A-Za-z0-9._-]+\\.apk$").matches(apk) || !Regex("^[A-Za-z0-9_.]+$").matches(pkg)) return@mapNotNull null
             val version = o["version"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -96,6 +102,7 @@ object RepoIndex {
                 name = (o["name"]?.jsonPrimitive?.contentOrNull ?: pkg).removePrefix("Tachiyomi: ").removePrefix("Aniyomi: "),
                 pkg = pkg, apkUrl = "$base/apk/$apk", lang = o["lang"]?.jsonPrimitive?.contentOrNull ?: "",
                 version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources, iconUrl = declaredIcon(o),
+                versionCode = o["code"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 } ?: 0,
             )
         }
     }
@@ -107,16 +114,24 @@ object RepoIndex {
      * يُفك يدويًا (حقول قليلة ثابتة) بلا مخطط مولَّد.
      */
     fun parseIndexV2(raw: ByteArray): Pair<Meta, List<Extension>> {
-        val bytes = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) gunzip(raw, 32 * 1024 * 1024) else raw
-        val top = Pb(bytes).fields()
+        val top = Pb(unpack(raw)).fields()
         val name = top.text(1)?.take(80)?.ifBlank { null } ?: error("فهرس المستودع بلا اسم")
         val fingerprint = top.text(3)?.lowercase()?.replace(":", "")
         require(fingerprint != null && SHA256.matches(fingerprint)) { "المستودع لا يعلن مفتاح توقيع؛ لا نشغّل كودًا بلا توقيع معروف" }
-        val list = top.all(101).flatMap { Pb(it).fields().all(1) }
+        val listUrl = top.text(102)?.takeIf { it.startsWith("https://") }
+        return Meta(name, fingerprint, extensionListUrl = listUrl) to entries(top.all(101).flatMap { Pb(it).fields().all(1) })
+    }
+
+    /** ملف `extensionListUrl`: ExtensionList { 1 Extension... } بلا اسم ولا مفتاح (يُحكم بمفتاح المستودع). */
+    fun parseExtensionList(raw: ByteArray): List<Extension> = entries(Pb(unpack(raw)).fields().all(1))
+
+    private fun unpack(raw: ByteArray) = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) gunzip(raw, 32 * 1024 * 1024) else raw
+
+    private fun entries(list: List<ByteArray>): List<Extension> {
         require(list.size <= 5000) { "المستودع أكبر من الحد" }
-        val extensions = list.mapNotNull { entry ->
+        return list.mapNotNull { entry ->
             val e = Pb(entry).fields()
-            val pkg = e.text(2)?.takeIf { Regex("^[A-Za-z0-9_.]+$").matches(it) } ?: return@mapNotNull null
+            val pkg = e.text(2)?.takeIf { PKG.matches(it) } ?: return@mapNotNull null
             val apkUrl = e.bytes(3)?.let { Pb(it).fields().text(1) }?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
             val version = e.text(6) ?: return@mapNotNull null
             val lib = e.text(4)?.toDoubleOrNull() ?: version.split('.').take(2).joinToString(".").toDoubleOrNull() ?: return@mapNotNull null
@@ -129,9 +144,9 @@ object RepoIndex {
             Extension(
                 name = e.text(1) ?: pkg, pkg = pkg, apkUrl = apkUrl, lang = langs.singleOrNull() ?: "all",
                 version = version, lib = lib, nsfw = e.varint(7) == 3L, sources = sources,
+                versionCode = e.varint(5)?.takeIf { it > 0 } ?: 0,
             )
         }
-        return Meta(name, fingerprint) to extensions
     }
 
     private fun gunzip(raw: ByteArray, limit: Int): ByteArray =
@@ -210,6 +225,11 @@ data class UserExtension(
     val versionName: String, val lib: Double, val lang: String, val nsfw: Boolean, val sources: List<UserSource>,
     val previous: UserVersion? = null,
     /**
+     * رقم الإصدار المثبت كما أعلنه الفهرس؛ 0 في سجلات قبل حفظه فلا مقارنة. لا يُستنتج من versionName:
+     * Keiyoushi غيّرت مخططه (1.6.0 رقمه 106000، و1.4.6 كان 6).
+     */
+    val versionCode: Long = 0,
+    /**
      * معرّفات مصادر قديمة ← الحالية. المكتبة والتقدّم محفوظة بالمعرّف الذي أُضيف به المصدر
      * (`pkg#id`)، فإن غيّرت الإضافة معرّف مصدرها في تحديث بقيت مكتبتك تصل إليه (PERSISTENT_PLUGINS §3.2).
      */
@@ -228,6 +248,7 @@ data class UserExtension(
 
     fun asVersion() = UserVersion(apkUrl, sha256, versionName, lib, sources)
 
+
     /** معرّف المصدر الحالي لمعرّف محفوظ، باتباع سلسلة الترحيل (بحد، فلا حلقة تعلّق التحميل). */
     fun resolve(id: String): String {
         var at = id
@@ -244,7 +265,7 @@ data class UserExtension(
     /** الرجوع لآخر سليم: يصير هو الحالي بمصادره، ومعرّفات الإصدار المتعطّل تُرحَّل إليه. */
     fun rolledBack(): UserExtension? = previous?.let { p ->
         copy(apkUrl = p.apkUrl, sha256 = p.sha256, versionName = p.versionName, lib = p.lib, sources = p.sources,
-            previous = null, aliases = aliases + sourceAliases(sources, p.sources))
+            previous = null, versionCode = 0, aliases = aliases + sourceAliases(sources, p.sources))
     }
 }
 
@@ -321,7 +342,10 @@ class RepoClient(private val context: Context, private val client: okhttp3.OkHtt
         if (v2 != null) {
             val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024))
             require(declared.fingerprint == meta.fingerprint) { "مفتاح التوقيع في repo.json لا يطابق الفهرس" }
-            return declared to list
+            // القائمة قد تكون في ملف مستقل (الحقل 102): تُتبع مرة واحدة فقط، فلا حلقة إعادة توجيه
+            // بلا حد كما في Mihon، وبحد حجم. بدون هذا كان نقل Keiyoushi القائمة إليه يُظهر صفر إضافات
+            val all = if (list.isEmpty() && meta.extensionListUrl != null) RepoIndex.parseExtensionList(fetchBytes(meta.extensionListUrl, 16 * 1024 * 1024)) else list
+            return declared to all
         }
         return declared to RepoIndex.parseIndex(fetchText("$base/index.min.json"), base)
     }

@@ -20,7 +20,7 @@ import java.io.File
 class BuiltinSourceRefresh(private val file: File) {
     /** إصدار مثبّت، ومعه آخر إصدار سليم قبله (Last Known Good) ليُرجع إليه إن تعطّل هذا على الجهاز. */
     @Serializable
-    data class Pinned(val sha256: String, val apkUrl: String, val versionName: String, val lib: Double, val previous: Pinned? = null)
+    data class Pinned(val sha256: String, val apkUrl: String, val versionName: String, val lib: Double, val previous: Pinned? = null, val code: Long = 0)
 
     private val json = Json { ignoreUnknownKeys = true }
     private val codec = MapSerializer(String.serializer(), Pinned.serializer())
@@ -46,16 +46,25 @@ class BuiltinSourceRefresh(private val file: File) {
         require(meta.fingerprint == KEIYOUSHI_KEY) { "Keiyoushi signing key changed" }
         val ext = list.firstOrNull { it.pkg == base.pkg } ?: return null
         if (kotlin.math.abs(ext.lib - base.expectedLib) > 0.0001) return null
+        // لا رجوع لإصدار أقدم من المثبّت على الجهاز: فهرس قديم أو متلاعب به لا يعيد إصدارًا مُستبدلًا
+        val have = pins[base.pkg]?.code ?: 0
+        if (ext.versionCode in 1 until have) return null
         val bytes = repo.downloadSigned(ext.apkUrl, KEIYOUSHI_KEY)
-        base.copy(sha256 = sha256Hex(bytes), apkUrl = ext.apkUrl, versionName = ext.version, expectedLib = ext.lib) to bytes
+        val sha = sha256Hex(bytes)
+        if (ext.versionCode > 0) codes[sha] = ext.versionCode
+        base.copy(sha256 = sha, apkUrl = ext.apkUrl, versionName = ext.version, expectedLib = ext.lib) to bytes
     }.getOrNull()
+
+    /** رقم الإصدار المعلن لكل ما نُزّل (بالبصمة)، يُحفظ مع تثبيته فيُمنع لاحقًا الرجوع لما قبله. */
+    private val codes = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** يثبّت إصدارًا نُزّل بعد نجاح تحميله فعلًا. الكتابة ذرّية: ملف مؤقت ثم إعادة تسمية. */
     @Synchronized fun confirm(spec: SourceSpec) {
         val old = pins[spec.pkg]
         if (old?.sha256.equals(spec.sha256, ignoreCase = true)) return
         // السابق يُحفظ بلا سابقه: سجل من خطوة واحدة يكفي ولا ينمو بلا حد
-        write(pins + (spec.pkg to Pinned(spec.sha256, spec.apkUrl, spec.versionName, spec.expectedLib, old?.copy(previous = null))))
+        val code = codes.remove(spec.sha256) ?: 0
+        write(pins + (spec.pkg to Pinned(spec.sha256, spec.apkUrl, spec.versionName, spec.expectedLib, old?.copy(previous = null), code)))
     }
 
     /**

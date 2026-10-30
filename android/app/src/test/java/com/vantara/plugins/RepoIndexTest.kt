@@ -134,4 +134,34 @@ class RepoIndexTest {
             assertEquals("https://example.com/logo.png", reloaded.repos.single().iconUrl)
         } finally { directory.deleteRecursively() }
     }
+
+    private val fp = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+
+    @Test fun readsTheDeclaredVersionCodeInsteadOfGuessingItFromTheName() {
+        // Keiyoushi: «1.6.4» رقمه 106004 في الفهرس الحالي، فلا يُستنتج الرقم من الاسم
+        val (_, list) = RepoIndex.parseIndexV2(field(1, "K") + field(3, fp) + field(101, ext("Azora", "eu.kanade.tachiyomi.extension.ar.azora", 1, source(1, "Azora", "ar"))))
+        assertEquals(106004L, list.single().versionCode)
+        // الفهرس القديم index.min.json: الحقل code إن وُجد، وإلا 0 (لا مقارنة)
+        val v1 = RepoIndex.parseIndex(index, base)
+        assertEquals(59L, v1[0].versionCode)
+        assertEquals(0L, v1[1].versionCode)
+    }
+
+    @Test fun anIndexMayMoveItsListToASeparateFileFollowedOnce() {
+        val (meta, list) = RepoIndex.parseIndexV2(field(1, "K") + field(3, fp) + field(102, "https://example.com/list.pb"))
+        assertEquals("https://example.com/list.pb", meta.extensionListUrl)
+        assertTrue(list.isEmpty())
+        val separate = RepoIndex.parseExtensionList(ext("Azora", "eu.kanade.tachiyomi.extension.ar.azora", 1, source(7, "Azora", "ar")))
+        assertEquals(listOf("eu.kanade.tachiyomi.extension.ar.azora"), separate.map { it.pkg })
+        // رابط غير آمن لا يُتبع
+        assertNull(RepoIndex.parseIndexV2(field(1, "K") + field(3, fp) + field(102, "http://example.com/list.pb")).first.extensionListUrl)
+    }
+
+    @Test fun aPackageNameThatCouldEscapeTheVaultIsDropped() {
+        val (_, list) = RepoIndex.parseIndexV2(
+            field(1, "K") + field(3, fp) + field(101, ext("Evil", "..", 1, source(1, "x", "ar")) + ext("Evil2", "a..b", 1, source(2, "x", "ar")) +
+                ext("Evil3", ".hidden.pkg", 1, source(3, "x", "ar")) + ext("Ok", "eu.kanade.tachiyomi.extension.ar.ok", 1, source(4, "x", "ar"))),
+        )
+        assertEquals(listOf("Ok"), list.map { it.name })
+    }
 }

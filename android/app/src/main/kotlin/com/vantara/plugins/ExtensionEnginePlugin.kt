@@ -336,13 +336,17 @@ class ExtensionEnginePlugin : Plugin() {
                 require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
+                // لا رجوع لإصدار أقدم من المستودع: فهرس قديم أو متلاعب به لا يعيد ثغرة أُصلحت (أسلوب TUF)
+                userStore.extension(pkg)?.let { mine ->
+                    require(ext.versionCode <= 0 || ext.versionCode >= mine.versionCode) { "${ext.name}: الإصدار في المستودع (${ext.version}) أقدم من المثبت عندك (${mine.versionName})؛ لا نرجع لإصدار أقدم" }
+                }
                 val apkUrl = ext.apkUrl
                 val bytes = repoClient.downloadSigned(apkUrl, repo.fingerprint)
                 val visible = RepoIndex.visibleSources(ext)
                 val fresh = UserExtension(
                     repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
                     versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
-                    sources = visible.map { UserSource(it.id, it.name, it.lang) },
+                    sources = visible.map { UserSource(it.id, it.name, it.lang) }, versionCode = ext.versionCode,
                 )
                 // التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا،
                 // وإن فشل بقي القديم محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم)
