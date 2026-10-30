@@ -13,6 +13,23 @@
  */
 
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
+import { assertVisible, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
+
+/**
+ * المحرك الأصلي يحمّل عند الإقلاع حزم المصادر الظاهرة لهذا الحساب فقط، فلا يُنزّل حساب جديد
+ * حزمًا لم يضفها. تلميح أداء لا قرار ملكية: القرار يبقى هنا (`forSource`).
+ */
+onEntitlementChange(async (decision) => {
+	const plugin = globalThis.Capacitor?.Plugins?.ExtensionEngine;
+	if (decision.state === 'unknown' || typeof plugin?.setVisibleBuiltins !== 'function') return;
+	try {
+		const { sources: list } = await plugin.sources();
+		if (entitlement() !== decision) return;
+		await plugin.setVisibleBuiltins({ pkgs: visiblePackages(list ?? [], decision) });
+	} catch {
+		// التلميح يُعاد عند التغيير التالي؛ غيابه يعني تحميلًا عند أول طلب فقط
+	}
+});
 
 /** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
 function bridge() {
@@ -22,6 +39,15 @@ function bridge() {
 /** هل المحرّك موجود أصلًا؟ تُسأل قبل عرض أي واجهة مصادر. */
 export function isAvailable() {
 	return bridge() !== null;
+}
+
+/**
+ * مصدر مدمج سابقًا غير مضاف لهذا الحساب لا يُطلب من المحرك (lib/source-entitlement.js):
+ * يُرمى خطأ «أضف مصدرًا» (`SOURCE_NOT_ADDED`) قبل أي شبكة أو تنزيل حزمة.
+ */
+function forSource(sourceId) {
+	assertVisible({ id: sourceId });
+	return required();
 }
 
 function required() {
@@ -41,7 +67,7 @@ function required() {
  */
 export async function sources() {
 	const { sources: list } = await required().sources();
-	return list ?? [];
+	return (list ?? []).filter((source) => visible(source));
 }
 
 /**
@@ -51,7 +77,7 @@ export async function sources() {
  * بعده يُخدَم من الذاكرة. فالواجهة تُظهر «جارٍ فتح المصدر» على هذا وحده.
  */
 export async function prepare(sourceId) {
-	return required().prepare({ sourceId });
+	return forSource(sourceId).prepare({ sourceId });
 }
 
 /**
@@ -61,26 +87,26 @@ export async function prepare(sourceId) {
  * تسعة آلاف، وفي MangaDex كل اللغات لا العربي.
  */
 export async function catalogue(sourceId, page = 1) {
-	return required().catalogue({ sourceId, page });
+	return forSource(sourceId).catalogue({ sourceId, page });
 }
 
 /** الرائج — الواجهة الأولى عند فتح مصدر. `{ mangas, hasNextPage, page }`. */
 export async function popular(sourceId, page = 1) {
-	return required().popular({ sourceId, page });
+	return forSource(sourceId).popular({ sourceId, page });
 }
 
 /** آخر التحديثات — ومنه يأتي «الجلب التلقائي» للفصول الجديدة. */
 export async function latest(sourceId, page = 1) {
-	return required().latest({ sourceId, page });
+	return forSource(sourceId).latest({ sourceId, page });
 }
 
 /** أعمال تصنيف بفلتر المصدر. `names`: أسماء التصنيف بكل صيغها (عربي وإنجليزي). */
 export async function genre(sourceId, names, page = 1) {
-	return required().genre({ sourceId, names, page });
+	return forSource(sourceId).genre({ sourceId, names, page });
 }
 
 export async function search(sourceId, query, page = 1) {
-	return required().search({ sourceId, query, page });
+	return forSource(sourceId).search({ sourceId, query, page });
 }
 
 /**
@@ -111,21 +137,21 @@ function sense(sourceId, manga, list) {
 }
 
 export async function series(sourceId, manga) {
-	const out = await required().series({ sourceId, manga });
+	const out = await forSource(sourceId).series({ sourceId, manga });
 	sense(sourceId, out.manga ?? manga, out.chapters ?? []);
 	return { manga: out.manga, chapters: out.chapters ?? [] };
 }
 
 /** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
 export async function chapters(sourceId, manga) {
-	const { chapters: list } = await required().chapters({ sourceId, manga });
+	const { chapters: list } = await forSource(sourceId).chapters({ sourceId, manga });
 	sense(sourceId, manga, list ?? []);
 	return list ?? [];
 }
 
 /** صفحات فصل. مرّر كائن الفصل كما جاءك من `chapters()`. */
 export async function pages(sourceId, chapter) {
-	const { pages: list } = await required().pages({ sourceId, chapter });
+	const { pages: list } = await forSource(sourceId).pages({ sourceId, chapter });
 	return list ?? [];
 }
 
@@ -168,13 +194,59 @@ export async function clearImageCache() {
 export function repositories() {
 	const plugin = bridge();
 	if (typeof plugin?.addRepo !== 'function') return null;
+	// حزمة كانت مدمجة تظهر في مستودعها (Keiyoushi) كأي إضافة: «تثبيتها» يضيفها لحسابك بمعرّفها
+	// القديم نفسه (لا نسخة ثانية ولا معرّف جديد)، و«حذفها» يزيلها من حسابك دون مسّ المكتبة.
+	const formerlyBundled = new Set();
 	return {
 		list: () => plugin.repos(),
 		add: (url) => plugin.addRepo({ url }),
 		remove: (url) => plugin.removeRepo({ url }),
-		extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],
-		install: (repo, pkg) => plugin.installExtension({ repo, pkg }),
-		uninstall: (pkg) => plugin.uninstallExtension({ pkg }),
+		extensions: async (url) => ((await plugin.repoIndex({ url })).extensions ?? []).map((ext) => {
+			if (!ext?.builtin) return ext;
+			formerlyBundled.add(ext.pkg);
+			const added = visible({ id: ext.pkg });
+			return { ...ext, builtin: false, formerlyBundled: true, installed: added ? ext.installed ?? ext.version : null, update: false };
+		}),
+		install: (repo, pkg) => formerlyBundled.has(pkg) ? choosePackage(pkg, true) : plugin.installExtension({ repo, pkg }),
+		uninstall: (pkg) => formerlyBundled.has(pkg) ? choosePackage(pkg, false) : plugin.uninstallExtension({ pkg }),
+	};
+}
+
+/**
+ * «مصادر جاهزة»: مصادر المانجا التي كانت تُشحن داخل التطبيق، بصيغة مستودع يقرؤه مدير الإضافات
+ * (addons-v7.js) على كل المنصات. الإضافة والإزالة اختيار متزامن في حسابك
+ * (lib/source-entitlement.js)، والمعرّف هو نفسه دائمًا، فلا تتكرر المصادر ولا تنقطع المكتبة.
+ */
+export const READY_REPOSITORY = 'vantara:ready-sources';
+export function readySources() {
+	if (!bridge()) return null;
+	const items = async () => {
+		const { sources: list } = await required().sources();
+		const byPackage = new Map();
+		for (const source of list ?? []) {
+			if (!isBundled(source) || source.filler) continue;
+			const pkg = packageOf(source.id);
+			if (byPackage.has(pkg)) continue;
+			const added = visible(source);
+			byPackage.set(pkg, {
+				pkg, name: source.label ?? pkg, version: String(source.version ?? ''), lang: source.lang ?? 'ar',
+				arabic: String(source.lang ?? 'ar').toLowerCase() === 'ar', nsfw: false, anime: false,
+				installed: added ? String(source.version ?? true) : null, update: false, formerlyBundled: true,
+				sources: source.names ?? [source.label ?? pkg], ...(source.iconUrl ? { iconUrl: source.iconUrl } : {}),
+			});
+		}
+		return [...byPackage.values()];
+	};
+	return {
+		list: async () => ({
+			repos: [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }],
+			installed: (await items()).filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY })),
+		}),
+		add: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
+		remove: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
+		extensions: () => items(),
+		install: (_repo, pkg) => choosePackage(pkg, true),
+		uninstall: (pkg) => choosePackage(pkg, false),
 	};
 }
 
@@ -195,6 +267,7 @@ export function sites() {
 export default {
 	cover,
 	repositories,
+	readySources,
 	sites,
 	isAvailable,
 	sources,

@@ -12,6 +12,7 @@ import { catalogExtras, matchesStremioResource } from "./stremio-model.js";
 import { publicUrl } from "./manifest.js";
 import { plainObject } from "./contracts.js";
 import { createSourcePulse } from "./source-pulse.js";
+import { notAddedError, onEntitlementChange, visible } from "../lib/source-entitlement.js";
 
 // معرّفات إضافات الويب (Stremio/Remote) تبدأ بـ addon|. مصادر CloudStream الأصلية تبدأ بـ addon|cs3| أيضًا
 // لكنها في سجل المحرك الأصلي؛ معاملتها كإضافة ويب جعلت فتح أعمالها يفشل («فتحه غير مدعوم»).
@@ -45,7 +46,8 @@ export function createAddonRuntime({
   const syncCore = () => {
     core.length = 0;
     core.push(
-      ...r.registry.list().map((d) => ({
+      // المصادر المدمجة سابقًا تظهر فقط لمن أضافها أو لحساب كان يملكها قبل الفصل (lib/source-entitlement.js)
+      ...r.registry.list().filter((d) => visible(d)).map((d) => ({
         key: `core|${d.id}`,
         sourceId: d.id,
         name: d.label,
@@ -70,6 +72,8 @@ export function createAddonRuntime({
     );
   };
   const ready = Promise.all([r.ready, registry.ready]).then(syncCore);
+  // تغيّر الحساب أو إضافة/إزالة مصدر من جهاز آخر: القائمة تُعاد دون إعادة تشغيل
+  onEntitlementChange(() => { void ready.then(syncCore).catch(() => {}); });
   const cache = createAddonCache({ store });
   const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
@@ -77,6 +81,7 @@ export function createAddonRuntime({
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
+      if (!visible(sourceDef)) throw notAddedError(sourceDef.id);
       const raw = createBundledAdapter({ sourceDef, engine: r.registry });
       // كل تصفح فعلي للمصدر دليل على صحته: يُسجَّل في نبضه
       const measured = (fn, capability) => (...a) => pulse.measure(key, () => fn(...a), {

@@ -61,7 +61,7 @@ const kindName=(a)=>{
 };
 
 export function renderV7Addons({
-  registry={}, filter="all", repositories=null, animeRepositories=null, cloudstreamRepositories=null, sites=null, verification=null, pulse=null,
+  registry={}, filter="all", repositories=null, readySources=null, animeRepositories=null, cloudstreamRepositories=null, sites=null, verification=null, pulse=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
 }={}){
   const root=el("section","v7-addon addon-v7");
@@ -75,7 +75,9 @@ export function renderV7Addons({
   const stores=[
     ...(cloudstreamRepositories?[{id:"cloudstream",kind:"anime",family:"cloudstream",api:cloudstreamRepositories}]:[]),
     ...(animeRepositories?[{id:"anime",kind:"anime",api:animeRepositories}]:[]),
-    ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[])
+    ...(repositories?[{id:"manga",kind:"manga",api:repositories}]:[]),
+    // مصادر المانجا التي كانت مدمجة: تُضاف لحسابك بمعرّفها القديم (lib/extension-engine.js readySources)
+    ...(readySources?[{id:"ready",kind:"manga",api:readySources}]:[])
   ];
   let repos=[], extensions=new Map(), siteRows=[], loading=false;
   const head=el("div","v7-heading");

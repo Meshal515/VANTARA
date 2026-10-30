@@ -10,6 +10,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
+import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
 import { aliasMap, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
@@ -157,6 +158,9 @@ export function resetSources() {
   sourcesPromise = null;
   discovered.clear();
 }
+
+// مصدر أُضيف أو أُزيل (أو وصل صف الحساب من المزامنة): القائمة تُقرأ من جديد
+onEntitlementChange(() => resetSources());
 
 export const available = () => engine.isAvailable();
 
