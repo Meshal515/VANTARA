@@ -1,0 +1,99 @@
+name: Web Debug
+
+# نسخة ويب تجريبية من فرع Debug للتجربة على الكمبيوتر، بأمر المالك. نشر معاينة فقط بفرع ثابت
+# web-debug في مشروع Pages نفسه (رابط ثابت web-debug.<subdomain>)، ولا يلمس production أبدًا:
+# لا يغيّر production_branch ولا إعدادات المشروع، ولا ينشر Workers ولا يمس D1.
+on:
+  push:
+    branches: [feat/addons-v7-native-manager-20261027]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-debug
+  cancel-in-progress: true
+
+env:
+  CF_PAGES_PROJECT: vantara
+  CF_PREVIEW_BRANCH: web-debug
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # لا نشر لنسخة اختباراتها فاشلة
+      - name: Web tests
+        run: npx vitest run apps/web
+
+      - name: Verify Cloudflare secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+
+      # نفس تجهيز production: عنوان المزامنة ونسخة الواجهة وبصمة الـservice worker. النسخة تبدأ بـ
+      # web-debug فتُعرف من الإعدادات. المزامنة والجلب تعمل فقط إن كان أصل هذه النسخة في ALLOWED_ORIGINS.
+      - name: Bake endpoints and version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          API_URL_VAR: ${{ vars.VANTARA_API_URL }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | jq -r '.result.subdomain // empty')
+          sync=''
+          if [ -n "$sub" ]; then sync="https://vantara-sync.$sub.workers.dev"; fi
+          SYNC_URL="$sync" API_URL="${API_URL_VAR:-}" PWA_VERSION="web-debug-$(git rev-parse --short=7 HEAD)" python3 - <<'PY'
+          import hashlib, os, pathlib, re
+          path = 'apps/web/lib/config.js'
+          text = open(path, encoding='utf-8').read()
+          text = text.replace('__VANTARA_SYNC_URL__', os.environ['SYNC_URL'])
+          text = text.replace('__VANTARA_API_URL__', os.environ['API_URL'])
+          text = text.replace('__VANTARA_VERSION__', os.environ['PWA_VERSION'])
+          open(path, 'w', encoding='utf-8').write(text)
+          worker = pathlib.Path('apps/web/sw.js')
+          source = worker.read_text()
+          digest = hashlib.sha256()
+          for asset in re.findall(r"^\s*'(/[^']+)',$", source, re.M):
+              digest.update(asset.encode())
+              digest.update(pathlib.Path('apps/web', 'index.html' if asset == '/' else asset[1:]).read_bytes())
+          source = re.sub(r"const SHELL_DIGEST = '[^']+';", f"const SHELL_DIGEST = '{digest.hexdigest()}';", source)
+          worker.write_text(source)
+          PY
+
+      - name: Deploy preview (never production)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test "$CF_PREVIEW_BRANCH" != main
+          npx --yes wrangler@4 pages deploy apps/web \
+            --project-name="$CF_PAGES_PROJECT" \
+            --branch="$CF_PREVIEW_BRANCH" \
+            --commit-dirty=true
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PAGES_PROJECT" \
+            | jq -r '.result.subdomain')
+          echo "Web Debug: https://$CF_PREVIEW_BRANCH.$sub" | tee -a "$GITHUB_STEP_SUMMARY"
