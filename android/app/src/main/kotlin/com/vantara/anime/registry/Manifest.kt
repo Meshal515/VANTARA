@@ -172,7 +172,8 @@ object ManifestParser {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** المحوّلات الأصلية التي يعرفها هذا الإصدار من التطبيق. */
-    val NATIVE_ADAPTERS = setOf(com.vantara.anime.adapters.WitAnimeSiteAdapter.KIND, com.vantara.anime.adapters.ArabSeedSiteAdapter.KIND, com.vantara.anime.adapters.TukTukSiteAdapter.KIND, com.vantara.anime.adapters.ShahiidSiteAdapter.KIND, com.vantara.anime.adapters.AkwamSiteAdapter.KIND, com.vantara.anime.adapters.EgyDeadSiteAdapter.KIND, com.vantara.anime.adapters.RistoAnimeSiteAdapter.KIND)
+    /** لا محوّلات مواقع مدمجة (قرار المالك 30 أكتوبر 2026). */
+    val NATIVE_ADAPTERS: Set<String> = emptySet()
 
     fun parse(text: String): Manifest = json.decodeFromString(Manifest.serializer(), text)
 

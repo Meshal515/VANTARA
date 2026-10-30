@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'f5f5b678a8ef8f6a3d91d8c5b75273d0176114083ca4c5e1c5693552b3530621';
+const SHELL_DIGEST = '97635e6896112a873ea1e62c577a657d32ef7e670e85c9855f731aa22ad37176';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -286,7 +286,6 @@ const SHELL = [
   '/pwa/sources/defs.json',
   '/pwa/sources/allow.json',
   '/pwa/sources/dom.js',
-  '/pwa/sources/engines/arabseed.js',
   '/pwa/sources/engines/index.js',
   '/pwa/sources/engines/madara.js',
   '/pwa/sources/engines/iken.js',
@@ -295,14 +294,6 @@ const SHELL = [
   '/pwa/sources/engines/mangathemesia.js',
   '/pwa/sources/engines/teamx.js',
   '/pwa/sources/engines/zeistmanga.js',
-  '/pwa/sources/engines/shahiid.js',
-  '/pwa/sources/engines/tuktuk.js',
-  '/pwa/sources/engines/akwam.js',
-  '/pwa/sources/engines/egydead.js',
-  '/pwa/sources/engines/ristoanime.js',
-  '/pwa/sources/engines/okanime.js',
-  '/pwa/sources/engines/video-common.js',
-  '/pwa/sources/engines/witanime.js',
   '/pwa/sources/hosts.js',
   '/pwa/sources/registry.js',
   '/pwa/sources/detect.js',

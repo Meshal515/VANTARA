@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, relative, sep } from 'node:path';
 import test from 'node:test';
@@ -1211,24 +1211,14 @@ test('every source extension ships inside the app and matches its pinned hash', 
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
 });
 
-test('anime/cinema extensions are bundled in the APK with the manifest fingerprint', () => {
-  // المستودع يحذف الإصدار القديم مع كل بناء: رابط Anime4Up وOkAnime المثبّت صار 404
-  // («تعذّر تنزيل» على الجهاز). كل إضافة في البيان مضمّنة ببصمته نفسها.
+test('anime/cinema built-in sources are removed by owner decision (30 Oct 2026)', () => {
+  // المالك: لا مصادر أنمي أو سينما مدمجة؛ المستخدم يضيف إضافاته (والتورنت محرك مستقل لا يمسّه هذا)
   const manifest = JSON.parse(read('apps/web/anime/sources.json'));
-  const specs = manifest.sources.filter((s) => s.extension).map((s) => s.extension);
-  assert.ok(specs.length >= 5, 'the anime manifest must pin its extensions');
-  const dir = 'android/app/src/main/assets/anime-extensions';
-  const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
-  for (const { pkg, sha256, apk, version } of specs) {
-    const path = `${dir}/${pkg}.apk`;
-    assert.equal(apk.match(/-v([\d.]+)\.apk$/)?.[1], version, `${pkg}: version must match its APK file name`);
-    assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-anime-extensions.mjs`);
-    const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
-    assert.equal(actual, sha256, `${path} does not match the manifest sha256`);
-  }
-  assert.equal(onDisk.length, specs.length, 'no stale anime extension APKs may remain in the bundle');
-  const loader = read('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
-  assert.match(loader, /cached \?: bundled\(ref\) \?: download\(ref\)/, 'the anime loader must prefer the bundled copy over downloading');
+  assert.deepEqual(manifest.sources, [], 'the anime/cinema manifest ships no built-in sources');
+  assert.ok(!existsSync(resolve(ROOT, 'android/app/src/main/assets/anime-extensions')), 'no bundled anime extension APKs');
+  const defs = JSON.parse(read('apps/web/pwa/sources/defs.json'));
+  const list = Array.isArray(defs) ? defs : defs.sources;
+  assert.ok(!list.some((d) => String(d.engine).endsWith('-site')), 'no built-in video site definitions on the web');
 });
 
 test('hybrid updates: web bundles only on matching native code, APKs only if official and newer', async () => {

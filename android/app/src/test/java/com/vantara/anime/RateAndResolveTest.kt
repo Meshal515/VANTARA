@@ -178,18 +178,4 @@ class RateAndResolveTest {
         assertEquals(listOf("witanime", "okanime"), ranked)
     }
 
-    @Test fun `OkAnime's shipped episode rule reads the redesigned work page`() {
-        val file = generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "apps/web/anime/sources.json") }.first { it.isFile }
-        val rule = ManifestParser.parse(file.readText()).sources.first { it.id == "okanime" }.episodes!!
-        val html = """
-            <div class="ep-compact-grid">
-              <a href="https://ww3.okanime.xyz/episode/boruto-naruto-next-generations-episode-1" class="ep-compact-btn " title="الحلقة 1">1</a>
-              <a href="https://ww3.okanime.xyz/episode/boruto-naruto-next-generations-episode-10" class="ep-compact-btn " title="الحلقة 10">10</a>
-              <a href="https://ww3.okanime.xyz/episode/boruto-naruto-next-generations-episode-2" class="ep-compact-btn " title="الحلقة 2">2</a>
-            </div>
-            <a class="sidebar-schedule-card" href="https://ww3.okanime.xyz/episode/yani-neko-episode-1">جدول</a>"""
-        val eps = rule.extract(html, "https://ww3.okanime.xyz/anime/boruto-naruto-next-generations")
-        assertEquals(listOf(1f, 2f, 10f), eps.map { it.number })
-        assertEquals("/episode/boruto-naruto-next-generations-episode-2", eps[1].path)
-    }
 }

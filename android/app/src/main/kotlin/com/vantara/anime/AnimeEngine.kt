@@ -6,13 +6,6 @@ import com.vantara.anime.adapters.ExtensionAdapter
 import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.adapters.SourcePage
-import com.vantara.anime.adapters.ArabSeedSiteAdapter
-import com.vantara.anime.adapters.ShahiidSiteAdapter
-import com.vantara.anime.adapters.TukTukSiteAdapter
-import com.vantara.anime.adapters.AkwamSiteAdapter
-import com.vantara.anime.adapters.EgyDeadSiteAdapter
-import com.vantara.anime.adapters.RistoAnimeSiteAdapter
-import com.vantara.anime.adapters.WitAnimeSiteAdapter
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.hosts.WebViewSniffer
 import com.vantara.anime.catalog.CatalogCrawler
@@ -210,57 +203,9 @@ class AnimeEngine(context: Context) {
     }
 
     /** محوّل VANTARA أصلي: لا تنزيل ولا تحميل كود، فيُبنى فورًا. */
-    private fun native(e: SourceEntry, kind: String): AnimeAdapter = when (kind) {
-        WitAnimeSiteAdapter.KIND -> WitAnimeSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        ArabSeedSiteAdapter.KIND -> ArabSeedSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        TukTukSiteAdapter.KIND -> TukTukSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        ShahiidSiteAdapter.KIND -> ShahiidSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        AkwamSiteAdapter.KIND -> AkwamSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-        )
-        EgyDeadSiteAdapter.KIND -> EgyDeadSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        RistoAnimeSiteAdapter.KIND -> RistoAnimeSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        else -> error("محوّل غير معروف: $kind")
-    }
+    // محوّلات المواقع المدمجة حُذفت بقرار المالك (30 أكتوبر 2026): البيان لا يشحن مصادر أنمي/سينما
+    @Suppress("UNUSED_PARAMETER")
+    private fun native(e: SourceEntry, kind: String): AnimeAdapter = error("محوّل غير معروف: $kind")
 
     fun loadError(id: String): String? = loadErrors[id]
 
