@@ -23,7 +23,9 @@ object NativeExtensionIcons {
     /** Missing/invalid resources stay absent, allowing the caller to use its repo's declared logo. */
     fun iconUrl(context: Context, directory: String, pkg: String, sha256: String): String? {
         if (directory !in setOf("extensions", "anime-extensions") || !packageName.matches(pkg) || !digest.matches(sha256)) return null
-        val local = File(context.filesDir, "$directory/$pkg.apk")
+        // مخزن الإضافات المستمر (vault/<pkg>/<sha256>.apk) أولًا، ثم ملف ما قبل المخزن
+        val local = File(context.filesDir, "$directory/vault/$pkg/${sha256.lowercase()}.apk").takeIf { it.isFile }
+            ?: File(context.filesDir, "$directory/$pkg.apk")
         if (local.isFile && local.length() !in 1..MAX_APK_BYTES) return null
         val key = if (local.isFile) "${local.absolutePath}:${local.length()}:${local.lastModified()}:$sha256"
             else "bundled:${context.packageName}:$directory/$pkg:$sha256"
