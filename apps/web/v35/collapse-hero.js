@@ -54,8 +54,12 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
   // من هنا متأخرة إطارًا عن التمرير وهي سبب الاهتزاز. يبقى هذا المسار للمحركات التي لا تدعمه.
   const scrollDriven = (node) => !!node && (globalThis.getComputedStyle?.(node)?.animationName ?? 'none') !== 'none';
   const cssBg = scrollDriven(bg), cssHead = scrollDriven(head);
-  const cssLayers = layers.filter((l) => scrollDriven(l.node));
-  const cssNodes = [cssBg ? bg : null, cssHead ? head : null, ...cssLayers.map((l) => l.node)].filter(Boolean);
+  // طبقة قد تكون دالة تُرجع العنصر الحالي: أنماط الصفحة تعيد رسم محتواها حين تصل البيانات
+  const nodeOf = (l) => (typeof l.node === 'function' ? l.node() : l.node);
+  const cssLayers = layers.filter((l) => scrollDriven(nodeOf(l)));
+  const fixedCss = [cssBg ? bg : null, cssHead ? head : null].filter(Boolean);
+  const cssNodesNow = () => [...fixedCss, ...cssLayers.map(nodeOf)].filter(Boolean);
+  const cssNodes = cssNodesNow();
   // WebView من 153 إلى 156 يحبس الانزلاق بعد رفع الإصبع ما دامت على الصفحة حركة مربوطة بالتمرير
   // ثم يلقيه دفعة واحدة (crbug 572898003). فالسحب بالإصبع لـCSS، والانزلاق بعده لهذا المسار
   // بنفس القيم حتى يتوقف، ثم يعود CSS.
@@ -83,9 +87,11 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
     const vh = globalThis.innerHeight || window.innerHeight || 800;
     for (const l of layers) {
       if (still || (cssLayers.includes(l) && !handed)) continue;
+      const node = nodeOf(l);
+      if (!node) continue;
       const v = l.at(rangeProgress(y, l.range(span, vh)), span);
-      l.node.style.transform = v.transform;
-      l.node.style.opacity = String(v.opacity);
+      node.style.transform = v.transform;
+      node.style.opacity = String(v.opacity);
     }
     if (f.collapsed !== last) {
       last = f.collapsed;
@@ -97,12 +103,12 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
     idle = null;
     if (!handed) return;
     handed = false;
-    for (const n of cssNodes) n.style.animation = '';
+    for (const n of cssNodesNow()) n.style.animation = '';
     // حركة CSS العائدة تبدأ معلّقة إطارًا تُرسم فيه بلا قيمها (البنر في أعلاه لحظة)؛ القيم
     // المكتوبة تبقى تحتها حتى تعمل، فهي تغطيها ما دامت فاعلة
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (handed) return;
-      for (const n of cssNodes) {
+      for (const n of cssNodesNow()) {
         n.style.transform = '';
         n.style.opacity = '';
       }
@@ -135,7 +141,7 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
     if (!moved || !cssNodes.length || !active() || !hero.isConnected) return;
     handed = true;
     frame();
-    for (const n of cssNodes) n.style.animation = 'none';
+    for (const n of cssNodesNow()) n.style.animation = 'none';
     settle(180);
   };
   const touch = { passive: true };

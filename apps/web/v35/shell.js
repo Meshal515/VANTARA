@@ -78,7 +78,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, readAppearance, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -5183,6 +5183,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(s.id, [root, document.documentElement]);
+    // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
+    let toneTag = document.getElementById('look-tones');
+    if (!toneTag) {
+      toneTag = document.createElement('style');
+      toneTag.id = 'look-tones';
+      document.head.append(toneTag);
+    }
+    toneTag.textContent = toneCss();
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', black ?? s.theme);
     document.documentElement.style.background = black ?? (accentOf(s.id) ? 'var(--bg)' : s.theme);
     paintRail();
@@ -5553,6 +5561,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openUpdates: (section) => openUpdates(section),
     sync,
     openWorkMenu: openMediaWorkMenu,
+    // «من نفس العالم»: مانجا العمل تُفتح في قسم المانجا ببحث عن اسمها في مصادر المستخدم
+    openMangaTitle: (title) => {
+      writeSection('manga');
+      applySection('manga');
+      buildDrawer();
+      openSearch();
+      searchFor(title);
+    },
     restoreSourceWork: restoreAddonWork,
     openProfile,
     friends: () => deps.friends?.() ?? [],

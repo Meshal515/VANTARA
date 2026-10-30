@@ -69,8 +69,8 @@ function worldLabel(w) {
   if (w.kind === 'manga') return w.relationType === 'ADAPTATION' || w.relationType === 'SOURCE' ? 'المانجا الأصلية' : ['مانجا', w.relation].join(' · ');
   return [w.relation, w.year].filter(Boolean).join(' · ');
 }
-/** الأنمي فقط يُفتح في صفحة الأنمي؛ المانجا تُعرض بلا رابط. */
-const openAttr = (w) => (w.here || w.kind === 'manga' ? '' : `data-open="${esc(w.id)}"`);
+/** الأنمي يُفتح في صفحة الأنمي، والمانجا في قسم المانجا ببحث عن اسمها. */
+const openAttr = (w) => (w.here ? '' : w.kind === 'manga' ? `data-manga="${esc(w.title)}"` : `data-open="${esc(w.id)}"`);
 
 const LOOKS = {
   /* ── المنصة ── */
@@ -92,7 +92,7 @@ const LOOKS = {
   /* ── البطاقة الطائرة ── */
   card(c, p) {
     const world = worldItems(c);
-    const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}">${p.thumb(n, n === p.cur ? 'full' : '')}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span></button>`).join('');
+    const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}">${p.thumb(n)}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span></button>`).join('');
     return `
       <div class="wl-head">
         <div class="wl-stage3d"><div class="wl-card">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div></div>
@@ -171,6 +171,8 @@ export function renderLook(look, host, c, { center = true } = {}) {
     if (ep) return c.play(Number(ep.dataset.ep));
     const open = e.target.closest('[data-open]');
     if (open) return c.open(open.dataset.open);
+    const manga = e.target.closest('[data-manga]');
+    if (manga) return c.openManga?.(manga.dataset.manga);
   };
   // الحلقة الحالية في وسط الشرائط الأفقية عند أول رسم وعند تبديل المجموعة فقط (أفقيًا؛ الصفحة لا تتحرك)
   if (center) requestAnimationFrame(() => {
@@ -185,84 +187,96 @@ export function renderLook(look, host, c, { center = true } = {}) {
 }
 
 /**
- * حركة كل نمط مع التمرير، كما في تصميمه، بدل انطواء البنر الخاص بالأساسي:
- * - المنصة: البنر يغوص (أبطأ من الصفحة، يغمق ويتضبب) والشعار والمعلومات يرتفعان ويختفيان.
- * - البطاقة الطائرة: خلفية مضبّبة بطيئة وفوقها البنر أسرع منها (عمق بطبقتين)، والبطاقة المائلة
- *   تعتدل وترتفع.
- * - شاشة السينما: الشاشة تميل للخلف كتلفاز على حامل، تصغر وتبهت، والغلاف يرتفع قليلًا.
- * - الحلقة أولًا: لقطة الحلقة تبتعد (ميل خفيف، تصغر، تستدير حوافها، تبهت)، ثم يظهر شريط «تابع» الصغير.
- * تُحسب كل إطار من موضع التمرير نفسه (rAF)، بلا CSS مربوط بالتمرير، فلا تعلق مع دفعة الإصبع.
+ * حركة كل نمط مع التمرير. نفس نظام النمط الأساسي (collapse-hero.js): CSS بخط زمني للتمرير يحرّكها
+ * مع الإصبع على خيط العرض نفسه فلا تتأخر إطارًا عن الصفحة (سبب اهتزاز البنر)، والمعادلات نفسها
+ * تُكتب من JS أثناء الانزلاق بعد رفع الإصبع فقط. كل طبقة وصف واحد يولّد الاثنين، فلا يختلفان.
+ * - المنصة: البنر يغوص أبطأ من الصفحة ويبهت، والشعار والمعلومات ترتفع وتختفي.
+ * - البطاقة الطائرة: البنر أبطأ، والبطاقة المائلة تعتدل وتقترب.
+ * - شاشة السينما: الشاشة ترجع للخلف بعيدًا وتنزل قليلًا وتبهت (لا تنطوي كالأساسي)، والغلاف يرتفع.
+ * - الحلقة أولًا: اللقطة تبتعد قليلًا وتبهت، وعنوان الحلقة يخفت.
+ */
+const LOOK_MOTION = {
+  platform: [
+    { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.35], s: [1, 1.05], o: [1, 0.4] },
+    { sel: '.wl-htxt', range: [0, 0.4], y: [0, -20], o: [1, 0] },
+  ],
+  card: [
+    { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.25] },
+    { sel: '.wl-stage3d > .wl-card', range: [0, 0.45], p: 900, y: [0, -24], z: [0, 30], rx: [6, 0], ry: [-18, 0] },
+  ],
+  screen: [
+    { sel: '.aw-hero', at: 'self', range: [0, 0.6], p: 1000, y: [0, 40], z: [0, -260], rx: [0, 4], s: [1, 0.92], o: [1, 0.15] },
+    { sel: '.wl-top .wl-cover', range: [0, 0.38], y: [0, -16] },
+  ],
+  episode: [
+    { sel: '.aw-hero', at: 'self', range: [0, 0.4], p: 900, y: [0, 30], z: [0, -60], rx: [0, 7], s: [1, 0.95], o: [1, 0.3] },
+    { sel: '.wl-now', range: [0, 0.4], o: [1, 0.4] },
+  ],
+};
+
+const lerpN = (a, b, t) => a + (b - a) * t;
+function layerValue(l, t, span) {
+  const k = l.span ? span : 1;
+  const v = (pair, d) => (pair ? lerpN(pair[0], pair[1], t) : d);
+  const transform = `perspective(${l.p ?? 1000}px) translate3d(0px, ${(v(l.y, 0) * k).toFixed(1)}px, ${v(l.z, 0).toFixed(1)}px) rotateX(${v(l.rx, 0).toFixed(2)}deg) rotateY(${v(l.ry, 0).toFixed(2)}deg) scale(${v(l.s, 1).toFixed(4)})`;
+  return { transform, opacity: l.o ? v(l.o, 1) : 1 };
+}
+
+/**
+ * طبقات collapse-hero لنمط، وقواعد CSS المطابقة لها (تُحقن في <style id="wl-motion">).
+ * span = ارتفاع البطل بالبكسل، vh = ارتفاع الشاشة؛ المدى بالبكسل كي يطابق مسار JS حرفيًا.
+ */
+export function lookMotion(look, { hero, dims }) {
+  const spec = LOOK_MOTION[look] ?? [];
+  const nodeOf = (l) => () => (l.at === 'self' ? hero : l.at === 'hero' ? hero?.querySelector(l.sel) : hero?.closest('.aw')?.querySelector(l.sel));
+  // الأبعاد تُقرأ في كل مرة: البطل يتغيّر ارتفاعه حين تصل صورته، فيُعاد توليد CSS بالأرقام نفسها
+  const rangeOf = (l) => (l.span ? [0, dims.span] : l.range.map((r) => Math.round(r * dims.vh)));
+  const layers = spec.map((l) => ({ node: nodeOf(l), range: () => rangeOf(l), at: (t) => layerValue(l, t, dims.span) }));
+  const css = () => `@supports (animation-timeline: scroll()){@media (prefers-reduced-motion: no-preference){${spec.map((l, i) => {
+    const span = dims.span;
+    const name = `wl-${look}-${i}`;
+    const [a, b] = rangeOf(l);
+    const from = layerValue(l, 0, span);
+    const to = layerValue(l, 1, span);
+    const sel = l.at === 'self' ? `.v35 .aw[data-style='${look}'] > .aw-hero` : `.v35 .aw[data-style='${look}'] ${l.sel}`;
+    return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}to{transform:${to.transform};opacity:${to.opacity}}}
+${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;
+  }).join('\n')}}}`;
+  return { layers, css };
+}
+
+/**
+ * ما لا يُربط بموضع التمرير: شريط «تابع» الصغير في «الحلقة أولًا» يظهر بانتقال بعد البطل (عنصر
+ * ثابت، فلا اهتزاز)، وبطاقات «من نفس العالم» المائلة في البطاقة الطائرة تعتدل بهدوء حين تصلها.
  * @returns {() => void} فكّ الربط
  */
-export function bindLookMotion(look, host, { hero = null, bg = null, active = () => true } = {}) {
-  if (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return () => {};
-  const clamp = (v) => Math.min(1, Math.max(0, v));
-  const f = (n) => n.toFixed(2);
-  let raf = 0;
-  const run = () => {
-    raf = 0;
-    if (!active() || !host.isConnected) return;
-    const y = Math.max(0, globalThis.scrollY);
-    const vh = globalThis.innerHeight || 800;
-    if (look === 'platform') {
-      const t = clamp(y / (vh * 0.4));
-      // يغوص ويغمق ويتضبب: البنر يبهت فوق نسخته المضبّبة الداكنة خلفه (::before)، تحويل وشفافية فقط —
-      // filter: blur() متغيّر مع كل إطار يعيد رسم البنر كله على الجوال وهو من أسباب التعليق
-      if (bg) {
-        bg.style.transform = `translate3d(0, ${f(y * 0.35)}px, 0) scale(${f(1 + 0.05 * t)})`;
-        bg.style.opacity = f(1 - 0.6 * t);
-      }
-      const txt = host.querySelector('.wl-htxt');
-      if (txt) {
-        txt.style.transform = `translate3d(0, ${f(-20 * t)}px, 0)`;
-        txt.style.opacity = f(clamp(1 - 1.3 * t));
-      }
-    } else if (look === 'card') {
-      const t = clamp(y / (vh * 0.45));
-      hero?.style.setProperty('--far-y', `${f(y * 0.5)}px`);
-      if (bg) bg.style.transform = `translate3d(0, ${f(y * 0.25)}px, 0)`;
-      const card = host.querySelector('.wl-card');
-      if (card) card.style.transform = `rotateY(${f(-18 * (1 - t))}deg) rotateX(${f(6 * (1 - t))}deg) translate3d(0, ${f(-24 * t)}px, ${f(30 * t)}px)`;
-    } else if (look === 'screen') {
-      const t = clamp(y / (vh * 0.38));
-      if (hero) {
-        hero.style.transform = `perspective(1000px) rotateX(${f(24 * t)}deg) translate3d(0, ${f(y * 0.25)}px, ${f(-90 * t)}px) scale(${f(1 - 0.05 * t)})`;
-        hero.style.opacity = f(1 - 0.8 * t);
-      }
-      const cover = host.querySelector('.wl-top .wl-cover');
-      if (cover) cover.style.transform = `translate3d(0, ${f(-16 * t)}px, 0)`;
-    } else if (look === 'episode') {
-      const t = clamp(y / (vh * 0.4));
-      if (hero) {
-        hero.style.transform = `perspective(900px) translate3d(0, ${f(y * 0.15)}px, ${f(-60 * t)}px) rotateX(${f(7 * t)}deg) scale(${f(1 - 0.05 * t)})`;
-        // استدارة الحواف بفئة واحدة وانتقال قصير، لا قيمة جديدة مع كل إطار (إعادة رسم وقص)
-        hero.classList.toggle('wl-lifted', t > 0.04);
-        hero.style.opacity = f(1 - 0.7 * t);
-      }
-      const now = host.querySelector('.wl-now');
-      if (now) now.style.opacity = f(1 - 0.6 * t);
-      const mini = host.querySelector('.wl-mini');
-      const k = clamp((t - 0.55) / 0.45);
-      if (mini) {
-        mini.style.opacity = f(k);
-        mini.style.transform = `translate(50%, ${f(-80 + 90 * k)}px)`;
-        mini.style.pointerEvents = k > 0.5 ? 'auto' : 'none';
-      }
-    }
-  };
-  const on = () => {
-    if (!raf) raf = requestAnimationFrame(run);
-  };
-  globalThis.addEventListener('scroll', on, { passive: true });
-  globalThis.addEventListener('resize', on, { passive: true });
-  run();
-  // بعد كل رسم للنمط (وصول التفاصيل) تُطبَّق الحالة الحالية على العناصر الجديدة
-  const mo = typeof MutationObserver === 'function' ? new MutationObserver(on) : null;
-  mo?.observe(host, { childList: true });
-  return () => {
-    globalThis.removeEventListener('scroll', on);
-    globalThis.removeEventListener('resize', on);
-    mo?.disconnect();
-    if (raf) cancelAnimationFrame(raf);
-  };
+export function bindLookExtras(look, host, { active = () => true } = {}) {
+  const offs = [];
+  if (look === 'episode') {
+    let on = null;
+    const check = () => {
+      if (!active() || !host.isConnected) return;
+      const next = globalThis.scrollY > (globalThis.innerHeight || 800) * 0.32;
+      if (next === on) return;
+      on = next;
+      host.querySelector('.wl-mini')?.classList.toggle('on', next);
+    };
+    globalThis.addEventListener('scroll', check, { passive: true });
+    offs.push(() => globalThis.removeEventListener('scroll', check));
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(() => { on = null; check(); }) : null;
+    mo?.observe(host, { childList: true });
+    offs.push(() => mo?.disconnect());
+    check();
+  }
+  if (look === 'card' && typeof IntersectionObserver === 'function') {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) e.target.classList.add('in');
+    }, { threshold: 0.6 });
+    const watch = () => host.querySelectorAll('.wl-world .wn:not(.in)').forEach((n) => io.observe(n));
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(watch) : null;
+    mo?.observe(host, { childList: true });
+    watch();
+    offs.push(() => { io.disconnect(); mo?.disconnect(); });
+  }
+  return () => offs.forEach((f) => f());
 }

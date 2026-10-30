@@ -152,3 +152,16 @@ export function applyAppearance(section, nodes, a = readAppearance()) {
   }
   return a.pureBlack ? '#000000' : null;
 }
+
+/**
+ * الأوراق والنوافذ تُفتح بنغمة قسم ثابتة (`data-tone="anime"` في ورقة السيرفرات مثلًا) وقاعدتها في CSS
+ * تعيد لون القسم المصمّم فوق ما اختاره المستخدم. هذه القواعد تُحقن بعد CSS الأقسام فتلبس كل نغمة
+ * اللون المختار لقسمها والأسود الصافي، وتُفرغ حين لا اختيار.
+ */
+export function toneCss(a = readAppearance()) {
+  return SECTIONS.map((id) => {
+    const vars = paletteVars(accentOf(id, a), { pureBlack: a.pureBlack });
+    const body = Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(';');
+    return body ? `.v35 [data-tone='${id}']{${body}}` : '';
+  }).filter(Boolean).join('\n');
+}

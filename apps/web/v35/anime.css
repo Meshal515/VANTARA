@@ -3276,7 +3276,6 @@ html[data-section='cinema'] {
 .v35 .aw:not([data-style='core']) .aw-bg { animation: none !important; }
 .v35 .aw[data-style='screen'] .aw-hero { transform-origin: 50% 100%; will-change: transform, opacity; }
 .v35 .aw[data-style='episode'] .aw-hero { transform-origin: 50% 0; will-change: transform, opacity; }
-.v35 .aw[data-style='card'] .aw-hero::before { transform: translate3d(0, var(--far-y, 0px), 0) scale(1.1); }
 /* الحلقة أولًا بلا حاوية: الحلقة هي البطل (عنوان كبير، وصف، تشغيل)، ثم العمل تحتها ثانويًا بمسافة لا صندوق */
 .v35 .wl-episode .wl-now small { color: var(--accent-text, var(--text-2)); letter-spacing: 0.2px; }
 .v35 .wl-episode .wl-series { background: none; padding: 0; border-radius: 0; margin: 28px var(--wl-g) 0; grid-template-columns: 58px 1fr; gap: 14px; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
@@ -3284,8 +3283,6 @@ html[data-section='cinema'] {
 .v35 .wl-episode .wl-series .wl-logo { max-height: 44px; max-width: 220px; }
 .v35 .wl-episode .wl-series .wl-meta { flex-wrap: wrap; row-gap: 2px; }
 .v35 .wl-episode .wl-scrub { padding-top: 22px; }
-.v35 .aw[data-style='episode'] .aw-hero { transition: border-radius 0.25s ease; }
-.v35 .aw[data-style='episode'] .aw-hero.wl-lifted { border-radius: 22px; }
 @container aw (min-width: 900px) {
   .v35 .wl-episode .wl-series { margin: 0 0 22px; padding: 0; background: none; grid-template-columns: 84px 1fr; gap: 18px; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
   .v35 .wl-episode .wl-series > img { width: 84px; }
@@ -3307,4 +3304,61 @@ html[data-section='cinema'] {
   .v35 .wl-episode .wl-series .wl-logo { max-height: 76px; max-width: 340px; }
   .v35 .wl-episode .wl-series .wl-meta { font-size: 14px; }
   .v35 .wl-episode .wl-series .wl-genres { font-size: 13px; }
+}
+
+/* ═══ إصلاحات الأنماط بعد التجربة على الجوال (31 أكتوبر) ═══ */
+/* ترتيب الرسم صريح: النسخة المضبّبة تحت البنر دائمًا. بلا z-index كان بعض الأجهزة يرسمها فوقه حين
+   تكتمل شفافيتها (البنر يظهر لحظة ثم يتغبّش)، ولا يحدث في الأساسي لأن حركة بنره تجعله طبقة فوقها */
+.v35 .aw-hero::before { z-index: 0; }
+.v35 .aw-hero > .aw-bg { z-index: 1; }
+.v35 .aw-hero > .aw-shade { z-index: 2; }
+
+/* «إذا عجبك هذا» شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة، يُسحب يمينًا ويسارًا ويُظهر الكل */
+.v35 .wl .wl-recs { display: flex !important; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; margin-inline: calc(var(--wl-g) * -1); padding: 0 var(--wl-g) 4px; scroll-padding-inline: var(--wl-g); scrollbar-width: none; }
+.v35 .wl .wl-recs::-webkit-scrollbar { display: none; }
+.v35 .wl .wl-recs .rc { display: block !important; flex: 0 0 116px; width: 116px; scroll-snap-align: start; }
+.v35 .wl .wl-recs .rc img { width: 116px; height: 174px; aspect-ratio: auto; border-radius: 10px; }
+.v35 .wl .wl-more { display: none; }
+.v35 .wl-card .wl-body > .wl-sec.wl-s-recs, .v35 .wl-screen .wl-body > .wl-s-recs { padding-inline: var(--wl-g); }
+
+/* «من نفس العالم» في البطاقة الطائرة: شريط يُسحب، كل البطاقات بمقاس واحد، و«أنت هنا» بإطار لا بحجم أكبر؛
+   تميل قليلًا ثم تعتدل بهدوء حين تصلها */
+.v35 .wl-card .wl-world { justify-content: flex-start !important; overflow-x: auto; overscroll-behavior-x: contain; margin-inline: calc(var(--wl-g) * -1); padding: 6px var(--wl-g) 4px; scrollbar-width: none; }
+.v35 .wl-card .wl-world::-webkit-scrollbar { display: none; }
+.v35 .wl-card .wn { flex: 0 0 116px !important; width: 116px !important; }
+.v35 .wl-card .wn img, .v35 .wl-card .wn.here img { width: 96px !important; height: 144px !important; transform: rotate(-4deg); transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.v35 .wl-card .wn:nth-child(4n + 3) img { transform: rotate(4deg); }
+.v35 .wl-card .wn.in img { transform: none !important; }
+.v35 .wl-card .wn.here img { box-shadow: 0 0 0 2px var(--text-1); }
+.v35 .wl-card .wl-dash { flex: 0 0 28px !important; min-width: 28px; }
+@media (prefers-reduced-motion: reduce) { .v35 .wl-card .wn img { transform: none !important; transition: none; } }
+
+/* شريط «تابع» في «الحلقة أولًا»: بعرض الصفحة تحت الترويسة، يظهر بانتقال بعد البطل لا مع كل بكسل */
+.v35 .wl-episode .wl-mini { left: 12px !important; right: 12px !important; top: calc(var(--top-h, 56px) + var(--safe-top, 0px) + 6px) !important; max-width: none !important; transform: translateY(-14px) !important; opacity: 0 !important; pointer-events: none !important; display: grid !important; grid-template-columns: 72px minmax(0, 1fr) 42px; gap: 12px; padding: 6px 6px 6px 8px !important; border-radius: 16px !important; transition: opacity 0.22s ease, transform 0.22s ease; }
+.v35 .wl-episode .wl-mini.on { opacity: 1 !important; transform: none !important; pointer-events: auto !important; }
+.v35 .wl-episode .wl-mini-th img { width: 72px !important; height: 40px !important; border-radius: 9px !important; }
+.v35 .wl-episode .wl-mini b { font-size: 14px !important; }
+.v35 .wl-episode .wl-mini small { font-size: 12px !important; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-episode .wl-mini .dot { width: 42px !important; height: 42px !important; }
+@media (prefers-reduced-motion: reduce) { .v35 .wl-episode .wl-mini { transition: none; } }
+
+@container aw (min-width: 900px) {
+  .v35 .wl .wl-recs .rc { flex-basis: 150px; width: 150px; }
+  .v35 .wl .wl-recs .rc img { width: 150px; height: 225px; }
+  .v35 .wl-card .wn { flex-basis: 170px !important; width: 170px !important; }
+  .v35 .wl-card .wn img, .v35 .wl-card .wn.here img { width: 150px !important; height: 225px !important; }
+  .v35 .wl-episode .wl-mini { left: 50% !important; right: auto !important; width: 520px; margin-left: -260px; }
+}
+/* حلقات البطاقة الطائرة: كل البطاقات بمقاس واحد، والحالية مرفوعة قليلًا فقط (لا أكبر)، وسحب حر سلس:
+   الالتصاق الإجباري بكل بطاقة كان يشدّ الإصبع ويبدو كتعليق، والصورة 1920 للحالية كانت تثقل الشريط */
+.v35 .wl-card .wl-strip { scroll-snap-type: x proximity !important; align-items: flex-start !important; padding-top: 18px !important; -webkit-overflow-scrolling: touch; }
+.v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex: 0 0 160px !important; scroll-snap-align: start; contain: layout paint; }
+.v35 .wl-card .sp.cur { transform: translateY(-14px); }
+.v35 .wl-card .sp.cur b { font-size: 12.5px !important; }
+.v35 .wl-card .sp b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-card .sp p { display: none !important; }
+.v35 .wl-card .sp.cur .th { box-shadow: 0 0 0 2px var(--accent), 0 10px 22px rgba(0, 0, 0, 0.45); }
+@container aw (min-width: 900px) {
+  .v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex-basis: 250px !important; }
+  .v35 .wl-card .sp.cur b { font-size: 14.5px !important; }
 }

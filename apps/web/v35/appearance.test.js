@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, onAccent, paletteVars, readAppearance, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
 
 const memory = () => {
   const m = new Map();
@@ -71,5 +71,14 @@ describe('المظهر', () => {
     // ألوان الأقسام المصمّمة تبقى بنص أبيض كما هي
     expect(onAccent('#8f5cff')).toBe('#ffffff');
     expect(onAccent('#3b82f6')).toBe('#ffffff');
+  });
+
+  it('الأوراق بنغمة قسم ثابتة تلبس اللون المختار لقسمها، ولا قاعدة بلا اختيار', () => {
+    expect(toneCss({ style: {}, accent: {}, pureBlack: false })).toBe('');
+    const css = toneCss({ style: {}, accent: { anime: 'gold' }, pureBlack: false });
+    expect(css).toContain(".v35 [data-tone='anime']{");
+    expect(css).toContain('--accent:#c9a227');
+    expect(css).toContain('--on-accent:#0b0b0f');
+    expect(css).not.toContain("[data-tone='cinema']");
   });
 });

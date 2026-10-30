@@ -31,7 +31,7 @@ import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
-import { bindLookMotion, renderLook } from './work-looks.js';
+import { bindLookExtras, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -719,8 +719,33 @@ export function createAnime(deps) {
     page.replaceChildren(wrap);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    const unLook = lw ? bindLookMotion(look, lw, { hero, bg, active: () => deps.currentPage() === 'anime' && state.detailToken === token }) : () => {};
-    const unHero = bindCollapsingHero({ hero, bar, layers: lw ? [] : animeDepthLayers({ bg, cover, mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    const live = () => deps.currentPage() === 'anime' && state.detailToken === token;
+    // الأنماط: حركة كل نمط بنظام الأساسي نفسه (CSS بخط زمني للتمرير + تسليم الانزلاق في collapse-hero)
+    let unLook = () => {};
+    let motionLayers = null;
+    if (lw) {
+      const dims = { span: hero.offsetHeight || 300, vh: globalThis.innerHeight || 800 };
+      const motion = lookMotion(look, { hero, dims });
+      let tag = document.getElementById('wl-motion');
+      if (!tag) {
+        tag = document.createElement('style');
+        tag.id = 'wl-motion';
+        document.head.append(tag);
+      }
+      tag.textContent = motion.css();
+      // ارتفاع البطل يتغيّر حين تصل صورته، والشاشة حين تدور: تُعاد الأرقام في CSS وJS معًا
+      const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+        const next = { span: hero.offsetHeight || dims.span, vh: globalThis.innerHeight || dims.vh };
+        if (next.span === dims.span && next.vh === dims.vh) return;
+        Object.assign(dims, next);
+        tag.textContent = motion.css();
+      }) : null;
+      ro?.observe(hero);
+      const unExtras = bindLookExtras(look, lw, { active: live });
+      unLook = () => { ro?.disconnect(); unExtras(); };
+      motionLayers = motion.layers;
+    }
+    const unHero = bindCollapsingHero({ hero, bar, layers: motionLayers ?? animeDepthLayers({ bg, cover, mark }), active: live });
     state.view.unbind = () => {
       unHero?.();
       unLook();
@@ -1069,6 +1094,7 @@ export function createAnime(deps) {
         const r = byId.get(String(id));
         if (r) void openAnime(r);
       },
+      openManga: (title) => deps.openMangaTitle?.(title),
       onRange: (i) => {
         v.lwRange = i;
         v.lwCenter = true;
