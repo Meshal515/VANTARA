@@ -89,6 +89,7 @@ class ExtensionEnginePlugin : Plugin() {
     /** مستودعات المستخدم وإضافاته (UserExtensions.kt). */
     private val userStore by lazy { UserExtensionStore(java.io.File(context.filesDir, "extensions/user-repos.json")) }
     private val repoClient by lazy { RepoClient(context, network.client) }
+    private val builtinSpecs by lazy { BuiltinSourceRefresh(java.io.File(context.filesDir, "extensions/builtin-refresh.json")) }
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override fun load() {
@@ -825,7 +826,8 @@ class ExtensionEnginePlugin : Plugin() {
             return source
         }
         val (pkg, lang) = splitSourceId(sourceId)
-        val spec = packageSpec(pkg) ?: error("unknown sourceId: $sourceId")
+        // المواصفة المضمّنة، أو آخر إصدار رسمي نُزّل من مستودع Keiyoushi وتحقق توقيعه (معرّف المصدر نفسه)
+        val spec = builtinSpecs.current(packageSpec(pkg) ?: error("unknown sourceId: $sourceId"))
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
         val filler = if (lang == null) null else FILLER_SOURCES.firstOrNull { it.pkg == pkg && it.lang == lang } ?: error("unknown sourceId: $sourceId")
         // الإنجليزية المستقلة ليست مصدرًا عربيًا: لا تُطلب إلا بلغتها
@@ -849,11 +851,16 @@ class ExtensionEnginePlugin : Plugin() {
 
         // الترتيب: نسخة الجهاز المتحقَّق منها، ثم المضمّنة في التطبيق، ثم التنزيل.
         // keiyoushi يحذف إصداراته القديمة، فالتنزيل وحده أسقط كل المصادر مرة
+        // مصدر مدمج بلا نسخة صالحة في الجهاز ولا في التطبيق: يُنزَّل من مستودع Keiyoushi الرسمي ويُقبل فقط
+        // بتوقيع مفتاحه، بالمعرّف نفسه، فالمكتبة والتقدّم لا يتغيّران (فصل المصادر المدمجة عن التطبيق).
+        // الرابط المثبّت القديم آخر حل: Keiyoushi يحذف إصداراته القديمة فصار 404.
+        var used = spec
         val apk = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
             ?: withContext(Dispatchers.IO) { readBundled(spec) }
+            ?: withContext(Dispatchers.IO) { builtinSpecs.fromRepository(spec, repoClient)?.let { (next, bytes) -> used = next; bytes } }
             ?: withContext(Dispatchers.IO) { download(spec) }
 
-        when (val result = withContext(Dispatchers.IO) { loader.load(spec, apk) }) {
+        when (val result = withContext(Dispatchers.IO) { loader.load(used, apk) }) {
             is FileExtensionLoader.Result.Fail ->
                 throw IllegalStateException(
                     "${spec.label}: ${result.stage} — ${result.reason}",
