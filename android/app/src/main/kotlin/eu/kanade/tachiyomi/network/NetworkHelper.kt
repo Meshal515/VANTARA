@@ -69,6 +69,8 @@ class NetworkHelper(context: Context) {
         .dns(HostRouting)
         // الأول دائمًا: توجيه مضيفات مسجّلة (محرك الأنمي)؛ بلا تسجيل لا يفعل شيئًا
         .addInterceptor(HostRouting)
+        // قاطع دائرة لكل مضيف قبل إعادة المحاولة: موقع طلب التوقف (429/Retry-After) لا يُطرق من كل الإضافات
+        .addInterceptor(eu.kanade.tachiyomi.network.interceptor.HostCircuitBreaker())
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net
         // for search/details then briefly returned EAI_NODATA for chapters.
         // Retry only idempotent methods; never replay POST/PUT blindly.
