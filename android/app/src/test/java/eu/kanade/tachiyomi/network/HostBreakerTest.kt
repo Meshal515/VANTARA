@@ -32,7 +32,8 @@ class HostBreakerTest {
         b.record("a.example", 200, null, 0)
         b.record("a.example", 500, null, 0)
         assertNull(b.waitMs("a.example", 0))
-        repeat(3) { b.record("A.EXAMPLE", 500, null, 0) }
+        // فشل واحد بعد الرد السليم، ثم اثنان آخران يكملان الثلاثة (المضيف بلا اعتبار لحالة الأحرف)
+        repeat(2) { b.record("A.EXAMPLE", 500, null, 0) }
         assertEquals(30_000L, b.waitMs("a.example", 0))
         assertNull(b.waitMs("other.example", 0))
     }
