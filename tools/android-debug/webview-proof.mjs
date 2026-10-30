@@ -197,6 +197,29 @@ try {
     proof.navigationFixture = 'shipped Home/Addons shell; local anonymous sync; real native bridges';
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
+    // تشخيص فتح عمل أنمي على WebView الحقيقي (لا يُفشل البناء: يعتمد على شبكة AniList). المالك يلمس
+    // غلافًا فلا تفتح صفحة العمل على الجهاز بينما تفتح في المتصفح؛ هذا يسجّل ما يحدث فعلًا هنا.
+    try {
+      proof.animeOpen = await evaluate(`(async()=>{
+        const wait=async(f,ms)=>{const t=Date.now();while(Date.now()-t<ms){const v=f();if(v)return v;await new Promise(r=>setTimeout(r,300));}return null};
+        const before=window.__debugProofErrors.length;
+        document.querySelector('[data-act="openDrawer"]')?.click();await new Promise(r=>setTimeout(r,400));
+        const sw=[...document.querySelectorAll('button,div')].find(b=>b.offsetParent&&/^ANIME/.test(b.textContent.trim()));
+        sw?.click();
+        const card=await wait(()=>[...document.querySelectorAll('.an-card')].find(c=>c.offsetParent),30000);
+        if(!card)return {section:document.documentElement.dataset.section,cards:0,errors:window.__debugProofErrors.slice(before)};
+        card.click();
+        const hero=await wait(()=>document.querySelector('#anime.active .aw-hero, .aw-hero'),20000);
+        return {section:document.documentElement.dataset.section,cards:document.querySelectorAll('.an-card').length,opened:!!hero,
+          active:document.querySelector('.page.active,[data-page].active')?.id??null,title:document.querySelector('.aw h1,.aw-title')?.textContent?.slice(0,60)??null,
+          errors:window.__debugProofErrors.slice(before).map(e=>e.slice(0,400))};
+      })()`);
+    } catch (error) { proof.animeOpen = { probeError: String(error).slice(0, 400) }; }
+    console.log('Anime open probe:', JSON.stringify(proof.animeOpen));
+    try {
+      const shot = await command('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(`${out}/anime-open.png`, Buffer.from(shot.data, 'base64'));
+    } catch {}
   }
   proof.passed = true;
 } catch (error) {
