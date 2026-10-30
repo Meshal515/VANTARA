@@ -1,6 +1,6 @@
 # معمارية الإضافات المستمرة — Persistent Plugin Architecture
 
-**التاريخ:** 2026‑10‑30 · **الحالة:** معتمدة من المالك كاتجاه، والتنفيذ لم يبدأ · **المرجع البحثي:** دراسة 14 نظام إضافات (Mihon وKeiyoushi وAniyomi وStremio وCloudStream وMangayomi وKotatsu وSuwayomi وAidoku وLNReader وSeanime وKazumi)، والقرارات الـ26 في §7.
+**التاريخ:** 2026‑10‑30 · **الحالة:** معتمدة من المالك؛ التنفيذ جارٍ على Debug (انظر §8) · **المرجع البحثي:** دراسة 14 نظام إضافات (Mihon وKeiyoushi وAniyomi وStremio وCloudStream وMangayomi وKotatsu وSuwayomi وAidoku وLNReader وSeanime وKazumi)، والقرارات الـ26 في §7.
 
 > **المبدأ الحاكم:** *An installed plugin must be operationally independent of its originating repository.*
 > الإضافة المثبتة مستقلة تشغيليًا عن مستودعها الأصلي، مع بقاء الأمان والتوافق وإمكانية التعافي.
@@ -212,3 +212,23 @@
 | 26 | عقد موحّد وسجل قدرات | 6 |
 
 **المبدأ الحاكم الجديد (قرار 0):** الإضافة المثبتة مستقلة تشغيليًا عن مستودعها الأصلي (§1، §3.1).
+
+## 8. حالة التنفيذ (Android)
+
+| البند | الحالة | أين |
+|---|---|---|
+| Vault بعنوان المحتوى، لا استبدال لإصدار قائم، كتابة ذرّية، ترحيل `<pkg>.apk` القديم | منفّذ، ينتظر CI وجهازًا | `FileExtensionLoader.kt` (`vaultFile`، `prune`، `erase`) |
+| تشغيل من النسخة المحلية مستقلًا عن المستودع، ثم LKG، ثم المضمّنة، ثم الرسمي | منفّذ | `ExtensionEnginePlugin.loadPackage` |
+| LKG للمدمجة سابقًا ولإضافات المستخدم، والرجوع والحفظ | منفّذ + اختبارات JVM | `BuiltinSourceRefresh`، `UserExtension.upgradedTo/rolledBack` |
+| ترحيل معرّفات المصادر (اسم + لغة، تطابق وحيد) | منفّذ + اختبارات | `sourceAliases`، `UserExtension.resolve` |
+| رفض تصادم المعرّفات والمعرّف 0 | منفّذ | `claimIds` |
+| الإصدار الرسمي لـKeiyoushi للمدمجة فقط (ثغرة: كانت إضافة المستخدم قد تُستبدل) | مُصلح | `loadPackage` |
+| قراءة `index.pb` كاملة (5، 102) ومتابعة القائمة المستقلة مرة واحدة | منفّذ + اختبارات | `RepoIndex`، `RepoClient.read` |
+| منع الرجوع لإصدار أقدم (رقم الإصدار المعلن فقط؛ لا استنتاج من الاسم) | منفّذ | `installExtension`، `fromRepository` |
+| اسم الحزمة لا يهرب من المخزن (`..`، مقاطع بنقطة) | منفّذ + اختبارات | `RepoIndex.PKG`، `FileExtensionLoader.PKG` |
+| تعافٍ تلقائي عند عدم توافق كود الإضافة بعد تحديث | منفّذ | `ExtensionEnginePlugin.recover` |
+| قاطع دائرة لكل مضيف (429/5xx، Retry-After) | منفّذ + اختبارات | `HostCircuitBreaker.kt` |
+| الأيقونات من المخزن | منفّذ | `NativeExtensionIcons` |
+| الويب وWindows | قيد التنفيذ (وكيل مستقل، فرع `claude/web-plugin-engine`) | — |
+| WorkManager و«آخر التحديثات» L0–L4 | لم يبدأ | المرحلة 5 |
+| حذف حزم المانجا المضمّنة في التطبيق | ينتظر اختبار جهاز حقيقي للمرحلة 1 | — |
