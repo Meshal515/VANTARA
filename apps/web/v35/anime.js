@@ -566,6 +566,8 @@ export function createAnime(deps) {
         state.art = { ...state.art, hd };
         upgradeStills(state.detail);
         paintSide(state.detail);
+        // الحلقة أولًا: إن بقي البطل على الغلاف (لا لقطة قبل وصول الدقة العالية) يُرقّى للقطة الآن
+        if (state.view?.look === 'episode') paintHero(state.detail);
       });
       // وصل بعد المهلة والغلاف ظاهر: يُرقّى للخلفية الدعائية (لا يمسّ صورة عريضة)
       paintHero(state.detail);
@@ -783,8 +785,11 @@ export function createAnime(deps) {
     const firstShot = v.look === 'episode' ? episodeStill(m, resumePoint(m).episode, artOf(m), { full: true }) : null;
     if (v.look === 'episode' && !artOf(m) && !v.artSettled) return;
     const known = v.look === 'episode' ? null : heroMemory.get(m.id);
+    // كل لقطات الحلقة بالترتيب (1920 ← 780 ← TVDB ← المنصات): رابط محجوب أو معطوب ينتقل للتالي
+    // بدل القفز إلى الغلاف المضبّب، وما يصل لاحقًا مع الفن يُجرَّب أيضًا
+    const shots = firstShot?.still ? [firstShot.src, ...(firstShot.fallbacks ?? [])] : [];
     const list = [
-      firstShot?.still ? { src: firstShot.src, rank: -2 } : null,
+      ...shots.map((src, i) => ({ src, rank: -2 + i * 0.01 })),
       known ? { src: known, rank: -1 } : null,
       // large مباشرة (البطل يقصّ الصورة ويكبّرها على الجوال فتُخسف medium ‏1280)، صورةً واحدة
       // بلا تبديل لاحق — large في metahub قد تكون لقطة غير medium؛ medium إن تعذّرت
@@ -816,7 +821,7 @@ export function createAnime(deps) {
       v.heroShown = true;
       // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
       v.heroSrc = pick.rank < 2 ? pick.src : null;
-      if (pick.rank < 1 && pick.rank !== -2) heroMemory.set(m.id, pick.src);
+      if (pick.rank < 1 && pick.rank > -1.5) heroMemory.set(m.id, pick.src);
       // ارتفاع البطل من شكل صورته نفسها (لا قص)، بين حدين في CSS
       if (pick.rank < 2 && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
       requestAnimationFrame(() => {
@@ -1009,7 +1014,7 @@ export function createAnime(deps) {
     const total = aired || m.episodes || point.episode;
     const rec = epRecord(m, point.episode);
     const ratio = !rec.done && rec.duration > 0 ? Math.min(1, rec.position / rec.duration) : null;
-    const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60)) : null;
+    const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60_000)) : null;
     const seen = seenCountOf(m);
     const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
     const minutes = (n) => {
