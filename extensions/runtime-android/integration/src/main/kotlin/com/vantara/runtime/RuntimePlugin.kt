@@ -14,6 +14,10 @@ import dev.vantara.runtime.android.AndroidRuntimeClient
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import com.vantara.verification.*
+import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /** Registered by the Debug-only bootstrap before Capacitor builds its bridge. */
 @CapacitorPlugin(name="VantaraRuntime")
@@ -26,7 +30,12 @@ class RuntimePlugin : Plugin() {
         try {
             ensureEngineInjekt(context.applicationContext as Application)
             val engine=AnimeEngine.get(context);engine.setRuntimeSources(emptyList())
-            host=RuntimeHost(context,engine,WebSettings.getDefaultUserAgent(context))
+            host=RuntimeHost(context,engine,WebSettings.getDefaultUserAgent(context),
+                silentClearance={ url,agent ->
+                    // الحل الصامت نفسه الذي يستخدمه محرك المانجا؛ يُنشأ عميله عند أول حاجة إن لم يكن موجودًا
+                    val solver=CloudflareInterceptor.current ?: run { Injekt.get<NetworkHelper>().client;CloudflareInterceptor.current }
+                    solver?.silentClearance(url,agent)
+                })
         }catch(error:Exception){android.util.Log.w("VantaraRuntime","RUNTIME_INITIALIZATION_FAILED:"+error.javaClass.simpleName)}
     }
     private fun run(call: PluginCall,action: suspend ()->JsonElement) { jobs.launch {

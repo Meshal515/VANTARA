@@ -41,6 +41,8 @@ class RuntimeHost(
     private val broker: HttpBroker = HttpBroker(OkHttpClient(), engine.dns, PublicAddresses(),
         vaults, Clock.systemUTC()),
     private val sourceTransport: (AndroidRuntimeClient.Scope,HttpBroker)->AndroidRuntimeClient.HostHttpTransport = { scope,http -> BrokerHostTransport(scope,http) },
+    /** حل صامت لتحدي Cloudflare غير التفاعلي (url، User-Agent) ← cf_clearance أو null. null = لا حل صامت. */
+    private val silentClearance: ((String,String)->String?)? = null,
 ) {
     private val app = context.applicationContext
     private val directory = File(app.filesDir,"runtime-cloudstream-v1")
@@ -328,6 +330,12 @@ class RuntimeHost(
                 catch (failure: RuntimeFailure) {
                     if(failure.code=="VERIFICATION_REQUIRED") {
                         val actualUserAgent=headers["User-Agent"]?.firstOrNull() ?: userAgent
+                        // كما يفعل CloudStream الأصلي: تحدٍّ يحلّ نفسه في متصفح مخفي لا يحتاج ضغطة من المستخدم.
+                        // نجاحه يعيد الطلب نفسه مرة؛ تحدٍّ يطلب إنسانًا أو يتكرر يبقى «تحتاج تحقق» كما كان.
+                        if(clearSilently(scope,request.url(),actualUserAgent)) {
+                            try { return bound.exchange(caller,outbound) }
+                            catch (again: RuntimeFailure) { if(again.code!="VERIFICATION_REQUIRED")throw again }
+                        }
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
                             pending[id]=Retry(o,generation,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
@@ -356,6 +364,26 @@ class RuntimeHost(
         }
         try { client.loadCloudStream(dex,hash,entry).await();return run(client) }
         finally { workers.remove(client);client.close() }
+    }
+    private val silentGate=SilentClearanceGate()
+    /**
+     * يحاول الحل الصامت مرة لكل مصدر وموقع كل 10 دقائق. عند النجاح يحفظ كوكي cf_clearance واحدًا للمضيف
+     * في مخزن هذا المصدر والحساب وحده (كما في التحقق اليدوي) ويرفع حالة التحدي عن الموقع.
+     */
+    private fun clearSilently(scope: AndroidRuntimeClient.Scope,url: String,userAgent: String): Boolean {
+        val solve=silentClearance ?: return false
+        val target=runCatching { sourceEndpoint(url) }.getOrNull() ?: return false
+        if(!target.isHttps)return false
+        val origin=HttpBroker.origin(target);val now=System.currentTimeMillis()
+        if(!silentGate.admit(scope.sourceId()+"|"+origin,now))return false
+        val value=runCatching { solve(target.toString(),userAgent) }.getOrNull()
+            ?.takeIf { VerificationPolicy.clearance("cf_clearance=$it")==it } ?: return false
+        val brokerScope=HttpBroker.Scope(scope.family(),scope.packageId(),scope.sourceId(),scope.sessionId(),scope.allowedOrigins())
+        val cookie=Cookie.Builder().name("cf_clearance").value(value).hostOnlyDomain(target.host).path("/").secure().httpOnly().expiresAt(now+1800000).build()
+        vaults.forScope(brokerScope).save(target,listOf(cookie))
+        broker.verificationSucceeded(brokerScope,origin)
+        android.util.Log.i("VantaraRuntime","SILENT_CLEARANCE:"+target.host)
+        return true
     }
     fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { sourceEndpoint(it.url).host }.distinct()
     fun beginVerification(host: String): VerificationPending = synchronized(lock) {
@@ -404,4 +432,14 @@ internal fun JsonObject.text(key: String)=get(key)?.let { (it as? JsonPrimitive)
 internal suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel(true) }
     whenComplete { value,error -> if (continuation.isActive) { if(error==null)continuation.resume(value) else continuation.resumeWithException(error.cause ?: error) } }
+}
+
+/** محاولة حل صامت واحدة لكل مصدر وموقع في كل نافذة زمنية: موقع يعيد التحدي لا يُدخل المحرك في حلقة. */
+internal class SilentClearanceGate(private val windowMs: Long=600_000L) {
+    private val tried=ConcurrentHashMap<String,Long>()
+    fun admit(key: String,now: Long): Boolean {
+        val last=tried[key]
+        if(last!=null && now-last<windowMs)return false
+        tried[key]=now;return true
+    }
 }

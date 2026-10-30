@@ -52,6 +52,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.IOException
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -65,6 +66,21 @@ class CloudflareInterceptor(
 ) : Interceptor {
 
     private val handler = Handler(Looper.getMainLooper())
+
+    init { current = this }
+
+    /**
+     * حلّ صامت لتحدٍّ غير تفاعلي يطلبه محرك آخر (محرك CloudStream المعزول): نفس الـWebView المخفي ونفس
+     * الكشف عن التحدي التفاعلي. يرجع قيمة cf_clearance للمضيف أو null (تحدٍّ يطلب إنسانًا، لا تحدّي،
+     * لا نافذة أمامية، أو انتهاء المهلة). لا يفتح واجهة ولا يحذف كوكيز. لا يُنادى من الخيط الرئيسي.
+     */
+    fun silentClearance(url: String, userAgent: String): String? {
+        val target = url.toHttpUrlOrNull() ?: return null
+        val request = Request.Builder().url(target).header("User-Agent", userAgent).build()
+        val outcome = synchronized(solveLock) { solveClearance(request) }
+        if (outcome != SolveOutcome.SOLVED) return null
+        return cookieManager.get(target).firstOrNull { it.name == "cf_clearance" }?.value
+    }
 
     // The spike is an automated source batch probe: it must never replace the
     // whole activity with a human Cloudflare challenge while dozens of sources
@@ -544,6 +560,10 @@ class CloudflareInterceptor(
 
     companion object {
         private const val TAG = "CloudflareInterceptor"
+        /** آخر نسخة أنشأها NetworkHelper؛ يصل منها محرك CloudStream إلى الحل الصامت دون نسخة ثانية. */
+        @Volatile @JvmStatic var current: CloudflareInterceptor? = null
+            private set
+
         private const val TIMEOUT_SEC = 20L
         private const val INTERACTIVE_TIMEOUT_SEC = 120L
         private const val POLL_MS = 400L
