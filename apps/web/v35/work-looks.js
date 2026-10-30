@@ -184,8 +184,8 @@ export function renderLook(look, host, c) {
 /**
  * حركة كل نمط مع التمرير، كما في تصميمه، بدل انطواء البنر الخاص بالأساسي:
  * - المنصة: البنر يغوص (أبطأ من الصفحة، يغمق ويتضبب) والشعار والمعلومات يرتفعان ويختفيان.
- * - البطاقة الطائرة: خلفية مضبّبة بطيئة وفوقها البنر أسرع منها (عمق بطبقتين)، الاسم العملاق ينزلق،
- *   والبطاقة المائلة تعتدل وترتفع.
+ * - البطاقة الطائرة: خلفية مضبّبة بطيئة وفوقها البنر أسرع منها (عمق بطبقتين)، والبطاقة المائلة
+ *   تعتدل وترتفع.
  * - شاشة السينما: الشاشة تميل للخلف كتلفاز على حامل، تصغر وتبهت، والغلاف يرتفع قليلًا.
  * - الحلقة أولًا: لقطة الحلقة تبتعد (ميل خفيف، تصغر، تستدير حوافها، تبهت)، ثم يظهر شريط «تابع» الصغير.
  * تُحسب كل إطار من موضع التمرير نفسه (rAF)، بلا CSS مربوط بالتمرير، فلا تعلق مع دفعة الإصبع.
@@ -216,8 +216,6 @@ export function bindLookMotion(look, host, { hero = null, bg = null, active = ()
       const t = clamp(y / (vh * 0.45));
       hero?.style.setProperty('--far-y', `${f(y * 0.5)}px`);
       if (bg) bg.style.transform = `translate3d(0, ${f(y * 0.25)}px, 0)`;
-      const giant = hero?.querySelector('.aw-giant');
-      if (giant) giant.style.transform = `translate3d(${f(y * 0.5)}px, 0, 0)`;
       const card = host.querySelector('.wl-card');
       if (card) card.style.transform = `rotateY(${f(-18 * (1 - t))}deg) rotateX(${f(6 * (1 - t))}deg) translate3d(0, ${f(-24 * t)}px, ${f(30 * t)}px)`;
     } else if (look === 'screen') {

@@ -669,14 +669,6 @@ export function createAnime(deps) {
     const hero = el('div', 'aw-hero');
     const bg = el('div', 'aw-bg');
     hero.append(bg, el('div', 'aw-shade'));
-    // البطاقة الطائرة: اسم العمل بحروف لاتينية عملاقة مفرّغة خلف البنر (لا يُكتب لاسم غير لاتيني)
-    const tail = String(m.title ?? '').split(':').pop().trim();
-    if (look === 'card' && /^[\x20-\x7e]+$/.test(tail)) {
-      const giant = el('div', 'aw-giant', tail.toUpperCase());
-      giant.dir = 'ltr';
-      giant.setAttribute('aria-hidden', 'true');
-      hero.append(giant);
-    }
     const stage = el('div', 'aw-stage');
     const cover = el('div', 'aw-cover');
     // ضغطة مطوّلة على الاسم أو الشعار: «نسخ» و«مشاركة» (نفس ورقة المانجا، `data-copyable`)

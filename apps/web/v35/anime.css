@@ -2985,7 +2985,6 @@ html[data-section='cinema'] {
 
 /* ── ٣ البطاقة الطائرة ── */
 .v35 .aw[data-style='card'] .aw-hero::after { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to bottom, transparent 55%, var(--bg)); pointer-events: none; }
-.v35 .aw-giant { position: absolute; inset-inline-end: -8px; bottom: -0.14em; z-index: 1; font: 900 clamp(64px, 22cqw, 190px) / 1 system-ui, sans-serif; letter-spacing: -0.04em; color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.35); white-space: nowrap; pointer-events: none; }
 .v35 .wl-card .wl-head { display: grid; }
 .v35 .wl-card .wl-stage3d { perspective: 900px; display: grid; justify-items: center; margin-top: -96px; position: relative; z-index: 3; }
 .v35 .wl-card .wl-card { width: 168px; aspect-ratio: 2 / 3; border-radius: 16px; overflow: hidden; transform: rotateY(-18deg) rotateX(6deg); box-shadow: -24px 34px 50px -22px #000, 0 0 0 1px rgba(255, 255, 255, 0.08); will-change: transform; }
