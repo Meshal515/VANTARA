@@ -12,6 +12,7 @@ import { publishConfig, requestPersistence } from './cache/images.js';
 import { createRegistry } from './sources/registry.js';
 import { ENGINES } from './sources/engines/index.js';
 import { createHostResolver } from './sources/hosts.js';
+import { guardFetcher } from '../lib/host-breaker.js';
 
 let auth = { header: () => readToken(), refresh: null };
 let runtime = null;
@@ -30,20 +31,35 @@ export function attachAuth(next) {
   auth = { header: next?.header ?? readToken, refresh: next?.refresh ?? null };
 }
 
-async function loadDefs() {
-  const res = await fetch('/pwa/sources/defs.json', { cache: 'no-cache' }).catch(() => null);
-  if (res?.ok) return (await res.json()).sources ?? [];
-  // دون اتصال: القشرة المخزنة تحمل نسخة defs.json (service worker)
-  return [];
+/**
+ * حزمة التعريفات: `{ sources, blocked }`، أو `null` إن تعذرت قراءتها. `null` ليس «لا مصادر»:
+ * السجل يشغّل المصادر المثبتة من نسخها المحلية (Plugin Vault) ولا يحذف شيئًا.
+ */
+export async function loadDefs(fetchImpl = (...a) => globalThis.fetch(...a)) {
+  try {
+    // دون اتصال: القشرة المخزنة تحمل نسخة defs.json (service worker)
+    const res = await fetchImpl('/pwa/sources/defs.json', { cache: 'no-cache' });
+    if (!res?.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data?.sources)) return null;
+    return { sources: data.sources, blocked: Array.isArray(data.blocked) ? data.blocked : [] };
+  } catch {
+    return null;
+  }
 }
+
+/** مخزن الإضافات الدائم: قاعدة مستقلة لا يكنسها كنس الكاش ولا تنتهي صلاحيتها. */
+export const VAULT_SPACES = Object.freeze({ vault: { ttlMs: Infinity, maxBytes: 64 * 1024 * 1024, maxEntryBytes: 2 * 1024 * 1024 } });
 
 export function getRuntime() {
   const desktop = desktopPlugin('SourceRuntime');
   if (desktop) return desktop.getRuntime();
   if (runtime) return runtime;
   const store = createStore();
-  const fetcher = createFetcher({ auth: { header: () => auth.header(), refresh: () => auth.refresh?.() } });
-  const registry = createRegistry({ engines: ENGINES, store, ctx: { fetch: fetcher, hosts: createHostResolver(fetcher) } });
+  // قاطع دائرة لكل مضيف قبل الجالب: موقع طلب التوقف لا يُطلب منه شيء حتى تنتهي المدة
+  const fetcher = guardFetcher(createFetcher({ auth: { header: () => auth.header(), refresh: () => auth.refresh?.() } }));
+  const durable = { store: createStore({ name: 'vantara-plugin-vault', spaces: VAULT_SPACES }), ns: 'vault' };
+  const registry = createRegistry({ engines: ENGINES, store, durable, ctx: { fetch: fetcher, hosts: createHostResolver(fetcher) } });
   let published = null; // { grant, at, promise }
 
   /**
@@ -60,7 +76,8 @@ export function getRuntime() {
   }
 
   const ready = (async () => {
-    await registry.init(await loadDefs());
+    const bundle = await loadDefs();
+    await registry.init(bundle?.sources ?? null, { blocked: bundle?.blocked ?? [] });
     void requestPersistence();
     // الكنس والفحص بعد أن تهدأ الشاشة الأولى
     setTimeout(() => {

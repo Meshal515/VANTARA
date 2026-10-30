@@ -3,6 +3,7 @@ import { publicUrl } from '../addons/manifest.js';
 import { LIMITS } from '../addons/contracts.js';
 import { loadDesktopSources } from '../pwa/platform.js';
 import { createDesktopFetcher } from './source-fetcher.js';
+import { guardFetcher } from '../lib/host-breaker.js';
 
 /** تخزين دائم تحت أصل vantara://app الثابت، بلا حساب أو token ضمن النقل. */
 export function createDesktopStore(storage = globalThis.localStorage) {
@@ -56,10 +57,13 @@ export function createDesktopRuntime({ bridge = globalThis.VantaraDesktop, stora
   runtime.ready=(async()=>{
     const modules=await loadDesktopSources({VantaraDesktop:bridge});
     if(!modules)return;
-    const defs=definitions ?? await fetch('/pwa/sources/defs.json').then(r=>r.ok?r.json():{sources:[]}).then(d=>d.sources ?? []).catch(()=>[]);
+    // تعذّر قراءة الحزمة ⇒ null: المصادر المثبتة تعمل من نسخها المحلية ولا يُحذف شيء (Plugin Vault)
+    const bundle=definitions ? {sources:definitions,blocked:[]} : await fetch('/pwa/sources/defs.json').then(r=>r.ok?r.json():null).then(d=>Array.isArray(d?.sources)?{sources:d.sources,blocked:Array.isArray(d.blocked)?d.blocked:[]}:null).catch(()=>null);
     runtime.store=modules.createStore({name:'vantara-desktop-sources'});
-    runtime.registry=modules.createRegistry({engines:modules.engines,store:runtime.store,ctx:{fetch:fetcher,hosts:modules.createHostResolver(fetcher)}});
-    await runtime.registry.init(defs.map(def=>def.edge==='challenge'?{...def,edge:undefined}:def));
+    const durable={store:modules.createStore({name:'vantara-desktop-vault',spaces:{vault:{ttlMs:Infinity,maxBytes:64*1024*1024,maxEntryBytes:2*1024*1024}}}),ns:'vault'};
+    const guarded=guardFetcher(fetcher);
+    runtime.registry=modules.createRegistry({engines:modules.engines,store:runtime.store,durable,ctx:{fetch:guarded,hosts:modules.createHostResolver(guarded)}});
+    await runtime.registry.init(bundle ? bundle.sources.map(def=>def.edge==='challenge'?{...def,edge:undefined}:def) : null,{blocked:bundle?.blocked ?? []});
   })();
   runtime.addons = createAddonRuntime({ runtime, store, transport: createDesktopTransport(bridge) });
   return runtime;
