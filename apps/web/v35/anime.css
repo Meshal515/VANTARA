@@ -2574,7 +2574,7 @@ html[data-section='cinema'] {
   display: none;
 }
 /* الغلاف ظاهر منفصلًا: لو لم تتوفر خلفية عريضة لا يتكرر نفسه حادًّا خلفه، بل جوًّا ضبابيًا */
-.v35 .aw:not(.no-cover) .aw-bg-img--poster {
+.v35 .aw:not(.no-cover):not([data-style='episode']) .aw-bg-img--poster {
   filter: blur(26px) saturate(1.25) brightness(0.72);
   transform: scale(1.25);
 }
@@ -3367,4 +3367,95 @@ html[data-section='cinema'] {
 @media (hover: hover) and (pointer: fine) {
   .v35 .wl .wl-strip, .v35 .wl .wl-recs, .v35 .wl-card .wl-world { cursor: grab; }
   .v35 .wl .dragging { cursor: grabbing; user-select: none; }
+}
+
+/* ═══ «الحلقة أولًا»: لقطة الحلقة كما هي، بلا أي ضباب ═══
+   لا نسخة مضبّبة خلف البطل ولا فلتر على أي طبقة فيه؛ بلا لقطة يبقى لون العمل (heroPlan في work-looks.js) */
+.v35 .aw[data-style='episode'] .aw-hero::before { display: none; }
+.v35 .aw[data-style='episode'] .aw-hero, .v35 .aw[data-style='episode'] .aw-bg, .v35 .aw[data-style='episode'] .aw-bg-img { filter: none !important; }
+
+/* ═══ الوظائف المشتركة في الأنماط الأربعة: موعد الحلقة القادمة، ونشاط الأصدقاء، والأنواع روابط ═══
+   نفس مصادر المحور (nextAiring وwork-insights في anime.js)؛ هنا شكلها وموضعها في كل نمط فقط */
+.v35 .wl-next { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--text-3); }
+.v35 .wl-next::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #34d399; flex: none; }
+.v35 .wl-next b { font-weight: 650; color: #86e3b6; }
+.v35 .wl-social .work-insights { margin: 0; }
+.v35 .wl-social:not(:has(.work-insights-line)) { display: none; }
+.v35 .wl-genres .wl-genre { color: inherit; font-size: inherit; }
+.v35 .wl-genres .wl-genre:hover { color: var(--text-1); }
+.v35 .wl-desc { cursor: pointer; }
+.v35 .wl-desc.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.v35 .wl-facts b { text-align: end; min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
+/* المنصة: على الجوال تحت اللوحة (الغلاف والمعلومات)، وعلى الكمبيوتر في العمود الثابت تحت التقدّم */
+.v35 .wl-platform .wl-aside > .wl-next, .v35 .wl-platform .wl-aside > .wl-social { margin: 14px var(--wl-g) 0; }
+/* البطاقة الطائرة: تحت زر المشاهدة */
+.v35 .wl-card .wl-info .wl-next { justify-content: center; }
+.v35 .wl-card .wl-info .wl-social .work-insights-line { justify-content: center; }
+.v35 .wl-card .wl-body > .wl-sec:not(.wl-full) { padding-inline: var(--wl-g); }
+/* شاشة السينما: الموعد مع المعلومات، والأصدقاء أول الجسم */
+.v35 .wl-screen .wl-mid .wl-next { margin-top: 2px; }
+/* الحلقة أولًا: الموعد تحت التشغيل، والأصدقاء بعد القصة (الجوال: نفس ترتيب العمود) */
+.v35 .wl-episode .wl-now .wl-next { margin-top: 2px; }
+.v35 .wl-episode .wl-social { order: 1; }
+@container aw (min-width: 900px) {
+  .v35 .wl-next { font-size: 14px; }
+  .v35 .wl-social .work-insights { font-size: 14px; }
+  .v35 .wl-platform .wl-aside > .wl-next, .v35 .wl-platform .wl-aside > .wl-social { margin: 0; }
+  .v35 .wl-card .wl-info .wl-next { justify-content: flex-start; }
+  .v35 .wl-card .wl-info .wl-social .work-insights-line { justify-content: flex-start; }
+  .v35 .wl-card .wl-body > .wl-sec:not(.wl-full) { padding-inline: 90px; }
+  .v35 .wl-card .wl-s-facts .wl-facts, .v35 .wl-screen .wl-s-facts .wl-facts { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 40px; font-size: 14px; }
+  .v35 .wl-card .wl-s-facts .wl-facts div, .v35 .wl-screen .wl-s-facts .wl-facts div { flex-direction: column; justify-content: flex-start; gap: 4px; }
+  .v35 .wl-card .wl-s-facts .wl-facts b, .v35 .wl-screen .wl-s-facts .wl-facts b { text-align: start; }
+}
+
+/* ═══ «المحور» على الكمبيوتر والويب (الحاوية ≥900px) ═══
+ * الجوال كما اعتمده المالك ولا يُمس. هنا: البنر بعرض الصفحة يملؤها بقصّ cover من منتصفه الأعلى (لا تشويه
+ * ولا جانبان فارغان)، والهوية نفسها (الغلاف في النص والشعار تحته)، ثم صف عريض: لقطة الحلقة بالتشغيل
+ * وبجانبها كل ما يخص العمل (الموعد، تقدّمي، القصة، الأصدقاء، معلومات)، ثم الحلقات بعمودين بعرض المحتوى. */
+@container aw (min-width: 900px) {
+  .v35 .aw[data-style='core'] .aw-hero { width: 100%; max-width: none; aspect-ratio: auto; height: clamp(380px, 54svh, 640px); min-height: 0; max-height: none; margin-inline: 0; }
+  .v35 .aw[data-style='core'] .aw-bg-img:not(.aw-bg-img--poster) { object-position: center 20%; }
+  .v35 .aw[data-style='core'] .aw-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+    /* الرأس أربعة صفوف، ثم صفوف العمود الجانبي، وآخرها مرن يأخذ ما تزيده اللقطة فلا تتباعد المعلومات */
+    grid-template-rows: auto auto auto auto auto auto auto auto auto 1fr;
+    grid-auto-flow: row dense;
+    column-gap: 48px;
+    padding: 0 max(56px, calc((100% - 1280px) / 2)) 24px;
+  }
+  .v35 .aw[data-style='core'] .aw-main > .aw-stage,
+  .v35 .aw[data-style='core'] .aw-main > .aw-body,
+  .v35 .aw[data-style='core'] .aw-main .aw-below { display: contents; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cover,
+  .v35 .aw[data-style='core'] .aw-main .an-mark,
+  .v35 .aw[data-style='core'] .aw-main .aw-meta,
+  .v35 .aw[data-style='core'] .aw-main .aw-genres { grid-column: 1 / -1; justify-self: center; position: relative; z-index: 2; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cover { grid-row: 1; margin-top: calc(var(--cover-w) * -0.92); }
+  .v35 .aw[data-style='core'] .aw-main .an-mark { grid-row: 2; }
+  .v35 .aw[data-style='core'] .aw-main .aw-meta { grid-row: 3; margin-top: 10px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-genres { grid-row: 4; margin-top: 6px; }
+  .v35 .aw[data-style='core'].no-cover .aw-main .an-mark { margin-top: -64px; }
+  /* لقطة الحلقة: العمود الأوسع، بنسبة 16:9 بلا سقف ارتفاع يقلّص عرضها */
+  .v35 .aw[data-style='core'] .aw-main .aw-still { grid-column: 1; grid-row: 5 / span 6; align-self: start; width: 100%; max-width: none; max-height: none; margin-top: 34px; }
+  /* العمود الجانبي: ما يخص العمل بدل فراغ أسود حول اللقطة */
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-side, .aw-cta, .aw-about, .work-insights, .aw-info) { grid-column: 2; text-align: start; justify-self: stretch; width: auto; max-width: none; margin: 0; padding: 0; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side { margin-top: 34px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side .aw-next { justify-content: flex-start; font-size: 14px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cta { margin-top: 34px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side:not([hidden]) ~ .aw-cta { margin-top: 14px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-about { margin-top: 18px; }
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis { font-size: 15px; line-height: 1.8; }
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis.clamped { -webkit-line-clamp: 5; }
+  .v35 .aw[data-style='core'] .aw-main .work-insights { margin-top: 16px; font-size: 13.5px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-info { margin-top: 26px; padding: 18px 0 0; border-top: 1px solid var(--line); }
+  .v35 .aw[data-style='core'] .aw-main .aw-info h2 { font-size: 17px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-info dl { font-size: 13.5px; }
+  /* الحلقات وما بعدها بعرض المحتوى كاملًا */
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-episodes, .aw-cast, .an-rail) { grid-column: 1 / -1; min-width: 0; }
+  .v35 .aw[data-style='core'] .aw-main .aw-episodes { margin-top: 48px; max-width: none; }
+  .v35 .aw[data-style='core'] .aw-main .an-er-list { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .v35 .aw[data-style='core'] .aw-main .an-er-main { grid-template-columns: 176px minmax(0, 1fr); }
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-cast, .an-rail) { margin-inline: calc(var(--gutter) * -1); }
 }

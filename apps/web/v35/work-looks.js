@@ -24,7 +24,12 @@ const dashLine = (n = 4) => `<svg class="wl-dash" preserveAspectRatio="none" vie
 function parts(c) {
   const { m, glyph } = c;
   const meta = c.meta.map((x) => `<span>${x.html ?? esc(x)}</span>`).join('');
-  const genres = c.genres.map((g) => `<span>${esc(g)}</span>`).join('');
+  // الأنواع روابط كما في المحور: تفتح مجموعة النوع
+  const genres = c.genres.map((g, i) => (c.genreKeys?.[i] ? `<button type="button" class="wl-genre" data-genre="${esc(c.genreKeys[i])}">${esc(g)}</button>` : `<span>${esc(g)}</span>`)).join('');
+  // الوظائف المشتركة مع المحور: موعد الحلقة القادمة (من AniList فقط) ونشاط الأصدقاء وتقدّمهم
+  const next = c.next ? `<div class="wl-next"><b>الحلقة ${esc(c.next.episode ?? '')} ${esc(c.next.rel)}</b><span>${esc(c.next.time)}</span></div>` : '';
+  const social = '<div class="wl-social" data-slot="insights"></div>';
+  const factsBox = c.facts.length ? `<div class="wl-facts">${c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('')}</div>` : '';
   const logo = c.logo ? `<img class="wl-logo" src="${esc(c.logo)}" alt="${esc(m.title)}">` : `<h1 class="wl-name" dir="auto">${esc(m.title)}</h1>`;
   const facts = c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('');
   const play = glyph('play', { size: 22, filled: true });
@@ -49,7 +54,7 @@ function parts(c) {
   const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : '';
   const section = (title, body, key = '') =>
     body ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}"><div class="wl-h"><h2>${title}</h2></div>${body}</section>` : '';
-  return { meta, genres, logo, facts, play, cur, curTitle, ranges, eps, epState, epSub, bar, thumb, epRows, chars, recs, desc, section };
+  return { meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, eps, epState, epSub, bar, thumb, epRows, chars, recs, desc, section };
 }
 
 /** «من نفس العالم»: ما قبله، ثم العمل نفسه («أنت هنا»)، ثم ما بعده، ثم بقية المرتبط؛ أنمي ومانجا. */
@@ -82,6 +87,7 @@ const LOOKS = {
           <div class="wl-plate"><div class="wl-cover">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div><div class="wl-facts">${p.facts}</div></div>
           <button type="button" class="wl-cta" data-ep="${p.cur}"><span class="dot">${p.play}</span><span>${esc(c.label)}<small dir="auto">${esc([p.curTitle, c.left ? `باقي ${c.left} د` : null].filter(Boolean).join(' · '))}</small></span></button>
           <div class="wl-pg" style="--w:${c.seenRatio * 100}%"><i></i><span>${esc(c.progressText)}</span></div>
+          ${p.next}${p.social}
         </aside>
         <main class="wl-main">${p.desc}${p.section('الحلقات', p.ranges + p.epRows(), 'eps')}${p.section('الشخصيات', p.chars('wl-chars', 10), 'chars')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</main>
       </div>
@@ -95,9 +101,9 @@ const LOOKS = {
     return `
       <div class="wl-head">
         <div class="wl-stage3d"><div class="wl-card">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div></div>
-        <div class="wl-info">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div><div class="wl-row"><button type="button" class="wl-big" data-ep="${p.cur}"><span class="dot">${p.play}</span>${esc(c.label)}</button><span class="wl-sub">${esc(c.progressText)}</span></div></div>
+        <div class="wl-info">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div><div class="wl-row"><button type="button" class="wl-big" data-ep="${p.cur}"><span class="dot">${p.play}</span>${esc(c.label)}</button><span class="wl-sub">${esc(c.progressText)}</span></div>${p.next}${p.social}</div>
       </div>
-      <div class="wl-body">${p.desc}<section class="wl-sec wl-full"><h2>الحلقات</h2>${p.ranges}<div class="wl-strip">${strip}</div></section>${c.characters.length ? `<section class="wl-sec wl-full"><h2>الشخصيات</h2>${p.chars('wl-tall', 8)}</section>` : ''}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join(dashLine(4))}</div>` : '')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
+      <div class="wl-body">${p.desc}<section class="wl-sec wl-full"><h2>الحلقات</h2>${p.ranges}<div class="wl-strip">${strip}</div></section>${c.characters.length ? `<section class="wl-sec wl-full"><h2>الشخصيات</h2>${p.chars('wl-tall', 8)}</section>` : ''}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join(dashLine(4))}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
   },
 
   /* ── شاشة السينما ── */
@@ -106,10 +112,10 @@ const LOOKS = {
     return `
       <div class="wl-top">
         <div class="wl-cover">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div>
-        <div class="wl-mid">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div>
+        <div class="wl-mid">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div>${p.next}</div>
         <button type="button" class="wl-go" data-ep="${p.cur}"><span class="dot">${p.play}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc([p.curTitle, c.progressText].filter(Boolean).join(' · '))}</small></span></button>
       </div>
-      <div class="wl-body">${p.desc}${p.section('الحلقات', p.ranges + `<div class="wl-line" style="--done:${c.lineDone}">${p.epRows()}</div>`)}${p.section('الشخصيات', p.chars('wl-ring', 9))}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w, i) => `<button type="button" class="wn${w.here ? ' here' : ''}${w.banner ? ' banner' : ''}" ${openAttr(w)}>${w.banner ? img(w.banner, 'bn') : ''}${img(w.posterSmall ?? w.poster, 'cv')}<i>${i + 1}</i><span class="t"><b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></span></button>`).join('')}</div>` : '')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
+      <div class="wl-body">${p.social}${p.desc}${p.section('الحلقات', p.ranges + `<div class="wl-line" style="--done:${c.lineDone}">${p.epRows()}</div>`)}${p.section('الشخصيات', p.chars('wl-ring', 9))}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w, i) => `<button type="button" class="wn${w.here ? ' here' : ''}${w.banner ? ' banner' : ''}" ${openAttr(w)}>${w.banner ? img(w.banner, 'bn') : ''}${img(w.posterSmall ?? w.poster, 'cv')}<i>${i + 1}</i><span class="t"><b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></span></button>`).join('')}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
   },
 
   /* ── الحلقة أولًا ── */
@@ -124,16 +130,27 @@ const LOOKS = {
     }
     return `
       <div class="wl-headrow">
-        <div class="wl-now"><small>${c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'} · الحلقة ${p.cur}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1>${c.epOverview(p.cur) ? `<p dir="auto">${esc(c.epOverview(p.cur))}</p>` : ''}<div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i><span>باقي ${c.left ?? ''} د</span>` : ''}</div></div>
+        <div class="wl-now"><small>${c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'} · الحلقة ${p.cur}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1>${c.epOverview(p.cur) ? `<p dir="auto">${esc(c.epOverview(p.cur))}</p>` : ''}<div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
         <div class="wl-series">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}<div>${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div></div>
       </div>
       <div class="wl-scrub"><div class="wl-track">${scrub.join('')}</div><div class="wl-sline" style="--w:${c.seenRatio * 100}%"></div></div>
-      <div class="wl-body"><div class="wl-left">${p.desc}${p.section('كل الحلقات', p.ranges + p.epRows(false), 'eps')}${p.section('الشخصيات', p.chars('wl-grid4', 10), 'chars')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div><div class="wl-right">${p.section('معلومات', `<div class="wl-facts">${p.facts}</div>`, 'facts')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}</div></div>
+      <div class="wl-body"><div class="wl-left">${p.desc}${p.social}${p.section('كل الحلقات', p.ranges + p.epRows(false), 'eps')}${p.section('الشخصيات', p.chars('wl-grid4', 10), 'chars')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div><div class="wl-right">${p.section('معلومات', p.factsBox, 'facts')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}</div></div>
       <div class="wl-mini"><span class="wl-mini-th">${img(c.still(p.cur).src)}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc(p.curTitle ?? '')}</small></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
   },
 };
 
 export const LOOK_IDS = Object.keys(LOOKS);
+
+/**
+ * ما يضعه كل نمط في البطل. «الحلقة أولًا» يعرض لقطة الحلقة الأصلية كما هي: لا غلاف مضبّب بديلًا
+ * عنها، ولا نسخة مضبّبة خلفها (::before)؛ بلا لقطة ولا خلفية للعمل يبقى لون العمل وحده. بقية الأنماط
+ * تحتفظ بمعالجة البنرات: الغلاف الطولي جوًّا ضبابيًا حين لا خلفية عريضة، والنسخة المضبّبة للأطراف.
+ * @returns {{ episodeStill: boolean, posterFallback: boolean, ambient: boolean }}
+ */
+export function heroPlan(look) {
+  const episode = look === 'episode';
+  return { episodeStill: episode, posterFallback: !episode, ambient: !episode };
+}
 
 /** يرسم النمط في host ويربط الضغطات (تشغيل حلقة، فتح عمل، تبديل مجموعة الحلقات). */
 export function renderLook(look, host, c, { center = true } = {}) {
@@ -160,7 +177,14 @@ export function renderLook(look, host, c, { center = true } = {}) {
     const r = e.target.closest('[data-range]');
     if (r) return c.onRange?.(Number(r.dataset.range));
     const ep = e.target.closest('[data-ep]');
+    // ضغطة مطوّلة فتحت قائمة الحلقة: اللمسة التي تتبعها ليست تشغيلًا
+    if (ep?._held) return void (ep._held = false);
     if (ep) return c.play(Number(ep.dataset.ep));
+    const genre = e.target.closest('[data-genre]');
+    if (genre) return c.openGenre?.(genre.dataset.genre);
+    // القصة: لمسة تفتحها كاملة وأخرى تطويها (كـ«المزيد» في المحور)
+    const desc = e.target.closest('.wl-desc');
+    if (desc) return void desc.classList.toggle('open');
     const open = e.target.closest('[data-open]');
     if (open) return c.open(open.dataset.open);
     const manga = e.target.closest('[data-manga]');

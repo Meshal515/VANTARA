@@ -32,7 +32,7 @@ import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
-import { bindLookExtras, lookMotion, renderLook } from './work-looks.js';
+import { bindLookExtras, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -556,7 +556,13 @@ export function createAnime(deps) {
     // لقطات الحلقات والشعار وخلفية IMDb من ani.zip: المخبّأ يصل في لحظة، والبطل
     // ينتظره قليلًا فيُختار مرة واحدة (لا بانر يتبدّل بعد ثانية بخلفية أخرى)
     const artReady = loadAnimeArt(m.id).then((art) => {
-      if (token !== state.detailToken || !art) return null;
+      if (token !== state.detailToken) return null;
+      // «الحلقة أولًا» ينتظر هذه اللحظة قبل أي صورة غير لقطة الحلقة (لا خلفية تسبق اللقطة)
+      if (state.view?.id === m.id) state.view.artDone = true;
+      if (!art) {
+        if (state.view?.look === 'episode') paintHero(state.detail);
+        return null;
+      }
       state.art = { ...art, id: m.id };
       paintLogo(state.detail);
       patchStills(state.detail);
@@ -706,9 +712,15 @@ export function createAnime(deps) {
       stage.hidden = true;
       body.hidden = true;
       wrap.append(bar, hero, lw, stage, body);
-    } else wrap.append(bar, hero, stage, body);
+    } else {
+      // «المحور»: الرأس والجسم في حاوية واحدة؛ على الشاشة العريضة شبكة تضع اللقطة والمعلومات
+      // جنبًا إلى جنب (anime.css). على الجوال حاوية عادية لا تغيّر شيئًا
+      const main = el('div', 'aw-main');
+      main.append(stage, body);
+      wrap.append(bar, hero, main);
+    }
 
-    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, lw, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, lw, heroRank: Infinity, heroShownRank: Infinity, heroTried: new Set(), artSettled: false, artDone: false, unbind: null };
     paintCover(m);
     paintMeta(m);
     paintCta(m);
@@ -807,13 +819,17 @@ export function createAnime(deps) {
     if (!v || v.id !== m?.id || !v.artSettled) return;
     const imdb = artOf(m)?.imdb;
     const wide = globalThis.matchMedia?.('(min-width: 900px)').matches === true;
-    // الحلقة أولًا: البطل لقطة الحلقة التي ستكملها (1920) متى عُرفت؛ وإلا خلفية العمل كالعادة
-    const firstShot = v.look === 'episode' ? episodeStill(m, resumePoint(m).episode, artOf(m), { full: true }) : null;
-    if (v.look === 'episode' && !artOf(m) && !v.artSettled) return;
-    const known = v.look === 'episode' ? null : heroMemory.get(m.id);
-    // كل لقطات الحلقة بالترتيب (1920 ← 780 ← TVDB ← المنصات): رابط محجوب أو معطوب ينتقل للتالي
-    // بدل القفز إلى الغلاف المضبّب، وما يصل لاحقًا مع الفن يُجرَّب أيضًا
+    // الحلقة أولًا: البطل لقطة الحلقة التي ستكملها كما هي، بلا أي ضباب ولا غلاف مضبّب بديلًا عنها
+    // (heroPlan في work-looks.js). بلا لقطة بعد اكتمال الفن: خلفية العمل الواضحة إن وُجدت، وإلا لون العمل
+    const plan = heroPlan(v.look);
+    const ep = resumePoint(m).episode;
+    const firstShot = plan.episodeStill ? episodeStill(m, ep, artOf(m), { full: true }) : null;
+    const known = plan.episodeStill ? null : heroMemory.get(m.id);
+    // كل لقطات الحلقة بالترتيب (1920 ← 780 ← TVDB ← المنصات): رابط محجوب أو معطوب ينتقل للتالي.
+    // اللقطة الظاهرة لا تُستبدل بلقطة أخرى (قد تكون إطارًا مختلفًا من الحلقة: تبديل مرئي)
     const shots = firstShot?.still ? [firstShot.src, ...(firstShot.fallbacks ?? [])] : [];
+    // لا خلفية ولا غلاف قبل أن يُعرف هل للحلقة لقطة: كانت تسبقها ثم تتسابق معها
+    if (plan.episodeStill && !shots.length && !v.artDone) return;
     const list = [
       ...shots.map((src, i) => ({ src, rank: -2 + i * 0.01 })),
       known ? { src: known, rank: -1 } : null,
@@ -824,12 +840,13 @@ export function createAnime(deps) {
       v.seriesBg ? { src: v.seriesBg, rank: 0.3 } : null,
       artOf(m)?.fanart ? { src: artOf(m).fanart, rank: 0.5 } : null,
       m.banner && wide ? { src: m.banner, rank: 1 } : null,
-      m.poster ?? m.posterSmall ? { src: m.poster ?? m.posterSmall, rank: 2 } : null,
+      plan.posterFallback && (m.poster ?? m.posterSmall) ? { src: m.poster ?? m.posterSmall, rank: 2 } : null,
     ].filter((c) => c && !v.heroTried.has(c.src));
     const pick = list[0];
     if (!pick || pick.rank >= v.heroRank) return;
-    // صورة ظاهرة عريضة لا تُستبدل؛ الغلاف الطولي وحده يُرقّى
-    if (v.heroShown && v.heroRank < 2) return;
+    // صورة ظاهرة عريضة لا تُستبدل؛ الغلاف الطولي وحده يُرقّى. في «الحلقة أولًا» لقطة الحلقة تحل محل
+    // خلفية العمل إن سبقتها (عمل بلا لقطة عند اكتمال الفن ثم وصلت لقطته مع التفاصيل)
+    if (v.heroShown && v.heroShownRank < 2 && !(plan.episodeStill && pick.rank < -1.5 && v.heroShownRank > -1.5)) return;
     // في الطريق صورة أفضل: الحالية تبقى حتى تحل محلها بتلاشٍ، لا فراغ بينهما
     v.heroRank = pick.rank;
     v.heroTried.add(pick.src);
@@ -839,12 +856,18 @@ export function createAnime(deps) {
     img.decoding = 'async';
     const show = () => {
       if (state.view !== v) return;
+      // صورة اختيرت قبل الأفضل ووصلت بعده (الغلاف بعد لقطة الحلقة): تُهمل، لا تغطي الأفضل.
+      // هذا سبب تغبيش «الحلقة أولًا»: اللقطة تظهر واضحة ثم يحل فوقها الغلاف المضبّب حين يكتمل تحميله
+      if (v.heroShown && pick.rank > v.heroShownRank) return;
       v.bg.append(img);
       // نسخة مضبّبة ثابتة خلف البنر: حين ينطوي بالعمق تملأ الأطراف بألوانه هو لا بفراغ
-      v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
-      // تظهر تدريجيًا مع الصورة لا دفعة واحدة
-      requestAnimationFrame(() => v.hero.classList.add('amb'));
+      if (plan.ambient) {
+        v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
+        // تظهر تدريجيًا مع الصورة لا دفعة واحدة
+        requestAnimationFrame(() => v.hero.classList.add('amb'));
+      }
       v.heroShown = true;
+      v.heroShownRank = pick.rank;
       // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
       v.heroSrc = pick.rank < 2 ? pick.src : null;
       if (pick.rank < 1 && pick.rank > -1.5) heroMemory.set(m.id, pick.src);
@@ -939,11 +962,11 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
     if (v.lw) paintLook(m);
-    const next = m.next?.at && m.next.at > Date.now() ? m.next : null;
+    const next = nextAiring(m);
     v.side.replaceChildren();
     if (next) {
       const line = el('span', 'aw-next');
-      line.append(el('b', null, `الحلقة ${next.episode ?? ''}`.trim()), el('span', null, meccaTime(next.at)));
+      line.append(el('b', null, `الحلقة ${next.episode ?? ''}`.trim()), el('span', null, next.time));
       v.side.append(line);
     }
     v.side.hidden = !next;
@@ -1042,18 +1065,14 @@ export function createAnime(deps) {
     const ratio = !rec.done && rec.duration > 0 ? Math.min(1, rec.position / rec.duration) : null;
     const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60_000)) : null;
     const seen = seenCountOf(m);
-    const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const { label, upcoming } = watchLabel(m);
+    const next = nextAiring(m);
     const minutes = (n) => {
       const d = art?.episodes?.[String(n)]?.runtime || m.duration;
       return d ? `${d} د` : '';
     };
-    const facts = [
-      ['الاستوديو', m.studio],
-      ['المصدر', SOURCE_AR[m.source]],
-      ['الموسم', m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year],
-      ['المدة', m.duration ? `${m.duration} دقيقة` : null],
-      ['الحلقات', m.episodes ? String(m.episodes) : null],
-    ].filter(([, val]) => val);
+    // «معلومات» من المصدر نفسه الذي يعرضه المحور
+    const facts = workFacts(m);
     const byId = new Map([...(m.relations ?? []), ...(m.world ?? []).filter((w) => w.kind === 'anime'), ...(m.recommendations ?? [])].map((r) => [String(r.id), r]));
     const shown = Math.max(1, Math.min(total, 25));
     const ctx = {
@@ -1068,9 +1087,13 @@ export function createAnime(deps) {
         STATUS_AR[m.status],
       ].filter(Boolean),
       genres: (m.genres ?? []).slice(0, 4).map(genreAr),
+      genreKeys: (m.genres ?? []).slice(0, 4),
       facts,
       point,
       label,
+      upcoming,
+      // الحلقة القادمة بموعدها الحقيقي (AniList)؛ null بلا موعد فلا يظهر شيء
+      next,
       total,
       ratio,
       left,
@@ -1089,7 +1112,8 @@ export function createAnime(deps) {
       still: (n, full = false) => episodeStill(m, n, art, { full }),
       seen: (n) => epRecord(m, n).done,
       minutes,
-      play: (n) => playEpisode(m, n),
+      play: (n) => (upcoming ? soonToast(m) : playEpisode(m, n)),
+      openGenre: (g) => openCollection({ kind: 'genre', genre: g }),
       open: (id) => {
         const r = byId.get(String(id));
         if (r) void openAnime(r);
@@ -1102,11 +1126,15 @@ export function createAnime(deps) {
       },
     };
     // لا رسم من جديد إن لم يتغيّر ما يُعرض (وصول نفس البيانات، أو تقدّم لم يتغيّر)
-    const sig = JSON.stringify([v.look, point, total, ratio, seen, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, state.malTitles ? Object.keys(state.malTitles).length : 0]);
+    const sig = JSON.stringify([v.look, point, total, ratio, seen, label, next?.episode, next?.rel, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, state.malTitles ? Object.keys(state.malTitles).length : 0]);
     if (sig === v.lwSig) return;
     v.lwSig = sig;
     renderLook(v.look, v.lw, ctx, { center: v.lwCenter !== false });
     v.lwCenter = false;
+    // نشاط الأصدقاء وتقدّمهم (work-insights) عنصر واحد يُرسم مرة؛ كل نمط يحجز له موضعًا ويُنقل إليه
+    v.lw.querySelector('[data-slot="insights"]')?.append(v.insightHost);
+    // ضغطة مطوّلة (أو الزر الأيمن) على حلقة: نفس قائمة المحور (شوهدت، علّم حتى هنا…)
+    for (const b of v.lw.querySelectorAll('.er[data-ep], .sp[data-ep], .wl-track [data-ep]')) bindLongPress(b, () => openEpisodeMenu(m, Number(b.dataset.ep)));
     const dock = v.lw.querySelector('.wl-dock');
     if (dock) {
       dock.hidden = v.dockGone === true;
@@ -1149,12 +1177,9 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v || v.id !== m.id) return;
     if (v.lw) paintLook(m);
-    const point = resumePoint(m);
-    const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
-    const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;
-    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const { point, aired, upcoming, label } = watchLabel(m);
     const main = button(`aw-play${upcoming ? ' aw-play--soon' : ''}`, `${glyph(upcoming ? 'clock' : 'play', { size: 20, filled: !upcoming })}<span>${label}</span>`, () => {
-      if (upcoming) return toast(m.next ? `أول حلقة ${meccaTime(m.next.at)}` : 'لم يُحدَّد موعد العرض بعد');
+      if (upcoming) return soonToast(m);
       playEpisode(m, point.episode);
     });
     const line = el('div', 'aw-progress');
@@ -1304,6 +1329,36 @@ export function createAnime(deps) {
     });
   }
 
+  /**
+   * ما يشترك فيه «المحور» والأنماط الأربعة: مصدر واحد لكل وظيفة، والنمط يختار موضعها وشكلها فقط.
+   * - workFacts: «معلومات» العمل.
+   * - nextAiring: موعد الحلقة القادمة من بيانات AniList (nextAiringEpisode) فقط؛ بلا موعد = null.
+   * - watchLabel: نص زر المشاهدة، و«يبدأ…» لعمل لم يُعرض بعد (لا تشغيل هنا).
+   */
+  function workFacts(m) {
+    return [
+      ['الاستوديو', m.studio],
+      ['الأصل', SOURCE_AR[m.source]],
+      ['العرض', [m.start?.year ? [m.start.day, m.start.month ? MONTHS_AR[m.start.month - 1] : null, m.start.year].filter(Boolean).join(' ') : null, STATUS_AR[m.status]].filter(Boolean).join(' · ')],
+      ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
+      ['أسماء أخرى', [m.romaji !== m.title ? m.romaji : null, m.native].filter(Boolean).join(' · ')],
+    ].filter(([, val]) => val);
+  }
+  function nextAiring(m, now = Date.now()) {
+    const n = m?.next;
+    if (!n?.at || !(n.at > now)) return null;
+    return { episode: n.episode ?? null, at: n.at, rel: relativeAr(n.at, now), time: meccaTime(n.at) };
+  }
+  function watchLabel(m) {
+    const point = resumePoint(m);
+    const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
+    const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;
+    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    return { point, aired, upcoming, label };
+  }
+  /** «لم يُعرض بعد»: تنبيه بالموعد بدل التشغيل (نفس سلوك زر المحور). */
+  const soonToast = (m) => toast(m.next ? `أول حلقة ${meccaTime(m.next.at)}` : 'لم يُحدَّد موعد العرض بعد');
+
   /** تحت الحلقات: الشخصيات، ما يكمل القصة، «إذا عجبك هذا»، والمعلومات. */
   function paintBelow(m) {
     const v = state.view;
@@ -1336,13 +1391,7 @@ export function createAnime(deps) {
     const world = [...(m.relations ?? []).filter((r) => r.relation === 'الجزء السابق' || r.relation === 'الجزء التالي'), ...others];
     if (world.length) blocks.push(rail('من نفس العالم', { items: world, card: (r) => posterCard(r) }));
     if (m.recommendations?.length) blocks.push(rail('إذا عجبك هذا', { items: m.recommendations, card: (r) => posterCard(r) }));
-    const facts = [
-      ['الاستوديو', m.studio],
-      ['الأصل', SOURCE_AR[m.source]],
-      ['العرض', [m.start?.year ? [m.start.day, m.start.month ? MONTHS_AR[m.start.month - 1] : null, m.start.year].filter(Boolean).join(' ') : null, STATUS_AR[m.status]].filter(Boolean).join(' · ')],
-      ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
-      ['أسماء أخرى', [m.romaji !== m.title ? m.romaji : null, m.native].filter(Boolean).join(' · ')],
-    ].filter(([, val]) => val);
+    const facts = workFacts(m);
     if (facts.length) {
       const s = el('section', 'aw-info');
       s.dataset.reveal = '';
