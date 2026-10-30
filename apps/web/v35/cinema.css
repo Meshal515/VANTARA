@@ -1450,7 +1450,7 @@
   padding: 0 4px;
   border-radius: 99px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 10px;
   line-height: 16px;
   text-align: center;

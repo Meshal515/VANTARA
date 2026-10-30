@@ -137,11 +137,14 @@ const LOOKS = {
 export const LOOK_IDS = Object.keys(LOOKS);
 
 /** يرسم النمط في host ويربط الضغطات (تشغيل حلقة، فتح عمل، تبديل مجموعة الحلقات). */
-export function renderLook(look, host, c) {
+export function renderLook(look, host, c, { center = true } = {}) {
   const make = LOOKS[look];
   if (!make || !host) return;
+  // إعادة الرسم (وصول بيانات أو تقدّم) تحفظ موضع الشرائط الأفقية؛ لا تقفز تحت إصبع المستخدم
+  const kept = [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].map((el) => el.scrollLeft);
   host.className = `wl wl-${look}`;
   host.innerHTML = make(c, parts(c));
+  if (!center) [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].forEach((el, i) => { if (kept[i] != null) el.scrollLeft = kept[i]; });
   // صورة تعذّرت: الشعار يحل محله الاسم مكتوبًا، وغيره يختفي بدل رمز الصورة المكسورة
   for (const im of host.querySelectorAll('img')) {
     im.onerror = () => {
@@ -169,8 +172,8 @@ export function renderLook(look, host, c) {
     const open = e.target.closest('[data-open]');
     if (open) return c.open(open.dataset.open);
   };
-  // الحلقة الحالية في وسط الشرائط الأفقية عند الرسم (أفقيًا فقط؛ الصفحة لا تتحرك)
-  requestAnimationFrame(() => {
+  // الحلقة الحالية في وسط الشرائط الأفقية عند أول رسم وعند تبديل المجموعة فقط (أفقيًا؛ الصفحة لا تتحرك)
+  if (center) requestAnimationFrame(() => {
     for (const strip of host.querySelectorAll('.wl-strip, .wl-track')) {
       const cur = strip.querySelector('.cur');
       if (!cur) continue;
@@ -203,9 +206,11 @@ export function bindLookMotion(look, host, { hero = null, bg = null, active = ()
     const vh = globalThis.innerHeight || 800;
     if (look === 'platform') {
       const t = clamp(y / (vh * 0.4));
+      // يغوص ويغمق ويتضبب: البنر يبهت فوق نسخته المضبّبة الداكنة خلفه (::before)، تحويل وشفافية فقط —
+      // filter: blur() متغيّر مع كل إطار يعيد رسم البنر كله على الجوال وهو من أسباب التعليق
       if (bg) {
         bg.style.transform = `translate3d(0, ${f(y * 0.35)}px, 0) scale(${f(1 + 0.05 * t)})`;
-        bg.style.filter = `brightness(${f(1 - 0.55 * t)}) blur(${f(5 * t)}px)`;
+        bg.style.opacity = f(1 - 0.6 * t);
       }
       const txt = host.querySelector('.wl-htxt');
       if (txt) {
@@ -230,7 +235,8 @@ export function bindLookMotion(look, host, { hero = null, bg = null, active = ()
       const t = clamp(y / (vh * 0.4));
       if (hero) {
         hero.style.transform = `perspective(900px) translate3d(0, ${f(y * 0.15)}px, ${f(-60 * t)}px) rotateX(${f(7 * t)}deg) scale(${f(1 - 0.05 * t)})`;
-        hero.style.borderRadius = `${f(22 * t)}px`;
+        // استدارة الحواف بفئة واحدة وانتقال قصير، لا قيمة جديدة مع كل إطار (إعادة رسم وقص)
+        hero.classList.toggle('wl-lifted', t > 0.04);
         hero.style.opacity = f(1 - 0.7 * t);
       }
       const now = host.querySelector('.wl-now');

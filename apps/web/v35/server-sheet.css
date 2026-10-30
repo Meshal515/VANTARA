@@ -871,7 +871,7 @@
   border: 0;
   border-radius: var(--r-md);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: var(--fs-body-lg);
   font-weight: 700;
 }
@@ -1358,7 +1358,7 @@
     padding: 14px;
     border-radius: 50%;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent, #fff);
   }
   .v35 .ss-art > .an-pick-best.waiting > .icon,
   .v35 .ss-art > .an-pick-best:disabled > .icon {

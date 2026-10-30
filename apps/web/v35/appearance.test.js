@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, paletteVars, readAppearance, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, onAccent, paletteVars, readAppearance, workStyleOf, writeAppearance } from './appearance.js';
 
 const memory = () => {
   const m = new Map();
@@ -59,5 +59,17 @@ describe('المظهر', () => {
     expect(applyAppearance('manga', [root], { style: {}, accent: { manga: 'rose' }, pureBlack: true })).toBe('#000000');
     expect(root.props.get('--bg')).toBe('#000');
     expect(root.props.get('--accent')).toBe('#cf5f95');
+  });
+
+  it('النص فوق اللون المختار يُحسب من تباينه: أسود فوق الأبيض والفاتح، وأبيض فوق الداكن', () => {
+    expect(onAccent('#e6e6ec')).toBe('#0b0b0f');
+    expect(onAccent('#c9a227')).toBe('#0b0b0f');
+    expect(onAccent('#9fb03c')).toBe('#0b0b0f');
+    expect(onAccent('#c1121f')).toBe('#ffffff');
+    expect(onAccent('#5260d2')).toBe('#ffffff');
+    expect(paletteVars('#e6e6ec')['--on-accent']).toBe('#0b0b0f');
+    // ألوان الأقسام المصمّمة تبقى بنص أبيض كما هي
+    expect(onAccent('#8f5cff')).toBe('#ffffff');
+    expect(onAccent('#3b82f6')).toBe('#ffffff');
   });
 });

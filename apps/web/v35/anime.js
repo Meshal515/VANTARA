@@ -972,6 +972,8 @@ export function createAnime(deps) {
       x0 = e.clientX;
       dx = 0;
       dock.style.transition = 'none';
+      // الإصبع يبقى للشريط حتى لو خرج منه أثناء السحب
+      dock.setPointerCapture?.(e.pointerId);
     });
     dock.addEventListener('pointermove', (e) => {
       if (x0 == null) return;
@@ -1023,7 +1025,7 @@ export function createAnime(deps) {
     ].filter(([, val]) => val);
     const byId = new Map([...(m.relations ?? []), ...(m.world ?? []).filter((w) => w.kind === 'anime'), ...(m.recommendations ?? [])].map((r) => [String(r.id), r]));
     const shown = Math.max(1, Math.min(total, 25));
-    renderLook(v.look, v.lw, {
+    const ctx = {
       m,
       glyph,
       logo: art?.logo ?? null,
@@ -1064,9 +1066,16 @@ export function createAnime(deps) {
       },
       onRange: (i) => {
         v.lwRange = i;
+        v.lwCenter = true;
         paintLook(m);
       },
-    });
+    };
+    // لا رسم من جديد إن لم يتغيّر ما يُعرض (وصول نفس البيانات، أو تقدّم لم يتغيّر)
+    const sig = JSON.stringify([v.look, point, total, ratio, seen, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, ctx.recsCap, state.malTitles ? Object.keys(state.malTitles).length : 0]);
+    if (sig === v.lwSig) return;
+    v.lwSig = sig;
+    renderLook(v.look, v.lw, ctx, { center: v.lwCenter !== false });
+    v.lwCenter = false;
     const dock = v.lw.querySelector('.wl-dock');
     if (dock) {
       dock.hidden = v.dockGone === true;
@@ -1108,6 +1117,7 @@ export function createAnime(deps) {
   function paintCta(m) {
     const v = state.view;
     if (!v || v.id !== m.id) return;
+    if (v.lw) paintLook(m);
     const point = resumePoint(m);
     const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
     const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;

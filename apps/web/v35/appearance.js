@@ -82,7 +82,29 @@ export function accentOf(section, a = readAppearance()) {
   return ACCENTS.find((c) => c.id === id)?.hex ?? null;
 }
 
-const VARS = ['--accent', '--accent-press', '--accent-text', '--accent-soft', '--accent-line', 'accent-color', 'caret-color', '--bg', '--bg-raised', '--surface-1', '--surface-2', '--surface-3', '--line', '--line-strong'];
+const VARS = ['--on-accent', '--accent', '--accent-press', '--accent-text', '--accent-soft', '--accent-line', 'accent-color', 'caret-color', '--bg', '--bg-raised', '--surface-1', '--surface-2', '--surface-3', '--line', '--line-strong'];
+
+/** نسبة تباين WCAG بين لونين hex. */
+function luminance(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+const contrast = (a, b) => {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+
+/**
+ * لون النص فوق اللون المختار: الأبيض كما في تصميم الأقسام ما دام مقروءًا عليه (تباين 3 فأكثر، معيار
+ * عناصر الواجهة والنص الكبير)، والأسود للألوان الفاتحة فقط (الأبيض والذهبي والعنبري والليموني).
+ */
+export function onAccent(hex) {
+  return contrast(hex, '#ffffff') >= 3 ? '#ffffff' : '#0b0b0f';
+}
 
 /**
  * متغيّرات لون مختار: درجات الزر والنص والخط، وخلفية سوداء فيها لمسة من اللون نفسه كما في
@@ -93,6 +115,7 @@ export function paletteVars(hex, { pureBlack = false } = {}) {
   const out = {};
   if (hex) {
     out['--accent'] = hex;
+    out['--on-accent'] = onAccent(hex);
     out['--accent-press'] = `color-mix(in srgb, ${hex} 82%, #000)`;
     out['--accent-text'] = `color-mix(in srgb, ${hex} 62%, #fff)`;
     out['--accent-soft'] = `color-mix(in srgb, ${hex} 16%, transparent)`;
