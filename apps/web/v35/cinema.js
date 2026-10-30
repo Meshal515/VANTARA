@@ -16,6 +16,7 @@
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 import { addonName, createServerSheet } from './server-sheet.js';
+import { isChecking, isUnavailable, isValid, validity } from '../lib/route-validity.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
@@ -47,8 +48,9 @@ export const routeSourceLabel = (route) => SOURCE_NAMES[route.sourceId]
   ?? route.sourceName
   ?? (String(route.sourceId ?? '').startsWith('addon|') ? addonName(route.sourceId) : route.sourceId);
 /** Native runtime selection is separate from a successful HTTP probe. */
-export const routeSelectable = (r) => r.state === 'READY' && (r.probed === true || r.runtimeReady === true);
-export const routePending = (r) => r.state === 'RESOLVING' || (r.state === 'READY' && r.probed == null && r.runtimeReady !== true);
+// صالح / قيد الفحص / غير متاح من مصدر واحد (lib/route-validity.js)
+export const routeSelectable = (r) => isValid(r);
+export const routePending = (r) => isChecking(r);
 export const routeDisplayName = (r) => String(r.sourceId ?? '').startsWith('addon|')
   ? routeSourceLabel(r) : (/[\u0600-\u06FF]/.test(String(r.code ?? '')) && r.server ? r.server : r.code ?? r.server ?? 'سيرفر');
 const GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
@@ -1812,11 +1814,11 @@ export function createCinema(deps) {
         sourceName: (r) => routeSourceLabel(r),
         selectable: routeSelectable,
         pending: routePending,
-        dead: (r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false,
+        dead: (r) => isUnavailable(r),
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
-        onUnavailable: (r) => toast(routeFailureMessage(r.reason), 5000),
+        onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('cinema'); } } : {}),
       });

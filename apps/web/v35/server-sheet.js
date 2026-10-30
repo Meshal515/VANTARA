@@ -11,9 +11,10 @@
  * مشاركين)، وما يُجهَّز بعد وما تعذّر مطويّان. الورقة لا تملك جلسة التشغيل:
  * من يفتحها (الأنمي/السينما) يمرّر السيرفرات وحالتها ويقرّر ماذا يحدث عند اللمس.
  */
-import { parseRelease, releaseScore, swarmTier } from '../addons/release-info.js';
+import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { glyph } from './icons.js';
-import { FAIL_MS, knownStart, rememberStart, startFeatures } from '../lib/start-memory.js';
+import { rememberStart, startFeatures } from '../lib/start-memory.js';
+import { isChecking, isUnavailable, isValid, scoreRoute, VALIDITY_AR } from '../lib/route-validity.js';
 
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
 
@@ -93,31 +94,14 @@ export function speedHint(r) {
   return 'بدء أبطأ';
 }
 
-const TORRENT_Q = { 1080: 4e7, 720: 2.5e7, 1440: 2e7, 2160: 1e7, 480: 0 };
-const CODEC = { 'H.264': 3e7, HEVC: 1e7, AV1: -4e7 };
-
 /**
- * «الأفضل لك» بين ما يمكن تشغيله الآن. المباشر يسبق التورنت (يبدأ فورًا)، وسيرفرك السابق يتقدّم.
- * التورنت بجاهزيته الحقيقية: المشاركون أولًا (لوغاريتميًا: 1000 مقابل 100 فرق واضح، 1100 مقابل
- * 1000 لا)، ثم العربية والصوت المتعدد، ثم الجودة (1080 قبل 4K: تبدأ أسرع)، والترميز (H.264 أسهل
- * فكًّا من HEVC، وAV1 بطيء على هواتف كثيرة)، والحجم الضخم يتأخر. وما جرّبه هذا الجهاز فعلًا
- * يقرر الباقي: صفة بدأت هنا ببطء أو تعذّرت (start-memory.js) تتأخر بقدر بطئها.
- * ترشيح لا قفل: كل صف ما زال يُلمس.
+ * «الأفضل لك»: الصالح وحده يدخل، ثم جدول معايير واحد معلن لكل الأنواع (lib/route-validity.js
+ * RANK_CRITERIA): العربية بوزن كبير، ثم ليس CAM، ثم سرعة البدء (زمن الفحص أو المشاركون)، ثم
+ * الجودة (1080 أولًا)، ثم الثبات على هذا الجهاز، ثم الترميز (H.264 ثم HEVC ثم AV1)، ثم الحجم.
+ * غير الصالح درجته -Infinity فلا يُقترح أبدًا. ترشيح لا قفل: كل صف صالح ما زال يُلمس.
  */
 export function rank(r, d) {
-  if (!d.torrent) {
-    const ms = Number(r.probeMs);
-    return 3e9 + (d.prefer ? 5e8 : 0) + (QUALITY_PREF[d.q] ?? 2) * 1e7 + (r.variant === 'DUB' ? 0 : 1e6) - (Number.isFinite(ms) ? Math.min(ms, 9e5) : 5e5);
-  }
-  if (d.tier === 'dead' || d.info?.source === 'CAM') return releaseScore(d.info);
-  const seeds = d.info?.seeders;
-  const swarm = Number.isFinite(seeds) ? Math.log10(1 + Math.max(0, seeds)) * 1e8 : 0.8e8;
-  const size = d.info?.size ?? 0;
-  const heavy = size > 20 * 1024 ** 3 ? 8e7 : size > 8 * 1024 ** 3 ? 3e7 : 0;
-  const known = knownStart(startFeatures(d));
-  const slow = known == null ? 0 : (Math.min(known, FAIL_MS) / 1000) * 6e6;
-  return 1e9 + (d.prefer ? 5e8 : 0) + swarm + (d.info?.arabic ? 5e7 : 0) + (d.info?.multiAudio ? 1e7 : 0)
-    + (TORRENT_Q[d.q] ?? 1e7) + (CODEC[d.info?.codec] ?? 0) - heavy - slow;
+  return scoreRoute(r, d).score;
 }
 
 /** آخر صف تورنت لُمس: يُنسب إليه زمن بدء المشغّل الأصلي حين يصل (playstat). */
@@ -186,6 +170,7 @@ const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'س
 /** لماذا هذا هو المقترح، بكلمات قليلة: يُقال تحت زر «شغّل الأفضل». */
 export function bestReason(r, d) {
   const out = [qualityLabel(d.q), d.name];
+  if (d.langs?.some((l) => l.ar) || d.info?.arabic) out.push('عربي');
   if (d.prefer) out.push('سيرفرك السابق');
   if (!d.torrent) out.push(speedHint(r) ?? 'يبدأ فورًا');
   else if (Number.isFinite(d.info?.seeders)) out.push(`${d.info.seeders.toLocaleString('en')} مشارك · ${SWARM_AR[d.tier]}`);
@@ -541,9 +526,12 @@ export function createServerSheet(body, o) {
     while (parent.children.length > nodes.length) parent.lastElementChild.remove();
   };
 
-  const isPending = (r) => o.pending?.(r) ?? r.state === 'RESOLVING';
-  const isDead = (r) => o.dead?.(r) ?? (r.state === 'UNAVAILABLE' || r.state === 'FAILED');
-  const isSelectable = (r) => o.selectable?.(r) ?? r.state === 'READY';
+  // ثلاث حالات لا تختلط (lib/route-validity.js): صالح / قيد الفحص / غير متاح
+  const isPending = (r) => o.pending?.(r) ?? isChecking(r);
+  const isDead = (r) => o.dead?.(r) ?? isUnavailable(r);
+  const isSelectable = (r) => o.selectable?.(r) ?? isValid(r);
+  // «قيد الفحص» وله رابط جاهز: لا يقترحه «شغّل الأفضل»، لكن لمسه اختيار صريح يجرّبه فعلًا
+  const isTryable = (r) => isPending(r) && r.state === 'READY' && (r.candidates?.length ?? 1) > 0;
 
   function chipNode(c) {
     const i = el('span', `ss-chip ss-chip--${c.cls}`);
@@ -574,7 +562,7 @@ export function createServerSheet(body, o) {
     const top = r.id === topId;
     const open = b.classList.contains('ss-row--open');
     b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
-    b.disabled = pending;
+    b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
     qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
@@ -592,15 +580,15 @@ export function createServerSheet(body, o) {
     const starting = Boolean(last.busy && picked === r.id);
     b.classList.toggle('ss-row--busy', starting);
     if (starting) end.innerHTML = '<i class="ss-spin"></i><small>يبدأ…</small>';
-    else if (pending) end.innerHTML = '<i class="ss-spin"></i><small>نفحص…</small>';
-    else if (gone) end.innerHTML = `<small class="ss-bad">${r.state === 'FAILED' ? 'تعذّر' : 'غير متاح'}</small>`;
+    else if (pending) end.innerHTML = `<i class="ss-spin"></i><small>${VALIDITY_AR.CHECKING}</small>`;
+    else if (gone) end.innerHTML = `<small class="ss-bad">${VALIDITY_AR.UNAVAILABLE}</small>`;
     else if (d.torrent) {
       const bars = meterBars(d);
       const meter = Array.from({ length: 4 }, (_, i) => `<i${i < bars ? ' class="on"' : ''}></i>`).join('');
       end.innerHTML = bars < 0
         ? '<small>غير معلن</small>'
         : `<span class="ss-meter ss-meter--${d.tier}" aria-hidden="true">${meter}</span><b class="an-srv-seeds" dir="ltr">${compact(d.info.seeders)}</b>`;
-    } else end.innerHTML = `<span class="ss-play">${glyph('play', { size: 13, filled: true })}</span>`;
+    } else end.innerHTML = `<small class="ss-ok">${VALIDITY_AR.VALID}</small><span class="ss-play">${glyph('play', { size: 13, filled: true })}</span>`;
     // سهم صغير يفتح التفاصيل تحت الصف؛ لمسه لا يشغّل
     const lines = d.torrent && !pending && !gone ? detailLines(r, d) : [];
     let chev = b.querySelector('.ss-chev');
@@ -634,10 +622,10 @@ export function createServerSheet(body, o) {
       box?.remove();
       b.classList.remove('ss-row--open');
     }
-    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? 'نفحص التشغيل' : gone ? 'غير متاح' : null].filter(Boolean).join('، ');
+    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
-    b.onclick = () => (selectable ? pick(r) : o.onUnavailable?.(r));
+    b.onclick = () => (selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r));
     return b;
   }
 
@@ -756,7 +744,7 @@ export function createServerSheet(body, o) {
     const shown = routes.filter(passes);
     const ready = shown.filter(isSelectable);
     const anyReady = routes.some(isSelectable);
-    const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).sort((a, b) => b.s - a.s);
+    const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
     const top = scored[0]?.r ?? null;
     topId = top?.id ?? null;
 
@@ -830,11 +818,11 @@ export function createServerSheet(body, o) {
       best.onclick = () => o.onRetry?.();
       return;
     }
-    const filtered = filter.q !== 'all' || filter.v != null || filter.a !== 'all';
-    best.disabled = Boolean(model.busy || model.missing || (!top && (model.settled || filtered)));
+    // «شغّل الأفضل» من الصالح وحده: بلا رابط صالح بعد لا يشغّل «أول ما يجهز» بل ينتظر الفحص
+    best.disabled = Boolean(model.busy || model.missing || !top);
     best.classList.toggle('waiting', !top && !model.settled && !model.missing);
     const td = top ? view(top) : null;
-    const label = model.busy ? 'نجهّز التشغيل…' : top ? 'شغّل الأفضل' : model.settled ? 'لا سيرفر جاهز' : 'شغّل أول سيرفر يجهز';
+    const label = model.busy ? 'نجهّز التشغيل…' : top ? 'شغّل الأفضل' : model.settled ? 'لا رابط صالح الآن' : 'ننتظر رابطًا صالحًا…';
     best.innerHTML = `${glyph('play', { size: 18, filled: true })}<span class="ss-best-copy"><span>${label}</span>${td && !model.busy ? '<small></small>' : ''}</span>`;
     const small = best.querySelector('small');
     if (small) {
@@ -846,9 +834,8 @@ export function createServerSheet(body, o) {
       });
     }
     best.onclick = () => {
-      if (best.disabled) return;
-      if (top) pick(top);
-      else o.onBest?.();
+      if (best.disabled || !top) return;
+      pick(top);
     };
   }
 

@@ -26,6 +26,7 @@ import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
+import { isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
@@ -2235,7 +2236,7 @@ export function createAnime(deps) {
       }
 
       // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
-      const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some((r) => r.state === 'READY');
+      const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some(isValid);
 
       const playRoute = async (r) => {
         if (sheet.busy) return;
@@ -2299,7 +2300,7 @@ export function createAnime(deps) {
           deps.closeSheet();
           playEpisode(m, n, { position });
         },
-        onUnavailable: (r) => deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000),
+        onUnavailable: (r) => deps.toast(validity(r).reason ?? 'لم يُستخرج رابط فيديو من المشغّل', 5000),
       });
       void deps.playableSources?.('anime').then((count) => {
         if (count !== 0 || sheet.closed) return;
@@ -2309,7 +2310,7 @@ export function createAnime(deps) {
       const status = ui.status;
 
       const statusLine = () => {
-        const ready = sheet.routes.filter((r) => r.state === 'READY').length;
+        const ready = sheet.routes.filter(isValid).length;
         const total = sheet.routes.length;
         if (!sheet.session) {
           if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
@@ -2336,7 +2337,7 @@ export function createAnime(deps) {
           retry: exhausted() ? { wait: engine.retrySeconds(sheet.retryAt) } : null,
         });
         // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some((r) => r.state === 'READY')) {
+        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some(isValid)) {
           sheet.autoTogether = false;
           queueMicrotask(() => ui.best.onclick());
         }
@@ -2390,7 +2391,8 @@ export function createAnime(deps) {
             : work.copies;
           // نفس ما يُعطى للمشغّل في playEpisode: يجهز من القرص قبل الضغط على تشغيل
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          const out = await engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server });
+          // probe: «صالح» يُقال فقط لرابط فُحص فعلًا وأعاد وسائط (lib/route-validity.js)
+          const out = await engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true });
           if (sheet.closed) {
             if (out?.session) void engine.closeSession(out.session);
             return;

@@ -44,8 +44,8 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   const ui = createServerSheet(body, { el, kicker: 'الحلقة 1', title: 'Re:ZERO', onPick, prefer: null, directLang: 'مترجم عربي', sourceName: (r) => ({ witanime: 'WitAnime', okanime: 'OkAnime' })[r.sourceId] ?? r.sourceId });
   const routes = [
     { id: 't', sourceId: TORR, sourceName: 'Torrentio', quality: 2160, state: 'READY', runtimeReady: true, label: 'X.2160p.WEB-DL\n👤 500 💾 4 GB ⚙️ Nyaa' },
-    { id: 'slow', sourceId: 'okanime', server: 'mp4upload', code: 'MPU', quality: 1080, state: 'READY', probeMs: 6000 },
-    { id: 'fast', sourceId: 'witanime', server: 'streamwish', code: 'SWH', quality: 1080, state: 'READY', probeMs: 700 },
+    { id: 'slow', sourceId: 'okanime', server: 'mp4upload', code: 'MPU', quality: 1080, state: 'READY', probed: true, probeMs: 6000 },
+    { id: 'fast', sourceId: 'witanime', server: 'streamwish', code: 'SWH', quality: 1080, state: 'READY', probed: true, probeMs: 700 },
     { id: 'wait', sourceId: 'witanime', server: 'hgcloud', code: 'HGC', quality: 720, state: 'RESOLVING' },
     { id: 'dead', sourceId: 'witanime', server: 'videa', code: 'VDA', quality: 480, state: 'UNAVAILABLE' },
   ];
@@ -58,7 +58,7 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   expect(top[0].querySelector('.ss-host').textContent).toBe('StreamWish');
   expect(top[0].textContent).toContain('مترجم عربي');
   expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل الأفضل');
-  expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · يبدأ فورًا');
+  expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · عربي · يبدأ فورًا');
   // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ لا رموز ثلاثية في أي صف
   const direct = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
   expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload']);
@@ -170,7 +170,8 @@ it('says plainly when nothing is ready, without a hero card, and offers a retry'
   const ui = createServerSheet(body, { el, onPick() {}, onRetry });
   ui.update({ routes: [], settled: false, status: { text: 'نبحث…', spin: true } });
   expect(body.querySelectorAll('.ss-skel')).toHaveLength(5);
-  expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل أول سيرفر يجهز');
+  // لا «شغّل أول ما يجهز»: الأفضل من الصالح وحده، فالزر ينتظر رابطًا صالحًا
+  expect(body.querySelector('.an-pick-best').textContent).toContain('ننتظر رابطًا صالحًا');
   ui.update({ routes: [{ id: 'x', sourceId: 'witanime', server: 'videa', quality: 480, state: 'UNAVAILABLE' }], settled: true, status: { text: '' }, retry: { wait: 0 } });
   expect(body.querySelector('.ss-note').textContent).toContain('لم يجهز أي سيرفر الآن');
   expect(body.querySelector('.an-srv-status').hidden).toBe(true);
@@ -185,17 +186,19 @@ import { rememberStart, startFeatures } from '../lib/start-memory.js';
 const tor = (label, extra = {}) => ({ id: label, sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true, label, ...extra });
 const score = (r) => rank(r, describeRoute(r));
 
-it('«الأفضل» من جاهزية التورنت: المشاركون أولًا، والعربية ترجّح المتقاربين فقط، و1080 قبل 4K، وAV1 يتأخر', () => {
+it('«الأفضل» من جدول المعايير: تورنت يدعم العربية يغلب، و1080 قبل 4K، وAV1 يتأخر، والسرب الأقوى يرجّح المتساويين', () => {
   globalThis.localStorage?.clear?.();
   const many = tor('A.1080p.WEB.x264\n👤 1000 💾 1.4 GB ⚙️ Nyaa', { quality: 1080 });
   const fewAr = tor('B.1080p.WEB.x264 Arabic\n👤 100 💾 1.4 GB ⚙️ Nyaa\n🇸🇦', { quality: 1080 });
-  expect(score(many)).toBeGreaterThan(score(fewAr));
-  const closeAr = tor('C.1080p.WEB.x264 Arabic\n👤 800 💾 1.4 GB ⚙️ Nyaa\n🇸🇦', { quality: 1080 });
-  expect(score(closeAr)).toBeGreaterThan(score(many));
+  expect(score(fewAr)).toBeGreaterThan(score(many));
+  const fewer = tor('A2.1080p.WEB.x264\n👤 20 💾 1.4 GB ⚙️ Nyaa', { quality: 1080 });
+  expect(score(many)).toBeGreaterThan(score(fewer));
   const uhd = tor('D.2160p.WEB.x264\n👤 1000 💾 6 GB ⚙️ Nyaa', { quality: 2160 });
   expect(score(many)).toBeGreaterThan(score(uhd));
   const av1 = tor('E.1080p.WEB.AV1\n👤 1000 💾 331 MB ⚙️ Nyaa', { quality: 1080 });
   expect(score(many)).toBeGreaterThan(score(av1));
+  // سرب بلا مشاركين أو بلا عدد معلن ليس صالحًا: لا درجة له أصلًا
+  expect(score(tor('Z.1080p.WEB.x264\n👤 0 💾 1 GB ⚙️ Nyaa', { quality: 1080 }))).toBe(-Infinity);
 });
 
 it('ما بدأ على هذا الجهاز ببطء يتأخر في الترشيح التالي (زمن المشغّل الأصلي الحقيقي)', () => {

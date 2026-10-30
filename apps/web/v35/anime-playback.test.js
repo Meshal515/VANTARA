@@ -27,7 +27,7 @@ it('APK server events and completed preparation keep the selector open until the
   const anime = createAnime(deps);
   anime.play({ id: 1, title: 'Re:ZERO Season 4', episodes: 19, poster: 'https://image.test/x.jpg' }, 3);
   await vi.advanceTimersByTimeAsync(0);
-  for (const quality of [1080, 480]) state.listeners.get('route')({ session: 'test-session', route: { id: String(quality), sourceId: 'shahiid', server: 'Megamax', code: 'MMX', quality, state: 'READY', candidates: [`stream-${quality}`], variant: 'SUB' } });
+  for (const quality of [1080, 480]) state.listeners.get('route')({ session: 'test-session', route: { id: String(quality), sourceId: 'shahiid', server: 'Megamax', code: 'MMX', quality, state: 'READY', probed: true, candidates: [`stream-${quality}`], variant: 'SUB' } });
   state.listeners.get('prepared')({ session: 'test-session' });
   await vi.advanceTimersByTimeAsync(1);
   expect(state.open).not.toHaveBeenCalled();

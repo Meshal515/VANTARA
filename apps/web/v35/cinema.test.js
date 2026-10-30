@@ -31,9 +31,13 @@ describe('server picker source labels', () => {
 describe('native torrent picker readiness', () => {
   it('allows a native torrent ticket immediately without inventing an HTTP probe', async () => {
     const ui = await import('./cinema.js');
-    const torrent = {state:'READY',runtimeReady:true,probed:null};
+    const torrent = {state:'READY',runtimeReady:true,probed:null,seeders:12};
     expect(ui.routeSelectable(torrent)).toBe(true);
     expect(ui.routePending(torrent)).toBe(false);
+    // صالح يحتاج دليلًا: تورنت بلا عدد مشاركين معلن لم يُحكم عليه بعد (قيد الفحص)، وبصفر مشاركين غير متاح
+    expect(ui.routeSelectable({state:'READY',runtimeReady:true,probed:null})).toBe(false);
+    expect(ui.routePending({state:'READY',runtimeReady:true,probed:null})).toBe(true);
+    expect(ui.routeSelectable({state:'READY',runtimeReady:true,seeders:0})).toBe(false);
     expect(ui.routePending({state:'READY',probed:null})).toBe(true);
     expect(ui.routeSelectable({state:'READY',probed:false})).toBe(false);
     expect(ui.routeSelectable({state:'FAILED',runtimeReady:true})).toBe(false);

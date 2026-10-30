@@ -53,14 +53,19 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   const group = sheet.querySelector('.ss-group--torrent');
   const visible = [...group.querySelectorAll(':scope > .an-srv-grid .an-srv')];
   const folded = [...group.querySelectorAll('details .an-srv')];
+  // جدول المعايير (lib/route-validity.js): العربية بوزن كبير، ثم السرعة والجودة والترميز والحجم
   expect(visible.map((b) => b.title)).toEqual([
-    'Fight.Club.1999.1080p.BluRay.x264.AAC-YTS',
-    'Fight.Club.1999.2160p.UHD.BluRay.REMUX.HEVC.DV.HDR10Plus.TrueHD.Atmos.7.1-FGT',
     'Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed',
+    'Fight.Club.1999.2160p.UHD.BluRay.REMUX.HEVC.DV.HDR10Plus.TrueHD.Atmos.7.1-FGT',
+    'Fight.Club.1999.1080p.BluRay.x264.AAC-YTS',
     'Fight.Club.1999.2160p.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1',
     'Fight.Club.1999.2160p.WEB-DL.x265.HDR.DDP5.1-NOGRP',
   ]);
-  expect(folded.map((b) => b.title)).toEqual(['Fight.Club.1999.1080p.BluRay.x265', 'Fight.Club.1999.2160p.HDCAM']);
+  // بلا مشاركين = غير متاح: في قسم «غير متاح» لا بين التورنت، ولا يُقترح أبدًا
+  expect(folded).toEqual([]);
+  const gone = [...sheet.querySelectorAll('.ss-dead .an-srv')];
+  expect(gone.map((b) => b.title).sort()).toEqual(['Fight.Club.1999.1080p.BluRay.x265', 'Fight.Club.1999.2160p.HDCAM']);
+  expect(gone.every((b) => b.textContent.includes('غير متاح'))).toBe(true);
   const best = visible[1];
   // صف يُختار منه: الجودة، الإضافة، اللغة والحجم، والمشاركون. اسم الإصدار وDV وREMUX تحت السهم
   expect(best.querySelector('.ss-q').textContent).toBe('4K');
@@ -74,20 +79,22 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(best.querySelectorAll('.ss-meter i.on').length).toBe(4);
   expect(best.className).toContain('an-srv--swarm-strong');
   expect(visible[4].querySelectorAll('.ss-meter i.on').length).toBe(1);
-  expect(folded[0].className).toContain('an-srv--swarm-dead');
+  expect(gone[0].className).toContain('an-srv--swarm-dead');
   // المقترح: أكثر مشاركين بحجم يُبثّ وترميز سهل (لا ريمكس 61 GB) — أول صف، وسببه تحت «شغّل الأفضل»
   const top = sheet.querySelectorAll('.ss-row--top');
   expect(top).toHaveLength(1);
   expect(top[0]).toBe(visible[0]);
-  expect(top[0].title).toBe('Fight.Club.1999.1080p.BluRay.x264.AAC-YTS');
+  expect(top[0].title).toBe('Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed');
   expect(top[0].querySelector('.ss-tag').hidden).toBe(false);
   expect(best.querySelector('.ss-tag').hidden).toBe(true);
   const why = sheet.querySelector('.an-pick-best small').textContent;
   expect(why).toContain('1080p');
-  expect(why).toContain('1,240 مشارك · سرب قوي');
-  expect(why).toContain('2.1 GB');
-  // اختيار المستخدم يبقى: المطويّ والضعيف قابلان للضغط
-  expect(folded[0].disabled).toBe(false);
+  expect(why).toContain('عربي');
+  expect(why).toContain('7 مشارك');
+  expect(why).toContain('1.9 GB');
+  // غير المتاح لا يُختار: لمسه يقول السبب ولا يشغّل
+  gone[0].onclick();
+  expect(state.open).not.toHaveBeenCalled();
   await best.onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.open).toHaveBeenCalledWith(expect.objectContaining({ candidate: 't0', section: 'cinema' }));

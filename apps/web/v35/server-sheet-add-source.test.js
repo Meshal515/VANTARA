@@ -22,6 +22,6 @@ it('لا مصدر في الحساب: «أضف مصدرًا لتشاهد» مكا
 it('سيرفر صالح وصل رغم ذلك: لا رسالة «أضف مصدرًا»', () => {
   const body = el('div');
   const ui = createServerSheet(body, { el, title: 'عمل', onAddSource: () => {} });
-  ui.update({ routes: [{ id: 'a', state: 'READY', server: 'https://ok.example/v.mp4', quality: 1080 }], noSources: true, status: { text: '' } });
+  ui.update({ routes: [{ id: 'a', state: 'READY', probed: true, server: 'https://ok.example/v.mp4', quality: 1080 }], noSources: true, status: { text: '' } });
   expect(body.textContent).not.toContain('أضف مصدرًا لتشاهد');
 });
