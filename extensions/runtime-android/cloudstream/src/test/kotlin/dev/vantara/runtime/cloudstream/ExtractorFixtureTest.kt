@@ -39,6 +39,15 @@ class ExtractorFixtureTest {
         assertTrue(link.url,Regex("""https://cdn\.example/stream/xyz~[A-Za-z0-9]{10}\?token=tok3n&expiry=\d+""").matches(link.url))
         assertEquals("https://playmogo.com/",link.referer)
     }
+    @Test fun registeredPlayerHostResolvesThroughLoadExtractorAndOtherHostsDoNot() {
+        val page="""<script>jwplayer("v").setup({sources:[{file:"https://cdn.example/hls/master.m3u8"}],image:"https://cdn.example/poster.jpg"});</script>"""
+        serve(mapOf("https://vidmoly.org/embed-abc.html" to page,"https://unknown-host.example/embed-abc.html" to page))
+        val link=resolve("https://vidmoly.org/embed-abc.html").single()
+        assertEquals("https://cdn.example/hls/master.m3u8",link.url);assertEquals(ExtractorLinkType.M3U8,link.type)
+        assertEquals("https://vidmoly.org/",link.referer)
+        // A host outside the verified list is never parsed as a player page
+        assertTrue(resolve("https://unknown-host.example/embed-abc.html").isEmpty())
+    }
     @Test fun playerPageReadsPackedJwPlayerSourcesButNotAdvertFiles() {
         val packed="eval(function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp('\\\\b'+c.toString(a)+'\\\\b','g'),k[c]);return p}('0.1({2:[{3:\"4://5.6/7.8\"}]});',9,9,'jwplayer|setup|sources|file|https|cdn|example|master|m3u8'.split('|')))"
         val html="<a href=\"https://ads.example/promo.mp4\">ad</a><script>$packed</script>"

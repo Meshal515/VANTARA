@@ -35,7 +35,10 @@ class RuntimeHost(
     private val engine: AnimeEngine,
     private val userAgent: String,
     private val vaults: HttpBroker.Vaults = FileCookieVaults(File(context.filesDir,"runtime-cloudstream-v1/cookies").toPath()),
-    private val broker: HttpBroker = HttpBroker(OkHttpClient(), Dns.SYSTEM, PublicAddresses(),
+    // نفس محلّل أسماء محرك الأنمي: النظام أولًا، وDNS مشفّر حين يحجب مزوّد الإنترنت الاسم أو يحوّله
+    // لصفحة حجب. كان Dns.SYSTEM وحده فتسقط مصادر عربية محجوبة بالاسم فقط ويُطلب لها VPN بلا داعٍ.
+    // فحص العناوين العامة في الوسيط باقٍ كما هو على ما يعيده هذا المحلّل.
+    private val broker: HttpBroker = HttpBroker(OkHttpClient(), engine.dns, PublicAddresses(),
         vaults, Clock.systemUTC()),
     private val sourceTransport: (AndroidRuntimeClient.Scope,HttpBroker)->AndroidRuntimeClient.HostHttpTransport = { scope,http -> BrokerHostTransport(scope,http) },
 ) {

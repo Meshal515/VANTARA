@@ -13,8 +13,19 @@ interface VantaraExtractor {
     val hosts:List<String>
     suspend fun extract(url:String,referer:String?,subtitles:(SubtitleFile)->Unit,links:(ExtractorLink)->Unit):Boolean
 }
+/**
+ * Embed hosts verified live (Oct 2026) to hand their media to a JW Player/Video.js configuration that
+ * [PlayerPage] reads: vidmoly, lulustream and its mirrors, and the minochinos/morencius embeds.
+ * Explicit host list only; a page on any other host is never parsed this way.
+ */
+object PlayerPageHosts:VantaraExtractor {
+    override val name="PlayerPage"
+    override val hosts=listOf("vidmoly.org","vidmoly.to","vidmoly.me","lulustream.com","luluvid.com","luluvdo.com","minochinos.com","morencius.com")
+    override suspend fun extract(url:String,referer:String?,subtitles:(SubtitleFile)->Unit,links:(ExtractorLink)->Unit)=
+        PlayerPage.extract(java.net.URI(url).host.substringBefore('.').replaceFirstChar{it.uppercase()},url,referer,subtitles,links)
+}
 object VantaraExtractors {
-    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood)
+    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood,PlayerPageHosts)
     private fun matches(host:String,known:String)=host.equals(known,true)||host.endsWith(".$known",true)
     fun find(host:String):VantaraExtractor?=all.firstOrNull{e->e.hosts.any{matches(host,it)}}
     /**
