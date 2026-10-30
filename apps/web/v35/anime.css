@@ -3153,7 +3153,8 @@ html[data-section='cinema'] {
 
   /* البطاقة الطائرة: المعلومات يسارًا والبطاقة الكبيرة المائلة يمينًا فوق حافة البنر */
   .v35 .wl-card .wl-head { grid-template-columns: 1fr 330px; gap: 60px; padding: 0 90px; margin-top: -210px; align-items: end; position: relative; z-index: 3; }
-  .v35 .wl-card .wl-stage3d { order: -1; margin-top: 0; perspective: 1100px; }
+  /* البطاقة على يمين الصفحة كما في الرسم (بداية السطر في RTL)، لا في وسط عمودها العريض */
+  .v35 .wl-card .wl-stage3d { order: -1; margin-top: 0; perspective: 1100px; justify-items: start; }
   .v35 .wl-card .wl-card { width: 330px; border-radius: 20px; transform: rotateY(-20deg) rotateX(7deg) rotateZ(-1deg); }
   .v35 .wl-card .wl-info { justify-items: start; text-align: start; padding: 0 0 20px; gap: 14px; }
   .v35 .wl-card .wl-info .wl-logo { max-height: 110px; max-width: 480px; object-position: right; }
@@ -3353,4 +3354,17 @@ html[data-section='cinema'] {
 @container aw (min-width: 900px) {
   .v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex-basis: 250px !important; }
   .v35 .wl-card .sp.cur b { font-size: 14.5px !important; }
+}
+
+/* الكمبيوتر: بنر الأنماط بعرض الصفحة كما في رسوماتها، لا مربع 16:9 بعرض 880 في وسطها وجانباه فارغان.
+   الصورة تملؤه (cover) وارتفاعه بين 420 و640. «المحور» (الأساسي المعتمد) و«شاشة السينما» (شاشة بإطار) كما هما */
+@container aw (min-width: 900px) {
+  .v35 .aw[data-style='platform'] .aw-hero,
+  .v35 .aw[data-style='card'] .aw-hero,
+  .v35 .aw[data-style='episode'] .aw-hero { width: 100%; max-width: none; aspect-ratio: auto; height: clamp(420px, 58svh, 640px); max-height: none; margin-inline: 0; }
+}
+/* السحب بالفأرة: يد مفتوحة فوق الشريط، ومغلقة أثناء السحب، ولا يُحدَّد نص */
+@media (hover: hover) and (pointer: fine) {
+  .v35 .wl .wl-strip, .v35 .wl .wl-recs, .v35 .wl-card .wl-world { cursor: grab; }
+  .v35 .wl .dragging { cursor: grabbing; user-select: none; }
 }

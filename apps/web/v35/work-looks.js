@@ -270,5 +270,79 @@ export function bindLookExtras(look, host, { active = () => true } = {}) {
     watch();
     offs.push(() => { io.disconnect(); mo?.disconnect(); });
   }
+  offs.push(bindRails(host));
   return () => offs.forEach((f) => f());
+}
+
+/** الأشرطة الأفقية في الأنماط: الحلقات، «إذا عجبك هذا»، «من نفس العالم»، الشخصيات. */
+const RAILS = '.wl-strip, .wl-recs, .wl-world, .wl-tall, .wl-chars';
+
+/**
+ * على الكمبيوتر: عجلة الفأرة تحرّك الشريط الأفقي تحت المؤشر، والسحب بالفأرة يحرّكه أيضًا. الاتجاه عربي:
+ * الشريط يبدأ من اليمين، فالعجلة للأسفل تتقدّم نحو اليسار (scrollLeft في RTL من 0 إلى قيم سالبة). عند
+ * طرف الشريط تعود العجلة لتمرير الصفحة. اللمس لا يُمس: الجوال يسحب بإصبعه كما كان.
+ */
+export function bindRails(host) {
+  const railOf = (t) => t?.closest?.(RAILS);
+  const rtl = (rail) => getComputedStyle(rail).direction === 'rtl';
+  const onWheel = (e) => {
+    const rail = railOf(e.target);
+    if (!rail || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const max = rail.scrollWidth - rail.clientWidth;
+    if (max <= 1) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * rail.clientWidth : e.deltaY;
+    // التقدّم في RTL يُنقص scrollLeft، وفي LTR يزيده
+    const step = rtl(rail) ? -dy : dy;
+    const at = rail.scrollLeft;
+    const lo = rtl(rail) ? -max : 0, hi = rtl(rail) ? 0 : max;
+    if ((step < 0 && at <= lo + 1) || (step > 0 && at >= hi - 1)) return;
+    e.preventDefault();
+    rail.scrollBy({ left: step, behavior: 'auto' });
+  };
+  let drag = null;
+  const onDown = (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    const rail = railOf(e.target);
+    if (!rail || rail.scrollWidth - rail.clientWidth <= 1) return;
+    drag = { rail, x: e.clientX, left: rail.scrollLeft, moved: false, snap: rail.style.scrollSnapType };
+  };
+  const onMove = (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) < 6) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      // الالتصاق يشدّ الشريط أثناء السحب فيبدو متعلقًا؛ يعود بعد الإفلات
+      drag.rail.style.scrollSnapType = 'none';
+      drag.rail.classList.add('dragging');
+    }
+    // المحتوى يتبع المؤشر في الاتجاهين
+    drag.rail.scrollLeft = drag.left - dx;
+  };
+  const onUp = () => {
+    if (!drag) return;
+    const { rail, moved, snap } = drag;
+    drag = null;
+    if (!moved) return;
+    rail.style.scrollSnapType = snap;
+    rail.classList.remove('dragging');
+    // السحب ليس لمسة: لا تُفتح الحلقة أو العمل الذي أُفلت فوقه
+    const block = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    rail.addEventListener('click', block, { capture: true, once: true });
+    setTimeout(() => rail.removeEventListener('click', block, { capture: true }), 0);
+  };
+  // سحب الصورة نفسها (سحب وإفلات المتصفح) يلغي أحداث المؤشر فيتوقف سحب الشريط
+  const noImageDrag = (e) => { if (railOf(e.target)) e.preventDefault(); };
+  host.addEventListener('wheel', onWheel, { passive: false });
+  host.addEventListener('pointerdown', onDown);
+  host.addEventListener('dragstart', noImageDrag);
+  globalThis.addEventListener?.('pointermove', onMove);
+  globalThis.addEventListener?.('pointerup', onUp);
+  return () => {
+    host.removeEventListener('wheel', onWheel);
+    host.removeEventListener('pointerdown', onDown);
+    host.removeEventListener('dragstart', noImageDrag);
+    globalThis.removeEventListener?.('pointermove', onMove);
+    globalThis.removeEventListener?.('pointerup', onUp);
+  };
 }
