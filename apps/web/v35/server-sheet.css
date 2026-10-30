@@ -1432,3 +1432,15 @@
   from { transform: perspective(700px) translate3d(0, 0px, 0) rotateX(0deg) scale(1); opacity: 1; }
   to { transform: perspective(700px) translate3d(0, calc(var(--ss-span, 300px) * -0.06), 0) rotateX(40deg) scale(0.86); opacity: 0; }
 }
+/* «أضف مصدرًا لتشاهد»: زر واحد واضح تحت الجملة، نص أبيض مقروء */
+.v35 .sheet .ss-note .ss-add-source {
+  margin-top: 12px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text-1);
+  color: var(--bg, #000);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

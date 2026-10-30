@@ -642,6 +642,19 @@ export function createServerSheet(body, o) {
   }
 
   function paintNote(model) {
+    // لا مصدر مشاهدة في الحساب أصلًا: ليس «غير متوفر»، بل خطوة واحدة واضحة تفتح صفحة الإضافات
+    if (model.noSources) {
+      note.innerHTML = `${glyph('info', { size: 18 })}<div><b></b><p></p></div>`;
+      note.querySelector('b').textContent = o.noSourcesTitle ?? 'أضف مصدرًا لتشاهد';
+      note.querySelector('p').textContent = 'الأعمال تظهر من الكتالوج، والمشاهدة من مصادر تضيفها أنت.';
+      if (o.onAddSource) {
+        const add = btn('ss-add-source');
+        add.textContent = 'أضف مصدرًا';
+        add.onclick = () => o.onAddSource();
+        note.querySelector('div').append(add);
+      }
+      return;
+    }
     const msg = model.missing ? 'لم نجد هذه الحلقة في المصادر الآن' : model.error ? 'تعذّر الوصول إلى المصادر' : 'لم يجهز أي سيرفر الآن';
     const hint = model.missing ? 'جرّب لاحقًا، أو فعّل مصادر أخرى من الإعدادات.' : 'أعد المحاولة بعد لحظات — كثيرًا ما تعود السيرفرات سريعًا.';
     note.innerHTML = `${glyph('info', { size: 18 })}<div><b></b><p></p></div>`;
@@ -733,7 +746,8 @@ export function createServerSheet(body, o) {
     && (filter.a === 'all' || view(r).name === filter.a);
 
   /**
-   * model: { routes, busy, settled, missing, error, status: {text, spin}, retry: null | {wait} }
+   * model: { routes, busy, settled, missing, error, noSources, status: {text, spin}, retry: null | {wait} }
+   * `noSources`: لا مصدر مشاهدة في الحساب: «أضف مصدرًا لتشاهد» مكان القائمة والزر يفتح الإضافات.
    */
   function update(model) {
     last = model;
@@ -753,7 +767,7 @@ export function createServerSheet(body, o) {
     status.append(el('span', null, st.text ?? ''));
     status.classList.toggle('ss-status--warn', Boolean(model.error || model.missing));
     // الملاحظة تقول الحال حين لا جاهز ولا انتظار: لا سطر يكرّرها
-    const empty = !top && Boolean(model.settled || model.missing || model.error);
+    const empty = !top && Boolean(model.settled || model.missing || model.error || model.noSources);
     status.hidden = empty;
 
     // المباشر ثم التورنت؛ ما يُجهَّز بعد (حين يوجد جاهز) وما تعذّر مطويّان
@@ -788,7 +802,7 @@ export function createServerSheet(body, o) {
     wait.summary.textContent = `تُجهَّز بالخلفية (${waiting.length})`;
     reconcile(dead.grid, gone.map(row));
     dead.summary.textContent = `غير متاح الآن (${gone.length})`;
-    const loading = !routes.length && !model.settled && !model.missing && !model.error;
+    const loading = !routes.length && !model.settled && !model.missing && !model.error && !model.noSources;
     if (empty) paintNote(model);
     const order = [
       empty ? note : null,
@@ -803,6 +817,12 @@ export function createServerSheet(body, o) {
 
     // زرّ واحد هادئ: يشغّل المقترح نفسه، أو ينتظر أول جاهز
     best.classList.remove('waiting');
+    if (model.noSources && !top) {
+      best.disabled = !o.onAddSource;
+      best.innerHTML = `${glyph('plus', { size: 18 })}<span class="ss-best-copy"><span>أضف مصدرًا</span></span>`;
+      best.onclick = () => o.onAddSource?.();
+      return;
+    }
     if (model.retry) {
       const w = model.retry.wait;
       best.disabled = w > 0;

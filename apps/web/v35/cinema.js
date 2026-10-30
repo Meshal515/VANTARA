@@ -1817,9 +1817,17 @@ export function createCinema(deps) {
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
         onUnavailable: (r) => toast(routeFailureMessage(r.reason), 5000),
+        noSourcesTitle: 'أضف مصدرًا لتشاهد',
+        ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('cinema'); } } : {}),
       });
       const status = ui.status;
       const best = ui.best;
+      // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر»
+      void deps.playableSources?.('cinema').then((count) => {
+        if (count !== 0 || sheet.closed) return;
+        sheet.noSources = true;
+        paint();
+      }, () => {});
       const paint = () => {
         queued = false;
         if (sheet.closed) return;
@@ -1843,7 +1851,7 @@ export function createCinema(deps) {
           const parts = [direct ? `${direct} مباشر` : null, torrents ? `${torrents} تورنت` : null].filter(Boolean).join(' · ');
           line = { text: `${parts} جاهز${settled ? '' : ' · البقية تصل'}`, spin: !settled };
         }
-        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, status: line });
+        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, noSources: sheet.noSources === true && !sheet.routes.length, status: line });
         if (sheet.error && !sheet.routes.length) status.textContent = `تعذّر تجهيز السيرفرات: ${sheet.error}`;
       };
       const queuePaint = () => {

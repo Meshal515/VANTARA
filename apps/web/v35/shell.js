@@ -19,6 +19,8 @@ import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { getAddonRuntime } from '../addons/runtime.js';
+import { supportedCapabilities } from '../addons/assessment.js';
+import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { sideDock } from './side-dock.js';
 import { glyph } from './icons.js';
@@ -824,6 +826,41 @@ export function mountV35(deps, { page = 'home' } = {}) {
     target.replaceChildren(box);
   }
 
+  /**
+   * عدد المصادر التي تشغّل أو تقرأ في هذا القسم لحسابك، أو null إن لم يُعرف بعد (فلا نقول «أضف مصدرًا»
+   * لحساب موجود لم يصل صفّه من المزامنة). نموذج Stremio: الكتالوج يعرض كل عمل، والمشاهدة/القراءة من
+   * مصادر يضيفها المستخدم.
+   */
+  async function playableSources(section) {
+    if (entitlement().state === 'unknown') return null;
+    if (section === 'manga') {
+      const list = await engine.sources().catch(() => null);
+      return list ? list.filter((s) => !s.filler).length : null;
+    }
+    const addons = await getAddonRuntime().catch(() => null);
+    if (!addons) return null;
+    await addons.ready;
+    const runtimeName = addons.runtimeName ?? addons.registry.runtimeName ?? 'pwa';
+    const kinds = section === 'cinema' ? ['movie', 'series'] : ['anime', 'movie', 'series'];
+    return addons.registry.list().filter((a) => a.enabled !== false
+      && (a.contentTypes ?? []).some((t) => kinds.includes(t))
+      && (a.bundled ? (a.capabilities ?? []).includes('streams') : supportedCapabilities(a, runtimeName).includes('streams'))).length;
+  }
+  function addSource() {
+    void openAddons();
+  }
+  /** «أضف مصدرًا لتقرأ»: مكان قائمة فارغة سببها أن الحساب بلا مصادر مانجا، لا عطل مصدر. */
+  async function showAddMangaSource(target) {
+    if ((await playableSources('manga')) !== 0) return false;
+    emptyState(target, {
+      icon: 'layers',
+      title: 'أضف مصدرًا لتقرأ',
+      text: 'الأعمال تظهر من الكتالوج، والقراءة من مصادر تضيفها أنت.',
+      action: { label: 'أضف مصدرًا', icon: 'plus', run: addSource },
+    });
+    return true;
+  }
+
   // ───────────────────────── الرئيسية ─────────────────────────
 
   /**
@@ -1101,6 +1138,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (hasCache) return;
       if (!state.heroItems.length) renderHeroFallback();
       const box = el('div');
+      if (await showAddMangaSource(box)) { q('homeSections').replaceChildren(box.firstElementChild); return; }
       emptyState(box, {
         icon: 'offline',
         error: true,
@@ -1334,6 +1372,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (state.current !== work) return;
     if (!work._work?.editions?.length) {
+      if (await showAddMangaSource(q('chapterPanel'))) { setReadCta(null); return; }
+      if (state.current !== work) return;
       emptyState(q('chapterPanel'), {
         icon: 'search',
         title: 'ما وصلنا للمصادر الحين',
@@ -3231,6 +3271,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!state.discoverQuery) renderGrid(q('discoverGrid'), state.catalog);
       btn.hidden = !state.catalogHasNext || !!state.discoverQuery;
     } catch {
+      if (!state.catalog.length && await showAddMangaSource(q('discoverGrid'))) return;
       if (!state.catalog.length) {
         emptyState(q('discoverGrid'), {
           icon: 'offline',
@@ -5508,6 +5549,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    playableSources, addSource,
     openUpdates: (section) => openUpdates(section),
     sync,
     openWorkMenu: openMediaWorkMenu,
@@ -5533,6 +5575,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
     restoreSourceWork: restoreAddonWork,
     together: () => together,

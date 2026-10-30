@@ -2267,6 +2267,8 @@ export function createAnime(deps) {
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
+        noSourcesTitle: 'أضف مصدرًا لتشاهد',
+        ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
         onRetry: () => {
           if (engine.retrySeconds(sheet.retryAt)) return;
           deps.closeSheet();
@@ -2274,6 +2276,11 @@ export function createAnime(deps) {
         },
         onUnavailable: (r) => deps.toast(r.reason || 'لم يُستخرج رابط فيديو من المشغّل', 5000),
       });
+      void deps.playableSources?.('anime').then((count) => {
+        if (count !== 0 || sheet.closed) return;
+        sheet.noSources = true;
+        paint();
+      }, () => {});
       const status = ui.status;
 
       const statusLine = () => {
@@ -2297,6 +2304,8 @@ export function createAnime(deps) {
           busy: sheet.busy,
           settled: sheet.done,
           missing: sheet.work === false,
+          // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر» (لا نلوم المصادر على غيابها)
+          noSources: sheet.noSources === true && !sheet.routes.length,
           error: Boolean(sheet.searchError),
           status: statusLine(),
           retry: exhausted() ? { wait: engine.retrySeconds(sheet.retryAt) } : null,
