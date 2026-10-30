@@ -7,7 +7,7 @@
  */
 import { FAILURES, failureCode, failureText } from './route-validity.js';
 
-export const ORIGIN = Object.freeze({ SITE: 'site', NETWORK: 'network', VANTARA: 'vantara', USER: 'user', UNKNOWN: 'unknown' });
+export const ORIGIN = Object.freeze({ SITE: 'site', NETWORK: 'network', VANTARA: 'vantara', EXTENSION: 'extension', UNSUPPORTED: 'unsupported', USER: 'user', UNKNOWN: 'unknown' });
 const SITE = '(الخلل من الموقع لا من VANTARA)';
 
 /** جملة رد HTTP من موقع المصدر، والرقم فيها (HTTP nnn) لأن شاشات التشخيص تقرؤه. */
@@ -39,6 +39,10 @@ export function describeFailure(error) {
   if (code === 'network' || code === 'timeout' || error?.name === 'TimeoutError') return plain(FAILURES.NETWORK.text, ORIGIN.NETWORK, 'NETWORK');
   if (code === 'INVALID_RESPONSE' || code === 'bad_json' || /مخالفة للعقد|JSON صالحًا|بيانات غير صالحة/.test(String(error?.message)))
     return plain('الموقع غيّر شكل صفحاته فلم تعد الإضافة تفهمها؛ تحتاج تحديثًا', ORIGIN.SITE, 'CONTRACT');
+  // المحرك الأصلي (ExtensionFailure.kt) يصنّف العطل بنفسه ويرسل مالكه وسببه العربي: يُعرض كما هو
+  const owner = error?.data?.owner;
+  if (['site', 'vantara', 'extension', 'unsupported'].includes(owner) && /[؀-ۿ]/.test(String(error?.message ?? '')))
+    return plain(error.message, owner);
   const status = Number(error?.status);
   if (Number.isInteger(status) && status >= 400 && status <= 599) return plain(siteStatusMessage(status), ORIGIN.SITE, `HTTP_${status}`);
   const message = String(error?.message ?? error ?? '');

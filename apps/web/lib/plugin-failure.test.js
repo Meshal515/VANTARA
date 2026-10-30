@@ -38,3 +38,16 @@ describe('transparent failure: an Arabic reason that says where it came from', (
     expect(unknown.text).toMatch(arabic);
   });
 });
+
+describe('تصنيف المحرك الأصلي', () => {
+  it('يعرض سبب المحرك ومالكه كما هما بدل «سبب غير معروف»', () => {
+    const error = Object.assign(new Error('الموقع رفض الطلب (403): حماية أو حجب لمنطقتك؛ جرّب شبكة أخرى أو VPN'), { code: 'SITE_HTTP_403', data: { owner: 'site' } });
+    expect(describeFailure(error)).toMatchObject({ code: 'SITE_HTTP_403', origin: 'site', cancelled: false });
+    const ext = Object.assign(new Error('تعطّلت الإضافة أثناء الطلب'), { code: 'PROVIDER_FAILED', data: { owner: 'extension' } });
+    expect(describeFailure(ext).origin).toBe('extension');
+  });
+  it('لا يثق بمالك مع رسالة غير عربية', () => {
+    const raw = Object.assign(new Error('HttpException: HTTP error 403'), { data: { owner: 'site' } });
+    expect(describeFailure(raw).text).not.toMatch(/HttpException/);
+  });
+});

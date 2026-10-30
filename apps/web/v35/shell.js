@@ -185,7 +185,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // Shell mounting remains synchronous; unavailable bridges never block startup.
   if(globalThis.Capacitor?.Plugins?.VantaraRuntime)queueMicrotask(()=>{
     void getAddonRuntime().then(async addons=>{
-      await addons.ready;if(followTimeClosed)return;
+      // الجلسة تُقرأ من التخزين بعد الإقلاع؛ الربط قبلها يفتح مخزن «local» الفارغ فتختفي إضافات
+      // CloudStream المثبتة في الحساب من الأقسام حتى تُفتح صفحة الإضافات.
+      await addons.ready;await sync.ready?.catch?.(()=>{});if(followTimeClosed)return;
       await addons.registry.setProfile(sync.user?.userId ?? 'local');
       if(!followTimeClosed)await addons.reloadSources?.();
     }).catch(()=>{});

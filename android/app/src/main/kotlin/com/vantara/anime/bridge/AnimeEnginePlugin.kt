@@ -302,7 +302,11 @@ class AnimeEnginePlugin : Plugin() {
 
     private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
     private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
-    private fun failure(call: PluginCall, t: Throwable) = call.reject(t.message ?: t.javaClass.simpleName)
+    /** سبب عربي ورمز ثابت ومالك العطل (VANTARA، الإضافة، الموقع، غير مدعوم)؛ لا رمز خام مثل PROVIDER_FAILED. */
+    private fun failure(call: PluginCall, t: Throwable) {
+        val verdict = com.vantara.plugins.ExtensionFailure.classify(t)
+        call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
+    }
 
     @PluginMethod
     fun repos(call: PluginCall) {

@@ -1081,8 +1081,14 @@ class ExtensionEnginePlugin : Plugin() {
      */
     private fun fail(call: PluginCall, t: Throwable) {
         val healed = runCatching { recover(call.getString("sourceId"), t) }.getOrDefault(false)
-        val message = if (healed) "تعطّل إصدار هذه الإضافة على جهازك فرجعنا تلقائيًا لآخر إصدار سليم؛ أعد المحاولة" else t.readable()
-        call.reject(message, t.javaClass.name, t as? Exception)
+        if (healed) return call.reject("تعطّل إصدار هذه الإضافة على جهازك فرجعنا تلقائيًا لآخر إصدار سليم؛ أعد المحاولة", "RECOVERED_TO_LKG", t as? Exception)
+        // تحدّي Cloudflare يبقى برمزه القديم (اسم الصنف) ورسالته: source-pulse.js يعرف به «تحتاج تحقق»
+        generateSequence(t) { it.cause }.take(4).firstOrNull { it.javaClass.simpleName == "CloudflareBypassException" }?.let {
+            return call.reject(it.message ?: "الموقع يطلب تحققًا (حماية Cloudflare)", it.javaClass.name, it as? Exception)
+        }
+        val verdict = ExtensionFailure.classify(t)
+        android.util.Log.w("ExtensionEngine", "${verdict.code}:${verdict.owner} <- ${t.readable()}")
+        call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
     }
 
     /**

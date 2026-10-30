@@ -35,7 +35,9 @@ class RuntimePlugin : Plugin() {
         catch(error: Exception) {
             val code=error.message?.takeIf { it.matches(Regex("[A-Z][A-Z0-9_]{1,100}")) } ?: "RUNTIME_OPERATION_FAILED"
             android.util.Log.w("VantaraRuntime",code+":"+error.javaClass.simpleName)
-            call.reject("تعذر تنفيذ عملية الإضافة: $code",code)
+            // السبب العربي ومالك العطل من المصنّف الموحّد؛ الرمز يبقى كما هو لأن الواجهة تقرؤه
+            val verdict=com.vantara.plugins.ExtensionFailure.fromCode(code)
+            call.reject(verdict?.message ?: "تعذّر تنفيذ عملية الإضافة داخل VANTARA",code,null,JSObject().put("owner",(verdict?.owner ?: com.vantara.plugins.ExtensionFailure.Owner.VANTARA).name.lowercase()))
         }
     } }
     @PluginMethod fun capabilities(call: PluginCall) { call.resolve(JSObject().put("cloudstream",::host.isInitialized && AndroidRuntimeClient.supportedOnThisPlatform()).put("profile","cloudstream-original-v1").put("experimental",true).put("platform","android")) }

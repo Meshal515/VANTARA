@@ -124,7 +124,7 @@ public final class RuntimeWorkerService extends Service {
         catch(VirtualMachineError e) { throw e; }
         catch(LinkageError e) { logAbi(e);throw new RuntimeFailure("ABI_MISMATCH"); }
         catch(UnsupportedOperationException e) { throw new RuntimeFailure("CAPABILITY_UNSUPPORTED"); }
-        catch(Throwable e) { throw new RuntimeFailure("PROVIDER_FAILED"); }
+        catch(Throwable e) { throw new RuntimeFailure(FailureCodes.of(e)); }
         if(largeJson)RuntimeProtocol.jsonResult(reply,result);
         else RuntimeProtocol.result(reply,"OK",RuntimeProtocol.text(result));
     }
