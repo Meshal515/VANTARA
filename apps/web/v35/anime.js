@@ -31,6 +31,7 @@ import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
+import { bindLookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -703,18 +704,16 @@ export function createAnime(deps) {
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
     body.append(about, insightHost, eps, more);
-    wrap.append(bar, hero, stage, body);
-    // المنصة: «تابع الحلقة» شريط ثابت أسفل الشاشة؛ يُسحب جانبًا فيختفي حتى الخروج والعودة
-    const dock = look === 'platform' ? el('div', 'aw-dock') : null;
-    // الحلقة أولًا: شريط لقطات الحلقات حول ما ستكمله، تحت بطاقة العمل
-    const scrub = look === 'episode' ? el('div', 'aw-scrub') : null;
-    if (scrub) stage.after(scrub);
-    if (dock) {
-      wrap.append(dock);
-      bindDockSwipe(dock);
-    }
+    // الأنماط الأربعة: كل ما تحت البطل يرسمه work-looks.js كما في تصميمه المعتمد؛ عناصر الأساسي
+    // تبقى مخفية لأن بقية الصفحة (الحلقات، التشغيل، التحديثات) تعمل عليها
+    const lw = look === 'core' ? null : el('div', 'wl');
+    if (lw) {
+      stage.hidden = true;
+      body.hidden = true;
+      wrap.append(bar, hero, lw, stage, body);
+    } else wrap.append(bar, hero, stage, body);
 
-    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, dock, scrub, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, lw, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
     paintCover(m);
     paintMeta(m);
     paintCta(m);
@@ -726,7 +725,12 @@ export function createAnime(deps) {
     page.replaceChildren(wrap);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    state.view.unbind = bindCollapsingHero({ hero, bar, layers: animeDepthLayers({ bg, cover: look === 'platform' || look === 'episode' ? null : cover, mark: look === 'platform' || look === 'episode' ? null : mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    const unLook = lw ? bindLookMotion(look, lw, { hero, bg, active: () => deps.currentPage() === 'anime' && state.detailToken === token }) : () => {};
+    const unHero = bindCollapsingHero({ hero, bar, layers: lw ? [] : animeDepthLayers({ bg, cover, mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    state.view.unbind = () => {
+      unHero?.();
+      unLook();
+    };
   }
 
   /** التفاصيل وصلت: كل مكان يُملأ في موضعه. */
@@ -744,7 +748,6 @@ export function createAnime(deps) {
     paintTools(m);
     paintAbout(m);
     renderEpisodes(v.eps, m);
-    if (v.look === 'card') centerWatching(v.eps);
     paintBelow(m);
     paintHero(m);
     paintLogo(m);
@@ -912,6 +915,7 @@ export function createAnime(deps) {
   function paintSide(m) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
+    if (v.lw) paintLook(m);
     const next = m.next?.at && m.next.at > Date.now() ? m.next : null;
     v.side.replaceChildren();
     if (next) {
@@ -953,8 +957,6 @@ export function createAnime(deps) {
       cap.append(t);
     }
     v.still.append(cap);
-    paintDock(m, point, title, label);
-    if (v.look === 'episode') paintNow(m, point, title, label);
     v.still.onclick = (e) => {
       if (e.target.closest('.aw-still-play')) return;
       play.classList.remove('nudge');
@@ -963,43 +965,11 @@ export function createAnime(deps) {
     };
   }
 
-  /** البطاقة الطائرة: الحلقات شريط أفقي؛ الحالية في وسطه عند الفتح (أفقيًا فقط، الصفحة لا تتحرك). */
-  function centerWatching(host) {
-    requestAnimationFrame(() => {
-      const list = host.querySelector('.an-er-list');
-      const cur = list?.querySelector('.an-er.watching') ?? list?.querySelector('.an-er:not(.seen)');
-      if (!cur) return;
-      const a = cur.getBoundingClientRect();
-      const b = list.getBoundingClientRect();
-      list.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
-    });
-  }
-
   /** تقدّم الحلقة المحفوظ (0..1) أو null. */
   const progressOf = (point) => {
     const r = point.record;
     return r?.duration > 0 ? Math.min(1, Math.max(0, r.position / r.duration)) : null;
   };
-
-  /** المنصة: الشريط الثابت «تابع الحلقة» — الغلاف صغيرًا، الحلقة وعنوانها والتقدّم، وزر التشغيل. */
-  function paintDock(m, point, title, label) {
-    const v = state.view;
-    if (!v?.dock) return;
-    v.dock.replaceChildren();
-    const thumb = el('span', 'aw-dock-cover');
-    if (m.poster ?? m.posterSmall) thumb.append(image(m.posterSmall ?? m.poster, 'an-img', { eager: true, position: 'center 20%' }));
-    const text = el('span', 'aw-dock-text');
-    text.append(el('b', null, label));
-    const sub = [typeof title === 'string' ? title : null, `شاهدت ${seenCountOf(m)} من ${m.episodes || m.aired || '؟'}`].filter(Boolean).join(' · ');
-    const small = el('small', null, sub);
-    small.dir = 'auto';
-    text.append(small);
-    const ratio = progressOf(point);
-    if (ratio != null) text.append(progress(ratio));
-    const play = button('aw-dock-play', glyph('play', { size: 20, filled: true }), () => playEpisode(m, point.episode), label);
-    v.dock.append(thumb, text, play);
-    v.dock.hidden = v.dockGone === true;
-  }
 
   /** سحب الشريط جانبًا أكثر من ثلث عرضه يُخفيه حتى تُفتح الصفحة من جديد؛ أقل من ذلك يرجع مكانه. */
   function bindDockSwipe(dock) {
@@ -1035,57 +1005,81 @@ export function createAnime(deps) {
     dock.addEventListener('pointercancel', end);
   }
 
-  /** الحلقة أولًا: ما ستكمله فوق بطاقة العمل — رقمها وعنوانها ووصفها والتقدّم والتشغيل، ثم شريط الحلقات. */
-  function paintNow(m, point, title, label) {
+  /** يجمع ما يعرضه النمط من بيانات العمل ويرسمه (عند الفتح، ووصول التفاصيل والفن والصور الأعلى دقة). */
+  function paintLook(m) {
     const v = state.view;
-    if (!v) return;
-    if (!v.now) {
-      v.now = el('div', 'aw-now');
-      v.stage.prepend(v.now);
-    }
-    v.now.replaceChildren();
-    v.now.append(el('small', null, `${point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'} · الحلقة ${point.episode}`));
-    const h = el('h2', null, typeof title === 'string' && title ? title : label);
-    h.dir = 'auto';
-    v.now.append(h);
-    const overview = artOf(m)?.episodes?.[String(point.episode)]?.overview;
-    if (overview) {
-      const p = el('p', null, overview);
-      p.dir = 'auto';
-      v.now.append(p);
-    }
-    const row = el('div', 'aw-now-play');
-    row.append(button('aw-now-btn', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label));
-    const ratio = progressOf(point);
-    if (ratio != null) {
-      row.append(progress(ratio));
-      const left = point.record?.duration ? Math.max(1, Math.round((point.record.duration - point.record.position) / 60)) : null;
-      if (left) row.append(el('span', 'aw-now-left', `باقي ${left} د`));
-    }
-    v.now.append(row);
-    if (!v.scrub) return;
-    const total = m.aired || m.episodes || point.episode;
-    const from = Math.max(1, point.episode - 4);
-    const to = Math.min(total, from + 9);
-    v.scrub.replaceChildren();
-    for (let n = from; n <= to; n++) {
-      const shot = episodeStill(m, n, artOf(m));
-      const t = el('button', `aw-scrub-ep${n === point.episode ? ' cur' : ''}${n < point.episode ? ' seen' : ''}`);
-      t.type = 'button';
-      t.setAttribute('aria-label', `الحلقة ${n}`);
-      if (shot.src) t.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.fallbacks }));
-      t.append(el('em', null, String(n)));
-      t.onclick = () => playEpisode(m, n);
-      v.scrub.append(t);
-    }
-    // الحالية في وسط الشريط أفقيًا فقط (scrollIntoView كان يحرّك الصفحة عموديًا أيضًا)
-    requestAnimationFrame(() => {
-      const cur = v.scrub.querySelector('.cur');
-      if (!cur) return;
-      const a = cur.getBoundingClientRect();
-      const b = v.scrub.getBoundingClientRect();
-      v.scrub.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
+    if (!v?.lw) return;
+    const art = artOf(m);
+    const point = resumePoint(m);
+    const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
+    const total = aired || m.episodes || point.episode;
+    const rec = epRecord(m, point.episode);
+    const ratio = !rec.done && rec.duration > 0 ? Math.min(1, rec.position / rec.duration) : null;
+    const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60)) : null;
+    const seen = seenCountOf(m);
+    const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const minutes = (n) => {
+      const d = art?.episodes?.[String(n)]?.runtime || m.duration;
+      return d ? `${d} د` : '';
+    };
+    const facts = [
+      ['الاستوديو', m.studio],
+      ['المصدر', SOURCE_AR[m.source]],
+      ['الموسم', m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year],
+      ['المدة', m.duration ? `${m.duration} دقيقة` : null],
+      ['الحلقات', m.episodes ? String(m.episodes) : null],
+    ].filter(([, val]) => val);
+    const byId = new Map([...(m.relations ?? []), ...(m.world ?? []).filter((w) => w.kind === 'anime'), ...(m.recommendations ?? [])].map((r) => [String(r.id), r]));
+    const shown = Math.max(1, Math.min(total, 25));
+    renderLook(v.look, v.lw, {
+      m,
+      glyph,
+      logo: art?.logo ?? null,
+      meta: [
+        FORMAT_AR[m.format],
+        m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year,
+        m.score ? { html: `★ <b>${m.score.toFixed(1)}</b>` } : null,
+        m.episodes ? `${m.episodes} حلقة` : null,
+        STATUS_AR[m.status],
+      ].filter(Boolean),
+      genres: (m.genres ?? []).slice(0, 4).map(genreAr),
+      facts,
+      point,
+      label,
+      total,
+      ratio,
+      left,
+      seenRatio: total ? Math.min(1, seen / total) : 0,
+      progressText: `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
+      lineDone: Math.min(100, ((Math.min(seen, shown) + 0.5) / shown) * 100).toFixed(1),
+      characters: m.characters ?? [],
+      // عدد التوصيات الظاهر في كل نمط كما في تصميمه (الجوال / العريض)؛ الباقي خلف «الكل»
+      recsCap: ({ platform: [9, 10], card: [9, 8], screen: [9, 8], episode: [9, 10] }[v.look] ?? [9, 9])[v.wrap.clientWidth >= 900 ? 1 : 0],
+      heroSrc: v.heroSrc ?? null,
+      rangeAt: v.lwRange ?? null,
+      epTitle: (n) => {
+        const t = episodeTitleOf(m, n, { mal: state.malTitles, art });
+        return typeof t === 'string' ? t : null;
+      },
+      epOverview: (n) => art?.episodes?.[String(n)]?.overview ?? null,
+      still: (n, full = false) => episodeStill(m, n, art, { full }),
+      seen: (n) => epRecord(m, n).done,
+      minutes,
+      play: (n) => playEpisode(m, n),
+      open: (id) => {
+        const r = byId.get(String(id));
+        if (r) void openAnime(r);
+      },
+      onRange: (i) => {
+        v.lwRange = i;
+        paintLook(m);
+      },
     });
+    const dock = v.lw.querySelector('.wl-dock');
+    if (dock) {
+      dock.hidden = v.dockGone === true;
+      bindDockSwipe(dock);
+    }
   }
 
   /** سطر واحد هادئ: النوع · الموسم · ★ · الاستوديو · الحالة. وتحته الأنواع روابطَ. */

@@ -52,6 +52,8 @@ export function seasonOf(date = new Date()) {
 export const SEASON_AR = { WINTER: 'شتاء', SPRING: 'ربيع', SUMMER: 'صيف', FALL: 'خريف' };
 export const FORMAT_AR = { TV: 'مسلسل', TV_SHORT: 'حلقات قصيرة', MOVIE: 'فيلم', SPECIAL: 'حلقة خاصة', OVA: 'OVA', ONA: 'ONA', MUSIC: 'موسيقي' };
 export const STATUS_AR = { RELEASING: 'يُعرض الآن', FINISHED: 'مكتمل', NOT_YET_RELEASED: 'قريبًا', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
+/** علاقات «من نفس العالم» بكلمة قصيرة (المانجا وما يرتبط بلا تصنيف أدق من AniList). */
+export const WORLD_AR = { PREQUEL: 'قبل الأحداث', SEQUEL: 'بعد الأحداث', PARENT: 'الأصل', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', SUMMARY: 'ملخص', ADAPTATION: 'الأصل', SOURCE: 'الأصل', OTHER: 'عمل مرتبط' };
 export const RELATION_AR = { SEQUEL: 'الجزء التالي', PREQUEL: 'الجزء السابق', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', PARENT: 'الأصل', SUMMARY: 'ملخص' };
 
 /** أقصر اسم مقروء: الإنجليزي إن وُجد، ثم الروماجي. */
@@ -168,6 +170,12 @@ export function parseDetail(data) {
     .map((e) => ({ ...normalize(e.node), relation: RELATION_AR[e.relationType] }))
     .filter((m) => m.id);
   const recommendations = (media.recommendations?.nodes ?? []).map((n) => normalize(n.mediaRecommendation)).filter(Boolean);
+  // «من نفس العالم» في أنماط الصفحة: الأعمال المرتبطة كلها أنمي ومانجا (لا الأغاني ولا ظهور الشخصيات)،
+  // بنوع العلاقة والصيغة؛ relations أعلاه تبقى كما هي للصفحة الأساسية
+  const world = (media.relations?.edges ?? [])
+    .filter((e) => WORLD_AR[e.relationType] && e.node?.format !== 'MUSIC' && (e.node?.type === 'ANIME' || e.node?.type === 'MANGA'))
+    .map((e) => ({ ...normalize(e.node), kind: e.node.type === 'MANGA' ? 'manga' : 'anime', relationType: e.relationType, relation: WORLD_AR[e.relationType] }))
+    .filter((m) => m.id);
   // الشخصيات: الرئيسية أولًا، بلا صورة AniList الافتراضية الفارغة
   const characters = (media.characters?.edges ?? [])
     .filter((e) => e?.node?.image?.large && !/\/default\.(jpg|png)$/.test(e.node.image.large))
@@ -182,6 +190,7 @@ export function parseDetail(data) {
   return {
     ...base,
     relations,
+    world,
     recommendations,
     characters,
     synonyms: media.synonyms ?? [],
