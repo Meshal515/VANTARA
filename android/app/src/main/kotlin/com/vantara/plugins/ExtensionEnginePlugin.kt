@@ -420,7 +420,7 @@ class ExtensionEnginePlugin : Plugin() {
                         .put("baseUrl", base),
                 )
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -536,7 +536,7 @@ class ExtensionEnginePlugin : Plugin() {
                         .put("count", update.chapters.size),
                 )
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -559,7 +559,7 @@ class ExtensionEnginePlugin : Plugin() {
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("chapters", out).put("count", list.size))
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -576,7 +576,7 @@ class ExtensionEnginePlugin : Plugin() {
                 list.forEach { out.put(it.toJs()) }
                 call.resolve(JSObject().put("pages", out).put("count", list.size))
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -666,7 +666,7 @@ class ExtensionEnginePlugin : Plugin() {
                 }
                 call.resolve(out)
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -718,7 +718,7 @@ class ExtensionEnginePlugin : Plugin() {
                 }
                 call.resolve(JSObject().put("path", file.absolutePath).put("cached", false))
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -834,7 +834,7 @@ class ExtensionEnginePlugin : Plugin() {
                         .put("page", page),
                 )
             } catch (t: Throwable) {
-                call.reject(t.readable(), t.javaClass.name, t as? Exception)
+                fail(call, t)
             }
         }
     }
@@ -1074,6 +1074,45 @@ class ExtensionEnginePlugin : Plugin() {
 
     /** `title` في `SMangaImpl` هو `lateinit`، وقراءته قبل الإسناد ترمي. */
     private fun SManga.isTitleSet(): Boolean = runCatching { title }.isSuccess
+
+    /**
+     * رفض النداء، مع تعافٍ تلقائي إن كان العطل من كود الإضافة نفسه لا من الموقع (PERSISTENT_PLUGINS §3.3/6).
+     * عطل الموقع (HTTP، شبكة، تغيّر صفحاته) لا يُصلحه إصدار أقدم، فيُعرض سببه كما هو.
+     */
+    private fun fail(call: PluginCall, t: Throwable) {
+        val healed = runCatching { recover(call.getString("sourceId"), t) }.getOrDefault(false)
+        val message = if (healed) "تعطّل إصدار هذه الإضافة على جهازك فرجعنا تلقائيًا لآخر إصدار سليم؛ أعد المحاولة" else t.readable()
+        call.reject(message, t.javaClass.name, t as? Exception)
+    }
+
+    /**
+     * عدم توافق إصدار الإضافة مع التطبيق (صنف أو دالة مفقودة، نوع غير متوقع) يظهر عند أول نداء لا عند
+     * التحميل. يُرجع إلى آخر إصدار سليم إن وُجد، أو إلى النسخة المضمّنة للمدمجة سابقًا، ويُخرج الحزمة من
+     * الذاكرة لتُحمَّل من جديد. لا يُنزّل شيئًا ولا يقبل كودًا جديدًا.
+     */
+    private fun recover(sourceId: String?, t: Throwable): Boolean {
+        val defect = generateSequence(t) { it.cause }.take(4).any { it is LinkageError || it is ClassCastException || it is AbstractMethodError }
+        if (!defect || sourceId.isNullOrBlank()) return false
+        val pkg = if ('#' in sourceId) sourceId.substringBefore('#') else splitSourceId(sourceId).first
+        val user = userStore.extension(pkg)
+        val healed = if (user != null) {
+            val back = user.rolledBack() ?: return false
+            userStore.update { st -> st.copy(extensions = st.extensions.map { if (it.pkg == pkg) back else it }) }
+            true
+        } else {
+            val base = packageSpec(pkg) ?: return false
+            when {
+                builtinSpecs.previousOf(base) != null -> { builtinSpecs.rollback(pkg); true }
+                builtinSpecs.current(base) !== base -> { builtinSpecs.reset(pkg); true }
+                else -> false
+            }
+        }
+        if (healed) {
+            forget(pkg)
+            owners.values.removeAll { it == pkg }
+        }
+        return healed
+    }
 
     private fun Throwable.readable(): String =
         generateSequence(this) { it.cause }
