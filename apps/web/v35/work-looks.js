@@ -62,7 +62,7 @@ function worldItems(c) {
   const list = [...before, here, ...after, ...rest];
   return list.length > 1 ? list : [];
 }
-/** «مانجا · قبل الأحداث»، «المانجا الأصلية»، «أنت هنا · 2022»، «عمل مرتبط · 2026». */
+/** «مانجا · الجزء السابق»، «المانجا الأصلية»، «أنت هنا · 2022»، «عمل مرتبط · 2026». */
 function worldLabel(w) {
   if (w.here) return ['أنت هنا', w.year].filter(Boolean).join(' · ');
   if (w.kind === 'manga') return w.relationType === 'ADAPTATION' || w.relationType === 'SOURCE' ? 'المانجا الأصلية' : ['مانجا', w.relation].join(' · ');

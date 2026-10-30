@@ -53,7 +53,7 @@ export const SEASON_AR = { WINTER: 'شتاء', SPRING: 'ربيع', SUMMER: 'صي
 export const FORMAT_AR = { TV: 'مسلسل', TV_SHORT: 'حلقات قصيرة', MOVIE: 'فيلم', SPECIAL: 'حلقة خاصة', OVA: 'OVA', ONA: 'ONA', MUSIC: 'موسيقي' };
 export const STATUS_AR = { RELEASING: 'يُعرض الآن', FINISHED: 'مكتمل', NOT_YET_RELEASED: 'قريبًا', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
 /** علاقات «من نفس العالم» بكلمة قصيرة (المانجا وما يرتبط بلا تصنيف أدق من AniList). */
-export const WORLD_AR = { PREQUEL: 'قبل الأحداث', SEQUEL: 'بعد الأحداث', PARENT: 'الأصل', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', SUMMARY: 'ملخص', ADAPTATION: 'الأصل', SOURCE: 'الأصل', OTHER: 'عمل مرتبط' };
+export const WORLD_AR = { PREQUEL: 'الجزء السابق', SEQUEL: 'الجزء التالي', PARENT: 'الأصل', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', SUMMARY: 'ملخص', ADAPTATION: 'الأصل', SOURCE: 'الأصل', OTHER: 'عمل مرتبط' };
 export const RELATION_AR = { SEQUEL: 'الجزء التالي', PREQUEL: 'الجزء السابق', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', PARENT: 'الأصل', SUMMARY: 'ملخص' };
 
 /** أقصر اسم مقروء: الإنجليزي إن وُجد، ثم الروماجي. */
