@@ -38,3 +38,39 @@ class BuiltinSourceRefreshTest {
         assertSame(base, BuiltinSourceRefresh(file).current(base))
     }
 }
+
+class BuiltinVisibilityTest {
+    @Test fun `no report yet is distinct from an empty account`() {
+        val dir = Files.createTempDirectory("visible").toFile()
+        val store = BuiltinVisibility(File(dir, "builtin-visible.json"))
+        assertEquals(null, store.read())
+        store.write(emptySet())
+        assertEquals(emptySet<String>(), store.read())
+        store.write(setOf("b.pkg", "a.pkg"))
+        assertEquals(setOf("a.pkg", "b.pkg"), BuiltinVisibility(File(dir, "builtin-visible.json")).read())
+    }
+
+    @Test fun `a corrupt file reads as not reported`() {
+        val dir = Files.createTempDirectory("visible").toFile()
+        val file = File(dir, "builtin-visible.json").apply { writeText("[broken") }
+        assertEquals(null, BuiltinVisibility(file).read())
+    }
+}
+
+class BuiltinRefreshConfirmTest {
+    @Test fun `a downloaded version is pinned only when confirmed`() {
+        val dir = Files.createTempDirectory("confirm").toFile()
+        val file = File(dir, "builtin-refresh.json")
+        val base = SourceSpec(
+            label = "Dilar", pkg = "eu.kanade.tachiyomi.extension.ar.dilar", expectedLib = 1.6,
+            apkUrl = "https://old/dilar.apk", sha256 = "a".repeat(64), versionName = "1.6.1", warning = ContentWarning.SAFE,
+            arabicSourceIds = setOf("1"), arabicSourceNames = listOf("ديلار"), blockedReason = null,
+        )
+        val refresh = BuiltinSourceRefresh(file)
+        assertSame(base, refresh.current(base))
+        val next = base.copy(sha256 = "c".repeat(64), apkUrl = "https://new/dilar.apk", versionName = "1.6.9")
+        refresh.confirm(next)
+        assertEquals("c".repeat(64), BuiltinSourceRefresh(file).current(base).sha256)
+        assertEquals(base.pkg, BuiltinSourceRefresh(file).current(base).pkg)
+    }
+}

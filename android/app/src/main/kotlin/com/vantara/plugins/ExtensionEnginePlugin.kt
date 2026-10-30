@@ -90,6 +90,13 @@ class ExtensionEnginePlugin : Plugin() {
     private val userStore by lazy { UserExtensionStore(java.io.File(context.filesDir, "extensions/user-repos.json")) }
     private val repoClient by lazy { RepoClient(context, network.client) }
     private val builtinSpecs by lazy { BuiltinSourceRefresh(java.io.File(context.filesDir, "extensions/builtin-refresh.json")) }
+    private val builtinVisibility by lazy { BuiltinVisibility(java.io.File(context.filesDir, "extensions/builtin-visible.json")) }
+
+    /** نسخة الحزمة موجودة على الجهاز (متحقَّق منها) أو داخل التطبيق: تحميلها لا يلمس الشبكة. */
+    private fun hasLocalCopy(pkg: String): Boolean {
+        val spec = packageSpec(pkg)?.let { builtinSpecs.current(it) } ?: return false
+        return loader.readVerifiedCache(spec) != null || readBundled(spec) != null
+    }
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override fun load() {
@@ -109,12 +116,16 @@ class ExtensionEnginePlugin : Plugin() {
         // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
         // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
         scope.launch {
+            // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins)،
+            // وقبل أول تبليغ ما له نسخة على الجهاز فقط — فلا يُنزّل حساب جديد حزمًا لم يضفها.
+            val visible = builtinVisibility.read()
+            fun eager(pkg: String) = visible?.contains(pkg) ?: hasLocalCopy(pkg)
             for (spec in SPIKE_SOURCES) {
-                if (spec.blockedReason != null) continue
+                if (spec.blockedReason != null || !eager(spec.pkg)) continue
                 launch { runCatching { obtain(spec.pkg) } }
             }
             // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
-            for (filler in FILLER_SOURCES) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
+            for (filler in FILLER_SOURCES) if (eager(filler.pkg)) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
             for (ext in userStore.state.extensions) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
         }
     }
@@ -202,6 +213,22 @@ class ExtensionEnginePlugin : Plugin() {
                     }
                 }
                 call.resolve(JSObject().put("sources", list))
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
+    }
+
+    /**
+     * الحزم المدمجة سابقًا الظاهرة للحساب الحالي (lib/source-entitlement.js). تلميح للتحميل المسبق عند
+     * الإقلاع فقط: لا يحذف ملفًا ولا يمنع طلبًا، والقرار نفسه في الواجهة ومن المزامنة.
+     */
+    @PluginMethod
+    fun setVisibleBuiltins(call: PluginCall) {
+        val array = call.getArray("pkgs") ?: return call.reject("pkgs مطلوبة")
+        val pkgs = (0 until array.length()).mapNotNull { array.optString(it).takeIf { pkg -> packageSpec(pkg) != null } }.toSet()
+        scope.launch(Dispatchers.IO) {
+            try {
+                builtinVisibility.write(pkgs)
+                call.resolve()
             } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
         }
     }
@@ -866,7 +893,10 @@ class ExtensionEnginePlugin : Plugin() {
                     "${spec.label}: ${result.stage} — ${result.reason}",
                     result.cause,
                 )
-            is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
+            is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>().also {
+                // الإصدار المنزّل يُثبَّت بعد نجاح تحميله فقط: حزمة لا تعمل لا تحلّ محلّ شيء
+                if (used !== spec && it.isNotEmpty()) builtinSpecs.confirm(used)
+            }
         }
     }
 

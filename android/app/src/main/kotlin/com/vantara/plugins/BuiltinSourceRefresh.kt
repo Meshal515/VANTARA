@@ -31,7 +31,8 @@ class BuiltinSourceRefresh(private val file: File) {
 
     /**
      * الإصدار الحالي من مستودع Keiyoushi موقّعًا بمفتاحه، أو null (شبكة، حزمة أُزيلت، واجهة غير مدعومة).
-     * لا يرمي: فشله يترك المسار القديم كما هو.
+     * لا يرمي ولا يحفظ شيئًا: الإصدار يُثبَّت بـ[confirm] فقط بعد أن تُحمَّل الحزمة وتُخرج مصادرها، فحزمة
+     * تالفة أو غير متوافقة لا تحلّ محلّ نسخة الجهاز العاملة (فشل التنزيل يترك الحالة السابقة كما هي).
      */
     fun fromRepository(base: SourceSpec, repo: RepoClient): Pair<SourceSpec, ByteArray>? = runCatching {
         val (meta, list) = repo.read(KEIYOUSHI_BASE)
@@ -40,10 +41,11 @@ class BuiltinSourceRefresh(private val file: File) {
         val ext = list.firstOrNull { it.pkg == base.pkg } ?: return null
         if (kotlin.math.abs(ext.lib - base.expectedLib) > 0.0001) return null
         val bytes = repo.downloadSigned(ext.apkUrl, KEIYOUSHI_KEY)
-        val pinned = Pinned(sha256Hex(bytes), ext.apkUrl, ext.version, ext.lib)
-        remember(base.pkg, pinned)
-        base.copy(sha256 = pinned.sha256, apkUrl = pinned.apkUrl, versionName = pinned.versionName, expectedLib = pinned.lib) to bytes
+        base.copy(sha256 = sha256Hex(bytes), apkUrl = ext.apkUrl, versionName = ext.version, expectedLib = ext.lib) to bytes
     }.getOrNull()
+
+    /** يثبّت إصدارًا نُزّل بعد نجاح تحميله فعلًا. الكتابة ذرّية: ملف مؤقت ثم إعادة تسمية. */
+    fun confirm(spec: SourceSpec) = remember(spec.pkg, Pinned(spec.sha256, spec.apkUrl, spec.versionName, spec.expectedLib))
 
     @Synchronized private fun remember(pkg: String, pin: Pinned) {
         val next = pins + (pkg to pin)
@@ -58,5 +60,23 @@ class BuiltinSourceRefresh(private val file: File) {
         const val KEIYOUSHI_BASE = "https://raw.githubusercontent.com/keiyoushi/extensions/repo"
         /** signingKeyFingerprint من repo.json الرسمي لـKeiyoushi (30 أكتوبر 2026). */
         const val KEIYOUSHI_KEY = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+    }
+}
+
+/**
+ * آخر ما بلّغته الواجهة من الحزم المدمجة سابقًا الظاهرة للحساب الحالي. null = لم تُبلّغ بعد (أول إقلاع
+ * بعد التحديث): عندها يُحمَّل مسبقًا ما له نسخة على الجهاز فقط. ملف تالف يُعامل كأنه غير موجود.
+ */
+class BuiltinVisibility(private val file: File) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private val codec = kotlinx.serialization.builtins.ListSerializer(String.serializer())
+
+    fun read(): Set<String>? = runCatching { json.decodeFromString(codec, file.readText()).toSet() }.getOrNull()
+
+    @Synchronized fun write(pkgs: Set<String>) {
+        file.parentFile?.mkdirs()
+        val tmp = File(file.path + ".tmp")
+        tmp.writeText(json.encodeToString(codec, pkgs.sorted()))
+        if (!tmp.renameTo(file)) { file.delete(); check(tmp.renameTo(file)) { "تعذر حفظ قائمة المصادر" } }
     }
 }
