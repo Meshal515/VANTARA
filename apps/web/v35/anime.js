@@ -30,6 +30,7 @@ import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
+import { workStyleOf } from './appearance.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
@@ -646,6 +647,9 @@ export function createAnime(deps) {
     page.style.removeProperty('--art');
     tint(page, m.color);
     const wrap = el('article', 'aw');
+    // نمط الصفحة من إعدادات المظهر: الأساسي (الغلاف في النص) أو أحد الأنماط الأربعة
+    const look = workStyleOf('anime');
+    wrap.dataset.style = look;
 
     // الترويسة: رجوع، والشعار صغيرًا حين ينطوي البطل، وفي الجهة المقابلة المفضلة ورشّح والمزيد
     // رموزًا بلا كلام. تبقى ظاهرة مع التمرير؛ صلبة متى انطوى البطل (لا محتوى من خلفها)
@@ -664,6 +668,14 @@ export function createAnime(deps) {
     const hero = el('div', 'aw-hero');
     const bg = el('div', 'aw-bg');
     hero.append(bg, el('div', 'aw-shade'));
+    // البطاقة الطائرة: اسم العمل بحروف لاتينية عملاقة مفرّغة خلف البنر (لا يُكتب لاسم غير لاتيني)
+    const tail = String(m.title ?? '').split(':').pop().trim();
+    if (look === 'card' && /^[\x20-\x7e]+$/.test(tail)) {
+      const giant = el('div', 'aw-giant', tail.toUpperCase());
+      giant.dir = 'ltr';
+      giant.setAttribute('aria-hidden', 'true');
+      hero.append(giant);
+    }
     const stage = el('div', 'aw-stage');
     const cover = el('div', 'aw-cover');
     // ضغطة مطوّلة على الاسم أو الشعار: «نسخ» و«مشاركة» (نفس ورقة المانجا، `data-copyable`)
@@ -692,8 +704,17 @@ export function createAnime(deps) {
     const more = el('div', 'aw-below');
     body.append(about, insightHost, eps, more);
     wrap.append(bar, hero, stage, body);
+    // المنصة: «تابع الحلقة» شريط ثابت أسفل الشاشة؛ يُسحب جانبًا فيختفي حتى الخروج والعودة
+    const dock = look === 'platform' ? el('div', 'aw-dock') : null;
+    // الحلقة أولًا: شريط لقطات الحلقات حول ما ستكمله، تحت بطاقة العمل
+    const scrub = look === 'episode' ? el('div', 'aw-scrub') : null;
+    if (scrub) stage.after(scrub);
+    if (dock) {
+      wrap.append(dock);
+      bindDockSwipe(dock);
+    }
 
-    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, dock, scrub, heroRank: Infinity, heroTried: new Set(), artSettled: false, unbind: null };
     paintCover(m);
     paintMeta(m);
     paintCta(m);
@@ -705,7 +726,7 @@ export function createAnime(deps) {
     page.replaceChildren(wrap);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
-    state.view.unbind = bindCollapsingHero({ hero, bar, layers: animeDepthLayers({ bg, cover, mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
+    state.view.unbind = bindCollapsingHero({ hero, bar, layers: animeDepthLayers({ bg, cover: look === 'platform' || look === 'episode' ? null : cover, mark: look === 'platform' || look === 'episode' ? null : mark }), active: () => deps.currentPage() === 'anime' && state.detailToken === token });
   }
 
   /** التفاصيل وصلت: كل مكان يُملأ في موضعه. */
@@ -723,6 +744,7 @@ export function createAnime(deps) {
     paintTools(m);
     paintAbout(m);
     renderEpisodes(v.eps, m);
+    if (v.look === 'card') centerWatching(v.eps);
     paintBelow(m);
     paintHero(m);
     paintLogo(m);
@@ -762,8 +784,12 @@ export function createAnime(deps) {
     if (!v || v.id !== m?.id || !v.artSettled) return;
     const imdb = artOf(m)?.imdb;
     const wide = globalThis.matchMedia?.('(min-width: 900px)').matches === true;
-    const known = heroMemory.get(m.id);
+    // الحلقة أولًا: البطل لقطة الحلقة التي ستكملها (1920) متى عُرفت؛ وإلا خلفية العمل كالعادة
+    const firstShot = v.look === 'episode' ? episodeStill(m, resumePoint(m).episode, artOf(m), { full: true }) : null;
+    if (v.look === 'episode' && !artOf(m) && !v.artSettled) return;
+    const known = v.look === 'episode' ? null : heroMemory.get(m.id);
     const list = [
+      firstShot?.still ? { src: firstShot.src, rank: -2 } : null,
       known ? { src: known, rank: -1 } : null,
       // large مباشرة (البطل يقصّ الصورة ويكبّرها على الجوال فتُخسف medium ‏1280)، صورةً واحدة
       // بلا تبديل لاحق — large في metahub قد تكون لقطة غير medium؛ medium إن تعذّرت
@@ -790,10 +816,14 @@ export function createAnime(deps) {
       v.bg.append(img);
       // نسخة مضبّبة ثابتة خلف البنر: حين ينطوي بالعمق تملأ الأطراف بألوانه هو لا بفراغ
       v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
+      // تظهر تدريجيًا مع الصورة لا دفعة واحدة
+      requestAnimationFrame(() => v.hero.classList.add('amb'));
       v.heroShown = true;
       // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
       v.heroSrc = pick.rank < 2 ? pick.src : null;
-      if (pick.rank < 1) heroMemory.set(m.id, pick.src);
+      if (pick.rank < 1 && pick.rank !== -2) heroMemory.set(m.id, pick.src);
+      // ارتفاع البطل من شكل صورته نفسها (لا قص)، بين حدين في CSS
+      if (pick.rank < 2 && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
       requestAnimationFrame(() => {
         img.classList.add('in');
         // ما تحتها يُزال بعد أن تغطيه
@@ -923,12 +953,139 @@ export function createAnime(deps) {
       cap.append(t);
     }
     v.still.append(cap);
+    paintDock(m, point, title, label);
+    if (v.look === 'episode') paintNow(m, point, title, label);
     v.still.onclick = (e) => {
       if (e.target.closest('.aw-still-play')) return;
       play.classList.remove('nudge');
       void play.offsetWidth;
       play.classList.add('nudge');
     };
+  }
+
+  /** البطاقة الطائرة: الحلقات شريط أفقي؛ الحالية في وسطه عند الفتح (أفقيًا فقط، الصفحة لا تتحرك). */
+  function centerWatching(host) {
+    requestAnimationFrame(() => {
+      const list = host.querySelector('.an-er-list');
+      const cur = list?.querySelector('.an-er.watching') ?? list?.querySelector('.an-er:not(.seen)');
+      if (!cur) return;
+      const a = cur.getBoundingClientRect();
+      const b = list.getBoundingClientRect();
+      list.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
+    });
+  }
+
+  /** تقدّم الحلقة المحفوظ (0..1) أو null. */
+  const progressOf = (point) => {
+    const r = point.record;
+    return r?.duration > 0 ? Math.min(1, Math.max(0, r.position / r.duration)) : null;
+  };
+
+  /** المنصة: الشريط الثابت «تابع الحلقة» — الغلاف صغيرًا، الحلقة وعنوانها والتقدّم، وزر التشغيل. */
+  function paintDock(m, point, title, label) {
+    const v = state.view;
+    if (!v?.dock) return;
+    v.dock.replaceChildren();
+    const thumb = el('span', 'aw-dock-cover');
+    if (m.poster ?? m.posterSmall) thumb.append(image(m.posterSmall ?? m.poster, 'an-img', { eager: true, position: 'center 20%' }));
+    const text = el('span', 'aw-dock-text');
+    text.append(el('b', null, label));
+    const sub = [typeof title === 'string' ? title : null, `شاهدت ${seenCountOf(m)} من ${m.episodes || m.aired || '؟'}`].filter(Boolean).join(' · ');
+    const small = el('small', null, sub);
+    small.dir = 'auto';
+    text.append(small);
+    const ratio = progressOf(point);
+    if (ratio != null) text.append(progress(ratio));
+    const play = button('aw-dock-play', glyph('play', { size: 20, filled: true }), () => playEpisode(m, point.episode), label);
+    v.dock.append(thumb, text, play);
+    v.dock.hidden = v.dockGone === true;
+  }
+
+  /** سحب الشريط جانبًا أكثر من ثلث عرضه يُخفيه حتى تُفتح الصفحة من جديد؛ أقل من ذلك يرجع مكانه. */
+  function bindDockSwipe(dock) {
+    let x0 = null;
+    let dx = 0;
+    dock.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      x0 = e.clientX;
+      dx = 0;
+      dock.style.transition = 'none';
+    });
+    dock.addEventListener('pointermove', (e) => {
+      if (x0 == null) return;
+      dx = e.clientX - x0;
+      dock.style.transform = `translateX(${dx}px)`;
+      dock.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / dock.offsetWidth));
+    });
+    const end = () => {
+      if (x0 == null) return;
+      x0 = null;
+      dock.style.transition = '';
+      if (Math.abs(dx) > dock.offsetWidth / 3) {
+        dock.style.transform = `translateX(${Math.sign(dx) * dock.offsetWidth * 1.2}px)`;
+        dock.style.opacity = '0';
+        if (state.view) state.view.dockGone = true;
+        setTimeout(() => { if (state.view?.dockGone) dock.hidden = true; }, 260);
+      } else {
+        dock.style.transform = '';
+        dock.style.opacity = '';
+      }
+    };
+    dock.addEventListener('pointerup', end);
+    dock.addEventListener('pointercancel', end);
+  }
+
+  /** الحلقة أولًا: ما ستكمله فوق بطاقة العمل — رقمها وعنوانها ووصفها والتقدّم والتشغيل، ثم شريط الحلقات. */
+  function paintNow(m, point, title, label) {
+    const v = state.view;
+    if (!v) return;
+    if (!v.now) {
+      v.now = el('div', 'aw-now');
+      v.stage.prepend(v.now);
+    }
+    v.now.replaceChildren();
+    v.now.append(el('small', null, `${point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'} · الحلقة ${point.episode}`));
+    const h = el('h2', null, typeof title === 'string' && title ? title : label);
+    h.dir = 'auto';
+    v.now.append(h);
+    const overview = artOf(m)?.episodes?.[String(point.episode)]?.overview;
+    if (overview) {
+      const p = el('p', null, overview);
+      p.dir = 'auto';
+      v.now.append(p);
+    }
+    const row = el('div', 'aw-now-play');
+    row.append(button('aw-now-btn', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label));
+    const ratio = progressOf(point);
+    if (ratio != null) {
+      row.append(progress(ratio));
+      const left = point.record?.duration ? Math.max(1, Math.round((point.record.duration - point.record.position) / 60)) : null;
+      if (left) row.append(el('span', 'aw-now-left', `باقي ${left} د`));
+    }
+    v.now.append(row);
+    if (!v.scrub) return;
+    const total = m.aired || m.episodes || point.episode;
+    const from = Math.max(1, point.episode - 4);
+    const to = Math.min(total, from + 9);
+    v.scrub.replaceChildren();
+    for (let n = from; n <= to; n++) {
+      const shot = episodeStill(m, n, artOf(m));
+      const t = el('button', `aw-scrub-ep${n === point.episode ? ' cur' : ''}${n < point.episode ? ' seen' : ''}`);
+      t.type = 'button';
+      t.setAttribute('aria-label', `الحلقة ${n}`);
+      if (shot.src) t.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.fallbacks }));
+      t.append(el('em', null, String(n)));
+      t.onclick = () => playEpisode(m, n);
+      v.scrub.append(t);
+    }
+    // الحالية في وسط الشريط أفقيًا فقط (scrollIntoView كان يحرّك الصفحة عموديًا أيضًا)
+    requestAnimationFrame(() => {
+      const cur = v.scrub.querySelector('.cur');
+      if (!cur) return;
+      const a = cur.getBoundingClientRect();
+      const b = v.scrub.getBoundingClientRect();
+      v.scrub.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
+    });
   }
 
   /** سطر واحد هادئ: النوع · الموسم · ★ · الاستوديو · الحالة. وتحته الأنواع روابطَ. */

@@ -76,6 +76,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
+import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, readAppearance, workStyleOf, writeAppearance } from './appearance.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -3807,9 +3808,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
         if(run!==addonViewGeneration)return;
         const work = sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes });
-        if (work._work) { root.dataset.section = 'manga'; buildDrawer(); await openWork(work); }
-        else if (addon.contentTypes.includes('anime')) { root.dataset.section = 'anime'; buildDrawer(); await anime.openAnime(work); }
-        else { root.dataset.section = 'cinema'; buildDrawer(); await cinema.openWork(work); }
+        if (work._work) { applySection('manga'); buildDrawer(); await openWork(work); }
+        else if (addon.contentTypes.includes('anime')) { applySection('anime'); buildDrawer(); await anime.openAnime(work); }
+        else { applySection('cinema'); buildDrawer(); await cinema.openWork(work); }
       } catch (error) { toast(error.message); }
     } });
     q('utilityBody').replaceChildren(sourceView);
@@ -4494,7 +4495,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     body.replaceChildren();
     const api = deps.settings;
     // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
-    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
+    const EYEBROWS = { 'المظهر': 'APPEARANCE', 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
     const group = (label, rows, { note, cls } = {}) => {
       if (label) {
         const head = el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}${EYEBROWS[label] ? '' : ' settings-sublabel'}`);
@@ -4573,6 +4574,60 @@ export function mountV35(deps, { page = 'home' } = {}) {
     meCard.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
     meCard.onclick = () => openProfile(me());
     body.append(meCard);
+
+    // المظهر: نمط صفحة الأنمي، ولون القسم الحالي، والأسود الصافي. على هذا الجهاز فقط
+    const look = readAppearance();
+    const section = root.dataset.section ?? 'manga';
+    const sectionWord = { manga: 'المانجا', anime: 'الأنمي', cinema: 'السينما' }[section] ?? '';
+    const accentNow = ACCENTS.find((c) => c.id === look.accent?.[section]);
+    const saveLook = (next) => {
+      writeAppearance(next);
+      applySection(root.dataset.section);
+      renderSettings();
+    };
+    group('المظهر', [
+      row('layers', 'نمط صفحة الأنمي', WORK_STYLES.find((x) => x.id === workStyleOf('anime', look))?.note, {
+        value: WORK_STYLES.find((x) => x.id === workStyleOf('anime', look))?.name,
+        run: () => openSheet((sheet) => {
+          sheet.append(el('h3', null, 'نمط صفحة الأنمي'));
+          for (const st of WORK_STYLES) {
+            sheet.append(sheetItem(st.id === workStyleOf('anime', look) ? 'check' : 'layers', `${st.name} — ${st.note}`, () => {
+              closeSheet();
+              saveLook({ ...look, style: { ...look.style, anime: st.id } });
+            }, { pressed: st.id === workStyleOf('anime', look) }));
+          }
+        }),
+      }),
+      row('palette', `لون ${sectionWord}`, 'عشرون لونًا هادئًا، وخلفية سوداء فيها لمسة منه', {
+        value: accentNow?.name ?? 'لون القسم',
+        run: () => openSheet((sheet) => {
+          sheet.append(el('h3', null, `لون ${sectionWord}`));
+          const grid = el('div', 'look-swatches');
+          const pick = (id) => {
+            closeSheet();
+            const accent = { ...look.accent };
+            if (id) accent[section] = id;
+            else delete accent[section];
+            saveLook({ ...look, accent });
+          };
+          const reset = el('button', `look-swatch look-swatch--reset${accentNow ? '' : ' on'}`);
+          reset.type = 'button';
+          reset.append(el('i'), el('span', null, 'لون القسم'));
+          reset.onclick = () => pick(null);
+          grid.append(reset);
+          for (const c of ACCENTS) {
+            const b = el('button', `look-swatch${accentNow?.id === c.id ? ' on' : ''}`);
+            b.type = 'button';
+            b.style.setProperty('--sw', c.hex);
+            b.append(el('i'), el('span', null, c.name));
+            b.onclick = () => pick(c.id);
+            grid.append(b);
+          }
+          sheet.append(grid);
+        }),
+      }),
+      toggle('moon', 'أسود صافي', 'خلفية سوداء تمامًا — أوفر لشاشات OLED', look.pureBlack, (on) => saveLook({ ...look, pureBlack: on })),
+    ]);
 
     group('الحساب', [
       row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
@@ -5081,10 +5136,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function applySection(id) {
     const s = SECTIONS[id] ?? SECTIONS.manga;
     root.dataset.section = s.id;
+    // نوافذ خارج جذر التطبيق (التنبيهات، الأوراق المعلّقة على body) ترث لون القسم من <html>
+    document.documentElement.dataset.section = s.id;
     q('brandSectionName').textContent = s.word;
     for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', s.theme);
-    document.documentElement.style.background = s.theme;
+    // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
+    const black = applyAppearance(s.id, [root, document.documentElement]);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', black ?? s.theme);
+    document.documentElement.style.background = black ?? (accentOf(s.id) ? 'var(--bg)' : s.theme);
     paintRail();
   }
   function pickSection(_e, t) {

@@ -13,7 +13,8 @@
 
 /* ───────────── متغيّرات الأقسام ───────────── */
 
-.v35[data-section='anime'] {
+.v35[data-section='anime'],
+html[data-section='anime'] {
   --bg: #05070d;
   --bg-raised: #080b14;
   --surface-1: #0d111b;
@@ -33,7 +34,8 @@
   accent-color: #3b82f6;
   caret-color: #8fb8ff;
 }
-.v35[data-section='cinema'] {
+.v35[data-section='cinema'],
+html[data-section='cinema'] {
   --bg: #0a0707;
   --bg-raised: #0f0b0b;
   --surface-1: #141010;
@@ -2886,4 +2888,269 @@
   0% { transform: perspective(700px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
   40% { opacity: 1; }
   100% { transform: perspective(700px) translate3d(0, -26px, -60px) rotateX(46deg) scale(0.86); opacity: 0; }
+}
+
+/* ═══════════ ارتفاع البطل من شكل صورته، وظهور الخلفية المضبّبة تدريجيًا ═══════════
+ * البنر لا يُقص: نسبة الصورة نفسها (--aw-ratio من الصورة المختارة)، بين 200px و55% من الشاشة،
+ * وعلى الشاشة العريضة بين 40% و55%. قبل وصول الصورة 16:9 (أغلب خلفيات metahub) فلا قفزة. */
+.v35 .aw .aw-hero {
+  height: auto;
+  aspect-ratio: var(--aw-ratio, 16 / 9);
+  min-height: 200px;
+  max-height: 55svh;
+}
+@media (min-width: 900px) {
+  .v35 .aw .aw-hero {
+    min-height: 40svh;
+  }
+}
+.v35 .aw-hero::before {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.v35 .aw-hero.amb::before {
+  opacity: 1;
+}
+
+/* ═══════════ أنماط صفحة العمل (إعدادات المظهر). الأساسي بلا قواعد إضافية ═══════════ */
+
+/* ── المنصة: الشعار فوق، الغلاف بجانب المعلومات، و«تابع الحلقة» شريط ثابت أسفل الشاشة ── */
+.v35 .aw[data-style='platform'] .aw-stage {
+  margin-top: -28px;
+  grid-template-columns: 104px minmax(0, 1fr);
+  grid-template-areas:
+    'mark mark'
+    'cover meta'
+    'cover genres'
+    'cover side'
+    'cta cta';
+  column-gap: 14px;
+  justify-items: start;
+  align-items: start;
+  text-align: start;
+}
+.v35 .aw[data-style='platform'] .aw-stage .an-mark { grid-area: mark; justify-items: start; margin-top: 0; }
+.v35 .aw[data-style='platform'] .aw-stage .an-mark-logo { object-position: right bottom; max-height: 64px; }
+.v35 .aw[data-style='platform'] .aw-cover { grid-area: cover; width: 104px; animation: none; }
+.v35 .aw[data-style='platform'] .an-mark { animation: none; }
+.v35 .aw[data-style='platform'] .aw-meta { grid-area: meta; justify-content: flex-start; margin-top: 8px; }
+.v35 .aw[data-style='platform'] .aw-genres { grid-area: genres; justify-content: flex-start; }
+.v35 .aw[data-style='platform'] .aw-side { grid-area: side; }
+.v35 .aw[data-style='platform'] .aw-cta { grid-area: cta; }
+.v35 .aw[data-style='platform'] .aw-still { display: none; }
+.v35 .aw[data-style='platform'] .aw-body { padding-bottom: 96px; }
+.v35 .aw-dock {
+  position: fixed;
+  z-index: 30;
+  inset-inline: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 46px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 8px 8px 12px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-strong);
+  transition: transform 0.25s ease, opacity 0.25s ease;
+  touch-action: pan-y;
+}
+.v35 .aw-dock[hidden] { display: none; }
+.v35 .aw-dock-cover { width: 40px; aspect-ratio: 2 / 3; border-radius: 7px; overflow: hidden; background: var(--surface-3); }
+.v35 .aw-dock-text { display: grid; gap: 3px; min-width: 0; }
+.v35 .aw-dock-text b { font-size: 14px; }
+.v35 .aw-dock-text small { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .aw-dock-text .an-bar { margin-top: 3px; }
+.v35 .aw-dock-play { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.v35 .aw-dock-play .icon { transform: translateX(1.5px); }
+@media (min-width: 900px) {
+  /* الشاشة العريضة: عمود ثابت على اليمين (الغلاف ولقطة الحلقة والمعلومات) والمحتوى بجانبه */
+  .v35 .aw[data-style='platform'] {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    column-gap: 48px;
+    padding-inline: var(--gutter);
+  }
+  .v35 .aw[data-style='platform'] > .aw-bar,
+  .v35 .aw[data-style='platform'] > .aw-hero { grid-column: 1 / -1; }
+  .v35 .aw[data-style='platform'] > .aw-hero { margin-inline: calc(var(--gutter) * -1); }
+  .v35 .aw[data-style='platform'] > .aw-stage {
+    grid-column: 1;
+    position: sticky;
+    top: calc(var(--top-h, 56px) + 16px);
+    align-self: start;
+    max-width: none;
+    margin: -160px 0 0;
+    padding: 0;
+    grid-template-columns: 1fr;
+    grid-template-areas: 'cover' 'mark' 'meta' 'genres' 'side' 'still' 'cta';
+  }
+  .v35 .aw[data-style='platform'] .aw-cover { width: 200px; }
+  .v35 .aw[data-style='platform'] .aw-still { display: block; grid-area: still; width: 100%; }
+  .v35 .aw[data-style='platform'] > .aw-body { grid-column: 2; max-width: none; margin: 0; padding-bottom: 0; }
+  .v35 .aw[data-style='platform'] .aw-dock { display: none; }
+}
+
+/* ── البطاقة الطائرة: غلاف مائل كبطاقة حقيقية، اسم عملاق مفرّغ، والحلقات شريط يُسحب ── */
+.v35 .aw[data-style='card'] .aw-cover {
+  overflow: visible;
+  background: none;
+  box-shadow: none;
+  perspective: 900px;
+}
+.v35 .aw[data-style='card'] .aw-cover .an-img {
+  border-radius: 16px;
+  transform: rotateY(-18deg) rotateX(6deg);
+  box-shadow: -24px 34px 50px -22px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.v35 .aw-giant {
+  position: absolute;
+  inset-inline-end: -8px;
+  bottom: -0.16em;
+  z-index: 1;
+  font: 900 clamp(64px, 22vw, 190px) / 1 system-ui, sans-serif;
+  letter-spacing: -0.04em;
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.v35 .aw[data-style='card'] .an-er-list {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--gutter);
+  margin-inline: calc(var(--gutter) * -1);
+  padding: 0 var(--gutter) 6px;
+  scrollbar-width: none;
+}
+.v35 .aw[data-style='card'] .an-er-list::-webkit-scrollbar { display: none; }
+.v35 .aw[data-style='card'] .an-er {
+  position: relative;
+  flex: 0 0 min(46vw, 250px);
+  display: block;
+  margin: 0;
+  padding: 0;
+  scroll-snap-align: start;
+}
+.v35 .aw[data-style='card'] .an-er.watching { flex-basis: min(72vw, 420px); }
+.v35 .aw[data-style='card'] .an-er-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: 100%; text-align: start; }
+.v35 .aw[data-style='card'] .an-er-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .aw[data-style='card'] .an-er-art { width: 100%; }
+.v35 .aw[data-style='card'] .an-er.watching .an-er-art { box-shadow: 0 0 0 2px var(--accent); }
+.v35 .aw[data-style='card'] .an-er > :not(.an-er-main) { position: absolute; top: 6px; inset-inline-start: 6px; }
+
+/* ── شاشة السينما: البنر شاشة بحواف مدورة، والحلقات على خط زمني ── */
+.v35 .aw[data-style='screen'] .aw-hero {
+  margin: calc(var(--top-h, 56px) + var(--safe-top, 0px) + 6px) 14px 0;
+  border-radius: 22px;
+  box-shadow: 0 0 0 1px var(--line-strong), 0 26px 40px -24px #000;
+}
+.v35 .aw[data-style='screen'] .aw-hero::before { display: none; }
+.v35 .aw[data-style='screen'] .aw-shade { background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent 45%); }
+.v35 .aw[data-style='screen'] { --cover-w: clamp(104px, 30vw, 170px); }
+.v35 .aw[data-style='screen'] .aw-stage { margin-top: calc(var(--cover-w) * -0.5); }
+.v35 .aw[data-style='screen'] .an-er-list { position: relative; padding-inline-start: 26px; }
+.v35 .aw[data-style='screen'] .an-er-list::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 22px;
+  bottom: 22px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.v35 .aw[data-style='screen'] .an-er { position: relative; }
+.v35 .aw[data-style='screen'] .an-er::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -23px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.v35 .aw[data-style='screen'] .an-er.seen::before { background: var(--accent); }
+.v35 .aw[data-style='screen'] .an-er.watching::before { background: #fff; box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+
+/* ── الحلقة أولًا: لقطة الحلقة هي البطل، تحتها عنوانها ووصفها والتشغيل، ثم بطاقة العمل وشريط الحلقات ── */
+.v35 .aw[data-style='episode'] .aw-still { display: none; }
+.v35 .aw[data-style='episode'] .aw-cover,
+.v35 .aw[data-style='episode'] .an-mark { animation: none; }
+.v35 .aw[data-style='episode'] .aw-stage {
+  margin-top: -24px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-areas:
+    'now now'
+    'cover mark'
+    'cover meta'
+    'cover genres'
+    'side side'
+    'cta cta';
+  column-gap: 14px;
+  justify-items: start;
+  align-items: start;
+  text-align: start;
+}
+.v35 .aw[data-style='episode'] .aw-cover { grid-area: cover; width: 76px; border-radius: 10px; }
+.v35 .aw[data-style='episode'] .aw-stage .an-mark { grid-area: mark; justify-items: start; margin-top: 2px; }
+/* الشعار واضح في بطاقة العمل؛ الاسم المكتوب يظهر فقط حين لا شعار */
+.v35 .aw[data-style='episode'] .aw-stage .an-mark-logo { max-height: 56px; max-width: 100%; object-position: right center; }
+.v35 .aw[data-style='episode'] .aw-meta { grid-area: meta; justify-content: flex-start; }
+.v35 .aw[data-style='episode'] .aw-genres { grid-area: genres; justify-content: flex-start; }
+.v35 .aw[data-style='episode'] .aw-side { grid-area: side; }
+.v35 .aw[data-style='episode'] .aw-cta { grid-area: cta; }
+.v35 .aw-now { grid-area: now; display: grid; gap: 8px; width: 100%; margin-bottom: 18px; }
+.v35 .aw-now small { color: var(--text-2); font-weight: 650; font-size: 12.5px; }
+.v35 .aw-now h2 { margin: 0; font-size: clamp(24px, 7vw, 40px); line-height: 1.12; }
+.v35 .aw-now p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .aw-now-play { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.v35 .aw-now-play .an-bar { flex: 1; }
+.v35 .aw-now-left { color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+.v35 .aw-now-btn { flex: none; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: #000; }
+.v35 .aw-now-btn .icon { transform: translateX(1.5px); }
+.v35 .aw-scrub {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 16px var(--gutter) 4px;
+  scrollbar-width: none;
+}
+.v35 .aw-scrub::-webkit-scrollbar { display: none; }
+.v35 .aw-scrub-ep {
+  position: relative;
+  flex: 0 0 72px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.v35 .aw-scrub-ep.seen .an-img { opacity: 0.45; }
+.v35 .aw-scrub-ep.cur { flex-basis: 96px; outline: 2px solid #fff; outline-offset: 1px; }
+.v35 .aw-scrub-ep em { position: absolute; bottom: 2px; left: 4px; font-style: normal; font-size: 10.5px; color: #fff; text-shadow: 0 1px 2px #000; }
+@media (min-width: 900px) {
+  .v35 .aw[data-style='episode'] .aw-stage { max-width: 960px; }
+  .v35 .aw-scrub { max-width: 960px; margin-inline: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .aw-dock { transition: none; }
 }

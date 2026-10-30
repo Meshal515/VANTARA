@@ -31,5 +31,5 @@ export function animeDepthLayers({ bg, cover, mark }) {
     { node: bg, range: (span) => [0, span], at: bannerAt },
     { node: cover, range: (_, vh) => DEPTH.cover.range.map((r) => r * vh), at: coverAt },
     { node: mark, range: (_, vh) => DEPTH.mark.range.map((r) => r * vh), at: markAt },
-  ];
+  ].filter((l) => l.node); // نمط يثبّت الغلاف واللوقو (المنصة، الحلقة أولًا) يمرّر null لهما
 }
