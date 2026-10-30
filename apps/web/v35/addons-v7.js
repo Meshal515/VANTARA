@@ -684,6 +684,9 @@ export function renderV7Addons({
     dialog.append(el("p","v7-notice v7-evidence-detail",installedState(a).detail));
     // تنبيه الناشر يُعرض كما هو، والمصدر يبقى قابلًا للاستعمال
     if(typeof a.advisory==="string"&&a.advisory.trim())dialog.append(el("p","v7-notice v7-advisory",a.advisory.slice(0,300)));
+    // الإضافة مستقلة عن مستودعها: غيابه لا يوقفها، والرجوع التلقائي يُشرح (PERSISTENT_PLUGINS.md)
+    if(a.inRepository===false)dialog.append(el("p","v7-notice v7-out-of-repo",fmtErr(a.upstream?.reason||a.repositoryNote||"لم تعد في مستودعها؛ تعمل النسخة المحفوظة على جهازك")));
+    if(a.restored?.reason)dialog.append(el("p","v7-notice v7-restored",fmtErr(a.restored.reason)));
     for(const [cap,h] of Object.entries(a.health||{}))if(h.reason)dialog.append(el("p","v7-notice",cap+": "+fmtErr(h.reason)));
     if(mode==="remote"){
       const acts=el("div","v7-dialog-actions");
@@ -709,7 +712,7 @@ export function renderV7Addons({
           if(busy)return;busy=true;update.disabled=true;updateResult.textContent="جارٍ فحص التحديث…";
           try{const result=await registry.stage(a.key);if(!alive||!dialog.contains(updateResult))return;
             updateResult.dataset.state=result?.changed===true?"update":result?.changed===false?"noUpdate":"unknown";
-            updateResult.textContent=result?.changed===true?"يوجد تحديث جاهز للتطبيق.":result?.changed===false?"الإضافة محدّثة؛ لا يوجد تحديث جديد.":"لم يُرجع المصدر نتيجة تحديث واضحة.";
+            updateResult.textContent=result?.refused==="DOWNGRADE_REFUSED"?`المستودع يعرض إصدارًا أقدم (${String(result.version??"").slice(0,40)}) من المثبت؛ رُفض حفاظًا على أمانك.`:result?.changed===true?"يوجد تحديث جاهز للتطبيق.":result?.changed===false?"الإضافة محدّثة؛ لا يوجد تحديث جديد.":"لم يُرجع المصدر نتيجة تحديث واضحة.";
             if(result?.changed===true){const fresh=registry.list?.().find(x=>x.key===a.key);if(fresh?.stagedVersion&&!advancedActions.querySelector('[data-apply-update]')){const apply=btn("تطبيق التحديث","v7-btn",()=>void run(()=>registry.activateStaged(a.key)));apply.dataset.applyUpdate="";advancedActions.append(apply);}}
             draw();
           }catch(err){if(alive){updateResult.dataset.state="error";updateResult.textContent=fmtErr(err);}}
