@@ -9,7 +9,8 @@
  *    بمفتاح مستقل لكل حزمة، فالدمج على مستوى الحقل في الخادم لا يُضيّع اختيار جهاز آخر.
  *  - لا شيء هنا يحذف: المكتبة والتقدّم والإعدادات لا تُلمس، فالإزالة تُخفي المصدر فقط.
  *  - لا يُستنتج «حساب جديد» من مخزن محلي فارغ: بلا صف الحساب من المزامنة الحالة «غير معروفة»،
- *    والمصادر المدمجة لا تُعرض ولا يُحذف شيء حتى تصل.
+ *    وفيها تبقى المصادر المدمجة ظاهرة كما كانت (الفصل لا يُحَسّ): الإخفاء لحساب ثبت أنه جديد فقط.
+ *    كان «غير معروف» يخفيها، فأي تأخر في وصول صف الحساب أخفى كل مصادر المانجا عن مستخدم قديم.
  */
 
 /** الحسابات المنشأة قبل هذه اللحظة هي «الحسابات الموجودة». تُؤكَّد عند نشر إصدار الفصل. */
@@ -73,11 +74,12 @@ export function choicesOf(settings) {
 
 /**
  * القرار الكامل: `{ state: 'legacy' | 'clean' | 'unknown', added, removed }`.
- * `standalone`: بلا خادم مزامنة ولا حساب (وضع «اقرأ بلا حساب»): مثل الحساب الجديد، واختياراته محلية.
+ * `standalone`: بلا خادم مزامنة ولا حساب (وضع «اقرأ بلا حساب»): لا حساب يثبت أنه جديد، فيبقى كما كان
+ * قبل الفصل (المدمجة ظاهرة)، واختياراته محلية.
  */
 export function decide({ account = null, settings = null, standalone = false } = {}) {
   const { added, removed } = choicesOf(settings);
-  const state = standalone ? 'clean' : cohortOf(account) ?? 'unknown';
+  const state = standalone ? 'unknown' : cohortOf(account) ?? 'unknown';
   return { state, added, removed };
 }
 
@@ -87,7 +89,8 @@ export function visible(def, decision = current) {
   const pkg = packageOf(def.id ?? def.sourceId);
   if (decision.removed.has(pkg)) return false;
   if (decision.added.has(pkg)) return true;
-  return decision.state === 'legacy';
+  // يُخفى عن حساب ثبت أنه أُنشئ بعد الفصل فقط؛ القديم وغير المعروف يبقيان كما كانا
+  return decision.state !== 'clean';
 }
 
 /** حقول `settings.patch` لإضافة حزمة مدمجة سابقًا أو إزالتها من حساب. */

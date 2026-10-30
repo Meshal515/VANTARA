@@ -76,11 +76,11 @@ describe('حالات القبول (BUNDLED_SOURCE_SEPARATION.md)', () => {
     expect(userSources.every((s) => visible(s, d))).toBe(true);
   });
 
-  it('لا يُستنتج «حساب جديد» من مخزن فارغ: بلا صف الحساب الحالة غير معروفة', () => {
+  it('لا يُستنتج «حساب جديد» من مخزن فارغ: بلا صف الحساب الحالة غير معروفة، والمدمجة تبقى ظاهرة كما كانت', () => {
     for (const account of [null, { user_id: 'a' }, { user_id: 'a', created_at: null }, { user_id: 'a', created_at: 'x' }]) {
       const d = decide({ account, settings: null });
       expect(d.state).toBe('unknown');
-      expect(builtins.some((s) => visible(s, d))).toBe(false);
+      expect(builtins.every((s) => visible(s, d))).toBe(true);
     }
   });
 
@@ -126,8 +126,11 @@ describe('حالات القبول (BUNDLED_SOURCE_SEPARATION.md)', () => {
     expect(choicesOf('{bad json').added.size).toBe(0);
   });
 
-  it('وضع «اقرأ بلا حساب» يبدأ نظيفًا', () => {
-    expect(decide({ standalone: true }).state).toBe('clean');
+  it('وضع «اقرأ بلا حساب» يبقى كما كان قبل الفصل (المدمجة ظاهرة)، وإزالته المحلية تُحترم', () => {
+    const d = decide({ standalone: true });
+    expect(d.state).toBe('unknown');
+    expect(builtins.every((s) => visible(s, d))).toBe(true);
+    expect(visible({ id: DILAR }, decide({ standalone: true, settings: settingsWith(choicePatch(DILAR, false)) }))).toBe(false);
   });
 
   it('فوج الحساب بحدّ الفصل', () => {
