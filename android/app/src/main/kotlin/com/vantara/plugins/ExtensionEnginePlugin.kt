@@ -339,19 +339,24 @@ class ExtensionEnginePlugin : Plugin() {
                 val apkUrl = ext.apkUrl
                 val bytes = repoClient.downloadSigned(apkUrl, repo.fingerprint)
                 val visible = RepoIndex.visibleSources(ext)
-                val user = UserExtension(
+                val fresh = UserExtension(
                     repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
                     versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
                     sources = visible.map { UserSource(it.id, it.name, it.lang) },
                 )
-                forget(pkg)
+                // التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا،
+                // وإن فشل بقي القديم محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم)
+                val user = userStore.extension(pkg)?.upgradedTo(fresh) ?: fresh
                 val all = when (val result = loader.load(user.spec(), bytes)) {
                     is FileExtensionLoader.Result.Fail -> error("${ext.name}: ${result.stage} — ${result.reason}")
                     is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
                 }
                 require(visible.any { v -> all.any { it.id.toString() == v.id } }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
+                claimIds(pkg, all)
+                forget(pkg)
                 packages[pkg] = all
                 userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+                loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256))
                 call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
             } catch (t: Throwable) {
                 call.reject(t.message ?: t.readable())
@@ -364,15 +369,32 @@ class ExtensionEnginePlugin : Plugin() {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
         if (userStore.extension(pkg) == null) return call.reject("ليست إضافة مثبتة من مستودع")
         forget(pkg)
+        owners.values.removeAll { it == pkg }
         userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+        // الإزالة بأمر المستخدم وحدها تحذف ملفات الإضافة من المخزن
+        loader.erase(pkg)
         call.resolve()
     }
 
-    /** يُخرج الحزمة من الذاكرة ويحذف ملفها (للقراءة فقط، فيُفتح أولًا). */
+    /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
     private fun forget(pkg: String) {
         packages.remove(pkg)
         loaded.keys.removeAll { it.startsWith("$pkg#") }
-        java.io.File(context.filesDir, "extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+    }
+
+    /** مالك كل معرّف مصدر محمَّل: حزمتان بمعرّف واحد تتشاركان تفضيلات `source_<id>` وكوكيزه. */
+    private val owners = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * يحجز معرّفات مصادر الحزمة أو يرفضها كلها: معرّف تملكه حزمة أخرى أو المعرّف 0 (المصدر المحلي) يرمي
+     * `ID_COLLISION` ولا يحلّ مصدرٌ محلّ آخر بصمت كما في Mihon (PERSISTENT_PLUGINS §3.2).
+     */
+    @Synchronized private fun claimIds(pkg: String, sources: List<CatalogueSource>) {
+        val ids = sources.map { it.id.toString() }
+        ids.firstOrNull { it == "0" }?.let { error("ID_COLLISION: المعرّف 0 محجوز") }
+        ids.firstOrNull { owners[it]?.let { owner -> owner != pkg } == true }?.let { error("ID_COLLISION: المعرّف $it تملكه ${owners[it]}") }
+        owners.values.removeAll { it == pkg }
+        for (id in ids) owners[id] = pkg
     }
 
 
@@ -848,7 +870,11 @@ class ExtensionEnginePlugin : Plugin() {
             val sid = sourceId.substringAfter('#')
             val ext = userStore.extension(userPkg) ?: error("unknown sourceId: $sourceId")
             val all = packages[userPkg] ?: loadPackage(ext.spec()).also { packages[userPkg] = it }
-            val source = all.firstOrNull { it.id.toString() == sid } ?: error("${ext.name}: المصدر غير موجود في الحزمة")
+            // المعرّف المحفوظ في المكتبة قد يكون قديمًا: يُتبع جدول الترحيل إلى المصدر الحالي
+            val current = userStore.extension(userPkg) ?: ext
+            val source = all.firstOrNull { it.id.toString() == sid }
+                ?: all.firstOrNull { it.id.toString() == current.resolve(sid) }
+                ?: error("${ext.name}: المصدر غير موجود في الحزمة")
             loaded[sourceId] = source
             return source
         }
@@ -874,30 +900,64 @@ class ExtensionEnginePlugin : Plugin() {
         return source
     }
 
-    private suspend fun loadPackage(spec: dev.vantara.spike.SourceSpec): List<CatalogueSource> = run {
-
-        // الترتيب: نسخة الجهاز المتحقَّق منها، ثم المضمّنة في التطبيق، ثم التنزيل.
-        // keiyoushi يحذف إصداراته القديمة، فالتنزيل وحده أسقط كل المصادر مرة
-        // مصدر مدمج بلا نسخة صالحة في الجهاز ولا في التطبيق: يُنزَّل من مستودع Keiyoushi الرسمي ويُقبل فقط
-        // بتوقيع مفتاحه، بالمعرّف نفسه، فالمكتبة والتقدّم لا يتغيّران (فصل المصادر المدمجة عن التطبيق).
-        // الرابط المثبّت القديم آخر حل: Keiyoushi يحذف إصداراته القديمة فصار 404.
-        var used = spec
-        val apk = withContext(Dispatchers.IO) { loader.readVerifiedCache(spec) }
-            ?: withContext(Dispatchers.IO) { readBundled(spec) }
-            ?: withContext(Dispatchers.IO) { builtinSpecs.fromRepository(spec, repoClient)?.let { (next, bytes) -> used = next; bytes } }
-            ?: withContext(Dispatchers.IO) { download(spec) }
-
-        when (val result = withContext(Dispatchers.IO) { loader.load(used, apk) }) {
-            is FileExtensionLoader.Result.Fail ->
-                throw IllegalStateException(
-                    "${spec.label}: ${result.stage} — ${result.reason}",
-                    result.cause,
-                )
-            is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>().also {
-                // الإصدار المنزّل يُثبَّت بعد نجاح تحميله فقط: حزمة لا تعمل لا تحلّ محلّ شيء
-                if (used !== spec && it.isNotEmpty()) builtinSpecs.confirm(used)
+    /**
+     * الحزمة من نسختها المحلية أولًا، مستقلة عن بقاء مستودعها (PERSISTENT_PLUGINS §3.1):
+     *  1. الإصدار الحالي من مخزن الجهاز، أو من التطبيق إن طابقت بصمته، أو من رابطه المثبّت بالبصمة نفسها.
+     *  2. آخر إصدار سليم قبله (LKG) من المخزن: إن تعطّل الحالي يُرجع إليه ويُحفظ الرجوع.
+     *  3. للمدمجة سابقًا: النسخة المضمّنة في التطبيق، ثم الإصدار الرسمي الحالي من Keiyoushi بمفتاحه المثبّت.
+     * لا كود يُقبل في أي خطوة دون مطابقة بصمة أو توقيع: التعافي لا يفتح بابًا لكود بديل غير موثّق.
+     * والإصدار الرسمي للمدمجة فقط: إضافة من مستودع المستخدم لا تُستبدل بنسخة مستودع آخر ولو بالاسم نفسه.
+     */
+    private suspend fun loadPackage(spec: dev.vantara.spike.SourceSpec): List<CatalogueSource> = withContext(Dispatchers.IO) {
+        val user = userStore.extension(spec.pkg)
+        val base = if (user == null) packageSpec(spec.pkg) else null
+        val failures = mutableListOf<String>()
+        fun attempt(s: dev.vantara.spike.SourceSpec, bytes: ByteArray?): List<CatalogueSource>? {
+            bytes ?: return null
+            return when (val result = loader.load(s, bytes)) {
+                is FileExtensionLoader.Result.Fail -> { failures += "${result.stage} — ${result.reason}"; null }
+                is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
+                    .ifEmpty { failures += "instantiate — no catalogue source"; null }
+                    ?.also { claimIds(s.pkg, it) }
             }
         }
+
+        // ١) الإصدار الحالي
+        val active = loader.readVerifiedCache(spec)
+            ?: base?.takeIf { it.sha256.equals(spec.sha256, ignoreCase = true) }?.let { readBundled(it) }
+            ?: runCatching { download(spec) }.getOrNull()
+        attempt(spec, active)?.let {
+            // ما عدا الحالي وآخر سليم قبله يُنظَّف من المخزن، ومعه ملف ما قبل المخزن (<pkg>.apk) بعد نسخه
+            loader.prune(spec.pkg, setOf(spec.sha256) + (user?.previous?.sha256?.let(::setOf) ?: builtinSpecs.keep(spec.pkg)))
+            return@withContext it
+        }
+
+        // ٢) آخر إصدار سليم من مخزن الجهاز فقط
+        val lkg = if (user != null) user.previousSpec() else base?.let { builtinSpecs.previousOf(it) }
+        if (lkg != null) attempt(lkg, loader.readVerifiedCache(lkg))?.let {
+            if (user != null) user.rolledBack()?.let { back -> userStore.update { st -> st.copy(extensions = st.extensions.map { e -> if (e.pkg == back.pkg) back else e }) } }
+            else builtinSpecs.rollback(spec.pkg)
+            return@withContext it
+        }
+
+        if (base != null) {
+            // ٣) النسخة المضمّنة في التطبيق: المرجع الأخير الموثوق للمدمجة سابقًا
+            if (!base.sha256.equals(spec.sha256, ignoreCase = true)) attempt(base, readBundled(base))?.let {
+                builtinSpecs.reset(base.pkg)
+                return@withContext it
+            }
+            // ٤) الإصدار الرسمي الحالي، يُثبَّت بعد نجاح تحميله فقط ويبقى ما قبله آخر سليم
+            builtinSpecs.fromRepository(base, repoClient)?.let { (next, bytes) ->
+                attempt(next, bytes)?.let {
+                    // ما قبله تعطّل أو غاب، فلا يُحفظ «آخر سليم»: المضمّنة تبقى المرجع الضمني
+                    builtinSpecs.reset(base.pkg)
+                    builtinSpecs.confirm(next)
+                    loader.prune(base.pkg, builtinSpecs.keep(base.pkg))
+                    return@withContext it
+                }
+            }
+        }
+        throw IllegalStateException("${spec.label}: ${failures.lastOrNull() ?: "لا نسخة صالحة على الجهاز، والمستودع لا يوفّرها الآن"}")
     }
 
     /**

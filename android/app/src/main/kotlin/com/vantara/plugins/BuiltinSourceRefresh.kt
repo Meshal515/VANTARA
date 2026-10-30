@@ -18,8 +18,9 @@ import java.io.File
  * ويُحفظ إصداره (البصمة والرابط) على الجهاز فيُحمَّل من ذاكرة الجهاز في المرات التالية بلا شبكة.
  */
 class BuiltinSourceRefresh(private val file: File) {
+    /** إصدار مثبّت، ومعه آخر إصدار سليم قبله (Last Known Good) ليُرجع إليه إن تعطّل هذا على الجهاز. */
     @Serializable
-    data class Pinned(val sha256: String, val apkUrl: String, val versionName: String, val lib: Double)
+    data class Pinned(val sha256: String, val apkUrl: String, val versionName: String, val lib: Double, val previous: Pinned? = null)
 
     private val json = Json { ignoreUnknownKeys = true }
     private val codec = MapSerializer(String.serializer(), Pinned.serializer())
@@ -27,7 +28,12 @@ class BuiltinSourceRefresh(private val file: File) {
         runCatching { json.decodeFromString(codec, file.readText()) }.getOrDefault(emptyMap())
 
     /** المواصفة الفعلية: آخر إصدار رسمي نُزّل لهذه الحزمة إن وُجد، وإلا المضمّنة كما هي. */
-    fun current(base: SourceSpec): SourceSpec = pins[base.pkg]?.let { base.copy(sha256 = it.sha256, apkUrl = it.apkUrl, versionName = it.versionName, expectedLib = it.lib) } ?: base
+    fun current(base: SourceSpec): SourceSpec = pins[base.pkg]?.let { base.with(it) } ?: base
+
+    /** آخر إصدار سليم قبل الحالي إن وُجد (ملفه في مخزن الجهاز)، وإلا null. */
+    fun previousOf(base: SourceSpec): SourceSpec? = pins[base.pkg]?.previous?.let { base.with(it) }
+
+    private fun SourceSpec.with(pin: Pinned) = copy(sha256 = pin.sha256, apkUrl = pin.apkUrl, versionName = pin.versionName, expectedLib = pin.lib)
 
     /**
      * الإصدار الحالي من مستودع Keiyoushi موقّعًا بمفتاحه، أو null (شبكة، حزمة أُزيلت، واجهة غير مدعومة).
@@ -45,10 +51,30 @@ class BuiltinSourceRefresh(private val file: File) {
     }.getOrNull()
 
     /** يثبّت إصدارًا نُزّل بعد نجاح تحميله فعلًا. الكتابة ذرّية: ملف مؤقت ثم إعادة تسمية. */
-    fun confirm(spec: SourceSpec) = remember(spec.pkg, Pinned(spec.sha256, spec.apkUrl, spec.versionName, spec.expectedLib))
+    @Synchronized fun confirm(spec: SourceSpec) {
+        val old = pins[spec.pkg]
+        if (old?.sha256.equals(spec.sha256, ignoreCase = true)) return
+        // السابق يُحفظ بلا سابقه: سجل من خطوة واحدة يكفي ولا ينمو بلا حد
+        write(pins + (spec.pkg to Pinned(spec.sha256, spec.apkUrl, spec.versionName, spec.expectedLib, old?.copy(previous = null))))
+    }
 
-    @Synchronized private fun remember(pkg: String, pin: Pinned) {
-        val next = pins + (pkg to pin)
+    /**
+     * الإصدار الحالي تعطّل على هذا الجهاز: يُرجع إلى آخر سليم قبله، أو إلى النسخة المضمّنة إن لم يوجد.
+     * @return البصمات التي بقيت مرجعًا (لتنظيف المخزن مما عداها)
+     */
+    @Synchronized fun rollback(pkg: String): Set<String> {
+        val prev = pins[pkg]?.previous
+        write(if (prev != null) pins + (pkg to prev) else pins - pkg)
+        return setOfNotNull(prev?.sha256)
+    }
+
+    /** النسخة المضمّنة في التطبيق هي المرجع من جديد (كل إصدار نُزّل بعدها تعطّل على الجهاز). */
+    @Synchronized fun reset(pkg: String) { if (pkg in pins) write(pins - pkg) }
+
+    /** البصمات التي يجب أن تبقى في المخزن لهذه الحزمة: الحالي وآخر سليم قبله. */
+    fun keep(pkg: String): Set<String> = pins[pkg]?.let { setOfNotNull(it.sha256, it.previous?.sha256) }.orEmpty()
+
+    @Synchronized private fun write(next: Map<String, Pinned>) {
         file.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         tmp.writeText(json.encodeToString(codec, next))

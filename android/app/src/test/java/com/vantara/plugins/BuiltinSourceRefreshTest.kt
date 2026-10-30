@@ -3,6 +3,7 @@ package com.vantara.plugins
 import dev.vantara.spike.ContentWarning
 import dev.vantara.spike.SourceSpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import java.io.File
@@ -72,5 +73,60 @@ class BuiltinRefreshConfirmTest {
         refresh.confirm(next)
         assertEquals("c".repeat(64), BuiltinSourceRefresh(file).current(base).sha256)
         assertEquals(base.pkg, BuiltinSourceRefresh(file).current(base).pkg)
+    }
+
+    private fun refreshed(sha: Char, version: String) = base.copy(sha256 = sha.toString().repeat(64), versionName = version, apkUrl = "https://example.invalid/$version.apk")
+
+    @Test fun `a newer official version keeps the previous one as last known good`() {
+        val dir = Files.createTempDirectory("refresh").toFile()
+        val pins = BuiltinSourceRefresh(File(dir, "builtin-refresh.json"))
+        assertNull(pins.previousOf(base))
+        pins.confirm(refreshed('b', "1.6.61"))
+        assertNull("the bundled copy is the implicit fallback before the first refresh", pins.previousOf(base))
+        pins.confirm(refreshed('c', "1.6.62"))
+        assertEquals("c".repeat(64), pins.current(base).sha256)
+        assertEquals("b".repeat(64), pins.previousOf(base)?.sha256)
+        assertEquals(setOf("c".repeat(64), "b".repeat(64)), pins.keep(base.pkg))
+        // يبقى بعد إعادة الفتح: الملف هو المرجع
+        val reopened = BuiltinSourceRefresh(File(dir, "builtin-refresh.json"))
+        assertEquals("b".repeat(64), reopened.previousOf(base)?.sha256)
+    }
+
+    @Test fun `confirming the same version again does not erase the last known good`() {
+        val dir = Files.createTempDirectory("refresh").toFile()
+        val pins = BuiltinSourceRefresh(File(dir, "builtin-refresh.json"))
+        pins.confirm(refreshed('b', "1.6.61"))
+        pins.confirm(refreshed('c', "1.6.62"))
+        pins.confirm(refreshed('c', "1.6.62"))
+        assertEquals("b".repeat(64), pins.previousOf(base)?.sha256)
+    }
+
+    @Test fun `a broken current version rolls back to the last known good, then to the bundled copy`() {
+        val dir = Files.createTempDirectory("refresh").toFile()
+        val pins = BuiltinSourceRefresh(File(dir, "builtin-refresh.json"))
+        pins.confirm(refreshed('b', "1.6.61"))
+        pins.confirm(refreshed('c', "1.6.62"))
+        assertEquals(setOf("b".repeat(64)), pins.rollback(base.pkg))
+        assertEquals("b".repeat(64), pins.current(base).sha256)
+        assertNull(pins.previousOf(base))
+        assertEquals(emptySet<String>(), pins.rollback(base.pkg))
+        assertSame(base, pins.current(base))
+    }
+
+    @Test fun `reset returns to the bundled copy`() {
+        val dir = Files.createTempDirectory("refresh").toFile()
+        val pins = BuiltinSourceRefresh(File(dir, "builtin-refresh.json"))
+        pins.confirm(refreshed('b', "1.6.61"))
+        pins.reset(base.pkg)
+        assertSame(base, pins.current(base))
+    }
+
+    @Test fun `a pin file from before last known good still reads`() {
+        val dir = Files.createTempDirectory("refresh").toFile()
+        val file = File(dir, "builtin-refresh.json")
+        file.writeText("""{"${base.pkg}":{"sha256":"${"b".repeat(64)}","apkUrl":"https://x.invalid/a.apk","versionName":"1.6.61","lib":1.6}}""")
+        val pins = BuiltinSourceRefresh(file)
+        assertEquals("b".repeat(64), pins.current(base).sha256)
+        assertNull(pins.previousOf(base))
     }
 }

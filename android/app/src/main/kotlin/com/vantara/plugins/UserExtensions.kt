@@ -200,16 +200,65 @@ data class UserRepo(val url: String, val name: String, val fingerprint: String, 
 @Serializable
 data class UserSource(val id: String, val name: String, val lang: String)
 
+/** إصدار سابق محفوظ في مخزن الجهاز (Last Known Good): يُرجع إليه إن تعطّل الحالي. */
+@Serializable
+data class UserVersion(val apkUrl: String, val sha256: String, val versionName: String, val lib: Double, val sources: List<UserSource>)
+
 @Serializable
 data class UserExtension(
     val repoUrl: String, val name: String, val pkg: String, val apkUrl: String, val sha256: String,
     val versionName: String, val lib: Double, val lang: String, val nsfw: Boolean, val sources: List<UserSource>,
+    val previous: UserVersion? = null,
+    /**
+     * معرّفات مصادر قديمة ← الحالية. المكتبة والتقدّم محفوظة بالمعرّف الذي أُضيف به المصدر
+     * (`pkg#id`)، فإن غيّرت الإضافة معرّف مصدرها في تحديث بقيت مكتبتك تصل إليه (PERSISTENT_PLUGINS §3.2).
+     */
+    val aliases: Map<String, String> = emptyMap(),
 ) {
     fun spec(): SourceSpec = SourceSpec(
         label = name, pkg = pkg, expectedLib = lib, apkUrl = apkUrl, sha256 = sha256, versionName = versionName,
         warning = if (nsfw) ContentWarning.MIXED else ContentWarning.SAFE,
         arabicSourceIds = sources.map { it.id }.toSet(), arabicSourceNames = sources.map { it.name },
     )
+
+    fun previousSpec(): SourceSpec? = previous?.let { p ->
+        spec().copy(apkUrl = p.apkUrl, sha256 = p.sha256, versionName = p.versionName, expectedLib = p.lib,
+            arabicSourceIds = p.sources.map { it.id }.toSet(), arabicSourceNames = p.sources.map { it.name })
+    }
+
+    fun asVersion() = UserVersion(apkUrl, sha256, versionName, lib, sources)
+
+    /** معرّف المصدر الحالي لمعرّف محفوظ، باتباع سلسلة الترحيل (بحد، فلا حلقة تعلّق التحميل). */
+    fun resolve(id: String): String {
+        var at = id
+        repeat(8) { if (sources.any { it.id == at }) return at; at = aliases[at] ?: return at }
+        return at
+    }
+
+    /** يصير الإصدار [next] هو الحالي، ويبقى هذا آخر سليم قبله، وتُرحَّل معرّفات المصادر التي تغيّرت. */
+    fun upgradedTo(next: UserExtension): UserExtension {
+        val keepPrev = if (next.sha256.equals(sha256, ignoreCase = true)) previous else asVersion()
+        return next.copy(previous = keepPrev, aliases = aliases + sourceAliases(sources, next.sources))
+    }
+
+    /** الرجوع لآخر سليم: يصير هو الحالي بمصادره، ومعرّفات الإصدار المتعطّل تُرحَّل إليه. */
+    fun rolledBack(): UserExtension? = previous?.let { p ->
+        copy(apkUrl = p.apkUrl, sha256 = p.sha256, versionName = p.versionName, lib = p.lib, sources = p.sources,
+            previous = null, aliases = aliases + sourceAliases(sources, p.sources))
+    }
+}
+
+/**
+ * ترحيل معرّفات المصادر بين إصدارين: معرّف اختفى يُربط بمصدر جديد له الاسم واللغة نفسهما فقط إن كان
+ * المطابق الوحيد. التطابق الغامض لا يُرحَّل تلقائيًا (Keiyoushi غيّرت معرّفات 53 حزمة، منها ar.mangahub).
+ */
+fun sourceAliases(from: List<UserSource>, to: List<UserSource>): Map<String, String> {
+    val ids = to.map { it.id }.toSet()
+    fun key(s: UserSource) = s.name.trim().lowercase() + "\u0000" + s.lang.trim().lowercase()
+    val byKey = to.groupBy(::key)
+    return from.filter { it.id !in ids }.mapNotNull { old ->
+        byKey[key(old)]?.singleOrNull()?.let { old.id to it.id }
+    }.toMap()
 }
 
 @Serializable
