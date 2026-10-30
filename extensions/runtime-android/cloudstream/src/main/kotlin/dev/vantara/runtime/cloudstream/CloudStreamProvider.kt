@@ -55,7 +55,9 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
         val source=if(requested.isEmpty())all.singleOrNull()?:throw IllegalArgumentException("SOURCE_SELECTION_REQUIRED") else all.singleOrNull{it.name==requested}?:throw IllegalArgumentException("SOURCE_NOT_FOUND")
         val output:Any=when(operation) {
             "catalogue"->{
-                SourceOperations.catalogue(source,input.path("page").asInt(1),input.path("section").asInt(0))
+                // قسم محدد عند طلبه صراحة، وإلا الصفحة الرئيسية بأقسامها كما في CloudStream
+                if(input.has("section"))SourceOperations.catalogue(source,input.path("page").asInt(1),input.path("section").asInt(0))
+                else SourceOperations.home(source,input.path("page").asInt(1))
             }
             "search"->{val query=input.path("query").asText("");val page=input.path("page").asInt(1);require(query.isNotBlank()&&query.length<=500&&page>0);source.search(query,page)?:throw IOException("NO_SEARCH_RESULT")}
             "details","episodes"->{

@@ -34,4 +34,35 @@ class CatalogueDispatchTest {
         try{legacy.search("work",2);fail("Invented pagination")}
         catch(expected:UnsupportedOperationException){assertEquals("search pagination",expected.message)}
     }
+    // انحدار الفحص الحي: 17 من 43 مصدرًا بدت فارغة أو معطوبة لأن القسم الأول وحده كان يُطلب
+    private fun sections(vararg behaviour:String)=object:MainAPI(){
+        override val hasMainPage=true
+        override val mainPage=behaviour.mapIndexed{i,_->MainPageData("قسم $i","/$i")}
+        val asked=mutableListOf<String>()
+        override suspend fun getMainPage(page:Int,request:MainPageRequest):HomePageResponse {
+            asked+=request.data
+            return when(behaviour[request.data.drop(1).toInt()]) {
+                "throw"->throw NullPointerException("selector")
+                "empty"->newHomePageResponse(request,emptyList(),false)
+                else->newHomePageResponse(request,listOf(newAnimeSearchResponse("عمل ${request.data}","https://s.example${request.data}",fix=false)),true)
+            }
+        }
+    }
+    @Test fun brokenOrEmptyFirstSectionDoesNotHideTheRest()=runBlocking {
+        val home=SourceOperations.home(sections("throw","empty","ok","ok"),1)
+        assertEquals(listOf("عمل /2","عمل /3"),home.items.flatMap{it.list}.map{it.name});assertTrue(home.hasNext)
+    }
+    @Test fun stopsOnceEnoughSectionsAreFilled()=runBlocking {
+        val api=sections("ok","ok","ok","ok","ok")
+        SourceOperations.home(api,1,enough=2);assertEquals(listOf("/0","/1"),api.asked)
+    }
+    @Test fun budgetStopsNewSectionsButFirstAlwaysRuns()=runBlocking {
+        var now=0L;val api=sections("empty","ok")
+        val home=SourceOperations.home(api,1,budgetMs=5,clock={now.also{now+=10}})
+        assertEquals(listOf("/0"),api.asked);assertTrue(home.items.all{it.list.isEmpty()})
+    }
+    @Test fun allSectionsFailingReportsTheRealFailure()=runBlocking {
+        try{SourceOperations.home(sections("throw","throw"),1);fail("Fake catalogue success")}
+        catch(expected:NullPointerException){assertEquals("selector",expected.message)}
+    }
 }
