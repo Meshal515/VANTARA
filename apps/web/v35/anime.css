@@ -3245,10 +3245,7 @@ html[data-section='cinema'] {
 /* محتوى الأنماط لا يتجاوز عموده: نص الحلقة الطويل كان يمدّ العمود خارج الشاشة */
 .v35 .wl-main > *, .v35 .wl-body > *, .v35 .wl-left > *, .v35 .wl-right > *, .v35 .wl-sec { min-width: 0; }
 .v35 .wl .er { width: 100%; min-width: 0; }
-/* العدد الظاهر كما في كل تصميم؛ «الكل» يُظهر البقية فلا يضيع عمل */
 .v35 .wl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.v35 .wl-more { color: var(--accent-text, var(--accent)) !important; font-size: 13px; font-weight: 650; }
-.v35 .wl-recs:not(.all) .rc:nth-child(n + 10) { display: none; }
 .v35 .wl-platform .wl-chars .ch:nth-child(n + 9),
 .v35 .wl-episode .wl-grid4 .ch:nth-child(n + 9) { display: none; }
 /* الحلقة أولًا على الجوال: عمود واحد بترتيب التصميم (الوصف، الحلقات، الشخصيات، العالم، المعلومات، التوصيات) */
@@ -3260,10 +3257,6 @@ html[data-section='cinema'] {
 .v35 .wl-episode .wl-s-facts { order: 5; }
 .v35 .wl-episode .wl-s-recs { order: 6; }
 @container aw (min-width: 900px) {
-  .v35 .wl-platform .wl-recs:not(.all) .rc:nth-child(10) { display: grid; }
-  .v35 .wl-episode .wl-recs:not(.all) .rc:nth-child(10) { display: grid; }
-  .v35 .wl-card .wl-recs:not(.all) .rc:nth-child(9),
-  .v35 .wl-screen .wl-recs:not(.all) .rc:nth-child(9) { display: none; }
   .v35 .wl-platform .wl-chars .ch:nth-child(-n + 10),
   .v35 .wl-episode .wl-grid4 .ch:nth-child(-n + 10) { display: grid; }
   .v35 .wl-episode .wl-left, .v35 .wl-episode .wl-right { display: grid; }
@@ -3313,12 +3306,11 @@ html[data-section='cinema'] {
 .v35 .aw-hero > .aw-bg { z-index: 1; }
 .v35 .aw-hero > .aw-shade { z-index: 2; }
 
-/* «إذا عجبك هذا» شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة، يُسحب يمينًا ويسارًا ويُظهر الكل */
+/* «إذا عجبك هذا» شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة، يُسحب يمينًا ويسارًا */
 .v35 .wl .wl-recs { display: flex !important; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; margin-inline: calc(var(--wl-g) * -1); padding: 0 var(--wl-g) 4px; scroll-padding-inline: var(--wl-g); scrollbar-width: none; }
 .v35 .wl .wl-recs::-webkit-scrollbar { display: none; }
 .v35 .wl .wl-recs .rc { display: block !important; flex: 0 0 116px; width: 116px; scroll-snap-align: start; }
 .v35 .wl .wl-recs .rc img { width: 116px; height: 174px; aspect-ratio: auto; border-radius: 10px; }
-.v35 .wl .wl-more { display: none; }
 .v35 .wl-card .wl-body > .wl-sec.wl-s-recs, .v35 .wl-screen .wl-body > .wl-s-recs { padding-inline: var(--wl-g); }
 
 /* «من نفس العالم» في البطاقة الطائرة: شريط يُسحب، كل البطاقات بمقاس واحد، و«أنت هنا» بإطار لا بحجم أكبر؛

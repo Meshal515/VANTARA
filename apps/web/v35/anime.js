@@ -1078,7 +1078,6 @@ export function createAnime(deps) {
       lineDone: Math.min(100, ((Math.min(seen, shown) + 0.5) / shown) * 100).toFixed(1),
       characters: m.characters ?? [],
       // عدد التوصيات الظاهر في كل نمط كما في تصميمه (الجوال / العريض)؛ الباقي خلف «الكل»
-      recsCap: ({ platform: [9, 10], card: [9, 8], screen: [9, 8], episode: [9, 10] }[v.look] ?? [9, 9])[v.wrap.clientWidth >= 900 ? 1 : 0],
       heroSrc: v.heroSrc ?? null,
       rangeAt: v.lwRange ?? null,
       epTitle: (n) => {
@@ -1102,7 +1101,7 @@ export function createAnime(deps) {
       },
     };
     // لا رسم من جديد إن لم يتغيّر ما يُعرض (وصول نفس البيانات، أو تقدّم لم يتغيّر)
-    const sig = JSON.stringify([v.look, point, total, ratio, seen, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, ctx.recsCap, state.malTitles ? Object.keys(state.malTitles).length : 0]);
+    const sig = JSON.stringify([v.look, point, total, ratio, seen, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, state.malTitles ? Object.keys(state.malTitles).length : 0]);
     if (sig === v.lwSig) return;
     v.lwSig = sig;
     renderLook(v.look, v.lw, ctx, { center: v.lwCenter !== false });
