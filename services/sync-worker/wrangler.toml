@@ -36,4 +36,4 @@ enabled = true
 required = ["VANTARA_SESSION_SECRET", "VANTARA_IDENTITY_SECRET", "VANTARA_DEVICE_PEPPER"]
 
 [vars]
-ALLOWED_ORIGINS = "https://vantara-bcf.pages.dev"
+ALLOWED_ORIGINS = "https://vantara-bcf.pages.dev,https://web-debug.vantara-bcf.pages.dev,https://web-engine.vantara-bcf.pages.dev"
