@@ -41,7 +41,13 @@ class LiveExtractorProbeTest {
                     "${if(media)"MEDIA" else "NOT_MEDIA"} ${r.code} $type"
                 }}.getOrElse{"ERROR ${it.javaClass.simpleName}: ${it.message?.take(80)}"}
             }
-            val line="PROBE ${java.net.URI(url).host} handled=${handled.getOrElse{"error:"+it.javaClass.simpleName}} links=${links.size} ${links.zip(verdicts).joinToString(" | "){(l,v)->"${l.quality}p $v"}} missing=${WorkerState.takeMissingExtractors()}"
+            // مستخرج مسجّل أعاد false: سبب الفشل الفعلي (loadExtractor يبتلعه عمدًا)، وحالة الصفحة كما رآها هذا الجهاز
+            val why=if(handled.getOrNull()==true)"" else dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(java.net.URI(url).host)?.let{e->
+                val page=runCatching{client.newCall(Request.Builder().url(url).header("User-Agent","Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36").build()).execute().use{r->"page=${r.code} final=${r.request.url.host} bytes=${r.body?.string()?.length}"}}.getOrElse{"page=ERR ${it.javaClass.simpleName}"}
+                val thrown=runCatching{runBlocking{e.extract(url,null,{},{})}}.fold({"returned=$it"},{"threw=${it.javaClass.simpleName}: ${it.message?.take(120)}"})
+                " why[${e.name}: $page $thrown]"
+            }.orEmpty()
+            val line="PROBE ${java.net.URI(url).host} handled=${handled.getOrElse{"error:"+it.javaClass.simpleName}} links=${links.size} ${links.zip(verdicts).joinToString(" | "){(l,v)->"${l.quality}p $v"}} missing=${WorkerState.takeMissingExtractors()}$why"
             println(line)
             // VANTARA_LIVE_OUT: التقرير في ملف يقرؤه CI (مخرجات الاختبار لا تظهر في سجل Gradle)
             System.getenv("VANTARA_LIVE_OUT")?.let{File(it).appendText(line+"\n")}

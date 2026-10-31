@@ -72,6 +72,13 @@ class LiveRepositorySweepTest {
                         if (adapter==null) { put("catalogue",buildJsonObject { put("result","FAIL");put("reason","SOURCE_NOT_ROUTED") });return@buildJsonObject }
                         val page=step(this,"catalogue",45_000) { adapter.page(Listing.POPULAR,1) }
                         put("catalogueItems",page?.items?.size ?: 0)
+                        // كتالوج «ناجح» فارغ: جواب المزوّد الخام (الأقسام وأحجامها) يحسم من المسؤول
+                        if (page!=null && page.items.isEmpty()) runCatching { host.diagnose(id,"catalogue",buildJsonObject { put("page",1) }) }.fold({ raw ->
+                            put("rawSections",JsonArray((raw["items"] as? JsonArray).orEmpty().map { sec -> buildJsonObject {
+                                put("name",(sec as? JsonObject)?.get("name")?.jsonPrimitive?.contentOrNull?.take(60) ?: "?")
+                                put("size",((sec as? JsonObject)?.get("list") as? JsonArray)?.size ?: -1)
+                            } }))
+                        },{ put("rawSections",JsonPrimitive("ERR "+reason(it))) })
                         val first=page?.items?.firstOrNull() ?: return@buildJsonObject
                         put("sampleTitle",first.title.take(80))
                         var work:SourceAnime=step(this,"details",45_000) { adapter.details(first) } ?: first
