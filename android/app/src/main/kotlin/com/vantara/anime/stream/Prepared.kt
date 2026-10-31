@@ -191,6 +191,22 @@ class PreparedEpisode(
         true
     }
 
+    /**
+     * A dead JS bridge must not hold the native session open. Claims are
+     * idempotent: a provider completing after this deadline is ignored.
+     */
+    fun expireAddonBatches(): Int {
+        val pending = synchronized(this) { pendingAddons.toList() }
+        var expired = 0
+        for (sourceId in pending) {
+            if (claimAddonBatch(sourceId)) {
+                expired++
+                finish()
+            }
+        }
+        return expired
+    }
+
     /** Own choices before they are reported, so cancellation cannot leak unselected tickets. */
     fun ownTorrentTicket(uri: String): Boolean = synchronized(this) {
         if (job?.isActive != true) return@synchronized false
