@@ -177,26 +177,29 @@ class AnimeEngine(context: Context) {
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
-                // A repository update/uninstall may arrive during slow APK IO.
-                // Reject the obsolete result rather than caching a stale adapter.
-                val current = entry(id)
-                check(current?.extension == ext && current.enabled && current.disabledReason == null) {
-                    "SOURCE_CHANGED_DURING_LOAD"
-                }
                 ExtensionAdapter(
                     id, source,
                     pageEmbeds = { entry(id)?.embeds },
                     resolver = embeds,
                     pageEpisodes = { entry(id)?.episodes },
                 ).also { a ->
-                    // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
-                    AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
-                    adapters[id] = a
-                    loadErrors.remove(id)
+                    // apply() uses the same monitor. A slow previous APK load
+                    // may not publish its obsolete adapter after an update.
+                    synchronized(this) {
+                        val current = entry(id)
+                        check(current?.extension == ext && current.enabled && current.disabledReason == null) {
+                            "SOURCE_CHANGED_DURING_LOAD"
+                        }
+                        AnimeHostRouter.register(id, current.domains.plan(a.extensionBaseUrl))
+                        adapters[id] = a
+                        loadErrors.remove(id)
+                    }
                 }
             }.onFailure {
-                loadErrors[id] = it.message ?: it.javaClass.simpleName
-                health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
+                if (entry(id)?.extension == ext) {
+                    loadErrors[id] = it.message ?: it.javaClass.simpleName
+                    health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
+                }
             }.getOrNull()
         }
     }
