@@ -15,12 +15,14 @@ interface VantaraExtractor {
 }
 /**
  * Embed hosts verified live (Oct 2026) to hand their media to a JW Player/Video.js configuration that
- * [PlayerPage] reads: vidmoly, lulustream and its mirrors, and the minochinos/morencius embeds.
+ * [PlayerPage] reads: vidmoly, lulustream and its mirrors, the minochinos/morencius embeds, mp4upload, anafast and vidspeed.
  * Explicit host list only; a page on any other host is never parsed this way.
  */
 object PlayerPageHosts:VantaraExtractor {
     override val name="PlayerPage"
-    override val hosts=listOf("vidmoly.org","vidmoly.to","vidmoly.me","lulustream.com","luluvid.com","luluvdo.com","minochinos.com","morencius.com")
+    // mp4upload وanafast وvidspeed: أعادت فيديو فعليًا في تمريرة القارئ العام الحية (31 أكتوبر، تشغيل 41162877481)
+    override val hosts=listOf("vidmoly.org","vidmoly.to","vidmoly.me","lulustream.com","luluvid.com","luluvdo.com","minochinos.com","morencius.com",
+        "mp4upload.com","anafast.cyou","vidspeed.cyou")
     override suspend fun extract(url:String,referer:String?,subtitles:(SubtitleFile)->Unit,links:(ExtractorLink)->Unit)=
         PlayerPage.extract(java.net.URI(url).host.substringBefore('.').replaceFirstChar{it.uppercase()},url,referer,subtitles,links)
 }

@@ -15,6 +15,6 @@ status=$?
 timeout 30s adb logcat -d -v raw -s VANTARA_SWEEP:I > live-sweep.jsonl 2>/dev/null || true
 timeout 30s adb logcat -d -v raw -s VANTARA_MANGA:I > manga-sweep.jsonl 2>/dev/null || true
 echo "manga lines: $(grep -c '^{' manga-sweep.jsonl || true)"
-timeout 30s adb logcat -d VantaraRuntime:V CloudflareInterceptor:I AndroidRuntime:E TestRunner:I '*:S' > live-sweep-logcat.txt 2>&1 || true
+timeout 30s adb logcat -d VantaraRuntime:V VantaraRuntimeHttp:D CloudflareInterceptor:I AndroidRuntime:E TestRunner:I '*:S' > live-sweep-logcat.txt 2>&1 || true
 echo "sweep lines: $(grep -c '^{' live-sweep.jsonl || true)"
 exit $status

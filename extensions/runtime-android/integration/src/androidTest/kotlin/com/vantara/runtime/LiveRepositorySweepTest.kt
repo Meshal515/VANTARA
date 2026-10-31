@@ -43,6 +43,37 @@ class LiveRepositorySweepTest {
         }
     }
 
+    private val http=okhttp3.OkHttpClient.Builder().connectTimeout(15,java.util.concurrent.TimeUnit.SECONDS).readTimeout(20,java.util.concurrent.TimeUnit.SECONDS).build()
+    private fun head(url: String,headers: Map<String,String>): Pair<okhttp3.Response,ByteArray> {
+        val request=okhttp3.Request.Builder().url(url).header("Range","bytes=0-4095").apply { headers.forEach { (k,v) -> header(k,v) } }
+            .header("User-Agent",headers["User-Agent"] ?: "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36").build()
+        val response=http.newCall(request).execute()
+        return response to response.use { r ->
+            val input=r.body?.byteStream() ?: return@use ByteArray(0)
+            val out=java.io.ByteArrayOutputStream();val buf=ByteArray(4096)
+            while (out.size()<4096) { val n=input.read(buf,0,4096-out.size());if (n<0)break;out.write(buf,0,n) }
+            out.toByteArray()
+        }
+    }
+    /** MEDIA لفيديو حقيقي (MP4/WebM/MKV/TS) أو لقائمة HLS وصل أول مقطع منها؛ وإلا السبب. */
+    private fun playable(url: String,headers: Map<String,String>,depth: Int=0): String {
+        val (response,bytes)=head(url,headers)
+        if (!response.isSuccessful) return "HTTP ${response.code}"
+        val text=bytes.toString(Charsets.ISO_8859_1)
+        if (text.startsWith("#EXTM3U")) {
+            if (depth>2) return "HLS_TOO_DEEP"
+            val next=text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: return "HLS_EMPTY"
+            val absolute=java.net.URI(response.request.url.toString()).resolve(next).toString()
+            // مقاطع مشفّرة (AES-128): بايتاتها عشوائية؛ نزولها بنجاح يكفي، والمشغّل يفكّها بالمفتاح
+            if (Regex("#EXT-X-KEY:METHOD=(AES-128|SAMPLE-AES)").containsMatchIn(text))
+                return head(absolute,headers).first.let { if (it.isSuccessful) "MEDIA hls-encrypted" else "HLS→HTTP ${it.code}" }
+            val inner=playable(absolute,headers,depth+1)
+            return if (inner.startsWith("MEDIA")) "MEDIA hls" else "HLS→$inner"
+        }
+        val video=bytes.size>=8 && (text.substring(4,8)=="ftyp" || bytes[0]==0x47.toByte() || (bytes[0]==0x1A.toByte() && bytes[1]==0x45.toByte()) || text.substring(4,8)=="moof" || text.substring(4,8)=="styp")
+        return if (video) "MEDIA ${response.header("Content-Type") ?: ""}".trim() else "NOT_MEDIA ${response.header("Content-Type") ?: "?"}"
+    }
+
     @Test fun repositoryJourneyReport() = runBlocking {
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("Live sweep is opt-in",args.getString("vantaraLiveSweep")=="true")
@@ -100,6 +131,16 @@ class LiveRepositorySweepTest {
                         put("missingExtractors",links?.get("missingExtractors") ?: JsonArray(emptyList()))
                         put("missingSamples",links?.get("missingSamples") ?: JsonObject(emptyMap()))
                         put("subtitles",links?.get("subtitles")?.jsonArray?.size ?: 0)
+                        // التشغيل لا الرابط: أول بايتات كل رابط بترويساته؛ HLS حتى أول مقطع فيديو فعلي
+                        val checked=links?.get("items")?.jsonArray.orEmpty().take(6).map { raw ->
+                            val link=raw.jsonObject
+                            val headers=(link["headers"] as? JsonObject).orEmpty().mapValues { it.value.jsonPrimitive.content }.toMutableMap()
+                            link["referer"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { headers.putIfAbsent("Referer",it) }
+                            val verdict=runCatching { playable(link.getValue("url").jsonPrimitive.content,headers) }.getOrElse { "ERR "+it.javaClass.simpleName }
+                            buildJsonObject { put("quality",link["quality"] ?: JsonNull);put("host",runCatching { java.net.URI(link.getValue("url").jsonPrimitive.content).host }.getOrNull() ?: "?");put("verdict",verdict) }
+                        }
+                        put("playable",checked.count { it["verdict"]?.jsonPrimitive?.content?.startsWith("MEDIA")==true })
+                        put("playback",JsonArray(checked))
                     } }))
                 }
                 reports+=report

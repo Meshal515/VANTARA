@@ -316,6 +316,9 @@ class RuntimeHost(
                 val outbound=RuntimeHttpAccess.Request(request.url(),request.method(),headers,request.body(),request.followRedirects())
                 return try {
                     val result=bound.exchange(caller,outbound)
+                    // للتشخيص: الحالة والمضيف والحجم فقط (لا مسار ولا محتوى)؛ يكشف صفحة حجب بـ200 أو 403 عادي
+                    // (هذه الطبقة في Debug وحده: srcDir في sourceSets.debug)
+                    android.util.Log.d("VantaraRuntimeHttp","${source.text("name")} $operation ${result.status()} ${runCatching { java.net.URI(result.url()).host }.getOrNull()} ${result.headers().entries.firstOrNull { it.key.equals("Content-Length",true) }?.value?.firstOrNull() ?: "?"}")
                     RuntimeNetworkPolicy.trustedSettingsOrigin(installed.packageHash(),source.text("mainUrl"),outbound,result)?.let { origin ->
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)

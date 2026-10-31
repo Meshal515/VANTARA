@@ -69,6 +69,8 @@ class NetworkHelper(context: Context) {
         .dns(HostRouting)
         // الأول دائمًا: توجيه مضيفات مسجّلة (محرك الأنمي)؛ بلا تسجيل لا يفعل شيئًا
         .addInterceptor(HostRouting)
+        // http لموقع خارجي يُرقّى إلى https: السياسة تمنع غير المشفّر، والمواقع تحوّل إليه أصلًا
+        .addInterceptor(eu.kanade.tachiyomi.network.interceptor.HttpsUpgradeInterceptor())
         // قاطع دائرة لكل مضيف قبل إعادة المحاولة: موقع طلب التوقف (429/Retry-After) لا يُطرق من كل الإضافات
         .addInterceptor(eu.kanade.tachiyomi.network.interceptor.HostCircuitBreaker())
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net

@@ -117,21 +117,33 @@ class MangaLiveSweepTest {
                     val page=step(this,"popular",45_000) { source.getPopularManga(1) }
                         ?: step(this,"latest",45_000) { source.getLatestUpdates(1) }
                     put("items",page?.mangas?.size ?: 0)
-                    val manga=page?.mangas?.firstOrNull() ?: return@buildJsonObject
-                    put("sampleTitle",manga.title.take(80))
-                    val update=step(this,"series",60_000) {
-                        try { SourceCompatRepairs.loadSeries(source,manga) }
-                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                        catch (_: Throwable) { SMangaUpdate(manga,SourceCompatRepairs.loadChapters(source,manga)) }
+                    // كالقارئ: عمل بلا فصول (رواية، قريبًا) يُترك لغيره؛ حتى ثلاثة أعمال قبل الحكم على المصدر
+                    var update:SMangaUpdate?=null;var tried=0
+                    for (candidate in page?.mangas.orEmpty().take(3)) {
+                        tried++
+                        put("sampleTitle",candidate.title.take(80))
+                        update=step(this,"series",60_000) {
+                            try { SourceCompatRepairs.loadSeries(source,candidate) }
+                            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (_: Throwable) { SMangaUpdate(candidate,SourceCompatRepairs.loadChapters(source,candidate)) }
+                        }
+                        if (!update?.chapters.isNullOrEmpty()) break
                     }
+                    put("worksTried",tried)
                     put("chapters",update?.chapters?.size ?: 0)
-                    val chapter=update?.chapters?.firstOrNull() ?: return@buildJsonObject
-                    val pages=step(this,"pages",60_000) { SourceCompatRepairs.loadPages(source,chapter) }
-                    put("pageCount",pages?.size ?: 0)
-                    // فصل ثانٍ من منتصف القائمة: صفحتان أو أقل في الفصلين معًا = قراءة ناقصة لا فصل قصير
-                    update.chapters.getOrNull(update.chapters.size/2)?.takeIf { update.chapters.size>2 }?.let { middle ->
-                        put("pageCount2",runCatching { withTimeout(45_000) { SourceCompatRepairs.loadPages(source,middle).size } }.getOrDefault(-1))
+                    val list=update?.chapters.orEmpty()
+                    if (list.isEmpty()) return@buildJsonObject
+                    // أحدث فصل قد يكون مدفوعًا مقفلًا: الأحدث ثم الأوسط ثم الأقدم حتى فصل له صفحات
+                    var pages:List<eu.kanade.tachiyomi.source.model.Page>?=null
+                    val counts=mutableListOf<Int>()
+                    for (chapter in listOf(list.first(),list[list.size/2],list.last()).distinct()) {
+                        pages=step(this,"pages",60_000) { SourceCompatRepairs.loadPages(source,chapter) }
+                        counts+=pages?.size ?: -1
+                        if (!pages.isNullOrEmpty() && pages.size>2) break
                     }
+                    put("pageCount",pages?.size ?: 0)
+                    // كل الفصول المجرّبة بصفحتين أو أقل = قراءة ناقصة لا فصل قصير
+                    put("pageCounts",JsonArray(counts.map(::JsonPrimitive)))
                     val first=pages?.firstOrNull() ?: return@buildJsonObject
                     step(this,"image",60_000) {
                         val http=source as? HttpSource ?: error("NOT_HTTP_SOURCE")
