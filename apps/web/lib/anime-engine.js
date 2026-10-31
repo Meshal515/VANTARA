@@ -271,6 +271,14 @@ export function pickCopies(items, titles, criteria = {}) {
     if (!best) return null;
     copies = judged.filter((x) => own(x.c) === own(best.c)).map((x) => x.c);
   }
+  // كل مصدر طابق العمل يشارك بأفضل نسخه، لا من كتب الاسم حرفيًا فقط: «Solo Leveling (Ore dake Level Up na Ken)»
+  // في مصدر و«ore dake level up na ken» في آخر عمل واحد، وكان الأول يُسقط فتنقص السيرفرات (فحص المحاكي)
+  const covered = new Set(copies.map((c) => c.sourceId));
+  for (const x of [...judged].sort((a, b) => b.j.score - a.j.score)) {
+    if (covered.has(x.c.sourceId)) continue;
+    covered.add(x.c.sourceId);
+    copies.push(x.c);
+  }
   // نسخة واحدة لكل مصدر: الأولى (أسرع رد) هي المرجّحة
   const one = [...new Map(copies.map((c) => [c.sourceId, c])).values()];
   return { key: fold(one[0].title), title: one[0].title, thumbnail: one.find((c) => c.thumbnail)?.thumbnail ?? null, copies: one };

@@ -103,3 +103,14 @@ it('uses the same generated PWA session when deferred addon discovery finishes',
  expect(calls.find(x=>x[0]==='extend')[1]).toMatchObject({session:out.session,copies:[{sourceId:'addon|provider',identity:{episode:2}}]});
  await api.closeSession(out.session);
 });
+
+it('every source that matches the work contributes a copy, not only exact-title ones (Solo Leveling on the emulator)', async () => {
+  const { pickCopies } = await import('./anime-engine.js');
+  const items = [
+    { sourceId: 'a', url: '/1', title: 'ore dake level up na ken' },
+    { sourceId: 'b', url: '/2', title: 'Solo Leveling (Ore dake Level Up na Ken)' },
+    { sourceId: 'b', url: '/3', title: 'Solo Leveling Season 2: Arise from the Shadow (Ore dake Level Up na Ken Season 2)' },
+  ];
+  const work = pickCopies(items, ['Ore dake Level Up na Ken', 'Solo Leveling']);
+  expect(work.copies.map((c) => `${c.sourceId}${c.url}`)).toEqual(['a/1', 'b/2']);
+});

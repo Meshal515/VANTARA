@@ -295,9 +295,11 @@ try {
           await js(`[...document.querySelectorAll('.v7-tab')].find(b=>b.textContent.includes('المثبتة')).click()`);
           await wait(`[...document.querySelectorAll('.v7-row')].some(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)})`, 'installed row');
           await js(`(()=>{const r=[...document.querySelectorAll('.v7-row')].find(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)});[...r.querySelectorAll('button')].find(b=>b.textContent.includes('فتح')).click();return true})()`);
-          await wait(`document.querySelector('#utility.active .addon-source')`, 'extension page after «فتح»', 120000);
-          await wait(`document.querySelector('#utility.active .addon-source .work-card .up-title')`, 'cards inside the extension page', 120000);
-          const title = await js(`(()=>{const c=document.querySelector('#utility.active .addon-source .work-card');const t=c.textContent.trim().slice(0,60);c.click();return t})()`);
+          // واجهة الإضافة (رئيسية قسمها) أو القائمة المسطحة إن لم تدعمها
+          const CARD = "#utility.active .addon-source-home .an-card, #utility.active .addon-source-home .hero-slide, #utility.active .addon-source .work-card";
+          await wait(`document.querySelector('#utility.active .addon-source-home, #utility.active .addon-source')`, 'extension page after «فتح»', 120000);
+          await wait(`document.querySelector(${JSON.stringify(CARD)})`, 'cards inside the extension page', 120000);
+          const title = await js(`(()=>{const c=document.querySelector(${JSON.stringify(CARD)});const t=(c.getAttribute('aria-label')||c.textContent).trim().slice(0,60);c.click();return t})()`);
           await wait(`document.querySelector('#anime.active, .aw-hero, #cinema.active')`, 'work page after tapping «' + title + '»', 120000);
           await wait(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length>0`, 'episodes on the work page', 120000);
           // التشغيل الفعلي: «شاهد الحلقة» ← المشغّل الأصلي (PlayerActivity) يفتح ويبقى في المقدمة
@@ -340,7 +342,9 @@ try {
         const raw=await new Promise(res=>{const all=[];const s=e.searchStream(titles[0],'anime',h=>{hits.push({src:h.sourceId.slice(0,60),n:(h.items||[]).length,err:h.error?String(h.error).slice(0,80):null,skip:!!h.skipped,first:(h.items||[]).slice(0,3).map(x=>x.title)});all.push(...(h.items||[]))});Promise.resolve(s.done).then(()=>res(all))});
         const work=e.pickCopies(raw,titles);
         let servers=null;
-        if(work){try{const p=await e.prepare({copies:work.copies,episode:1});servers=p?.session?(await e.routes(p.session))?.routes?.length??'session':'none'}catch(x){servers='error: '+x.message}}
+        if(work){try{const p=await e.prepare({copies:work.copies,episode:1});
+          if(!p?.session)servers='no session';else{const b=await e.best(p.session,null,90000).catch(x=>({error:x.message}));const r=await e.routes(p.session);
+            const list=r?.routes??[];servers={count:list.length,ready:list.filter(x=>x.state==='ready'||x.ready).length,sources:[...new Set(list.map(x=>String(x.sourceName??x.sourceId??'').slice(0,40)))],best:b?.candidate?.server??b?.server??(b?.error||null)}}}catch(x){servers='error: '+x.message}}
         out[titles[0]]={hits,matched:work?work.copies.map(c=>c.sourceId.slice(0,60)+' :: '+c.title):[],servers};}
       return out})()`, 900000);
     console.log(JSON.stringify(proof.match, null, 1).slice(0, 6000));
