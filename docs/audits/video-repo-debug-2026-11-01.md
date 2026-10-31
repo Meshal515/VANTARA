@@ -8,12 +8,55 @@
 
 Maximize real-world compatibility and crash-free data-safe behavior for **external Aniyomi and CloudStream repositories/plugins** on the Android Debug APK. Verify repository discovery, publisher/signature trust, package download, APK/DEX class loading, source registration, browsing/search, work details, seasons/episodes, playable stream extraction and playback handoff. Distinguish a broken provider site from a faulty VANTARA bridge by comparing the same plugin and site against its native host, where possible. Tests/fixtures are not proof of playback on actual media.
 
-## Priority / acceptance
+## Fixed five-stage execution workflow — owner-approved order
 
-1. **Compatibility:** real signed APK and CloudStream DEX, complete ABI and callback contracts, multiple sources per package; no fake-success compatibility matrix.
-2. **Reliability and persistence:** no fatal crashes, ANR, unbounded waits, data loss or partial updates; preserve previous known-good APK, source IDs, favorites, watch history and progress.
-3. **Full user journey:** add repository → inspect → install → source → catalogue/search → detail → episodes → links → player decodes an actual first video frame; seek/restart/recovery tested separately.
-4. **Error attribution:** Engine / Addon ABI / publisher repository / remote source / media CDN / environment / not tested. External failure is not silently reclassified as working.
+**Mandatory sequence:** 1. Compatibility → 2. Self-Healing & Stability → 3. Full Playback Journey → 4. Evidence & Verification → 5. Zero Data Loss & Final Regression Sweep.
+
+Complete a stage with recorded evidence before asserting the next stage is accepted. Development may add non-destructive instrumentation needed for an earlier stage, but never activate unverified production updates as a shortcut. Data protection remains a hard invariant in **every** stage, with an independent deep audit at stage 5.
+
+### Stage 1 — Compatibility (Aniyomi first, CloudStream second; both highest priority)
+
+- Use actual published, signed Aniyomi APKs and CloudStream DEX extensions from active repositories, not custom success-only fixtures.
+- Audit repository index versions, signatures and package identity, class-loader/library ABI, dependencies and callbacks, multi-source factories, registration, extractor interfaces, network/media headers, and native player handoff contracts.
+- Reproduce incompatibilities against the original app/compatible native host under comparable network conditions. If a source demonstrably works there, a failure in VANTARA is **not** excused as a broken website.
+- **Exit criterion:** each tested package registers all real applicable sources without an avoidable VANTARA ABI, loading or identity failure. Produce a source-by-source compatibility matrix; unknown is **untested**, not successful.
+
+### Stage 2 — Self-Healing & Stability (a core engine feature)
+
+- Implement a guarded update pipeline: **discover → download → verify publisher and hash → stage without touching active package → isolated compatibility probe → real content health probe → compare existing and candidate → atomic activation → post-activation watch → rollback/quarantine on regression**.
+- A candidate is **not promoted** for a valid signature, successful class-loading, nonempty manifest, valid page URL, or higher version alone. Probe actual catalogue/search → work detail → episodes → link resolution → usable video content, with bounded timeouts and no user-history mutation.
+- On a failing/inconclusive probe: preserve the last-known-good installation, source IDs, account bindings, preferences, cookies and media progress; mark update `pending-unverified` or `failed` with a reason; retry later with rate limits and exponential backoff. Do not silently downgrade a known-working installed package.
+- Health-check actual known working sources individually and compare against baseline. A single temporarily failing host should not incorrectly condemn every source in a multi-source APK. A degraded package may have partial-but-real capability; report per-source health, preserve working sources, and avoid claiming total health.
+- Auto-recover from transient timeout, DNS/network change, stale caches, process death, server choice failures and authenticated host-origin changes **only where observable and safe**. Respect site identity, publisher identity, HTTPS/trust constraints, user-required verification and credentials. No guess-based URL substitution, silent third-party site scraping, bot challenge circumvention or unlimited retry loops.
+- **Exit criterion:** reproducible worker/plugin failures do not crash/freeze VANTARA; interrupted/failed update never destroys its predecessor; viable updated package demonstrates real media and can be rolled back without data changes.
+
+### Stage 3 — Full End-to-End Playback
+
+- Exercise add repository → list repository extensions → download/install → register source → catalogue/search → detail → season/episode → `loadLinks`/extractor → choose stream → native VANTARA player **decodes a first video frame** → seek/resume → close/restart.
+- Test multiple live, independent source plugins for both Aniyomi and CloudStream, different extractors, required `Referer`, origin and cookies, and HLS/DASH/direct media as actually encountered.
+- An HTTP 200, an extracted URL and downloaded media bytes are only *intermediate* milestones. No decoded-frame evidence means playback is **not yet proven**.
+- **Exit criterion:** per-source real-device journeys succeed for working sources; failures are isolated, bounded and actionable.
+
+### Stage 4 — Evidence & Verification
+
+- Run compile/unit/instrumentation/emulator/actual signed-APK checks **on the same commit and feature flags as the Debug binary under test**, with linked logs, source names, site health and stage timings.
+- Classify every failure: VANTARA engine / addon ABI / repository/signature / provider site down / human action required / video host / environment / not tested. If host app works but VANTARA fails, classify as our compatibility failure until contradicted.
+- Verify first-frame playback separately from page, episodes, stream-link and network checks. Never equate a green CI workflow with a verified playable provider.
+- **Exit criterion:** an auditable matrix for every sampled package and source, including evidence, fixes and unresolved limits.
+
+### Stage 5 — Zero Data Loss & Final Round
+
+- Execute upgrade, failed update, interrupted download, crash during commit, force-stop/restart, corrupted metadata, rollback, cache invalidation, repository removal, and account/profile switching with real existing data.
+- Compare before/after **source IDs, app library, favorites, watched and resume positions, history, user preferences, trusted repository list, credentials/cookies and local metadata**. No accidental deletion, reset or cross-profile contamination.
+- Re-run the *entire* compatibility → self-healing → end-to-end playback → verification matrix after the last change. Explicitly verify Stremio unchanged and main/Stable untouched.
+- **Exit criterion:** no observed data loss under the tested failure matrix, no outstanding critical regression and full traceable evidence for the tested packages. This is not a mathematical guarantee for untested providers.
+
+### Mandatory rules
+
+- **Any currently working source and compatible extension ought to work in VANTARA.** A working upstream source that fails solely because of VANTARA is an engine defect to prioritize. Publisher site outages are not engine defects, but must not damage the app.
+- Update preflight may run *quietly* without interrupting the user, but must be strictly bounded, minimally invasive, privacy-preserving and never mark content viewed or change the user's watch state. Don't claim it can always verify every media link without side effects or internet access.
+- User data, publisher trust, full security checks and Stable isolation are non-negotiable in all five stages. No changes to Stremio, main, Stable or released APK without explicit approval.
+- Findings and fixes must reference `file:line`, repro, root cause, narrowly scoped remedy, exact test evidence and remaining uncertainty.
 
 ## Verified inputs at project start
 
