@@ -74,9 +74,15 @@ internal object SourceCompatRepairs {
             // يعرف 10–12 فقط). الإصلاح احتياط لإصدار قديم لا يقرأ الصفحات.
             val own = runCatching { source.getPageList(chapter) }
                 .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-                .getOrNull()
-            if (own != null && own.isNotEmpty() && own.all { isHttpImage(it.imageUrl) }) return own
-            return loadDilarPages(source, chapter)
+            // صفحة بلا imageUrl ومعها url صالحة في عقد Mihon: يُحلّ رابطها لاحقًا بـgetImageUrl كما يفعل القارئ
+            own.getOrNull()?.let { pages -> if (pages.isNotEmpty() && pages.all { isHttpImage(it.imageUrl) || (it.imageUrl == null && it.url.isNotBlank()) }) return pages }
+            // فشل الطريقين: سبب الإضافة نفسها هو الأدق (والإصلاح مرفق معه) — كان سبب الإصلاح يخفيه
+            return try { loadDilarPages(source, chapter) } catch (repair: Throwable) {
+                if (repair is kotlinx.coroutines.CancellationException) throw repair
+                val ownFailure = own.exceptionOrNull()
+                    ?: IllegalStateException("Dilar extension returned ${own.getOrNull()?.size ?: 0} pages: ${own.getOrNull()?.firstOrNull()?.imageUrl?.substringBefore(':') ?: "none"}")
+                throw ownFailure.apply { addSuppressed(repair) }
+            }
         }
 
         val original = source.getPageList(chapter)

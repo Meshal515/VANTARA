@@ -71,6 +71,7 @@ class NetworkHelper(context: Context) {
         .addInterceptor(HostRouting)
         // http لموقع خارجي يُرقّى إلى https: السياسة تمنع غير المشفّر، والمواقع تحوّل إليه أصلًا
         .addInterceptor(eu.kanade.tachiyomi.network.interceptor.HttpsUpgradeInterceptor())
+        .addNetworkInterceptor(eu.kanade.tachiyomi.network.interceptor.HttpsUpgradeInterceptor.Redirects)
         // قاطع دائرة لكل مضيف قبل إعادة المحاولة: موقع طلب التوقف (429/Retry-After) لا يُطرق من كل الإضافات
         .addInterceptor(eu.kanade.tachiyomi.network.interceptor.HostCircuitBreaker())
         // Transient GET/HEAD retry: the real-device run resolved sparkmanga.net

@@ -36,4 +36,23 @@ class HttpsUpgradeTest {
         assertEquals("http://box.vantara.local/x", seen("http://box.vantara.local/x"))
         assertEquals("https://already.example/x", seen("https://already.example/x"))
     }
+
+    @Test fun redirectToExternalHttpIsUpgradedBeforeOkHttpFollowsIt() {
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())
+        val worker = Thread {
+            server.accept().use { socket ->
+                val input = socket.getInputStream().bufferedReader()
+                while (input.readLine()?.isNotEmpty() == true) Unit
+                socket.getOutputStream().write(
+                    "HTTP/1.1 301 Moved\r\nLocation: http://asgard.example/api/public/page/1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(),
+                )
+            }
+        }.apply { start() }
+        val client = OkHttpClient.Builder().followRedirects(false)
+            .addNetworkInterceptor(HttpsUpgradeInterceptor.Redirects).build()
+        val location = client.newCall(Request.Builder().url("http://127.0.0.1:${server.localPort}/x").build()).execute().use { it.header("Location") }
+        worker.join(5000); server.close()
+        assertEquals("https://asgard.example/api/public/page/1", location)
+    }
 }
+
