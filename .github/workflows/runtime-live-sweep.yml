@@ -20,8 +20,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: runtime-live-sweep-${{ github.run_id }}
-  cancel-in-progress: false
+  group: runtime-live-sweep-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -88,6 +88,17 @@ jobs:
                   verdict=head or ('PASS' if s.get('image',{}).get('result')=='PASS' else next((f"{k}: {s[k].get('code')}" for k in ('popular','latest','series','pages','image') if s.get(k,{}).get('result')=='FAIL' and not (k=='popular' and s.get('latest',{}).get('result')=='PASS')),'EMPTY'))
                   print(f"| {r['extension']} | {r['origin']} | {s.get('name','')} | {verdict} |")
           PY
+      - name: Real signed multi-source Aniyomi APK source routing evidence
+        if: always()
+        run: |
+          {
+            echo '### Aniyomi: actual signed Yuzono APK, nine factory sources'
+            if test -s aniyomi-sweep.log; then
+              cat aniyomi-sweep.log
+            else
+              echo 'NO_ANIYOMI_PASS_EVIDENCE — inspect emulator instrumentation report'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       # من شبكة هذا الجهاز نفسه (الصفحة والفيديو من عنوان واحد كما في هاتف المستخدم): كل رابط سيرفر حقيقي
       # جمعه الفحص أو حُفظ سابقًا يمر بمستخرجات VANTARA، ولا يُحتسب رابطًا إلا إن أعاد السيرفر فيديو أو HLS فعلًا
       - name: Live extractor probe (real server samples)
