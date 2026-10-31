@@ -568,3 +568,15 @@ it('names the failed source and clears its message on another tab', async()=>{
   expect(view.querySelector('.v7-diagnostic').textContent).toBe('');
   view.close();
 });
+
+it('a separated former built-in is one ordinary extension with delete, never a second “bundled” row',async()=>{
+ const d=setup(),pkg='eu.kanade.tachiyomi.extension.ar.azora';
+ const core={key:`core|${pkg}`,sourceId:pkg,pkg,name:'Azora',bundled:true,contentTypes:['manga'],capabilities:['home']};
+ const uninstall=vi.fn(async()=>{});
+ const ready={list:async()=>({repos:[{url:'vantara:ready-sources',name:'مصادر جاهزة'}],installed:[{pkg,name:'Azora',installed:'1.6.74',formerlyBundled:true,repo:'vantara:ready-sources'}]}),extensions:async()=>[{pkg,name:'Azora',installed:'1.6.74',formerlyBundled:true}],uninstall};
+ const view=renderV7Addons({registry:registry([core]),readySources:ready});d.body.append(view);await tick();installedTab(view).click();await tick();
+ const rows=[...view.querySelectorAll('.v7-body .v7-row')];
+ expect(rows).toHaveLength(1);
+ expect(rows[0].querySelector('.v7-trash')).not.toBeNull();
+ view.close();
+});
