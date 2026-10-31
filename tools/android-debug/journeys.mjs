@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const phase = process.argv[2];
-const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read'];
+const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read', 'anime'];
 if (!PHASES.includes(phase)) throw new Error(`phase: ${PHASES.join('|')}`);
 const out = process.env.DEBUG_EVIDENCE || 'android-debug-evidence';
 const pkg = 'com.vantara.app.debug';
@@ -23,6 +23,9 @@ const KEIYOUSHI = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo';
 const AZORA = 'eu.kanade.tachiyomi.extension.ar.azora';
 const TEAMX = 'eu.kanade.tachiyomi.extension.ar.teamx';
 // إضافات عربية غير مدمجة مرّت في الفحص الحي حتى صورة؛ أول ما يُثبَّت ويُقرأ له فصل كامل يكفي، والمحاولات تُسجَّل
+const CS_REPO = 'https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json';
+// مصادر أنمي أثبت الفحص الحي تشغيلها؛ كل واحد يُحكم عليه وحده حتى تشغيل فعلي
+const ANIME_CANDIDATES = ['AnimeRift', 'Animewitcher', 'Anime4up', 'Aia2tv 2'];
 const USER_CANDIDATES = ['Rocks Manga', 'Lava Scans', 'Despair', 'Oduto', 'SayManhwa', 'Loner', 'XSano', 'Kawii', 'ProComic'];
 
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
@@ -133,6 +136,61 @@ const readChapter = (sourceId) => js(`(async()=>{
   throw new Error('no chapter with more than two pages read fully: '+trail.join(' | '));
 })()`, 900000);
 
+
+/** تشغيل فعلي من جهة الشبكة نفسها: أول بايتات الفيديو بترويسات المرشّح، أو أول مقطع HLS. */
+async function playable(c) {
+  const headers = { 'user-agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36', ...(c.headers || {}) };
+  const get = async (url, range) => {
+    const r = await fetch(url, { headers: range ? { ...headers, range: 'bytes=0-131071' } : headers, redirect: 'follow', signal: AbortSignal.timeout(30000) });
+    if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`);
+    return { r, bytes: new Uint8Array(await r.arrayBuffer()) };
+  };
+  const text = (b) => new TextDecoder().decode(b.slice(0, 200000));
+  const media = (b) => b.length > 1024 && (b[0] === 0x47 || [0x66747970, 0x6d6f6f66, 0x73747970].includes(new DataView(b.buffer).getUint32(4)) || (b[0] === 0x1a && b[1] === 0x45));
+  let { r, bytes } = await get(c.url, true);
+  if (/#EXTM3U/.test(text(bytes))) {
+    let list = text(bytes), base = r.url;
+    const variant = list.split('\n').find((l) => l && !l.startsWith('#') && /#EXT-X-STREAM-INF/.test(list));
+    if (variant) { ({ r, bytes } = await get(new URL(variant.trim(), base).href)); list = text(bytes); base = r.url; }
+    const seg = list.split('\n').find((l) => l.trim() && !l.startsWith('#'));
+    if (!seg) throw new Error('HLS without segments');
+    const encrypted = /#EXT-X-KEY:METHOD=AES/.test(list);
+    const s = await get(new URL(seg.trim(), base).href, true);
+    if (!(s.bytes.length > 1024) || (!encrypted && !media(s.bytes))) throw new Error(`segment is not video (${s.bytes.length} bytes)`);
+    return { kind: encrypted ? 'hls-aes' : 'hls', segmentBytes: s.bytes.length };
+  }
+  if (!media(bytes)) throw new Error(`not video: ${r.headers.get('content-type')} ${bytes.length} bytes`);
+  return { kind: 'file', bytes: bytes.length, type: r.headers.get('content-type') };
+}
+const AE = 'Capacitor.Plugins.AnimeEngine', VR = 'Capacitor.Plugins.VantaraRuntime';
+const installAnime = (name) => js(`(async()=>{await ${VR}.setProfile({profile:'local'});await ${VR}.addRepository({url:${JSON.stringify(CS_REPO)}});
+  const rows=(await ${VR}.extensions({url:${JSON.stringify(CS_REPO)}})).extensions,row=rows.find(r=>r.internalName===${JSON.stringify(name)});
+  if(!row)throw new Error('not in repository');await ${VR}.install({url:${JSON.stringify(CS_REPO)},pkg:row.pkg});
+  for(let n=0;n<40;n++){const s=(await ${AE}.sources()).sources.find(x=>x.pkg===row.pkg);if(s)return {pkg:row.pkg,id:s.id,name:s.name};await new Promise(r=>setTimeout(r,500))}
+  throw new Error('installed but not offered as an anime source')})()`, 300000);
+async function watchEpisode(sourceId) {
+  const trail = [];
+  const page = await js(`${AE}.page({sourceId:${JSON.stringify(sourceId)},listing:'popular',page:1}).then(r=>r.page.items)`, 240000);
+  for (const anime of page.slice(0, 3)) {
+    const work = await js(`${AE}.details({anime:${JSON.stringify(anime)}}).then(r=>r.anime).catch(()=>(${JSON.stringify(anime)}))`, 240000);
+    const eps = await js(`${AE}.episodes({anime:${JSON.stringify(work)}}).then(r=>r.episodes)`, 240000).catch((e) => { trail.push(`episodes: ${e.message}`); return []; });
+    trail.push(`${anime.title.slice(0, 40)}: ${eps.length} episodes`);
+    if (!eps.length) continue;
+    const ep = eps[0];
+    const out = await js(`${AE}.streams({copies:[${JSON.stringify(work)}],episode:${Number(ep.number) || 1}})`, 400000).catch((e) => { trail.push(`streams: ${e.message}`); return { candidates: [] }; });
+    const servers = out.candidates.map((c) => ({ server: c.server, host: c.host, quality: c.quality, container: c.container }));
+    trail.push(`episode ${ep.number}: ${servers.length} servers`);
+    for (const c of out.candidates.slice(0, 8)) {
+      try {
+        const play = await playable(c);
+        await js(`${AE}.closeSession({session:${JSON.stringify(out.session)}})`).catch(() => {});
+        return { work: anime.title.slice(0, 60), episode: ep.number, servers: servers.length, qualities: [...new Set(servers.map((x) => x.quality).filter(Boolean))].sort((a, b) => b - a), played: { server: c.server, host: c.host, quality: c.quality, ...play }, trail };
+      } catch (error) { trail.push(`${c.server}@${c.host}: ${String(error.message).slice(0, 80)}`); }
+    }
+  }
+  throw new Error(trail.join(' | '));
+}
+
 try {
   if (phase === 'upgrade-before') {
     await step('webData', async () => { const m = await js(webMarker); if (!m.localStorage || !m.indexedDB) throw new Error(JSON.stringify(m)); return m; });
@@ -143,7 +201,9 @@ try {
       for(const name of ${JSON.stringify(USER_CANDIDATES)}){const row=rows.find(r=>r.name===name&&r.arabic&&!r.builtin&&!r.nsfw&&!r.anime);if(!row)continue;
         try{const r=await E.installExtension({repo:${JSON.stringify(KEIYOUSHI)},pkg:row.pkg});await E.prepare({sourceId:r.ids[0]});return {name,pkg:row.pkg,id:r.ids[0]}}catch(e){tried.push(name+': '+e.message)}}
       throw new Error('no candidate installed: '+tried.join(' | '))})()`));
+    await step('animeExtension', () => installAnime(ANIME_CANDIDATES[0]));
     proof.snapshot = await step('snapshot', snapshot);
+    proof.anime = await step('animeSnapshot', () => js(`${VR}.setProfile({profile:'local'}).then(()=>${VR}.list()).then(d=>({repos:d.repos.map(r=>r.url).sort(),installed:JSON.stringify(d.installed)}))`));
     if (!/vault\/eu\.kanade\.tachiyomi\.extension\.ar\.azora\//.test(proof.snapshot.files)) throw new Error('used built-in has no device copy before the upgrade');
   }
 
@@ -168,6 +228,13 @@ try {
     await step('loadsFromDeviceWithoutNetwork', () => js(`(async()=>{const E=${EE},r={};
       for(const id of [${JSON.stringify(AZORA)},${JSON.stringify(TEAMX)},${JSON.stringify(user.id)}])r[id]=(await E.prepare({sourceId:id})).name;return r})()`));
     await step('online', () => network(true));
+    await step('animeRetained', async () => {
+      const now = await js(`${VR}.setProfile({profile:'local'}).then(()=>${VR}.list()).then(d=>({repos:d.repos.map(r=>r.url).sort(),installed:JSON.stringify(d.installed)}))`);
+      const pkgId = before.steps.animeExtension.value.pkg;
+      const offered = await js(`${AE}.sources().then(r=>r.sources.some(s=>s.pkg===${JSON.stringify(pkgId)}))`);
+      if (JSON.stringify(now.repos) !== JSON.stringify(before.anime.repos) || now.installed !== before.anime.installed || !offered) throw new Error('anime repository/extension changed: ' + JSON.stringify({ now, offered }).slice(0, 300));
+      return { repos: now.repos.length, extensionKept: true, offeredAsSource: true };
+    });
     await step('builtinWorksAfterUpgrade', () => js(`${EE}.popular({sourceId:${JSON.stringify(AZORA)},page:1}).then(r=>{if(!r.mangas.length)throw new Error('empty');return {items:r.mangas.length}})`));
   }
 
@@ -208,6 +275,20 @@ try {
     await step('installedListed', () => js(`${EE}.repos().then(r=>{if(!r.installed.some(x=>x.pkg===${JSON.stringify(read.pkg)}))throw new Error('not listed');return r.installed.map(x=>x.name)})`));
     // مصدر كان مدمجًا: بلا نسخة في التطبيق يُجلب من Keiyoushi بمفتاحه ويُقرأ له فصل كامل
     await step('formerBuiltinFromNetworkFullChapter', () => readChapter(AZORA));
+  }
+  if (phase === 'anime') {
+    const results = {};
+    for (const name of ANIME_CANDIDATES) {
+      try { const src = await installAnime(name); results[name] = { result: 'PASS', ...(await watchEpisode(src.id)) }; }
+      catch (error) { results[name] = { result: 'FAIL', error: String(error.message).slice(0, 700) }; }
+      console.log(`${results[name].result} anime/${name}`, JSON.stringify(results[name]).slice(0, 400));
+      proof.anime = results; save();
+    }
+    await step('installAndPlay', () => {
+      const ok = Object.entries(results).filter(([, r]) => r.result === 'PASS').map(([n]) => n);
+      if (!ok.length) throw new Error('no anime source reached real playback');
+      return { played: ok, failed: Object.keys(results).filter((n) => !ok.includes(n)) };
+    });
   }
   proof.passed = true;
 } catch (error) {
