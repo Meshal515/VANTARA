@@ -113,6 +113,10 @@ class ExtensionEnginePlugin : Plugin() {
         // Activity جديدة فتُحمَّل الإضافة من جديد، وتسجيلٌ ثانٍ لنفس المفرد
         // في injekt يرمي — فيسقط التطبيق عند أول تدوير لا عند أول استعمال.
         ensureEngineInjekt(context.applicationContext as Application)
+        // محلّل الأسماء الاحتياطي (DNS عبر HTTPS) للمانجا من أول لحظة: كان يُركَّب عند تشغيل محرك الأنمي فقط،
+        // فمن يفتح المانجا مباشرة يبقى على DNS مزوّده، ومواقع يحجبها بالـDNS تفشل («تعذّر الوصول لاسم الموقع»).
+        // النظام أولًا كما هو، وDoH فقط حين يفشل أو يعيد عنوان حجب؛ محرك الأنمي يستبدله بنسخته لاحقًا.
+        if (eu.kanade.tachiyomi.network.HostRouting.dns == null) eu.kanade.tachiyomi.network.HostRouting.dns = com.vantara.anime.net.AnimeDns({ false })
         // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
         // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
         scope.launch {

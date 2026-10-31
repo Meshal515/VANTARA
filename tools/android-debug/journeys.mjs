@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const phase = process.argv[2];
-const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read', 'anime', 'ui-anime'];
+const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read', 'anime', 'ui-anime', 'anime-match'];
 if (!PHASES.includes(phase)) throw new Error(`phase: ${PHASES.join('|')}`);
 const out = process.env.DEBUG_EVIDENCE || 'android-debug-evidence';
 const pkg = 'com.vantara.app.debug';
@@ -325,6 +325,25 @@ try {
     }
     proof.ui = results;
     if (Object.values(results).some((r) => r.error)) throw new Error('anime source did not open to a work page with episodes');
+  }
+
+
+  if (phase === 'anime-match') {
+    // نفس مطابقة صفحة عمل الأنمي (هوية AniList ← نسخ الإضافات) على أعمال حقيقية: ماذا يجد كل مصدر؟
+    const works = [
+      ['Sousou no Frieren', "Frieren: Beyond Journey's End", '葬送のフリーレン'],
+      ['Ore dake Level Up na Ken', 'Solo Leveling'],
+      ['ONE PIECE', 'One Piece'],
+    ];
+    proof.match = await js(`(async()=>{const e=await import('/lib/anime-engine.js');const out={};
+      for(const titles of ${JSON.stringify(works)}){const hits=[];
+        const raw=await new Promise(res=>{const all=[];const s=e.searchStream(titles[0],'anime',h=>{hits.push({src:h.sourceId.slice(0,60),n:(h.items||[]).length,err:h.error?String(h.error).slice(0,80):null,skip:!!h.skipped,first:(h.items||[]).slice(0,3).map(x=>x.title)});all.push(...(h.items||[]))});Promise.resolve(s.done).then(()=>res(all))});
+        const work=e.pickCopies(raw,titles);
+        let servers=null;
+        if(work){try{const p=await e.prepare({copies:work.copies,episode:1});servers=p?.session?(await e.routes(p.session))?.routes?.length??'session':'none'}catch(x){servers='error: '+x.message}}
+        out[titles[0]]={hits,matched:work?work.copies.map(c=>c.sourceId.slice(0,60)+' :: '+c.title):[],servers};}
+      return out})()`, 900000);
+    console.log(JSON.stringify(proof.match, null, 1).slice(0, 6000));
   }
 
   if (phase === 'anime') {
