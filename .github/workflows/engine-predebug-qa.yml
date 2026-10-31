@@ -1,0 +1,30 @@
+name: VANTARA engine pre-release integration QA (no publish)
+
+on:
+  push:
+    branches: [fix/engine-core-predebug-20261031]
+    paths:
+      - 'apps/web/**'
+      - 'android/**'
+      - 'extensions/runtime-android/**'
+      - 'tools/repository-compat/**'
+      - '.github/workflows/engine-predebug-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-predebug-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-actual-app:
+    uses: ./.github/workflows/runtime-app-debug.yml
+    permissions:
+      contents: read
+
+  isolated-runtime-contracts:
+    uses: ./.github/workflows/runtime-android.yml
+    permissions:
+      contents: read
