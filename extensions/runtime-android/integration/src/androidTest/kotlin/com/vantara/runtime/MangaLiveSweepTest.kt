@@ -81,7 +81,14 @@ class MangaLiveSweepTest {
         index.getOrNull()?.let { (meta,list) ->
             require(meta.fingerprint==BuiltinSourceRefresh.KEIYOUSHI_KEY) { "Keiyoushi signing key changed" }
             for (ext in list) {
-                if (ext.anime || ext.pkg in builtin.map { it.pkg } || ext.sources.none { it.lang.equals("ar",true) }) continue
+                // المضمّنة: إن نشرت Keiyoushi إصدارًا غير المثبّت يُختبر الأحدث أيضًا، فيثبت هل التحديث يصلح عطلها
+                builtin.firstOrNull { it.pkg==ext.pkg }?.let { pinned ->
+                    if (!ext.anime && ext.version!=pinned.versionName) {
+                        val spec=pinned.copy(apkUrl=ext.apkUrl,sha256="",versionName=ext.version,expectedLib=ext.lib)
+                        packages+=Triple("keiyoushi-latest",spec) { repo.downloadSigned(ext.apkUrl,meta.fingerprint) }
+                    }
+                }
+                if (ext.anime || ext.nsfw || ext.pkg in builtin.map { it.pkg } || ext.sources.none { it.lang.equals("ar",true) }) continue
                 val visible=RepoIndex.visibleSources(ext)
                 val spec=SourceSpec(label=ext.name,pkg=ext.pkg,expectedLib=ext.lib,apkUrl=ext.apkUrl,sha256="",versionName=ext.version,
                     warning=if (ext.nsfw) ContentWarning.MIXED else ContentWarning.SAFE,

@@ -1088,7 +1088,38 @@ class ExtensionEnginePlugin : Plugin() {
         }
         val verdict = ExtensionFailure.classify(t)
         android.util.Log.w("ExtensionEngine", "${verdict.code}:${verdict.owner} <- ${t.readable()}")
+        // عطل من كود الإضافة أو عدم توافقها: إصدار رسمي أحدث قد يصلحه (الموقع تغيّر والإضافة المثبّتة قديمة)
+        if (verdict.owner == ExtensionFailure.Owner.EXTENSION || verdict.code == "ENGINE_INCOMPATIBLE") refreshBuiltin(call.getString("sourceId"))
         call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
+    }
+
+    private val refreshTried = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * تحديث ذاتي موثّق للمصادر المدمجة: كانت تبقى على الإصدار المثبّت ما دام يُحمَّل، ولو تغيّر الموقع وأصلحت
+     * Keiyoushi إضافتها. عند عطل يملكه كود الإضافة يُطلب الإصدار الرسمي الحالي (المفتاح المثبّت، لا رجوع لأقدم)،
+     * ويُثبَّت فقط بعد أن يُحمَّل ويُخرج مصادره؛ السابق يبقى آخر سليم. محاولة لكل حزمة كل 6 ساعات، في الخلفية.
+     */
+    private fun refreshBuiltin(sourceId: String?) {
+        if (sourceId.isNullOrBlank()) return
+        val pkg = if ('#' in sourceId) sourceId.substringBefore('#') else splitSourceId(sourceId).first
+        val base = packageSpec(pkg) ?: return
+        if (userStore.extension(pkg) != null) return
+        val now = System.currentTimeMillis()
+        if (refreshTried[pkg]?.let { now - it < 6 * 3_600_000L } == true) return
+        refreshTried[pkg] = now
+        scope.launch(Dispatchers.IO) {
+            val current = builtinSpecs.current(base)
+            val (next, bytes) = builtinSpecs.fromRepository(base, repoClient) ?: return@launch
+            if (next.sha256.equals(current.sha256, ignoreCase = true)) return@launch
+            val sources = (loader.load(next, bytes) as? FileExtensionLoader.Result.Ok)?.loaded?.sources?.filterIsInstance<CatalogueSource>()
+            if (sources.isNullOrEmpty()) return@launch
+            runCatching { claimIds(pkg, sources) }.getOrElse { return@launch }
+            builtinSpecs.confirm(next)
+            forget(pkg)
+            loader.prune(pkg, builtinSpecs.keep(pkg))
+            android.util.Log.i("ExtensionEngine", "BUILTIN_UPDATED:$pkg ${current.versionName} -> ${next.versionName}")
+        }
     }
 
     /**

@@ -70,6 +70,12 @@ internal object SourceCompatRepairs {
 
     suspend fun loadPages(source: CatalogueSource, chapter: SChapter): List<Page> {
         if (source.name == "Dilar" && source is HttpSource) {
+            // مسار الإضافة نفسها أولًا: إصدار رسمي أحدث يعرف بروتوكول الموقع الحالي (صار 17، والإصلاح هنا
+            // يعرف 10–12 فقط). الإصلاح احتياط لإصدار قديم لا يقرأ الصفحات.
+            val own = runCatching { source.getPageList(chapter) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                .getOrNull()
+            if (own != null && own.isNotEmpty() && own.all { isHttpImage(it.imageUrl) }) return own
             return loadDilarPages(source, chapter)
         }
 

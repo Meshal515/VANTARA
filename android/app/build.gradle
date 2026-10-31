@@ -176,7 +176,9 @@ dependencies {
     // اعتراض Cloudflare المشترك مع الـspike يطابق بصمة Chrome (UserAgentMetadata)
     // عبر WebSettingsCompat؛ نفس الإصدار الذي مرّت به المصادر الست عشرة
     implementation "androidx.webkit:webkit:1.17.0"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+    // 1.11.0 لا 1.8.1: إضافات Keiyoushi الحديثة مبنية عليه وتنادي BuildersKt.runBlockingK (موجود من 1.11.0 فقط،
+    // ويبقى runBlocking القديم للإضافات الأقدم). بدونه NoSuchMethodError داخل اعتراض شبكة الإضافة (فحص المانجا الحي).
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
 
     // ── الترجمة على الجوال: ONNX Runtime يشغّل نماذج الرؤية وOCR داخل الجهاز ──
     // الأوزان (~430MB) ليست هنا: تُنزَّل عند الطلب (ModelStore). المكتبة نفسها

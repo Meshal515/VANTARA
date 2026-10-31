@@ -28,6 +28,10 @@ class UncaughtExceptionInterceptor : Interceptor {
             } else {
                 throw IOException(e)
             }
+        } catch (e: LinkageError) {
+            // كود إضافة يطلب واجهة لا يوفرها التطبيق (NoSuchMethodError…) داخل نداء OkHttp غير متزامن:
+            // بلا هذا يسقط التطبيق كله. يصل الآن كفشل لهذا المصدر وحده (ExtensionFailure: ENGINE_INCOMPATIBLE)
+            throw IOException(e)
         }
     }
 }
