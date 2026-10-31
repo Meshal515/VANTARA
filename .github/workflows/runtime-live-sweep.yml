@@ -58,7 +58,7 @@ jobs:
         env:
           SWEEP_REPOSITORY: ${{ inputs.repository }}
           SWEEP_ONLY: ${{ inputs.only }}
-          SWEEP_LIMIT: '2'
+          SWEEP_LIMIT: '6'
           ANIYOMI_REPOSITORY: https://raw.githubusercontent.com/yuzono/anime-repo/repo
         with:
           api-level: 35
