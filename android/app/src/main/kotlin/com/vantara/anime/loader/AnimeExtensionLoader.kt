@@ -37,10 +37,30 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
      * (`assets/anime-extensions`، tools/bundle-anime-extensions.mjs)، والتنزيل آخرًا:
      * المستودع يحذف الإصدارات القديمة فيصير الرابط المثبّت 404 («تعذّر تنزيل»).
      */
+    private fun vaultFile(ref: ExtensionRef): File {
+        require(Regex("^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$").matches(ref.pkg)) { "INVALID_EXTENSION_PACKAGE" }
+        require(Regex("^[a-fA-F0-9]{64}$").matches(ref.sha256)) { "INVALID_EXTENSION_HASH" }
+        return File(File(dir, "vault/${ref.pkg}"), "${ref.sha256.lowercase()}.apk")
+    }
+
     suspend fun obtain(ref: ExtensionRef): AnimeCatalogueSource {
-        val cached = File(dir, "${ref.pkg}.apk").takeIf { it.isFile }?.readBytes()?.takeIf { sha256(it).equals(ref.sha256, true) }
+        // Existing releases stored a mutable <pkg>.apk: read it only if it still
+        // matches the pinned hash, then migrate non-destructively to the vault.
+        val cached = listOf(vaultFile(ref), File(dir, "${ref.pkg}.apk"))
+            .firstNotNullOfOrNull { file ->
+                file.takeIf { it.isFile }?.let { runCatching { it.readBytes() }.getOrNull() }
+                    ?.takeIf { sha256(it).equals(ref.sha256, true) }
+            }
         val bytes = cached ?: bundled(ref) ?: download(ref)
         return load(ref, bytes)
+    }
+
+    /** Remove only this package after the installed manifest no longer refers to it. */
+    fun erase(pkg: String) {
+        require(Regex("^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$").matches(pkg)) { "INVALID_EXTENSION_PACKAGE" }
+        File(dir, "vault/$pkg").listFiles()?.forEach { it.setWritable(true, true); it.delete() }
+        File(dir, "vault/$pkg").delete()
+        File(dir, "$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
     }
 
     private fun bundled(ref: ExtensionRef): ByteArray? = runCatching {
@@ -58,14 +78,21 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
         }
-        val apk = File(dir, "${ref.pkg}.apk")
-        runCatching {
-            if (apk.exists()) {
-                apk.setWritable(true, true)
-                apk.delete()
-            }
-            apk.writeBytes(bytes)
-        }.onFailure { throw LoadException("write", "تعذّرت كتابة الإضافة", it) }
+        // Each version is immutable and keyed by its hash. A broken update
+        // cannot overwrite the last verified release (nor the legacy APK).
+        val apk = vaultFile(ref)
+        if (!apk.isFile || runCatching { sha256(apk.readBytes()) }.getOrNull() != actual) {
+            val stage = File(apk.parentFile, "${ref.sha256}.${System.nanoTime()}.part")
+            try {
+                check(apk.parentFile?.mkdirs() == true || apk.parentFile?.isDirectory == true)
+                stage.writeBytes(bytes)
+                if (!stage.setWritable(false, false) || stage.canWrite()) throw LoadException("readonly", "ملف الإضافة لم يصبح للقراءة فقط")
+                if (apk.exists()) { apk.setWritable(true, true); check(apk.delete()) }
+                if (!stage.renameTo(apk)) throw LoadException("write", "تعذّر تثبيت النسخة الموثقة")
+            } catch (error: Exception) {
+                throw LoadException("write", "تعذّرت كتابة الإضافة دون المساس بالإصدار السابق", error)
+            } finally { if (stage.exists()) { stage.setWritable(true, true); stage.delete() } }
+        }
         apk.setWritable(false, false)
         if (apk.canWrite()) throw LoadException("readonly", "الملف ما زال قابلًا للكتابة")
 
