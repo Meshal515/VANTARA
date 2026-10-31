@@ -49,7 +49,10 @@ class LiveExtractorProbeTest {
                     val packed=Regex("""eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,""").findAll(html).count()
                     val scripts=dev.vantara.runtime.cloudstream.extractors.PlayerPage.scripts(html)
                     val keys=listOf("wurl","file:","sources","m3u8",".mp4").filter{k->k in scripts}.joinToString(",")
-                    "page=${r.code} final=${r.request.url.host} bytes=${html.length} packed=$packed unpackedChars=${scripts.length-html.length} keys=[$keys]"
+                    // مقتطف حول مفتاح الرابط في الصفحة الحية، والقيم الطويلة مقنّعة: يكشف صيغة الإسناد الفعلية
+                    val at=scripts.indexOf("wurl").takeIf{it>=0}
+                    val excerpt=at?.let{scripts.substring(maxOf(0,it-60),minOf(scripts.length,it+120)).replace(Regex("[A-Za-z0-9]{8,}"),"X").replace('\n',' ')}.orEmpty()
+                    "page=${r.code} final=${r.request.url.host} bytes=${html.length} packed=$packed unpackedChars=${scripts.length-html.length} keys=[$keys] near=«$excerpt»"
                 }}.getOrElse{"page=ERR ${it.javaClass.simpleName}"}
                 val thrown=runCatching{runBlocking{e.extract(url,null,{},{})}}.fold({"returned=$it"},{"threw=${it.javaClass.simpleName}: ${it.message?.take(120)}"})
                 " why[${e.name}: $page $thrown]"

@@ -127,6 +127,7 @@ class ExtensionEnginePlugin : Plugin() {
             // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
             for (filler in FILLER_SOURCES) if (eager(filler.pkg)) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
             for (ext in userStore.state.extensions) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
+            launch { runCatching { refreshBuiltinsDaily(::eager) } }
         }
     }
 
@@ -1108,18 +1109,44 @@ class ExtensionEnginePlugin : Plugin() {
         val now = System.currentTimeMillis()
         if (refreshTried[pkg]?.let { now - it < 6 * 3_600_000L } == true) return
         refreshTried[pkg] = now
-        scope.launch(Dispatchers.IO) {
-            val current = builtinSpecs.current(base)
-            val (next, bytes) = builtinSpecs.fromRepository(base, repoClient) ?: return@launch
-            if (next.sha256.equals(current.sha256, ignoreCase = true)) return@launch
-            val sources = (loader.load(next, bytes) as? FileExtensionLoader.Result.Ok)?.loaded?.sources?.filterIsInstance<CatalogueSource>()
-            if (sources.isNullOrEmpty()) return@launch
-            runCatching { claimIds(pkg, sources) }.getOrElse { return@launch }
-            builtinSpecs.confirm(next)
-            forget(pkg)
-            loader.prune(pkg, builtinSpecs.keep(pkg))
-            android.util.Log.i("ExtensionEngine", "BUILTIN_UPDATED:$pkg ${current.versionName} -> ${next.versionName}")
+        scope.launch(Dispatchers.IO) { updateBuiltin(base) }
+    }
+
+    /**
+     * يثبّت الإصدار الرسمي الأحدث لحزمة مدمجة إن نُشر: المفتاح المثبّت، لا رجوع لأقدم، ويُعتمد بعد أن يُحمَّل
+     * ويُخرج مصادره فقط؛ السابق يبقى آخر سليم. فحص الموقع الحي: Dilar المثبّت 1.6.14 يفشل في الصفحات
+     * (بروتوكول الموقع 17) والرسمي 1.6.20 يقرأها.
+     */
+    private fun updateBuiltin(base: SourceSpec, index: Pair<RepoIndex.Meta, List<RepoIndex.Extension>>? = null): Boolean {
+        val pkg = base.pkg
+        val current = builtinSpecs.current(base)
+        val (next, bytes) = builtinSpecs.fromRepository(base, repoClient, index, onlyIfNewer = true) ?: return false
+        if (next.sha256.equals(current.sha256, ignoreCase = true)) return false
+        val sources = (loader.load(next, bytes) as? FileExtensionLoader.Result.Ok)?.loaded?.sources?.filterIsInstance<CatalogueSource>()
+        if (sources.isNullOrEmpty()) return false
+        runCatching { claimIds(pkg, sources) }.getOrElse { return false }
+        builtinSpecs.confirm(next)
+        forget(pkg)
+        loader.prune(pkg, builtinSpecs.keep(pkg))
+        android.util.Log.i("ExtensionEngine", "BUILTIN_UPDATED:$pkg ${current.versionName} -> ${next.versionName}")
+        return true
+    }
+
+    /**
+     * التحقق اليومي من إصدارات المدمجة كما يفعل Mihon لإضافاته: الفهرس يُقرأ مرة، ولا يُنزَّل إلا ما تغيّر
+     * إصداره، ولما أضافه الحساب (أو له نسخة على الجهاز) فقط. بعد دقيقة من الإقلاع، مرة كل 24 ساعة.
+     */
+    private suspend fun refreshBuiltinsDaily(eager: (String) -> Boolean) {
+        val stamp = java.io.File(context.filesDir, "extensions/builtin-refresh-at")
+        val last = runCatching { stamp.readText().trim().toLong() }.getOrDefault(0L)
+        if (System.currentTimeMillis() - last < 24 * 3_600_000L) return
+        kotlinx.coroutines.delay(60_000)
+        val index = runCatching { repoClient.read(BuiltinSourceRefresh.KEIYOUSHI_BASE) }.getOrNull() ?: return
+        for (base in SPIKE_SOURCES + FILLER_PACKAGES) {
+            if (base.blockedReason != null || !eager(base.pkg) || userStore.extension(base.pkg) != null) continue
+            runCatching { updateBuiltin(base, index) }
         }
+        runCatching { stamp.parentFile?.mkdirs(); stamp.writeText(System.currentTimeMillis().toString()) }
     }
 
     /**

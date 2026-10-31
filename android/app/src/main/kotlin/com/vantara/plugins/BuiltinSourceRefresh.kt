@@ -40,11 +40,19 @@ class BuiltinSourceRefresh(private val file: File) {
      * لا يرمي ولا يحفظ شيئًا: الإصدار يُثبَّت بـ[confirm] فقط بعد أن تُحمَّل الحزمة وتُخرج مصادرها، فحزمة
      * تالفة أو غير متوافقة لا تحلّ محلّ نسخة الجهاز العاملة (فشل التنزيل يترك الحالة السابقة كما هي).
      */
-    fun fromRepository(base: SourceSpec, repo: RepoClient): Pair<SourceSpec, ByteArray>? = runCatching {
-        val (meta, list) = repo.read(KEIYOUSHI_BASE)
+    fun fromRepository(
+        base: SourceSpec,
+        repo: RepoClient,
+        index: Pair<RepoIndex.Meta, List<RepoIndex.Extension>>? = null,
+        onlyIfNewer: Boolean = false,
+    ): Pair<SourceSpec, ByteArray>? = runCatching {
+        // فهرس قُرئ مرة لكل المدمجة (التحقق اليومي) أو يُقرأ هنا لحزمة واحدة
+        val (meta, list) = index ?: repo.read(KEIYOUSHI_BASE)
         // المفتاح المثبّت هنا هو المرجع، لا ما يعلنه المستودع: تغيّر المفتاح يوقف التنزيل
         require(meta.fingerprint == KEIYOUSHI_KEY) { "Keiyoushi signing key changed" }
         val ext = list.firstOrNull { it.pkg == base.pkg } ?: return null
+        // الإصدار نفسه المثبّت لا يُنزَّل من جديد: لا تغيير يُنتظر منه
+        if (onlyIfNewer && ext.version == current(base).versionName) return null
         if (kotlin.math.abs(ext.lib - base.expectedLib) > 0.0001) return null
         // لا رجوع لإصدار أقدم من المثبّت على الجهاز: فهرس قديم أو متلاعب به لا يعيد إصدارًا مُستبدلًا
         val have = pins[base.pkg]?.code ?: 0
