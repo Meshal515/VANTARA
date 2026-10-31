@@ -20,8 +20,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: runtime-live-sweep-${{ github.ref }}
-  cancel-in-progress: true
+  group: runtime-live-sweep-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -59,7 +59,7 @@ jobs:
           SWEEP_REPOSITORY: ${{ inputs.repository }}
           SWEEP_ONLY: ${{ inputs.only }}
           SWEEP_LIMIT: '2'
-          ANIYOMI_REPOSITORY: https://raw.githubusercontent.com/msrofficial/anime-repo/repo
+          ANIYOMI_REPOSITORY: https://raw.githubusercontent.com/yuzono/anime-repo/repo
         with:
           api-level: 35
           target: google_apis
@@ -123,6 +123,7 @@ jobs:
             extractor-probe.txt
             extractor-generic.txt
             manga-sweep.jsonl
+            aniyomi-sweep.log
             live-sweep.jsonl
             live-sweep-logcat.txt
             android/app/build/outputs/androidTest-results/
