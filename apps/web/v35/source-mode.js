@@ -8,7 +8,7 @@ const node = (tag, cls, text) => {
   if (text != null) n.textContent = text;
   return n;
 };
-function sourceLogo(addon) {
+export function sourceLogo(addon) {
   const mark = node("span", "addon-logo");
   mark.setAttribute("aria-hidden", "true");
   const fallback = () => {

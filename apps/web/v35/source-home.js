@@ -8,6 +8,7 @@
 import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { nativeCover } from "./covers.js";
+import { sourceLogo } from "./source-mode.js";
 
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -67,25 +68,51 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
     Promise.resolve(onOpenWork(work, { addon, adapter })).finally(() => { open.busy = false; });
   };
 
-  // ── الرأس: رجوع واسم الإضافة وحالتها كما في القائمة ──
-  const back = node("button", "addon-button addon-button-quiet addon-source-back", "‹ الإضافات");
+  // ── الرأس: شريط رئيسية القسم نفسه (VANTARA / القسم)، وشعار الإضافة بجانب VANTARA، والقسم مقفل على
+  //    تخصص الإضافة (لا سهم تبديل). يمين: رجوع إلى الإضافات، ويسار: البحث داخل الإضافة ──
+  const head = node("header", "header addon-home-header");
+  const start = node("div", "header-start");
+  const back = node("button", "icon-btn addon-home-back");
   back.type = "button";
+  back.setAttribute("aria-label", "رجوع إلى الإضافات");
+  back.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   back.onclick = onBack;
-  const head = node("header", "addon-home-head");
-  const name = node("h2", null, addon.name);
-  name.dir = "auto";
-  const status = node("p", "addon-pulse");
+  start.append(back);
+  const brandBox = node("div", "brand-box");
+  const lock = node("div", "brand-switch addon-home-brand");
+  lock.setAttribute("role", "heading");
+  lock.setAttribute("aria-level", "1");
+  lock.setAttribute("aria-label", `${addon.name} داخل VANTARA`);
+  const brandRow = node("span", "addon-home-brand-row");
+  const logo = sourceLogo(addon);
+  logo.classList.add("addon-home-logo");
+  brandRow.append(node("span", "brand", "VANTARA"), logo);
+  const section = node("span", "brand-section");
+  const word = node("span", "addon-home-section", "");
+  section.append(word);
+  lock.append(brandRow, section);
+  brandBox.append(lock);
+  const end = node("div", "header-end");
+  const find = node("button", "icon-btn");
+  find.type = "button";
+  find.setAttribute("aria-label", `ابحث في ${addon.name}`);
+  find.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  find.onclick = () => onOpenList("search");
+  end.append(find);
+  head.append(start, brandBox, end);
+  const sectionWord = () => { word.textContent = kind === "manga" ? "MANGA" : kind === "anime" ? "ANIME" : "CINEMA"; };
+  sectionWord();
+  const status = node("p", "addon-pulse addon-home-pulse");
   const paint = () => {
     if (!pulse || !addon.key) return void (status.hidden = true);
     const st = pulseView(pulse.get(addon.key), { checking: false });
-    status.className = `addon-pulse addon-pulse--${st.level}`;
-    status.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, st.label));
+    status.className = `addon-pulse addon-pulse--${st.level} addon-home-pulse`;
+    status.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, addon.name), node("span", null, st.label));
   };
   paint();
-  head.append(name, status);
   const body = node("div", "addon-home-body");
   body.append(node("p", "addon-source-note", "جارٍ جلب المصدر…"));
-  root.append(back, head, body);
+  root.append(head, status, body);
 
   // ── مانجا: البطل والأبواب ──
   function mangaHero(items) {
@@ -196,8 +223,10 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
     const [popular, latest] = await Promise.all([take(adapter.popular), take(adapter.latest ?? adapter.home)]);
     if (closed) return;
     const lead = popular.length ? popular : latest;
-    kind = dominantKind([...popular, ...latest], kind);
+    // تخصص الإضافة يحسم القسم؛ المعلِنة لأكثر من نوع تأخذ قسم أغلب ما أرجعته فعلًا
+    if (types.length !== 1) kind = dominantKind([...popular, ...latest], kind);
     root.classList.add(`addon-source-home--${kind}`);
+    sectionWord();
     if (!lead.length && !latest.length) {
       const empty = node("div", "addon-home-empty");
       empty.append(node("p", "addon-source-note", "لم يُرجع المصدر أعمالًا الآن."));

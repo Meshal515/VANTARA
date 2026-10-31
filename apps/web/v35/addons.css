@@ -1070,3 +1070,11 @@
 .addon-source-home .an-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .addon-source-home .addon-home-all { margin: 0 var(--gutter, 18px); }
 .addon-source-home .addon-home-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 0 var(--gutter, 18px); }
+/* رأس رئيسية القسم داخل الإضافة: شعارها بجانب VANTARA، والقسم مقفل، وشريط الصفحة العام مخفي */
+#utility:has(.addon-source-home) > :first-child:not(.page-body) { display: none; }
+.addon-home-header { position: sticky; top: 0; z-index: 5; }
+.addon-home-brand { cursor: default; display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: 0; color: inherit; }
+.addon-home-brand-row { display: inline-flex; align-items: center; gap: 8px; }
+.addon-home-logo { width: 24px; height: 24px; border-radius: 7px; overflow: hidden; display: inline-flex; }
+.addon-home-logo img, .addon-home-logo svg { width: 100%; height: 100%; object-fit: cover; }
+.addon-home-pulse { margin: 0; padding: 0 var(--gutter, 18px); display: flex; gap: 8px; align-items: center; }

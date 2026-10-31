@@ -20,6 +20,11 @@ describe('source home', () => {
     document.body.append(root);
     await flush(); await flush();
     expect(root.classList.contains('addon-source-home--manga')).toBe(true);
+    // شريط رئيسية القسم: VANTARA وشعار الإضافة بجانبه، والقسم مقفل على تخصصها (لا زر تبديل)
+    expect(root.querySelector('.header .brand').textContent).toBe('VANTARA');
+    expect(root.querySelector('.header .addon-home-logo')).not.toBeNull();
+    expect(root.querySelector('.header .brand-section').textContent).toBe('MANGA');
+    expect(root.querySelector('[data-act="toggleSections"]')).toBeNull();
     expect(root.querySelector('.hero .hero-slide .hero-name').textContent).toBe('p1');
     expect([...root.querySelectorAll('.shortcut .shortcut-label')].map((n) => n.textContent)).toEqual(['آخر التحديثات', 'الرائج', 'كل الأعمال', 'البحث']);
     root.querySelectorAll('.shortcut')[1].click();
@@ -36,6 +41,7 @@ describe('source home', () => {
     document.body.append(root);
     await flush(); await flush();
     expect(root.classList.contains('addon-source-home--anime')).toBe(true);
+    expect(root.querySelector('.header .brand-section').textContent).toBe('ANIME');
     const cards = [...root.querySelectorAll('.an-rail .an-card')];
     expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['a1', 'm1', 'a2']);
     cards[1].click();
