@@ -66,3 +66,14 @@ Mangalek/Link/Lionz/Spark/Starz (عائلة موقع واحد: الفصل الأ
 روابط مستخرجة: AnimeRift (9) وAnime4up (10) وAnimeWitcher (3) وDima toon (1). الفحص صار يتحقق من تشغيل كل رابط
 (بايتات فيديو أو أول مقطع HLS). Cloudflare: Anime3rb وAnime-Phoenix (تبتلعه الإضافة فيظهر NO_CATALOGUE) وWitanime
 وAnimerco. أقسام بصفر عناصر: Brstej وMycima وYouTube وEgydead (سجل VantaraRuntimeHttp يحسم السبب).
+
+## أحكام بالدليل (تشغيل 41168900235)
+
+- **التشغيل الفعلي** (بايتات فيديو أو أول مقطع HLS): AnimeRift 6/6، AnimeWitcher 3/3، Anime4up 4/7 (mp4upload
+  وMixdrop المضافان يعملان داخل التطبيق)، Dima toon، Aflaam، Asia2tv (ok.ru 144–1080)، EgyWatch، Eshek، TVgarden.
+- مقاطع acek-cdn ترد 403 حتى مع Origin: فرضية Origin مرفوضة؛ قيد من الخادم (رمز أو عنوان).
+- Mixdrop: يعمل في مسار التطبيق؛ فشله في LiveExtractorProbeTest كان لأن الفحص يرسل UA «okhttp» (أُصلح).
+- أقسام بلا عناصر — **الإضافة متقادمة لا المحرك**: Alooytv تطلب fitnur.com/alooytv وصارت صفحة اختصار روابط؛
+  Brstej تبحث عن `div.caption h3 a` والموقع (200، عشرون عملًا بـ`pm-video-thumb`) غيّر تصميمه. لا إصلاح دون كود
+  خاص بالموقع (مرفوض بقرار المالك)؛ يحتاج تحديثًا من ناشر الإضافة.
+- Dilar الرسمي 1.6.20: PASS حتى صورة (126 فصلًا، 36 صفحة). AsgardScans: PASS بعد ترقية التحويلات.

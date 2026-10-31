@@ -22,7 +22,12 @@ class LiveExtractorProbeTest {
         val list=System.getenv("VANTARA_LIVE_EXTRACTORS")?.let(::File)
         assumeTrue("live probe is opt-in",list?.isFile==true)
         val client=OkHttpClient.Builder().connectTimeout(15,TimeUnit.SECONDS).readTimeout(20,TimeUnit.SECONDS).build()
-        NetworkBridge.install{request,follow->client.newBuilder().followRedirects(follow).followSslRedirects(follow).build().newCall(request).execute()}
+        // كالمضيف في التطبيق (RuntimeHost يضع User-Agent المتصفح لكل طلب بلا UA): بدونه يرسل OkHttp «okhttp/x»
+        // فتعيد مواقع مثل Mixdrop صفحة أخرى، فيبدو المستخرج معطوبًا في الفحص وحده
+        NetworkBridge.install{request,follow->
+            val outgoing=if(request.header("User-Agent")==null)request.newBuilder().header("User-Agent","Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36").build() else request
+            client.newBuilder().followRedirects(follow).followSslRedirects(follow).build().newCall(outgoing).execute()
+        }
         for(url in list!!.readLines().map{it.trim()}.filter{it.startsWith("http")}) {
             val links=mutableListOf<ExtractorLink>()
             // VANTARA_LIVE_GENERIC=1 runs the shared player-page engine on every URL, to learn which hosts it reads.
