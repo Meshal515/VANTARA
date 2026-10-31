@@ -77,13 +77,17 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
           // Idempotent settlement: a bridge rejection must not strand the
           // session's native pendingBatches, even when all providers fail.
           if (controller.signal.aborted) return;
-          try {
-            if (typeof plugin.finishAddonBatch === 'function')
+          let settled = false;
+          if (typeof plugin.finishAddonBatch === 'function') {
+            try {
               await plugin.finishAddonBatch({ session, sourceId, ...(addonGeneration ? { addonGeneration } : {}) });
-            else
+              settled = true;
+            } catch { /* Older Android binaries may not support this method. */ }
+          }
+          if (!settled) {
+            try {
               await plugin.appendAddonStreams({ ...args, streams: [], provider: undefined, reason: 'تعذر تسليم سيرفرات الإضافة' });
-          } catch {
-            // A native watchdog drains any remaining reservations independently.
+            } catch { /* The native watchdog drains any remaining reservation. */ }
           }
         }
       })).then(() => undefined);
