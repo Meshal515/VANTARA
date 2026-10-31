@@ -583,11 +583,18 @@ class AnimeEngine(context: Context) {
                 val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
                 coroutineScope {
                     for (copy in ordered) launch {
+                        // تتبع منظم لكل مصدر في التجهيز (معرّف الجلسة = Trace ID): أين يقف وكم أخذ ولماذا
+                        val t0 = System.nanoTime()
+                        fun trace(stage: String, detail: Any? = null) { android.util.Log.i("VantaraPrepare",
+                            "trace=${prep.id} source=${copy.sourceId.take(80)} stage=$stage ms=${(System.nanoTime() - t0) / 1_000_000}${detail?.let { " $it" } ?: ""}") }
+                        trace("start", "episode=${prep.number}")
                         runCatching {
                             withTimeout(PREPARE_TIMEOUT_MS) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                                val ep = resolver.pick(resolver.episodes(c), prep.number) ?: return@withTimeout
-                                val a = adapter(copy.sourceId) ?: return@withTimeout
+                                val list = resolver.episodes(c)
+                                trace("episodes", "count=${list.size} numbers=${list.take(5).map { it.number }}")
+                                val ep = resolver.pick(list, prep.number) ?: return@withTimeout trace("no-episode", "wanted=${prep.number}")
+                                val a = adapter(copy.sourceId) ?: return@withTimeout trace("no-adapter")
                                 val scope = this
                                 val trace = com.vantara.anime.adapters.ResolveTrace { r ->
                                     prep.report(r)
@@ -599,9 +606,13 @@ class AnimeEngine(context: Context) {
                                 val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
                                 else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
+                                trace("links", "count=${links.size}")
                                 prep.adopt(copy.sourceId, links)
                             }
-                        }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
+                        }.onFailure {
+                            trace(if (it is TimeoutCancellationException) "timeout" else "error", "${it.javaClass.simpleName}: ${it.message?.take(160)}")
+                            if (it is CancellationException && it !is TimeoutCancellationException) throw it
+                        }
                     }
                 }
             } finally {
