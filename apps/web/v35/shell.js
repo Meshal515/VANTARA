@@ -18,6 +18,7 @@ import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
+import { renderSourceHome, supportsSourceHome } from './source-home.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
@@ -3827,7 +3828,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('utilityTitle').textContent = addon.name;
     showPage('utility');
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async function openSelectedWork(item) {
+    const openSelectedWork = async function openSelectedWork(item) {
       try {
         toast('جارٍ فتح «' + String(item?.title ?? item?.name ?? 'العمل').slice(0, 40) + '»…');
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
@@ -3852,12 +3853,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
         if(run!==addonViewGeneration)return;
         const work = sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes });
-        if (work._work) { applySection('manga'); buildDrawer(); await openWork(work); }
-        else if (addon.contentTypes.includes('anime')) { applySection('anime'); buildDrawer(); await anime.openAnime(work); }
+        // كل عمل يُفتح ببطاقة نوعه هو، لا بنوع الإضافة: مصدر متنوع قد يحمل مانجا داخل واجهة أنمي
+        const itemType = String(item.type ?? '').toLowerCase();
+        if (work._work || itemType === 'manga') { applySection('manga'); buildDrawer(); await openWork(work); }
+        else if (itemType === 'anime' || (!['movie', 'series', 'tv'].includes(itemType) && addon.contentTypes.includes('anime'))) { applySection('anime'); buildDrawer(); await anime.openAnime(work); }
         else { applySection('cinema'); buildDrawer(); await cinema.openWork(work); }
       } catch (error) { toast(error.message); }
-    } });
-    q('utilityBody').replaceChildren(sourceView);
+    };
+    // واجهة الإضافة بلغة قسمها (source-home.js)، والقائمة الكاملة خلف أبوابها؛ الرجوع منها إلى واجهة الإضافة
+    const showList = (tab) => {
+      sourceView?.close?.();
+      const listState = tab ? { query: '', page: 1, scroll: 0, ...(tab === 'search' ? {} : { tab }) } : sourceState;
+      sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: listState, onBack: home ? showHome : openAddons, onOpenWork: openSelectedWork });
+      q('utilityBody').replaceChildren(sourceView);
+      if (tab === 'search') sourceView.querySelector('.addon-source-search input')?.focus?.();
+    };
+    const home = supportsSourceHome(adapter) && !sourceState?.tab;
+    function showHome() {
+      sourceView?.close?.();
+      sourceView = renderSourceHome({ addon, adapter, pulse: addons.pulse, onOpenWork: openSelectedWork, onOpenList: showList, onBack: openAddons });
+      q('utilityBody').replaceChildren(sourceView);
+    }
+    if (home) showHome(); else showList(null);
   }
   // ───────────────────────── PIN وحذف الحساب ─────────────────────────
 

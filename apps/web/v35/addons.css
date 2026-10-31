@@ -1052,3 +1052,21 @@
 }
 /* البطاقة تُفتح: إشارة فورية بدل «لا شيء يحدث» */
 .addon-source .work-card[aria-busy="true"] { opacity: .55; pointer-events: none; }
+
+/* واجهة الإضافة بلغة قسمها (source-home.js): مكوّنات الرئيسية نفسها، ورأس خفيف باسم الإضافة */
+.addon-source-home { display: flex; flex-direction: column; gap: 22px; padding-bottom: 40px; }
+.addon-source-home .addon-home-head { display: flex; flex-direction: column; gap: 4px; padding: 0 var(--gutter, 18px); }
+.addon-source-home .addon-home-head h2 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.01em; }
+.addon-source-home .addon-home-body { display: flex; flex-direction: column; gap: 26px; }
+.addon-source-home .addon-home-hero .hero-track { transform: none !important; }
+.addon-source-home .addon-home-hero .hero-slide { cursor: pointer; }
+.addon-source-home .hero-dot.active { opacity: 1; }
+.addon-home-billboard { position: relative; display: block; margin: 0 var(--gutter, 18px); padding: 0; border: 0; border-radius: 22px; overflow: hidden; aspect-ratio: 16 / 10; background: rgba(255,255,255,.04); cursor: pointer; color: #fff; text-align: start; }
+.addon-home-billboard-art, .addon-home-billboard-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.addon-home-billboard::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.82), rgba(0,0,0,0) 60%); }
+.addon-home-billboard-cap { position: absolute; inset-inline: 18px; bottom: 16px; z-index: 1; display: flex; flex-direction: column; gap: 4px; }
+.addon-home-billboard-cap small { font-size: 13px; opacity: .75; }
+.addon-home-billboard-cap b { font-size: 24px; font-weight: 800; line-height: 1.2; }
+.addon-source-home .an-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.addon-source-home .addon-home-all { margin: 0 var(--gutter, 18px); }
+.addon-source-home .addon-home-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 0 var(--gutter, 18px); }
