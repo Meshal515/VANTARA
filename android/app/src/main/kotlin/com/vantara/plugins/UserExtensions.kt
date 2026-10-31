@@ -202,6 +202,29 @@ object RepoIndex {
         }
     }
 
+    /**
+     * Some real Aniyomi publishers currently include complete source identities in their legacy
+     * index.min.json while the same package's v2 protobuf entry has no source metadata.
+     * Supplement *metadata only*; never replace the v2 APK URL, version, warning, package or
+     * repository signing key. A mismatch must be left untouched rather than guess identities.
+     */
+    fun fillMissingSourcesFromLegacy(v2: List<Extension>, legacy: List<Extension>): List<Extension> {
+        val byPackage = legacy.groupBy { it.pkg }
+        return v2.map { current ->
+            if (current.sources.isNotEmpty()) return@map current
+            val old = byPackage[current.pkg]?.singleOrNull()
+                ?.takeIf { it.version == current.version }
+                ?.takeIf { it.versionCode == 0L || current.versionCode == 0L || it.versionCode == current.versionCode }
+                ?.takeIf { it.sources.isNotEmpty() }
+                ?: return@map current
+            val ids = old.sources.map { it.id }
+            if (ids.distinct().size != ids.size ||
+                ids.any { it.toLongOrNull() == null } ||
+                old.sources.any { it.name.isBlank() || it.lang.isBlank() }) return@map current
+            current.copy(sources = old.sources)
+        }
+    }
+
     /** المصادر التي تظهر في التطبيق: العربية إن وُجدت، وإلا مصادر لغة الإضافة. */
     fun visibleSources(ext: Extension): List<Source> =
         ext.sources.filter { it.lang.equals("ar", ignoreCase = true) }.ifEmpty {
@@ -346,7 +369,13 @@ class RepoClient(private val context: Context, private val client: okhttp3.OkHtt
             // القائمة قد تكون في ملف مستقل (الحقل 102): تُتبع مرة واحدة فقط، فلا حلقة إعادة توجيه
             // بلا حد كما في Mihon، وبحد حجم. بدون هذا كان نقل Keiyoushi القائمة إليه يُظهر صفر إضافات
             val all = if (list.isEmpty() && meta.extensionListUrl != null) RepoIndex.parseExtensionList(fetchBytes(meta.extensionListUrl, 16 * 1024 * 1024)) else list
-            return declared to all
+            // v2 can omit source factories for published Aniyomi packages even when the
+            // matching publisher's legacy index lists them. Keep v2 package/signature authority.
+            val supplemented = if (all.any { it.anime && it.sources.isEmpty() }) {
+                val legacy = runCatching { RepoIndex.parseIndex(fetchText("$base/index.min.json"), base) }.getOrNull()
+                if (legacy != null) RepoIndex.fillMissingSourcesFromLegacy(all, legacy) else all
+            } else all
+            return declared to supplemented
         }
         return declared to RepoIndex.parseIndex(fetchText("$base/index.min.json"), base)
     }
