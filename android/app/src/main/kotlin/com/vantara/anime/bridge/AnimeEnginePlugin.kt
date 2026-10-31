@@ -178,6 +178,14 @@ class AnimeEnginePlugin : Plugin() {
         call.resolve(JSObject().put("added", engine.extendAddonSources(session, (0 until ids.length()).map { ids.optString(it) }, call.getString("addonGeneration"))))
     }
 
+    /** Idempotent failure acknowledgement for the web-to-native stream bridge. */
+    @PluginMethod
+    fun finishAddonBatch(call: PluginCall) {
+        val session = call.getString("session") ?: return call.reject("session مطلوب")
+        val sourceId = call.getString("sourceId") ?: return call.reject("sourceId مطلوب")
+        call.resolve(JSObject().put("finished", engine.finishAddonBatch(session, sourceId, call.getString("addonGeneration"))))
+    }
+
     @PluginMethod
     fun appendAddonStreams(call: PluginCall) = run(call) {
         val session = call.getString("session") ?: error("session مطلوب")
