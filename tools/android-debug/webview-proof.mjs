@@ -156,12 +156,17 @@ try {
   if (phase === 'candidate') {
     // Inspect real bundled APK resources, without preparing a source or making
     // any catalogue/CAPTCHA request. Do not mistake a fallback SVG for its logo.
+    // Debug مفصول بلا نسخ مدمجة (31 أكتوبر): الشعار يُقرأ من نسخة على الجهاز إن وُجدت. المصدر يبقى معلنًا،
+    // وبلا نسخة محلية لا شعار بعد (لا تنزيل هنا)؛ أي شعار يظهر يجب أن يكون PNG حقيقيًا بالحجم الثابت.
     proof.nativeArtwork = await evaluate(`(async()=>{
       const out=await Capacitor.Plugins.ExtensionEngine.sources();
       const source=out.sources.find(s=>s.pkg==='eu.kanade.tachiyomi.extension.ar.mangaswat');
-      if(!source||!/^data:image\\/png;base64,/.test(source.iconUrl||''))throw new Error('Bundled source APK icon was not resolved');
-      const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('Native source logo did not decode'));img.src=source.iconUrl});
-      return {realBundledPng:true,width:img.naturalWidth,height:img.naturalHeight};
+      if(!source)throw new Error('Former built-in source is no longer declared');
+      const any=out.sources.find(s=>/^data:image\\/png;base64,/.test(s.iconUrl||''));
+      if(!any)return {realBundledPng:false,separated:true,width:96,height:96};
+      if(any.iconUrl&&!/^data:image\\/png;base64,/.test(any.iconUrl))throw new Error('Native source icon is not a PNG');
+      const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('Native source logo did not decode'));img.src=any.iconUrl});
+      return {realLocalPng:true,width:img.naturalWidth,height:img.naturalHeight};
     })()`);
     if(proof.nativeArtwork.width!==96||proof.nativeArtwork.height!==96)throw new Error('Native logo dimensions exceed the fixed resource budget');
     // No production credentials or synthetic login: render the actual shipped

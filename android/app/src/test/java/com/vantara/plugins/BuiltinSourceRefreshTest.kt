@@ -130,4 +130,12 @@ class BuiltinRefreshConfirmTest {
         assertEquals(base.pkg, BuiltinSourceRefresh(file).current(base).pkg)
     }
 
+    @Test fun `an official release on another supported lib is accepted, an unsupported one is not`() {
+        // Mangalek المثبّت 1.4.65 والرسمي 1.6.70: يُقبل؛ واجهة لا يحمّلها المحرك تُرفض قبل التنزيل
+        org.junit.Assert.assertTrue(BuiltinSourceRefresh.acceptsLib(1.4))
+        org.junit.Assert.assertTrue(BuiltinSourceRefresh.acceptsLib(1.6))
+        org.junit.Assert.assertTrue(BuiltinSourceRefresh.acceptsLib(1.600000023841858))
+        org.junit.Assert.assertFalse(BuiltinSourceRefresh.acceptsLib(1.3))
+        org.junit.Assert.assertFalse(BuiltinSourceRefresh.acceptsLib(1.7))
+    }
 }

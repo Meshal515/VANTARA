@@ -53,7 +53,9 @@ class BuiltinSourceRefresh(private val file: File) {
         val ext = list.firstOrNull { it.pkg == base.pkg } ?: return null
         // الإصدار نفسه المثبّت لا يُنزَّل من جديد: لا تغيير يُنتظر منه
         if (onlyIfNewer && ext.version == current(base).versionName) return null
-        if (kotlin.math.abs(ext.lib - base.expectedLib) > 0.0001) return null
+        // أي واجهة يحمّلها المحرك، لا واجهة الإصدار المثبّت وحدها: Mangalek وMangaSpark مثبّتان على 1.4 والرسمي
+        // صار 1.6 (يقرأ حتى صورة في الفحص الحي). اشتراط 1.4 تركهما بلا نسخة بعد فصل المدمجة، وجمّدهما قبله
+        if (!acceptsLib(ext.lib)) return null
         // لا رجوع لإصدار أقدم من المثبّت على الجهاز: فهرس قديم أو متلاعب به لا يعيد إصدارًا مُستبدلًا
         val have = pins[base.pkg]?.code ?: 0
         if (ext.versionCode in 1 until have) return null
@@ -100,6 +102,9 @@ class BuiltinSourceRefresh(private val file: File) {
     }
 
     companion object {
+        /** واجهات الإضافات التي يحمّلها FileExtensionLoader (LIB_MIN..LIB_MAX فيه، والتحقق النهائي عنده بعد التنزيل). */
+        fun acceptsLib(lib: Double): Boolean = lib >= 1.4 - 0.0001 && lib <= 1.6 + 0.0001
+
         const val KEIYOUSHI_BASE = "https://raw.githubusercontent.com/keiyoushi/extensions/repo"
         /** signingKeyFingerprint من repo.json الرسمي لـKeiyoushi (30 أكتوبر 2026). */
         const val KEIYOUSHI_KEY = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"

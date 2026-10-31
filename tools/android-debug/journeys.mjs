@@ -1,0 +1,222 @@
+/**
+ * رحلات Debug الثلاث على APK حقيقي في محاكي، عبر WebView التطبيق وجسوره الأصلية نفسها (CDP):
+ *
+ *   upgrade-before  على Debug القديم (بنسخ مدمجة): بيانات ويب، مصادر مدمجة مستعملة، مستودع وإضافة مثبتة.
+ *   upgrade-after   بعد `adb install -r` بلا حذف: كل ما سبق باقٍ، والمدمجة تُحمَّل من الجهاز **بلا شبكة**.
+ *   restart         بعد إعادة تشغيل العملية: المستودع والإضافة والمدمجة باقية.
+ *   clean           تثبيت نظيف: لا نسخ مدمجة، لا مستودع، لا إضافة، لا تنزيل ذاتي، وحساب جديد يرى صفر مصادر.
+ *   repo-read       من النظيف: إضافة مستودع ← تثبيت مصدر ← قراءة فصل كامل (كل صورة تُنزّل ويُتحقق أنها صورة)،
+ *                   ثم مصدر كان مدمجًا يُجلب من الشبكة الموثّقة ويُقرأ له فصل كامل.
+ *
+ * لا تسجيل دخول ولا حسابات حقيقية. الحكم PASS/FAIL في <phase>.json، والخروج غير الصفري = فشل.
+ */
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const phase = process.argv[2];
+const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read'];
+if (!PHASES.includes(phase)) throw new Error(`phase: ${PHASES.join('|')}`);
+const out = process.env.DEBUG_EVIDENCE || 'android-debug-evidence';
+const pkg = 'com.vantara.app.debug';
+const KEIYOUSHI = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo';
+const AZORA = 'eu.kanade.tachiyomi.extension.ar.azora';
+const TEAMX = 'eu.kanade.tachiyomi.extension.ar.teamx';
+// إضافات عربية غير مدمجة مرّت في الفحص الحي حتى صورة؛ أول ما يُثبَّت ويُقرأ له فصل كامل يكفي، والمحاولات تُسجَّل
+const USER_CANDIDATES = ['Rocks Manga', 'Lava Scans', 'Despair', 'Oduto', 'SayManhwa', 'Loner', 'XSano', 'Kawii', 'ProComic'];
+
+const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
+const shell = (cmd) => { try { return adb('shell', 'run-as', pkg, 'sh', '-c', `'${cmd}'`); } catch (e) { return `ERR ${String(e.stderr || e.message).slice(0, 200)}`; } };
+mkdirSync(out, { recursive: true });
+const proof = { phase, passed: false, steps: {} };
+const save = () => writeFileSync(`${out}/${phase}.json`, JSON.stringify(proof, null, 2) + '\n');
+
+const pid = adb('shell', 'pidof', pkg);
+if (!/^\d+$/.test(pid)) throw new Error('APK process is not running');
+adb('forward', 'tcp:9224', `localabstract:webview_devtools_remote_${pid}`);
+let pages;
+for (let n = 0; n < 90; n++) {
+  try {
+    pages = await (await fetch('http://127.0.0.1:9224/json')).json();
+    if (pages.some((p) => p.type === 'page' && p.url.startsWith('https://localhost'))) break;
+  } catch {}
+  await delay(1000);
+}
+const page = pages?.find((p) => p.type === 'page' && p.url.startsWith('https://localhost'));
+if (!page) throw new Error('The APK did not expose its local WebView');
+const socket = new WebSocket(page.webSocketDebuggerUrl);
+await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+let seq = 0;
+const pending = new Map();
+socket.onmessage = ({ data }) => {
+  const msg = JSON.parse(data);
+  const item = pending.get(msg.id);
+  if (!item) return;
+  pending.delete(msg.id); clearTimeout(item.timer);
+  msg.error ? item.reject(new Error(JSON.stringify(msg.error))) : item.resolve(msg.result);
+};
+const command = (method, params = {}, ms = 240000) => new Promise((resolve, reject) => {
+  const id = ++seq;
+  const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, ms);
+  pending.set(id, { resolve, reject, timer });
+  socket.send(JSON.stringify({ id, method, params }));
+});
+async function js(expression, ms) {
+  const r = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, ms);
+  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+  return r.result.value;
+}
+await command('Runtime.enable');
+for (let n = 0; n < 60 && !(await js('Boolean(window.Capacitor?.Plugins?.ExtensionEngine)')); n++) await delay(1000);
+
+/** خطوة محكومة: تُسجَّل نتيجتها أو سبب فشلها، والفشل يوقف المرحلة. */
+async function step(name, fn) {
+  const t = Date.now();
+  try {
+    const value = await fn();
+    proof.steps[name] = { result: 'PASS', ms: Date.now() - t, value };
+    console.log(`PASS ${phase}/${name}`, JSON.stringify(value)?.slice(0, 300));
+    return value;
+  } catch (error) {
+    proof.steps[name] = { result: 'FAIL', ms: Date.now() - t, error: String(error?.message || error).slice(0, 600) };
+    console.log(`FAIL ${phase}/${name}`, proof.steps[name].error);
+    throw error;
+  } finally { save(); }
+}
+
+// ── أدوات داخل WebView ──
+const EE = 'Capacitor.Plugins.ExtensionEngine';
+const webMarker = `(async()=>{
+  const key='vantara.debug.journey-proof',value='journey-20261031';
+  const db=await new Promise((res,rej)=>{const r=indexedDB.open('vantara-debug-journey',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+  if(${JSON.stringify(phase)}==='upgrade-before'){localStorage.setItem(key,value);await new Promise((res,rej)=>{const t=db.transaction('p','readwrite');t.objectStore('p').put(value,key);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+  const stored=await new Promise((res,rej)=>{const r=db.transaction('p').objectStore('p').get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});db.close();
+  return {localStorage:localStorage.getItem(key)===value,indexedDB:stored===value};
+})()`;
+const snapshot = async () => ({
+  sources: (await js(`${EE}.sources().then(r=>r.sources.map(s=>s.id).sort())`)),
+  repos: (await js(`${EE}.repos().then(r=>({repos:r.repos.map(x=>x.url).sort(),installed:r.installed.map(x=>x.pkg+'@'+x.version).sort()}))`)),
+  files: shell('cd files/extensions 2>/dev/null && find . -type f -name "*.apk" | sort'),
+  userRepos: shell('sha256sum files/extensions/user-repos.json 2>/dev/null | cut -c1-64'),
+  visible: shell('cat files/extensions/builtin-visible.json 2>/dev/null'),
+});
+const network = async (on) => {
+  adb('shell', 'cmd', 'connectivity', 'airplane-mode', on ? 'disable' : 'enable');
+  for (let n = 0; n < 30; n++) {
+    const online = await js(`fetch('https://raw.githubusercontent.com/keiyoushi/extensions/repo/repo.json',{cache:'no-store'}).then(()=>true,()=>false)`, 30000);
+    if (online === on) return { online };
+    await delay(1000);
+  }
+  throw new Error(`network did not become ${on ? 'online' : 'offline'}`);
+};
+
+/** فصل كامل: رائج ← حتى ثلاثة أعمال ← الأحدث/الأوسط/الأقدم حتى فصل بأكثر من صفحتين ← كل صورة تُنزّل وتُتحقق. */
+const readChapter = (sourceId) => js(`(async()=>{
+  const E=${EE},id=${JSON.stringify(sourceId)},trail=[];
+  let list=(await E.popular({sourceId:id,page:1}).catch(e=>({mangas:[],e:e.message}))).mangas;
+  if(!list.length)list=(await E.latest({sourceId:id,page:1})).mangas;
+  for(const manga of list.slice(0,3)){
+    const ch=(await E.chapters({sourceId:id,manga}).catch(e=>{trail.push('chapters: '+e.message);return {chapters:[]}})).chapters;
+    for(const chapter of [...new Set([ch[0],ch[Math.floor(ch.length/2)],ch[ch.length-1]])].filter(Boolean)){
+      const pg=(await E.pages({sourceId:id,chapter}).catch(e=>{trail.push('pages: '+e.message);return {pages:[]}})).pages;
+      trail.push(manga.title.slice(0,40)+' / '+(chapter.name||'').slice(0,30)+': '+pg.length+' pages');
+      if(pg.length<3)continue;
+      let bytes=0;const types=new Set();
+      for(const p of pg.slice(0,120)){
+        const img=await E.image({sourceId:id,page:p});
+        if(!(img.bytes>1024)||!/^image\\//.test(img.contentType||''))throw new Error('page '+p.index+' is not an image: '+img.contentType+' '+img.bytes);
+        bytes+=img.bytes;types.add(img.contentType);
+      }
+      return {work:manga.title.slice(0,60),chapter:(chapter.name||'').slice(0,60),pages:pg.length,imagesRead:Math.min(pg.length,120),bytes,types:[...types],trail};
+    }
+  }
+  throw new Error('no chapter with more than two pages read fully: '+trail.join(' | '));
+})()`, 900000);
+
+try {
+  if (phase === 'upgrade-before') {
+    await step('webData', async () => { const m = await js(webMarker); if (!m.localStorage || !m.indexedDB) throw new Error(JSON.stringify(m)); return m; });
+    await step('builtinsUsed', () => js(`(async()=>{const E=${EE};await E.setVisibleBuiltins({pkgs:[${JSON.stringify(AZORA)},${JSON.stringify(TEAMX)}]});
+      const a=await E.prepare({sourceId:${JSON.stringify(AZORA)}}),t=await E.prepare({sourceId:${JSON.stringify(TEAMX)}});return {azora:a.name,teamx:t.name}})()`));
+    await step('repositoryAndExtension', () => js(`(async()=>{const E=${EE};await E.addRepo({url:${JSON.stringify(KEIYOUSHI)}});
+      const rows=(await E.repoIndex({url:${JSON.stringify(KEIYOUSHI)}})).extensions,tried=[];
+      for(const name of ${JSON.stringify(USER_CANDIDATES)}){const row=rows.find(r=>r.name===name&&r.arabic&&!r.builtin&&!r.nsfw&&!r.anime);if(!row)continue;
+        try{const r=await E.installExtension({repo:${JSON.stringify(KEIYOUSHI)},pkg:row.pkg});await E.prepare({sourceId:r.ids[0]});return {name,pkg:row.pkg,id:r.ids[0]}}catch(e){tried.push(name+': '+e.message)}}
+      throw new Error('no candidate installed: '+tried.join(' | '))})()`));
+    proof.snapshot = await step('snapshot', snapshot);
+    if (!/vault\/eu\.kanade\.tachiyomi\.extension\.ar\.azora\//.test(proof.snapshot.files)) throw new Error('used built-in has no device copy before the upgrade');
+  }
+
+  if (phase === 'upgrade-after' || phase === 'restart') {
+    const before = JSON.parse(readFileSync(`${out}/upgrade-before.json`, 'utf8'));
+    const user = before.steps.repositoryAndExtension.value;
+    await step('webData', async () => { const m = await js(webMarker); if (!m.localStorage || !m.indexedDB) throw new Error(JSON.stringify(m)); return m; });
+    const now = await step('snapshot', snapshot);
+    await step('nothingLost', () => {
+      const missing = (a, b) => a.filter((x) => !b.includes(x));
+      const lost = {
+        sources: missing(before.snapshot.sources, now.sources),
+        repos: missing(before.snapshot.repos.repos, now.repos.repos),
+        installed: missing(before.snapshot.repos.installed, now.repos.installed),
+        files: missing(before.snapshot.files.split('\n'), now.files.split('\n')),
+      };
+      if (Object.values(lost).some((l) => l.length) || before.snapshot.userRepos !== now.userRepos || before.snapshot.visible !== now.visible) throw new Error('lost after upgrade: ' + JSON.stringify(lost));
+      return { sources: now.sources.length, repos: now.repos.repos, installed: now.repos.installed, deviceCopies: now.files.split('\n').length, userReposUnchanged: true };
+    });
+    // الدليل على الفصل: النسخة المضمّنة غابت، والمدمجة المستعملة والإضافة تُحمَّلان من الجهاز وحده
+    await step('offline', () => network(false));
+    await step('loadsFromDeviceWithoutNetwork', () => js(`(async()=>{const E=${EE},r={};
+      for(const id of [${JSON.stringify(AZORA)},${JSON.stringify(TEAMX)},${JSON.stringify(user.id)}])r[id]=(await E.prepare({sourceId:id})).name;return r})()`));
+    await step('online', () => network(true));
+    await step('builtinWorksAfterUpgrade', () => js(`${EE}.popular({sourceId:${JSON.stringify(AZORA)},page:1}).then(r=>{if(!r.mangas.length)throw new Error('empty');return {items:r.mangas.length}})`));
+  }
+
+  if (phase === 'clean') {
+    await delay(75000); // الإقلاع والتحميل المسبق ودقيقة التحقق اليومي: لا شيء يُنزَّل لحساب لم يضف شيئًا
+    const now = await step('snapshot', snapshot);
+    await step('noSourcesInstalled', async () => {
+      if (now.files) throw new Error('extension packages appeared without the user adding any: ' + now.files);
+      if (now.repos.repos.length || now.repos.installed.length) throw new Error('repositories/extensions present on a clean install');
+      if (now.visible) throw new Error('visibility written without an account');
+      const ready = await js(`${EE}.sources().then(r=>r.sources.filter(s=>s.ready).map(s=>s.id))`);
+      if (ready.length) throw new Error('sources loaded on a clean install: ' + ready);
+      return { packagesOnDevice: 0, repos: 0, installed: 0, loaded: 0 };
+    });
+    await step('newAccountSeesZeroSources', () => js(`(async()=>{const m=await import('/lib/source-entitlement.js');
+      const d=m.decide({account:{created_at:m.BUNDLED_CUTOVER_MS+1}}),all=(await ${EE}.sources()).sources;
+      const shown=all.filter(s=>m.visible(s,d));if(d.state!=='clean'||shown.length)throw new Error('visible: '+shown.map(s=>s.id));
+      const legacy=m.decide({account:{created_at:m.BUNDLED_CUTOVER_MS-86400000}});
+      return {state:d.state,visible:0,declared:all.length,legacyAccountKeeps:all.filter(s=>m.visible(s,legacy)).length}})()`));
+  }
+
+  if (phase === 'repo-read') {
+    await step('addRepository', () => js(`${EE}.addRepo({url:${JSON.stringify(KEIYOUSHI)}}).then(r=>({name:r.repo.name,count:r.count}))`));
+    const rows = await step('repositoryIndex', () => js(`${EE}.repoIndex({url:${JSON.stringify(KEIYOUSHI)}}).then(r=>r.extensions.filter(x=>x.arabic&&!x.nsfw&&!x.anime).map(x=>({name:x.name,pkg:x.pkg,builtin:x.builtin})))`));
+    const attempts = [];
+    let read = null;
+    for (const name of USER_CANDIDATES) {
+      const row = rows.find((r) => r.name === name && !r.builtin);
+      if (!row) continue;
+      try {
+        const ids = await js(`${EE}.installExtension({repo:${JSON.stringify(KEIYOUSHI)},pkg:${JSON.stringify(row.pkg)}}).then(r=>r.ids)`);
+        read = { name, pkg: row.pkg, ...(await readChapter(ids[0])) };
+        break;
+      } catch (error) { attempts.push(`${name}: ${String(error.message).slice(0, 200)}`); }
+    }
+    proof.attempts = attempts;
+    await step('installAndReadFullChapter', async () => { if (!read) throw new Error(attempts.join(' | ')); return read; });
+    await step('installedListed', () => js(`${EE}.repos().then(r=>{if(!r.installed.some(x=>x.pkg===${JSON.stringify(read.pkg)}))throw new Error('not listed');return r.installed.map(x=>x.name)})`));
+    // مصدر كان مدمجًا: بلا نسخة في التطبيق يُجلب من Keiyoushi بمفتاحه ويُقرأ له فصل كامل
+    await step('formerBuiltinFromNetworkFullChapter', () => readChapter(AZORA));
+  }
+  proof.passed = true;
+} catch (error) {
+  proof.failure = String(error?.stack || error).slice(0, 1500);
+  process.exitCode = 1;
+} finally {
+  try { const s = await command('Page.captureScreenshot', { format: 'png' }, 30000); writeFileSync(`${out}/${phase}.png`, Buffer.from(s.data, 'base64')); } catch {}
+  save();
+  socket.close();
+  try { adb('forward', '--remove', 'tcp:9224'); } catch {}
+  if (phase !== 'clean' && phase !== 'repo-read') try { adb('shell', 'cmd', 'connectivity', 'airplane-mode', 'disable'); } catch {}
+}
