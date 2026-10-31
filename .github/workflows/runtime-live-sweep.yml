@@ -73,6 +73,21 @@ jobs:
       - name: Summarize the sweep
         if: always()
         run: node tools/repository-compat/summarize_live_sweep.mjs live-sweep.jsonl >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Summarize the manga sweep
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY" || true
+          import json
+          print('### المانجا: من تحميل الحزمة حتى صورة صفحة فعلية')
+          print('| الإضافة | الأصل | المصدر | النتيجة |'); print('|---|---|---|---|')
+          for line in open('manga-sweep.jsonl'):
+              if not line.startswith('{'): continue
+              r=json.loads(line)
+              head=next((f"{k}: {r[k].get('code')}" for k in ('download','load') if r.get(k,{}).get('result')=='FAIL'),None)
+              for s in (r.get('sources') or [{}]) if not head else [{}]:
+                  verdict=head or ('PASS' if s.get('image',{}).get('result')=='PASS' else next((f"{k}: {s[k].get('code')}" for k in ('popular','latest','series','pages','image') if s.get(k,{}).get('result')=='FAIL' and not (k=='popular' and s.get('latest',{}).get('result')=='PASS')),'EMPTY'))
+                  print(f"| {r['extension']} | {r['origin']} | {s.get('name','')} | {verdict} |")
+          PY
       # من شبكة هذا الجهاز نفسه (الصفحة والفيديو من عنوان واحد كما في هاتف المستخدم): كل رابط سيرفر حقيقي
       # جمعه الفحص أو حُفظ سابقًا يمر بمستخرجات VANTARA، ولا يُحتسب رابطًا إلا إن أعاد السيرفر فيديو أو HLS فعلًا
       - name: Live extractor probe (real server samples)
@@ -101,6 +116,7 @@ jobs:
           name: live-repository-sweep
           path: |
             extractor-probe.txt
+            manga-sweep.jsonl
             live-sweep.jsonl
             live-sweep-logcat.txt
             android/app/build/outputs/androidTest-results/
