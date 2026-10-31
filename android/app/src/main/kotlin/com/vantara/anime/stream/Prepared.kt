@@ -42,6 +42,7 @@ class PreparedEpisode(
     @Volatile var job: Job? = null
     @Volatile var done = false
         private set
+    @Volatile private var terminal = false
 
     init { if (probe) session.acceptsCandidate = { candidateProbes[it.id] == true || it.id in runtimeCandidates } }
 
@@ -63,7 +64,7 @@ class PreparedEpisode(
 
     fun report(r: RouteReport) {
         // No late source report after the absolute preparation deadline.
-        if (done) return
+        if (terminal) return
         if (r.state != RouteState.READY || r.candidates.isEmpty()) {
             reportQuality(r)
             return
@@ -169,7 +170,7 @@ class PreparedEpisode(
      * يتوقف ما يعمل. يرجع false إن أُغلقت الجلسة.
      */
     fun beginBatch(): Boolean = synchronized(this) {
-        if (done || job?.isActive != true) return@synchronized false
+        if (terminal || job?.isActive != true) return@synchronized false
         pendingBatches++
         done = false
         true
@@ -177,7 +178,7 @@ class PreparedEpisode(
 
     /** Reserve before native preparation launches, including an empty native source batch. */
     fun reserveAddonBatches(sourceIds: List<String>, generation: String = addonGeneration): Int = synchronized(this) {
-        if (done || generation != addonGeneration || job?.isActive != true) return@synchronized 0
+        if (terminal || generation != addonGeneration || job?.isActive != true) return@synchronized 0
         val fresh = sourceIds.asSequence().filter { it.startsWith("addon|") && it.length <= 4096 }
             .distinct().filter { it !in pendingAddons && it !in completedAddons }.take(128).toList()
         pendingAddons.addAll(fresh)
@@ -188,7 +189,7 @@ class PreparedEpisode(
 
     /** A provider can complete once; foreign/duplicate/closed-session results are ignored. */
     fun claimAddonBatch(sourceId: String, generation: String = addonGeneration): Boolean = synchronized(this) {
-        if (done || generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
+        if (terminal || generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
         completedAddons.add(sourceId)
         true
     }
@@ -204,6 +205,7 @@ class PreparedEpisode(
     fun forceComplete(): Boolean {
         val changed = synchronized(this) {
             if (done) return@synchronized false
+            terminal = true
             pendingAddons.clear()
             pendingBatches = 0
             done = true
@@ -229,13 +231,14 @@ class PreparedEpisode(
 
     /** A native torrent ticket is preparable; it is not an HTTP probe or a first frame. */
     fun allowRuntimeCandidate(candidateId: String) {
+        if (terminal) return
         runtimeCandidates.add(candidateId)
         session.changes.value = session.changes.value + 1
     }
 
     /** Promote a warm session once; its existing candidates and player remain intact. */
     fun beginFullPreparation(): Boolean = synchronized(this) {
-        if (done || fullPreparation) return@synchronized false
+        if (terminal || fullPreparation) return@synchronized false
         fullPreparation = true
         pendingBatches++
         done = false

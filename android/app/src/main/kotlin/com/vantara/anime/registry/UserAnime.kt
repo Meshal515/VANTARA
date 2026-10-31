@@ -1,5 +1,6 @@
 package com.vantara.anime.registry
 
+import com.vantara.plugins.ExtensionStateFile
 import com.vantara.plugins.UserRepo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -44,26 +45,16 @@ data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extension
 
 class UserAnimeStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
-    private val atomic = android.util.AtomicFile(file)
+    private val storage = ExtensionStateFile(file)
 
-    @Volatile var state: UserAnimeState = if (!file.exists() && !File(file.path + ".bak").exists()) UserAnimeState() else
-        runCatching {
-            json.decodeFromString<UserAnimeState>(atomic.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
-        }.getOrElse { throw IllegalStateException("ANIME_EXTENSION_STATE_CORRUPTED: cannot silently reset installed extensions", it) }
+    @Volatile var state: UserAnimeState = storage.read(UserAnimeState()) {
+        json.decodeFromString<UserAnimeState>(it)
+    }
         private set
 
     @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
         val next = change(state)
-        val bytes = json.encodeToString(UserAnimeState.serializer(), next).toByteArray(Charsets.UTF_8)
-        file.parentFile?.mkdirs()
-        val stream = atomic.startWrite()
-        try {
-            stream.write(bytes)
-            atomic.finishWrite(stream)
-        } catch (error: Throwable) {
-            atomic.failWrite(stream)
-            throw error
-        }
+        storage.write(json.encodeToString(UserAnimeState.serializer(), next))
         state = next
         return next
     }
