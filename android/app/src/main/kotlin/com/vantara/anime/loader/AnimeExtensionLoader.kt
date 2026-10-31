@@ -63,7 +63,8 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         throw LoadException("download", "تعذّر تنزيل ${ref.pkg}", t)
     }
 
-    fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
+    /** Enumerates every catalogue source from an actual APK/factory before committing. */
+    fun inspect(ref: ExtensionRef, bytes: ByteArray): List<AnimeCatalogueSource> {
         val actual = sha256(bytes)
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
@@ -112,8 +113,23 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
             }
         }
         val catalogue = sources.filterIsInstance<AnimeCatalogueSource>()
-        return (ref.sourceName?.let { n -> catalogue.firstOrNull { it.name == n } } ?: catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.firstOrNull())
-            ?: throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        if (catalogue.isEmpty()) throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        require(catalogue.map { it.id.toString() }.toSet().size == catalogue.size) {
+            "DUPLICATE_SOURCE_ID: الحزمة تعلن معرّفات مصادر مكررة"
+        }
+        return catalogue
+    }
+
+    fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
+        val catalogue = inspect(ref, bytes)
+        val selected = ref.sourceId?.let { id ->
+            catalogue.firstOrNull { it.id.toString() == id }
+                ?: throw LoadException("identity", "المصدر $id غير موجود في حزمة ${ref.pkg}")
+        } ?: ref.sourceName?.let { name ->
+            catalogue.firstOrNull { it.name == name }
+                ?: throw LoadException("identity", "المصدر $name غير موجود في حزمة ${ref.pkg}")
+        } ?: catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.firstOrNull()
+        return selected ?: throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
     }
 
     private fun sha256(bytes: ByteArray): String =

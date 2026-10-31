@@ -50,7 +50,7 @@ class AnimeEnginePlugin : Plugin() {
         WebViewActivityHolder.set(activity)
         ensureEngineInjekt(context.applicationContext as Application)
         engine = AnimeEngine.get(context)
-        engine.setUserSources(userStore.state.extensions.map { it.entry() })
+        engine.setUserSources(userStore.state.extensions.flatMap { it.entries() })
         // تقدّم المشاهدة من المشغّل الأصلي إلى الواجهة (سجل المشاهدة/الاستئناف)
         com.vantara.anime.player.PlaybackEvents.listener = { p ->
             notifyListeners(
@@ -356,7 +356,7 @@ class AnimeEnginePlugin : Plugin() {
                 // Removing a repository is not the same action as uninstalling its
                 // already-pinned extensions. Keep the code and account/library links.
                 val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
-                engine.setUserSources(next.extensions.map { it.entry() })
+                engine.setUserSources(next.extensions.flatMap { it.entries() })
                 call.resolve()
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -380,7 +380,7 @@ class AnimeEnginePlugin : Plugin() {
                             .put("builtin", engine.shipsPackage(ext.pkg))
                             .put("installed", mine?.version).put("content", mine?.content)
                             .put("update", mine != null && mine.version != ext.version)
-                            .put("sources", JSArray(com.vantara.plugins.RepoIndex.visibleSources(ext).map { it.name }))
+                            .put("sources", JSArray(ext.sources.map { it.name }))
                             .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256) }
                                 ?: engine.sources().firstOrNull { it.extension?.pkg == ext.pkg }?.extension?.let {
                                     NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
@@ -409,24 +409,73 @@ class AnimeEnginePlugin : Plugin() {
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
                 val bytes = repoClient.downloadSigned(ext.apkUrl, repo.fingerprint)
-                val source = com.vantara.plugins.RepoIndex.visibleSources(ext).firstOrNull() ?: error("الإضافة لا تعلن مصدرًا")
+                // The signed APK/factory, not a possibly incomplete index, defines
+                // the complete set of available sources and their actual identities.
+                val inspector = com.vantara.anime.loader.AnimeExtensionLoader(context, http)
+                val actual = inspector.inspect(
+                    com.vantara.anime.registry.ExtensionRef(pkg, ext.apkUrl,
+                        com.vantara.plugins.sha256Hex(bytes), version = ext.version), bytes)
+                val declared = ext.sources.associateBy { it.id }
+                require(ext.sources.all { item -> actual.any { it.id.toString() == item.id } }) {
+                    "SOURCE_MISSING_IN_APK: المستودع يعلن مصادر غير موجودة داخل APK"
+                }
+                val publisherSources = actual.map { found ->
+                    val meta = declared[found.id.toString()]
+                    com.vantara.plugins.RepoIndex.Source(
+                        id = found.id.toString(), name = found.name, lang = found.lang,
+                        baseUrl = (found as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)
+                            ?.baseUrl?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                            ?: meta?.baseUrl.orEmpty(),
+                    )
+                }
+                require(publisherSources.isNotEmpty()) { "الحزمة لا تحمل مصادر أنمي" }
+                require(publisherSources.distinctBy { it.id }.size == publisherSources.size) {
+                    "DUPLICATE_SOURCE_ID: المستودع يعلن مصادر مكررة"
+                }
+                val previous = userStore.state.extensions.firstOrNull { it.pkg == pkg }
+                // Keep the old primary id and its library/progress links on an update.
+                val primary = previous?.let { old ->
+                    publisherSources.firstOrNull { it.id == old.primarySourceId }
+                        ?: publisherSources.firstOrNull { it.name == old.sourceName && it.baseUrl == old.baseUrl }
+                        ?: publisherSources.firstOrNull { it.baseUrl == old.baseUrl && it.lang == old.sourceLang }
+                } ?: publisherSources.firstOrNull { it.lang.equals("ar", ignoreCase = true) }
+                    ?: publisherSources.first()
+                require(previous == null || publisherSources.size == 1 || previous.primarySourceId == null ||
+                    primary.id == previous.primarySourceId) {
+                    "SOURCE_REMOVED: تحديث الحزمة يزيل المصدر الأساسي المحفوظ؛ لم يُحذف الإصدار العامل"
+                }
+                val previousAdditional = previous?.additionalSources.orEmpty().associateBy { it.sourceId }
+                val additional = publisherSources.filter { it.id != primary.id }.map { source ->
+                    com.vantara.anime.registry.InstalledAnimeSource(
+                        sourceId = source.id,
+                        id = previousAdditional[source.id]?.id ?: "user-$pkg#${source.id}",
+                        name = source.name,
+                        lang = source.lang,
+                        baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    )
+                }
                 val user = com.vantara.anime.registry.UserAnimeExtension(
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
-                    sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
-                    stableId = userStore.state.extensions.firstOrNull { it.pkg == pkg }?.id ?: "user-$pkg",
-                    sourceLang = source.lang,
+                    sourceName = primary.name, baseUrl = primary.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    stableId = previous?.id ?: "user-$pkg", sourceLang = primary.lang,
+                    primarySourceId = primary.id, additionalSources = additional,
                 )
-                // Existing ids remain unchanged for library/history safety. Do not install
-                // a second package that would silently shadow the same old-style id.
-                require(userStore.state.extensions.none { it.pkg != pkg && it.id == user.id }) {
-                    "SOURCE_ID_COLLISION: تعارض معرّف مصدر أنمي؛ لم يُثبّت أي شيء"
+                val entries = user.entries()
+                val ids = entries.map { it.id }
+                require(ids.toSet().size == ids.size && userStore.state.extensions.filter { it.pkg != pkg }
+                    .flatMap { it.entries() }.none { it.id in ids }) {
+                    "SOURCE_ID_COLLISION: معرّفات مصادر Aniyomi متعارضة"
                 }
-                // Staging is non-destructive: the last known-good APK remains available.
-                com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
+                // Verify the signed APK's actual factory sources, not just the repo's claims.
+                // This is one DexClassLoader inspection; no partially persisted update.
+                require(previous?.additionalSources.orEmpty().all { saved ->
+                    publisherSources.any { it.id == saved.sourceId }
+                }) { "SOURCE_REMOVED: تحديث الحزمة يزيل مصادر محفوظة؛ الإصدار القديم باقٍ" }
                 val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                engine.setUserSources(next.extensions.map { it.entry() })
-                call.resolve(JSObject().put("id", user.id))
+                engine.setUserSources(next.extensions.flatMap { it.entries() })
+                call.resolve(JSObject().put("id", user.id).put("ids", JSArray(entries.map { it.id }))
+                    .put("sourceCount", entries.size))
             } catch (t: Throwable) { failure(call, t) }
         }
     }
@@ -440,7 +489,7 @@ class AnimeEnginePlugin : Plugin() {
         } catch (error: Throwable) {
             return failure(call, error)
         }
-        engine.setUserSources(next.extensions.map { it.entry() })
+        engine.setUserSources(next.extensions.flatMap { it.entries() })
         // Explicit uninstall only: clean current vault and legacy APK, not the library/history.
         if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {
             java.io.File(context.filesDir, "anime-extensions/vault/$pkg").deleteRecursively()
