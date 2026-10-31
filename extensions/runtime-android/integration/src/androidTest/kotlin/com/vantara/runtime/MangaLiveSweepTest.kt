@@ -71,11 +71,18 @@ class MangaLiveSweepTest {
         // المضمّنة (العربية والإنجليزية) ثم عربية Keiyoushi غير المضمّنة، كما يثبّتها المستخدم من المستودع
         val builtin=(SPIKE_SOURCES+FILLER_PACKAGES).distinctBy { it.pkg }
         val packages=mutableListOf<Triple<String,SourceSpec,suspend ()->ByteArray>>()
+        val repo=RepoClient(context,network.client)
+        // سلسلة التطبيق نفسها بعد فصل المدمجة عن Debug: نسخة التطبيق (Stable فقط) ← الرابط المثبّت بالبصمة ←
+        // الإصدار الرسمي الحالي من Keiyoushi بمفتاحه المثبّت. الأخير يُختبر بمواصفته (بصمته وإصداره) لا بالمثبّتة
+        val resolved=java.util.concurrent.ConcurrentHashMap<String,SourceSpec>()
         for (spec in builtin) packages+=Triple("builtin",spec) {
             runCatching { context.assets.open("extensions/${spec.pkg}.apk").use { it.readBytes() } }.getOrNull()
-                ?.takeIf { sha256(it).equals(spec.sha256,true) } ?: error("BUNDLED_MISSING_OR_STALE")
+                ?.takeIf { sha256(it).equals(spec.sha256,true) }
+                ?: runCatching { network.client.newCall(okhttp3.Request.Builder().url(spec.apkUrl).build()).execute().use { it.body.bytes() } }.getOrNull()
+                    ?.takeIf { sha256(it).equals(spec.sha256,true) }
+                ?: BuiltinSourceRefresh(File(context.cacheDir,"sweep-pins.json")).fromRepository(spec,repo)?.let { (next,bytes) -> resolved[spec.pkg]=next;bytes }
+                ?: error("NO_BUILTIN_COPY")
         }
-        val repo=RepoClient(context,network.client)
         val index=runCatching { repo.read(BuiltinSourceRefresh.KEIYOUSHI_BASE) }
         index.exceptionOrNull()?.let { Log.i("VANTARA_MANGA",buildJsonObject { put("repository","FAIL");put("detail",it.toString().take(200)) }.toString()) }
         index.getOrNull()?.let { (meta,list) ->
@@ -102,7 +109,8 @@ class MangaLiveSweepTest {
             val report=buildJsonObject {
                 put("extension",base.label);put("origin",origin);put("version",base.versionName)
                 val bytes=step(this,"download",90_000) { fetch() } ?: return@buildJsonObject
-                val spec=if (base.sha256.isEmpty()) base.copy(sha256=sha256(bytes)) else base
+                val spec=resolved[base.pkg]?.takeIf { origin=="builtin" }?.also { put("resolvedVersion",it.versionName) }
+                    ?: if (base.sha256.isEmpty()) base.copy(sha256=sha256(bytes)) else base
                 val sources=step(this,"load",60_000) {
                     when (val r=loader.load(spec,bytes)) {
                         is FileExtensionLoader.Result.Fail -> error("${r.stage}: ${r.reason}")

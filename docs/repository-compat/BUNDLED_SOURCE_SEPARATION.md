@@ -1,8 +1,24 @@
 # Follow-up release: detach bundled sources without losing existing users' sources
 
-Status: QUEUED after runtime/manager acceptance. No source removal or migration
-has run. Owner explicitly requests this follow-up; this document is an execution
-queue and acceptance contract, not a claim that a scheduled automation exists.
+Status (31 Oct 2026, owner order): **Debug separated; Stable unchanged.**
+
+- The bundled manga APKs moved byte-for-byte to the Stable-only source set
+  `android/app/src/release/assets/extensions/`. The Debug APK ships none of them.
+  The scope guard admits only that byte-identical move, not a deletion.
+- Debug loads a former built-in exactly like any other extension, with the same
+  IDs (`pkg`, `pkg@lang`): the device vault → the pinned URL (SHA-256) → the last
+  known good version → the current official Keiyoushi release, under the pinned
+  Keiyoushi signing key only. The daily refresh, the on-failure refresh and the
+  rollback are unchanged.
+- Migration of existing Debug users needs no step: every package a user already
+  opened is in the vault (`files/extensions/vault/<pkg>/<sha>.apk`). Packages
+  visible to the account but never opened are staged in the background as soon
+  as the web layer reports them (`setVisibleBuiltins` → `stageVisible`). A failed
+  staging shows nothing and deletes nothing, and is retried on open or next start.
+- Entitlement is unchanged (`apps/web/lib/source-entitlement.js`): accounts
+  created before `BUNDLED_CUTOVER_MS` keep their sources; new accounts start empty.
+- Not yet proven: a live sweep with no bundled copy, and on a real device.
+  Stable keeps its bundled copies until its own release decision (gate 7).
 
 ## Required user-visible result
 

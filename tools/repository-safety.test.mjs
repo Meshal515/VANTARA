@@ -1196,7 +1196,7 @@ test('every source extension ships inside the app and matches its pinned hash', 
   const english = pinned('android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt');
   assert.ok(english.length >= 5, 'FillerSources.kt must pin the English filler extensions');
   const specs = [...arabic, ...english];
-  const dir = 'android/app/src/main/assets/extensions';
+  const dir = 'android/app/src/release/assets/extensions';
   const tracked = trackedFiles().filter((p) => p.startsWith(`${dir}/`));
   const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
   for (const { pkg, sha } of specs) {
@@ -1209,6 +1209,25 @@ test('every source extension ships inside the app and matches its pinned hash', 
   if (tracked.length) assert.equal(tracked.length, specs.length, 'every bundled extension must be tracked');
   const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
+});
+
+test('Debug is separated from the bundled manga sources while keeping their recovery chain', () => {
+  // فصل المدمجة في Debug بأمر المالك (31 أكتوبر 2026): النسخ داخل بناء Stable وحده (src/release)،
+  // وDebug يحمّلها كأي إضافة: مخزن الجهاز ← الرابط المثبّت بالبصمة ← آخر سليم ← Keiyoushi الرسمي بمفتاحه
+  const onDisk = (dir) => { try { return readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk')); } catch { return []; } };
+  assert.equal(onDisk('android/app/src/main/assets/extensions').length, 0, 'the shared source set must not bundle manga extensions');
+  assert.equal(onDisk('android/app/src/debug/assets/extensions').length, 0, 'Debug must not bundle manga extensions');
+  assert.ok(onDisk('android/app/src/release/assets/extensions').length >= 15, 'Stable keeps its bundled copies until its own separation release');
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+  const chain = plugin.slice(plugin.indexOf('private suspend fun loadPackage'), plugin.indexOf('private fun readBundled'));
+  assert.match(chain, /readVerifiedCache\(spec\)[\s\S]*?download\(spec\)[\s\S]*?previousOf[\s\S]*?fromRepository\(base, repoClient\)/,
+    'without a bundled copy a built-in still loads from the device vault, its pinned URL, its last good version, then the signed official release');
+  assert.match(read('android/app/src/main/kotlin/com/vantara/plugins/BuiltinSourceRefresh.kt'), /require\(meta\.fingerprint == KEIYOUSHI_KEY\)/,
+    'the official release is accepted only under the pinned Keiyoushi key');
+  // المصادر الظاهرة للحساب تُجهَّز في الخلفية عند الإقلاع (تُنزّل إلى المخزن مرة)، والتحديث اليومي والذاتي باقيان
+  assert.match(plugin, /fun eager\(pkg: String\) = visible\?\.contains\(pkg\) \?: hasLocalCopy\(pkg\)/);
+  assert.match(plugin, /refreshBuiltinsDaily\(::eager\)/);
+  assert.match(plugin, /refreshBuiltin\(call\.getString\("sourceId"\)\)/);
 });
 
 test('anime/cinema built-in sources are removed by owner decision (30 Oct 2026)', () => {
@@ -1236,7 +1255,7 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
   ]) {
     assert.ok(inputs.includes(path), `native fingerprint must cover ${path}`);
   }
-  assert.ok(inputs.some((p) => p.startsWith('android/app/src/main/assets/extensions/')), 'bundled source extensions are native');
+  assert.ok(inputs.some((p) => p.startsWith('android/app/src/release/assets/extensions/')), 'bundled source extensions are native');
   assert.ok(!inputs.some((p) => p.startsWith('apps/') || p.includes('assets/public/')), 'web files must not change the native fingerprint');
   assert.ok(capacitorVersions(read('pnpm-lock.yaml')).length >= 3, 'installed @capacitor versions are part of the fingerprint');
 

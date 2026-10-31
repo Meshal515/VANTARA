@@ -230,7 +230,30 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 builtinVisibility.write(pkgs)
                 call.resolve()
-            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+            } catch (t: Throwable) { return@launch call.reject(t.message ?: t.readable()) }
+            stageVisible(pkgs)
+        }
+    }
+
+    /** الحزم التي جُهّزت في هذه العملية: التبليغ يتكرر مع كل تغيّر مزامنة ولا يعيد التنزيل. */
+    private val staged = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Debug مفصول بلا نسخ مضمّنة: المصدر الظاهر للحساب بلا نسخة على الجهاز يُجهَّز الآن في الخلفية (تنزيل
+     * موثّق ← تحميل فعلي ← المخزن) فيفتح القارئ كما كان قبل الفصل. فشل التجهيز (شبكة، موقع) لا يُظهر شيئًا
+     * ولا يحذف شيئًا، ويُعاد عند فتح المصدر أو في الإقلاع التالي.
+     */
+    private fun stageVisible(pkgs: Set<String>) {
+        for (pkg in pkgs) {
+            if (loaded.keys.any { splitSourceId(it.substringBefore('#')).first == pkg } || hasLocalCopy(pkg) || !staged.add(pkg)) continue
+            val id = if (SPIKE_SOURCES.any { it.pkg == pkg }) pkg
+                else FILLER_SOURCES.firstOrNull { it.pkg == pkg }?.let { "${it.pkg}@${it.lang}" } ?: continue
+            scope.launch(Dispatchers.IO) {
+                runCatching { obtain(id) }.onFailure {
+                    staged.remove(pkg)
+                    android.util.Log.i("ExtensionEngine", "BUILTIN_STAGE_DEFERRED:$pkg ${ExtensionFailure.classify(it).code}")
+                }
+            }
         }
     }
 
@@ -909,7 +932,9 @@ class ExtensionEnginePlugin : Plugin() {
      * الحزمة من نسختها المحلية أولًا، مستقلة عن بقاء مستودعها (PERSISTENT_PLUGINS §3.1):
      *  1. الإصدار الحالي من مخزن الجهاز، أو من التطبيق إن طابقت بصمته، أو من رابطه المثبّت بالبصمة نفسها.
      *  2. آخر إصدار سليم قبله (LKG) من المخزن: إن تعطّل الحالي يُرجع إليه ويُحفظ الرجوع.
-     *  3. للمدمجة سابقًا: النسخة المضمّنة في التطبيق، ثم الإصدار الرسمي الحالي من Keiyoushi بمفتاحه المثبّت.
+     *  3. للمدمجة سابقًا: النسخة المضمّنة في التطبيق (Stable فقط؛ Debug مفصول بلا نسخ مضمّنة)، ثم الإصدار
+     *     الرسمي الحالي من Keiyoushi بمفتاحه المثبّت. في Debug تمر المدمجة بالمسار نفسه لأي إضافة: مخزن الجهاز
+     *     ثم الشبكة الموثّقة، والتعافي (LKG، التحديث الذاتي) كما هو.
      * لا كود يُقبل في أي خطوة دون مطابقة بصمة أو توقيع: التعافي لا يفتح بابًا لكود بديل غير موثّق.
      * والإصدار الرسمي للمدمجة فقط: إضافة من مستودع المستخدم لا تُستبدل بنسخة مستودع آخر ولو بالاسم نفسه.
      */
@@ -966,7 +991,8 @@ class ExtensionEnginePlugin : Plugin() {
     }
 
     /**
-     * الإضافة المضمّنة في `assets/extensions/` (`tools/bundle-extensions.mjs`).
+     * الإضافة المضمّنة في `assets/extensions/` (`tools/bundle-extensions.mjs`)، في بناء Stable وحده
+     * (`src/release/assets`). Debug مفصول: لا نسخ مضمّنة فيُرجع null دائمًا، والسلسلة تكمل إلى الشبكة الموثّقة.
      * تُقبل فقط إن طابقت بصمتها المثبّتة: ملفٌّ قديم بقي من بناء سابق يُتجاهل
      * ويُنزَّل البديل، بدل أن يُحمَّل كود لم يُتحقق منه.
      */
