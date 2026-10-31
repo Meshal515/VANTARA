@@ -295,8 +295,9 @@ try {
           await js(`[...document.querySelectorAll('.v7-tab')].find(b=>b.textContent.includes('المثبتة')).click()`);
           await wait(`[...document.querySelectorAll('.v7-row')].some(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)})`, 'installed row');
           await js(`(()=>{const r=[...document.querySelectorAll('.v7-row')].find(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)});[...r.querySelectorAll('button')].find(b=>b.textContent.includes('فتح')).click();return true})()`);
-          await wait(`document.querySelector('.work-card')`, 'source catalogue cards', 120000);
-          const title = await js(`(()=>{const c=document.querySelector('.work-card');const t=c.textContent.trim().slice(0,60);c.click();return t})()`);
+          await wait(`document.querySelector('#utility.active .addon-source')`, 'extension page after «فتح»', 120000);
+          await wait(`document.querySelector('#utility.active .addon-source .work-card .up-title')`, 'cards inside the extension page', 120000);
+          const title = await js(`(()=>{const c=document.querySelector('#utility.active .addon-source .work-card');const t=c.textContent.trim().slice(0,60);c.click();return t})()`);
           await wait(`document.querySelector('#anime.active, .aw-hero, #cinema.active')`, 'work page after tapping «' + title + '»', 120000);
           await wait(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length>0`, 'episodes on the work page', 120000);
           return { opened: title, episodes: await js(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length`) };
