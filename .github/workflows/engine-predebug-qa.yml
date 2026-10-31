@@ -2,7 +2,7 @@ name: VANTARA engine pre-release integration QA (no publish)
 
 on:
   push:
-    branches: [fix/engine-core-predebug-20261031]
+    branches: [fix/engine-core-predebug-20261031, codex/vantara-video-repo-debug-20261101]
     paths:
       - 'apps/web/**'
       - 'android/**'
