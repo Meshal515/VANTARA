@@ -128,6 +128,10 @@ class MangaLiveSweepTest {
                     val chapter=update?.chapters?.firstOrNull() ?: return@buildJsonObject
                     val pages=step(this,"pages",60_000) { SourceCompatRepairs.loadPages(source,chapter) }
                     put("pageCount",pages?.size ?: 0)
+                    // فصل ثانٍ من منتصف القائمة: صفحتان أو أقل في الفصلين معًا = قراءة ناقصة لا فصل قصير
+                    update.chapters.getOrNull(update.chapters.size/2)?.takeIf { update.chapters.size>2 }?.let { middle ->
+                        put("pageCount2",runCatching { withTimeout(45_000) { SourceCompatRepairs.loadPages(source,middle).size } }.getOrDefault(-1))
+                    }
                     val first=pages?.firstOrNull() ?: return@buildJsonObject
                     step(this,"image",60_000) {
                         val http=source as? HttpSource ?: error("NOT_HTTP_SOURCE")
