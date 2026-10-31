@@ -58,7 +58,14 @@ class LiveRepositorySweepTest {
     /** MEDIA لفيديو حقيقي (MP4/WebM/MKV/TS) أو لقائمة HLS وصل أول مقطع منها؛ وإلا السبب. */
     private fun playable(url: String,headers: Map<String,String>,depth: Int=0): String {
         val (response,bytes)=head(url,headers)
-        if (!response.isSuccessful) return "HTTP ${response.code}"
+        if (!response.isSuccessful) {
+            // فرضية تُختبر قبل تغيير المشغّل: CDN يرفض المقطع بلا Origin الذي يرسله المتصفح مع HLS
+            val referer=headers["Referer"] ?: return "HTTP ${response.code}"
+            val origin=runCatching { java.net.URI(referer).let { "${it.scheme}://${it.host}" } }.getOrNull() ?: return "HTTP ${response.code}"
+            if (response.code!=403 || headers.containsKey("Origin")) return "HTTP ${response.code}"
+            val retry=playable(url,headers+("Origin" to origin),depth)
+            return if (retry.startsWith("MEDIA")) "$retry (Origin)" else "HTTP 403"
+        }
         val text=bytes.toString(Charsets.ISO_8859_1)
         if (text.startsWith("#EXTM3U")) {
             if (depth>2) return "HLS_TOO_DEEP"
