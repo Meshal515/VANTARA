@@ -300,7 +300,24 @@ try {
           const title = await js(`(()=>{const c=document.querySelector('#utility.active .addon-source .work-card');const t=c.textContent.trim().slice(0,60);c.click();return t})()`);
           await wait(`document.querySelector('#anime.active, .aw-hero, #cinema.active')`, 'work page after tapping «' + title + '»', 120000);
           await wait(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length>0`, 'episodes on the work page', 120000);
-          return { opened: title, episodes: await js(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length`) };
+          // التشغيل الفعلي: «شاهد الحلقة» ← المشغّل الأصلي (PlayerActivity) يفتح ويبقى في المقدمة
+          await wait(`document.querySelector('#anime.active .aw-still-play')`, 'watch button', 60000);
+          await js(`document.querySelector('#anime.active .aw-still-play').click()`);
+          let player = false;
+          for (const t = Date.now(); Date.now() - t < 150000 && !player; await delay(2000)) {
+            const top = adb('shell', 'dumpsys', 'activity', 'activities').split('\n').filter((l) => /topResumedActivity|mResumedActivity/.test(l)).join(' ');
+            player = /com\.vantara\.anime\.player\.PlayerActivity/.test(top);
+          }
+          if (!player) throw new Error('player did not open | toast=' + (await js(`document.querySelector('#toast')?.textContent||''`)));
+          await delay(20000);
+          const top = adb('shell', 'dumpsys', 'activity', 'activities').split('\n').filter((l) => /topResumedActivity|mResumedActivity/.test(l)).join(' ');
+          const stillPlaying = /PlayerActivity/.test(top);
+          const shot = execFileSync('adb', ['exec-out', 'screencap', '-p']);
+          writeFileSync(`${out}/player-${name}.png`, shot);
+          adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
+          await delay(3000);
+          if (!stillPlaying) throw new Error('player closed within 20 s (playback failed)');
+          return { opened: title, playerOpened: true, stillPlayingAfter20s: true };
         });
       } catch (error) { results[name] = { error: String(error.message).slice(0, 700) }; }
       try { const shot = await command('Page.captureScreenshot', { format: 'png' }, 30000); writeFileSync(`${out}/ui-${name}.png`, Buffer.from(shot.data, 'base64')); } catch {}
