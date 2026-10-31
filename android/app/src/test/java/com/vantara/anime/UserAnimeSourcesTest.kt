@@ -39,6 +39,18 @@ class UserAnimeSourcesTest {
         assertEquals("First", entries[1].name)
     }
 
+    @Test fun upgradeRetainsPinnedLastKnownGoodWithoutLosingExistingSourceId() {
+        val current = extension()
+        val updated = current.upgradedTo(current.copy(sha256 = "b".repeat(64), version = "15.0"))
+        val entry = updated.entries().first()
+        assertEquals(current.id, updated.id)
+        assertEquals(current.sha256, updated.previous?.sha256)
+        assertEquals(current.sha256, entry.extension?.fallback?.sha256)
+        assertEquals("b".repeat(64), entry.extension?.sha256)
+        val sameVersion = updated.upgradedTo(updated.copy(name = "Renamed"))
+        assertEquals(current.sha256, sameVersion.previous?.sha256)
+    }
+
     @Test fun legacySingleSourceRecordStillHasOneEntry() {
         val entries = extension().entries()
         assertEquals(1, entries.size)
