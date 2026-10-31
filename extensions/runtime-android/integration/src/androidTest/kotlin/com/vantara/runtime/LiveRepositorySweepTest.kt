@@ -104,9 +104,15 @@ class LiveRepositorySweepTest {
             host.setProfile("live-sweep-"+UUID.randomUUID())
             host.addRepository(repo)
             val packages=host.extensions(repo).map { it.jsonObject }
-            for (row in packages.take(maxPackages)) {
+            // Filter before applying the execution limit: a named plugin later in a
+            // repository must not disappear just because earlier packages consumed
+            // the maxPackages window (the old sweep silently tested zero matches).
+            val selected=packages.filter { row ->
+                val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.contentOrNull ?: "?"
+                only==null || name.lowercase() in only
+            }.take(maxPackages)
+            for (row in selected) {
                 val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.content ?: "?"
-                if (only!=null && name.lowercase() !in only) continue
                 val types=(row["tvTypes"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
                 val content=if (types.any { it.equals("Anime",true) || it.equals("AnimeMovie",true) || it.equals("OVA",true) }) "anime" else "cinema"
                 val report=buildJsonObject {
