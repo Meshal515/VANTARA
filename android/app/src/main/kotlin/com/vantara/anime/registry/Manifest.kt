@@ -45,6 +45,10 @@ data class SourceEntry(
     val advisory: String? = null,
 )
 
+/** Pinned last-known-good version; never resolved from an untrusted latest URL. */
+@Serializable
+data class ExtensionFallback(val apk: String, val sha256: String, val version: String? = null)
+
 @Serializable
 data class ExtensionRef(
     /** حزمة APK الإضافة كما نشرها المستودع. */
@@ -56,6 +60,7 @@ data class ExtensionRef(
     val sourceName: String? = null,
     /** معرّف المصدر الحقيقي من Source.id (أدق من الاسم عند تكرار الأسماء). */
     val sourceId: String? = null,
+    val fallback: ExtensionFallback? = null,
 )
 
 @Serializable
