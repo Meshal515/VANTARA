@@ -26,7 +26,7 @@ const TEAMX = 'eu.kanade.tachiyomi.extension.ar.teamx';
 const USER_CANDIDATES = ['Rocks Manga', 'Lava Scans', 'Despair', 'Oduto', 'SayManhwa', 'Loner', 'XSano', 'Kawii', 'ProComic'];
 
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
-const shell = (cmd) => { try { return adb('shell', 'run-as', pkg, 'sh', '-c', `'${cmd}'`); } catch (e) { return `ERR ${String(e.stderr || e.message).slice(0, 200)}`; } };
+const shell = (cmd) => adb('shell', 'run-as', pkg, 'sh', '-c', `'${cmd}'`);
 mkdirSync(out, { recursive: true });
 const proof = { phase, passed: false, steps: {} };
 const save = () => writeFileSync(`${out}/${phase}.json`, JSON.stringify(proof, null, 2) + '\n');
@@ -96,9 +96,9 @@ const webMarker = `(async()=>{
 const snapshot = async () => ({
   sources: (await js(`${EE}.sources().then(r=>r.sources.map(s=>s.id).sort())`)),
   repos: (await js(`${EE}.repos().then(r=>({repos:r.repos.map(x=>x.url).sort(),installed:r.installed.map(x=>x.pkg+'@'+x.version).sort()}))`)),
-  files: shell('cd files/extensions 2>/dev/null && find . -type f -name "*.apk" | sort'),
-  userRepos: shell('sha256sum files/extensions/user-repos.json 2>/dev/null | cut -c1-64'),
-  visible: shell('cat files/extensions/builtin-visible.json 2>/dev/null'),
+  files: shell('cd files/extensions 2>/dev/null && find . -type f -name "*.apk" | sort; true'),
+  userRepos: shell('sha256sum files/extensions/user-repos.json 2>/dev/null | cut -c1-64; true'),
+  visible: shell('cat files/extensions/builtin-visible.json 2>/dev/null; true'),
 });
 const network = async (on) => {
   adb('shell', 'cmd', 'connectivity', 'airplane-mode', on ? 'disable' : 'enable');
