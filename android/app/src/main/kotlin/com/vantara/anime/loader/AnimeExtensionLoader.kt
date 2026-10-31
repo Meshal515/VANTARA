@@ -43,16 +43,34 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         return File(File(dir, "vault/${ref.pkg}"), "${ref.sha256.lowercase()}.apk")
     }
 
+    private fun verifiedLocalBytes(ref: ExtensionRef): ByteArray? =
+        listOf(vaultFile(ref), File(dir, "${ref.pkg}.apk")).firstNotNullOfOrNull { file ->
+            file.takeIf { it.isFile }?.let { runCatching { it.readBytes() }.getOrNull() }
+                ?.takeIf { sha256(it).equals(ref.sha256, true) }
+        }
+
     suspend fun obtain(ref: ExtensionRef): AnimeCatalogueSource {
-        // Existing releases stored a mutable <pkg>.apk: read it only if it still
-        // matches the pinned hash, then migrate non-destructively to the vault.
-        val cached = listOf(vaultFile(ref), File(dir, "${ref.pkg}.apk"))
-            .firstNotNullOfOrNull { file ->
-                file.takeIf { it.isFile }?.let { runCatching { it.readBytes() }.getOrNull() }
-                    ?.takeIf { sha256(it).equals(ref.sha256, true) }
+        return try {
+            // Legacy <pkg>.apk is copied into the immutable vault only after
+            // its pinned SHA-256 matches. Never delete the last working version.
+            val bytes = verifiedLocalBytes(ref) ?: bundled(ref) ?: download(ref)
+            load(ref, bytes)
+        } catch (currentFailure: Exception) {
+            val old = ref.fallback ?: throw currentFailure
+            if (old.sha256.equals(ref.sha256, ignoreCase = true)) throw currentFailure
+            val previousRef = ref.copy(apk = old.apk, sha256 = old.sha256, version = old.version, fallback = null)
+            // Only a locally verified previous version may be used for offline
+            // recovery; a stale repository URL never silently changes the pin.
+            val previousBytes = verifiedLocalBytes(previousRef) ?: throw currentFailure
+            try {
+                load(previousRef, previousBytes).also {
+                    android.util.Log.w("AnimeExtensionLoader", "LAST_KNOWN_GOOD_USED: ${ref.pkg}")
+                }
+            } catch (previousFailure: Exception) {
+                currentFailure.addSuppressed(previousFailure)
+                throw currentFailure
             }
-        val bytes = cached ?: bundled(ref) ?: download(ref)
-        return load(ref, bytes)
+        }
     }
 
     /** Remove only this package after the installed manifest no longer refers to it. */
