@@ -50,7 +50,7 @@ class AnimeEnginePlugin : Plugin() {
         WebViewActivityHolder.set(activity)
         ensureEngineInjekt(context.applicationContext as Application)
         engine = AnimeEngine.get(context)
-        engine.setUserSources(userStore.state.extensions.map { it.entry() })
+        engine.setUserSources(userStore.state.extensions.flatMap { it.entries() })
         // تقدّم المشاهدة من المشغّل الأصلي إلى الواجهة (سجل المشاهدة/الاستئناف)
         com.vantara.anime.player.PlaybackEvents.listener = { p ->
             notifyListeners(
@@ -408,21 +408,32 @@ class AnimeEnginePlugin : Plugin() {
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
                 val bytes = repoClient.downloadSigned(ext.apkUrl, repo.fingerprint)
-                val source = com.vantara.plugins.RepoIndex.visibleSources(ext).firstOrNull() ?: error("الإضافة لا تعلن مصدرًا")
+                val declared = ext.sources.distinctBy { it.id }
+                require(declared.isNotEmpty() && declared.size <= 128) { "الإضافة لا تعلن مصادر متوافقة" }
+                val hash = com.vantara.plugins.sha256Hex(bytes)
+                // Instantiate the real APK before persisting: source factories
+                // can publish many sources, not only the first catalogue.
+                val loader = com.vantara.anime.loader.AnimeExtensionLoader(context, http)
+                val actual = loader.loadSources(
+                    com.vantara.anime.registry.ExtensionRef(pkg = pkg, apk = ext.apkUrl, sha256 = hash, version = ext.version), bytes)
+                val matching = declared.filter { item -> actual.any { it.id.toString() == item.id } }
+                require(matching.isNotEmpty()) { "مصادر المستودع لا تطابق ما داخل APK" }
+                val first = matching.first()
                 val user = com.vantara.anime.registry.UserAnimeExtension(
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
-                    sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
-                    sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    sha256 = hash, version = ext.version, content = content,
+                    sourceName = first.name.takeIf { matching.size > 1 },
+                    baseUrl = first.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    sources = matching.map { com.vantara.anime.registry.UserAnimeSource(
+                        it.id, it.name, it.lang, it.baseUrl) },
                 )
+                val ids = user.entries().map { it.id }.toSet()
                 // Existing IDs are persisted in watch progress; never silently
-                // replace another package with the same short derived ID.
-                require(userStore.state.extensions.none { it.pkg != pkg && it.id == user.id }) {
-                    "SOURCE_ID_COLLISION: ${user.id}"
-                }
-                // التحميل نفسه الذي سيستعمله المحرك: حزمة لا تُحمَّل لا تُحفظ
-                com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
+                // replace an unrelated package with a short derived ID.
+                require(userStore.state.extensions.filter { it.pkg != pkg }.flatMap { it.entries() }
+                    .none { it.id in ids }) { "SOURCE_ID_COLLISION: ${user.id}" }
                 val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                engine.setUserSources(next.extensions.map { it.entry() })
+                engine.setUserSources(next.extensions.flatMap { it.entries() })
                 call.resolve(JSObject().put("id", user.id))
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -433,7 +444,7 @@ class AnimeEnginePlugin : Plugin() {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
         if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
         val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
-        engine.setUserSources(next.extensions.map { it.entry() })
+        engine.setUserSources(next.extensions.flatMap { it.entries() })
         // Erase all validated cached versions only after durable uninstall.
         com.vantara.anime.loader.AnimeExtensionLoader(context, http).erase(pkg)
         call.resolve()
