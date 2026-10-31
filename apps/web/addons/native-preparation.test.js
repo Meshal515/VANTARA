@@ -71,3 +71,57 @@ it('asks anime-only providers for Kitsu episodes under the anime type they decla
  await nativeAddonPreparation({runtime:a,copies:[anime],episode:7}).start('s',{appendAddonStreams:async()=>{}}).done;
  expect(input).toMatchObject({videoId:'kitsu:12:7',type:'anime'});
 });
+
+it('settles a rejected native bridge delivery without blocking a successful sibling', async () => {
+  const calls = [], completed = [];
+  const a = runtime(async () => [{ id: 'ok', url: 'https://cdn.test/ok.mp4', status: 'RESOLVED' }]);
+  a.registry.list = () => [manifest, { ...manifest, key: 'good', name: 'Good' }];
+  const copies = [copy, { ...copy, sourceId: 'addon|good' }];
+  const job = nativeAddonPreparation({ runtime: a, copies, episode: 3 }).start('s', {
+    appendAddonStreams: async data => {
+      calls.push(data.sourceId);
+      if (data.sourceId === 'addon|provider') throw new Error('Capacitor delivery failed');
+    },
+    finishAddonBatch: async data => completed.push(data.sourceId),
+  });
+  await job.done;
+  expect(calls).toContain('addon|good');
+  expect(completed).toEqual(['addon|provider']);
+});
+
+it('bounds an unresponsive provider and emits a completion result', async () => {
+  const events = [];
+  const a = runtime(() => new Promise(() => {}));
+  const job = nativeAddonPreparation({ runtime: a, copies: [copy], episode: 3 }).start('s', {
+    appendAddonStreams: async data => events.push(data),
+  }, { timeoutMs: 10 });
+  await job.done;
+  expect(events).toHaveLength(1);
+  expect(events[0].sourceId).toBe('addon|provider');
+  expect(events[0].streams).toEqual([]);
+  expect(events[0].reason).toMatch(/مهلة/);
+});
+
+it('uses a legacy bridge fallback when finishAddonBatch is absent', async () => {
+  const calls = [];
+  const a = runtime(async () => []);
+  await nativeAddonPreparation({ runtime: a, copies: [copy], episode: 3 }).start('s', {
+    appendAddonStreams: async data => {
+      calls.push(data);
+      if (calls.length === 1) throw new Error('first publish failed');
+    },
+  }).done;
+  expect(calls).toHaveLength(2);
+  expect(calls[1].streams).toEqual([]);
+});
+
+it('does not publish after cancelling an unresponsive provider', async () => {
+  const calls = [];
+  const a = runtime(() => new Promise(() => {}));
+  const job = nativeAddonPreparation({ runtime: a, copies: [copy], episode: 3 }).start('s', {
+    appendAddonStreams: async data => calls.push(data),
+  }, { timeoutMs: 1000 });
+  job.cancel();
+  await job.done;
+  expect(calls).toEqual([]);
+});
