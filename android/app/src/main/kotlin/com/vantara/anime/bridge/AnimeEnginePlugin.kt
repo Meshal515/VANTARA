@@ -418,7 +418,20 @@ class AnimeEnginePlugin : Plugin() {
                     com.vantara.anime.registry.ExtensionRef(pkg = pkg, apk = ext.apkUrl, sha256 = hash, version = ext.version), bytes)
                 val matching = declared.filter { item -> actual.any { it.id.toString() == item.id } }
                 require(matching.isNotEmpty()) { "مصادر المستودع لا تطابق ما داخل APK" }
-                val first = matching.first()
+                val existing = userStore.state.extensions.firstOrNull { it.pkg == pkg }
+                // The legacy primary ID is used in watch history. Never rebind
+                // it to a different source when the repository reorders entries.
+                val oldPrimary = existing?.sources?.firstOrNull()
+                val preserved = oldPrimary?.let { old ->
+                    matching.firstOrNull { it.id == old.id }
+                        ?: matching.filter { it.name == old.name && it.lang == old.lang }.singleOrNull()
+                } ?: existing?.sourceName?.let { oldName ->
+                    matching.filter { it.name == oldName }.singleOrNull()
+                }
+                require(existing == null || (oldPrimary == null && existing.sourceName == null) || preserved != null) {
+                    "PRIMARY_SOURCE_CHANGED: يلزم ترحيل هوية المصدر قبل التحديث"
+                }
+                val first = preserved ?: matching.firstOrNull { it.lang.equals("ar", ignoreCase = true) } ?: matching.first()
                 val draft = com.vantara.anime.registry.UserAnimeExtension(
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
                     sha256 = hash, version = ext.version, content = content,
