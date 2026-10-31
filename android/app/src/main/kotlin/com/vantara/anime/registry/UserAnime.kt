@@ -15,6 +15,16 @@ import java.io.File
 data class UserAnimeSource(val id: String, val name: String, val lang: String, val baseUrl: String)
 
 @Serializable
+data class UserAnimeVersion(
+    val apkUrl: String,
+    val sha256: String,
+    val version: String,
+    val sourceName: String? = null,
+    val baseUrl: String,
+    val sources: List<UserAnimeSource> = emptyList(),
+)
+
+@Serializable
 data class UserAnimeExtension(
     val repoUrl: String,
     val name: String,
@@ -28,7 +38,12 @@ data class UserAnimeExtension(
     val baseUrl: String,
     /** Missing on historical installations; those keep their original single-source identity. */
     val sources: List<UserAnimeSource> = emptyList(),
+    val previous: UserAnimeVersion? = null,
 ) {
+    fun upgradedTo(next: UserAnimeExtension): UserAnimeExtension =
+        next.copy(previous = if (sha256.equals(next.sha256, ignoreCase = true)) previous
+            else UserAnimeVersion(apkUrl, sha256, version, sourceName, baseUrl, sources))
+
     val id: String get() = "user-" + pkg.substringAfterLast('.').ifEmpty { pkg }
 
     fun entry(): SourceEntry = entries().first()
@@ -39,7 +54,8 @@ data class UserAnimeExtension(
             listOf(preferred ?: sources.first()) + sources.filter { it.id != (preferred ?: sources.first()).id }
         if (ordered.isEmpty()) return listOf(SourceEntry(
             id = id, name = name, lang = "ar", priority = 40, content = content,
-            extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName),
+            extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version,
+                sourceName = sourceName, fallback = previous?.let { ExtensionFallback(it.apkUrl, it.sha256, it.version) }),
             domains = Domains(current = baseUrl),
         ))
         return ordered.mapIndexed { index, source ->
@@ -51,7 +67,8 @@ data class UserAnimeExtension(
                 priority = 40,
                 content = content,
                 extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version,
-                    sourceName = source.name, sourceId = source.id),
+                    sourceName = source.name, sourceId = source.id,
+                    fallback = previous?.let { ExtensionFallback(it.apkUrl, it.sha256, it.version) }),
                 domains = Domains(current = source.baseUrl.ifBlank { baseUrl }),
             )
         }
