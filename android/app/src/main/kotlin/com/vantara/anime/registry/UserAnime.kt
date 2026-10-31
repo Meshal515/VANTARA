@@ -42,7 +42,7 @@ data class UserAnimeExtension(
 
     fun entry(): SourceEntry = SourceEntry(
         id = id,
-        name = name,
+        name = sourceName ?: name,
         lang = sourceLang,
         priority = 40,
         content = content,
