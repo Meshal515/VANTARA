@@ -109,13 +109,19 @@ jobs:
           PY
           VANTARA_LIVE_EXTRACTORS="$PWD/extractor-samples.txt" VANTARA_LIVE_OUT="$PWD/extractor-probe.txt" \
             bash android/gradlew -p extensions/runtime-android :cloudstream:testDebugUnitTest --tests '*LiveExtractorProbeTest*' --no-daemon || true
-          { echo '### Live extractor probe'; echo '```'; cat extractor-probe.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # التمريرة الثانية: قارئ صفحات المشغّل العام على كل رابط، لمعرفة المضيفات التي يقرأ منها فيديو فعليًا
+          # قبل تسجيلها (لا يُسجَّل مضيف دون دليل MEDIA هنا)
+          VANTARA_LIVE_GENERIC=1 VANTARA_LIVE_EXTRACTORS="$PWD/extractor-samples.txt" VANTARA_LIVE_OUT="$PWD/extractor-generic.txt" \
+            bash android/gradlew -p extensions/runtime-android :cloudstream:testDebugUnitTest --tests '*LiveExtractorProbeTest*' --rerun --no-daemon -q || true
+          { echo '### Live extractor probe'; echo '```'; cat extractor-probe.txt 2>/dev/null; echo '```'
+            echo '### Generic player-page probe'; echo '```'; grep MEDIA extractor-generic.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: live-repository-sweep
           path: |
             extractor-probe.txt
+            extractor-generic.txt
             manga-sweep.jsonl
             live-sweep.jsonl
             live-sweep-logcat.txt
