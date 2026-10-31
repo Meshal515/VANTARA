@@ -54,8 +54,9 @@ elif [ "$case_name" = clean ]; then
   node tools/android-debug/journeys.mjs clean || status=1
   node tools/android-debug/journeys.mjs repo-read || status=1
   node tools/android-debug/journeys.mjs anime || status=1
-  node tools/android-debug/journeys.mjs ui-anime || status=1
+  # القياس قبل الواجهة: خطوة المشغّل الثقيلة أخيرًا فلا تُضيّع دليل التجهيز إن سقط المحاكي
   node tools/android-debug/journeys.mjs anime-match || true
+  node tools/android-debug/journeys.mjs ui-anime || status=1
   [ "$status" = 0 ] || failed=1
 else
   echo "unknown case $case_name"; exit 2

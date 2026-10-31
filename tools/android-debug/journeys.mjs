@@ -347,7 +347,10 @@ try {
             const list=r?.routes??[];servers={count:list.length,ready:list.filter(x=>x.state==='ready'||x.ready).length,sources:[...new Set(list.map(x=>String(x.sourceName??x.sourceId??'').slice(0,40)))],best:b?.candidate?.server??b?.server??(b?.error||null)}}}catch(x){servers='error: '+x.message}}
         out[titles[0]]={hits,matched:work?work.copies.map(c=>c.sourceId.slice(0,60)+' :: '+c.title):[],servers};}
       return out})()`, 900000);
+    // أين وقف تجهيز كل مصدر (VantaraPrepare: معرّف الجلسة والمرحلة والزمن)
+    try { proof.prepareTrace = adb('logcat', '-d', '-s', 'VantaraPrepare:I').split('\n').slice(-120); } catch (e) { proof.prepareTrace = [String(e.message).slice(0, 200)]; }
     console.log(JSON.stringify(proof.match, null, 1).slice(0, 6000));
+    console.log(proof.prepareTrace.join('\n'));
   }
 
   if (phase === 'anime') {
