@@ -58,6 +58,9 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
     img.alt = "";
     img.loading = "lazy";
     img.referrerPolicy = "no-referrer";
+    // صنف .an-img في رئيسية الأنمي يُخفي الصورة حتى «loaded»: تُعلَّم هنا حين تُفكّ فعلًا، وإلا بقيت البطاقات فارغة
+    img.onload = () => img.classList.add("loaded");
+    img.onerror = () => img.classList.add("failed");
     if (addon.sourceId && (addon.bundled || addon.protocol === "native") && kind === "manga") {
       void nativeCover(url, addon.sourceId).then((local) => { if (!closed && local) { img.src = local; box.append(img); } });
     } else { img.src = url; box.append(img); }

@@ -497,9 +497,13 @@ export function renderV7Addons({
       if(!have||(have._url==="vantara:ready-sources"&&x._url!=="vantara:ready-sources"))installedByPkg.set(x.pkg,x);
     }
     const installedNative=[...installedByPkg.values()];
+    // المصدر المدمج سابقًا يظهر أيضًا في سجل المصادر العام (بلا حذف): نسخة واحدة في «المثبتة»، سطر الإضافة بحذفه
+    const nativePkgs=new Set(installedNative.map(x=>x.pkg));
+    const pkgOf=id=>String(id??"").split("#")[0].split("@")[0];
+    const shownRemote=allRemote.filter(a=>!(a.bundled&&nativePkgs.has(pkgOf(a.sourceId??a.id))));
     const direct=allRemote.filter(a=>!a.bundled);
     repoCount.textContent=String(repos.length+direct.length+siteRows.length);
-    installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
+    installedCount.textContent=String(shownRemote.length+installedNative.length+siteRows.length);
     repoTab.classList.toggle("active",tab==="repos");
     installedTab.classList.toggle("active",tab==="installed");
     verificationTab.classList.toggle("active",tab==="verification");
@@ -546,7 +550,7 @@ export function renderV7Addons({
       for(const item of unknown.filter(x=>!currentSearch||String(x.host+" "+(x.sourceName||"")).toLowerCase().includes(currentSearch)))list.append(verificationRow(item));
       body.append(list.childElementCount?list:empty("لا توجد مصادر تحتاج تحققًا",""));
     }else{
-      const filteredRemote=filtered(allRemote);
+      const filteredRemote=filtered(shownRemote);
       const filteredNative=filtered(installedNative);
       const filteredSites=siteRows.filter(x=>(type==="الكل"||type==="مانجا")&&(!currentSearch||String((x.label||"")+" "+(x.domain||"")+" "+(x.engine||"")).toLocaleLowerCase().includes(currentSearch)));
       const list=el("div","v7-list");

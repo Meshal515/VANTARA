@@ -44,6 +44,10 @@ describe('source home', () => {
     expect(root.querySelector('.header .brand-section').textContent).toBe('ANIME');
     const cards = [...root.querySelectorAll('.an-rail .an-card')];
     expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['a1', 'm1', 'a2']);
+    // الغلاف يظهر حين يُفكّ (صنف .an-img مخفي حتى loaded)
+    const img = cards[0].querySelector('img');
+    img.onload();
+    expect(img.classList.contains('loaded')).toBe(true);
     cards[1].click();
     expect(onOpenWork.mock.calls[0][0].type).toBe('manga');
     root.close();

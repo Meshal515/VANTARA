@@ -262,8 +262,9 @@ export function readySources() {
 		add: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
 		remove: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
 		extensions: () => items(),
-		install: (_repo, pkg) => choosePackage(pkg, true),
-		uninstall: (pkg) => choosePackage(pkg, false),
+		// مثل مستودعها الأصلي: التثبيت يُنزّل ويحمّل فعلًا، والحذف يمحو نسختها من الجهاز
+		install: (_repo, pkg) => installFormer(required(), pkg),
+		uninstall: (pkg) => removeFormer(required(), pkg),
 	};
 }
 
