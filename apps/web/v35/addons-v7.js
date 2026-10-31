@@ -60,6 +60,9 @@ const kindName=(a)=>{
   return "مصدر";
 };
 
+// فهارس المستودعات المقروءة تبقى بين إعادة رسم الصفحة: التثبيت يعيد بناءها، وكانت القائمة كلها تختفي
+// («جارٍ تحميل المصادر…») حتى يُقرأ الفهرس من جديد. القديم يُعرض فورًا ويُستبدل حين يصل الجديد.
+const indexCache=new Map();
 export function renderV7Addons({
   registry={}, filter="all", repositories=null, readySources=null, animeRepositories=null, cloudstreamRepositories=null, sites=null, verification=null, pulse=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
@@ -79,7 +82,7 @@ export function renderV7Addons({
     // مصادر المانجا التي كانت مدمجة: تُضاف لحسابك بمعرّفها القديم (lib/extension-engine.js readySources)
     ...(readySources?[{id:"ready",kind:"manga",api:readySources}]:[])
   ];
-  let repos=[], extensions=new Map(), siteRows=[], loading=false;
+  let repos=[], extensions=new Map(indexCache), siteRows=[], loading=false;
   const head=el("div","v7-heading");
   const add=btn("أضف","v7-plus",()=>showImport());
   add.prepend(ico("plus"));
@@ -486,7 +489,14 @@ export function renderV7Addons({
       if(!nativeByPackage.has(key))nativeByPackage.set(key,nativeRecord(item,store,item.repo));
     }
     const allNative=[...nativeByPackage.values()];
-    const installedNative=allNative.filter(x=>x.installed || x.update || x.builtin);
+    // الحزمة نفسها قد تُعلنها «مصادر جاهزة» ومستودعها الأصلي (Keiyoushi) معًا: مصدر واحد بمعرّف واحد على
+    // الجهاز، فيُعرض مرة واحدة. يُفضَّل سطر المستودع الأصلي لأنه يحمل الحذف وإعادة التثبيت منه.
+    const installedByPkg=new Map();
+    for(const x of allNative.filter(x=>x.installed || x.update || x.builtin)){
+      const have=installedByPkg.get(x.pkg);
+      if(!have||(have._url==="vantara:ready-sources"&&x._url!=="vantara:ready-sources"))installedByPkg.set(x.pkg,x);
+    }
+    const installedNative=[...installedByPkg.values()];
     const direct=allRemote.filter(a=>!a.bundled);
     repoCount.textContent=String(repos.length+direct.length+siteRows.length);
     installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
@@ -600,7 +610,7 @@ export function renderV7Addons({
         try{
           const items=await job.repo.group.api.extensions(job.repo.data.url);
           if(alive&&job.run===generation){
-            extensions.set(job.repo.key,{store:job.repo.group,url:job.repo.data.url,items:items||[]});
+            extensions.set(job.repo.key,{store:job.repo.group,url:job.repo.data.url,items:items||[]});indexCache.set(job.repo.key,extensions.get(job.repo.key));
             extensionErrors.delete(job.repo.key);
           }
         }catch(err){

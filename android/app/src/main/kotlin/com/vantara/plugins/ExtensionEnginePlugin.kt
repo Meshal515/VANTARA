@@ -235,6 +235,26 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    /**
+     * حذف مصدر كان مدمجًا من الجهاز فعلًا (بعد إزالته من الحساب في الواجهة): يخرج من الذاكرة وتُحذف نسخه
+     * المحفوظة ومثبّت إصداره، فإعادة تثبيته تنزّله من Keiyoushi موقّعًا. المكتبة والتقدم في المزامنة لا تُمس.
+     */
+    @PluginMethod
+    fun removeBuiltin(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        packageSpec(pkg) ?: return call.reject("ليست إضافة كانت مدمجة")
+        scope.launch(Dispatchers.IO) {
+            try {
+                forget(pkg)
+                loaded.keys.removeAll { splitSourceId(it.substringBefore('#')).first == pkg }
+                staged.remove(pkg)
+                builtinSpecs.reset(pkg)
+                loader.prune(pkg, emptySet())
+                call.resolve()
+            } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
+    }
+
     /** الحزم التي جُهّزت في هذه العملية: التبليغ يتكرر مع كل تغيّر مزامنة ولا يعيد التنزيل. */
     private val staged = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 

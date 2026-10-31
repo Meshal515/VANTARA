@@ -207,8 +207,8 @@ export function repositories() {
 			const added = visible({ id: ext.pkg });
 			return { ...ext, builtin: false, formerlyBundled: true, installed: added ? ext.installed ?? ext.version : null, update: false };
 		}),
-		install: (repo, pkg) => formerlyBundled.has(pkg) ? choosePackage(pkg, true) : plugin.installExtension({ repo, pkg }),
-		uninstall: (pkg) => formerlyBundled.has(pkg) ? choosePackage(pkg, false) : plugin.uninstallExtension({ pkg }),
+		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
+		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
 	};
 }
 
@@ -217,6 +217,23 @@ export function repositories() {
  * (addons-v7.js) على كل المنصات. الإضافة والإزالة اختيار متزامن في حسابك
  * (lib/source-entitlement.js)، والمعرّف هو نفسه دائمًا، فلا تتكرر المصادر ولا تنقطع المكتبة.
  */
+/**
+ * حزمة كانت مدمجة، بعد فصلها، تُثبَّت كأي إضافة فعلًا: تُضاف لحسابك ثم تُنزَّل موثّقة وتُحمَّل الآن
+ * (يظهر شعارها ويُعرف فشلها فورًا). فشل التحميل يرجع الاختيار كما كان ويُعرض سببه.
+ */
+async function installFormer(plugin, pkg) {
+	await choosePackage(pkg, true);
+	const id = ((await plugin.sources()).sources ?? []).map((s) => s.id).find((sid) => packageOf(sid) === pkg && !String(sid).includes('#'));
+	try { if (id) await plugin.prepare({ sourceId: id }); }
+	catch (error) { await choosePackage(pkg, false).catch(() => {}); throw error; }
+}
+
+/** حذف حقيقي: من حسابك ومن الجهاز (نسختها المحفوظة)، فإعادة التثبيت تنزّلها من Keiyoushi. المكتبة والتقدم باقيان. */
+async function removeFormer(plugin, pkg) {
+	await choosePackage(pkg, false);
+	if (typeof plugin.removeBuiltin === 'function') await plugin.removeBuiltin({ pkg });
+}
+
 export const READY_REPOSITORY = 'vantara:ready-sources';
 export function readySources() {
 	if (!bridge()) return null;

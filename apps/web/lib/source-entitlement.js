@@ -164,4 +164,8 @@ export function writeLocalChoices(fields, storage = globalThis.localStorage) {
 export async function choosePackage(pkg, on) {
   if (!writer) throw new Error('الحساب غير جاهز بعد، حاول بعد لحظة');
   await writer(choicePatch(pkg, on));
+  // الاختيار يُطبَّق هنا فورًا لا بعد رجوعه من المزامنة: كانت «تثبيت» تبقى ظاهرة بعد الضغط حتى تدور المزامنة
+  const added = new Set(current.added), removed = new Set(current.removed);
+  if (on) { added.add(String(pkg)); removed.delete(String(pkg)); } else { removed.add(String(pkg)); added.delete(String(pkg)); }
+  setEntitlement({ state: current.state, added, removed });
 }

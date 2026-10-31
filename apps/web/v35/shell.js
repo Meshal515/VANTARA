@@ -3829,6 +3829,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
     sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async function openSelectedWork(item) {
       try {
+        toast('جارٍ فتح «' + String(item?.title ?? item?.name ?? 'العمل').slice(0, 40) + '»…');
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);
         if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');

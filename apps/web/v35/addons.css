@@ -1050,3 +1050,5 @@
 .v35 .addon-store--detail > :not(.addon-grid) {
   display: none !important;
 }
+/* البطاقة تُفتح: إشارة فورية بدل «لا شيء يحدث» */
+.addon-source .work-card[aria-busy="true"] { opacity: .55; pointer-events: none; }
