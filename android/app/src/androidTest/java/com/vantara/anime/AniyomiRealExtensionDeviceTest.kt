@@ -87,5 +87,6 @@ class AniyomiRealExtensionDeviceTest {
         }
         android.util.Log.i("VANTARA_ANIYOMI_REAL",
             "PASS package=${entry.pkg} sources=${factoryIds.size} verified_sha256=$sha")
+        Unit // JUnit requires a void test method; Log.i() returns Int.
     }
 }
