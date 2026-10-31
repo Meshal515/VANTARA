@@ -19,13 +19,13 @@ concurrency:
 
 jobs:
   runtime-validation:
-    if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' || github.ref == 'refs/heads/fix/engine-integrity-debug-review-20261031') && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
     permissions:
       contents: read
     uses: ./.github/workflows/runtime-app-debug.yml
 
   runtime-kernel-validation:
-    if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' || github.ref == 'refs/heads/fix/engine-integrity-debug-review-20261031') && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
     permissions:
       contents: read
     uses: ./.github/workflows/runtime-android.yml
