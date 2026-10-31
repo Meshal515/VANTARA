@@ -48,11 +48,7 @@ jobs:
           script: |
             adb logcat -G 16M || true
             adb logcat -c || true
-            bash android/gradlew -p android :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.anime.AniyomiRealExtensionDeviceTest \
-              -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiReal=true \
-              -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiRepository=https://raw.githubusercontent.com/yuzono/anime-repo/repo \
-              --no-daemon --stacktrace
+            bash android/gradlew -p android :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.anime.AniyomiRealExtensionDeviceTest -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiReal=true -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiRepository=https://raw.githubusercontent.com/yuzono/anime-repo/repo --no-daemon --stacktrace
             adb logcat -d -v raw -s VANTARA_ANIYOMI_REAL:I > aniyomi-sweep.log
             grep -q 'PASS package=' aniyomi-sweep.log
       - name: Upload source-by-source emulator evidence
