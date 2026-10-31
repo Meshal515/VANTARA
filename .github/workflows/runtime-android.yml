@@ -1,7 +1,7 @@
 name: VANTARA Runtime isolated Android execution (authored and pinned CS3 DEX)
 on:
   push:
-    branches: [feat/repository-compat-runtime-20261028, feat/runtime-debug-integration-20261028]
+    branches: [feat/repository-compat-runtime-20261028, feat/runtime-debug-integration-20261028, codex/vantara-video-repo-debug-20261101]
     paths:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
