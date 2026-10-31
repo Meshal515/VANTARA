@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Real CloudStream source-site probe on an ephemeral emulator, never the owner profile.
+# Must be invoked via bash: android-emulator-runner's script shell is /bin/sh.
+set -uo pipefail
+adb logcat -G 16M || true
+adb logcat -c || true
+args=(
+  -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.LiveRepositorySweepTest
+  -Pandroid.testInstrumentationRunnerArguments.vantaraLiveSweep=true
+  -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=Anime4up,Animewitcher,Witanime
+  -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=3
+)
+bash android/gradlew -p android :app:connectedDebugAndroidTest "${args[@]}" --no-daemon --stacktrace
+status=$?
+adb logcat -d -v raw -s VANTARA_SWEEP:I > live-video-sweep.jsonl 2>/dev/null || true
+adb logcat -d VantaraRuntime:V VantaraRuntimeHttp:D AndroidRuntime:E TestRunner:I '*:S' > live-video-sweep-logcat.txt 2>&1 || true
+if [[ -s live-video-sweep.jsonl ]]; then
+  node tools/repository-compat/summarize_live_sweep.mjs live-video-sweep.jsonl > live-video-summary.md || true
+else
+  printf '%s\n' 'ERROR: no real CloudStream plugin journeys recorded' >&2
+  exit 1
+fi
+exit "$status"
