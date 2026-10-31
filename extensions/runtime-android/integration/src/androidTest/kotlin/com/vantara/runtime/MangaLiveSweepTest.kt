@@ -47,6 +47,11 @@ class MangaLiveSweepTest {
             out.put(name,buildJsonObject {
                 put("result","FAIL");put("code",v.code);put("owner",v.owner.name.lowercase())
                 put("detail",(error.javaClass.simpleName+": "+(error.message ?: "")).replace(Regex("https?://\\S+"),"<url>").take(200))
+                // عطل محرك (توافق، ربط) يُحسم بسلسلة أسبابه وأعلى إطاراته، لا برسالته وحدها
+                if (v.owner!=ExtensionFailure.Owner.SITE) put("trace",JsonArray(generateSequence(error) { it.cause }.take(5).flatMap { e ->
+                    listOf(JsonPrimitive("! ${e.javaClass.name}: ${(e.message ?: "").replace(Regex("https?://\\S+"),"<url>").take(160)}")) +
+                        e.stackTrace.take(6).map { JsonPrimitive("  ${it.className}.${it.methodName}:${it.lineNumber}") }
+                }.toList()))
                 put("ms",(System.nanoTime()-started)/1_000_000)
             })
             null
