@@ -31,12 +31,38 @@ Codex لم يدفع شيئًا بعد 29 أكتوبر؛ عمله كله داخل
 
 ## معروف ومفتوح
 
-- Mixdrop: يعمل محليًا (الفك صحيح) ويفشل حيًا؛ الفحص صار يسجّل السبب.
+- Mixdrop: يعمل محليًا ويفشل حيًا: الصفحة 200 من mxdrop.click والمستخرج يعيد false (الصفحة الحية تختلف عن نسختنا المحلية).
 - عشرة مصادر CloudStream بكتالوج فارغ «ناجح»: الفحص صار يسجّل الجواب الخام.
 - ثمانية مصادر CloudStream تقف عند Cloudflare: الحل الصامت مكتوب ولم يُثبت (يحتاج نافذة أمامية؛ المحاكي في الفحص بلا نشاط ظاهر).
 - MangaRose: غير موجود في Keiyoushi (59 إضافة عربية فيه)؛ يحتاج مستودعًا آخر من المالك.
-- مستخرجات ناقصة كثيرة الطلب: mp4upload، voe، vk، uqload، streamwish، vidspeed، savefiles، byse*.
+- مستخرجات ناقصة كثيرة الطلب: voe، vk، uqload، streamwish، savefiles، byse*، megamax، gofile (mp4upload وanafast وvidspeed أُضيفت بدليل حي).
 
-## مصفوفة المانجا
+## إصلاحات مثبتة بأدلة الفحص (31 أكتوبر)
 
-تُملأ من manga-sweep.jsonl بعد كل تشغيل (PASS = صورة صفحة فعلية نزلت وتحقق أنها صورة).
+| العطل | السبب الجذري | الإصلاح |
+|---|---|---|
+| إضافة تُسقط التطبيق كله (Manga Million) | إضافات Keiyoushi الحديثة تنادي `BuildersKt.runBlockingK` (من coroutines 1.11.0 فقط؛ التطبيق كان 1.8.1)، والخطأ في نداء OkHttp غير متزامن، و`UncaughtExceptionInterceptor` يمسك `Exception` فقط | coroutines 1.11.0 (يبقى `runBlocking` القديم)، والاعتراض يمسك `LinkageError` → فشل المصدر وحده. `UncaughtLinkageTest` |
+| المدمجة مجمّدة على إصدار قديم | التحديث الرسمي يُطلب فقط إن فشل التحميل نفسه | تحديث ذاتي موثّق عند عطل يملكه كود الإضافة (`refreshBuiltin`)، مرة كل 6 ساعات |
+| Dilar | الموقع صار ببروتوكول تشفير 17، وإصلاحنا (10–12) مفروض على كل إصدار | مسار الإضافة أولًا؛ **ما زال فاشلًا حتى بالإصدار الرسمي 1.6.20** |
+| AsgardScans | روابط http ترفضها سياسة التطبيق | `HttpsUpgradeInterceptor` |
+| كتالوج CloudStream فارغ/معطوب | القسم 0 وحده كان يُطلب | `SourceOperations.home` |
+
+## مصفوفة المانجا (تشغيل 41162877481، PASS = صورة صفحة فعلية نزلت وتحقق أنها صورة)
+
+الأولوية الأربع عشرة: Team X وAzora وMangalek وManga Link وMangaCloud وManga Starz وMangaLionz و3asq **PASS**.
+MangaSwat وHijala: Cloudflare تفاعلي من شبكة المحاكي (يحتاج جهازًا حقيقيًا أو التحقق اليدوي). Dilar: بروتوكول 17.
+MangaTime: JSON لا تفهمه الإضافة حتى بأحدث إصدار. MangaTek: 403 من الموقع. MangaRose: غير موجود في Keiyoushi.
+
+PASS أيضًا: AriaToon وHizoManga وManga Tales وMangaSpark وMangaDex وMangaTik وMangaTuk وRocks Manga وYokai
+وXSano وLava Scans وKawii وManga Ai Land وDespair وProComic وOduto وLoner وSayManhwa وNamiComi وXCOMIC وYSK
+وGlobalComix وDragon Ball Multiverse وThe Library of Ohara، والإنجليزية Weeb Central وAsura وMangaFire وMangakakalot.
+
+مفتوح: Mangahere (NPE داخل QuickJS عند الصفحات)، Manga Million (`NoClassDefFoundError q1` بعد ترقية coroutines)،
+EShadow/Orca/MangaDot (أعمال بلا فصول — الفحص صار يجرب ثلاثة أعمال)، Manhatok/Niji (فصل بلا صفحات — يجرب ثلاثة فصول)،
+Mangalek/Link/Lionz/Spark/Starz (عائلة موقع واحد: الفصل الأحدث بصفحتين — الفحص يعدّ صفحات فصول أخرى).
+
+## الأنمي (CloudStream) — المعيار: تشغيل فعلي لا رابط
+
+روابط مستخرجة: AnimeRift (9) وAnime4up (10) وAnimeWitcher (3) وDima toon (1). الفحص صار يتحقق من تشغيل كل رابط
+(بايتات فيديو أو أول مقطع HLS). Cloudflare: Anime3rb وAnime-Phoenix (تبتلعه الإضافة فيظهر NO_CATALOGUE) وWitanime
+وAnimerco. أقسام بصفر عناصر: Brstej وMycima وYouTube وEgydead (سجل VantaraRuntimeHttp يحسم السبب).
