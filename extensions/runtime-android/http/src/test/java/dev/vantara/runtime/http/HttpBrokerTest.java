@@ -104,6 +104,18 @@ public class HttpBrokerTest {
             instant.set(instant.get().plusSeconds(3));first.enqueue(new MockResponse().setBody("ok"));assertEquals("ok",body(b.execute(input(one+"/resumed"))));
         }
     }
+    @Test public void challengedSiteIsRetriedAfterItsWindowSoASourceRecoversByItself() throws Exception {
+        first.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));
+        try(HttpBroker.Session a=broker.open(scope("A"))) {
+            assertEquals("VERIFICATION_REQUIRED",failure(a,input(one+"/challenge")));
+            instant.set(instant.get().plusSeconds(60));
+            assertEquals("VERIFICATION_REQUIRED",failure(a,input(one+"/still-blocked")));assertEquals(1,first.getRequestCount());
+            // The site dropped its protection: after the window it is asked again and the source works with no user action
+            instant.set(instant.get().plusMillis(HttpBroker.CHALLENGE_TTL_MS));
+            assertFalse(a.needsVerification(one));
+            first.enqueue(new MockResponse().setBody("back"));assertEquals("back",body(a.execute(input(one+"/recovered"))));
+        }
+    }
     @Test public void humanChallengeIsSilentAndScopedButBare403IsNotCloudflare() throws Exception {
         first.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));
         try(HttpBroker.Session a=broker.open(scope("A"));HttpBroker.Session b=broker.open(scope("B"))) {

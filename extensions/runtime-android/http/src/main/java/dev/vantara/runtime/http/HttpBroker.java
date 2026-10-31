@@ -56,7 +56,13 @@ public final class HttpBroker {
     private final Vaults vaults;
     private final Clock clock;
     private final LinkedHashMap<String,Host> hosts=new LinkedHashMap<>();
-    private final Set<Challenge> challenges=new HashSet<>();
+    /**
+     * Origins that answered with a Cloudflare challenge, and when. A challenge blocks requests only for
+     * CHALLENGE_TTL_MS: afterwards the site is tried again, so a source whose site dropped its protection recovers
+     * by itself instead of staying "needs verification" until the app restarts.
+     */
+    private final Map<Challenge,Long> challenges=new HashMap<>();
+    static final long CHALLENGE_TTL_MS=600_000L;
     private final Semaphore total=new Semaphore(8);
     private final int perHost;
 
@@ -100,6 +106,14 @@ public final class HttpBroker {
     private Challenge challenge(Scope s,String origin){return new Challenge(s.family(),s.packageId(),s.sourceId(),s.sessionId(),origin);}
     /** Host verification coordinator only; this controller is never given to provider code. */
     public void verificationSucceeded(Scope s,String origin) {synchronized(challenges){challenges.remove(challenge(s,origin));}}
+    private boolean challenged(Challenge c) {
+        synchronized(challenges){
+            Long at=challenges.get(c);
+            if(at==null)return false;
+            if(clock.millis()-at<CHALLENGE_TTL_MS)return true;
+            challenges.remove(c);return false;
+        }
+    }
     private Host acquireHost(String name) throws Failure {
         synchronized(hosts){
             Host state=hosts.get(name);
@@ -138,7 +152,7 @@ public final class HttpBroker {
         private final AtomicBoolean closed=new AtomicBoolean();
         private final Set<Call> active=new HashSet<>();
         private Session(Scope scope,CookieVault cookies){this.scope=scope;this.cookies=cookies;}
-        public boolean needsVerification(String origin){synchronized(challenges){return challenges.contains(challenge(scope,origin));}}
+        public boolean needsVerification(String origin){return challenged(challenge(scope,origin));}
         private void admit(HttpUrl url) throws Failure {
             if(closed.get())throw new Failure("SESSION_CLOSED");
             if(!scope.origins().contains(PUBLIC_INTERNET)&&!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
@@ -177,7 +191,7 @@ public final class HttpBroker {
                             if(closed.get())throw new Failure("SESSION_CLOSED");
                             cookies.save(url,Cookie.parseAll(url,response.headers()));
                             if("challenge".equalsIgnoreCase(response.header("cf-mitigated"))){
-                                synchronized(challenges){if(challenges.size()>=128&&!challenges.contains(challenge(scope,origin(url))))throw new Failure("ENGINE_CAPACITY");challenges.add(challenge(scope,origin(url)));}
+                                synchronized(challenges){Challenge c=challenge(scope,origin(url));long now=clock.millis();challenges.values().removeIf(at->now-at>=CHALLENGE_TTL_MS);if(challenges.size()>=128&&!challenges.containsKey(c))throw new Failure("ENGINE_CAPACITY");challenges.put(c,now);}
                                 throw new Failure("VERIFICATION_REQUIRED");
                             }
                             if(response.code()==429){cooldown(host,retryAfter(response));throw new Failure("RATE_LIMITED",host.retryAt);}
