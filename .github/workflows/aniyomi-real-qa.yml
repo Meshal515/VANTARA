@@ -2,7 +2,11 @@ name: VANTARA real Aniyomi multi-source APK compatibility (no publish)
 on:
   push:
     branches: [fix/engine-core-predebug-20261031, codex/vantara-video-repo-debug-20261101]
-    paths: ['.github/workflows/aniyomi-real-qa.yml']
+    paths:
+      - '.github/workflows/aniyomi-real-qa.yml'
+      - 'android/app/src/main/kotlin/com/vantara/plugins/UserExtensions.kt'
+      - 'android/app/src/main/kotlin/com/vantara/anime/loader/**'
+      - 'android/app/src/androidTest/java/com/vantara/anime/AniyomiRealExtensionDeviceTest.kt'
   workflow_dispatch:
 
 permissions:
