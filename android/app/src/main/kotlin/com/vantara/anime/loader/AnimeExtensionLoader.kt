@@ -74,6 +74,16 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
     }
 
     fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
+        val catalogue = loadSources(ref, bytes)
+        return (ref.sourceId?.let { id -> catalogue.firstOrNull { it.id.toString() == id } }
+            ?: ref.sourceName?.let { name -> catalogue.firstOrNull { it.name == name } }
+            ?: catalogue.firstOrNull { it.lang == "ar" }
+            ?: catalogue.firstOrNull())
+            ?: throw LoadException("instantiate", "الإضافة لا تحمل المصدر المطلوب")
+    }
+
+    /** Enumerate every catalogue source in the signed APK, not only the first one. */
+    fun loadSources(ref: ExtensionRef, bytes: ByteArray): List<AnimeCatalogueSource> {
         val actual = sha256(bytes)
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
@@ -121,8 +131,8 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
             }
         }
         val catalogue = sources.filterIsInstance<AnimeCatalogueSource>()
-        return (ref.sourceName?.let { n -> catalogue.firstOrNull { it.name == n } } ?: catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.firstOrNull())
-            ?: throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        if (catalogue.isEmpty()) throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        return catalogue
     }
 
     private fun sha256(bytes: ByteArray): String =
