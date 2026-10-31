@@ -41,15 +41,15 @@ data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extension
 
 class UserAnimeStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
-    @Volatile var state: UserAnimeState = runCatching { json.decodeFromString<UserAnimeState>(file.readText()) }.getOrDefault(UserAnimeState())
+    @Volatile var state: UserAnimeState = com.vantara.plugins.readExtensionState(file)?.let {
+        try { json.decodeFromString<UserAnimeState>(it) }
+        catch (error: Exception) { throw IllegalStateException("EXTENSION_STATE_CORRUPT: ${file.name}", error) }
+    } ?: UserAnimeState()
         private set
 
     @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
         val next = change(state)
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(UserAnimeState.serializer(), next))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        com.vantara.plugins.writeExtensionState(file, json.encodeToString(UserAnimeState.serializer(), next))
         state = next
         return next
     }
