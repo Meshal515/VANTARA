@@ -446,9 +446,11 @@ class AnimeEngine(context: Context) {
         // Own both warm-up and later expansion so closing the session cancels both.
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
         prep.reserveAddonBatches(addonSources)
+        if (addonSources.isNotEmpty()) scheduleAddonBatchExpiry(prep)
         if (requestAddons) {
             val providers = addonProviders.filter { it.valid() && (warmSourceId == null || it.sourceId == warmSourceId) && it.endpoint(number) != null }.distinctBy { it.sourceId }.take(128)
             prep.reserveAddonBatches(providers.map { it.sourceId })
+            if (providers.isNotEmpty()) scheduleAddonBatchExpiry(prep)
             providers.forEach { launchAddonRequest(prep, it) }
         }
         launchPreparation(prep, copies.filter { warmSourceId == null || it.sourceId == warmSourceId }, preferredSourceId ?: warmSourceId, preferredServer)
@@ -470,8 +472,31 @@ class AnimeEngine(context: Context) {
         return fresh.size
     }
 
-    fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =
-        prepared[id]?.let { if (generation == null) 0 else it.reserveAddonBatches(sourceIds, generation) } ?: 0
+    fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int {
+        val prep = prepared[id] ?: return 0
+        val added = if (generation == null) 0 else prep.reserveAddonBatches(sourceIds, generation)
+        if (added > 0) scheduleAddonBatchExpiry(prep)
+        return added
+    }
+
+    /** Native safety net independent from web network promises and Capacitor. */
+    private fun scheduleAddonBatchExpiry(prep: com.vantara.anime.stream.PreparedEpisode) {
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            kotlinx.coroutines.delay(50_000L)
+            if (prepared[prep.id] === prep) {
+                val expired = prep.expireAddonBatches()
+                if (expired > 0) android.util.Log.w("VantaraPrepare", "ADDON_BATCH_EXPIRED session=${prep.id} count=$expired")
+            }
+        }
+    }
+
+    /** Completes a failed provider exactly once; a duplicate or late result is ignored. */
+    fun finishAddonBatch(id: String, sourceId: String, generation: String?): Boolean {
+        val prep = prepared[id] ?: return false
+        if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return false
+        prep.finish()
+        return true
+    }
 
     fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
 
@@ -492,6 +517,8 @@ class AnimeEngine(context: Context) {
     fun appendAddonStreams(id: String, sourceId: String, name: String, raw: kotlinx.serialization.json.JsonElement, provider: com.vantara.addons.NativeStremioProvider? = null, generation: String? = null): Int {
         val prep = prepared[id] ?: return 0
         if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return 0
+        var dispatched = false
+        try {
         if (provider?.sourceId == sourceId && provider.valid()) sessionRequests.computeIfPresent(id) { _, req ->
             req.copy(addonProviders = (req.addonProviders.filter { it.sourceId != sourceId } + provider).take(128))
         }
@@ -528,7 +555,13 @@ class AnimeEngine(context: Context) {
                 }
             } finally { prep.finish() }
         }
+        dispatched = true
         return list.size
+        } finally {
+            // Covers exceptions in parse/register and coroutine construction,
+            // after the native batch has already been claimed.
+            if (!dispatched) prep.finish()
+        }
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
