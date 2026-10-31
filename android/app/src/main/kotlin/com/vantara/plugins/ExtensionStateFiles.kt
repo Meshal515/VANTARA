@@ -1,6 +1,6 @@
 package com.vantara.plugins
 
-import android.util.AtomicFile
+import androidx.core.util.AtomicFile
 import java.io.File
 
 /**
