@@ -43,7 +43,14 @@ class LiveExtractorProbeTest {
             }
             // مستخرج مسجّل أعاد false: سبب الفشل الفعلي (loadExtractor يبتلعه عمدًا)، وحالة الصفحة كما رآها هذا الجهاز
             val why=if(handled.getOrNull()==true)"" else dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(java.net.URI(url).host)?.let{e->
-                val page=runCatching{client.newCall(Request.Builder().url(url).header("User-Agent","Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36").build()).execute().use{r->"page=${r.code} final=${r.request.url.host} bytes=${r.body?.string()?.length}"}}.getOrElse{"page=ERR ${it.javaClass.simpleName}"}
+                val page=runCatching{client.newCall(Request.Builder().url(url).header("User-Agent","Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36").build()).execute().use{r->
+                    val html=r.body?.string().orEmpty()
+                    // بنية الصفحة الحية: كتل P.A.C.K.E.R. وما فُكّ منها، ومفاتيح المشغّل قبل الفك وبعده
+                    val packed=Regex("""eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,""").findAll(html).count()
+                    val scripts=dev.vantara.runtime.cloudstream.extractors.PlayerPage.scripts(html)
+                    val keys=listOf("wurl","file:","sources","m3u8",".mp4").filter{k->k in scripts}.joinToString(",")
+                    "page=${r.code} final=${r.request.url.host} bytes=${html.length} packed=$packed unpackedChars=${scripts.length-html.length} keys=[$keys]"
+                }}.getOrElse{"page=ERR ${it.javaClass.simpleName}"}
                 val thrown=runCatching{runBlocking{e.extract(url,null,{},{})}}.fold({"returned=$it"},{"threw=${it.javaClass.simpleName}: ${it.message?.take(120)}"})
                 " why[${e.name}: $page $thrown]"
             }.orEmpty()
