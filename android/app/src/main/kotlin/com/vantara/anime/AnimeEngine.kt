@@ -128,7 +128,16 @@ class AnimeEngine(context: Context) {
 
     @Synchronized private fun apply() {
         val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
+        val oldById = manifest.sources.associateBy { it.id }
+        val newById = parsed.sources.associateBy { it.id }
         manifest = parsed
+        // An update keeps the same VANTARA source ID but changes the APK hash.
+        // Do not keep an adapter backed by the old class loader after refresh.
+        adapters.keys.removeAll { id ->
+            val current = newById[id]
+            current == null || !current.enabled || current.disabledReason != null || oldById[id] != current
+        }
+        loadErrors.keys.removeAll { id -> oldById[id] != newById[id] }
         for (s in parsed.sources) {
             if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
             AnimeHostRouter.register(s.id, s.domains.plan(null))
@@ -168,6 +177,12 @@ class AnimeEngine(context: Context) {
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
+                // A repository update/uninstall may arrive during slow APK IO.
+                // Reject the obsolete result rather than caching a stale adapter.
+                val current = entry(id)
+                check(current?.extension == ext && current.enabled && current.disabledReason == null) {
+                    "SOURCE_CHANGED_DURING_LOAD"
+                }
                 ExtensionAdapter(
                     id, source,
                     pageEmbeds = { entry(id)?.embeds },
