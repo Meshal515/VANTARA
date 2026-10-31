@@ -1,0 +1,88 @@
+name: VANTARA Debug CloudStream real repository journey (report only, no publish)
+
+on:
+  push:
+    branches: [codex/vantara-video-repo-debug-20261101]
+    paths:
+      - '.github/workflows/video-repository-live-qa.yml'
+      - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/LiveRepositorySweepTest.kt'
+      - 'extensions/runtime-android/cloudstream/**'
+      - 'extensions/runtime-android/integration/src/main/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-live-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-cloudstream-repository-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Copy current web shell and compile actual runtime-enabled Debug APK
+        run: |
+          set -euo pipefail
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - name: Emulator can run an isolated CloudStream provider
+        run: sudo chmod 666 /dev/kvm
+      - name: Record real CloudStream sources without modifying production profiles
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: |
+            set -uo pipefail
+            adb logcat -G 16M || true
+            adb logcat -c || true
+            bash android/gradlew -p android :app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.LiveRepositorySweepTest \
+              -Pandroid.testInstrumentationRunnerArguments.vantaraLiveSweep=true \
+              -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=Anime4up,Animewitcher,Witanime \
+              -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=3 \
+              --no-daemon --stacktrace
+            status=$?
+            adb logcat -d -v raw -s VANTARA_SWEEP:I > live-video-sweep.jsonl || true
+            adb logcat -d VantaraRuntime:V VantaraRuntimeHttp:D AndroidRuntime:E TestRunner:I '*:S' > live-video-sweep-logcat.txt 2>&1 || true
+            if [ -s live-video-sweep.jsonl ]; then
+              node tools/repository-compat/summarize_live_sweep.mjs live-video-sweep.jsonl > live-video-summary.md || true
+            fi
+            test -s live-video-sweep.jsonl || { echo 'ERROR: no real CloudStream plugin journeys recorded'; exit 1; }
+            exit "$status"
+      - name: Upload actual per-plugin journey proof, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-live-source-evidence-NOT-certified-playback
+          path: |
+            live-video-sweep.jsonl
+            live-video-sweep-logcat.txt
+            live-video-summary.md
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+          if-no-files-found: warn
+          retention-days: 14
