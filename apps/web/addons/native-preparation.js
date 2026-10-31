@@ -42,14 +42,50 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
       const provider = input && descriptor(entry, input);
       return provider ? [provider] : [];
     }),
-    start(session, plugin, { addonGeneration } = {}) {
+    start(session, plugin, { addonGeneration, timeoutMs = 49_000 } = {}) {
       const controller = new AbortController();
-      const done = Promise.all([...selected.values()].map(async entry => {
+      // Android independently expires reservations; never depend on a remote Promise
+      // or the Capacitor bridge to finish before another provider may complete.
+      const done = Promise.allSettled([...selected.values()].map(async entry => {
+        const sourceId = entry.copy.sourceId;
         let result = [], provider = null, reason = null;
-        try { const response = await streams(entry, controller.signal); result = response.list; provider = response.provider; }
-        catch { reason = 'تعذر الاتصال بالإضافة أو العثور على فيديو مطابق'; }
+        const providerController = new AbortController();
+        const abort = () => providerController.abort();
+        controller.signal.addEventListener('abort', abort, { once: true });
+        let timer, onAbort;
+        const deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => { providerController.abort(); reject(new Error('ADDON_PREPARE_TIMEOUT')); }, Math.max(1, timeoutMs));
+          onAbort = () => reject(new Error('ADDON_PREPARE_CANCELLED'));
+          controller.signal.addEventListener('abort', onAbort, { once: true });
+        });
+        try {
+          const response = await Promise.race([streams(entry, providerController.signal), deadline]);
+          result = response.list;
+          provider = response.provider;
+        } catch {
+          reason = 'تعذر الاتصال بالإضافة أو انتهاء مهلة تجهيز السيرفرات';
+        } finally {
+          clearTimeout(timer);
+          controller.signal.removeEventListener('abort', onAbort);
+          controller.signal.removeEventListener('abort', abort);
+        }
         if (controller.signal.aborted) return;
-        await plugin.appendAddonStreams({ session, sourceId: entry.copy.sourceId, name: entry.provider.name, streams: result, reason, ...(provider ? { provider } : {}), ...(addonGeneration ? { addonGeneration } : {}) });
+        const args = { session, sourceId, name: entry.provider.name, streams: result, reason, ...(provider ? { provider } : {}), ...(addonGeneration ? { addonGeneration } : {}) };
+        try {
+          await plugin.appendAddonStreams(args);
+        } catch {
+          // Idempotent settlement: a bridge rejection must not strand the
+          // session's native pendingBatches, even when all providers fail.
+          if (controller.signal.aborted) return;
+          try {
+            if (typeof plugin.finishAddonBatch === 'function')
+              await plugin.finishAddonBatch({ session, sourceId, ...(addonGeneration ? { addonGeneration } : {}) });
+            else
+              await plugin.appendAddonStreams({ ...args, streams: [], provider: undefined, reason: 'تعذر تسليم سيرفرات الإضافة' });
+          } catch {
+            // A native watchdog drains any remaining reservations independently.
+          }
+        }
       })).then(() => undefined);
       return { done, cancel: () => controller.abort() };
     },
