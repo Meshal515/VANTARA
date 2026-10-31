@@ -19,10 +19,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  runtime-actual-app:
-    uses: ./.github/workflows/runtime-app-debug.yml
-    permissions:
-      contents: read
+  optional-runtime-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Build the web/domain contract and run compatibility regressions
+        run: |
+          pnpm --filter @vantara/domain build
+          pnpm test:web
+      - name: Prepare independent pinned runtime fixtures
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Package actual web assets into optional-runtime APK
+        run: npx cap sync android
+      - name: Compile optional CloudStream runtime and run unit/instrumentation builds
+        run: bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Upload QA reports only (no signing, no publishing)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: predebug-optional-runtime-qa-reports
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
 
   isolated-runtime-contracts:
     uses: ./.github/workflows/runtime-android.yml
