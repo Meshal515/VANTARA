@@ -404,11 +404,9 @@ class ExtensionEnginePlugin : Plugin() {
                     is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
                 }
                 require(visible.any { v -> all.any { it.id.toString() == v.id } }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
-                claimIds(pkg, all)
-                forget(pkg)
-                packages[pkg] = all
-                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256))
+                commitInstalledPackage(pkg, all, user)
+                // Garbage collection is best effort after a durable activation.
+                runCatching { loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256)) }
                 call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
             } catch (t: Throwable) {
                 call.reject(t.message ?: t.readable())
@@ -420,12 +418,19 @@ class ExtensionEnginePlugin : Plugin() {
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
         if (userStore.extension(pkg) == null) return call.reject("ليست إضافة مثبتة من مستودع")
-        forget(pkg)
-        owners.values.removeAll { it == pkg }
-        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
-        // الإزالة بأمر المستخدم وحدها تحذف ملفات الإضافة من المخزن
-        loader.erase(pkg)
-        call.resolve()
+        try {
+            synchronized(this) {
+                // Durable commit first. If it fails, the working plugin stays loaded.
+                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+                forget(pkg)
+                owners.values.removeAll { it == pkg }
+            }
+            // الإزالة بأمر المستخدم وحدها تحذف ملفات الإضافة من المخزن
+            loader.erase(pkg)
+            call.resolve()
+        } catch (error: Exception) {
+            call.reject(error.message ?: "تعذّر حذف الإضافة دون فقدان البيانات")
+        }
     }
 
     /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
@@ -450,6 +455,19 @@ class ExtensionEnginePlugin : Plugin() {
     }
 
 
+
+    /** Atomically validate ownership and persist metadata before replacing the active source. */
+    @Synchronized private fun commitInstalledPackage(pkg: String, all: List<CatalogueSource>, user: UserExtension) {
+        val ids = all.map { it.id.toString() }
+        ids.firstOrNull { it == "0" }?.let { error("ID_COLLISION: المعرّف 0 محجوز") }
+        ids.firstOrNull { owners[it]?.let { owner -> owner != pkg } == true }
+            ?.let { error("ID_COLLISION: المعرّف $it محجوز لحزمة أخرى") }
+        // A rejected disk write cannot remove the old loaded extension.
+        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+        claimIds(pkg, all)
+        forget(pkg)
+        packages[pkg] = all
+    }
 
     /** تنزيل ⇒ تحقّق بصمة ⇒ تحميل من ملف. يُستدعى مرة، ثم يُخدَم من الذاكرة. */
     @PluginMethod
