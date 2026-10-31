@@ -12,7 +12,13 @@ import java.io.File
  */
 internal fun readExtensionState(file: File): String? {
     val backup = File(file.path + ".bak")
-    if (!file.exists() && !backup.exists()) return null
+    // Previous versions wrote a separate .tmp and could delete the old file
+    // on rename failure. Never treat such an interrupted upgrade as a clean install.
+    val oldTemp = File(file.path + ".tmp")
+    if (!file.exists() && !backup.exists()) {
+        if (oldTemp.exists()) throw IllegalStateException("EXTENSION_STATE_RECOVERY_REQUIRED: ${file.name}")
+        return null
+    }
     return try {
         String(AtomicFile(file).readFully(), Charsets.UTF_8)
     } catch (error: Exception) {
