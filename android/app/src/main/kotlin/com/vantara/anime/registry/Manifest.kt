@@ -54,6 +54,8 @@ data class ExtensionRef(
     val version: String? = null,
     /** اسم المصدر داخل الحزمة إن كانت تحمل أكثر من مصدر. */
     val sourceName: String? = null,
+    /** معرّف المصدر الحقيقي من Source.id (أدق من الاسم عند تكرار الأسماء). */
+    val sourceId: String? = null,
 )
 
 @Serializable
