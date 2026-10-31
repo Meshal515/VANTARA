@@ -353,8 +353,9 @@ class AnimeEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
-                engine.setUserSources(next.extensions.map { it.entry() })
+                // Removing a repository does not uninstall APKs that came
+                // from it. Installed versions remain pinned and loadable offline.
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
                 call.resolve()
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -413,6 +414,11 @@ class AnimeEnginePlugin : Plugin() {
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
                     sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
                 )
+                // Existing IDs are persisted in watch progress; never silently
+                // replace another package with the same short derived ID.
+                require(userStore.state.extensions.none { it.pkg != pkg && it.id == user.id }) {
+                    "SOURCE_ID_COLLISION: ${user.id}"
+                }
                 // التحميل نفسه الذي سيستعمله المحرك: حزمة لا تُحمَّل لا تُحفظ
                 com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
                 val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
@@ -428,7 +434,8 @@ class AnimeEnginePlugin : Plugin() {
         if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
         val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
         engine.setUserSources(next.extensions.map { it.entry() })
-        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+        // Erase all validated cached versions only after durable uninstall.
+        com.vantara.anime.loader.AnimeExtensionLoader(context, http).erase(pkg)
         call.resolve()
     }
 
