@@ -93,11 +93,12 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
 
     fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
         val catalogue = loadSources(ref, bytes)
-        return (ref.sourceId?.let { id -> catalogue.firstOrNull { it.id.toString() == id } }
-            ?: ref.sourceName?.let { name -> catalogue.firstOrNull { it.name == name } }
-            ?: catalogue.firstOrNull { it.lang == "ar" }
-            ?: catalogue.firstOrNull())
-            ?: throw LoadException("instantiate", "الإضافة لا تحمل المصدر المطلوب")
+        val exact = ref.sourceId?.let { id -> catalogue.firstOrNull { it.id.toString() == id } }
+        val named = ref.sourceName?.let { name -> catalogue.filter { it.name == name }.singleOrNull() }
+        if (ref.sourceId != null || ref.sourceName != null) {
+            return exact ?: named ?: throw LoadException("identity", "مصدر الإضافة المطلوب لم يعد موجودًا")
+        }
+        return catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.first()
     }
 
     /** Enumerate every catalogue source in the signed APK, not only the first one. */
