@@ -20,6 +20,43 @@ class LinkCollectorTest {
         val result=LinkCollector.collect(5_000){_,cb->cb(link(1));error("third server crashed")}
         assertEquals(1,result.links.size);assertTrue(result.complete);assertEquals("third server crashed",result.failure?.message)
     }
+    @Test fun hungProvidersAreBoundedAndTheirLateVideoCallbacksAreDiscarded() {
+        val started=java.util.concurrent.CountDownLatch(2)
+        val release=java.util.concurrent.CountDownLatch(1)
+        val exited=java.util.concurrent.CountDownLatch(2)
+        val results=java.util.Collections.synchronizedList(mutableListOf<LinkCollector.Result>())
+        val callers=(1..2).map {
+            Thread({
+                results.add(LinkCollector.collect(200){_,cb->
+                    cb(link(1))
+                    started.countDown()
+                    try {
+                        // A deliberately non-cooperative provider: ignores interrupt on timeout.
+                        while(release.count>0L) {
+                            try {release.await()} catch(_:InterruptedException) {}
+                        }
+                        cb(link(2))
+                    } finally {exited.countDown()}
+                })
+            },"hung-provider-caller-$it").apply{start()}
+        }
+        try {
+            assertTrue("Both provider workers started",started.await(3,java.util.concurrent.TimeUnit.SECONDS))
+            callers.forEach{it.join(2000)}
+            assertEquals(2,results.size)
+            assertTrue(results.all{it.links.size==1 && !it.complete})
+            val denied=LinkCollector.collect(250){_,_->fail("Third hung provider must not start")}
+            assertEquals("VIDEO_LINK_WORKER_BUSY",denied.failure?.message)
+            assertFalse(denied.complete)
+            assertTrue(denied.links.isEmpty())
+        } finally {
+            release.countDown()
+            assertTrue("Hung workers must eventually exit after release",exited.await(3,java.util.concurrent.TimeUnit.SECONDS))
+            callers.forEach{it.join(2000)}
+        }
+        assertEquals("Late callbacks must not change returned results",listOf(1,1),results.map{it.links.size})
+    }
+
     @Test fun aFastProviderCompletesWithAllItsLinks() {
         val result=LinkCollector.collect(5_000){_,cb->repeat(3){cb(link(it))}}
         assertEquals(3,result.links.size);assertTrue(result.complete);assertNull(result.failure)
