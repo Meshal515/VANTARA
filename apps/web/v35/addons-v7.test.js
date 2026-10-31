@@ -555,3 +555,16 @@ it('keeps repository-removal errors in the confirmation and preserves the saved 
  expect(view.querySelector('.v7-dialog').textContent).toContain('تعذرت إزالة المستودع');expect(confirm.disabled).toBe(false);
  expect(view.querySelector('.v7-body').textContent).toContain('Saved Repo');view.close();
 });
+
+it('names the failed source and clears its message on another tab', async()=>{
+  setup();
+  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Manga Starz',pkg:'starz.pkg'}],
+    install:async()=>{throw Object.assign(Error('الموقع رفض الطلب (403)'),{code:'SITE_HTTP_403'});}};
+  const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();
+  view.querySelector('.v7-flip').click();await tick();
+  expect(view.querySelector('.v7-diagnostic').textContent).toBe('Manga Starz: الموقع رفض الطلب (403)');
+  expect(view.querySelector('.v7-flip.installed')).toBeNull();
+  installedTab(view).click();
+  expect(view.querySelector('.v7-diagnostic').textContent).toBe('');
+  view.close();
+});

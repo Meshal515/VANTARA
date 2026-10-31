@@ -65,6 +65,8 @@ class MangaLiveSweepTest {
         val loader=FileExtensionLoader(context)
         val output=File(context.getExternalFilesDir(null),"manga-sweep").apply { mkdirs() }
         val reports=mutableListOf<JsonObject>()
+        // نافذة أمامية كما عند القارئ: حل Cloudflare الصامت في عميل المانجا يحتاجها (MangaSwat وغيره)
+        val window=androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
 
         // المضمّنة (العربية والإنجليزية) ثم عربية Keiyoushi غير المضمّنة، كما يثبّتها المستخدم من المستودع
         val builtin=(SPIKE_SOURCES+FILLER_PACKAGES).distinctBy { it.pkg }
@@ -88,7 +90,7 @@ class MangaLiveSweepTest {
             }
         }
 
-        for ((origin,base,fetch) in packages) {
+        try { for ((origin,base,fetch) in packages) {
             if (only!=null && base.label.lowercase() !in only) continue
             val report=buildJsonObject {
                 put("extension",base.label);put("origin",origin);put("version",base.versionName)
@@ -136,6 +138,6 @@ class MangaLiveSweepTest {
             reports+=report
             Log.i("VANTARA_MANGA",report.toString())
             File(output,"report.json").writeText(JsonArray(reports).toString())
-        }
+        } } finally { window.close() }
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import uy.kohesive.injekt.api.get
 import java.io.File
 import java.util.UUID
 
@@ -50,7 +51,14 @@ class LiveRepositorySweepTest {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         ensureEngineInjekt(context.applicationContext as Application)
         val engine=AnimeEngine.get(context)
-        val host=RuntimeHost(context,engine,"Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36")
+        // نافذة التطبيق أمامية كما عند المستخدم: المتصفح المخفي للحل الصامت لـCloudflare يحتاجها
+        val window=androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
+        val host=RuntimeHost(context,engine,"Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36",
+            silentClearance={ url,agent ->
+                val solver=eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current
+                    ?: run { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client;eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current }
+                solver?.silentClearance(url,agent)
+            })
         val reports=mutableListOf<JsonObject>()
         val output=File(context.getExternalFilesDir(null),"live-sweep").apply { mkdirs() }
         try {
@@ -98,6 +106,6 @@ class LiveRepositorySweepTest {
                 Log.i("VANTARA_SWEEP",report.toString())
                 File(output,"report.json").writeText(JsonArray(reports).toString())
             }
-        } finally { host.close();engine.setRuntimeSources(emptyList()) }
+        } finally { host.close();engine.setRuntimeSources(emptyList());window.close() }
     }
 }

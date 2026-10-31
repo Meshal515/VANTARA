@@ -364,7 +364,7 @@ export function renderV7Addons({
           later(()=>{if(row.isConnected)slot.classList.add("visible");},300);
           stateLabel.classList.add("visible");
           later(sourcesChanged,400);
-        }catch(err){notify(fmtErr(err));}finally{flip.disabled=false;}
+        }catch(err){notify(a.name+": "+fmtErr(err));}finally{flip.disabled=false;}
       };
       actions.append(slot,flip);
       }
@@ -443,7 +443,7 @@ export function renderV7Addons({
     }
     return row;
   }
-  function switchTab(t){tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";draw();}
+  function switchTab(t){tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";notify("");draw();}
   function toggleMenu(){
     menuOpen=!menuOpen;filterMenu.hidden=!menuOpen;
   }
