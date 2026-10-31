@@ -11,23 +11,29 @@ class LinkCollectorTest {
 
     @Test fun linksFoundBeforeASlowServerAreReturnedWhenTheBudgetEnds() {
         val started=System.nanoTime()
-        val result=LinkCollector.collect(300){_,cb->cb(link(1));cb(link(2));delay(60_000);cb(link(3))}
+        val exited=java.util.concurrent.CountDownLatch(1)
+        val result=LinkCollector.collect(300){_,cb->
+            try { cb(link(1));cb(link(2));delay(60_000);cb(link(3)) }
+            finally { exited.countDown() }
+        }
         assertEquals(listOf("https://media.example/1.m3u8","https://media.example/2.m3u8"),result.links.map{it.url})
         assertFalse(result.complete);assertNull(result.failure)
         assertTrue("waited past the budget",(System.nanoTime()-started)/1_000_000<5_000)
+        assertTrue("Cooperative coroutine must be cancelled on timeout",exited.await(3,java.util.concurrent.TimeUnit.SECONDS))
     }
     @Test fun aProviderFailureAfterSomeLinksKeepsThoseLinks() {
         val result=LinkCollector.collect(5_000){_,cb->cb(link(1));error("third server crashed")}
         assertEquals(1,result.links.size);assertTrue(result.complete);assertEquals("third server crashed",result.failure?.message)
     }
     @Test fun hungProvidersAreBoundedAndTheirLateVideoCallbacksAreDiscarded() {
+        val limiter=java.util.concurrent.Semaphore(2,true)
         val started=java.util.concurrent.CountDownLatch(2)
         val release=java.util.concurrent.CountDownLatch(1)
         val exited=java.util.concurrent.CountDownLatch(2)
         val results=java.util.Collections.synchronizedList(mutableListOf<LinkCollector.Result>())
         val callers=(1..2).map {
             Thread({
-                results.add(LinkCollector.collect(200){_,cb->
+                results.add(LinkCollector.collectWithLimiter(200,limiter){_,cb->
                     cb(link(1))
                     started.countDown()
                     try {
@@ -45,7 +51,7 @@ class LinkCollectorTest {
             callers.forEach{it.join(2000)}
             assertEquals(2,results.size)
             assertTrue(results.all{it.links.size==1 && !it.complete})
-            val denied=LinkCollector.collect(250){_,_->fail("Third hung provider must not start")}
+            val denied=LinkCollector.collectWithLimiter(250,limiter){_,_->fail("Third hung provider must not start")}
             assertEquals("VIDEO_LINK_WORKER_BUSY",denied.failure?.message)
             assertFalse(denied.complete)
             assertTrue(denied.links.isEmpty())
