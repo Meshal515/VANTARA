@@ -1,7 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
+import { available, boundedPreparationStep, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
+
+describe('bounded native preparation', () => {
+  it('returns successful bridge operations without delaying them', async () => {
+    expect(await boundedPreparationStep(Promise.resolve('ready'), 20, 'ready')).toBe('ready');
+  });
+  it('turns an unresolved addon runtime into an actionable timeout', async () => {
+    await expect(boundedPreparationStep(new Promise(() => {}), 10, 'addon-runtime'))
+      .rejects.toThrow('ANIME_PREPARE_TIMEOUT:addon-runtime');
+  });
+  it('preserves explicit errors rather than replacing them with timeouts', async () => {
+    await expect(boundedPreparationStep(Promise.reject(new Error('invalid manifest')), 200, 'configure'))
+      .rejects.toThrow('invalid manifest');
+  });
+});
 
 describe('anime-engine bridge', () => {
   afterEach(() => {
