@@ -419,7 +419,7 @@ class AnimeEnginePlugin : Plugin() {
                 val matching = declared.filter { item -> actual.any { it.id.toString() == item.id } }
                 require(matching.isNotEmpty()) { "مصادر المستودع لا تطابق ما داخل APK" }
                 val first = matching.first()
-                val user = com.vantara.anime.registry.UserAnimeExtension(
+                val draft = com.vantara.anime.registry.UserAnimeExtension(
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
                     sha256 = hash, version = ext.version, content = content,
                     sourceName = first.name.takeIf { matching.size > 1 },
@@ -427,6 +427,7 @@ class AnimeEnginePlugin : Plugin() {
                     sources = matching.map { com.vantara.anime.registry.UserAnimeSource(
                         it.id, it.name, it.lang, it.baseUrl) },
                 )
+                val user = userStore.state.extensions.firstOrNull { it.pkg == pkg }?.upgradedTo(draft) ?: draft
                 val ids = user.entries().map { it.id }.toSet()
                 // Existing IDs are persisted in watch progress; never silently
                 // replace an unrelated package with a short derived ID.
