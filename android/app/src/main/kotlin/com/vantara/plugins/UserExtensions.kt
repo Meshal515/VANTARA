@@ -288,15 +288,15 @@ data class UserExtensionState(val repos: List<UserRepo> = emptyList(), val exten
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */
 class UserExtensionStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
-    @Volatile var state: UserExtensionState = runCatching { json.decodeFromString<UserExtensionState>(file.readText()) }.getOrDefault(UserExtensionState())
+    @Volatile var state: UserExtensionState = readExtensionState(file)?.let {
+        try { json.decodeFromString<UserExtensionState>(it) }
+        catch (error: Exception) { throw IllegalStateException("EXTENSION_STATE_CORRUPT: ${file.name}", error) }
+    } ?: UserExtensionState()
         private set
 
     @Synchronized fun update(change: (UserExtensionState) -> UserExtensionState): UserExtensionState {
         val next = change(state)
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(UserExtensionState.serializer(), next))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        writeExtensionState(file, json.encodeToString(UserExtensionState.serializer(), next))
         state = next
         return next
     }
