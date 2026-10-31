@@ -24,6 +24,21 @@ const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugi
 
 export const available = () => bridge() !== null;
 
+/** A bridge/runtime promise that never settles must not block a work screen forever. */
+export function withPhaseDeadline(promise, timeoutMs, code = 'PREPARE_STAGE_TIMEOUT') {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('انتهت مهلة تجهيز السيرفرات');
+        error.code = code;
+        reject(error);
+      }, timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /**
  * بنر العمل وشعاره إلى كاش المشغّل الأصلي لحظة تجهيز السيرفرات، فتفتح شاشة التحميل بهما فورًا
  * بدل سواد ثم بنر ثم شعار. APK أقدم بلا الطريقة يرفض النداء فيُتجاهل؛ لا شيء ينتظره.
@@ -189,13 +204,13 @@ export async function extend(session, copies) {
     if (!state) return 0;
     const native = copies.filter(c => !c.sourceId?.startsWith('addon|'));
     const external = copies.filter(c => c.sourceId?.startsWith('addon|') && !state.sources.has(c.sourceId));
-    let added = native.length ? (await plugin.extend({ session, copies: native }).catch(() => null))?.added ?? 0 : 0;
+    let added = native.length ? (await withPhaseDeadline(plugin.extend({ session, copies: native }), 15_000, 'ENGINE_EXTEND_TIMEOUT').catch(() => null))?.added ?? 0 : 0;
     if (nativeAddonSessions.get(session) !== state) return 0;
     if (external.length) {
-      const runtime = await getAddonRuntime(); await runtime.ready;
+      const runtime = await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await withPhaseDeadline(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
       if (nativeAddonSessions.get(session) !== state) return 0;
       const plan = nativeAddonPreparation({ runtime, copies: external, episode: state.episode });
-      const reserved = await plugin.extendAddonSources({ session, sourceIds: plan.sourceIds, addonGeneration: state.generation });
+      const reserved = await withPhaseDeadline(plugin.extendAddonSources({ session, sourceIds: plan.sourceIds, addonGeneration: state.generation }), 15_000, 'ENGINE_EXTEND_TIMEOUT');
       if (nativeAddonSessions.get(session) !== state) return 0;
       if (reserved?.added) { startNativeAddons(session, plan, plugin, state); added += reserved.added; }
     }
@@ -386,35 +401,39 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   }
   if (native) {
     if (nativeAddonSessions.get(id) !== state) return null;
-    const runtime = await getAddonRuntime(); await runtime.ready;
+    const runtime = await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await withPhaseDeadline(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     state.snapshot = runtime.registry.snapshot?.();
     const plan = nativeAddonPreparation({ runtime, copies, episode });
-    await configure();
+    await withPhaseDeadline(configure(), 15_000, 'ENGINE_CONFIG_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
-    const out = await plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
+    const out = await withPhaseDeadline(plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation }), 15_000, 'ENGINE_PREPARE_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);
     if (out?.session === id) attachDiscovery();
     return out ? { ...out, copies } : null;
   }
-  const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id });
+  const out = await withPhaseDeadline(call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id }), 30_000, 'ENGINE_PREPARE_TIMEOUT');
   if (out?.session === id && addonDiscoverySessions.get(id) === context) attachDiscovery();
   else if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
   return out ? { ...out, copies: out.copies ?? copies } : null;
   } catch (error) {
     if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
-    if (native && nativeAddonSessions.get(id) === state) cancelNativeAddons(id);
+    if (native && nativeAddonSessions.get(id) === state) {
+      cancelNativeAddons(id);
+      // A timed-out bridge could have opened native resources before JS was notified.
+      try { void Promise.resolve(plugin?.closeSession?.({ session: id })).catch(() => {}); } catch {}
+    }
     throw error;
   }
 }
 
 /** إضافات الفيديو تستخدم الهوية المؤكدة فقط، وتلتحق بالمصادر الأصلية على المنصتين. */
 export async function withAddonCopies(copies, identity) {
-  const a=await getAddonRuntime();await a.ready;
+  const a=await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT');await withPhaseDeadline(a.ready, 15_000, 'ADDON_READY_TIMEOUT');
   if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
-  identity = await a.enrichAnimeIdentity?.(identity) ?? identity;
+  identity = await withPhaseDeadline(a.enrichAnimeIdentity?.(identity), 15_000, 'ADDON_IDENTITY_TIMEOUT') ?? identity;
   const extra=addonCopies(a.registry,identity,a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
   const refreshed = copies.map(c => extra.find(fresh => fresh.sourceId === c.sourceId && fresh.id === (c.id ?? c.url)) ?? c);
   return [...refreshed,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];

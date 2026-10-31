@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute, withPhaseDeadline } from './anime-engine.js';
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -185,5 +185,16 @@ describe('شاهد اللقطة', () => {
     expect(momentRange('الحلقة 3 · 1:02:10–1:02:30')).toEqual({ startMs: 3_730_000, endMs: 3_750_000 });
     expect(momentRange('الحلقة 3')).toBeNull();
     expect(momentRange('الحلقة 3 · 2:00–1:00')).toBeNull();
+  });
+});
+
+describe('prepare stage timeouts', () => {
+  it('returns the original completed value and clears the deadline', async () => {
+    await expect(withPhaseDeadline(Promise.resolve({ ok: true }), 100, 'TEST')).resolves.toEqual({ ok: true });
+  });
+  it('returns a stable error code instead of awaiting an unresponsive bridge forever', async () => {
+    await expect(withPhaseDeadline(new Promise(() => {}), 10, 'BRIDGE_STAGE_TIMEOUT')).rejects.toMatchObject({
+      code: 'BRIDGE_STAGE_TIMEOUT',
+    });
   });
 });
