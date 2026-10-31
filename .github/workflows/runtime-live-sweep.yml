@@ -4,10 +4,8 @@ name: VANTARA Runtime live repository sweep (opt-in)
 # step's PASS/FAIL and reason; it is evidence about the sources from this runner's network, not a gate.
 on:
   push:
-    branches: ['claude/addons-debug-foundation']
+    branches: [fix/engine-core-predebug-20261031]
     paths:
-      - 'extensions/runtime-android/**'
-      - 'tools/repository-compat/run_live_sweep.sh'
       - '.github/workflows/runtime-live-sweep.yml'
   workflow_dispatch:
     inputs:
@@ -60,6 +58,8 @@ jobs:
         env:
           SWEEP_REPOSITORY: ${{ inputs.repository }}
           SWEEP_ONLY: ${{ inputs.only }}
+          SWEEP_LIMIT: '2'
+          ANIYOMI_REPOSITORY: https://raw.githubusercontent.com/msrofficial/anime-repo/repo
         with:
           api-level: 35
           target: google_apis

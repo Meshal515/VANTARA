@@ -86,6 +86,7 @@ class LiveRepositorySweepTest {
         assumeTrue("Live sweep is opt-in",args.getString("vantaraLiveSweep")=="true")
         val repo=args.getString("vantaraRepo") ?: arb
         val only=args.getString("vantaraOnly")?.split(',')?.map { it.trim().lowercase() }?.toSet()
+        val maxPackages=args.getString("vantaraMaxPackages")?.toIntOrNull()?.coerceIn(1, 5000) ?: 5000
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         ensureEngineInjekt(context.applicationContext as Application)
         val engine=AnimeEngine.get(context)
@@ -103,7 +104,7 @@ class LiveRepositorySweepTest {
             host.setProfile("live-sweep-"+UUID.randomUUID())
             host.addRepository(repo)
             val packages=host.extensions(repo).map { it.jsonObject }
-            for (row in packages) {
+            for (row in packages.take(maxPackages)) {
                 val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.content ?: "?"
                 if (only!=null && name.lowercase() !in only) continue
                 val types=(row["tvTypes"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
