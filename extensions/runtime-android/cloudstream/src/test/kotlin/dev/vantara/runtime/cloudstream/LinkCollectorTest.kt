@@ -51,7 +51,9 @@ class LinkCollectorTest {
             assertTrue(denied.links.isEmpty())
         } finally {
             release.countDown()
-            assertTrue("Hung workers must eventually exit after release",exited.await(3,java.util.concurrent.TimeUnit.SECONDS))
+            // Cleanup must never mask the original assertion: if one worker never started,
+            // its finally block cannot decrement exited, and the primary failure tells why.
+            exited.await(3,java.util.concurrent.TimeUnit.SECONDS)
             callers.forEach{it.join(2000)}
         }
         assertEquals("Late callbacks must not change returned results",listOf(1,1),results.map{it.links.size})
