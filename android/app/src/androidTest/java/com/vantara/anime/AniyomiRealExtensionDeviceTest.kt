@@ -23,14 +23,15 @@ class AniyomiRealExtensionDeviceTest {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("Live Aniyomi APK test is explicitly opt-in", args.getString("vantaraAniyomiReal") == "true")
         val base = args.getString("vantaraAniyomiRepository")
-            ?: "https://raw.githubusercontent.com/msrofficial/anime-repo/repo"
+            ?: "https://raw.githubusercontent.com/yuzono/anime-repo/repo"
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         ensureEngineInjekt(context.applicationContext as Application)
         val http = Injekt.get<NetworkHelper>().client
         val repo = RepoClient(context, http)
         val (meta, index) = withTimeout(60_000) { repo.read(base) }
-        val entry = index.firstOrNull { it.anime && !it.nsfw && it.sources.isNotEmpty() }
-            ?: error("ANIYOMI_REPO_NO_SAFE_SOURCES")
+        // Publicly published, signed Yuzono multi-source factory: nine language variants.
+        val entry = index.firstOrNull { it.pkg.endsWith(".animeworldindia") && it.anime && !it.nsfw && it.sources.size > 1 }
+            ?: error("ANIYOMI_REPO_NO_SIGNED_MULTI_SOURCE_FACTORY")
         val bytes = withTimeout(90_000) { repo.downloadSigned(entry.apkUrl, meta.fingerprint) }
         val sha = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
@@ -38,7 +39,7 @@ class AniyomiRealExtensionDeviceTest {
         val reference = ExtensionRef(entry.pkg, entry.apkUrl, sha, version = entry.version)
         val factory = loader.inspect(reference, bytes)
         val factoryIds = factory.map { it.id.toString() }
-        assertTrue("Actual Aniyomi APK must expose real sources", factory.isNotEmpty())
+        assertTrue("A real multi-source Aniyomi factory must expose multiple sources", factory.size > 1)
         assertEquals("Factory source IDs must be unique", factoryIds.size, factoryIds.toSet().size)
         for (source in factory) {
             val selected = loader.load(reference.copy(sourceId = source.id.toString()), bytes)
