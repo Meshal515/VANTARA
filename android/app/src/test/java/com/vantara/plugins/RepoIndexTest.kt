@@ -147,6 +147,44 @@ class RepoIndexTest {
         assertEquals(0L, v1[1].versionCode)
     }
 
+    @Test fun aniyomiMissingV2FactorySourcesUseOnlyMatchingPublisherLegacyMetadata() {
+        val animePkg = "eu.kanade.tachiyomi.animeextension.all.animeworldindia"
+        val current = RepoIndex.Extension(
+            "AnimeWorld India", animePkg, "https://publisher.example/v2-current.apk",
+            "all", "14.24", 14.24, false, emptyList(), versionCode = 24,
+        )
+        val legacy = current.copy(
+            apkUrl = "https://publisher.example/legacy.apk",
+            sources = listOf(
+                RepoIndex.Source("2012957501886720048", "AnimeWorld India", "all", "https://site.example"),
+                RepoIndex.Source("8052146309028882026", "AnimeWorld India", "en", "https://site.example"),
+            ),
+        )
+        val supplemented = RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(legacy)).single()
+        assertEquals(2, supplemented.sources.size)
+        assertEquals(current.apkUrl, supplemented.apkUrl)
+        assertEquals(current.version, supplemented.version)
+        assertEquals(current.versionCode, supplemented.versionCode)
+        assertEquals(current.nsfw, supplemented.nsfw)
+    }
+
+    @Test fun aniyomiNeverGuessesIdentitiesAcrossVersionsOrDuplicatePackages() {
+        val pkg = "eu.kanade.tachiyomi.animeextension.all.multisource"
+        val current = RepoIndex.Extension("Multisource", pkg, "https://publisher.example/latest.apk", "all", "17.2", 17.2, false, emptyList(), versionCode = 170002)
+        val declared = RepoIndex.Source("100", "Original", "en")
+        val older = current.copy(version = "17.1", versionCode = 170001, sources = listOf(declared))
+        val badCode = current.copy(versionCode = 170001, sources = listOf(declared))
+        val duplicateIds = current.copy(sources = listOf(declared, declared.copy(name = "Other")))
+        val invalidId = current.copy(sources = listOf(declared.copy(id = "../../bad")))
+        assertTrue(RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(older)).single().sources.isEmpty())
+        assertTrue(RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(badCode)).single().sources.isEmpty())
+        assertTrue(RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(duplicateIds)).single().sources.isEmpty())
+        assertTrue(RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(invalidId)).single().sources.isEmpty())
+        assertTrue(RepoIndex.fillMissingSourcesFromLegacy(listOf(current), listOf(current.copy(sources = listOf(declared)), current.copy(sources = listOf(declared)))).single().sources.isEmpty())
+        val alreadyValid = current.copy(sources = listOf(declared))
+        assertEquals(alreadyValid, RepoIndex.fillMissingSourcesFromLegacy(listOf(alreadyValid), listOf(older)).single())
+    }
+
     @Test fun anIndexMayMoveItsListToASeparateFileFollowedOnce() {
         val (meta, list) = RepoIndex.parseIndexV2(field(1, "K") + field(3, fp) + field(102, "https://example.com/list.pb"))
         assertEquals("https://example.com/list.pb", meta.extensionListUrl)
