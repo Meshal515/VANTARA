@@ -18,6 +18,17 @@ import { nativeAddonPreparation } from '../addons/native-preparation.js';
 import { isNative, webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { withImdbEpisode } from './anime-imdb.js';
 
+/** A hung runtime/bridge must not keep the work sheet loading forever. */
+export function boundedPreparationStep(task, timeoutMs, stage) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(task),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`ANIME_PREPARE_TIMEOUT:${stage}`)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
 const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('AnimeEngine');
@@ -386,13 +397,22 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   }
   if (native) {
     if (nativeAddonSessions.get(id) !== state) return null;
-    const runtime = await getAddonRuntime(); await runtime.ready;
+    let runtime = null;
+    try {
+      runtime = await boundedPreparationStep(
+        Promise.resolve().then(getAddonRuntime).then(async a => { await a.ready; return a; }),
+        12_000, 'addon-runtime');
+    } catch {
+      // Broken optional addon discovery cannot block existing CloudStream or
+      // Aniyomi sources. Native core still handles the work with empty addons.
+    }
     if (nativeAddonSessions.get(id) !== state) return null;
-    state.snapshot = runtime.registry.snapshot?.();
-    const plan = nativeAddonPreparation({ runtime, copies, episode });
-    await configure();
+    state.snapshot = runtime?.registry.snapshot?.();
+    const plan = runtime ? nativeAddonPreparation({ runtime, copies, episode }) :
+      { sourceIds: [], providers: [], start: () => ({ done: Promise.resolve(), cancel() {} }) };
+    await boundedPreparationStep(configure(), 12_000, 'configure');
     if (nativeAddonSessions.get(id) !== state) return null;
-    const out = await plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
+    const out = await boundedPreparationStep(plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation }), 15_000, 'native-bridge');
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);
@@ -405,19 +425,30 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   return out ? { ...out, copies: out.copies ?? copies } : null;
   } catch (error) {
     if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
-    if (native && nativeAddonSessions.get(id) === state) cancelNativeAddons(id);
+    if (native && nativeAddonSessions.get(id) === state) {
+      cancelNativeAddons(id);
+      if (typeof plugin?.closeSession === 'function') {
+        void Promise.resolve().then(() => plugin.closeSession({ session: id })).catch(() => {});
+      }
+    }
     throw error;
   }
 }
 
 /** إضافات الفيديو تستخدم الهوية المؤكدة فقط، وتلتحق بالمصادر الأصلية على المنصتين. */
 export async function withAddonCopies(copies, identity) {
-  const a=await getAddonRuntime();await a.ready;
-  if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
-  identity = await a.enrichAnimeIdentity?.(identity) ?? identity;
-  const extra=addonCopies(a.registry,identity,a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
-  const refreshed = copies.map(c => extra.find(fresh => fresh.sourceId === c.sourceId && fresh.id === (c.id ?? c.url)) ?? c);
-  return [...refreshed,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
+  try {
+    const a = await boundedPreparationStep(
+      Promise.resolve().then(getAddonRuntime).then(async runtime => { await runtime.ready; return runtime; }),
+      12_000, 'addon-discovery');
+    if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
+    identity = await boundedPreparationStep(a.enrichAnimeIdentity?.(identity) ?? identity, 8_000, 'identity');
+    const extra = addonCopies(a.registry, identity, a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
+    const refreshed = copies.map(c => extra.find(fresh => fresh.sourceId === c.sourceId && fresh.id === (c.id ?? c.url)) ?? c);
+    return [...refreshed, ...extra.filter(c => !copies.some(old => old.sourceId === c.sourceId))];
+  } catch {
+    return copies; // Optional provider discovery must never block native media.
+  }
 }
 /** First confirmed copies can prepare while the other discovery path remains pending. */
 export async function firstAvailableCopies(locator, addons) {
