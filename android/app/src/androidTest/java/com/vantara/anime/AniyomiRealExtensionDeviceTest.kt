@@ -4,6 +4,10 @@ import android.app.Application
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vantara.anime.loader.AnimeExtensionLoader
 import com.vantara.anime.registry.ExtensionRef
+import com.vantara.anime.registry.UserAnimeExtension
+import com.vantara.anime.registry.InstalledAnimeSource
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
+import org.junit.Assert.assertNotNull
 import com.vantara.plugins.RepoClient
 import com.vantara.plugins.ensureEngineInjekt
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -47,6 +51,40 @@ class AniyomiRealExtensionDeviceTest {
         }
         assertTrue("Publisher-declared source IDs should exist in actual APK",
             entry.sources.all { it.id in factoryIds })
+        val first = factory.first()
+        val baseUrls = entry.sources.associateBy { it.id }
+        val profile = UserAnimeExtension(
+            repoUrl = base, name = entry.name, pkg = entry.pkg, apkUrl = entry.apkUrl,
+            sha256 = sha, version = entry.version, content = "anime",
+            sourceName = first.name,
+            baseUrl = (first as? AnimeHttpSource)?.baseUrl
+                ?: baseUrls[first.id.toString()]?.baseUrl.orEmpty().ifBlank { "https://unknown.invalid" },
+            stableId = "user-${entry.pkg}", sourceLang = first.lang,
+            primarySourceId = first.id.toString(),
+            additionalSources = factory.drop(1).map { source ->
+                InstalledAnimeSource(
+                    sourceId = source.id.toString(), id = "user-${entry.pkg}#${source.id}",
+                    name = source.name, lang = source.lang,
+                    baseUrl = (source as? AnimeHttpSource)?.baseUrl
+                        ?: baseUrls[source.id.toString()]?.baseUrl.orEmpty().ifBlank { "https://unknown.invalid" },
+                )
+            },
+        )
+        val entries = profile.entries()
+        assertEquals("Every real factory source must get a distinct stable VANTARA ID",
+            factory.size, entries.map { it.id }.toSet().size)
+        val engine = AnimeEngine.get(context)
+        try {
+            engine.setUserSources(entries)
+            for (source in entries) {
+                assertTrue("Source missing from engine registry: ${source.id}",
+                    engine.sources().any { it.id == source.id })
+                val routed = withTimeout(30_000) { engine.adapter(source.id) }
+                assertNotNull("Actual APK factory source cannot be routed: ${source.id}", routed)
+            }
+        } finally {
+            engine.setUserSources(emptyList())
+        }
         android.util.Log.i("VANTARA_ANIYOMI_REAL",
             "PASS package=${entry.pkg} sources=${factoryIds.size} verified_sha256=$sha")
     }
