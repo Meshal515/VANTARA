@@ -404,10 +404,20 @@ class ExtensionEnginePlugin : Plugin() {
                     is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
                 }
                 require(visible.any { v -> all.any { it.id.toString() == v.id } }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
-                claimIds(pkg, all)
-                forget(pkg)
-                packages[pkg] = all
-                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+                synchronized(extensionMutations) {
+                    val previousOwners = owners.filterValues { it == pkg }
+                    claimIds(pkg, all)
+                    try {
+                        // Durable state must be committed before activating the new version.
+                        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
+                    } catch (error: Throwable) {
+                        owners.values.removeAll { it == pkg }
+                        owners.putAll(previousOwners)
+                        throw error
+                    }
+                    forget(pkg)
+                    packages[pkg] = all
+                }
                 loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256))
                 call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
             } catch (t: Throwable) {
@@ -420,12 +430,19 @@ class ExtensionEnginePlugin : Plugin() {
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
         if (userStore.extension(pkg) == null) return call.reject("ليست إضافة مثبتة من مستودع")
-        forget(pkg)
-        owners.values.removeAll { it == pkg }
-        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
-        // الإزالة بأمر المستخدم وحدها تحذف ملفات الإضافة من المخزن
-        loader.erase(pkg)
-        call.resolve()
+        try {
+            synchronized(extensionMutations) {
+                // Never erase the working code before the removal is durably recorded.
+                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+                forget(pkg)
+                owners.values.removeAll { it == pkg }
+            }
+            // Only an explicit uninstall erases code files, never library/progress.
+            loader.erase(pkg)
+            call.resolve()
+        } catch (error: Throwable) {
+            call.reject(error.message ?: error.readable())
+        }
     }
 
     /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
@@ -436,6 +453,7 @@ class ExtensionEnginePlugin : Plugin() {
 
     /** مالك كل معرّف مصدر محمَّل: حزمتان بمعرّف واحد تتشاركان تفضيلات `source_<id>` وكوكيزه. */
     private val owners = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val extensionMutations = Any()
 
     /**
      * يحجز معرّفات مصادر الحزمة أو يرفضها كلها: معرّف تملكه حزمة أخرى أو المعرّف 0 (المصدر المحلي) يرمي

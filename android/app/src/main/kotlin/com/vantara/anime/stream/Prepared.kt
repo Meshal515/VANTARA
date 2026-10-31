@@ -167,7 +167,7 @@ class PreparedEpisode(
      * يتوقف ما يعمل. يرجع false إن أُغلقت الجلسة.
      */
     fun beginBatch(): Boolean = synchronized(this) {
-        if (job?.isActive != true) return@synchronized false
+        if (done || job?.isActive != true) return@synchronized false
         pendingBatches++
         done = false
         true
@@ -175,7 +175,7 @@ class PreparedEpisode(
 
     /** Reserve before native preparation launches, including an empty native source batch. */
     fun reserveAddonBatches(sourceIds: List<String>, generation: String = addonGeneration): Int = synchronized(this) {
-        if (generation != addonGeneration || job?.isActive != true) return@synchronized 0
+        if (done || generation != addonGeneration || job?.isActive != true) return@synchronized 0
         val fresh = sourceIds.asSequence().filter { it.startsWith("addon|") && it.length <= 4096 }
             .distinct().filter { it !in pendingAddons && it !in completedAddons }.take(128).toList()
         pendingAddons.addAll(fresh)
@@ -186,9 +186,32 @@ class PreparedEpisode(
 
     /** A provider can complete once; foreign/duplicate/closed-session results are ignored. */
     fun claimAddonBatch(sourceId: String, generation: String = addonGeneration): Boolean = synchronized(this) {
-        if (generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
+        if (done || generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
         completedAddons.add(sourceId)
         true
+    }
+
+    /** Idempotent recovery for a JS→Android bridge failure, scoped to the session generation. */
+    fun settleFailedAddon(sourceId: String, generation: String): Boolean {
+        if (!claimAddonBatch(sourceId, generation)) return false
+        finish()
+        return true
+    }
+
+    /** Terminal watchdog: no JS/WebView failure may leave native preparation unresolved. */
+    fun forceComplete(): Boolean {
+        val changed = synchronized(this) {
+            if (done) return@synchronized false
+            pendingAddons.clear()
+            pendingBatches = 0
+            done = true
+            true
+        }
+        if (changed) {
+            session.changes.value = session.changes.value + 1
+            listeners.forEach { runCatching { it(null) } }
+        }
+        return changed
     }
 
     /** Own choices before they are reported, so cancellation cannot leak unselected tickets. */

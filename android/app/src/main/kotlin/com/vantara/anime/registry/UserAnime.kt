@@ -41,15 +41,26 @@ data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extension
 
 class UserAnimeStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
-    @Volatile var state: UserAnimeState = runCatching { json.decodeFromString<UserAnimeState>(file.readText()) }.getOrDefault(UserAnimeState())
+    private val atomic = android.util.AtomicFile(file)
+
+    @Volatile var state: UserAnimeState = if (!atomic.exists()) UserAnimeState() else
+        runCatching {
+            json.decodeFromString<UserAnimeState>(atomic.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
+        }.getOrElse { throw IllegalStateException("ANIME_EXTENSION_STATE_CORRUPTED: cannot silently reset installed extensions", it) }
         private set
 
     @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
         val next = change(state)
+        val bytes = json.encodeToString(UserAnimeState.serializer(), next).toByteArray(Charsets.UTF_8)
         file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(UserAnimeState.serializer(), next))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        val stream = atomic.startWrite()
+        try {
+            stream.write(bytes)
+            atomic.finishWrite(stream)
+        } catch (error: Throwable) {
+            atomic.failWrite(stream)
+            throw error
+        }
         state = next
         return next
     }

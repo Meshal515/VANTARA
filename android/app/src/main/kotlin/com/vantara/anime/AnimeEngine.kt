@@ -128,6 +128,11 @@ class AnimeEngine(context: Context) {
 
     @Synchronized private fun apply() {
         val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
+        val previous = manifest.sources.associateBy { it.id }
+        val next = parsed.sources.associateBy { it.id }
+        // A verified APK update under the same source ID must invalidate its old adapter.
+        adapters.keys.removeAll { id -> previous[id] != next[id] }
+        loadErrors.keys.removeAll { id -> previous[id] != next[id] }
         manifest = parsed
         for (s in parsed.sources) {
             if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
@@ -446,6 +451,10 @@ class AnimeEngine(context: Context) {
         // Own both warm-up and later expansion so closing the session cancels both.
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
         prep.reserveAddonBatches(addonSources)
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            kotlinx.coroutines.delay(90_000)
+            if (prepared[sessionId] === prep) prep.forceComplete()
+        }
         if (requestAddons) {
             val providers = addonProviders.filter { it.valid() && (warmSourceId == null || it.sourceId == warmSourceId) && it.endpoint(number) != null }.distinctBy { it.sourceId }.take(128)
             prep.reserveAddonBatches(providers.map { it.sourceId })
@@ -473,6 +482,9 @@ class AnimeEngine(context: Context) {
     fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =
         prepared[id]?.let { if (generation == null) 0 else it.reserveAddonBatches(sourceIds, generation) } ?: 0
 
+    fun finishAddonBatch(id: String, sourceId: String, generation: String?): Boolean =
+        if (generation == null) false else prepared[id]?.settleFailedAddon(sourceId, generation) ?: false
+
     fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
 
     private fun launchAddonRequest(prep: com.vantara.anime.stream.PreparedEpisode, provider: com.vantara.addons.NativeStremioProvider) {
@@ -492,6 +504,7 @@ class AnimeEngine(context: Context) {
     fun appendAddonStreams(id: String, sourceId: String, name: String, raw: kotlinx.serialization.json.JsonElement, provider: com.vantara.addons.NativeStremioProvider? = null, generation: String? = null): Int {
         val prep = prepared[id] ?: return 0
         if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return 0
+        try {
         if (provider?.sourceId == sourceId && provider.valid()) sessionRequests.computeIfPresent(id) { _, req ->
             req.copy(addonProviders = (req.addonProviders.filter { it.sourceId != sourceId } + provider).take(128))
         }
@@ -529,6 +542,12 @@ class AnimeEngine(context: Context) {
             } finally { prep.finish() }
         }
         return list.size
+        } catch (error: Throwable) {
+            // claimAddonBatch already reserved this source; a parsing/launch error
+            // must settle it even if the reporting coroutine was never created.
+            prep.finish()
+            throw error
+        }
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */

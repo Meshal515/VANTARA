@@ -38,9 +38,19 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
      * المستودع يحذف الإصدارات القديمة فيصير الرابط المثبّت 404 («تعذّر تنزيل»).
      */
     suspend fun obtain(ref: ExtensionRef): AnimeCatalogueSource {
-        val cached = File(dir, "${ref.pkg}.apk").takeIf { it.isFile }?.readBytes()?.takeIf { sha256(it).equals(ref.sha256, true) }
+        val stored = archive(ref)
+        val cached = sequenceOf(stored, File(dir, "${ref.pkg}.apk"))
+            .mapNotNull { apk -> runCatching { apk.takeIf { it.isFile }?.readBytes() }.getOrNull() }
+            .firstOrNull { sha256(it).equals(ref.sha256, true) }
         val bytes = cached ?: bundled(ref) ?: download(ref)
         return load(ref, bytes)
+    }
+
+    /** Verified, content-addressed APK vault; updates do not overwrite the working version. */
+    private fun archive(ref: ExtensionRef): File {
+        require(ref.pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) { "invalid APK package" }
+        require(ref.sha256.matches(Regex("(?i)[a-f0-9]{64}"))) { "invalid APK sha256" }
+        return File(File(dir, "vault/${ref.pkg}"), "${ref.sha256.lowercase()}.apk")
     }
 
     private fun bundled(ref: ExtensionRef): ByteArray? = runCatching {
@@ -58,15 +68,23 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
         }
-        val apk = File(dir, "${ref.pkg}.apk")
+        val apk = archive(ref)
         runCatching {
-            if (apk.exists()) {
-                apk.setWritable(true, true)
-                apk.delete()
+            apk.parentFile?.mkdirs()
+            val existing = runCatching { apk.takeIf { it.isFile }?.readBytes() }.getOrNull()
+            if (existing == null || !sha256(existing).equals(actual, true)) {
+                val stage = File(apk.parentFile, "${actual}.${System.nanoTime()}.part")
+                try {
+                    stage.writeBytes(bytes)
+                    stage.setWritable(false, false)
+                    if (stage.canWrite()) error("staged APK is writable")
+                    if (!stage.renameTo(apk)) error("cannot stage verified APK into vault")
+                } finally {
+                    if (stage.exists()) { stage.setWritable(true, true); stage.delete() }
+                }
             }
-            apk.writeBytes(bytes)
-        }.onFailure { throw LoadException("write", "تعذّرت كتابة الإضافة", it) }
-        apk.setWritable(false, false)
+            apk.setWritable(false, false)
+        }.onFailure { throw LoadException("write", "تعذّرت كتابة الإضافة دون المساس بالإصدار السابق", it) }
         if (apk.canWrite()) throw LoadException("readonly", "الملف ما زال قابلًا للكتابة")
 
         @Suppress("DEPRECATION")

@@ -179,6 +179,14 @@ class AnimeEnginePlugin : Plugin() {
     }
 
     @PluginMethod
+    fun finishAddonBatch(call: PluginCall) {
+        val session = call.getString("session") ?: return call.reject("session مطلوب")
+        val sourceId = call.getString("sourceId") ?: return call.reject("sourceId مطلوب")
+        val finished = engine.finishAddonBatch(session, sourceId, call.getString("addonGeneration"))
+        call.resolve(JSObject().put("finished", finished))
+    }
+
+    @PluginMethod
     fun appendAddonStreams(call: PluginCall) = run(call) {
         val session = call.getString("session") ?: error("session مطلوب")
         val sourceId = call.getString("sourceId") ?: error("sourceId مطلوب")
@@ -345,7 +353,9 @@ class AnimeEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
+                // Removing a repository is not the same action as uninstalling its
+                // already-pinned extensions. Keep the code and account/library links.
+                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
                 engine.setUserSources(next.extensions.map { it.entry() })
                 call.resolve()
             } catch (t: Throwable) { failure(call, t) }
@@ -405,7 +415,12 @@ class AnimeEnginePlugin : Plugin() {
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
                     sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
                 )
-                // التحميل نفسه الذي سيستعمله المحرك: حزمة لا تُحمَّل لا تُحفظ
+                // Existing ids remain unchanged for library/history safety. Do not install
+                // a second package that would silently shadow the same old-style id.
+                require(userStore.state.extensions.none { it.pkg != pkg && it.id == user.id }) {
+                    "SOURCE_ID_COLLISION: تعارض معرّف مصدر أنمي؛ لم يُثبّت أي شيء"
+                }
+                // Staging is non-destructive: the last known-good APK remains available.
                 com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
                 val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
                 engine.setUserSources(next.extensions.map { it.entry() })
@@ -420,7 +435,13 @@ class AnimeEnginePlugin : Plugin() {
         if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
         val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
         engine.setUserSources(next.extensions.map { it.entry() })
-        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+        // Explicit uninstall only: clean current vault and legacy APK, not the library/history.
+        if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {
+            java.io.File(context.filesDir, "anime-extensions/vault/$pkg").deleteRecursively()
+            java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let {
+                if (it.exists()) { it.setWritable(true, true); it.delete() }
+            }
+        }
         call.resolve()
     }
 

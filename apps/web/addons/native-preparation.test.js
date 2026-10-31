@@ -71,3 +71,51 @@ it('asks anime-only providers for Kitsu episodes under the anime type they decla
  await nativeAddonPreparation({runtime:a,copies:[anime],episode:7}).start('s',{appendAddonStreams:async()=>{}}).done;
  expect(input).toMatchObject({videoId:'kitsu:12:7',type:'anime'});
 });
+
+
+it('settles the exact native batch when JS-to-Android delivery rejects, preserving sibling success', async () => {
+  const received = [], settled = [];
+  const fast = {...manifest,key:'second',name:'Second'};
+  const a = runtime(async () => [{status:'RESOLVED',url:'https://cdn.test/ok.mp4'}]);
+  a.registry.list = () => [manifest, fast];
+  const plan = nativeAddonPreparation({runtime:a,copies:[copy,{...copy,sourceId:'addon|second'}],episode:3});
+  const done = plan.start('s', {
+    appendAddonStreams:async ({sourceId,...rest}) => {
+      if (sourceId === 'addon|provider') throw Error('bridge disconnected');
+      received.push({sourceId,...rest});
+    },
+    finishAddonBatch:async payload => settled.push(payload),
+  },{addonGeneration:'generation-1',deliveryTimeoutMs:40});
+  await done.done;
+  expect(received.map(x => x.sourceId)).toEqual(['addon|second']);
+  expect(settled).toMatchObject([{session:'s',sourceId:'addon|provider',addonGeneration:'generation-1'}]);
+});
+
+it('times out a provider that never settles, without blocking sibling or leaking timers', async () => {
+  const published = [], slow={...manifest,key:'slow',name:'Slow'};
+  const a=runtime(async()=>[]);
+  a.registry.list=()=>[manifest,slow];
+  a.adapter=key=>({streams:()=>key==='slow' ? new Promise(()=>{}) : Promise.resolve([{id:'fast',url:'https://cdn.test/ok.mp4'}])});
+  const p=nativeAddonPreparation({runtime:a,copies:[copy,{...copy,sourceId:'addon|slow'}],episode:3});
+  await p.start('s',{appendAddonStreams:async payload=>published.push(payload)},{deadlineMs:25}).done;
+  expect(published).toHaveLength(2);
+  expect(published.find(x=>x.sourceId==='addon|slow').streams).toEqual([]);
+  expect(published.find(x=>x.sourceId==='addon|slow').reason).toContain('مهلة');
+});
+
+it('times out a hung Android delivery and falls back to the native settle method',async()=>{
+  const settled=[];
+  await nativeAddonPreparation({runtime:runtime(async()=>[]),copies:[copy],episode:3})
+    .start('s',{appendAddonStreams:()=>new Promise(()=>{}),finishAddonBatch:async p=>settled.push(p)},
+      {addonGeneration:'g',deliveryTimeoutMs:20}).done;
+  expect(settled[0]).toMatchObject({sourceId:'addon|provider',addonGeneration:'g'});
+});
+
+it('cancellation settles JS tasks without publishing a stale result or waiting for the provider timeout',async()=>{
+  const p=nativeAddonPreparation({runtime:runtime(()=>new Promise(()=>{})),copies:[copy],episode:3});
+  const calls=[];
+  const job=p.start('s',{appendAddonStreams:async x=>calls.push(x)},{deadlineMs:1000});
+  job.cancel();
+  await job.done;
+  expect(calls).toEqual([]);
+});

@@ -42,16 +42,55 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
       const provider = input && descriptor(entry, input);
       return provider ? [provider] : [];
     }),
-    start(session, plugin, { addonGeneration } = {}) {
-      const controller = new AbortController();
+    start(session, plugin, { addonGeneration, deadlineMs = 52_000, deliveryTimeoutMs = 10_000 } = {}) {
+      // Independent provider deadlines and generation-safe native settlement.
+      const controllers = new Set(), cancelTasks = new Set();
+      const budget = Number.isFinite(deadlineMs) ? Math.max(1, Math.min(60_000, deadlineMs)) : 52_000;
+      const deliveryBudget = Number.isFinite(deliveryTimeoutMs) ? Math.max(1, Math.min(10_000, deliveryTimeoutMs)) : 10_000;
+      let cancelled = false;
+      const bounded = (work, ms, { onTimeout = () => {}, cancellation } = {}) => {
+        let timer;
+        return Promise.race([
+          Promise.resolve().then(work).then(value => ({ ok: true, value }), () => ({ ok: false })),
+          new Promise(resolve => { timer = setTimeout(() => { onTimeout(); resolve({ timeout: true }); }, ms); }),
+          ...(cancellation ? [cancellation] : []),
+        ]).finally(() => clearTimeout(timer));
+      };
       const done = Promise.all([...selected.values()].map(async entry => {
-        let result = [], provider = null, reason = null;
-        try { const response = await streams(entry, controller.signal); result = response.list; provider = response.provider; }
-        catch { reason = 'تعذر الاتصال بالإضافة أو العثور على فيديو مطابق'; }
-        if (controller.signal.aborted) return;
-        await plugin.appendAddonStreams({ session, sourceId: entry.copy.sourceId, name: entry.provider.name, streams: result, reason, ...(provider ? { provider } : {}), ...(addonGeneration ? { addonGeneration } : {}) });
+        const controller = new AbortController();
+        controllers.add(controller);
+        let cancelTask;
+        const cancellation = new Promise(resolve => { cancelTask = () => resolve({ cancelled: true }); cancelTasks.add(cancelTask); });
+        try {
+          const result = await bounded(() => streams(entry, controller.signal), budget,
+            { onTimeout: () => controller.abort(), cancellation });
+          if (cancelled || result.cancelled) return;
+          const found = result.ok ? result.value : null;
+          const reason = found ? null : result.timeout ? 'انتهت مهلة تجهيز سيرفر الإضافة' : 'تعذر الاتصال بالإضافة أو العثور على فيديو مطابق';
+          const payload = { session, sourceId: entry.copy.sourceId, name: entry.provider.name, streams: found?.list ?? [], reason, ...(found?.provider ? { provider: found.provider } : {}), ...(addonGeneration ? { addonGeneration } : {}) };
+          const delivered = await bounded(() => plugin.appendAddonStreams(payload), deliveryBudget, { cancellation });
+          if (cancelled || delivered.cancelled || delivered.ok) return;
+          // A rejected or unresponsive bridge must not strand an already-reserved batch.
+          if (typeof plugin.finishAddonBatch === 'function') {
+            await bounded(() => plugin.finishAddonBatch({
+              session, sourceId: entry.copy.sourceId, addonGeneration, reason: 'DELIVERY_FAILED',
+            }), 5_000, { cancellation });
+          }
+        } finally {
+          controllers.delete(controller);
+          cancelTasks.delete(cancelTask);
+        }
       })).then(() => undefined);
-      return { done, cancel: () => controller.abort() };
+      return {
+        done,
+        cancel: () => {
+          cancelled = true;
+          for (const controller of controllers) controller.abort();
+          for (const resolve of cancelTasks) resolve();
+          controllers.clear();
+          cancelTasks.clear();
+        },
+      };
     },
   };
 }

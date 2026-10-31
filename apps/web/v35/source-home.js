@@ -68,7 +68,13 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
   const open = (work) => {
     if (open.busy) return;
     open.busy = true;
-    Promise.resolve(onOpenWork(work, { addon, adapter })).finally(() => { open.busy = false; });
+    try {
+      void Promise.resolve(onOpenWork(work, { addon, adapter }))
+        .catch(() => { /* The enclosing screen owns its user-visible error message. */ })
+        .finally(() => { open.busy = false; });
+    } catch {
+      open.busy = false;
+    }
   };
 
   // ── الرأس: شريط رئيسية القسم نفسه (VANTARA / القسم)، وشعار الإضافة بجانب VANTARA، والقسم مقفل على

@@ -288,15 +288,26 @@ data class UserExtensionState(val repos: List<UserRepo> = emptyList(), val exten
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */
 class UserExtensionStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
-    @Volatile var state: UserExtensionState = runCatching { json.decodeFromString<UserExtensionState>(file.readText()) }.getOrDefault(UserExtensionState())
+    private val atomic = android.util.AtomicFile(file)
+
+    @Volatile var state: UserExtensionState = if (!atomic.exists()) UserExtensionState() else
+        runCatching {
+            json.decodeFromString<UserExtensionState>(atomic.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
+        }.getOrElse { throw IllegalStateException("EXTENSION_STATE_CORRUPTED: cannot silently reset installed extensions", it) }
         private set
 
     @Synchronized fun update(change: (UserExtensionState) -> UserExtensionState): UserExtensionState {
         val next = change(state)
+        val bytes = json.encodeToString(UserExtensionState.serializer(), next).toByteArray(Charsets.UTF_8)
         file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(UserExtensionState.serializer(), next))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        val stream = atomic.startWrite()
+        try {
+            stream.write(bytes)
+            atomic.finishWrite(stream)
+        } catch (error: Throwable) {
+            atomic.failWrite(stream)
+            throw error
+        }
         state = next
         return next
     }
