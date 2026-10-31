@@ -10,6 +10,10 @@ import java.io.File
  * (SourceEntry بإضافة وبصمة مثبّتة)، فتعمل في البحث والحلقات والسيرفرات والصحة بلا
  * مسار خاص. القسم (أنمي/أفلام) يختاره المستخدم لأن المستودع لا يفرّق بينهما.
  */
+/** Each APK can expose multiple separately addressable anime/cinema sources. */
+@Serializable
+data class UserAnimeSource(val id: String, val name: String, val lang: String, val baseUrl: String)
+
 @Serializable
 data class UserAnimeExtension(
     val repoUrl: String,
@@ -22,18 +26,36 @@ data class UserAnimeExtension(
     val content: String,
     val sourceName: String? = null,
     val baseUrl: String,
+    /** Missing on historical installations; those keep their original single-source identity. */
+    val sources: List<UserAnimeSource> = emptyList(),
 ) {
     val id: String get() = "user-" + pkg.substringAfterLast('.').ifEmpty { pkg }
 
-    fun entry(): SourceEntry = SourceEntry(
-        id = id,
-        name = name,
-        lang = "ar",
-        priority = 40,
-        content = content,
-        extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName),
-        domains = Domains(current = baseUrl),
-    )
+    fun entry(): SourceEntry = entries().first()
+
+    fun entries(): List<SourceEntry> {
+        val preferred = sourceName?.let { target -> sources.firstOrNull { it.name == target } }
+        val ordered = if (sources.isEmpty()) emptyList() else
+            listOf(preferred ?: sources.first()) + sources.filter { it.id != (preferred ?: sources.first()).id }
+        if (ordered.isEmpty()) return listOf(SourceEntry(
+            id = id, name = name, lang = "ar", priority = 40, content = content,
+            extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName),
+            domains = Domains(current = baseUrl),
+        ))
+        return ordered.mapIndexed { index, source ->
+            SourceEntry(
+                // First source retains its old ID so history/progress keep working.
+                id = if (index == 0) id else "${id}#${source.id}",
+                name = source.name,
+                lang = source.lang,
+                priority = 40,
+                content = content,
+                extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version,
+                    sourceName = source.name, sourceId = source.id),
+                domains = Domains(current = source.baseUrl.ifBlank { baseUrl }),
+            )
+        }
+    }
 }
 
 @Serializable
