@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/video-repository-live-qa.yml'
       - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/LiveRepositorySweepTest.kt'
+      - 'tools/repository-compat/run_live_video.sh'
       - 'extensions/runtime-android/cloudstream/**'
       - 'extensions/runtime-android/integration/src/main/**'
   workflow_dispatch:
@@ -55,24 +56,7 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
-          script: |
-            set -uo pipefail
-            adb logcat -G 16M || true
-            adb logcat -c || true
-            bash android/gradlew -p android :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.LiveRepositorySweepTest \
-              -Pandroid.testInstrumentationRunnerArguments.vantaraLiveSweep=true \
-              -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=Anime4up,Animewitcher,Witanime \
-              -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=3 \
-              --no-daemon --stacktrace
-            status=$?
-            adb logcat -d -v raw -s VANTARA_SWEEP:I > live-video-sweep.jsonl || true
-            adb logcat -d VantaraRuntime:V VantaraRuntimeHttp:D AndroidRuntime:E TestRunner:I '*:S' > live-video-sweep-logcat.txt 2>&1 || true
-            if [ -s live-video-sweep.jsonl ]; then
-              node tools/repository-compat/summarize_live_sweep.mjs live-video-sweep.jsonl > live-video-summary.md || true
-            fi
-            test -s live-video-sweep.jsonl || { echo 'ERROR: no real CloudStream plugin journeys recorded'; exit 1; }
-            exit "$status"
+          script: bash tools/repository-compat/run_live_video.sh
       - name: Upload actual per-plugin journey proof, including failures
         if: always()
         uses: actions/upload-artifact@v4
