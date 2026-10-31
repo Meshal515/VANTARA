@@ -433,14 +433,21 @@ class AnimeEnginePlugin : Plugin() {
                     "DUPLICATE_SOURCE_ID: المستودع يعلن مصادر مكررة"
                 }
                 val previous = userStore.state.extensions.firstOrNull { it.pkg == pkg }
-                // Keep the old primary id and its library/progress links on an update.
-                val primary = previous?.let { old ->
+                // A legacy primary with no raw source ID must be matched unambiguously:
+                // never silently reassign a library's old ID to a different website.
+                val matched = previous?.let { old ->
                     publisherSources.firstOrNull { it.id == old.primarySourceId }
-                        ?: publisherSources.firstOrNull { it.name == old.sourceName && it.baseUrl == old.baseUrl }
-                        ?: publisherSources.firstOrNull { it.baseUrl == old.baseUrl && it.lang == old.sourceLang }
-                } ?: publisherSources.firstOrNull { it.lang.equals("ar", ignoreCase = true) }
+                        ?: publisherSources.firstOrNull {
+                            old.sourceName != null && it.name == old.sourceName && it.baseUrl == old.baseUrl
+                        }
+                        ?: publisherSources.singleOrNull { it.baseUrl == old.baseUrl && it.lang == old.sourceLang }
+                }
+                require(previous == null || matched != null || publisherSources.size == 1) {
+                    "SOURCE_IDENTITY_UNRESOLVED: لا يمكن ترحيل المصدر الأساسي بأمان"
+                }
+                val primary = matched ?: publisherSources.firstOrNull { it.lang.equals("ar", ignoreCase = true) }
                     ?: publisherSources.first()
-                require(previous == null || publisherSources.size == 1 || previous.primarySourceId == null ||
+                require(previous == null || previous.primarySourceId == null ||
                     primary.id == previous.primarySourceId) {
                     "SOURCE_REMOVED: تحديث الحزمة يزيل المصدر الأساسي المحفوظ؛ لم يُحذف الإصدار العامل"
                 }
