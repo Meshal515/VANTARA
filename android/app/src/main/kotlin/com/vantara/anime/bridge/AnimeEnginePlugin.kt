@@ -433,7 +433,11 @@ class AnimeEnginePlugin : Plugin() {
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
         if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
-        val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+        val next = try {
+            userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+        } catch (error: Throwable) {
+            return failure(call, error)
+        }
         engine.setUserSources(next.extensions.map { it.entry() })
         // Explicit uninstall only: clean current vault and legacy APK, not the library/history.
         if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {

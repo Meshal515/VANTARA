@@ -173,7 +173,8 @@ class AnimeEngine(context: Context) {
         return locks.getOrPut(id) { Mutex() }.withLock {
             adapters[id] ?: runCatching {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(
+                // A background load from an older verified APK can finish after an update.
+                if (entry(id)?.extension != ext) null else ExtensionAdapter(
                     id, source,
                     pageEmbeds = { entry(id)?.embeds },
                     resolver = embeds,

@@ -43,7 +43,7 @@ class UserAnimeStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val atomic = android.util.AtomicFile(file)
 
-    @Volatile var state: UserAnimeState = if (!atomic.exists()) UserAnimeState() else
+    @Volatile var state: UserAnimeState = if (!file.exists() && !File(file.path + ".bak").exists()) UserAnimeState() else
         runCatching {
             json.decodeFromString<UserAnimeState>(atomic.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
         }.getOrElse { throw IllegalStateException("ANIME_EXTENSION_STATE_CORRUPTED: cannot silently reset installed extensions", it) }

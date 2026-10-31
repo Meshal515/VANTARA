@@ -62,6 +62,8 @@ class PreparedEpisode(
     }
 
     fun report(r: RouteReport) {
+        // No late source report after the absolute preparation deadline.
+        if (done) return
         if (r.state != RouteState.READY || r.candidates.isEmpty()) {
             reportQuality(r)
             return
@@ -233,7 +235,7 @@ class PreparedEpisode(
 
     /** Promote a warm session once; its existing candidates and player remain intact. */
     fun beginFullPreparation(): Boolean = synchronized(this) {
-        if (fullPreparation) return@synchronized false
+        if (done || fullPreparation) return@synchronized false
         fullPreparation = true
         pendingBatches++
         done = false

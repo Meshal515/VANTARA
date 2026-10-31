@@ -290,7 +290,7 @@ class UserExtensionStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val atomic = android.util.AtomicFile(file)
 
-    @Volatile var state: UserExtensionState = if (!atomic.exists()) UserExtensionState() else
+    @Volatile var state: UserExtensionState = if (!file.exists() && !File(file.path + ".bak").exists()) UserExtensionState() else
         runCatching {
             json.decodeFromString<UserExtensionState>(atomic.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
         }.getOrElse { throw IllegalStateException("EXTENSION_STATE_CORRUPTED: cannot silently reset installed extensions", it) }
