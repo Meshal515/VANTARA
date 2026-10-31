@@ -22,13 +22,16 @@ data class UserAnimeExtension(
     val content: String,
     val sourceName: String? = null,
     val baseUrl: String,
+    /** Null on old persisted records, so historical library IDs remain unchanged. */
+    val stableId: String? = null,
+    val sourceLang: String = "ar",
 ) {
-    val id: String get() = "user-" + pkg.substringAfterLast('.').ifEmpty { pkg }
+    val id: String get() = stableId ?: ("user-" + pkg.substringAfterLast('.').ifEmpty { pkg })
 
     fun entry(): SourceEntry = SourceEntry(
         id = id,
         name = name,
-        lang = "ar",
+        lang = sourceLang,
         priority = 40,
         content = content,
         extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName),

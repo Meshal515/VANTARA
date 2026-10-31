@@ -414,6 +414,8 @@ class AnimeEnginePlugin : Plugin() {
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
                     sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    stableId = userStore.state.extensions.firstOrNull { it.pkg == pkg }?.id ?: "user-$pkg",
+                    sourceLang = source.lang,
                 )
                 // Existing ids remain unchanged for library/history safety. Do not install
                 // a second package that would silently shadow the same old-style id.

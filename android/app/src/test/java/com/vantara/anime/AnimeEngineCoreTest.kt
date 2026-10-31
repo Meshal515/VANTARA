@@ -215,4 +215,17 @@ class AnimeEngineCoreTest {
         assertEquals(0, prep.reserveAddonBatches(listOf("addon|three"), "g"))
     }
 
+    @Test fun `aniyomi source identity keeps legacy records and uses unique IDs for new packages`() {
+        val legacy = com.vantara.anime.registry.UserAnimeExtension(
+            repoUrl = "https://repo.example", name = "Anime", pkg = "dev.first.anime",
+            apkUrl = "https://repo.example/anime.apk", sha256 = "0".repeat(64),
+            version = "14.26", content = "anime", baseUrl = "https://example.org",
+        )
+        assertEquals("user-anime", legacy.id)
+        val first = legacy.copy(stableId = "user-dev.first.anime", sourceLang = "en")
+        val second = legacy.copy(pkg = "dev.second.anime", stableId = "user-dev.second.anime")
+        assertFalse(first.id == second.id)
+        assertEquals("en", first.entry().lang)
+    }
+
 }
