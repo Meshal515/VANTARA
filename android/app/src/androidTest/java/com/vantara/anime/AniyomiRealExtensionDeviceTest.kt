@@ -35,7 +35,20 @@ class AniyomiRealExtensionDeviceTest {
         val (meta, index) = withTimeout(60_000) { repo.read(base) }
         // Publicly published, signed Yuzono multi-source factory: nine language variants.
         val entry = index.firstOrNull { it.pkg.endsWith(".animeworldindia") && it.anime && !it.nsfw && it.sources.size > 1 }
-            ?: error("ANIYOMI_REPO_NO_SIGNED_MULTI_SOURCE_FACTORY")
+            ?: run {
+                // Diagnose the repository ingestion layer before blaming Aniyomi APK/DEX compatibility.
+                // index.pb can disagree with the publisher's legacy JSON: neither is an execution proof.
+                val legacy = runCatching {
+                    com.vantara.plugins.RepoIndex.parseIndex(repo.fetchText("$base/index.min.json"), base)
+                }.getOrNull()
+                val published = legacy?.firstOrNull { it.pkg.endsWith(".animeworldindia") }
+                val v2 = index.firstOrNull { it.pkg.endsWith(".animeworldindia") }
+                error("ANIYOMI_REPO_NO_SIGNED_MULTI_SOURCE_FACTORY " +
+                    "v2_total=${index.size} v2_target_sources=${v2?.sources?.size ?: -1} " +
+                    "v2_target_nsfw=${v2?.nsfw} v2_target_anime=${v2?.anime} " +
+                    "legacy_total=${legacy?.size ?: -1} legacy_target_sources=${published?.sources?.size ?: -1} " +
+                    "legacy_target_nsfw=${published?.nsfw} legacy_target_anime=${published?.anime}")
+            }
         val bytes = withTimeout(90_000) { repo.downloadSigned(entry.apkUrl, meta.fingerprint) }
         val sha = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
