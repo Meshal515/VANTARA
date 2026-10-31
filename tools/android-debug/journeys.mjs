@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const phase = process.argv[2];
-const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read', 'anime'];
+const PHASES = ['upgrade-before', 'upgrade-after', 'restart', 'clean', 'repo-read', 'anime', 'ui-anime'];
 if (!PHASES.includes(phase)) throw new Error(`phase: ${PHASES.join('|')}`);
 const out = process.env.DEBUG_EVIDENCE || 'android-debug-evidence';
 const pkg = 'com.vantara.app.debug';
@@ -276,6 +276,39 @@ try {
     // مصدر كان مدمجًا: بلا نسخة في التطبيق يُجلب من Keiyoushi بمفتاحه ويُقرأ له فصل كامل
     await step('formerBuiltinFromNetworkFullChapter', () => readChapter(AZORA));
   }
+
+  if (phase === 'ui-anime') {
+    // الواجهة الحقيقية كما يلمسها المستخدم: الإضافات ← المثبتة ← المصدر ← فتح ← بطاقة عمل ← صفحة العمل والحلقات
+    await step('mountShell', () => js(`(async()=>{window.__uiErrors=[];
+      addEventListener('error',e=>__uiErrors.push(String(e.error?.stack||e.message)));addEventListener('unhandledrejection',e=>__uiErrors.push(String(e.reason?.stack||e.reason)));
+      const sync={user:null,rows:()=>[],row:()=>null,onChange:()=>()=>{},enqueue:()=>{},translation:async()=>({status:200,body:{rows:[]}}),latestSnapshots:async()=>({sources:[]}),
+        presence:async()=>[],stats:async()=>({}),insights:async()=>({}),topWorks:async()=>[],pendingDevices:async()=>[],privacyCapability:async()=>({}),authorizationHeader:null};
+      const {mountV35}=await import('/v35/shell.js');
+      window.__shell=mountV35({sync,mount:n=>document.querySelector('#root').replaceChildren(n),go:async()=>{},friends:()=>[],presence:async()=>[],version:'journey',switchAccount:()=>{},openReader:()=>{}},{page:'home'});return true})()`));
+    const wait = async (expr, label, ms = 60000) => { for (const t = Date.now(); Date.now() - t < ms; await delay(500)) if (await js(`Boolean(${expr})`)) return true; throw new Error('timed out: ' + label + ' | toast=' + (await js(`document.querySelector('#toast')?.textContent||''`)) + ' | errors=' + (await js('JSON.stringify(window.__uiErrors||[]).slice(0,600)'))); };
+    const results = {};
+    for (const name of ['AnimeRift', 'AnimeWitcher']) {
+      try {
+        results[name] = await step(`open-${name}`, async () => {
+          await js(`(()=>{document.querySelector('[data-act="openDrawer"]').click();[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات').click();return true})()`);
+          await wait(`document.querySelector('#utility.active .v7-addon')`, 'addons page');
+          await js(`[...document.querySelectorAll('.v7-tab')].find(b=>b.textContent.includes('المثبتة')).click()`);
+          await wait(`[...document.querySelectorAll('.v7-row')].some(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)})`, 'installed row');
+          await js(`(()=>{const r=[...document.querySelectorAll('.v7-row')].find(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)});[...r.querySelectorAll('button')].find(b=>b.textContent.includes('فتح')).click();return true})()`);
+          await wait(`document.querySelector('.work-card')`, 'source catalogue cards', 120000);
+          const title = await js(`(()=>{const c=document.querySelector('.work-card');const t=c.textContent.trim().slice(0,60);c.click();return t})()`);
+          await wait(`document.querySelector('#anime.active, .aw-hero, #cinema.active')`, 'work page after tapping «' + title + '»', 120000);
+          await wait(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length>0`, 'episodes on the work page', 120000);
+          return { opened: title, episodes: await js(`document.querySelectorAll('#anime.active [data-episode], #anime.active .ep-row, #anime.active .aw-ep, .aw-episodes button').length`) };
+        });
+      } catch (error) { results[name] = { error: String(error.message).slice(0, 700) }; }
+      try { const shot = await command('Page.captureScreenshot', { format: 'png' }, 30000); writeFileSync(`${out}/ui-${name}.png`, Buffer.from(shot.data, 'base64')); } catch {}
+      await js(`document.querySelector('[data-act="navTo"][data-arg="home"]')?.click()`).catch(() => {});
+    }
+    proof.ui = results;
+    if (Object.values(results).some((r) => r.error)) throw new Error('anime source did not open to a work page with episodes');
+  }
+
   if (phase === 'anime') {
     const results = {};
     for (const name of ANIME_CANDIDATES) {
