@@ -479,6 +479,20 @@ class AnimeEnginePlugin : Plugin() {
                 require(previous?.additionalSources.orEmpty().all { saved ->
                     publisherSources.any { it.id == saved.sourceId }
                 }) { "SOURCE_REMOVED: تحديث الحزمة يزيل مصادر محفوظة؛ الإصدار القديم باقٍ" }
+                // Updates are never promoted solely because the APK and its factory load.
+                // Probe each actual candidate source while the old metadata and APK pointer
+                // still refer to the working revision. No user library rows are changed here.
+                AniyomiUpdateGate.verify(previous?.sha256, com.vantara.plugins.sha256Hex(bytes),
+                    publisherSources.map { it.id }) { sourceId ->
+                    val candidateSource = actual.single { it.id.toString() == sourceId }
+                    kotlinx.coroutines.withTimeout(20_000L) {
+                        kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            com.vantara.anime.adapters.ExtensionAdapter(
+                                "candidate-" + sourceId, candidateSource,
+                            ).page(com.vantara.anime.adapters.Listing.POPULAR, 1).items.isNotEmpty()
+                        }
+                    }
+                }
                 val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
                 engine.setUserSources(next.extensions.flatMap { it.entries() })
                 call.resolve(JSObject().put("id", user.id).put("ids", JSArray(entries.map { it.id }))
