@@ -251,7 +251,7 @@ it('native CloudStream media routes are direct even when the runtime reported th
 
 it('live-installed CloudStream sources appear above torrents immediately and automatically populate filter', () => {
   const { body, el } = dom(), onPick = vi.fn();
-  const ui = createServerSheet(body, { el, onPick });
+  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
   const torrent = { id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true,
     label: 'Series S01E01 1080p 👤 92' };
   const rift = { id: 'rift', sourceId: CS3_RIFT, sourceName: 'AnimeRift', state: 'READY', server: 'vidmoly',

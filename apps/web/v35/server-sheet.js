@@ -12,15 +12,13 @@
  * من يفتحها (الأنمي/السينما) يمرّر السيرفرات وحالتها ويقرّر ماذا يحدث عند اللمس.
  */
 import { parseRelease, swarmTier } from '../addons/release-info.js';
+import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, scoreRoute, VALIDITY_AR } from '../lib/route-validity.js';
 
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
-/** CloudStream sources are native HTTP/HLS video servers, not Stremio/torrent addons.
- * A ready native route can have runtimeReady=true; that is NOT a torrent flag. */
-export const isCloudStreamRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|cs3|');
-export const isTorrentRoute = (r) => isAddonRoute(r) && !isCloudStreamRoute(r);
+export { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 
 const ADDON_NAMES = { torrentio: 'Torrentio', comet: 'Comet', mediafusion: 'MediaFusion', knightcrawler: 'KnightCrawler', jackettio: 'Jackettio', peerflix: 'Peerflix', orion: 'Orion', annatar: 'Annatar', torbox: 'TorBox', debridio: 'Debridio' };
 const capital = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -75,7 +73,11 @@ export function describe(r, ctx = {}) {
   const torrent = isTorrentRoute(r);
   const info = isAddonRoute(r) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
   const q = bucket(r.quality ?? info?.quality);
-  const name = torrent ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة') : ctx.sourceName?.(r) ?? r.sourceName ?? r.sourceId ?? 'سيرفر';
+  const name = torrent
+    ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة')
+    : isCloudStreamRoute(r)
+      ? (r.sourceName || ctx.sourceName?.(r) || 'مصدر مباشر')
+      : (ctx.sourceName?.(r) ?? r.sourceName ?? r.sourceId ?? 'سيرفر');
   const host = torrent ? ([...new Set([info?.site, releaseGroup(info?.filename)].filter(Boolean))].join(' · ') || info?.filename) : hostName(r.server) ?? (r.code && !/^[A-Z0-9]{2,5}$/.test(r.code) ? r.code : null);
   const langs = [];
   if (torrent) {
@@ -479,7 +481,7 @@ export function createServerSheet(body, o) {
   const views = new Map();
   const view = (r) => {
     // الوصف يتغيّر بتغيّر الحالة لا بغيرها: يُحسب مرة لكل نسخة من السيرفر
-    const key = `${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}`;
+    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}`;
     const hit = views.get(r.id);
     if (hit?.key === key) return hit.d;
     const d = describe(r, { sourceName: o.sourceName, prefer: o.prefer, directLang: o.directLang });
