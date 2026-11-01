@@ -5,6 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { analyzePassiveSessions } from './webview-lifecycle.mjs';
 
 const phase = process.argv[2];
 if (!['baseline', 'candidate', 'restart'].includes(phase)) throw new Error('Expected baseline/candidate/restart phase');
@@ -80,7 +81,18 @@ function assertNoAutomaticVerification(iteration) {
     const memory = adb('shell', 'dumpsys', 'meminfo', pkg);
     writeFileSync(`${out}/memory-cycle-${iteration}.txt`, memory);
     const webviews = memory.match(/WebViews:\s*(\d+)/);
-    if (!webviews || Number(webviews[1]) !== 1) throw new Error(`Expected only the shell WebView; found ${webviews?.[1] ?? 'unknown'}`);
+    if (!webviews || Number(webviews[1]) < 1) throw new Error('APK shell WebView is missing from dumpsys');
+    // Android's meminfo counts Java WebView objects even after destroy(), until
+    // GC. Real source cover traffic may also start a legitimate passive browser
+    // fetch. Neither is an interactive VerificationActivity or a leak by itself.
+    // Verify the native START/END lifecycle and reject stale in-flight sessions
+    // instead of demanding WebViews === 1 while the app is using its network.
+    const uptimeMs = Number(adb('shell', 'cat', '/proc/uptime').split(/\s+/)[0]) * 1000;
+    if (!Number.isFinite(uptimeMs)) throw new Error('Cannot sample Android uptime for passive WebView lifecycle');
+    const passiveLog = adb('logcat', '-d', '-v', 'threadtime', '-s', 'VantaraPassiveWebView:I', '*:S');
+    const passive = analyzePassiveSessions(passiveLog, pid, uptimeMs);
+    proof.passiveWebViewSamples ??= [];
+    proof.passiveWebViewSamples.push({ iteration, javaWebViewObjects: Number(webviews[1]), ...passive });
     proof.maxObservedWebViews = Math.max(proof.maxObservedWebViews || 0, Number(webviews[1]));
   }
 }
