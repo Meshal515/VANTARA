@@ -1,28 +1,21 @@
-/** Interceptor-owned passive Android WebViews are not verification Activities.
- * The Java WebViews field in dumpsys counts objects awaiting GC too, so it is
- * not a reliable gauge of open browser windows or leak-free teardown.
+/** Tracks live Chromium WebView targets instead of GC-sensitive Java object counts.
+ * The existing Activity/process checks separately forbid an automatic verifier.
  */
-export function analyzePassiveSessions(log, pid, uptimeMs, maxAgeMs = 30_000) {
+export function observeWebViewTargets(pages, seen, nowMs, maxAgeMs = 45_000) {
+  if (!Array.isArray(pages)) throw new Error('Android WebView targets unavailable');
   const active = new Map();
-  let started = 0;
-  let ended = 0;
-  for (const line of log.split(/\r?\n/)) {
-    const m = line.match(/^\S+\s+\S+\s+(\d+)\s+\d+\s+I\s+VantaraPassiveWebView:\s+(START|END)\s+id=(\d+)\s+at=(\d+)/);
-    if (!m || Number(m[1]) !== Number(pid)) continue;
-    const [, , kind, id, msText] = m;
-    const at = Number(msText);
-    if (kind === 'START') {
-      if (active.has(id)) throw new Error(`Passive WebView ${id} opened twice without cleanup`);
-      active.set(id, at);
-      started++;
-    } else {
-      if (!active.has(id)) throw new Error(`Passive WebView ${id} destroyed without a matching start`);
-      active.delete(id);
-      ended++;
-    }
+  let shellTargets = 0;
+  const externalHosts = new Set();
+  for (const target of pages) {
+    if (target.type !== 'page') continue;
+    if (String(target.url || '').startsWith('https://localhost')) { shellTargets++; continue; }
+    if (!target.id) throw new Error('Unidentified secondary WebView target');
+    const id = String(target.id);
+    const started = seen.get(id) ?? nowMs;
+    if (nowMs - started > maxAgeMs) throw new Error(`Secondary WebView target outlived ${maxAgeMs}ms without teardown`);
+    active.set(id, started);
+    try { externalHosts.add(new URL(target.url).hostname); } catch { externalHosts.add('loading'); }
   }
-  const ages = [...active.values()].map(at => uptimeMs - at);
-  if (ages.some(age => age > maxAgeMs))
-    throw new Error(`Passive WebView exceeded ${maxAgeMs} ms lifetime (oldest ${Math.max(...ages)} ms)`);
-  return { started, ended, active: active.size, oldestActiveMs: ages.length ? Math.max(...ages) : 0 };
+  if (shellTargets < 1) throw new Error('App shell WebView target missing');
+  return { seen:active, sample:{ shellTargets, temporaryTargets:active.size, temporaryHosts:[...externalHosts] } };
 }
