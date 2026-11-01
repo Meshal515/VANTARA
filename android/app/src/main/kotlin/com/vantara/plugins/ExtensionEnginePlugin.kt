@@ -314,10 +314,10 @@ class ExtensionEnginePlugin : Plugin() {
                 val (meta, list) = repoClient.read(base)
                 val count = list.size
                 val repo = UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
-                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
+                userStore.registerRepository(repo)
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", count))
             } catch (t: Throwable) {
-                call.reject(t.message ?: t.readable())
+                rejectMangaMutation(call, t)
             }
         }
     }
@@ -330,7 +330,7 @@ class ExtensionEnginePlugin : Plugin() {
                 userStore.unlinkRepository(base)
                 call.resolve()
             } catch (t: Throwable) {
-                call.reject(t.message ?: t.readable())
+                rejectMangaMutation(call, t)
             }
         }
     }
@@ -390,12 +390,13 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val base = RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
-                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
                 require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
+                val token = userStore.beginInstall(pkg, base)
+                val repo = token.repository
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
                 // لا رجوع لإصدار أقدم من المستودع: فهرس قديم أو متلاعب به لا يعيد ثغرة أُصلحت (أسلوب TUF)
-                userStore.extension(pkg)?.let { mine ->
+                token.previous?.let { mine ->
                     require(ext.versionCode <= 0 || ext.versionCode >= mine.versionCode) { "${ext.name}: الإصدار في المستودع (${ext.version}) أقدم من المثبت عندك (${mine.versionName})؛ لا نرجع لإصدار أقدم" }
                 }
                 val apkUrl = ext.apkUrl
@@ -408,30 +409,29 @@ class ExtensionEnginePlugin : Plugin() {
                 )
                 // التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا،
                 // وإن فشل بقي القديم محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم)
-                val user = userStore.extension(pkg)?.upgradedTo(fresh) ?: fresh
+                val user = token.previous?.upgradedTo(fresh) ?: fresh
                 val all = when (val result = loader.load(user.spec(), bytes)) {
                     is FileExtensionLoader.Result.Fail -> error("${ext.name}: ${result.stage} — ${result.reason}")
                     is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
                 }
-                require(visible.any { v -> all.any { it.id.toString() == v.id } }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
-                synchronized(extensionMutations) {
-                    val previousOwners = owners.filterValues { it == pkg }
-                    claimIds(pkg, all)
-                    try {
-                        // Durable state must be committed before activating the new version.
-                        userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                    } catch (error: Throwable) {
-                        owners.values.removeAll { it == pkg }
-                        owners.putAll(previousOwners)
-                        throw error
-                    }
+                val sourceIds = all.map { it.id.toString() }
+                require(visible.any { it.id in sourceIds }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
+                userStore.commitInstall(token, user, this@ExtensionEnginePlugin,
+                    validate = { validateSourceIds(pkg, sourceIds) }) {
+                    publishSourceIds(pkg, sourceIds)
                     forget(pkg)
                     packages[pkg] = all
+                    // No later install/uninstall may race an old version's cleanup.
+                    try { loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256)) }
+                    catch (cleanup: Exception) {
+                        if (cleanup is CancellationException) throw cleanup
+                        // Optional garbage collection cannot turn an activated install into a false failure.
+                        android.util.Log.w("ExtensionEngine", "MANGA_PRUNE_DEFERRED:$pkg ${cleanup.javaClass.simpleName}")
+                    }
                 }
-                loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256))
                 call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
             } catch (t: Throwable) {
-                call.reject(t.message ?: t.readable())
+                rejectMangaMutation(call, t)
             }
         }
     }
@@ -439,20 +439,29 @@ class ExtensionEnginePlugin : Plugin() {
     @PluginMethod
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
-        if (userStore.extension(pkg) == null) return call.reject("ليست إضافة مثبتة من مستودع")
+        if (packageSpec(pkg) != null) return call.reject("احذف هذه الإضافة من قائمة مصادرها السابقة")
         try {
-            synchronized(extensionMutations) {
-                // Never erase the working code before the removal is durably recorded.
-                userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
+            userStore.uninstall(pkg, this@ExtensionEnginePlugin, {
                 forget(pkg)
                 owners.values.removeAll { it == pkg }
-            }
-            // Only an explicit uninstall erases code files, never library/progress.
-            loader.erase(pkg)
+            }, { loader.erase(pkg) })
             call.resolve()
         } catch (error: Throwable) {
-            call.reject(error.message ?: error.readable())
+            rejectMangaMutation(call, error)
         }
+    }
+
+    private fun rejectMangaMutation(call: PluginCall, error: Throwable) {
+        if (error is CancellationException) throw error
+        val code = error.message
+        val message = when (code) {
+            "MANGA_PACKAGE_CHANGED" -> "تغيّرت الإضافة أو حُذفت أثناء الفحص؛ لم تُفعّل هذه المحاولة. أعد المحاولة إذا رغبت."
+            "MANGA_REPOSITORY_CHANGED" -> "تغيّر المستودع أثناء التثبيت أو التحديث؛ لم تُفعّل هذه المحاولة. أعد المحاولة."
+            "MANGA_REPOSITORY_KEY_CHANGED" -> "تغيّر مفتاح توقيع المستودع؛ احتُفظ بالمستودع وإضافاته الحالية ولم يُعتمد المفتاح الجديد."
+            else -> null
+        }
+        if (message == null) call.reject(error.message ?: error.readable())
+        else call.reject(message, code)
     }
 
     /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
@@ -463,7 +472,6 @@ class ExtensionEnginePlugin : Plugin() {
 
     /** مالك كل معرّف مصدر محمَّل: حزمتان بمعرّف واحد تتشاركان تفضيلات `source_<id>` وكوكيزه. */
     private val owners = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private val extensionMutations = Any()
 
     /**
      * يحجز معرّفات مصادر الحزمة أو يرفضها كلها: معرّف تملكه حزمة أخرى أو المعرّف 0 (المصدر المحلي) يرمي
@@ -471,8 +479,17 @@ class ExtensionEnginePlugin : Plugin() {
      */
     @Synchronized private fun claimIds(pkg: String, sources: List<CatalogueSource>) {
         val ids = sources.map { it.id.toString() }
+        validateSourceIds(pkg, ids)
+        publishSourceIds(pkg, ids)
+    }
+
+    /** Called only while holding this plugin's publication monitor; never accesses the store. */
+    private fun validateSourceIds(pkg: String, ids: List<String>) {
         ids.firstOrNull { it == "0" }?.let { error("ID_COLLISION: المعرّف 0 محجوز") }
         ids.firstOrNull { owners[it]?.let { owner -> owner != pkg } == true }?.let { error("ID_COLLISION: المعرّف $it تملكه ${owners[it]}") }
+    }
+
+    private fun publishSourceIds(pkg: String, ids: List<String>) {
         owners.values.removeAll { it == pkg }
         for (id in ids) owners[id] = pkg
     }

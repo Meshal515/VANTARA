@@ -320,19 +320,76 @@ data class UserExtensionState(
 
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */
 class UserExtensionStore(private val file: File) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
-    private val storage = ExtensionStateFile(file)
+    private val shared = open(file)
 
-    @Volatile var state: UserExtensionState = storage.read(UserExtensionState()) {
-        json.decodeFromString<UserExtensionState>(it)
-    }
-        private set
+    val state: UserExtensionState get() = shared.state
 
-    @Synchronized fun update(change: (UserExtensionState) -> UserExtensionState): UserExtensionState {
+    class InstallToken internal constructor(
+        internal val owner: UserExtensionStore,
+        val pkg: String,
+        val repository: UserRepo,
+        val previous: UserExtension?,
+        internal val packageRevision: Long,
+        internal val repositoryRevision: Long,
+    )
+
+    fun update(change: (UserExtensionState) -> UserExtensionState): UserExtensionState = synchronized(shared) {
+        // An older bridge must transform the current durable state, never its original snapshot.
+        shared.refresh()
         val next = change(state)
-        storage.write(json.encodeToString(UserExtensionState.serializer(), next))
-        state = next
-        return next
+        shared.storage.write(shared.json.encodeToString(UserExtensionState.serializer(), next))
+        shared.accept(next)
+        next
+    }
+
+    fun registerRepository(repo: UserRepo): UserExtensionState = synchronized(shared) {
+        shared.refresh()
+        val pinned = state.repos.singleOrNull { it.url == repo.url }
+        check(pinned == null || pinned.fingerprint.equals(repo.fingerprint, ignoreCase = true)) {
+            "MANGA_REPOSITORY_KEY_CHANGED"
+        }
+        update { it.copy(repos = it.repos.filterNot { old -> old.url == repo.url } + repo) }
+    }
+
+    /** Capture intent before downloading or loading third-party code. No network under this monitor. */
+    fun beginInstall(pkg: String, repoUrl: String): InstallToken = synchronized(shared) {
+        require(RepoIndex.PKG.matches(pkg)) { "معرّف الإضافة غير صالح" }
+        shared.refresh()
+        val repo = state.repos.singleOrNull { it.url == repoUrl } ?: error("MANGA_REPOSITORY_CHANGED")
+        InstallToken(this, pkg, repo, state.extensions.singleOrNull { it.pkg == pkg },
+            shared.packageRevisions[pkg] ?: 0, shared.repositoryRevisions[repoUrl] ?: 0)
+    }
+
+    /** Lock order is store -> publication. Validation must not mutate registry state. */
+    fun commitInstall(token: InstallToken, user: UserExtension, publicationLock: Any,
+        validate: () -> Unit = {}, publish: (UserExtensionState) -> Unit): UserExtensionState = synchronized(shared) {
+        shared.refresh()
+        check(token.owner === this && user.pkg == token.pkg && user.repoUrl == token.repository.url) { "MANGA_PACKAGE_CHANGED" }
+        check((shared.packageRevisions[token.pkg] ?: 0) == token.packageRevision &&
+            state.extensions.singleOrNull { it.pkg == token.pkg } == token.previous) { "MANGA_PACKAGE_CHANGED" }
+        check((shared.repositoryRevisions[token.repository.url] ?: 0) == token.repositoryRevision &&
+            state.repos.singleOrNull { it.url == token.repository.url } == token.repository) { "MANGA_REPOSITORY_CHANGED" }
+        synchronized(publicationLock) {
+            validate()
+            val next = update { it.copy(extensions = it.extensions.filterNot { old -> old.pkg == user.pkg } + user) }
+            // An explicit same-version reinstall is still a newer intent than another staged request.
+            shared.packageRevisions[user.pkg] = (shared.packageRevisions[user.pkg] ?: 0) + 1
+            publish(next)
+            next
+        }
+    }
+
+    fun uninstall(pkg: String, publicationLock: Any, publish: (UserExtensionState) -> Unit,
+        erase: () -> Unit): UserExtensionState = synchronized(shared) {
+        require(RepoIndex.PKG.matches(pkg)) { "معرّف الإضافة غير صالح" }
+        synchronized(publicationLock) {
+            val next = update { it.copy(extensions = it.extensions.filterNot { old -> old.pkg == pkg }) }
+            // Revoke even a first install that was still downloading and had no installed record.
+            shared.packageRevisions[pkg] = (shared.packageRevisions[pkg] ?: 0) + 1
+            publish(next)
+            erase()
+            next
+        }
     }
 
     fun extension(pkg: String): UserExtension? = state.extensions.firstOrNull { it.pkg == pkg }
@@ -340,6 +397,48 @@ class UserExtensionStore(private val file: File) {
     fun unlinkRepository(url: String) = update { it.copy(repos = it.repos.filterNot { repo -> repo.url == url }) }
 
     fun dismissReadyCatalogue() = update { it.copy(readyCatalogDismissed = true) }
+
+    /** One publication lock and current state for all bridge generations owning the same file. */
+    private class Shared(file: File) {
+        val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val storage = ExtensionStateFile(file)
+        val packageRevisions = mutableMapOf<String, Long>()
+        val repositoryRevisions = mutableMapOf<String, Long>()
+        @Volatile var state = storage.read(UserExtensionState()) { json.decodeFromString<UserExtensionState>(it) }
+
+        fun refresh() {
+            accept(storage.read(state) { json.decodeFromString<UserExtensionState>(it) })
+        }
+
+        fun accept(next: UserExtensionState) {
+            val beforePackages = state.extensions.associateBy { it.pkg }
+            val afterPackages = next.extensions.associateBy { it.pkg }
+            for (pkg in beforePackages.keys + afterPackages.keys)
+                if (beforePackages[pkg] != afterPackages[pkg]) packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+            val beforeRepos = state.repos.associateBy { it.url }
+            val afterRepos = next.repos.associateBy { it.url }
+            for (url in beforeRepos.keys + afterRepos.keys)
+                if (beforeRepos[url] != afterRepos[url]) repositoryRevisions[url] = (repositoryRevisions[url] ?: 0) + 1
+            state = next
+        }
+    }
+
+    companion object {
+        private val files = mutableMapOf<String, java.lang.ref.WeakReference<Shared>>()
+
+        private fun open(file: File): Shared {
+            val canonical = file.canonicalFile
+            val shared = synchronized(files) {
+                files.entries.removeAll { it.value.get() == null }
+                files[canonical.path]?.get() ?: Shared(canonical).also {
+                    files[canonical.path] = java.lang.ref.WeakReference(it)
+                }
+            }
+            // Never hold the registry monitor while acquiring an existing file's publication lock.
+            synchronized(shared) { shared.refresh() }
+            return shared
+        }
+    }
 }
 
 fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

@@ -36,6 +36,10 @@ seams.add('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin
 seams.add('android/app/src/main/kotlin/com/vantara/plugins/UserExtensions.kt');
 seams.add('android/app/src/test/java/com/vantara/plugins/RepoIndexTest.kt');
 seams.add('android/app/src/test/java/com/vantara/plugins/UserRepositoryRemovalTest.kt');
+seams.add('android/app/src/test/java/com/vantara/plugins/MangaRepositoryLifecycleTest.kt');
+seams.add('apps/web/lib/sync.test.js');
+// Explicit source-choice durability: strict enqueue failures must not publish an unsaved overlay.
+seams.add('apps/web/lib/sync.js');
 seams.add('android/app/src/androidTest/java/com/vantara/plugins/OptionalMangaRepositoriesDeviceTest.kt');
 seams.add('.github/workflows/manga-repository-management-qa.yml');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.

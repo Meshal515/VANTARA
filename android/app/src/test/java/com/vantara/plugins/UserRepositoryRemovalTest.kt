@@ -6,6 +6,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class UserRepositoryRemovalTest {
+    @Test fun recreatedBridgeCannotReplaceUnreadableStateWithItsCachedSnapshot() {
+        val dir = Files.createTempDirectory("manga-store-corruption").toFile()
+        try {
+            val file = File(dir, "state.json")
+            val oldBridge = UserExtensionStore(file)
+            UserExtensionStore(file).dismissReadyCatalogue()
+            file.writeText("{unreadable")
+            assertThrows(IllegalStateException::class.java) { oldBridge.update { UserExtensionState() } }
+            assertEquals("{unreadable", file.readText())
+            assertTrue(oldBridge.state.readyCatalogDismissed)
+            assertThrows(IllegalStateException::class.java) { UserExtensionStore(file) }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun olderBridgeCannotRestoreADismissedCatalogueWhileRegisteringARepository() {
+        val dir = Files.createTempDirectory("manga-bridge-recreation").toFile()
+        try {
+            val file = File(dir, "state.json")
+            val oldBridge = UserExtensionStore(file)
+            val newBridge = UserExtensionStore(file)
+            newBridge.dismissReadyCatalogue()
+            val repo = UserRepo("https://repo.example", "Repo", "a".repeat(64))
+            oldBridge.update { it.copy(repos = listOf(repo)) }
+            assertTrue(UserExtensionStore(file).state.readyCatalogDismissed)
+            assertTrue(oldBridge.state.readyCatalogDismissed)
+            assertEquals(listOf(repo), newBridge.state.repos)
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun unlinkAndDismissSurviveRecreationAndRetainTheFullInstalledRecord() {
         val dir = Files.createTempDirectory("optional-manga-repo").toFile()
         try {
