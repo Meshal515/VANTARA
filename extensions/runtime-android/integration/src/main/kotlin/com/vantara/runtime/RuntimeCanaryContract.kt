@@ -15,7 +15,7 @@ internal object RuntimeCanaryContract {
             .mapNotNull { (it as? JsonObject)?.get("list") as? JsonArray }
             .flatMap { it.asSequence() }
             .mapNotNull { it as? JsonObject }
-            .firstOrNull { it.text("name").isNotBlank() && safeHttpUrl(it.text("url")) }
+            .firstOrNull { it.text("name").isNotBlank() && it.text("url").isNotBlank() && it.text("url").length <= 8192 }
             ?: throw IllegalArgumentException("CANDIDATE_CATALOGUE_EMPTY")
         return first.text("url")
     }
