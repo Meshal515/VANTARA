@@ -9,6 +9,7 @@ on:
       - 'apps/web/v35/server-sheet.js'
       - 'apps/web/v35/cinema.js'
       - 'apps/web/lib/route-family.js'
+      - 'apps/web/sw.js'
       - 'apps/web/lib/route-validity.js'
       - 'apps/web/lib/route-validity.test.js'
       - 'apps/web/v35/server-sheet.test.js'
