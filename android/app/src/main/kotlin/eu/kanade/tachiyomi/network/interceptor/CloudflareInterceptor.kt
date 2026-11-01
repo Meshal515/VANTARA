@@ -509,6 +509,7 @@ class CloudflareInterceptor(
             view.alpha = 0f
             decor.addView(view)
         }
+        PassiveWebViewTracker.created(view)
         return view
     }
 
@@ -553,7 +554,7 @@ class CloudflareInterceptor(
                 runCatching { it.stopLoading() }
                 runCatching { it.removeJavascriptInterface("ImgFetch") }
                 runCatching { it.removeJavascriptInterface("kagari") }
-                runCatching { it.destroy() }
+                if (runCatching { it.destroy() }.isSuccess) PassiveWebViewTracker.destroyed(it)
             }
         }
     }
