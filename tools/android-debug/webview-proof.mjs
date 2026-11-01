@@ -5,7 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
-import { observeWebViewTargets } from './webview-lifecycle.mjs';
+import { observeWebViewTargets } from '../repository-compat/webview-lifecycle.mjs';
 
 const phase = process.argv[2];
 if (!['baseline', 'candidate', 'restart'].includes(phase)) throw new Error('Expected baseline/candidate/restart phase');
