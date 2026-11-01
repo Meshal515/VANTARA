@@ -293,6 +293,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val st = userStore.state
                 call.resolve(
                     JSObject()
+                        .put("readyCatalogDismissed", st.readyCatalogDismissed)
                         .put("repos", JSArray(st.repos.map { repoJson(it) }))
                         .put("installed", JSArray(st.extensions.map {
                             JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl)
@@ -326,13 +327,22 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                for (ext in userStore.state.extensions.filter { it.repoUrl == base }) forget(ext.pkg)
-                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
+                userStore.unlinkRepository(base)
                 call.resolve()
             } catch (t: Throwable) {
                 call.reject(t.message ?: t.readable())
             }
         }
+    }
+
+    /** Debug's old catalogue is optional. Unlinking it must never uninstall packages. */
+    @PluginMethod
+    fun removeReadySources(call: PluginCall) {
+        if (!com.vantara.app.BuildConfig.DEBUG) return call.reject("هذه العملية متاحة في Debug فقط")
+        try {
+            userStore.dismissReadyCatalogue()
+            call.resolve()
+        } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
     }
 
     /** إضافات المستودع كما يعلنها الآن، مع حالتها عندنا (مثبتة، تحديث، مدمجة، أنمي). */

@@ -255,12 +255,21 @@ export function readySources() {
 		return [...byPackage.values()];
 	};
 	return {
-		list: async () => ({
-			repos: [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }],
-			installed: (await items()).filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY })),
-		}),
-		add: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
-		remove: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
+		list: async () => {
+			const installed = (await items()).filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY }));
+			const state = typeof bridge()?.repos === 'function' ? await required().repos() : {};
+			return {
+				repos: !state.readyCatalogDismissed && installed.length ? [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }] : [],
+				installed,
+			};
+		},
+		// This is a legacy catalogue, never an importer for external repository URLs.
+		remove: async (url) => {
+			if (url !== READY_REPOSITORY) throw new Error('معرّف القائمة غير صالح');
+			const plugin = required();
+			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث نسخة Debug لإزالة هذه القائمة');
+			await plugin.removeReadySources();
+		},
 		extensions: () => items(),
 		// مثل مستودعها الأصلي: التثبيت يُنزّل ويحمّل فعلًا، والحذف يمحو نسختها من الجهاز
 		install: (_repo, pkg) => installFormer(required(), pkg),

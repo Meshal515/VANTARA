@@ -46,6 +46,15 @@ class RepoIndexTest {
         assertThrows(IllegalArgumentException::class.java) { RepoIndex.base("https://example.com:8443/repo") }
     }
 
+    @Test fun acceptsTheOwnersProtobufLinksAsCanonicalRepositoryRoots() {
+        for ((owner, repo) in listOf("keiyoushi" to "extensions", "yuzono" to "manga-repo")) {
+            val canonical = "https://raw.githubusercontent.com/$owner/$repo/repo"
+            assertEquals(canonical, RepoIndex.base("https://github.com/$owner/$repo/raw/repo/index.pb"))
+            assertEquals(canonical, RepoIndex.base("https://github.com/$owner/$repo/raw/refs/heads/repo/index.pb"))
+            assertEquals(canonical, RepoIndex.base("$canonical/index.pb"))
+        }
+    }
+
     @Test fun parsesTheJsonIndexAndRejectsUnsafeFileNames() {
         val list = RepoIndex.parseIndex(index, base)
         assertEquals(listOf("3asq", "MangaDex", "Asura"), list.map { it.name })

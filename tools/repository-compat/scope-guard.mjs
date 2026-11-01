@@ -31,6 +31,13 @@ seams.add('.github/workflows/video-compat-cohort.yml');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPolicy.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeVersionPolicyTest.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');
+// Owner's Nov 1 screenshots: optional legacy manga catalogue and direct protobuf repository URLs.
+seams.add('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/plugins/UserExtensions.kt');
+seams.add('android/app/src/test/java/com/vantara/plugins/RepoIndexTest.kt');
+seams.add('android/app/src/test/java/com/vantara/plugins/UserRepositoryRemovalTest.kt');
+seams.add('android/app/src/androidTest/java/com/vantara/plugins/OptionalMangaRepositoriesDeviceTest.kt');
+seams.add('.github/workflows/manga-repository-management-qa.yml');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');

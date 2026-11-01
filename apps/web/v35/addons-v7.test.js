@@ -547,6 +547,22 @@ it('removes a saved native repository only after explicitly warning about its in
  expect(view.querySelector('.v7-body').textContent).not.toContain('Saved Repo');view.close();
 });
 
+it.each([
+ 'https://github.com/keiyoushi/extensions/raw/repo/index.pb',
+ 'https://github.com/yuzono/manga-repo/raw/repo/index.pb',
+])('routes the owner manga index %s to the repository engine instead of a manga website',async url=>{
+ const d=setup();let registered=false;
+ const api={list:async()=>({repos:registered?[{url,name:'External manga repo'}]:[]}),extensions:async()=>[],
+  add:vi.fn(async()=>{registered=true;return {repo:{name:'External manga repo'}};})};
+ const sites={list:async()=>[],add:vi.fn()};
+ const view=renderV7Addons({registry:registry(),repositories:api,sites});d.body.append(view);await tick();
+ view.querySelector('.v7-plus').click();view.querySelector('.v7-add-input').value=url;
+ const add=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='أضف');
+ add.click();await tick();add.click();await tick();
+ expect(api.add).toHaveBeenCalledWith(url);expect(sites.add).not.toHaveBeenCalled();
+ expect(view.querySelector('.v7-body').textContent).toContain('External manga repo');view.close();
+});
+
 it('keeps repository-removal errors in the confirmation and preserves the saved repository',async()=>{
  const d=setup(),remove=vi.fn(async()=>{throw Error('تعذرت إزالة المستودع');});
  const api={list:async()=>({repos:[{url:'https://repo.example/saved',name:'Saved Repo'}]}),extensions:async()=>[],remove};

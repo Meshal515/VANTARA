@@ -432,7 +432,7 @@ export function renderV7Addons({
     row.onclick=e=>{if(!e.target.closest("button"))browse();};
     if(r.group.api?.remove){
       const remove=btn("","v7-trash",()=>{
-        showDialog("إزالة المستودع؟",r.group.family==="cloudstream"?"سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة.":"ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");
+        showDialog("إزالة المستودع؟","سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة. يمكنك حذف كل إضافة من تبويب المثبتة.");
         const actions=el("div","v7-confirm-actions"),result=el("p","v7-notice");result.setAttribute("role","status");
         const cancel=btn("رجوع","v7-btn",()=>closeModal());
         const confirm=btn("إزالة","v7-btn danger",async()=>{
@@ -866,7 +866,7 @@ export function renderV7Addons({
         return;
       }
       // Standalone manga websites use the actual site bridge, not the executable APK repo engines.
-      if(!/\.json$/i.test(parsed.pathname) && sites?.add){
+      if(!/\.(?:json|pb)$/i.test(parsed.pathname) && sites?.add){
         const site=await sites.add(uri);
         note.textContent="أُضيف الموقع: "+(site?.label||parsed.hostname);
         closeModal(true);await refresh();sourcesChanged();return;

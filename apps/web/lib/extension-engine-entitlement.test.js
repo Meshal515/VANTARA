@@ -91,3 +91,28 @@ it('المحرك الأصلي يُبلَّغ بالحزم الظاهرة فقط 
   await vi.waitFor(() => expect(plugin.setVisibleBuiltins).toHaveBeenCalled());
   expect(plugin.setVisibleBuiltins).toHaveBeenLastCalledWith({ pkgs: [AZORA, DILAR].sort() });
 });
+
+it('the legacy catalogue cannot claim an external repository URL', async () => {
+  await load(EXISTING);
+  expect(engine.readySources().add).toBeUndefined();
+});
+
+it('dismisses the legacy catalogue durably without uninstalling its sources', async () => {
+  await load(EXISTING);
+  let dismissed = false;
+  plugin.repos.mockImplementation(async () => ({ repos: [], installed: [], readyCatalogDismissed: dismissed }));
+  plugin.removeReadySources = vi.fn(async () => { dismissed = true; });
+  const ready = engine.readySources();
+  expect((await ready.list()).repos).toHaveLength(1);
+  await ready.remove(engine.READY_REPOSITORY);
+  expect((await engine.readySources().list()).repos).toEqual([]);
+  expect((await ready.list()).installed.map(x => x.pkg)).toEqual([DILAR, AZORA]);
+  expect(written).toEqual([]);
+  expect(plugin.uninstallExtension).not.toHaveBeenCalled();
+  expect(plugin.removeReadySources).toHaveBeenCalledOnce();
+});
+
+it('does not show a preset repository for a clean account', async () => {
+  await load(NEW);
+  expect((await engine.readySources().list()).repos).toEqual([]);
+});

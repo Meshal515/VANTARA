@@ -49,13 +49,18 @@ object RepoIndex {
         val anime: Boolean get() = pkg.contains(".animeextension.")
     }
 
-    /** يقبل رابط المستودع نفسه أو رابط index.min.json/index.json/repo.json فيه. */
+    /** Canonicalize public GitHub raw aliases and accept either supported index format. */
     fun base(input: String): String {
         val raw = input.trim().removeSuffix("/")
         val uri = runCatching { URI(raw) }.getOrNull() ?: error("رابط المستودع غير صالح")
         require(uri.scheme.equals("https", ignoreCase = true) && uri.host != null && uri.rawUserInfo == null && uri.port == -1) { "المستودع يحتاج رابط HTTPS عاديًا" }
         require(uri.rawQuery == null && uri.rawFragment == null) { "رابط المستودع لا يحمل استعلامًا" }
-        return raw.replace(Regex("/(index\\.min\\.json|index\\.json|repo\\.json)$", RegexOption.IGNORE_CASE), "")
+        val path = uri.rawPath.orEmpty()
+        val github = if (uri.host.equals("github.com", ignoreCase = true))
+            Regex("^/([^/]+)/([^/]+)/raw/(?:refs/heads/)?(.+)$").matchEntire(path) else null
+        val canonical = if (github != null)
+            "https://raw.githubusercontent.com/${github.groupValues[1]}/${github.groupValues[2]}/${github.groupValues[3]}" else raw
+        return canonical.replace(Regex("/(index\\.min\\.json|index\\.json|index\\.pb|repo\\.json)$", RegexOption.IGNORE_CASE), "")
     }
 
     /** رابط index.pb إن أعلنه repo.json (HTTPS فقط)، وإلا null فيُقرأ index.min.json. */
@@ -306,7 +311,12 @@ fun sourceAliases(from: List<UserSource>, to: List<UserSource>): Map<String, Str
 }
 
 @Serializable
-data class UserExtensionState(val repos: List<UserRepo> = emptyList(), val extensions: List<UserExtension> = emptyList())
+data class UserExtensionState(
+    val repos: List<UserRepo> = emptyList(),
+    val extensions: List<UserExtension> = emptyList(),
+    /** Hides only the old optional catalogue; installed packages and account choices are retained. */
+    val readyCatalogDismissed: Boolean = false,
+)
 
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */
 class UserExtensionStore(private val file: File) {
@@ -326,6 +336,10 @@ class UserExtensionStore(private val file: File) {
     }
 
     fun extension(pkg: String): UserExtension? = state.extensions.firstOrNull { it.pkg == pkg }
+
+    fun unlinkRepository(url: String) = update { it.copy(repos = it.repos.filterNot { repo -> repo.url == url }) }
+
+    fun dismissReadyCatalogue() = update { it.copy(readyCatalogDismissed = true) }
 }
 
 fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
