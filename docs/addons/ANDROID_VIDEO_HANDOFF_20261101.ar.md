@@ -23,10 +23,11 @@ CloudStream يعمل عبر runtime اختياري خاص بـDebug: مستود�
 
 | الفحص | النتيجة | حد الدليل |
 |---|---|---|
-| Android JVM | PASS: 578 اختبارًا،115 suite،صفر فشل/تجاوز | ليست اختبارات جهاز |
+| Android JVM | PASS: 582 اختبارًا،116 suite،صفر فشل/تجاوز | ليست اختبارات جهاز |
 | Web | PASS:1949 اختبارًا،210 ملف | اختبارات انحدار؛ لا نشر PWA |
 | حواجز المستودع | PASS:55 | ليست تدقيقًا أمنيًا شاملًا |
 | HTTP/media/recovery standalone | PASS:41 | TLS/fixtures حقيقية محلية؛ ليست مواقع/مشغلًا حيًا |
+| وحدات runtime عبر Gradle | HTTP35/35؛executor44/44؛CloudStream46PASS+1SKIP | extractor live opt-in غير منفذ؛ لا يساوي PASS |
 | assembleDebug وassembleDebugAndroidTest | PASS | بناء محلي غير منشور |
 | جهاز فعلي | BLOCKED | لا جهاز متصل |
 | محاكي محلي | BLOCKED | لا KVM في البيئة؛ الاختبارات المحاكية تنقل إلى Actions |
@@ -47,8 +48,10 @@ CloudStream يعمل عبر runtime اختياري خاص بـDebug: مستود�
 
 1. تشغيل Actions على SHA هذه الدفعة دون نشر: Android،العقود،الجسر،Aniyomi،CloudStream anime/cinema،decoded frames،rollback.
 2. فحص كل FAIL/BLOCKED مع نسخة الإضافة ومضيفها وحالة الشبكة؛ لا تجاوز CAPTCHA أو حسابات أو DRM.
-3. تعميق Aniyomi update gate الحالي الذي ما زال catalogue-only؛ فحصه ليس ضمان فيديو ولا self-healing بعد التفعيل. تنزيل RepoClient ذو الحجم غير المعلن ما زال يحتاج حد قراءة قبل التخصيص.
+3. تعميق Aniyomi update gate الحالي الذي ما زال catalogue-only؛ فحصه ليس ضمان فيديو ولا self-healing بعد التفعيل. أصلح حد قراءة RepoClient ومسار إعادة تنزيل AnimeExtensionLoader قبل التخصيص، مع أربع حالات unknown/oversize/dishonest/exact-length.
 4. إثبات restart/تحديث/بيانات المستخدم على نفس المرشح، واختبار الجودات والترجمة والمصادر المهمة قبل ترقية Debug الموقع.
 5. لا نشر قبل قبول النتائج. Scores الجودة تؤجل لحين الأدلة؛ بناء ناجح لا يبرر10/10.
 
 سجلات التنفيذ التفصيلية المحلية: `/workspace/evidence/20261101/`،وتقارير الاستعادة `/workspace/evidence/20261101-release-recovery.ar.md` و`20261101-engine-review.ar.md`. الدليل الملخص المتتبع في `docs/addons/evidence/20261101/`.
+
+متابعة: إزالة المستودع لا تعيد نشر snapshot إضافات قديم؛ لا تتغير الإضافات المثبتة أصلًا عند هذه العملية. أصلح أيضًا حد التنزيل أثناء القراءة، لا بعدها. RED موثق لغياب API ثم GREEN للبناء والاختبارات الكاملة.

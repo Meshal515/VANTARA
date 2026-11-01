@@ -348,12 +348,25 @@ fun apkSignerFingerprints(context: Context, apk: File): Set<String> {
  * قراءة المستودع وتنزيل إضافاته والتحقق من توقيعها: مشترك بين المانجا والأنمي.
  * إضافة لا يطابق توقيعها مفتاح المستودع لا تُرجع بايتاتها أبدًا.
  */
+/** Bounds the decoded stream too: absent, compressed or dishonest Content-Length cannot grow unbounded. */
+internal fun readRepositoryBody(input: java.io.InputStream, declaredLength: Long, limit: Int): ByteArray {
+    require(limit > 0 && declaredLength <= limit) { "الملف أكبر من الحد" }
+    val output = java.io.ByteArrayOutputStream(minOf(limit, 16 * 1024))
+    val buffer = ByteArray(minOf(limit, 8192))
+    while (true) {
+        val remaining = limit - output.size()
+        val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining.toLong() + 1).toInt())
+        if (count == -1) return output.toByteArray()
+        require(count <= remaining) { "الملف أكبر من الحد" }
+        output.write(buffer, 0, count)
+    }
+}
+
 class RepoClient(private val context: Context, private val client: okhttp3.OkHttpClient) {
     fun fetchBytes(url: String, limit: Int): ByteArray =
         client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { res ->
             require(res.isSuccessful) { "تعذر الوصول (HTTP ${res.code})" }
-            require(res.body.contentLength() <= limit) { "الملف أكبر من الحد" }
-            res.body.bytes().also { require(it.size <= limit) { "الملف أكبر من الحد" } }
+            res.body.byteStream().use { readRepositoryBody(it, res.body.contentLength(), limit) }
         }
 
     fun fetchText(url: String): String = String(fetchBytes(url, 8 * 1024 * 1024), Charsets.UTF_8)

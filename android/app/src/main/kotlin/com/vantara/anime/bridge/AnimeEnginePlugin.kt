@@ -374,8 +374,9 @@ class AnimeEnginePlugin : Plugin() {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 // Removing a repository is not the same action as uninstalling its
                 // already-pinned extensions. Keep the code and account/library links.
-                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
-                engine.setUserSources(next.extensions.flatMap { it.entries() })
+                // Repository metadata does not change installed sources. Republishing a snapshot
+                // outside the store monitor could race a newer install/uninstall publication.
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
                 call.resolve()
             } catch (t: Throwable) { failure(call, t) }
         }

@@ -14,6 +14,8 @@ seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/van
 seams.add('extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt');
 seams.add('extensions/runtime-android/integration/src/test/kotlin/com/vantara/runtime/RuntimeRecoveryGateTest.kt');
 seams.add('tools/repository-compat/scope-guard.mjs');
+seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
+seams.add('android/app/src/test/java/com/vantara/plugins/BoundedRepositoryBodyTest.kt');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');

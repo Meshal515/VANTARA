@@ -58,7 +58,11 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
     }.getOrNull()?.takeIf { sha256(it).equals(ref.sha256, true) }
 
     private suspend fun download(ref: ExtensionRef): ByteArray = try {
-        http.newCall(GET(ref.apk)).awaitSuccess().use { it.body.bytes() }
+        http.newCall(GET(ref.apk)).awaitSuccess().use { response ->
+            response.body.byteStream().use {
+                com.vantara.plugins.readRepositoryBody(it, response.body.contentLength(), 40 * 1024 * 1024)
+            }
+        }
     } catch (t: Throwable) {
         throw LoadException("download", "تعذّر تنزيل ${ref.pkg}", t)
     }
