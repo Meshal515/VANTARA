@@ -197,6 +197,49 @@ class RuntimeHost(
             installFile(o,download,observed,pkg,JsonObject(row+mapOf("content" to JsonPrimitive(content),"enabled" to JsonPrimitive(true))))
         } finally { download.delete() }
     }
+    /**
+     * Read-only public catalogue canary on each candidate source BEFORE an update
+     * can replace an already installed package. Scope IDs are version-specific,
+     * isolating candidate cookies from the active user's cookies and sessions.
+     * First installs are independent: there is no known-good version to protect.
+     */
+    private suspend fun preflightCandidateUpdate(
+        o: Owner, generation: Long, pkg: String,
+        candidate: RuntimePackageStore.Staged, sources: JsonArray
+    ) = withTimeout(90_000L) {
+        for (raw in sources) {
+            val source=raw.jsonObject
+            val name=source.text("name")
+            val versionHash=candidate.candidate().packageHash()
+            val candidateId=sourceId(pkg,name,o.id)+"|candidate|"+versionHash.take(12)
+            val origins=RuntimeNetworkPolicy.sourceOrigins(versionHash,source.text("mainUrl"),emptySet())
+            val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,candidateId,o.id,origins)
+            val bound=sourceTransport(scope,broker)
+            val transport=object: AndroidRuntimeClient.HostHttpTransport {
+                override fun exchange(caller: AndroidRuntimeClient.Scope, request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
+                    val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER)
+                    headers.putAll(request.headers())
+                    headers.putIfAbsent("User-Agent",listOf(userAgent))
+                    return bound.exchange(caller,RuntimeHttpAccess.Request(
+                        request.url(),request.method(),headers,request.body(),request.followRedirects()))
+                }
+                override fun close() { bound.close() }
+            }
+            try {
+                val payload=buildJsonObject { put("source",name);put("page",1) }
+                val catalogue=worker(o,generation,scope,candidate.dexFile(),
+                    candidate.candidate().dexHash(),candidate.candidate().entry(),transport) { client ->
+                    RuntimeJson.parse(client.invokeJson("catalogue",payload.toString(),15_000).await()).jsonObject
+                }
+                val sections=catalogue["items"] as? JsonArray
+                    ?: throw IOException("CANDIDATE_CATALOGUE_INVALID")
+                if (sections.none { row ->
+                        ((row as? JsonObject)?.get("list") as? JsonArray)?.isNotEmpty()==true
+                    }) throw IOException("CANDIDATE_CATALOGUE_EMPTY")
+            } finally { transport.close() }
+        }
+    }
+
     /** Also used by device integration tests with real pinned archives and an isolated test broker. */
     suspend fun installFile(file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = installFile(owner,file,hash,pkg,metadata)
     private suspend fun installFile(o: Owner,file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = slots.withPermit {
@@ -210,17 +253,40 @@ class RuntimeHost(
                 RuntimeJson.parse(client.invokeJson("capabilities","{}",3000).await()).jsonObject
             }
             val sources=RuntimeRegistration.validate(registration,pkg)
+            val before=synchronized(lock) { checkPackage(o,pkg,generation);o.store.current(pkg) }
+            val previous=before?.let { RuntimeJson.parse(it.metadata()).jsonObject }
+            // Source IDs are derived from the exact publisher name, not a transient URL.
+            RuntimeUpdateAdmission.preserveIds(previous,registration)
+            if(before!=null && before.packageHash()!=candidate.candidate().packageHash()) {
+                try { preflightCandidateUpdate(o,generation,pkg,candidate,sources) }
+                catch (timedOut: TimeoutCancellationException) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_TIMEOUT",timedOut) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_FAILED",failure) }
+            }
             val installed=synchronized(lock) {
                 checkPackage(o,pkg,generation)
-                val previous=o.store.current(pkg)?.let { RuntimeJson.parse(it.metadata()).jsonObject }
-                // Fail closed on plugin updates that would orphan a saved VANTARA source ID.
-                // This is checked before the atomic installed pointer can be touched.
-                RuntimeUpdateAdmission.preserveIds(previous,registration)
+                check(o.store.current(pkg)==before) { "RUNTIME_PACKAGE_CHANGED_DURING_PREFLIGHT" }
                 val stored=JsonObject(metadata+mapOf("registration" to registration,"enabled" to (previous?.get("enabled") ?: metadata["enabled"] ?: JsonPrimitive(true))))
                 val retained=o.store.inventory().installed().filter { it.packageId()!=pkg }
                 val retainedCount=retained.sumOf { existing -> runCatching { RuntimeJson.parse(existing.metadata()).jsonObject.getValue("registration").jsonObject.getValue("sources").jsonArray.size }.getOrDefault(0) }
                 require(retained.size<128 && retainedCount+sources.size<=128) { "RUNTIME_SOURCE_LIMIT" }
-                candidate.activate(pkg,stored.toString()).also { stopPackage(pkg);refresh(o) }
+                val activated=candidate.activate(pkg,stored.toString())
+                try {
+                    stopPackage(pkg)
+                    refresh(o)
+                    check(sources.all { row ->
+                        engine.runtimeSource(sourceId(pkg,row.jsonObject.text("name"),o.id))!=null
+                    }) { "RUNTIME_SOURCE_ACTIVATION_MISSING" }
+                    activated
+                } catch (failure: Throwable) {
+                    // A failed immediate binding must not strand an upgraded package.
+                    // CAS refuses to overwrite newer settings or a concurrent install.
+                    if(before!=null && o.store.restoreIfCurrent(activated,before)) {
+                        stopPackage(pkg)
+                        refresh(o)
+                    }
+                    throw failure
+                }
             }
             installedRow(installed,o.id)
         }
