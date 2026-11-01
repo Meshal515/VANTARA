@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.plugins.Plugin
+import com.lagradost.cloudstream3.plugins.BasePlugin
 import com.lagradost.cloudstream3.utils.*
 import dev.vantara.runtime.api.*
 import kotlinx.coroutines.runBlocking
@@ -20,7 +21,7 @@ private const val LINKS_BUDGET_MS=26_000L
 
 class CloudStreamProvider(private val context:Context,private val loader:ClassLoader,private val entry:String):RuntimeProvider {
     private var sources:List<MainAPI>?=null
-    private var plugin:Plugin?=null
+    private var plugin:BasePlugin?=null
     override fun initialize(access:RuntimeAccess) {
         check(sources==null){"PROFILE_ALREADY_INITIALIZED"}
         val http=access as? RuntimeHttpAccess?:throw IOException("FULL_HTTP_UNSUPPORTED")
@@ -32,11 +33,10 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
         try {
             val result=Registration.collect {
                 val type=Class.forName(entry,false,loader)
-                check(type.classLoader===loader&&Plugin::class.java.isAssignableFrom(type)){"ABI_MISMATCH"}
-                val candidate=type.getDeclaredConstructor().newInstance() as Plugin
+                val candidate=PluginAdmission.instantiate(type,loader)
                 val worker=WorkerContext(context,loader)
                 WorkerState.install(worker)
-                candidate.load(worker);plugin=candidate
+                PluginAdmission.initialize(candidate,worker);plugin=candidate
             }
             check(result.sources.isNotEmpty()){"NO_REGISTERED_SOURCES"}
             result.extractors.forEach{ExtractorRegistry.add(it)}
