@@ -97,7 +97,11 @@ object DebugVideoPlaybackProbe {
                 }
                 assertTrue("Quality switch lost the playback position", read { player.currentPosition } >= beforePosition - 5_000)
             }
-            return "advancedMs=$advanced;decodedFrames=$rendered;droppedFrames=$dropped;seekForward=true;seekBackward=true;qualities=${heights.joinToString(",")};processRestart=NOT_TESTED"
+            val duration = read { player.duration }
+            assertTrue("On-demand source has no measured duration for end-of-media validation", duration > 5_000)
+            read { player.seekTo(duration - 3_000) }
+            await("actual end of media") { player.playbackState == androidx.media3.common.Player.STATE_ENDED }
+            return "advancedMs=$advanced;decodedFrames=$rendered;droppedFrames=$dropped;seekForward=true;seekBackward=true;qualities=${heights.joinToString(",")};seekToEndAndEnded=true;processRestart=NOT_TESTED"
         } finally {
             activity?.let { onMain(ins) { it.finish() } }
             engine.closeSession(id)
