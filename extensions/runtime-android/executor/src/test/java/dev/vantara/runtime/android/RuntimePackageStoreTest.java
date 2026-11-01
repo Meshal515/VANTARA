@@ -40,7 +40,7 @@ public class RuntimePackageStoreTest {
     private String hash(File file)throws Exception{StringBuilder s=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.toPath())))s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}
     private RuntimePackageStore store(String account)throws Exception{return new RuntimePackageStore(temp.getRoot().toPath().resolve("runtime-owned"),account);}
     @Test public void rollbackRestoresPriorImmutableRevisionAndMetadataAfterRestart()throws Exception{
-        File userData=temp.newFile("saved-library.json");Files.writeString(userData.toPath(),"{\"episodeProgress\":42}");
+        File userData=temp.newFile("saved-library.json");Files.write(userData.toPath(),"{\"episodeProgress\":42}".getBytes(StandardCharsets.UTF_8));
         RuntimePackageStore store=store("primary");File one=archive(1),two=archive(2);
         try(RuntimePackageStore.Staged s=store.stage(one,hash(one))){s.activate("stable-id","{\"enabled\":false,\"source\":\"old\"}");}
         RuntimePackageStore.Installed previous=store.current("stable-id");
@@ -51,7 +51,7 @@ public class RuntimePackageStoreTest {
         assertEquals(previous.packageHash(),recovered.packageHash());
         assertEquals(previous.metadata(),recovered.metadata());
         assertEquals(1,recovered.version());
-        assertEquals("{\"episodeProgress\":42}",Files.readString(userData.toPath()));
+        assertEquals("{\"episodeProgress\":42}",new String(Files.readAllBytes(userData.toPath()),StandardCharsets.UTF_8));
     }
     @Test public void rollbackNeverOverwritesNewerMetadataOrAnotherProfile()throws Exception{
         RuntimePackageStore store=store("primary");RuntimePackageStore other=store("other");
