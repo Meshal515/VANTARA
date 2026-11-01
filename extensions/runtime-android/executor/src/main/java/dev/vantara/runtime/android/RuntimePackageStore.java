@@ -110,6 +110,43 @@ public final class RuntimePackageStore {
         try{write(pending,bytes.toByteArray());Files.move(pending,records.resolve(value.packageId()+".vri"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
         finally{Files.deleteIfExists(pending);}
     }
+    /**
+     * Fail-closed recovery for a newly activated runtime revision. The caller must supply
+     * the exact observed active record and an earlier snapshot from THIS account.
+     * A concurrent settings edit, newer activation, or another account's object refuses
+     * the rollback rather than silently erasing user state.
+     *
+     * Only the installed pointer is switched atomically. Immutable objects, sessions,
+     * cookies, repositories and other account files are never removed or rewritten.
+     */
+    public boolean restoreIfCurrent(Installed expectedActive,Installed previous)throws IOException {
+        if(expectedActive==null||previous==null||!Objects.equals(expectedActive.packageId(),previous.packageId()))
+            throw new IOException("PACKAGE_ROLLBACK_INVALID");
+        final String packageId=expectedActive.packageId();id(packageId);
+        return locked(()->{
+            Installed active=current(packageId);
+            if(active==null||!active.equals(expectedActive))return false;
+            if(!previous.packageHash().matches("[0-9a-f]{64}")||!previous.dexHash().matches("[0-9a-f]{64}"))
+                throw new IOException("PACKAGE_ROLLBACK_INVALID");
+            Path object=objects.resolve(previous.packageHash()),archive=object.resolve("original.cs3"),dex=object.resolve("classes.dex");
+            // A snapshot from a different profile has the same package ID but a
+            // different owned object path; NEVER pull it into this account.
+            if(!dex.toAbsolutePath().normalize().equals(previous.dexFile().toPath().toAbsolutePath().normalize()))
+                throw new IOException("PACKAGE_ROLLBACK_INVALID");
+            if(Files.isSymbolicLink(object)||Files.isSymbolicLink(archive)||Files.isSymbolicLink(dex))
+                throw new IOException("PACKAGE_OBJECT_CORRUPT");
+            final Cs3Package validated;
+            try {
+                validated=Cs3Package.read(archive.toFile(),previous.packageHash());
+                if(!validated.dexHash().equals(previous.dexHash())||!validated.entry().equals(previous.entry())
+                    ||validated.version()!=previous.version()||!dexHash(dex).equals(previous.dexHash()))
+                    throw new IOException("PACKAGE_OBJECT_CORRUPT");
+            }catch(IOException failure){throw new IOException("PACKAGE_OBJECT_CORRUPT",failure);}
+            pointer(new Installed(packageId,previous.packageHash(),previous.dexHash(),previous.entry(),
+                previous.version(),dex.toFile(),previous.metadata()));
+            return true;
+        });
+    }
     /** Manual new-family settings only; binaries, cookies and other accounts are not rewritten. */
     public Installed updateMetadata(String packageId,String metadata)throws IOException {
         id(packageId);return locked(()->{
