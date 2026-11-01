@@ -1,23 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzePassiveSessions } from './webview-lifecycle.mjs';
-
-const entry = (pid, action, id, time) => `11-01 13:51:07.001  ${pid}  ${pid} I VantaraPassiveWebView: ${action} id=${id} at=${time}`;
-test('an in-flight Cloudflare image fetch is not a leaked verification screen', () => {
-  const log = entry(12, 'START', 8, 1000);
-  assert.deepEqual(analyzePassiveSessions(log, 12, 3500), {started:1,ended:0,active:1,oldestActiveMs:2500});
+import { observeWebViewTargets } from './webview-lifecycle.mjs';
+const shell = { id:'shell',type:'page',url:'https://localhost/index.html' };
+const cover = { id:'cover',type:'page',url:'https://io.mangalik.net/wp-content/x.webp' };
+test('the application shell is required', () => {
+  assert.throws(()=>observeWebViewTargets([],new Map(),0),/shell/);
 });
-test('a finished passive session counts as closed even while Android retains its Java object', () => {
-  const log = [entry(12,'START',8,1000),entry(12,'END',8,1200)].join('\n');
-  assert.equal(analyzePassiveSessions(log,12,40000).active,0);
+test('a temporary cover-fetch WebView is allowed without treating it as human verification', () => {
+  const result = observeWebViewTargets([shell,cover],new Map(),2000);
+  assert.deepEqual(result.sample,{shellTargets:1,temporaryTargets:1,temporaryHosts:['io.mangalik.net']});
+  assert.equal(result.seen.get('cover'),2000);
 });
-test('an old active session fails closed', () => {
-  assert.throws(() => analyzePassiveSessions(entry(12,'START',8,1000),12,32000), /exceeded/);
+test('normal teardown removes a secondary target from the tracking set', () => {
+  const before=observeWebViewTargets([shell,cover],new Map(),1000);
+  const after=observeWebViewTargets([shell],before.seen,52000);
+  assert.equal(after.seen.size,0);
 });
-test('unmatched cleanup and duplicate creation are errors', () => {
-  assert.throws(() => analyzePassiveSessions(entry(12,'END',8,1200),12,3000), /without a matching/);
-  assert.throws(() => analyzePassiveSessions([entry(12,'START',8,1000),entry(12,'START',8,2000)].join('\n'),12,3000), /twice/);
+test('a stuck secondary WebView is a real failure, not exempted by the count change', () => {
+  const before=observeWebViewTargets([shell,cover],new Map(),1000);
+  assert.throws(()=>observeWebViewTargets([shell,cover],before.seen,48000),/outlived/);
 });
-test('records from other processes do not masquerade as app WebViews', () => {
-  assert.equal(analyzePassiveSessions(entry(50,'START',9,1000),12,40000).active,0);
+test('new navigation target restarts its own lifetime and only hostnames are reported', () => {
+  const before=observeWebViewTargets([shell,cover],new Map(),1000);
+  const next=observeWebViewTargets([shell,{...cover,id:'new'}],before.seen,52000);
+  assert.equal(next.seen.get('new'),52000);
+  assert.ok(!JSON.stringify(next.sample).includes('/wp-content/'));
 });
