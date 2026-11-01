@@ -17,6 +17,10 @@ import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, scoreRoute, VALIDITY_AR } from '../lib/route-validity.js';
 
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
+/** CloudStream sources are native HTTP/HLS video servers, not Stremio/torrent addons.
+ * A ready native route can have runtimeReady=true; that is NOT a torrent flag. */
+export const isCloudStreamRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|cs3|');
+export const isTorrentRoute = (r) => isAddonRoute(r) && !isCloudStreamRoute(r);
 
 const ADDON_NAMES = { torrentio: 'Torrentio', comet: 'Comet', mediafusion: 'MediaFusion', knightcrawler: 'KnightCrawler', jackettio: 'Jackettio', peerflix: 'Peerflix', orion: 'Orion', annatar: 'Annatar', torbox: 'TorBox', debridio: 'Debridio' };
 const capital = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -68,7 +72,7 @@ const QUALITY_PREF = { 1080: 5, 2160: 4, 1440: 4, 720: 3, 480: 1 };
 
 /** ما يحتاجه الصف ليُرسم: الاسم والنوع والجودة واللغة والصحة. */
 export function describe(r, ctx = {}) {
-  const torrent = isAddonRoute(r) || r.runtimeReady != null;
+  const torrent = isTorrentRoute(r);
   const info = isAddonRoute(r) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
   const q = bucket(r.quality ?? info?.quality);
   const name = torrent ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة') : ctx.sourceName?.(r) ?? r.sourceName ?? r.sourceId ?? 'سيرفر';
