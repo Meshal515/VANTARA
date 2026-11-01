@@ -82,6 +82,47 @@ public class RuntimePackageStoreTest {
         catch(IOException expected){assertEquals("PACKAGE_OBJECT_CORRUPT",expected.getMessage());}
         assertEquals(update.packageHash(),store.current("stable-id").packageHash());
     }
+    @Test public void knownGoodUpdateSurvivesProcessRestartAndRollbackRetainsOtherUserFiles()throws Exception{
+        RuntimePackageStore store=store("person");File v1=archive(1),v2=archive(2);
+        Path history=temp.getRoot().toPath().resolve("watch-history.json");
+        Files.write(history,"{\"position\":1234}".getBytes(StandardCharsets.UTF_8));
+        try(RuntimePackageStore.Staged staged=store.stage(v1,hash(v1))){staged.activate("source-key","{\"old\":true}");}
+        assertNull("First install has no predecessor",store.previous("source-key"));
+        try(RuntimePackageStore.Staged staged=store.stage(v2,hash(v2))){staged.activate("source-key","{\"old\":false}");}
+        RuntimePackageStore restarted=store("person");
+        assertEquals(hash(v1),restarted.previous("source-key").packageHash());
+        assertEquals("{\"old\":true}",restarted.previous("source-key").metadata());
+        assertTrue(restarted.restoreLastKnownGoodIfCurrent(restarted.current("source-key")));
+        assertEquals(hash(v1),store("person").current("source-key").packageHash());
+        assertEquals("{\"old\":true}",store("person").current("source-key").metadata());
+        assertEquals("{\"position\":1234}",new String(Files.readAllBytes(history),StandardCharsets.UTF_8));
+        assertFalse("A rolled-back package must not repeatedly roll back itself",
+            restarted.restoreLastKnownGoodIfCurrent(restarted.current("source-key")));
+    }
+    @Test public void automaticRecoveryNeverOverwritesUserSettingsAfterUpgrade()throws Exception{
+        RuntimePackageStore store=store("person");File v1=archive(1),v2=archive(2);
+        try(RuntimePackageStore.Staged staged=store.stage(v1,hash(v1))){staged.activate("source-key","{\"enabled\":true}");}
+        try(RuntimePackageStore.Staged staged=store.stage(v2,hash(v2))){staged.activate("source-key","{\"enabled\":true}");}
+        store.updateMetadata("source-key","{\"enabled\":false}");
+        RuntimePackageStore restarted=store("person");
+        assertFalse("An automatic fallback must not erase a later manual settings change",
+            restarted.restoreLastKnownGoodIfCurrent(restarted.current("source-key")));
+        assertEquals(hash(v2),store.current("source-key").packageHash());
+        assertEquals("{\"enabled\":false}",store.current("source-key").metadata());
+    }
+    @Test public void accountIsolationAndUninstallPreventStaleRecovery()throws Exception{
+        File v1=archive(1),v2=archive(2);
+        RuntimePackageStore one=store("first"),two=store("second");
+        try(RuntimePackageStore.Staged staged=one.stage(v1,hash(v1))){staged.activate("shared-id");}
+        try(RuntimePackageStore.Staged staged=one.stage(v2,hash(v2))){staged.activate("shared-id");}
+        try(RuntimePackageStore.Staged staged=two.stage(v1,hash(v1))){staged.activate("shared-id");}
+        assertNull(two.previous("shared-id"));
+        one.uninstall("shared-id");
+        assertNull(one.previous("shared-id"));
+        try(RuntimePackageStore.Staged staged=one.stage(v2,hash(v2))){staged.activate("shared-id");}
+        assertFalse(one.restoreLastKnownGoodIfCurrent(one.current("shared-id")));
+        assertEquals(hash(v1),two.current("shared-id").packageHash());
+    }
     @Test public void uncommittedCandidateIsNotAnInstalledPackage()throws Exception{
         RuntimePackageStore store=store("account");File file=archive(1);
         try(RuntimePackageStore.Staged staged=store.stage(file,hash(file))){assertTrue(staged.dexFile().isFile());assertNull(store.current("package-id"));}
