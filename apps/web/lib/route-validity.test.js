@@ -56,3 +56,10 @@ it('native CloudStream video readiness follows HTTP probes not torrent seeder co
   expect(validity(tor('A.1080p\\n👤 25')).state).toBe(VALIDITY.VALID);
   expect(validity(tor('A.1080p\\n👤 25',{runtimeReady:false})).state).toBe(VALIDITY.UNAVAILABLE);
 });
+
+it('source-less legacy torrent ticket compatibility does not mask real named HTTP streams', () => {
+  expect(validity({state:'READY',runtimeReady:true,seeders:12}).state).toBe(VALIDITY.VALID);
+  expect(validity({state:'READY',runtimeReady:true}).state).toBe(VALIDITY.CHECKING);
+  expect(validity({state:'READY',runtimeReady:false}).state).toBe(VALIDITY.UNAVAILABLE);
+  expect(validity({sourceId:'addon|cs3|cs3_123|id',state:'READY',runtimeReady:true,probed:true}).state).toBe(VALIDITY.VALID);
+});

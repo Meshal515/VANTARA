@@ -17,6 +17,7 @@
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 import { addonName, createServerSheet } from './server-sheet.js';
 import { isChecking, isUnavailable, isValid, validity } from '../lib/route-validity.js';
+import { isTorrentRoute } from '../lib/route-family.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
@@ -1842,7 +1843,7 @@ export function createCinema(deps) {
         // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
         const pendingRoute = sheet.routes.some(routePending);
         const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
-        const torrents = sheet.routes.filter((r) => routeSelectable(r) && r.runtimeReady === true).length;
+        const torrents = sheet.routes.filter((r) => routeSelectable(r) && isTorrentRoute(r)).length;
         let line;
         if (sheet.missing) line = { text: m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا' };
         else if (!sheet.session) line = { text: 'نبحث في المصادر العربية والإضافات…', spin: true };
