@@ -16,7 +16,7 @@ import java.io.File
 
 /** Second instrumentation process on the same APK/data, after explicit am force-stop. */
 class InstalledVideoRestartDeviceTest {
-    @Test fun persistedInstallationsAndPlaybackSurviveProcessDeath() = runBlocking {
+    @Test fun persistedInstallationsAndPlaybackSurviveProcessDeath(): Unit = runBlocking {
         val ins=InstrumentationRegistry.getInstrumentation()
         val context=ins.targetContext
         require(context.packageName.endsWith(".debug") &&

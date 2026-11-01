@@ -71,10 +71,11 @@ data class UserAnimeExtension(
 data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extensions: List<UserAnimeExtension> = emptyList())
 
 class UserAnimeStore(private val file: File) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
-    private val storage = ExtensionStateFile(file)
-    private val packageRevisions = mutableMapOf<String, Long>()
-    private val repositoryRevisions = mutableMapOf<String, Long>()
+    private val shared = open(file)
+    private val json get() = shared.json
+    private val storage get() = shared.storage
+    private val packageRevisions get() = shared.packageRevisions
+    private val repositoryRevisions get() = shared.repositoryRevisions
 
     class InstallToken internal constructor(
         internal val owner: UserAnimeStore,
@@ -85,47 +86,38 @@ class UserAnimeStore(private val file: File) {
         internal val repositoryRevision: Long,
     )
 
-    @Volatile var state: UserAnimeState = storage.read(UserAnimeState()) {
-        json.decodeFromString<UserAnimeState>(it)
-    }
-        private set
+    val state: UserAnimeState get() = shared.state
 
-    @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
+    fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState = synchronized(shared) {
+        shared.refresh()
         val next = change(state)
         storage.write(json.encodeToString(UserAnimeState.serializer(), next))
-        val beforePackages = state.extensions.associateBy { it.pkg }
-        val afterPackages = next.extensions.associateBy { it.pkg }
-        for (pkg in beforePackages.keys + afterPackages.keys) {
-            if (beforePackages[pkg] != afterPackages[pkg]) packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
-        }
-        val beforeRepos = state.repos.associateBy { it.url }
-        val afterRepos = next.repos.associateBy { it.url }
-        for (url in beforeRepos.keys + afterRepos.keys) {
-            if (beforeRepos[url] != afterRepos[url]) repositoryRevisions[url] = (repositoryRevisions[url] ?: 0) + 1
-        }
-        state = next
-        return next
+        shared.accept(next)
+        next
     }
 
     /** Re-adding/refreshing a bookmark is not authorization to replace a pinned publisher identity. */
-    @Synchronized fun registerRepository(repo: UserRepo): UserAnimeState {
+    fun registerRepository(repo: UserRepo): UserAnimeState = synchronized(shared) {
+        shared.refresh()
         val pinned = state.repos.singleOrNull { it.url == repo.url }
         check(pinned == null || pinned.fingerprint.equals(repo.fingerprint, ignoreCase = true)) {
             "ANIYOMI_REPOSITORY_KEY_CHANGED"
         }
-        return update { it.copy(repos = it.repos.filter { old -> old.url != repo.url } + repo) }
+        update { it.copy(repos = it.repos.filter { old -> old.url != repo.url } + repo) }
     }
 
-    @Synchronized fun beginInstall(pkg: String, repoUrl: String): InstallToken {
+    fun beginInstall(pkg: String, repoUrl: String): InstallToken = synchronized(shared) {
+        shared.refresh()
         val repo = state.repos.singleOrNull { it.url == repoUrl }
             ?: error("ANIYOMI_REPOSITORY_CHANGED")
-        return InstallToken(this, pkg, repo, state.extensions.singleOrNull { it.pkg == pkg },
+        InstallToken(this, pkg, repo, state.extensions.singleOrNull { it.pkg == pkg },
             packageRevisions[pkg] ?: 0, repositoryRevisions[repoUrl] ?: 0)
     }
 
     /** No network under the monitor. Lock order: store -> engine; engine never reads this store. */
-    @Synchronized fun commitInstall(token: InstallToken, user: UserAnimeExtension,
-        publish: (UserAnimeState) -> Unit): UserAnimeState {
+    fun commitInstall(token: InstallToken, user: UserAnimeExtension,
+        publish: (UserAnimeState) -> Unit): UserAnimeState = synchronized(shared) {
+        shared.refresh()
         check(token.owner === this && user.pkg == token.pkg && user.repoUrl == token.repository.url) { "ANIYOMI_PACKAGE_CHANGED" }
         check((packageRevisions[token.pkg] ?: 0) == token.packageRevision &&
             state.extensions.singleOrNull { it.pkg == token.pkg } == token.previous) { "ANIYOMI_PACKAGE_CHANGED" }
@@ -133,16 +125,53 @@ class UserAnimeStore(private val file: File) {
             state.repos.singleOrNull { it.url == token.repository.url } == token.repository) { "ANIYOMI_REPOSITORY_CHANGED" }
         val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != user.pkg } + user) }
         publish(next)
-        return next
+        next
     }
 
-    @Synchronized fun uninstall(pkg: String, publish: (UserAnimeState) -> Unit, erase: () -> Unit): UserAnimeState {
+    fun uninstall(pkg: String, publish: (UserAnimeState) -> Unit, erase: () -> Unit): UserAnimeState = synchronized(shared) {
         val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != pkg }) }
         // Also revoke a first install that started while this package had no active record.
         packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
         publish(next)
         erase()
-        return next
+        next
+    }
+
+    /** All bridge generations for one file share state, revisions and the publication lock. */
+    private class Shared(file: File) {
+        val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+        val storage = ExtensionStateFile(file)
+        val packageRevisions = mutableMapOf<String, Long>()
+        val repositoryRevisions = mutableMapOf<String, Long>()
+        @Volatile var state = storage.read(UserAnimeState()) { json.decodeFromString<UserAnimeState>(it) }
+
+        fun refresh() = accept(storage.read(state) { json.decodeFromString<UserAnimeState>(it) })
+        fun accept(next: UserAnimeState) {
+            val beforePackages = state.extensions.associateBy { it.pkg }
+            val afterPackages = next.extensions.associateBy { it.pkg }
+            for (pkg in beforePackages.keys + afterPackages.keys)
+                if (beforePackages[pkg] != afterPackages[pkg]) packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+            val beforeRepos = state.repos.associateBy { it.url }
+            val afterRepos = next.repos.associateBy { it.url }
+            for (url in beforeRepos.keys + afterRepos.keys)
+                if (beforeRepos[url] != afterRepos[url]) repositoryRevisions[url] = (repositoryRevisions[url] ?: 0) + 1
+            state = next
+        }
+    }
+    companion object {
+        private val files = mutableMapOf<String, java.lang.ref.WeakReference<Shared>>()
+        private fun open(file: File): Shared {
+            val canonical = file.canonicalFile
+            val shared = synchronized(files) {
+                files.entries.removeAll { it.value.get() == null }
+                files[canonical.path]?.get() ?: Shared(canonical).also {
+                    files[canonical.path] = java.lang.ref.WeakReference(it)
+                }
+            }
+            // Do not hold the registry lock while acquiring a file's publication lock.
+            synchronized(shared) { shared.refresh() }
+            return shared
+        }
     }
 }
 

@@ -27,6 +27,23 @@ class AnimeRepositoryLifecycleTest {
         s.update { UserAnimeState(repos = listOf(repo), extensions = listOf(extension())) }
     }
 
+    @Test fun `a recreated bridge cannot overwrite a completed install with its older snapshot`() = temporary { file ->
+        val first = store(file)
+        val recreated = UserAnimeStore(file)
+        val token = first.beginInstall(extension().pkg,repo.url)
+        first.commitInstall(token,extension('c')) {}
+        recreated.registerRepository(repo.copy(name="Refreshed"))
+        assertEquals(extension('c'),UserAnimeStore(file).state.extensions.single())
+    }
+    @Test fun `uninstall from a recreated bridge revokes an older in flight install token`() = temporary { file ->
+        val first = store(file)
+        val token = first.beginInstall(extension().pkg,repo.url)
+        val recreated = UserAnimeStore(file)
+        recreated.uninstall(extension().pkg,{},{})
+        assertThrows(IllegalStateException::class.java) { first.commitInstall(token,extension('c')) {} }
+        assertTrue(UserAnimeStore(file).state.extensions.isEmpty())
+    }
+
     @Test fun `readding a repository cannot silently replace its pinned signing key`() = temporary { file ->
         val s = store(file)
         val before = file.readBytes()
