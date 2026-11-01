@@ -181,6 +181,7 @@ jobs:
           pnpm --filter @vantara/domain build
           pnpm test:web
           pnpm test:safety
+          node --test tools/android-debug/webview-lifecycle.test.mjs
           python3 -m unittest discover -s tools/android-debug -p 'test_*.py' -v
 
       - name: Download the actual previous signed Debug APK and manifest
