@@ -63,7 +63,17 @@ public final class RuntimePackageStore {
         }finally{if(!ok)removeCandidate(candidate);}
     }
     public Installed current(String packageId)throws IOException {
-        id(packageId);Path pointer=records.resolve(packageId+".vri");
+        return readRecord(packageId,records.resolve(packageId+".vri"));
+    }
+    /** Last published predecessor, per account; immutable objects are retained across process restarts. */
+    public Installed previous(String packageId)throws IOException {
+        return readRecord(packageId,records.resolve(packageId+".vri.previous"));
+    }
+    private Installed promoted(String packageId)throws IOException {
+        return readRecord(packageId,records.resolve(packageId+".vri.published"));
+    }
+    private Installed readRecord(String packageId,Path pointer)throws IOException {
+        id(packageId);
         if(!Files.exists(pointer,LinkOption.NOFOLLOW_LINKS))return null;
         if(!Files.isRegularFile(pointer,LinkOption.NOFOLLOW_LINKS)||Files.size(pointer)>65536)throw new IOException("PACKAGE_REGISTRY_CORRUPT");
         try(DataInputStream in=new DataInputStream(Files.newInputStream(pointer))){
@@ -101,13 +111,16 @@ public final class RuntimePackageStore {
         }
     }
     private void pointer(Installed value)throws IOException {
+        pointerAt(records.resolve(value.packageId()+".vri"),value);
+    }
+    private void pointerAt(Path target,Installed value)throws IOException {
         if(value.metadata()==null||value.metadata().length()>16000)throw new IOException("PACKAGE_METADATA_LIMIT");
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();
         try(DataOutputStream out=new DataOutputStream(bytes)){
             out.writeInt(MAGIC);out.writeUTF(value.packageId());out.writeUTF(value.packageHash());out.writeUTF(value.dexHash());out.writeUTF(value.entry());out.writeInt(value.version());out.writeUTF(value.metadata());
         }
         Path pending=Files.createTempFile(records,"pending-",".pending");
-        try{write(pending,bytes.toByteArray());Files.move(pending,records.resolve(value.packageId()+".vri"),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
+        try{write(pending,bytes.toByteArray());Files.move(pending,target,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}
         finally{Files.deleteIfExists(pending);}
     }
     /**
@@ -147,6 +160,19 @@ public final class RuntimePackageStore {
             return true;
         });
     }
+    /**
+     * Automatic fallback is permitted ONLY when the record exactly matches a
+     * recorded promotion. A later user settings change invalidates that CAS,
+     * so a background health monitor cannot silently overwrite preferences.
+     */
+    public boolean restoreLastKnownGoodIfCurrent(Installed expectedActive)throws IOException {
+        if(expectedActive==null)throw new IOException("PACKAGE_ROLLBACK_INVALID");
+        Installed activeAtPromotion=promoted(expectedActive.packageId());
+        if(activeAtPromotion==null||!activeAtPromotion.equals(expectedActive))return false;
+        Installed lastGood=previous(expectedActive.packageId());
+        if(lastGood==null||lastGood.packageHash().equals(expectedActive.packageHash()))return false;
+        return restoreIfCurrent(expectedActive,lastGood);
+    }
     /** Manual new-family settings only; binaries, cookies and other accounts are not rewritten. */
     public Installed updateMetadata(String packageId,String metadata)throws IOException {
         id(packageId);return locked(()->{
@@ -156,7 +182,12 @@ public final class RuntimePackageStore {
     }
     /** Explicit uninstall removes this account's registration, retaining immutable objects for recovery. */
     public void uninstall(String packageId)throws IOException {
-        id(packageId);locked(()->{Files.deleteIfExists(records.resolve(packageId+".vri"));return null;});
+        id(packageId);locked(()->{
+            Files.deleteIfExists(records.resolve(packageId+".vri"));
+            Files.deleteIfExists(records.resolve(packageId+".vri.previous"));
+            Files.deleteIfExists(records.resolve(packageId+".vri.published"));
+            return null;
+        });
     }
     public final class Staged implements AutoCloseable {
         private final Path path;private final Cs3Package candidate;private boolean closed,moved;
@@ -180,7 +211,15 @@ public final class RuntimePackageStore {
                     if(Files.exists(object,LinkOption.NOFOLLOW_LINKS)){
                         if(Files.isSymbolicLink(object)||!Cs3Package.read(object.resolve("original.cs3").toFile(),candidate.packageHash()).dexHash().equals(candidate.dexHash())||!dexHash(object.resolve("classes.dex")).equals(candidate.dexHash()))throw new IOException("PACKAGE_OBJECT_CORRUPT");
                     }else{Files.move(path,object,StandardCopyOption.ATOMIC_MOVE);moved=true;}
-                    pointer(new Installed(packageId,candidate.packageHash(),candidate.dexHash(),candidate.entry(),candidate.version(),object.resolve("classes.dex").toFile(),metadata));
+                    Installed next=new Installed(packageId,candidate.packageHash(),candidate.dexHash(),candidate.entry(),candidate.version(),object.resolve("classes.dex").toFile(),metadata);
+                    if(old!=null&&!old.packageHash().equals(next.packageHash())){
+                        // Write both crash-safe snapshots BEFORE switching the live pointer.
+                        // If the process dies before the final pointer, the old version
+                        // remains active; a later recovery CAS refuses stale snapshots.
+                        pointerAt(records.resolve(packageId+".vri.previous"),old);
+                        pointerAt(records.resolve(packageId+".vri.published"),next);
+                    }
+                    pointer(next);
                     closed=true;if(!moved)removeCandidate(path);
                     return current(packageId);
                 }
