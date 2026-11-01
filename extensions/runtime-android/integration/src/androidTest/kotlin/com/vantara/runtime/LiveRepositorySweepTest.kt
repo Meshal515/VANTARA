@@ -114,7 +114,11 @@ class LiveRepositorySweepTest {
             for (row in selected) {
                 val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.content ?: "?"
                 val types=(row["tvTypes"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
-                val content=if (types.any { it.equals("Anime",true) || it.equals("AnimeMovie",true) || it.equals("OVA",true) }) "anime" else "cinema"
+                // The test is explicitly testing cinema or anime; a mixed-type publisher can
+                // support both. Never silently categorize Mycima/Egydead as anime
+                // during a cinema journey merely because Anime is in tvTypes.
+                val content=args.getString("vantaraContent")?.takeIf { it in setOf("anime","cinema") }
+                    ?: if (types.any { it.equals("Anime",true) || it.equals("AnimeMovie",true) || it.equals("OVA",true) }) "anime" else "cinema"
                 val report=buildJsonObject {
                     put("plugin",name);put("content",content)
                     val installed=step(this,"install",90_000) { host.install(repo,row.getValue("pkg").jsonPrimitive.content,content) }

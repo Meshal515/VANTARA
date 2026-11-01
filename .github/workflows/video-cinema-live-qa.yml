@@ -29,6 +29,7 @@ jobs:
       VANTARA_LIVE_ONLY: 'Faselhd,Egydead,Akwam,Mycima,Cimalight'
       VANTARA_LIVE_REQUIRED: 'Faselhd,Egydead,Akwam,Mycima,Cimalight'
       VANTARA_LIVE_LIMIT: '5'
+      VANTARA_LIVE_CONTENT: 'cinema'
       VANTARA_LIVE_HEALTHY: ''
     steps:
       - uses: actions/checkout@v4

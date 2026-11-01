@@ -45,3 +45,16 @@ test('strict health check identifies requested provider case-insensitively',()=>
  const r=run([{...success,plugin:'AnimeRift'}],['--strict','--require-plugins=animerift','--require-healthy=ANIMERIFT']);
  assert.equal(r.status,0,r.stdout+r.stderr);
 });
+
+test('cinema provider with empty catalogue is reported as an actual failure, not a green catalogue',()=>{
+ const row={plugin:'Mycima',content:'cinema',install:pass,sources:[{catalogue:pass,catalogueItems:0,playable:0}]};
+ const r=run([row],['--strict','--require-plugins=Mycima']);assert.notEqual(r.status,0);
+ assert.match(r.stdout,/EMPTY_CATALOGUE/);
+ assert.match(r.stdout,/Mycima \| cinema/);
+});
+test('video byte-probe failures are preserved beside publisher results',()=>{
+ const row={plugin:'Akwam',content:'cinema',install:pass,sources:[{catalogue:pass,details:pass,episodes:pass,videoLinks:pass,links:2,playable:0,
+  playback:[{verdict:'ERR UnknownServiceException'}]}]};
+ const r=run([row],['--strict','--require-plugins=Akwam']);assert.notEqual(r.status,0);
+ assert.match(r.stdout,/UnknownServiceException/);
+});

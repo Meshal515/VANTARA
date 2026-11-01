@@ -9,6 +9,7 @@ args=(
   -Pandroid.testInstrumentationRunnerArguments.vantaraLiveSweep=true
   -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=${VANTARA_LIVE_ONLY:-Anime4up,AnimeRift,Animewitcher,Witanime}
   -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=${VANTARA_LIVE_LIMIT:-4}
+  ${VANTARA_LIVE_CONTENT:+-Pandroid.testInstrumentationRunnerArguments.vantaraContent=${VANTARA_LIVE_CONTENT}}
 )
 bash android/gradlew -p android :app:connectedDebugAndroidTest "${args[@]}" --no-daemon --stacktrace
 status=$?

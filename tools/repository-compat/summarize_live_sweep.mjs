@@ -11,7 +11,7 @@ const present = new Set(rows.map(row => String(row.plugin ?? '').toLowerCase()))
 const absent = required.filter(name => !present.has(name.toLowerCase()));
 const steps = ['install', 'catalogue', 'details', 'episodes', 'videoLinks'];
 const cell = (step) => !step ? '—' : step.result === 'PASS' ? '✅' : `❌ ${String(step.reason ?? '').slice(0, 60)}`;
-const out = ['## Live repository sweep', '', `| Plugin | ${steps.join(' | ')} | links | media-byte links | missing extractors |`, `|---|${steps.map(() => '---').join('|')}|---|---|---|`];
+const out = ['## Live repository sweep', '', `| Plugin | Content | ${steps.join(' | ')} | links | media-byte links | media probe verdicts | missing extractors |`, `|---|---|${steps.map(() => '---').join('|')}|---|---|---|---|`];
 const missing = new Map();
 const healthyPlugins = new Set();
 let sourceCount = 0;
@@ -22,6 +22,9 @@ for (const row of rows) {
   const sources = row.sources?.length ? row.sources : [{}];
   for (const source of sources) {
     const cells = steps.map((name) => cell(name === 'install' ? row.install : source[name]));
+    if (source.catalogue?.result === 'PASS' && source.catalogueItems === 0) {
+      cells[1] = '❌ EMPTY_CATALOGUE';
+    }
     for (const host of source.missingExtractors ?? []) missing.set(host, (missing.get(host) ?? 0) + 1);
     sourceCount += 1;
     if ((source.links ?? 0) > 0) extracted += 1;
@@ -31,7 +34,7 @@ for (const row of rows) {
       fullJourneys += 1;
       healthyPlugins.add(String(row.plugin ?? '').toLowerCase());
     }
-    out.push(`| ${row.plugin} | ${cells.join(' | ')} | ${source.links ?? 0} | ${source.playable ?? 0} | ${(source.missingExtractors ?? []).join(', ')} |`);
+    out.push(`| ${row.plugin} | ${row.content ?? '?'} | ${cells.join(' | ')} | ${source.links ?? 0} | ${source.playable ?? 0} | ${(source.playback ?? []).map(item => item.verdict).join('; ').slice(0,140) || '—'} | ${(source.missingExtractors ?? []).join(', ')} |`);
   }
 }
 out.push('', `**Source journeys: ${sourceCount}; with extracted links: ${extracted}; with reachable media bytes: ${mediaReachable}; confirmed five-step media journeys: ${fullJourneys}.**`, '', '**Media-byte reachability does NOT certify playback in VANTARA.**', '');
