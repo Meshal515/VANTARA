@@ -27,6 +27,24 @@ class AnimeRepositoryLifecycleTest {
         s.update { UserAnimeState(repos = listOf(repo), extensions = listOf(extension())) }
     }
 
+    @Test fun `readding a repository cannot silently replace its pinned signing key`() = temporary { file ->
+        val s = store(file)
+        val before = file.readBytes()
+        val changed = repo.copy(fingerprint = "c".repeat(64))
+        val error = assertThrows(IllegalStateException::class.java) { s.registerRepository(changed) }
+        assertEquals("ANIYOMI_REPOSITORY_KEY_CHANGED", error.message)
+        assertArrayEquals(before, file.readBytes())
+        assertEquals(repo, UserAnimeStore(file).state.repos.single())
+        assertEquals(extension(), s.state.extensions.single())
+    }
+    @Test fun `same repository signing key permits metadata refresh without changing installations`() = temporary { file ->
+        val s = store(file)
+        val refreshed = repo.copy(name = "Publisher renamed", iconUrl = "https://repo.example/icon.png")
+        s.registerRepository(refreshed)
+        assertEquals(refreshed, UserAnimeStore(file).state.repos.single())
+        assertEquals(extension(), s.state.extensions.single())
+    }
+
     @Test fun `corrupt startup keeps original bytes and does not publish empty sources`() = temporary { file ->
         val corrupt = "{broken-installed-state".toByteArray()
         file.writeBytes(corrupt)

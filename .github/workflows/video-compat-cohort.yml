@@ -63,7 +63,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
       - name: Prove the live media report rejects false-green/empty source journeys
-        run: node --test tools/repository-compat/summarize_live_sweep.test.mjs
+        run: node --test tools/repository-compat/summarize_live_sweep.test.mjs tools/repository-compat/live-video-args.test.mjs
       - name: Copy current web shell and compile actual runtime-enabled Debug APK
         run: |
           set -euo pipefail

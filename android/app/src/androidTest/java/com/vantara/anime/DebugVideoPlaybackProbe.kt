@@ -49,14 +49,28 @@ object DebugVideoPlaybackProbe {
             val frames = read { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
             val droppedBefore = read { player.videoDecoderCounters?.droppedBufferCount ?: 0 }
             val began = SystemClock.elapsedRealtime()
+            var minimumBuffer = Long.MAX_VALUE
+            var bufferingSamples = 0
             while (SystemClock.elapsedRealtime() - began < 30_000) {
-                assertNull(read { player.playerError?.errorCodeName }); Thread.sleep(200)
+                assertNull(read { player.playerError?.errorCodeName })
+                read { minimumBuffer = minOf(minimumBuffer,player.totalBufferedDuration)
+                    if(player.playbackState == androidx.media3.common.Player.STATE_BUFFERING) bufferingSamples++ }
+                Thread.sleep(200)
             }
             val advanced = read { player.currentPosition } - initial
             val rendered = read { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 } - frames
-            assertTrue("Clock did not advance for 25 seconds", advanced >= 25_000)
-            assertTrue("Insufficient decoded frames", rendered >= 200)
             val dropped = read { player.videoDecoderCounters?.droppedBufferCount ?: 0 } - droppedBefore
+            val dimensions = read { "${player.videoFormat?.width}x${player.videoFormat?.height}" }
+            val memory = android.os.Debug.MemoryInfo().apply { android.os.Debug.getMemoryInfo(this) }
+            android.util.Log.i("VantaraRuntime","NATIVE_VIDEO_METRICS source=${work.sourceId};advanced=$advanced;rendered=$rendered;dropped=$dropped;dimensions=$dimensions;minimumBufferMs=$minimumBuffer;bufferingSamples=$bufferingSamples;pssKb=${memory.totalPss}")
+            val diagnostic = PlayerActivity::class.java.getDeclaredField("diag").apply { isAccessible=true }.get(current) as com.vantara.anime.player.PlaybackDiagnostics
+            android.util.Log.i("VantaraRuntime",read { diagnostic.report(null,com.vantara.anime.player.PlaybackDiagnostics.PlayerFacts(
+                player.playbackState,player.currentPosition,player.totalBufferedDuration,player.duration,
+                player.videoFormat?.containerMimeType,dimensions,null,
+                player.currentTracks.groups.count { it.type==C.TRACK_TYPE_TEXT },
+                player.currentTracks.groups.count { it.type==C.TRACK_TYPE_AUDIO })) })
+            assertTrue("Clock advanced only $advanced ms in 30 seconds; buffered=$minimumBuffer;bufferingSamples=$bufferingSamples", advanced >= 25_000)
+            assertTrue("Insufficient decoded frames: $rendered", rendered >= 200)
             assertTrue("Excessive dropped frames: $dropped/$rendered", dropped * 10 <= rendered + dropped)
             val forward = read { player.currentPosition + 30_000 }
             read { player.seekTo(forward) }

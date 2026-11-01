@@ -321,15 +321,18 @@ class AnimeEnginePlugin : Plugin() {
     /** سبب عربي ورمز ثابت ومالك العطل (VANTARA، الإضافة، الموقع، غير مدعوم)؛ لا رمز خام مثل PROVIDER_FAILED. */
     private fun failure(call: PluginCall, t: Throwable) {
         val localCode = generateSequence(t) { it.cause }.take(6).mapNotNull { it.message }.firstOrNull {
-            it.startsWith("EXTENSION_STATE_") || it in setOf("ANIYOMI_PACKAGE_CHANGED", "ANIYOMI_REPOSITORY_CHANGED")
+            it.startsWith("EXTENSION_STATE_") || it in setOf("ANIYOMI_PACKAGE_CHANGED", "ANIYOMI_REPOSITORY_CHANGED", "ANIYOMI_REPOSITORY_KEY_CHANGED", "ANIYOMI_APK_VERSION_MISMATCH", "ANIYOMI_DOWNGRADE_REJECTED")
         }
         if (localCode != null) {
             val message = when (localCode) {
+                "ANIYOMI_APK_VERSION_MISMATCH" -> "إصدار APK لا يطابق فهرس المستودع؛ لم يُفعّل التحديث وبقيت الإضافة المثبتة"
+                "ANIYOMI_DOWNGRADE_REJECTED" -> "المستودع يعرض إصدارًا أقدم؛ بقي الإصدار المثبت دون تغيير"
+                "ANIYOMI_REPOSITORY_KEY_CHANGED" -> "المستودع يعلن مفتاح توقيع مختلفًا؛ بقي المفتاح المثبت والإضافات دون تغيير. تحقق من الناشر قبل إعادة إضافته"
                 "ANIYOMI_PACKAGE_CHANGED" -> "تغيّرت الإضافة أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
                 "ANIYOMI_REPOSITORY_CHANGED" -> "تغيّر المستودع أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
                 else -> "تعذّر قراءة أو حفظ سجل الإضافات؛ بقيت البيانات المحفوظة دون مسح"
             }
-            return call.reject(message, localCode, t as? Exception, JSObject().put("owner", "vantara"))
+            return call.reject(message, localCode, t as? Exception, JSObject().put("owner", if (localCode in setOf("ANIYOMI_REPOSITORY_KEY_CHANGED", "ANIYOMI_APK_VERSION_MISMATCH", "ANIYOMI_DOWNGRADE_REJECTED")) "extension" else "vantara"))
         }
         val verdict = com.vantara.plugins.ExtensionFailure.classify(t)
         call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
@@ -361,7 +364,7 @@ class AnimeEnginePlugin : Plugin() {
                 val (meta, list) = repoClient.read(base)
                 require(list.any { it.anime }) { "هذا مستودع مانجا؛ أضفه من قسم المانجا" }
                 val repo = com.vantara.plugins.UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
-                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
+                userStore.registerRepository(repo)
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", list.count { it.anime }))
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -399,7 +402,7 @@ class AnimeEnginePlugin : Plugin() {
                             .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
                             .put("builtin", engine.shipsPackage(ext.pkg))
                             .put("installed", mine?.version).put("content", mine?.content)
-                            .put("update", mine != null && mine.version != ext.version)
+                            .put("update", mine != null && if(mine.versionCode>0 && ext.versionCode>0) ext.versionCode>mine.versionCode else mine.version != ext.version)
                             .put("sources", JSArray(ext.sources.map { it.name }))
                             .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256) }
                                 ?: engine.sources().firstOrNull { it.extension?.pkg == ext.pkg }?.extension?.let {
@@ -429,13 +432,15 @@ class AnimeEnginePlugin : Plugin() {
                 require(!engine.shipsPackage(pkg)) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
+                token.previous?.let { old -> com.vantara.anime.loader.AnimeVersionPolicy.update(
+                    old.version,old.versionCode,ext.version,ext.versionCode) }
                 val bytes = repoClient.downloadSigned(ext.apkUrl, repo.fingerprint)
                 // The signed APK/factory, not a possibly incomplete index, defines
                 // the complete set of available sources and their actual identities.
                 val inspector = com.vantara.anime.loader.AnimeExtensionLoader(context, http)
                 val actual = inspector.inspect(
                     com.vantara.anime.registry.ExtensionRef(pkg, ext.apkUrl,
-                        com.vantara.plugins.sha256Hex(bytes), version = ext.version), bytes)
+                        com.vantara.plugins.sha256Hex(bytes), version = ext.version), bytes, expectedVersionCode = ext.versionCode)
                 val declared = ext.sources.associateBy { it.id }
                 require(ext.sources.all { item -> actual.any { it.id.toString() == item.id } }) {
                     "SOURCE_MISSING_IN_APK: المستودع يعلن مصادر غير موجودة داخل APK"
@@ -487,7 +492,7 @@ class AnimeEnginePlugin : Plugin() {
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
                     sourceName = primary.name, baseUrl = primary.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
                     stableId = previous?.id ?: "user-$pkg", sourceLang = primary.lang,
-                    primarySourceId = primary.id, additionalSources = additional,
+                    primarySourceId = primary.id, additionalSources = additional, versionCode = ext.versionCode,
                 )
                 val entries = user.entries()
                 val ids = entries.map { it.id }

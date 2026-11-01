@@ -68,7 +68,7 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
     }
 
     /** Enumerates every catalogue source from an actual APK/factory before committing. */
-    fun inspect(ref: ExtensionRef, bytes: ByteArray): List<AnimeCatalogueSource> {
+    fun inspect(ref: ExtensionRef, bytes: ByteArray, expectedVersionCode: Long? = null): List<AnimeCatalogueSource> {
         val actual = sha256(bytes)
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
@@ -98,6 +98,13 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         if (info.packageName != ref.pkg) throw LoadException("identity", "الحزمة ${info.packageName} ليست ${ref.pkg}")
         val lib = info.versionName?.substringBefore('.')?.toIntOrNull()
         if (lib == null || lib !in LIB_MIN..LIB_MAX) throw LoadException("lib", "مكتبة إضافات غير مدعومة: ${info.versionName}")
+        // Admission validates the publisher's display version against signed APK metadata.
+        // Legacy cache restoration omits this new check so a historical label cannot disable working code.
+        if(expectedVersionCode != null) {
+            @Suppress("DEPRECATION")
+            val code = if(android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+            AnimeVersionPolicy.archive(ref.version,expectedVersionCode,info.versionName,code)
+        }
         val meta = info.applicationInfo?.metaData ?: throw LoadException("parse", "لا بيانات وصفية")
         val names = meta.getString(META_CLASS) ?: meta.getString(META_FACTORY)
             ?: throw LoadException("parse", "لا $META_CLASS")

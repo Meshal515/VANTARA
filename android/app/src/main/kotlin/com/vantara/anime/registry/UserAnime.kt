@@ -37,6 +37,8 @@ data class UserAnimeExtension(
     val sourceLang: String = "ar",
     val primarySourceId: String? = null,
     val additionalSources: List<InstalledAnimeSource> = emptyList(),
+    /** Zero means an old saved record/repository did not declare an Android version code. */
+    val versionCode: Long = 0,
 ) {
     val id: String get() = stableId ?: ("user-" + pkg.substringAfterLast('.').ifEmpty { pkg })
 
@@ -103,6 +105,15 @@ class UserAnimeStore(private val file: File) {
         }
         state = next
         return next
+    }
+
+    /** Re-adding/refreshing a bookmark is not authorization to replace a pinned publisher identity. */
+    @Synchronized fun registerRepository(repo: UserRepo): UserAnimeState {
+        val pinned = state.repos.singleOrNull { it.url == repo.url }
+        check(pinned == null || pinned.fingerprint.equals(repo.fingerprint, ignoreCase = true)) {
+            "ANIYOMI_REPOSITORY_KEY_CHANGED"
+        }
+        return update { it.copy(repos = it.repos.filter { old -> old.url != repo.url } + repo) }
     }
 
     @Synchronized fun beginInstall(pkg: String, repoUrl: String): InstallToken {

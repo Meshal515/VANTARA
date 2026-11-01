@@ -1,8 +1,8 @@
 {
   "baseline": "7a266dac8492471948931d3a4e1f600836b44b06",
   "scope": "local JVM unit tests, not device or live source acceptance",
-  "suites": 118,
-  "tests": 590,
+  "suites": 119,
+  "tests": 596,
   "failures": 0,
   "errors": 0,
   "skipped": 0
