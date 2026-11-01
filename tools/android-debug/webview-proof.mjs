@@ -5,7 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
-import { analyzePassiveSessions } from './webview-lifecycle.mjs';
+import { observeWebViewTargets } from './webview-lifecycle.mjs';
 
 const phase = process.argv[2];
 if (!['baseline', 'candidate', 'restart'].includes(phase)) throw new Error('Expected baseline/candidate/restart phase');
@@ -68,7 +68,8 @@ mkdirSync(out, { recursive: true });
 await command('Runtime.enable');
 await command('Page.enable');
 const proof = { phase, package: pkg, pid, passed: false, authenticationTest: false, sourcePlaybackTest: false };
-function assertNoAutomaticVerification(iteration) {
+let observedSecondaryTargets = new Map();
+async function assertNoAutomaticVerification(iteration) {
   const activities = adb('shell', 'dumpsys', 'activity', 'activities');
   const resumed = activities.split('\n').filter(line => /mResumedActivity|topResumedActivity/.test(line));
   if (!resumed.some(line => line.includes(`${pkg}/com.vantara.app.MainActivity`))) {
@@ -82,17 +83,14 @@ function assertNoAutomaticVerification(iteration) {
     writeFileSync(`${out}/memory-cycle-${iteration}.txt`, memory);
     const webviews = memory.match(/WebViews:\s*(\d+)/);
     if (!webviews || Number(webviews[1]) < 1) throw new Error('APK shell WebView is missing from dumpsys');
-    // Android's meminfo counts Java WebView objects even after destroy(), until
-    // GC. Real source cover traffic may also start a legitimate passive browser
-    // fetch. Neither is an interactive VerificationActivity or a leak by itself.
-    // Verify the native START/END lifecycle and reject stale in-flight sessions
-    // instead of demanding WebViews === 1 while the app is using its network.
-    const uptimeMs = Number(adb('shell', 'cat', '/proc/uptime').split(/\s+/)[0]) * 1000;
-    if (!Number.isFinite(uptimeMs)) throw new Error('Cannot sample Android uptime for passive WebView lifecycle');
-    const passiveLog = adb('logcat', '-d', '-v', 'threadtime', '-s', 'VantaraPassiveWebView:I', '*:S');
-    const passive = analyzePassiveSessions(passiveLog, pid, uptimeMs);
-    proof.passiveWebViewSamples ??= [];
-    proof.passiveWebViewSamples.push({ iteration, javaWebViewObjects: Number(webviews[1]), ...passive });
+    // dumpsys reports Java objects awaiting GC, not the count of open windows.
+    // Monitor live Chromium targets to find genuinely stuck temporary views.
+    // An actual verification Activity/process is still forbidden above.
+    const targets = await (await fetch('http://127.0.0.1:9223/json')).json();
+    const observed = observeWebViewTargets(targets, observedSecondaryTargets, Date.now());
+    observedSecondaryTargets = observed.seen;
+    proof.browserSamples ??= [];
+    proof.browserSamples.push({ iteration, javaWebViewObjects: Number(webviews[1]), ...observed.sample });
     proof.maxObservedWebViews = Math.max(proof.maxObservedWebViews || 0, Number(webviews[1]));
   }
 }
@@ -197,7 +195,7 @@ try {
       return true;
     })()`);
     await waitFor("document.querySelector('.v35 #home.active')", 'shipped Home renderer');
-    assertNoAutomaticVerification(0);
+    await assertNoAutomaticVerification(0);
     for (let iteration = 1; iteration <= 30; iteration++) {
       await evaluate(`(()=>{document.querySelector('[data-act="openDrawer"]').click();const b=[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات');if(!b)throw new Error('Missing Addons navigation');b.click();return true})()`);
       await waitFor("document.querySelector('#utility.active .v7-addon')", `Addons renderer cycle ${iteration}`);
@@ -208,9 +206,14 @@ try {
       await waitFor("document.querySelector('#home.active') && !document.querySelector('#utility.active')", `Home return cycle ${iteration}`);
       await delay(150);
       if (adb('shell', 'pidof', pkg) !== pid) throw new Error(`APK process restarted during cycle ${iteration}`);
-      assertNoAutomaticVerification(iteration);
+      await assertNoAutomaticVerification(iteration);
       proof.cycles = iteration;
     }
+    // Recheck after temporary network WebViews have had their bounded fetch
+    // deadline. A stuck live target fails; a destroyed Java object awaiting
+    // garbage collection does not.
+    await delay(25000);
+    await assertNoAutomaticVerification(40);
     proof.navigationFixture = 'shipped Home/Addons shell; local anonymous sync; real native bridges';
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
