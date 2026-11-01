@@ -42,7 +42,7 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
-      - name: Real server sheet tests: late CloudStream sources + torrent coexistence + source menu
+      - name: 'Real server sheet tests: late CloudStream sources + torrent coexistence + source menu'
         run: pnpm exec vitest run apps/web/v35/server-sheet.test.js apps/web/v35/server-sheet-add-source.test.js apps/web/addons/native-runtime.test.js
       - name: Prepare current web UI and runtime-enabled Debug
         run: |
