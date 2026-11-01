@@ -28,3 +28,20 @@ test('strict proof fails a missing named plugin rather than ignoring it',()=>{
 test('strict proof rejects empty output as no evidence',()=>{
  const r=run([]);assert.notEqual(r.status,0,r.stdout+r.stderr);
 });
+
+test('explicit AnimeRift health gate cannot be green just because Anime4up plays',()=>{
+ const r=run([success,{plugin:'AnimeRift',install:pass,sources:[{catalogue:{result:'FAIL',reason:'VERIFICATION_REQUIRED'},playable:0}]}],
+   ['--strict','--require-plugins=Animewitcher,AnimeRift','--require-healthy=AnimeRift']);
+ assert.notEqual(r.status,0,r.stdout+r.stderr);
+ assert.match(r.stderr,/AnimeRift/i);
+});
+test('explicit AnimeRift health gate succeeds only on a full actual media journey',()=>{
+ const r=run([success,{...success,plugin:'AnimeRift'}],
+   ['--strict','--require-plugins=Animewitcher,AnimeRift','--require-healthy=AnimeRift']);
+ assert.equal(r.status,0,r.stdout+r.stderr);
+ assert.match(r.stdout,/AnimeRift/);
+});
+test('strict health check identifies requested provider case-insensitively',()=>{
+ const r=run([{...success,plugin:'AnimeRift'}],['--strict','--require-plugins=animerift','--require-healthy=ANIMERIFT']);
+ assert.equal(r.status,0,r.stdout+r.stderr);
+});
