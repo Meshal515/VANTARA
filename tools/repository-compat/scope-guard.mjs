@@ -47,6 +47,9 @@ seams.add('extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/
 seams.add('extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/ObservedAbiTest.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/plugins/OptionalMangaRepositoriesDeviceTest.kt');
 seams.add('.github/workflows/manga-repository-management-qa.yml');
+// Nov 1: emulator-only decoder performance tolerance in the real playback integration test.
+// The unchanged real-device frame budget and mandatory playback/seek assertions remain enforced.
+seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/RuntimeAppIntegrationTest.kt');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');
