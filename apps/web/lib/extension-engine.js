@@ -13,7 +13,7 @@
  */
 
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
-import { assertVisible, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
+import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
 /**
  * المحرك الأصلي يحمّل عند الإقلاع حزم المصادر الظاهرة لهذا الحساب فقط، فلا يُنزّل حساب جديد
@@ -218,14 +218,18 @@ export function repositories() {
  * (lib/source-entitlement.js)، والمعرّف هو نفسه دائمًا، فلا تتكرر المصادر ولا تنقطع المكتبة.
  */
 /**
- * حزمة كانت مدمجة، بعد فصلها، تُثبَّت كأي إضافة فعلًا: تُضاف لحسابك ثم تُنزَّل موثّقة وتُحمَّل الآن
- * (يظهر شعارها ويُعرف فشلها فورًا). فشل التحميل يرجع الاختيار كما كان ويُعرض سببه.
+ * حزمة كانت مدمجة، بعد فصلها، تُنزَّل موثّقة وتُحمَّل أولًا ثم تُضاف لحسابك بمعرّفها القديم.
+ * فشل الاستعادة لا يغيّر اختيار الحساب السابق ولا يخفي مصادره أثناء انقطاع الشبكة.
  */
 async function installFormer(plugin, pkg) {
-	await choosePackage(pkg, true);
+	const context = choiceContext();
 	const id = ((await plugin.sources()).sources ?? []).map((s) => s.id).find((sid) => packageOf(sid) === pkg && !String(sid).includes('#'));
-	try { if (id) await plugin.prepare({ sourceId: id }); }
-	catch (error) { await choosePackage(pkg, false).catch(() => {}); throw error; }
+	assertChoiceContext(context);
+	if (!id) throw Object.assign(new Error('لم يعلن المحرك مصدرًا لهذه الإضافة؛ لم تُثبّت.'), { code: 'SOURCE_NOT_DECLARED' });
+	const prepared = await plugin.prepare({ sourceId: id });
+	assertChoiceContext(context);
+	if (prepared?.ok !== true) throw Object.assign(new Error('لم يؤكد المحرك تجهيز الإضافة؛ لم يتغير اختيار حسابك.'), { code: 'SOURCE_PREPARE_UNCONFIRMED' });
+	await choosePackage(pkg, true, context);
 }
 
 /** حذف حقيقي: من حسابك ومن الجهاز (نسختها المحفوظة)، فإعادة التثبيت تنزّلها من Keiyoushi. المكتبة والتقدم باقيان. */

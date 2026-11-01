@@ -47,7 +47,7 @@ import {
 } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
-import { decide, readLocalChoices, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
+import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
@@ -82,17 +82,22 @@ const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugi
 function refreshSourceEntitlement() {
   const standalone = !syncConfigured();
   const userId = sync.user?.userId;
+  setChoiceOwner(standalone ? 'standalone' : userId ? `account:${userId}` : null);
   setEntitlement(decide({
     standalone,
     account: userId ? sync.rows('accounts', (row) => row.user_id === userId)[0] ?? null : null,
     settings: standalone ? readLocalChoices() : userId ? sync.row('settings', userId)?.data ?? null : null,
   }));
 }
-setChoiceWriter(async (fields) => {
+setChoiceWriter(async (fields, context) => {
   const local = !syncConfigured();
+  const userId = sync.user?.userId;
+  // Read the actual session again at dispatch, including before a delayed session event is delivered.
+  setChoiceOwner(local ? 'standalone' : userId ? `account:${userId}` : null);
+  assertChoiceContext(context);
   if (local) writeLocalChoices(fields);
-  else if (!sync.user?.userId) throw new Error('سجّل الدخول لتضيف مصدرًا لحسابك');
-  else sync.enqueue('settings.patch', { fields });
+  else if (!userId) throw new Error('سجّل الدخول لتضيف مصدرًا لحسابك');
+  else await sync.enqueue('settings.patch', { fields }, { requireDurable: true });
   refreshSourceEntitlement();
 });
 refreshSourceEntitlement();

@@ -116,3 +116,149 @@ it('does not show a preset repository for a clean account', async () => {
   await load(NEW);
   expect((await engine.readySources().list()).repos).toEqual([]);
 });
+
+it('rejects a legacy installation with no declared source instead of saving a false success', async () => {
+  await load(NEW);
+  plugin.sources.mockResolvedValue({ sources: [] });
+  await expect(engine.readySources().install(engine.READY_REPOSITORY, DILAR)).rejects.toMatchObject({ code: 'SOURCE_NOT_DECLARED' });
+  expect(plugin.prepare).not.toHaveBeenCalled();
+  expect(written).toEqual([]);
+  expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
+
+it.each([EXISTING, NEW])('failed native restoration preserves the previous account selection for cohort %s', async createdAt => {
+  await load(createdAt);
+  const before = e.visible({ id: DILAR });
+  plugin.prepare.mockRejectedValue(new Error('offline package restoration'));
+  await expect(engine.readySources().install(engine.READY_REPOSITORY, DILAR)).rejects.toThrow('offline package restoration');
+  expect(plugin.prepare).toHaveBeenCalledWith({ sourceId: DILAR });
+  expect(e.visible({ id: DILAR })).toBe(before);
+  expect(written).toEqual([]);
+});
+
+it('selects the original source ID only after its package was prepared successfully', async () => {
+  await load(NEW);
+  const order = [];
+  plugin.prepare.mockImplementation(async args => {
+    order.push(['prepare', args.sourceId]);
+    expect(e.visible({ id: DILAR })).toBe(false);
+    return { ok: true };
+  });
+  e.setChoiceWriter(async fields => { order.push(['choice', fields]); });
+  await engine.readySources().install(engine.READY_REPOSITORY, DILAR);
+  expect(order.map(([step]) => step)).toEqual(['prepare', 'choice']);
+  expect(order[0][1]).toBe(DILAR);
+  expect(e.visible({ id: DILAR })).toBe(true);
+});
+
+it('does not select a legacy package when native preparation did not confirm success', async () => {
+  await load(NEW);
+  plugin.prepare.mockResolvedValue({ ok: false });
+  await expect(engine.readySources().install(engine.READY_REPOSITORY, DILAR)).rejects.toMatchObject({ code: 'SOURCE_PREPARE_UNCONFIRMED' });
+  expect(written).toEqual([]);
+  expect(e.visible({ id: DILAR })).toBe(false);
+});
+
+it('rejects an account-write failure after preparation without claiming selection succeeded', async () => {
+  await load(NEW);
+  e.setChoiceWriter(async () => { throw new Error('account write failed'); });
+  await expect(engine.readySources().install(engine.READY_REPOSITORY, DILAR)).rejects.toThrow('account write failed');
+  expect(plugin.prepare).toHaveBeenCalledWith({ sourceId: DILAR });
+  expect(e.visible({ id: DILAR })).toBe(false);
+});
+
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
+
+it.each(['switch-account', 'switch-away-and-return'])('rejects stale preparation across %s with identical cohort and choices', async change => {
+  await load(NEW);
+  e.setChoiceOwner?.('account:a');
+  const started = deferred(), finish = deferred(), writes = [];
+  plugin.prepare.mockImplementation(async () => { started.resolve(); await finish.promise; return { ok: true }; });
+  e.setChoiceWriter(async fields => { writes.push(fields); });
+  const install = engine.readySources().install(engine.READY_REPOSITORY, DILAR);
+  const rejected = expect(install).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+  await started.promise;
+  e.setChoiceOwner?.('account:b');
+  // Identity must invalidate the operation even when the entitlement signature is unchanged.
+  e.setEntitlement(e.decide({ account: { user_id: 'b', created_at: NEW }, settings: {} }));
+  if (change === 'switch-away-and-return') e.setChoiceOwner?.('account:a');
+  finish.resolve();
+  await rejected;
+  expect(writes).toEqual([]);
+  expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
+
+it('rejects an account change during source discovery before downloading or saving choices', async () => {
+  await load(NEW);
+  e.setChoiceOwner?.('account:a');
+  const started = deferred(), finish = deferred();
+  const result = await plugin.sources();
+  plugin.sources.mockImplementation(async () => { started.resolve(); await finish.promise; return result; });
+  const install = engine.readySources().install(engine.READY_REPOSITORY, DILAR);
+  const rejected = expect(install).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+  await started.promise;
+  e.setChoiceOwner?.('account:b');
+  finish.resolve();
+  await rejected;
+  expect(plugin.prepare).not.toHaveBeenCalled();
+  expect(written).toEqual([]);
+});
+
+it('does not apply an old writer completion to a newly active identical account', async () => {
+  await load(NEW);
+  e.setChoiceOwner?.('account:a');
+  const started = deferred(), finish = deferred(), dispatched = [];
+  e.setChoiceWriter(async fields => { dispatched.push(fields); started.resolve(); await finish.promise; });
+  const selecting = e.choosePackage(DILAR, true);
+  const rejected = expect(selecting).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+  await started.promise;
+  e.setChoiceOwner?.('account:b');
+  e.setEntitlement(e.decide({ account: { user_id: 'b', created_at: NEW }, settings: {} }));
+  finish.resolve();
+  await rejected;
+  expect(dispatched).toHaveLength(1);
+  expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
+
+it('preserves the operation context while refreshing the same account', async () => {
+  await load(NEW);
+  expect(typeof e.setChoiceOwner).toBe('function');
+  e.setChoiceOwner('account:a');
+  const original = e.choiceContext();
+  e.setChoiceOwner('account:a');
+  expect(e.choiceContext()).toBe(original);
+  e.setChoiceOwner(null);
+  expect(e.choiceContext()).not.toBe(original);
+  e.setChoiceOwner('account:a');
+  expect(e.choiceContext()).not.toBe(original);
+});
+
+it('lets the writer reject a delayed session change before dispatching any account operation', async () => {
+  await load(NEW);
+  e.setChoiceOwner('account:a');
+  const dispatched = [];
+  e.setChoiceWriter(async (fields, context) => {
+    // Same order as app.js: bind the actual current owner, then validate, then enqueue.
+    e.setChoiceOwner('account:b');
+    e.assertChoiceContext(context);
+    dispatched.push(fields);
+  });
+  await expect(engine.readySources().install(engine.READY_REPOSITORY, DILAR)).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+  expect(dispatched).toEqual([]);
+  expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
+
+it('refuses a stale explicit context after returning to the original account', async () => {
+  await load(NEW);
+  e.setChoiceOwner('account:a');
+  const context = e.choiceContext();
+  e.setChoiceOwner('account:b');
+  e.setChoiceOwner('account:a');
+  await expect(e.choosePackage(DILAR, true, context)).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+  expect(written).toEqual([]);
+  expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
