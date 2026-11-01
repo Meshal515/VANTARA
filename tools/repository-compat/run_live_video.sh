@@ -7,15 +7,15 @@ adb logcat -c || true
 args=(
   -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.LiveRepositorySweepTest
   -Pandroid.testInstrumentationRunnerArguments.vantaraLiveSweep=true
-  -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=Anime4up,AnimeRift,Animewitcher,Witanime
-  -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=4
+  -Pandroid.testInstrumentationRunnerArguments.vantaraOnly=${VANTARA_LIVE_ONLY:-Anime4up,AnimeRift,Animewitcher,Witanime}
+  -Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=${VANTARA_LIVE_LIMIT:-4}
 )
 bash android/gradlew -p android :app:connectedDebugAndroidTest "${args[@]}" --no-daemon --stacktrace
 status=$?
 adb logcat -d -v raw -s VANTARA_SWEEP:I > live-video-sweep.jsonl 2>/dev/null || true
 adb logcat -d VantaraRuntime:V VantaraRuntimeHttp:D AndroidRuntime:E TestRunner:I '*:S' > live-video-sweep-logcat.txt 2>&1 || true
 if [[ -s live-video-sweep.jsonl ]]; then
-  node tools/repository-compat/summarize_live_sweep.mjs live-video-sweep.jsonl --strict --require-plugins=Anime4up,AnimeRift,Animewitcher,Witanime --require-healthy=AnimeRift > live-video-summary.md
+  node tools/repository-compat/summarize_live_sweep.mjs live-video-sweep.jsonl --strict "--require-plugins=${VANTARA_LIVE_REQUIRED:-Anime4up,AnimeRift,Animewitcher,Witanime}" "--require-healthy=${VANTARA_LIVE_HEALTHY:-AnimeRift}" > live-video-summary.md
   proof_status=$?
   cat live-video-summary.md
   if [[ "$proof_status" -ne 0 ]]; then
