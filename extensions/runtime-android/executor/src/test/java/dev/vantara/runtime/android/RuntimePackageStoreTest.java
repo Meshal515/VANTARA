@@ -39,6 +39,49 @@ public class RuntimePackageStoreTest {
     }
     private String hash(File file)throws Exception{StringBuilder s=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.toPath())))s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}
     private RuntimePackageStore store(String account)throws Exception{return new RuntimePackageStore(temp.getRoot().toPath().resolve("runtime-owned"),account);}
+    @Test public void rollbackRestoresPriorImmutableRevisionAndMetadataAfterRestart()throws Exception{
+        File userData=temp.newFile("saved-library.json");Files.writeString(userData.toPath(),"{\"episodeProgress\":42}");
+        RuntimePackageStore store=store("primary");File one=archive(1),two=archive(2);
+        try(RuntimePackageStore.Staged s=store.stage(one,hash(one))){s.activate("stable-id","{\"enabled\":false,\"source\":\"old\"}");}
+        RuntimePackageStore.Installed previous=store.current("stable-id");
+        try(RuntimePackageStore.Staged s=store.stage(two,hash(two))){s.activate("stable-id","{\"enabled\":false,\"source\":\"new\"}");}
+        RuntimePackageStore.Installed update=store.current("stable-id");
+        assertTrue(store.restoreIfCurrent(update,previous));
+        RuntimePackageStore.Installed recovered=store("primary").current("stable-id");
+        assertEquals(previous.packageHash(),recovered.packageHash());
+        assertEquals(previous.metadata(),recovered.metadata());
+        assertEquals(1,recovered.version());
+        assertEquals("{\"episodeProgress\":42}",Files.readString(userData.toPath()));
+    }
+    @Test public void rollbackNeverOverwritesNewerMetadataOrAnotherProfile()throws Exception{
+        RuntimePackageStore store=store("primary");RuntimePackageStore other=store("other");
+        File one=archive(1),two=archive(2);
+        try(RuntimePackageStore.Staged s=store.stage(one,hash(one))){s.activate("stable-id","{\"source\":\"old\"}");}
+        RuntimePackageStore.Installed previous=store.current("stable-id");
+        try(RuntimePackageStore.Staged s=store.stage(two,hash(two))){s.activate("stable-id","{\"source\":\"new\"}");}
+        RuntimePackageStore.Installed update=store.current("stable-id");
+        try(RuntimePackageStore.Staged s=other.stage(one,hash(one))){s.activate("stable-id","{\"other\":true}");}
+        store.updateMetadata("stable-id","{\"userChanged\":true}");
+        assertFalse("Stale rollback must not erase a subsequent user change",store.restoreIfCurrent(update,previous));
+        assertEquals("{\"userChanged\":true}",store("primary").current("stable-id").metadata());
+        assertEquals("{\"other\":true}",store("other").current("stable-id").metadata());
+    }
+    @Test public void rollbackRejectsForeignSnapshotsAndTamperedPriorObject()throws Exception{
+        RuntimePackageStore store=store("primary"),other=store("other");File one=archive(1),two=archive(2);
+        try(RuntimePackageStore.Staged s=store.stage(one,hash(one))){s.activate("stable-id","{\"source\":\"old\"}");}
+        RuntimePackageStore.Installed previous=store.current("stable-id");
+        try(RuntimePackageStore.Staged s=store.stage(two,hash(two))){s.activate("stable-id","{\"source\":\"new\"}");}
+        RuntimePackageStore.Installed update=store.current("stable-id");
+        try(RuntimePackageStore.Staged s=other.stage(one,hash(one))){s.activate("stable-id");}
+        try {store.restoreIfCurrent(update,other.current("stable-id"));fail("Foreign snapshot was accepted");}
+        catch(IOException expected){assertEquals("PACKAGE_ROLLBACK_INVALID",expected.getMessage());}
+        assertEquals(update.packageHash(),store.current("stable-id").packageHash());
+        assertTrue(previous.dexFile().setWritable(true));
+        Files.write(previous.dexFile().toPath(),new byte[]{1,2,3});
+        try {store.restoreIfCurrent(update,previous);fail("Tampered snapshot was accepted");}
+        catch(IOException expected){assertEquals("PACKAGE_OBJECT_CORRUPT",expected.getMessage());}
+        assertEquals(update.packageHash(),store.current("stable-id").packageHash());
+    }
     @Test public void uncommittedCandidateIsNotAnInstalledPackage()throws Exception{
         RuntimePackageStore store=store("account");File file=archive(1);
         try(RuntimePackageStore.Staged staged=store.stage(file,hash(file))){assertTrue(staged.dexFile().isFile());assertNull(store.current("package-id"));}
