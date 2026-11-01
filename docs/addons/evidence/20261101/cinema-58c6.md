@@ -11,4 +11,3 @@
 **Source journeys: 5; with extracted links: 1; with reachable media bytes: 0; confirmed five-step media journeys: 0.**
 
 **Media-byte reachability does NOT certify playback in VANTARA.**
-
