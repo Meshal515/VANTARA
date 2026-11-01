@@ -198,7 +198,7 @@ class RuntimeHost(
         } finally { download.delete() }
     }
     /**
-     * Read-only public catalogue canary on each candidate source BEFORE an update
+     * Full public catalogue/details/episodes/video-links canary on each candidate source BEFORE an update
      * can replace an already installed package. Scope IDs are version-specific,
      * isolating candidate cookies from the active user's cookies and sessions.
      * First installs are independent: there is no known-good version to protect.
@@ -227,15 +227,21 @@ class RuntimeHost(
             }
             try {
                 val payload=buildJsonObject { put("source",name);put("page",1) }
-                val catalogue=worker(o,generation,scope,candidate.dexFile(),
+                worker(o,generation,scope,candidate.dexFile(),
                     candidate.candidate().dexHash(),candidate.candidate().entry(),transport) { client ->
-                    RuntimeJson.parse(client.invokeJson("catalogue",payload.toString(),15_000).await()).jsonObject
+                    // One isolated candidate worker, same generic original CloudStream ABI
+                    // for every publisher plugin. A valid catalogue alone is NOT enough.
+                    suspend fun call(operation:String,argument:JsonObject,deadline:Long=15_000L):JsonObject {
+                        val wire=JsonObject(argument+mapOf("source" to JsonPrimitive(name)))
+                        return RuntimeJson.parse(client.invokeJson(operation,wire.toString(),deadline).await()).jsonObject
+                    }
+                    val catalogue=call("catalogue",payload)
+                    val workUrl=RuntimeCanaryContract.firstWorkUrl(catalogue)
+                    RuntimeCanaryContract.requireDetails(call("details",buildJsonObject { put("url",workUrl) }))
+                    val episodeData=RuntimeCanaryContract.firstEpisodeData(call("episodes",buildJsonObject { put("url",workUrl) }))
+                    val streams=call("videoLinks",buildJsonObject { put("data",episodeData) },30_000L)
+                    RuntimeCanaryContract.mediaUrls(streams)
                 }
-                val sections=catalogue["items"] as? JsonArray
-                    ?: throw IOException("CANDIDATE_CATALOGUE_INVALID")
-                if (sections.none { row ->
-                        ((row as? JsonObject)?.get("list") as? JsonArray)?.isNotEmpty()==true
-                    }) throw IOException("CANDIDATE_CATALOGUE_EMPTY")
             } finally { transport.close() }
         }
     }
