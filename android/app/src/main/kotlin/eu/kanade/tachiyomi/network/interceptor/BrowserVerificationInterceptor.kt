@@ -160,7 +160,6 @@ class BrowserVerificationInterceptor(
                     return true
                 }
             }
-            PassiveWebViewTracker.created(view)
             view.loadUrl(request.url.toString(), mapOf("User-Agent" to userAgent))
         }
 
@@ -175,7 +174,7 @@ class BrowserVerificationInterceptor(
             view?.let {
                 (it.parent as? ViewGroup)?.removeView(it)
                 runCatching { it.stopLoading() }
-                if (runCatching { it.destroy() }.isSuccess) PassiveWebViewTracker.destroyed(it)
+                runCatching { it.destroy() }
             }
         }
     }
