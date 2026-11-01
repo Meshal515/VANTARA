@@ -22,7 +22,7 @@ import java.util.UUID
 class PublishedRepoRegistrationTest {
     @Test fun registerEveryPublishedPluginInThisShard() = runBlocking {
         val ins=InstrumentationRegistry.getInstrumentation()
-        val args=ins.arguments
+        val args=InstrumentationRegistry.getArguments()
         assumeTrue("Opt-in public repository sweep", args.getString("vantaraRegistrationSweep")=="true")
         val repo=args.getString("vantaraRepo") ?:
             "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json"
