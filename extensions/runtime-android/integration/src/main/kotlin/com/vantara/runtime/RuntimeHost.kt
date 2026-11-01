@@ -213,6 +213,9 @@ class RuntimeHost(
             val installed=synchronized(lock) {
                 checkPackage(o,pkg,generation)
                 val previous=o.store.current(pkg)?.let { RuntimeJson.parse(it.metadata()).jsonObject }
+                // Fail closed on plugin updates that would orphan a saved VANTARA source ID.
+                // This is checked before the atomic installed pointer can be touched.
+                RuntimeUpdateAdmission.preserveIds(previous,registration)
                 val stored=JsonObject(metadata+mapOf("registration" to registration,"enabled" to (previous?.get("enabled") ?: metadata["enabled"] ?: JsonPrimitive(true))))
                 val retained=o.store.inventory().installed().filter { it.packageId()!=pkg }
                 val retainedCount=retained.sumOf { existing -> runCatching { RuntimeJson.parse(existing.metadata()).jsonObject.getValue("registration").jsonObject.getValue("sources").jsonArray.size }.getOrDefault(0) }
