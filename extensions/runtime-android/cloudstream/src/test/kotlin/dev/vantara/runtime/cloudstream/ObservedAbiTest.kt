@@ -14,6 +14,8 @@ class ObservedAbiTest {
     @Test fun everyPinnedPublicHostReferenceHasExactExecutableDescriptor()=assertResolves("/API_REQUIREMENTS.json")
     /** All 43 plugins of the Arabic 3rabi repository, not only the four originally pinned packages. */
     @Test fun everyArabicRepositoryHostReferenceHasExactExecutableDescriptor()=assertResolves("/CS3_HOST_SURFACE_ARB.json")
+    /** Actual Mehdi Anime4Up v4, including four inherited host lookups resolved during DEX inspection. */
+    @Test fun everyMehdiAnime4UpHostReferenceHasExactExecutableDescriptor()=assertResolves("/CS3_HOST_SURFACE_MEHDI_A4.json")
     private fun assertResolves(resource:String) {
         val data=mapper.readTree(javaClass.getResourceAsStream(resource)?:error("ABI observations missing: $resource"))
         val absent=linkedSetOf<String>()
