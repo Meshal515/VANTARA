@@ -45,6 +45,11 @@ class RuntimePostPromotionRecoveryDeviceTest {
                     }
                     if(canary) candidateProbes.incrementAndGet() else oldProbes.incrementAndGet()
                     val url=URI(request.url())
+                    if(url.host=="pixeldrain.com" && url.path.startsWith("/api/file/")) {
+                        // Authored media prefix through the same host transport, not a live playback claim.
+                        return RuntimeHttpAccess.Response(request.url(),206,mapOf("Content-Type" to listOf("video/mp4")),
+                            byteArrayOf(0,0,0,24)+"ftypisom".toByteArray())
+                    }
                     var status=200
                     val body=when(url.host) {
                         "d8lh9i7zl7-dsn.algolia.net", "tvnesh8ozy-dsn.algolia.net" ->

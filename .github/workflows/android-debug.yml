@@ -41,8 +41,8 @@ jobs:
     # bridge. This is an ephemeral QA artifact; no Stable, signed Debug channel,
     # or release workflow is enabled by this switch.
     env:
-      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: ${{ github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' && 'true' || 'false' }}
-      VANTARA_RUNTIME_DEBUG: ${{ github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' && 'true' || 'false' }}
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: ${{ (github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101') && 'true' || 'false' }}
+      VANTARA_RUNTIME_DEBUG: ${{ (github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101') && 'true' || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -119,7 +119,7 @@ jobs:
           done
 
       - name: Verify the experimental Debug APK actually contains CloudStream native runtime
-        if: github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101'
+        if: github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101'
         run: python3 tools/android-debug/verify-cloudstream-debug.py android/app/build/outputs/apk/debug/app-debug.apk
 
       # الفشل معلومة بقدر النجاح: نريد سببه كاملًا لا سطرًا واحدًا

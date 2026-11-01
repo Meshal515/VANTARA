@@ -16,6 +16,13 @@ public final class BrokerHostTransport implements AndroidRuntimeClient.HostHttpT
     }
 
     @Override public RuntimeHttpAccess.Response exchange(AndroidRuntimeClient.Scope caller,RuntimeHttpAccess.Request request) throws Exception {
+        return exchange(caller,request,0);
+    }
+    @Override public RuntimeHttpAccess.Response probePrefix(AndroidRuntimeClient.Scope caller,RuntimeHttpAccess.Request request,int limit) throws Exception {
+        if(limit<1||limit>HttpBroker.MAX_PROBE_BYTES)throw new RuntimeFailure("PROBE_BODY_LIMIT");
+        return exchange(caller,request,limit);
+    }
+    private RuntimeHttpAccess.Response exchange(AndroidRuntimeClient.Scope caller,RuntimeHttpAccess.Request request,int prefixLimit) throws Exception {
         if(!owner.equals(caller))throw new RuntimeFailure("SCOPE_MISMATCH");
         if(request==null)throw new RuntimeFailure("INVALID_REQUEST");
         Headers.Builder headers=new Headers.Builder();
@@ -24,7 +31,8 @@ public final class BrokerHostTransport implements AndroidRuntimeClient.HostHttpT
                 for(String value:row.getValue())headers.add(row.getKey(),value);
         }catch(IllegalArgumentException|NullPointerException malformed){throw new RuntimeFailure("INVALID_REQUEST_HEADER");}
         try {
-            HttpBroker.Output response=session.execute(new HttpBroker.Input(request.url(),request.method(),headers.build(),request.body(),request.followRedirects()));
+            HttpBroker.Input input=new HttpBroker.Input(request.url(),request.method(),headers.build(),request.body(),request.followRedirects());
+            HttpBroker.Output response=prefixLimit==0?session.execute(input):session.probePrefix(input,prefixLimit);
             return new RuntimeHttpAccess.Response(response.url(),response.status(),response.headers().toMultimap(),response.body());
         }catch(HttpBroker.Failure failure){
             // Retain diagnosis only on the trusted host. IPC serializes the code,

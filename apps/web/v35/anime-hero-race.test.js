@@ -19,6 +19,8 @@ const DETAIL = {
 };
 
 const setup = ({ style, zip }) => {
+  // نبدأ الساعة قبل openAnime: زمن بناء DOM لا يستهلك الفاصل بين مهلة البطل ووصول الفن.
+  vi.useFakeTimers();
   const { window, document } = parseHTML('<html><body><main><section id="anime"></section><section id="animeLibrary"></section><div id="animeDiscover"></div><section id="animeCollection"></section></main></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document);
   const made = [];
@@ -48,8 +50,8 @@ const setup = ({ style, zip }) => {
   const heroImgs = () => made.filter((n) => /aw-bg-img/.test(n.className));
   return { root, anime, heroImgs };
 };
-const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0)); };
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const settle = async () => { for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(1); };
+const wait = (ms) => vi.advanceTimersByTimeAsync(ms);
 
 it('a late, worse hero image never covers a better one already shown (core)', async () => {
   const { root, anime, heroImgs } = setup({ style: 'core', zip: { mappings: { imdb_id: 'tt1234567' }, episodes: {} } });

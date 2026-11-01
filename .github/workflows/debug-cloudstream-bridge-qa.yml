@@ -2,7 +2,7 @@ name: VANTARA experimental Debug video source UI and native bridge proof (no pub
 
 on:
   push:
-    branches: [codex/vantara-video-repo-debug-20261101]
+    branches: [codex/vantara-video-repo-debug-20261101, codex/android-video-hardening-20261101]
     paths:
       - '.github/workflows/debug-cloudstream-bridge-qa.yml'
       - '.github/workflows/android-debug.yml'

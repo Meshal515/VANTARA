@@ -2,7 +2,7 @@ name: VANTARA cinema CloudStream published plugins live QA (Debug only, no publi
 
 on:
   push:
-    branches: [codex/vantara-video-repo-debug-20261101]
+    branches: [codex/vantara-video-repo-debug-20261101, codex/android-video-hardening-20261101]
     paths:
       - '.github/workflows/video-cinema-live-qa.yml'
       - 'tools/repository-compat/run_live_video.sh'

@@ -72,6 +72,7 @@ class AnimeEngine(context: Context) {
     /** إضافات Aniyomi التي ثبّتها المستخدم من مستودعاته (UserAnime.kt). */
     @Volatile private var userSources: List<com.vantara.anime.registry.SourceEntry> = emptyList()
     private val adapters = ConcurrentHashMap<String, AnimeAdapter>()
+    private val publications = AnimeSourcePublication(this)
     @Volatile private var runtimeSources: Map<String, RuntimeSourceBinding> = emptyMap()
     private val loadErrors = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
@@ -97,7 +98,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** يُنادى من الواجهة عند الإقلاع وكلما وصل بيان أحدث. */
-    fun configure(text: String): List<String> {
+    @Synchronized fun configure(text: String): List<String> {
         val parsed = ManifestParser.parse(text)
         val errors = ManifestParser.validate(parsed)
         if (errors.isNotEmpty()) return errors
@@ -107,7 +108,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** المشحون + ما ثبّته المستخدم؛ يُنادى بعد كل تثبيت أو إزالة دون انتظار الواجهة. */
-    fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
+    @Synchronized fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
         userSources = list
         apply()
     }
@@ -130,6 +131,7 @@ class AnimeEngine(context: Context) {
         val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
         val previous = manifest.sources.associateBy { it.id }
         val next = parsed.sources.associateBy { it.id }
+        publications.invalidate((previous.keys + next.keys).filter { previous[it] != next[it] })
         // A verified APK update under the same source ID must invalidate its old adapter.
         adapters.keys.removeAll { id -> previous[id] != next[id] }
         loadErrors.keys.removeAll { id -> previous[id] != next[id] }
@@ -165,30 +167,35 @@ class AnimeEngine(context: Context) {
     /** المصدر جاهزًا للعمل، أو null مع سبب في [loadErrors]. */
     suspend fun adapter(id: String): AnimeAdapter? {
         runtimeSources[id]?.let { return it.adapter.takeIf { _ -> it.entry.enabled && it.entry.disabledReason == null } }
-        adapters[id]?.let { return it }
-        val e = entry(id) ?: return null
-        if (!e.enabled || e.disabledReason != null) return null
-        e.adapter?.let { kind -> return native(e, kind).also { adapters[id] = it } }
-        val ext = e.extension ?: return null
+        synchronized(this) { adapters[id]?.let { return it } }
         return locks.getOrPut(id) { Mutex() }.withLock {
-            adapters[id] ?: runCatching {
+            val (e, generation) = synchronized(this) {
+                adapters[id]?.let { return@withLock it }
+                val current = entry(id)?.takeIf { it.enabled && it.disabledReason == null } ?: return@withLock null
+                current to publications.generation(id)
+            }
+            e.adapter?.let { kind -> return@withLock publications.publish(id, generation) {
+                native(e, kind).also { adapters[id] = it }
+            } }
+            val ext = e.extension ?: return@withLock null
+            try {
                 val source = loader.obtain(ext)
-                // A background load from an older verified APK can finish after an update.
-                if (entry(id)?.extension != ext) null else ExtensionAdapter(
-                    id, source,
-                    pageEmbeds = { entry(id)?.embeds },
-                    resolver = embeds,
-                    pageEpisodes = { entry(id)?.episodes },
-                ).also { a ->
-                    // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
-                    AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
-                    adapters[id] = a
-                    loadErrors.remove(id)
+                publications.publish(id, generation) {
+                    ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds },
+                        resolver = embeds, pageEpisodes = { entry(id)?.episodes }).also { a ->
+                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
+                        adapters[id] = a
+                        loadErrors.remove(id)
+                    }
                 }
-            }.onFailure {
-                loadErrors[id] = it.message ?: it.javaClass.simpleName
-                health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
-            }.getOrNull()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Throwable) {
+                publications.publish(id, generation) {
+                    loadErrors[id] = error.message ?: error.javaClass.simpleName
+                    health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${error.message}")
+                }
+                null
+            }
         }
     }
 
@@ -886,5 +893,17 @@ class AnimeEngine(context: Context) {
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =
             instance ?: synchronized(this) { instance ?: AnimeEngine(context).also { instance = it } }
+    }
+}
+
+/** The engine's monitor covers both generation validation and publication, including ABA reinstalls. */
+internal class AnimeSourcePublication(private val monitor: Any) {
+    private val revisions = mutableMapOf<String, Long>()
+    fun generation(id: String): Long = synchronized(monitor) { revisions[id] ?: 0 }
+    fun invalidate(ids: Collection<String>) = synchronized(monitor) {
+        ids.forEach { revisions[it] = (revisions[it] ?: 0) + 1 }
+    }
+    fun <T> publish(id: String, expected: Long, block: () -> T): T? = synchronized(monitor) {
+        if ((revisions[id] ?: 0) != expected) null else block()
     }
 }

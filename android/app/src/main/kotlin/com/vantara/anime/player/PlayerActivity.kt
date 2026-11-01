@@ -597,7 +597,7 @@ class PlayerActivity : Activity() {
             override fun leaveRoom() = finish()
             override fun openServers() = showServers()
             override fun serverLabel() = current?.let { c ->
-                val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality)?.let { "${bucket(it)}p" }
+                val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality?.takeIf { it > 0 })?.let { "${it}p" }
                 listOfNotNull(codeOf(c) ?: c.server, q).joinToString(" · ")
             }
         })
@@ -1336,17 +1336,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun updateQualityLabel() {
-        val h = player.videoFormat?.height?.takeIf { it > 0 } ?: current?.quality
-        qualityLabel.text = h?.let { "${bucket(it)}p" } ?: "HD"
-    }
-
-    private fun bucket(h: Int) = when {
-        h >= 2000 -> 2160
-        h >= 1000 -> 1080
-        h >= 700 -> 720
-        h >= 460 -> 480
-        h >= 340 -> 360
-        else -> h
+        val h = player.videoFormat?.height?.takeIf { it > 0 } ?: current?.quality?.takeIf { it > 0 }
+        qualityLabel.text = h?.let { "${it}p" } ?: "HD"
     }
 
     private fun setControls(show: Boolean) {
@@ -1621,10 +1612,10 @@ class PlayerActivity : Activity() {
             val video = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
             val options = video.flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { Triple(g, it, g.getTrackFormat(it).height) } }
                 .filter { it.third > 0 }
-                .distinctBy { bucket(it.third) }
+                .distinctBy { it.third }
                 .sortedByDescending { it.third }
             val overrides = player.trackSelectionParameters.overrides.values.filter { it.type == C.TRACK_TYPE_VIDEO }
-            val playingH = player.videoFormat?.height?.let(::bucket)
+            val playingH = player.videoFormat?.height?.takeIf { it > 0 } ?: current?.quality?.takeIf { it > 0 }
             if (options.size > 1) {
                 // «تلقائي» فقط حين توجد جودات فعلًا يختار بينها
                 val auto = overrides.isEmpty()
@@ -1634,28 +1625,28 @@ class PlayerActivity : Activity() {
                 })
                 for ((g, i, h) in options) {
                     val on = overrides.any { it.mediaTrackGroup == g.mediaTrackGroup && i in it.trackIndices }
-                    body.addView(sheetRow("${bucket(h)}p", null, trailing = if (on) check() else null, selected = on) {
+                    body.addView(sheetRow("${h}p", null, trailing = if (on) check() else null, selected = on) {
                         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                             .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
                             .build()
                         sheet.close()
-                        message("${bucket(h)}p")
+                        message("${h}p")
                     })
                 }
             } else {
-                val h = playingH ?: current?.quality?.let(::bucket)
+                val h = options.singleOrNull()?.third ?: playingH
                 body.addView(sheetRow(h?.let { "${it}p" } ?: "جودة السيرفر", "الجودة الوحيدة في هذا السيرفر", trailing = check(), selected = true))
             }
             // جودات أخرى تعني سيرفرًا آخر: تُعرض بالجودة والرمز، والتبديل من نفس الثانية
             val p = prep
             val cur = current?.let { p?.routeOf(it.id)?.id }
             val others = p?.routes().orEmpty()
-                .filter { it.state == RouteState.READY && it.id != cur && it.quality != null && bucket(it.quality) != playingH }
+                .filter { it.state == RouteState.READY && it.id != cur && it.quality != null && it.quality > 0 && it.quality != playingH }
                 .sortedByDescending { it.quality }
-                .distinctBy { bucket(it.quality!!) }
+                .distinctBy { it.quality }
             if (others.isNotEmpty()) {
                 body.addView(sectionLabel("من سيرفر آخر"))
-                for (r in others) body.addView(sheetRow("${bucket(r.quality!!)}p", r.code) { switchTo(r) })
+                for (r in others) body.addView(sheetRow("${r.quality}p", r.code) { switchTo(r) })
             }
         }
     }
@@ -2325,35 +2316,5 @@ class PlayerActivity : Activity() {
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_LAUNCH, json.encodeToString(Launch.serializer(), launch))
                 .putExtra(EXTRA_SESSION, launch.session)
-    }
-}
-
-/** تجميع السيرفرات للورقة (المشغّل والواجهة بنفس القاعدة). */
-object RouteGroups {
-    fun bucket(q: Int?): Int? = when {
-        q == null -> null
-        q >= 1000 -> 1080
-        q >= 700 -> 720
-        q >= 460 -> 480
-        else -> 360
-    }
-
-    /** [(«1080p»، سيرفرات)…] من الأعلى، ثم غير المحددة، وغير المتاحة في الآخر. */
-    fun group(routes: List<Route>): List<Pair<String, List<Route>>> {
-        val usable = routes.filter { it.state != RouteState.UNAVAILABLE }
-        val out = mutableListOf<Pair<String, List<Route>>>()
-        usable.groupBy { bucket(it.quality) }
-            .toSortedMap(compareByDescending<Int?> { it ?: -1 })
-            .forEach { (b, list) -> out += (b?.let { "${it}p" } ?: "جودة غير محددة") to list.sortedBy { order(it.state) } }
-        val dead = routes.filter { it.state == RouteState.UNAVAILABLE }
-        if (dead.isNotEmpty()) out += "غير متاح" to dead
-        return out
-    }
-
-    private fun order(s: RouteState) = when (s) {
-        RouteState.READY -> 0
-        RouteState.RESOLVING -> 1
-        RouteState.FAILED -> 2
-        RouteState.UNAVAILABLE -> 3
     }
 }

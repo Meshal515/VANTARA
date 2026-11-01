@@ -2,7 +2,7 @@ name: VANTARA Debug CloudStream real repository journey (report only, no publish
 
 on:
   push:
-    branches: [codex/vantara-video-repo-debug-20261101]
+    branches: [codex/vantara-video-repo-debug-20261101, codex/android-video-hardening-20261101]
     paths:
       - '.github/workflows/video-repository-live-qa.yml'
       - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/LiveRepositorySweepTest.kt'

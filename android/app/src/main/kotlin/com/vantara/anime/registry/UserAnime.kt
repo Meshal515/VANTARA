@@ -71,6 +71,17 @@ data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extension
 class UserAnimeStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val storage = ExtensionStateFile(file)
+    private val packageRevisions = mutableMapOf<String, Long>()
+    private val repositoryRevisions = mutableMapOf<String, Long>()
+
+    class InstallToken internal constructor(
+        internal val owner: UserAnimeStore,
+        val pkg: String,
+        val repository: UserRepo,
+        val previous: UserAnimeExtension?,
+        internal val packageRevision: Long,
+        internal val repositoryRevision: Long,
+    )
 
     @Volatile var state: UserAnimeState = storage.read(UserAnimeState()) {
         json.decodeFromString<UserAnimeState>(it)
@@ -80,7 +91,46 @@ class UserAnimeStore(private val file: File) {
     @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
         val next = change(state)
         storage.write(json.encodeToString(UserAnimeState.serializer(), next))
+        val beforePackages = state.extensions.associateBy { it.pkg }
+        val afterPackages = next.extensions.associateBy { it.pkg }
+        for (pkg in beforePackages.keys + afterPackages.keys) {
+            if (beforePackages[pkg] != afterPackages[pkg]) packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+        }
+        val beforeRepos = state.repos.associateBy { it.url }
+        val afterRepos = next.repos.associateBy { it.url }
+        for (url in beforeRepos.keys + afterRepos.keys) {
+            if (beforeRepos[url] != afterRepos[url]) repositoryRevisions[url] = (repositoryRevisions[url] ?: 0) + 1
+        }
         state = next
+        return next
+    }
+
+    @Synchronized fun beginInstall(pkg: String, repoUrl: String): InstallToken {
+        val repo = state.repos.singleOrNull { it.url == repoUrl }
+            ?: error("ANIYOMI_REPOSITORY_CHANGED")
+        return InstallToken(this, pkg, repo, state.extensions.singleOrNull { it.pkg == pkg },
+            packageRevisions[pkg] ?: 0, repositoryRevisions[repoUrl] ?: 0)
+    }
+
+    /** No network under the monitor. Lock order: store -> engine; engine never reads this store. */
+    @Synchronized fun commitInstall(token: InstallToken, user: UserAnimeExtension,
+        publish: (UserAnimeState) -> Unit): UserAnimeState {
+        check(token.owner === this && user.pkg == token.pkg && user.repoUrl == token.repository.url) { "ANIYOMI_PACKAGE_CHANGED" }
+        check((packageRevisions[token.pkg] ?: 0) == token.packageRevision &&
+            state.extensions.singleOrNull { it.pkg == token.pkg } == token.previous) { "ANIYOMI_PACKAGE_CHANGED" }
+        check((repositoryRevisions[token.repository.url] ?: 0) == token.repositoryRevision &&
+            state.repos.singleOrNull { it.url == token.repository.url } == token.repository) { "ANIYOMI_REPOSITORY_CHANGED" }
+        val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != user.pkg } + user) }
+        publish(next)
+        return next
+    }
+
+    @Synchronized fun uninstall(pkg: String, publish: (UserAnimeState) -> Unit, erase: () -> Unit): UserAnimeState {
+        val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != pkg }) }
+        // Also revoke a first install that started while this package had no active record.
+        packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+        publish(next)
+        erase()
         return next
     }
 }

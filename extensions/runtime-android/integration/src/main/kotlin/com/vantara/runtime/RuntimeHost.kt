@@ -205,7 +205,8 @@ class RuntimeHost(
      */
     private suspend fun sourceCanary(
         o:Owner,generation:Long,pkg:String,source:JsonObject,
-        dex:File,packageHash:String,dexHash:String,entry:String,purpose:String
+        dex:File,packageHash:String,dexHash:String,entry:String,purpose:String,
+        expectedOperation:String?=null,expectedInput:JsonObject=JsonObject(emptyMap())
     ) {
         val name=source.text("name")
         val candidateId=sourceId(pkg,name,o.id)+"|"+purpose+"|"+packageHash.take(12)
@@ -228,11 +229,34 @@ class RuntimeHost(
                     val wire=JsonObject(input+mapOf("source" to JsonPrimitive(name)))
                     return RuntimeJson.parse(client.invokeJson(operation,wire.toString(),deadline).await()).jsonObject
                 }
+                expectedOperation?.let { operation ->
+                    check(RuntimeOperationHealth.assess(operation,expectedInput,call(operation,expectedInput),source)==
+                        RuntimeOperationHealth.Result.PRODUCTIVE) { "PREVIOUS_OPERATION_NOT_HEALTHY" }
+                }
                 val catalogue=call("catalogue",buildJsonObject{put("page",1)})
                 val workUrl=RuntimeCanaryContract.firstWorkUrl(catalogue)
                 RuntimeCanaryContract.requireDetails(call("details",buildJsonObject{put("url",workUrl)}))
                 val episodeData=RuntimeCanaryContract.firstEpisodeData(call("episodes",buildJsonObject{put("url",workUrl)}))
-                RuntimeCanaryContract.mediaUrls(call("videoLinks",buildJsonObject{put("data",episodeData)},30_000L))
+                val links=call("videoLinks",buildJsonObject{put("data",episodeData)},30_000L)
+                // A URL alone cannot promote an update. Probe only bounded media prefixes, through
+                // the same scoped transport/cookies/headers; never mark a work watched.
+                withTimeout(45_000L) {
+                    coroutineScope {
+                        val probe=async(Dispatchers.IO) {
+                            RuntimeMediaProbe { url,headers ->
+                                synchronized(lock) { checkPackage(o,pkg,generation) }
+                                val sent=headers.newBuilder().apply { if(headers["User-Agent"]==null)set("User-Agent",userAgent) }.build()
+                                val response=bound.probePrefix(scope,RuntimeHttpAccess.Request(url,"GET",sent.toMultimap(),null,true),HttpBroker.MAX_PROBE_BYTES)
+                                synchronized(lock) { checkPackage(o,pkg,generation) }
+                                val returned=Headers.Builder().apply { response.headers().forEach { (key,values)->values.forEach {add(key,it)} } }.build()
+                                HttpBroker.Output(response.url(),response.status(),returned,response.body())
+                            }.requirePlayable(links)
+                        }
+                        // Closing on timeout/cancellation aborts the physical OkHttp call before
+                        // structured concurrency waits for the blocking child to finish.
+                        try { probe.await() } finally { bound.close() }
+                    }
+                }
             }
         }finally{transport.close()}
     }
@@ -259,7 +283,7 @@ class RuntimeHost(
      * same real catalogue→details→episodes→video-links journey. External outages,
      * auth challenges and user edits must never force a blind rollback.
      */
-    private suspend fun recoverAfterFailure(o:Owner,installed:RuntimePackageStore.Installed,source:JsonObject,id:String,operation:String,failure:Throwable) {
+    private suspend fun recoverAfterFailure(o:Owner,installed:RuntimePackageStore.Installed,source:JsonObject,id:String,operation:String,input:JsonObject,failure:Throwable) {
         if(failure is CancellationException || operation !in setOf("catalogue","details","episodes","videoLinks")) return
         val reason=if(failure is RuntimeFailure)failure.code else failure.message.orEmpty()
         if(listOf("VERIFICATION_REQUIRED","SOURCE_DISABLED","PROFILE_CHANGED","PACKAGE_CHANGED",
@@ -269,7 +293,7 @@ class RuntimeHost(
         if(active.packageHash()!=installed.packageHash())return
         val old=o.store.previous(pkg) ?: return
         if(old.packageHash()==active.packageHash())return
-        val key=o.id+"|"+pkg+"|"+active.packageHash()+"|"+id+"|"+operation
+        val key=o.id+"|"+pkg+"|"+active.packageHash()+"|"+id+"|"+operation+"|"+digest(input.toString())
         if(!recoveryGate.onFailure(key,System.currentTimeMillis()))return
         val sources=RuntimeJson.parse(old.metadata()).jsonObject["registration"]?.jsonObject
             ?.get("sources") as? JsonArray ?: return
@@ -278,7 +302,7 @@ class RuntimeHost(
         try {
             withTimeout(75_000L) {
                 sourceCanary(o,generation,pkg,oldSource,old.dexFile(),old.packageHash(),
-                    old.dexHash(),old.entry(),"recovery")
+                    old.dexHash(),old.entry(),"recovery",operation,input)
             }
         } catch (verificationFailure:Exception) {
             android.util.Log.w("VantaraRuntime","ROLLBACK_SKIPPED:previous_revision_not_verified:$pkg")
@@ -423,11 +447,16 @@ class RuntimeHost(
             try { withTimeout(remaining) { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } }
             catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
         }
-    }.also {
-        recoveryGate.onSuccess(o.id+"|"+installed.packageId()+"|"+installed.packageHash()+"|"+id+"|"+operation)
+    }.also { result ->
+        val health=RuntimeOperationHealth.assess(operation,input,result,source)
+        val recoveryKey=o.id+"|"+installed.packageId()+"|"+installed.packageHash()+"|"+id+"|"+operation+"|"+digest(input.toString())
+        RuntimeOperationHealth.recordSuccess(recoveryGate,recoveryKey,health)
+        if(health==RuntimeOperationHealth.Result.EMPTY) {
+            recoverAfterFailure(o,installed,source,id,operation,input,IllegalStateException("EMPTY_PROVIDER_RESULT"))
+        }
     }
     } catch (failure:Throwable) {
-        try {recoverAfterFailure(o,installed,source,id,operation,failure)}
+        try {recoverAfterFailure(o,installed,source,id,operation,input,failure)}
         catch (recoveryError:Exception) {android.util.Log.w("VantaraRuntime","AUTO_RECOVERY_UNAVAILABLE:"+recoveryError.javaClass.simpleName)}
         throw failure
     }

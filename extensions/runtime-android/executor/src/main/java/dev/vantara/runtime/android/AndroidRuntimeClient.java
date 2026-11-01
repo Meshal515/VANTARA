@@ -16,6 +16,15 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     public interface HostTransport { String request(Scope scope,String url) throws Exception; }
     public interface HostHttpTransport extends HostTransport,AutoCloseable {
         RuntimeHttpAccess.Response exchange(Scope scope,RuntimeHttpAccess.Request request) throws Exception;
+        /** Trusted host admission only; worker IPC never exposes this method. */
+        default RuntimeHttpAccess.Response probePrefix(Scope scope,RuntimeHttpAccess.Request request,int limit) throws Exception {
+            if(limit<1||limit>65536||request==null||!"GET".equals(request.method())||request.body()!=null)
+                throw new RuntimeFailure("INVALID_PROBE_REQUEST");
+            RuntimeHttpAccess.Response response=exchange(scope,request);
+            byte[] body=response.body();
+            return new RuntimeHttpAccess.Response(response.url(),response.status(),response.headers(),
+                body.length<=limit?body:Arrays.copyOf(body,limit));
+        }
         @Override default String request(Scope scope,String url) throws Exception {
             return new String(exchange(scope,new RuntimeHttpAccess.Request(url,"GET",Collections.emptyMap(),null,true)).body(),java.nio.charset.StandardCharsets.UTF_8);
         }

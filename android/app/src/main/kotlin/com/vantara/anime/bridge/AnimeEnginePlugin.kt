@@ -42,7 +42,10 @@ class AnimeEnginePlugin : Plugin() {
     private val crawls = ConcurrentHashMap<String, Job>()
     private lateinit var engine: AnimeEngine
     /** مستودعات Aniyomi وإضافاتها التي ثبّتها المستخدم. */
-    private val userStore by lazy { com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json")) }
+    private val userStoreResult by lazy { runCatching {
+        com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json"))
+    } }
+    private val userStore get() = userStoreResult.getOrThrow()
     private val http by lazy { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client }
     private val repoClient by lazy { com.vantara.plugins.RepoClient(context, http) }
 
@@ -50,7 +53,8 @@ class AnimeEnginePlugin : Plugin() {
         WebViewActivityHolder.set(activity)
         ensureEngineInjekt(context.applicationContext as Application)
         engine = AnimeEngine.get(context)
-        engine.setUserSources(userStore.state.extensions.flatMap { it.entries() })
+        initializeAnimeUserSources(userStoreResult) { engine.setUserSources(it.extensions.flatMap { item -> item.entries() }) }
+            ?.let { android.util.Log.w("AnimeEngine", "Installed extension state unavailable; bytes retained", it) }
         // تقدّم المشاهدة من المشغّل الأصلي إلى الواجهة (سجل المشاهدة/الاستئناف)
         com.vantara.anime.player.PlaybackEvents.listener = { p ->
             notifyListeners(
@@ -276,12 +280,14 @@ class AnimeEnginePlugin : Plugin() {
     fun sources(call: PluginCall) {
         scope.launch(Dispatchers.IO) {
             try {
-                val st = userStore.state
+                // A damaged Aniyomi registry must not hide independently registered CloudStream sources.
+                // This is optional presentation metadata, never a replacement written to the store.
+                val st = userStoreResult.getOrNull()?.state
                 val list = JSArray()
                 for (s in engine.sources()) {
                     val runtime = engine.runtimeSource(s.id)
                     val rec = engine.health.get(HealthStore.sourceKey(s.id))
-                    val installed = s.extension?.let { ref -> st.extensions.firstOrNull { it.pkg == ref.pkg } }
+                    val installed = s.extension?.let { ref -> st?.extensions?.firstOrNull { it.pkg == ref.pkg } }
                     val icon = s.extension?.let { ref -> NativeExtensionIcons.iconUrl(context, "anime-extensions", ref.pkg, ref.sha256) }
                     list.put(
                         JSObject()
@@ -290,7 +296,7 @@ class AnimeEnginePlugin : Plugin() {
                             .put("lang", s.lang)
                             .put("version", s.extension?.version ?: runtime?.version)
                             .put("user", installed != null || runtime != null)
-                            .put("repo", installed?.let { ext -> st.repos.firstOrNull { it.url == ext.repoUrl }?.name } ?: runtime?.repository)
+                            .put("repo", installed?.let { ext -> st?.repos?.firstOrNull { it.url == ext.repoUrl }?.name } ?: runtime?.repository)
                             .put("repoUrl", installed?.repoUrl ?: runtime?.repositoryUrl)
                             .put("enabled", s.enabled && s.disabledReason == null)
                             .put("disabledReason", s.disabledReason)
@@ -301,7 +307,9 @@ class AnimeEnginePlugin : Plugin() {
                             .withIcon(icon ?: runtime?.iconUrl),
                     )
                 }
-                call.resolve(JSObject().put("sources", list))
+                call.resolve(JSObject().put("sources", list).apply {
+                    userStoreResult.exceptionOrNull()?.let { put("installationStateError", "EXTENSION_STATE_CORRUPTED") }
+                })
             } catch (t: Throwable) { call.reject(t.message ?: "تعذّر قراءة المصادر") }
         }
     }
@@ -312,6 +320,17 @@ class AnimeEnginePlugin : Plugin() {
     private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
     /** سبب عربي ورمز ثابت ومالك العطل (VANTARA، الإضافة، الموقع، غير مدعوم)؛ لا رمز خام مثل PROVIDER_FAILED. */
     private fun failure(call: PluginCall, t: Throwable) {
+        val localCode = generateSequence(t) { it.cause }.take(6).mapNotNull { it.message }.firstOrNull {
+            it.startsWith("EXTENSION_STATE_") || it in setOf("ANIYOMI_PACKAGE_CHANGED", "ANIYOMI_REPOSITORY_CHANGED")
+        }
+        if (localCode != null) {
+            val message = when (localCode) {
+                "ANIYOMI_PACKAGE_CHANGED" -> "تغيّرت الإضافة أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
+                "ANIYOMI_REPOSITORY_CHANGED" -> "تغيّر المستودع أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
+                else -> "تعذّر قراءة أو حفظ سجل الإضافات؛ بقيت البيانات المحفوظة دون مسح"
+            }
+            return call.reject(message, localCode, t as? Exception, JSObject().put("owner", "vantara"))
+        }
         val verdict = com.vantara.plugins.ExtensionFailure.classify(t)
         call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
     }
@@ -404,7 +423,8 @@ class AnimeEnginePlugin : Plugin() {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
                 val content = call.getString("content")?.takeIf { it == "anime" || it == "cinema" } ?: "anime"
-                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val token = userStore.beginInstall(pkg, base)
+                val repo = token.repository
                 require(!engine.shipsPackage(pkg)) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
@@ -432,7 +452,7 @@ class AnimeEnginePlugin : Plugin() {
                 require(publisherSources.distinctBy { it.id }.size == publisherSources.size) {
                     "DUPLICATE_SOURCE_ID: المستودع يعلن مصادر مكررة"
                 }
-                val previous = userStore.state.extensions.firstOrNull { it.pkg == pkg }
+                val previous = token.previous
                 // A legacy primary with no raw source ID must be matched unambiguously:
                 // never silently reassign a library's old ID to a different website.
                 val matched = previous?.let { old ->
@@ -493,8 +513,9 @@ class AnimeEnginePlugin : Plugin() {
                         }
                     }
                 }
-                val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                engine.setUserSources(next.extensions.flatMap { it.entries() })
+                userStore.commitInstall(token, user) { next ->
+                    engine.setUserSources(next.extensions.flatMap { it.entries() })
+                }
                 call.resolve(JSObject().put("id", user.id).put("ids", JSArray(entries.map { it.id }))
                     .put("sourceCount", entries.size))
             } catch (t: Throwable) { failure(call, t) }
@@ -504,21 +525,21 @@ class AnimeEnginePlugin : Plugin() {
     @PluginMethod
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
-        if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
-        val next = try {
-            userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
-        } catch (error: Throwable) {
-            return failure(call, error)
+        scope.launch {
+            try {
+                if (userStore.state.extensions.none { it.pkg == pkg }) error("ليست إضافة مثبتة من مستودع")
+                userStore.uninstall(pkg, { next -> engine.setUserSources(next.extensions.flatMap { it.entries() }) }) {
+                    // Explicit uninstall only; never the user's library, progress or sessions.
+                    if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {
+                        java.io.File(context.filesDir, "anime-extensions/vault/$pkg").deleteRecursively()
+                        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let {
+                            if (it.exists()) { it.setWritable(true, true); it.delete() }
+                        }
+                    }
+                }
+                call.resolve()
+            } catch (error: Throwable) { failure(call, error) }
         }
-        engine.setUserSources(next.extensions.flatMap { it.entries() })
-        // Explicit uninstall only: clean current vault and legacy APK, not the library/history.
-        if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {
-            java.io.File(context.filesDir, "anime-extensions/vault/$pkg").deleteRecursively()
-            java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let {
-                if (it.exists()) { it.setWritable(true, true); it.delete() }
-            }
-        }
-        call.resolve()
     }
 
     /** صحة كل مصدر وسيرفر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي. */
@@ -690,3 +711,12 @@ class AnimeEnginePlugin : Plugin() {
         JSObject().put("items", engine.catalogItems(id), ListSerializer(SourceAnime.serializer()))
     }
 }
+
+/** Startup failure is isolated from plugin registration; the strict store remains untouched. */
+internal fun initializeAnimeUserSources(
+    result: Result<com.vantara.anime.registry.UserAnimeStore>,
+    publish: (com.vantara.anime.registry.UserAnimeState) -> Unit,
+): Throwable? = result.fold(
+    onSuccess = { store -> runCatching { publish(store.state) }.exceptionOrNull() },
+    onFailure = { it },
+)
