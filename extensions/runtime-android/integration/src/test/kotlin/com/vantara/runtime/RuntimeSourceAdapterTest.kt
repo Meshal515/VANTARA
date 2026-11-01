@@ -7,6 +7,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RuntimeSourceAdapterTest {
+    @Test fun publicHttpMediaIsUpgradedToTlsBeforeSharedMediaAdmission()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://media.example/video.mp4","quality":720,"headers":{"Referer":"https://source.example/watch"}}]}""") }
+        val candidates=adapter.candidates(SourceEpisode(id,"episode","Episode",1f))
+        assertEquals(1,candidates.size)
+        assertEquals("https://media.example/video.mp4",candidates.single().url)
+        assertEquals("https://source.example/watch",candidates.single().headers["Referer"])
+    }
+    @Test fun httpCredentialsAndNonstandardPortsNeverBecomePermittedMedia()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://user:secret@media.example/video.mp4"},{"url":"http://media.example:8080/video.mp4"},{"url":"http://127.0.0.1/private.mp4"}]}""") }
+        assertTrue(adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).isEmpty())
+    }
     @Test fun revokedRuntimeSourceCannotReturnPreviouslyCachedEpisodes()=runBlocking {
         val dir=kotlin.io.path.createTempDirectory("runtime-episodes-").toFile()
         try {

@@ -58,3 +58,14 @@ test('video byte-probe failures are preserved beside publisher results',()=>{
  const r=run([row],['--strict','--require-plugins=Akwam']);assert.notEqual(r.status,0);
  assert.match(r.stdout,/UnknownServiceException/);
 });
+
+test('required native playback cannot pass using media bytes alone',()=>{
+ const r=run([success],['--strict','--require-native=Animewitcher']);
+ assert.notEqual(r.status,0);assert.match(r.stderr,/native playback missing/i);
+});
+test('required native playback needs the actual device measurement record',()=>{
+ const noFacts={...success,sources:[{...success.sources[0],nativePlayback:pass}]};
+ assert.notEqual(run([noFacts],['--strict','--require-native=Animewitcher']).status,0);
+ const measured={...success,sources:[{...success.sources[0],nativePlayback:pass,nativePlaybackFacts:'advancedMs=29802;decodedFrames=715;seekForward=true;seekBackward=true;qualities=480'}]};
+ assert.equal(run([measured],['--strict','--require-native=Animewitcher']).status,0);
+});

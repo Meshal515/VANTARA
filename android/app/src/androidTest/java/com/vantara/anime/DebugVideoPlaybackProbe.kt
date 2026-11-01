@@ -47,6 +47,7 @@ object DebugVideoPlaybackProbe {
             await("first decoded frame") { (player.videoDecoderCounters?.renderedOutputBufferCount ?: 0) > 0 && player.isPlaying }
             val initial = read { player.currentPosition }
             val frames = read { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
+            val droppedBefore = read { player.videoDecoderCounters?.droppedBufferCount ?: 0 }
             val began = SystemClock.elapsedRealtime()
             while (SystemClock.elapsedRealtime() - began < 30_000) {
                 assertNull(read { player.playerError?.errorCodeName }); Thread.sleep(200)
@@ -55,6 +56,8 @@ object DebugVideoPlaybackProbe {
             val rendered = read { player.videoDecoderCounters?.renderedOutputBufferCount ?: 0 } - frames
             assertTrue("Clock did not advance for 25 seconds", advanced >= 25_000)
             assertTrue("Insufficient decoded frames", rendered >= 200)
+            val dropped = read { player.videoDecoderCounters?.droppedBufferCount ?: 0 } - droppedBefore
+            assertTrue("Excessive dropped frames: $dropped/$rendered", dropped * 10 <= rendered + dropped)
             val forward = read { player.currentPosition + 30_000 }
             read { player.seekTo(forward) }
             await("forward seek") { player.isPlaying && player.currentPosition in (forward + 500)..(forward + 8_000) }
@@ -94,7 +97,7 @@ object DebugVideoPlaybackProbe {
                 }
                 assertTrue("Quality switch lost the playback position", read { player.currentPosition } >= beforePosition - 5_000)
             }
-            return "advancedMs=$advanced;decodedFrames=$rendered;seekForward=true;seekBackward=true;qualities=${heights.joinToString(",")};processRestart=NOT_TESTED"
+            return "advancedMs=$advanced;decodedFrames=$rendered;droppedFrames=$dropped;seekForward=true;seekBackward=true;qualities=${heights.joinToString(",")};processRestart=NOT_TESTED"
         } finally {
             activity?.let { onMain(ins) { it.finish() } }
             engine.closeSession(id)

@@ -503,14 +503,19 @@ class AnimeEnginePlugin : Plugin() {
                 // Updates are never promoted solely because the APK and its factory load.
                 // Probe each actual candidate source while the old metadata and APK pointer
                 // still refer to the working revision. No user library rows are changed here.
-                AniyomiUpdateGate.verify(previous?.sha256, com.vantara.plugins.sha256Hex(bytes),
-                    publisherSources.map { it.id }) { sourceId ->
-                    val candidateSource = actual.single { it.id.toString() == sourceId }
-                    kotlinx.coroutines.withTimeout(20_000L) {
-                        kotlinx.coroutines.withContext(Dispatchers.IO) {
-                            com.vantara.anime.adapters.ExtensionAdapter(
-                                "candidate-" + sourceId, candidateSource,
-                            ).page(com.vantara.anime.adapters.Listing.POPULAR, 1).items.isNotEmpty()
+                kotlinx.coroutines.withTimeout(90_000L) {
+                    AniyomiUpdateGate.verify(previous?.sha256, com.vantara.plugins.sha256Hex(bytes),
+                        publisherSources.map { it.id }) { sourceId ->
+                        val candidateSource = actual.single { it.id.toString() == sourceId }
+                        kotlinx.coroutines.withTimeout(60_000L) {
+                            val adapter = com.vantara.anime.adapters.ExtensionAdapter("candidate-" + sourceId, candidateSource)
+                            AniyomiUpdateGate.verifyJourney(adapter) { candidates ->
+                                verifyAniyomiCandidateMedia(
+                                    (candidateSource as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)?.client ?: http,
+                                    candidates,
+                                )
+                            }
+                            true
                         }
                     }
                 }

@@ -7,6 +7,8 @@ const rows = readFileSync(process.argv[2] ?? 'live-sweep.jsonl', 'utf8').split('
 const strict = process.argv.includes('--strict');
 const required = process.argv.find(value => value.startsWith('--require-plugins='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
 const requiredHealthy = process.argv.find(value => value.startsWith('--require-healthy='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
+const requiredNative = process.argv.find(value => value.startsWith('--require-native='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
+const nativeHealthy = new Set();
 const present = new Set(rows.map(row => String(row.plugin ?? '').toLowerCase()));
 const absent = required.filter(name => !present.has(name.toLowerCase()));
 const steps = ['install', 'catalogue', 'details', 'episodes', 'videoLinks'];
@@ -21,6 +23,7 @@ let fullJourneys = 0;
 for (const row of rows) {
   const sources = row.sources?.length ? row.sources : [{}];
   for (const source of sources) {
+    if(row.install?.result === 'PASS' && source.nativePlayback?.result === 'PASS' && typeof source.nativePlaybackFacts === 'string' && source.nativePlaybackFacts.trim()) nativeHealthy.add(String(row.plugin ?? '').toLowerCase());
     const cells = steps.map((name) => cell(name === 'install' ? row.install : source[name]));
     if (source.catalogue?.result === 'PASS' && source.catalogueItems === 0) {
       cells[1] = '❌ EMPTY_CATALOGUE';
@@ -41,10 +44,13 @@ out.push('', `**Source journeys: ${sourceCount}; with extracted links: ${extract
 if (missing.size) out.push('### Missing extractors by demand', '', ...[...missing].sort((a, b) => b[1] - a[1]).map(([host, n]) => `- ${host}: ${n}`));
 console.log(out.join('\n'));
 
+const nativeMissing = requiredNative.filter(name => !nativeHealthy.has(name.toLowerCase()));
+console.log('Native decoded playback and quality evidence: '+([...nativeHealthy].join(', ') || 'none'));
+if(nativeMissing.length) console.log('Required native playback missing: '+nativeMissing.join(', '));
 const unhealthy = requiredHealthy.filter(name => !healthyPlugins.has(name.toLowerCase()));
 if (absent.length) console.log('Unexamined required plugins: '+absent.join(', '));
 if (unhealthy.length) console.log('Required provider journeys lacking complete media proof: '+unhealthy.join(', '));
-if (strict && (!rows.length || absent.length || fullJourneys === 0 || unhealthy.length)) {
-  console.error('LIVE_SWEEP_NOT_CERTIFIED: '+(!rows.length ? 'no source reports' : absent.length ? 'required plugins missing: '+absent.join(', ') : unhealthy.length ? 'required provider media journey failed: '+unhealthy.join(', ') : 'no complete source journey reached real media bytes'));
+if (strict && (!rows.length || absent.length || fullJourneys === 0 || unhealthy.length || nativeMissing.length)) {
+  console.error('LIVE_SWEEP_NOT_CERTIFIED: '+(!rows.length ? 'no source reports' : absent.length ? 'required plugins missing: '+absent.join(', ') : unhealthy.length ? 'required provider media journey failed: '+unhealthy.join(', ') : nativeMissing.length ? 'required native playback missing: '+nativeMissing.join(', ') : 'no complete source journey reached real media bytes'));
   process.exitCode = 1;
 }

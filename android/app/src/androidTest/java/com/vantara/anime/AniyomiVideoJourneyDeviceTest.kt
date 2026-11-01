@@ -58,20 +58,35 @@ class AniyomiVideoJourneyDeviceTest {
                     stage = "catalogue"
                     val work = adapter.page(Listing.POPULAR, 1).items.firstOrNull() ?: error("EMPTY_CATALOGUE")
                     stage = "search"
-                    assertTrue(adapter.page(Listing.SEARCH, 1, work.title).items.any { it.url == work.url })
+                    // A failed mandatory search remains a failed journey, but must not hide
+                    // independent video diagnostics for an otherwise accessible catalogue work.
+                    val search = runCatching { adapter.page(Listing.SEARCH, 1, work.title) }
+                    val searchMatches = search.getOrNull()?.items?.any { it.url.trimEnd('/') == work.url.trimEnd('/') } == true
+                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "OPERATION source=$suffix;operation=search;result=${if(searchMatches) "PASS" else "FAIL"};query=${work.title.take(120)};expectedPath=${work.url.substringBefore('?').take(180)};resultCount=${search.getOrNull()?.items?.size ?: -1}")
                     stage = "details"
-                    val detail = adapter.details(work)
+                    var detail = adapter.details(work)
+                    if (detail.hasSeasons) {
+                        stage = "seasons"
+                        val season = adapter.seasons(detail).firstOrNull() ?: error("EMPTY_SEASONS")
+                        detail = adapter.details(season)
+                    }
                     stage = "episodes"
                     val episode = adapter.episodes(detail).firstOrNull() ?: error("EMPTY_EPISODES")
                     stage = "native-preparation-playback-qualities"
                     val facts = DebugVideoPlaybackProbe.run(ins, engine, detail, episode.number)
-                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_PASS source=$suffix;version=${entry.getString("version")};$facts")
-                    passed++
+                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "PLAYBACK_PASS source=$suffix;version=${entry.getString("version")};$facts")
+                    if (searchMatches) {
+                        android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_PASS source=$suffix;version=${entry.getString("version")};$facts")
+                        passed++
+                    } else {
+                        android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=search;code=SEARCH_MISSING_EXPECTED_WORK;upstreamComparison=NOT_TESTED")
+                    }
                 } catch (failure: Throwable) {
                     val chain = generateSequence(failure) { it.cause }.take(6).toList()
                     val code = chain.mapNotNull { it.message }.firstOrNull { it.matches(Regex("[A-Z][A-Z0-9_]{2,80}")) }
                         ?: chain.last().javaClass.simpleName
-                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=$stage;code=$code;upstreamComparison=NOT_TESTED")
+                    val httpStatus = chain.filterIsInstance<eu.kanade.tachiyomi.network.HttpException>().firstOrNull()?.let { it.message?.take(60) }.orEmpty()
+                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=$stage;code=$code;http=$httpStatus;upstreamComparison=NOT_TESTED")
                 }
             }
             assertTrue("No real Aniyomi repository source completed decoded playback; inspect every JOURNEY_FAIL", passed > 0)

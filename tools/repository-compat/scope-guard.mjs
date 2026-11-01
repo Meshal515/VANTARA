@@ -16,6 +16,17 @@ seams.add('extensions/runtime-android/integration/src/test/kotlin/com/vantara/ru
 seams.add('tools/repository-compat/scope-guard.mjs');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
 seams.add('android/app/src/test/java/com/vantara/plugins/BoundedRepositoryBodyTest.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/anime/bridge/AniyomiUpdateGate.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/anime/bridge/AniyomiCandidateMedia.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/anime/stream/MediaEvidenceProbe.kt');
+seams.add('android/app/src/test/java/com/vantara/anime/bridge/AniyomiUpdateJourneyTest.kt');
+seams.add('android/app/src/test/java/com/vantara/anime/bridge/AniyomiCandidateMediaTest.kt');
+seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/LiveRepositorySweepTest.kt');
+seams.add('extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeSourceAdapter.kt');
+seams.add('extensions/runtime-android/integration/src/test/kotlin/com/vantara/runtime/RuntimeSourceAdapterTest.kt');
+seams.add('tools/repository-compat/run_live_video.sh');
+seams.add('tools/repository-compat/summarize_live_sweep.mjs');
+seams.add('tools/repository-compat/summarize_live_sweep.test.mjs');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');

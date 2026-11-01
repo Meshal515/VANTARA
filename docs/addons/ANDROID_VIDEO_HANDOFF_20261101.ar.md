@@ -23,7 +23,7 @@ CloudStream يعمل عبر runtime اختياري خاص بـDebug: مستود�
 
 | الفحص | النتيجة | حد الدليل |
 |---|---|---|
-| Android JVM | PASS: 582 اختبارًا،116 suite،صفر فشل/تجاوز | ليست اختبارات جهاز |
+| Android JVM | PASS: 590 اختبارًا،118 suite،صفر فشل/تجاوز | ليست اختبارات جهاز |
 | Web | PASS:1949 اختبارًا،210 ملف | اختبارات انحدار؛ لا نشر PWA |
 | حواجز المستودع | PASS:55 | ليست تدقيقًا أمنيًا شاملًا |
 | HTTP/media/recovery standalone | PASS:41 | TLS/fixtures حقيقية محلية؛ ليست مواقع/مشغلًا حيًا |
@@ -42,16 +42,50 @@ CloudStream يعمل عبر runtime اختياري خاص بـDebug: مستود�
 - آخر frame gate تاريخي فشل153/522 dropped، رغم نجاح تشغيل أقدم702 إطارًا. لا يجوز اختيار النتيجة الأقدم لإخفاء الأحدث.
 - OKAnime موجود في مستودع Yuzono المنتقل إلى mojuru مع هوية/توقيع موثقين؛404لنسخة14.27القديمة ليس دليل موت المصدر.
 
-المتحقق طرفًا لطرف لهذا المرشح حتى هذه اللحظة: **0 مصادر معتمدة**. لم يتحقق هدف20أو100؛ الاختبارات المحاكية الجديدة لم تنفذ بعد. لا نسب نجاح مختلقة.
+المتحقق طرفًا لطرف لهذا المرشح حتى هذه اللحظة: **0 مصادر معتمدة**. لم يتحقق هدف20أو100؛ اختبارات الجولة الأولى موثقة أدناه؛ اعتماد الرحلة الكاملة لا يزال غير متحقق. لا نسب نجاح مختلقة.
 
 ## العمل التالي والقيود
 
 1. تشغيل Actions على SHA هذه الدفعة دون نشر: Android،العقود،الجسر،Aniyomi،CloudStream anime/cinema،decoded frames،rollback.
 2. فحص كل FAIL/BLOCKED مع نسخة الإضافة ومضيفها وحالة الشبكة؛ لا تجاوز CAPTCHA أو حسابات أو DRM.
-3. تعميق Aniyomi update gate الحالي الذي ما زال catalogue-only؛ فحصه ليس ضمان فيديو ولا self-healing بعد التفعيل. أصلح حد قراءة RepoClient ومسار إعادة تنزيل AnimeExtensionLoader قبل التخصيص، مع أربع حالات unknown/oversize/dishonest/exact-length.
+3. أصبح Aniyomi update gate يطلب catalogue/details/seasons/episodes/media مع حد90ثانية للحزمة. فحص byte/segment مشترك مع CloudStream بلا محرك جديد؛ لا يثبت decoding ولا self-healing بعد التفعيل. أصلح حد قراءة RepoClient ومسار إعادة تنزيل AnimeExtensionLoader قبل التخصيص، مع أربع حالات unknown/oversize/dishonest/exact-length.
 4. إثبات restart/تحديث/بيانات المستخدم على نفس المرشح، واختبار الجودات والترجمة والمصادر المهمة قبل ترقية Debug الموقع.
 5. لا نشر قبل قبول النتائج. Scores الجودة تؤجل لحين الأدلة؛ بناء ناجح لا يبرر10/10.
 
 سجلات التنفيذ التفصيلية المحلية: `/workspace/evidence/20261101/`،وتقارير الاستعادة `/workspace/evidence/20261101-release-recovery.ar.md` و`20261101-engine-review.ar.md`. الدليل الملخص المتتبع في `docs/addons/evidence/20261101/`.
 
 متابعة: إزالة المستودع لا تعيد نشر snapshot إضافات قديم؛ لا تتغير الإضافات المثبتة أصلًا عند هذه العملية. أصلح أيضًا حد التنزيل أثناء القراءة، لا بعدها. RED موثق لغياب API ثم GREEN للبناء والاختبارات الكاملة.
+
+## الجولة الأولى على Actions — SHA 58c6b683
+
+- [APK](https://github.com/Meshal515/VANTARA/actions/runs/41285640016)،[predebug والعزل API26/28/29/35](https://github.com/Meshal515/VANTARA/actions/runs/41285640111)،[الجسر/UI](https://github.com/Meshal515/VANTARA/actions/runs/41285639974)،[CI](https://github.com/Meshal515/VANTARA/actions/runs/41285640000): PASS في نطاق فحوصها، دون نشر.
+- [المشغل الفعلي](https://github.com/Meshal515/VANTARA/actions/runs/41285640122): PASS AnimeWitcher،715إطارًا،0dropped،29802ms خلال30039ms،848×480،والقفز أمامًا/خلفًا. هذا فحص DEX مثبت ووسائط حقيقية؛ لا يثبت جميع الجودات أو UI تثبيت المستودع أو restart.
+- [الرجوع بعد التحديث](https://github.com/Meshal515/VANTARA/actions/runs/41285640042): PASS باستخدام DEX حقيقي وشبكة authored وإخفاقات محقونة؛ ليس تحديث ناشر حيًا أو انقطاع عملية.
+- [CloudStream الأنمي](https://github.com/Meshal515/VANTARA/actions/runs/41285640029): Anime4up6/9 وRift6/9 وWitcher3/3روابط أعادت وسائط؛ Witanime BLOCKED بالتحقق البشري. هذا **دليل بايتات فقط**. workflow يطلب حدًا أدنى، ولا يعني PASS كل مصدر.
+- [السينما](https://github.com/Meshal515/VANTARA/actions/runs/41285640014): FAIL0/5. Akwam رابطان دون وسائط وUnknownServiceException؛ Cimalight BLOCKED تحقق؛ Egydead/Mycima كتالوج فارغ؛ Faselhd PROVIDER_FAILED. لا مقارنة upstream مكتملة.
+- [Aniyomi](https://github.com/Meshal515/VANTARA/actions/runs/41285640130): مصنع9هويات PASS؛ اختبار الرحلات FAIL0/3. OKAnime كتالوج PASS وبحث FAIL ولم يصل الفيديو بسبب توقف الاختبار هناك. Anime4up HTTP عند الكتالوج،وWitanime BLOCKED تحقق. أصلح أيضًا خطأ script runner الذي ينفذ الأسطر في shells مستقلة؛ الخطأ لم يخف فشل instrumentation الأصلي.
+
+ملخصات artifacts من هذه الجولة محفوظة مع SHA في مجلد الأدلة. لا تنسب هذه النتائج إلى التعديلات اللاحقة بلا إعادة فحص.
+
+## متابعة الجولة الثانية
+
+- فحص HTTP حقيقي محلي كشف أن إلغاء socket كان يتحول إلى CANDIDATE_MEDIA_UNVERIFIED؛ صار يتحقق من cancellation قبل إسناد الفشل للمصدر. الإلغاء300ms اجتاز مع إغلاق الاتصال،لا انتظار مهلةHTTP10ثوان.
+- RuntimeSourceAdapter كان يسقط روابطhttp لدى parser الآمن المشترك. صار CloudStream وحده يحاول HTTPS لنفس المضيف والمنفذ الافتراضي قبل admission؛ لا cleartext fallback ولا إضعاف TLS أو حدود عناوين الشبكة. حالة الاختبار الحقيقية RED:0مرشحات ثم GREEN:الرابطHTTPS،وتبقى credentials/private/nonstandard ports مرفوضة.
+- مصدر Akwam الفعلي يكتب بعض الوسائطhttp،لكن توفرTLS على المضيف ما زال يحتاج الفحص الحي. لا نعلن إصلاح Akwam قبل النتيجة.
+- المختبر صار يستخدم عميل وسائط المشغل الفعلي بدل rawOkHttp،ويختبر decoded frames والجودات عند تفعيل vantaraNativePlayback. التقرير لا يقبل media bytes بدل هذا الدليل.
+- البحث المتعثر في Aniyomi يبقى FAIL لكنه لا يمنع جمع دليل الفيديو المستقل. لا يحوّل نجاح الفيديو رحلة بحث فاشلة إلى PASS.
+
+## تقييم مؤقت، لا شهادة إنتاج
+
+| البعد | الدرجة/10 | الدليل والحد |
+|---|---|---|
+| المعمارية |7| محركان قائمـان وعقود واضحة وprobeمشترك؛Aniyomiداخل العملية |
+| الأمن |6| عزلCloudStream/حدودHTTP/TLS/بصمات؛لاsandboxكاملAniyomi |
+| الاستقرار |6| JVM وCIوالمشغل نجحت؛مصادر السينما وAniyomiمتعثرة |
+| التوافق |4|9هويات و3mediajourneys وnativeواحد؛لا20مصدرًا |
+| الأداء |5|715إطارًا بلاdropلمصدر480pواحد؛لاprofilingواسع |
+| الاستمرارية |7|CAS/ملفاتذرية/منعABA/بياناتsentinel؛restartالمرشحلميثبت |
+| التثبيت والتحديث |7|حفظقبلنشر/بواباتcanary/rollbackمحاكىلأخطاء؛لاpublisherupgradeشامل |
+| التشخيص |7|مراحلورموزعربيةوتمييزbyte/native؛إسنادupstreamمعلق |
+| قابلية التوسعة |7|مصانعAPKومصادرCloudStreamواختباراتABI؛القدراتغيرالمثبتةلاتحسب |
+| التجربة |5|المشغلالفعلييعملفيمسارمحدد؛بحث/تحقق/سينماتحتاجإكمال |

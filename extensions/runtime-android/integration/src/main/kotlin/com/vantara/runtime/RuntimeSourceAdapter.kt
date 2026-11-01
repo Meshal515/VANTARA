@@ -77,7 +77,7 @@ class RuntimeSourceAdapter(
             val headers=(link["headers"] as? JsonObject).orEmpty().toMutableMap()
             if(link.text("referer").isNotBlank())headers.putIfAbsent("Referer",JsonPrimitive(link.text("referer")))
             buildJsonObject {
-                put("url",link.text("url"));put("name",link.text("name"));put("title",link.text("name"))
+                put("url",runCatching { runtimeMediaUrl(link.text("url")) }.getOrDefault(link.text("url")));put("name",link.text("name"));put("title",link.text("name"))
                 put("quality",link["quality"] ?: JsonNull);put("headers",JsonObject(headers))
                 put("type",mediaType(link.text("type"),link.text("url")))
             }

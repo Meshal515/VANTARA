@@ -243,6 +243,7 @@ class RuntimeHost(
                 withTimeout(45_000L) {
                     coroutineScope {
                         val probe=async(Dispatchers.IO) {
+                            try {
                             RuntimeMediaProbe { url,headers ->
                                 synchronized(lock) { checkPackage(o,pkg,generation) }
                                 val sent=headers.newBuilder().apply { if(headers["User-Agent"]==null)set("User-Agent",userAgent) }.build()
@@ -251,6 +252,10 @@ class RuntimeHost(
                                 val returned=Headers.Builder().apply { response.headers().forEach { (key,values)->values.forEach {add(key,it)} } }.build()
                                 HttpBroker.Output(response.url(),response.status(),returned,response.body())
                             }.requirePlayable(links)
+                            } catch (failure:Exception) {
+                                currentCoroutineContext().ensureActive()
+                                throw failure
+                            }
                         }
                         // Closing on timeout/cancellation aborts the physical OkHttp call before
                         // structured concurrency waits for the blocking child to finish.
@@ -305,6 +310,7 @@ class RuntimeHost(
                     old.dexHash(),old.entry(),"recovery",operation,input)
             }
         } catch (verificationFailure:Exception) {
+            currentCoroutineContext().ensureActive()
             android.util.Log.w("VantaraRuntime","ROLLBACK_SKIPPED:previous_revision_not_verified:$pkg")
             return
         }

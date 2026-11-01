@@ -1,0 +1,5 @@
+--------- beginning of main
+PASS package=eu.kanade.tachiyomi.animeextension.all.animeworldindia sources=9 verified_sha256=cfed30b52a405e4d76a47a13fb988cb70d553217e9a1e5acae97fd5686bb0187
+JOURNEY_FAIL source=okanime;stage=search;code=AssertionError;upstreamComparison=NOT_TESTED
+JOURNEY_FAIL source=anime4up;stage=catalogue;code=HttpException;upstreamComparison=NOT_TESTED
+JOURNEY_FAIL source=witanime;stage=catalogue;code=CloudflareBypassException;upstreamComparison=NOT_TESTED
