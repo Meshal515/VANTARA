@@ -50,15 +50,16 @@ class OptionalMangaRepositoriesDeviceTest {
                 val args = JSObject().put("url", supplied)
                 val result = invoke("addRepo", args)
                 assertTrue("Real repository returned no extensions", result.getInt("count") > 0)
-                invoke("addRepo", args) // repeat registration must not create a duplicate
-                val canonical = RepoIndex.base(supplied)
+                // The expected identity is independent of the production normalizer.
+                // Registering the raw-content alias must reuse the GitHub-link repository.
+                val canonical = "https://raw.githubusercontent.com/$owner/$name/repo"
+                invoke("addRepo", JSObject().put("url", "$canonical/index.pb"))
                 val registered = invoke("repos").getJSONArray("repos")
-                assertEquals(1, (0 until registered.length()).count {
-                    registered.getJSONObject(it).getString("url") == canonical
-                })
+                assertEquals("URL aliases created duplicate repositories", 1, registered.length())
+                assertEquals(canonical, registered.getJSONObject(0).getString("url"))
                 invoke("removeRepo", args)
                 assertEquals(0, invoke("repos").getJSONArray("repos").length())
-                android.util.Log.i("VANTARA_REPOSITORY_QA", "REPOSITORY_PASS owner=$owner;index=protobuf;registeredTwice=true;unlinked=true")
+                android.util.Log.i("VANTARA_REPOSITORY_QA", "REPOSITORY_PASS owner=$owner;inputIndex=protobuf;registeredTwice=true;aliasesDeduplicated=true;unlinked=true")
             }
             invoke("removeReadySources")
             assertTrue(invoke("repos").getBoolean("readyCatalogDismissed"))

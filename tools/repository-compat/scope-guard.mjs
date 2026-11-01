@@ -40,6 +40,11 @@ seams.add('android/app/src/test/java/com/vantara/plugins/MangaRepositoryLifecycl
 seams.add('apps/web/lib/sync.test.js');
 // Explicit source-choice durability: strict enqueue failures must not publish an unsaved overlay.
 seams.add('apps/web/lib/sync.js');
+// Exact CloudStream host ABI evidenced by the published Mehdi Anime4Up v4 package.
+seams.add('extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/cloudstream3/Models.kt');
+seams.add('extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt');
+seams.add('extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/nicehttp/NiceResponse.kt');
+seams.add('extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/ObservedAbiTest.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/plugins/OptionalMangaRepositoriesDeviceTest.kt');
 seams.add('.github/workflows/manga-repository-management-qa.yml');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.

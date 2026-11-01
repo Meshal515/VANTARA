@@ -79,6 +79,8 @@ jobs:
             aniyomi-install-instrumentation.txt
             aniyomi-restart-instrumentation.txt
             aniyomi-sweep.log
+            aniyomi-app-badging.txt
+            aniyomi-test-badging.txt
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/
           if-no-files-found: warn

@@ -10,7 +10,8 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 adb install android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 trap 'adb logcat -d -s VANTARA_REPOSITORY_QA:I > optional-manga-logcat.txt' EXIT
 for method in addRemoveAndDismiss dismissalSurvivesProcessRestart; do
-  adb shell am instrument -w -e class "com.vantara.plugins.OptionalMangaRepositoriesDeviceTest#$method" \
+  # Raw output retains Android's terminal result code for the strict proof parser.
+  adb shell am instrument -r -w -e class "com.vantara.plugins.OptionalMangaRepositoriesDeviceTest#$method" \
     -e vantaraEphemeralRepositories true "$runner" > "optional-manga-$method.txt" 2>&1
   cat "optional-manga-$method.txt"
   node tools/repository-compat/assert_instrumentation.mjs "optional-manga-$method.txt" 1
