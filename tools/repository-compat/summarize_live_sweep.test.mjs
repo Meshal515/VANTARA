@@ -69,3 +69,9 @@ test('required native playback needs the actual device measurement record',()=>{
  const measured={...success,sources:[{...success.sources[0],nativePlayback:pass,nativePlaybackFacts:'advancedMs=29802;decodedFrames=715;seekForward=true;seekBackward=true;qualities=480'}]};
  assert.equal(run([measured],['--strict','--require-native=Animewitcher']).status,0);
 });
+
+test('native cohorts fail if every source stops before decoded playback',()=>{
+ assert.notEqual(run([success],['--strict','--require-native-any']).status,0);
+ const measured={...success,sources:[{...success.sources[0],nativePlayback:pass,nativePlaybackFacts:'advancedMs=29802;decodedFrames=715;seekForward=true;seekBackward=true;qualities=480'}]};
+ assert.equal(run([measured],['--strict','--require-native-any']).status,0);
+});

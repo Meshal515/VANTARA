@@ -6,6 +6,7 @@ adb logcat -c || true
 status=0
 bash android/gradlew -p android :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.anime.AniyomiRealExtensionDeviceTest,com.vantara.anime.AniyomiVideoJourneyDeviceTest \
+  "-Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiPackages=${VANTARA_ANIYOMI_PACKAGES:-okanime,anime4up,witanime}" \
   -Pandroid.testInstrumentationRunnerArguments.vantaraEphemeralVideo=true \
   -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiReal=true \
   -Pandroid.testInstrumentationRunnerArguments.vantaraAniyomiRepository=https://raw.githubusercontent.com/yuzono/anime-repo/repo \

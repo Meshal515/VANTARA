@@ -43,7 +43,11 @@ class AniyomiVideoJourneyDeviceTest {
             invoke("addRepo", JSObject().put("url", repository))
             val index = invoke("repoIndex", JSObject().put("url", repository)).getJSONArray("extensions")
             val engine = AnimeEngine.get(ins.targetContext)
-            for (suffix in listOf("okanime", "anime4up", "witanime")) {
+            val selected = args.getString("vantaraAniyomiPackages")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
+                ?: listOf("okanime", "anime4up", "witanime")
+            require(selected.size in 1..14 && selected.distinct().size == selected.size &&
+                selected.all { it.matches(Regex("[a-z0-9]+")) }) { "INVALID_VIDEO_TEST_SELECTION" }
+            for (suffix in selected) {
                 var stage = "discovery"
                 try {
                     val entry = (0 until index.length()).map { index.getJSONObject(it) }
@@ -86,7 +90,10 @@ class AniyomiVideoJourneyDeviceTest {
                     val code = chain.mapNotNull { it.message }.firstOrNull { it.matches(Regex("[A-Z][A-Z0-9_]{2,80}")) }
                         ?: chain.last().javaClass.simpleName
                     val httpStatus = chain.filterIsInstance<eu.kanade.tachiyomi.network.HttpException>().firstOrNull()?.let { it.message?.take(60) }.orEmpty()
-                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=$stage;code=$code;http=$httpStatus;upstreamComparison=NOT_TESTED")
+                    val origin = chain.asReversed().firstNotNullOfOrNull { error -> error.stackTrace.firstOrNull {
+                        it.className.startsWith("eu.kanade.tachiyomi.animeextension.") || it.className.startsWith("com.vantara.")
+                    } }?.let { "${it.className}#${it.methodName}:${it.lineNumber}" }.orEmpty()
+                    android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=$stage;code=$code;http=$httpStatus;origin=$origin;upstreamComparison=NOT_TESTED")
                 }
             }
             assertTrue("No real Aniyomi repository source completed decoded playback; inspect every JOURNEY_FAIL", passed > 0)

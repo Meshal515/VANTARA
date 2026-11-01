@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 const rows = readFileSync(process.argv[2] ?? 'live-sweep.jsonl', 'utf8').split('\n')
   .filter((line) => line.startsWith('{')).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 const strict = process.argv.includes('--strict');
+const requireNativeAny = process.argv.includes('--require-native-any');
 const required = process.argv.find(value => value.startsWith('--require-plugins='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
 const requiredHealthy = process.argv.find(value => value.startsWith('--require-healthy='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
 const requiredNative = process.argv.find(value => value.startsWith('--require-native='))?.split('=')[1]?.split(',').filter(Boolean) ?? [];
@@ -50,7 +51,7 @@ if(nativeMissing.length) console.log('Required native playback missing: '+native
 const unhealthy = requiredHealthy.filter(name => !healthyPlugins.has(name.toLowerCase()));
 if (absent.length) console.log('Unexamined required plugins: '+absent.join(', '));
 if (unhealthy.length) console.log('Required provider journeys lacking complete media proof: '+unhealthy.join(', '));
-if (strict && (!rows.length || absent.length || fullJourneys === 0 || unhealthy.length || nativeMissing.length)) {
-  console.error('LIVE_SWEEP_NOT_CERTIFIED: '+(!rows.length ? 'no source reports' : absent.length ? 'required plugins missing: '+absent.join(', ') : unhealthy.length ? 'required provider media journey failed: '+unhealthy.join(', ') : nativeMissing.length ? 'required native playback missing: '+nativeMissing.join(', ') : 'no complete source journey reached real media bytes'));
+if (strict && (!rows.length || absent.length || fullJourneys === 0 || unhealthy.length || nativeMissing.length || (requireNativeAny && nativeHealthy.size === 0))) {
+  console.error('LIVE_SWEEP_NOT_CERTIFIED: '+(!rows.length ? 'no source reports' : absent.length ? 'required plugins missing: '+absent.join(', ') : unhealthy.length ? 'required provider media journey failed: '+unhealthy.join(', ') : nativeMissing.length ? 'required native playback missing: '+nativeMissing.join(', ') : requireNativeAny && nativeHealthy.size === 0 ? 'no actual native playback evidence' : 'no complete source journey reached real media bytes'));
   process.exitCode = 1;
 }
