@@ -71,6 +71,7 @@ const SHELL = [
   '/lib/plugin-vault.js',
   '/lib/plugin-failure.js',
   '/lib/host-breaker.js',
+  '/lib/route-family.js',
   '/lib/route-validity.js',
   '/addons/native-catalog.js',
   '/v35/reader-scroll.js',
