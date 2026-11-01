@@ -30,6 +30,7 @@ seams.add('tools/repository-compat/summarize_live_sweep.test.mjs');
 seams.add('.github/workflows/video-compat-cohort.yml');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPolicy.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeVersionPolicyTest.kt');
+seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');
 // Nov 1: bounded video-engine recovery, real quality heights and opt-in device evidence.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');

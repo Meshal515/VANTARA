@@ -76,6 +76,8 @@ jobs:
         with:
           name: aniyomi-9-real-sources-not-release
           path: |
+            aniyomi-install-instrumentation.txt
+            aniyomi-restart-instrumentation.txt
             aniyomi-sweep.log
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/

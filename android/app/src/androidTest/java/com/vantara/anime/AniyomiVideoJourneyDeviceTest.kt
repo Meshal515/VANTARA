@@ -25,23 +25,13 @@ class AniyomiVideoJourneyDeviceTest {
         val activity = ins.startActivitySync(android.content.Intent(ins.targetContext, com.vantara.app.MainActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as com.vantara.app.MainActivity
         val plugin = activity.bridge.getPlugin("AnimeEngine").instance as AnimeEnginePlugin
-        fun invoke(method: String, data: JSObject): JSObject {
-            val completed = CompletableFuture<JSObject>()
-            val call = object : PluginCall(null, "AnimeEngine", "real-video-qa", method, data) {
-                override fun resolve(result: JSObject?) { completed.complete(result ?: JSObject()) }
-                override fun resolve() { completed.complete(JSObject()) }
-                override fun reject(msg: String?, code: String?, error: Exception?, details: JSObject?) {
-                    completed.completeExceptionally(IllegalStateException(code ?: "NATIVE_OPERATION_REJECTED", error))
-                }
-            }
-            plugin.javaClass.getMethod(method, PluginCall::class.java).invoke(plugin, call)
-            return completed.get(150, TimeUnit.SECONDS)
-        }
         val repository = "https://raw.githubusercontent.com/yuzono/anime-repo/repo"
         var passed = 0
+        var playableWork: com.vantara.anime.adapters.SourceAnime? = null
+        var playableEpisode = 0f
         try {
-            invoke("addRepo", JSObject().put("url", repository))
-            val index = invoke("repoIndex", JSObject().put("url", repository)).getJSONArray("extensions")
+            invokeVideoEngine(plugin, "addRepo", JSObject().put("url", repository))
+            val index = invokeVideoEngine(plugin, "repoIndex", JSObject().put("url", repository)).getJSONArray("extensions")
             val engine = AnimeEngine.get(ins.targetContext)
             val selected = args.getString("vantaraAniyomiPackages")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
                 ?: listOf("okanime", "anime4up", "witanime")
@@ -54,7 +44,7 @@ class AniyomiVideoJourneyDeviceTest {
                         .single { it.getString("pkg").endsWith(".$suffix") }
                     val pkg = entry.getString("pkg")
                     stage = "install"
-                    val installed = invoke("installExtension", JSObject().put("repo", repository).put("pkg", pkg).put("content", "anime"))
+                    val installed = invokeVideoEngine(plugin, "installExtension", JSObject().put("repo", repository).put("pkg", pkg).put("content", if(suffix in setOf("arabseed","asia2tv","cimaleek","egydead","faselhd","tuktukcinema")) "cinema" else "anime"))
                     stage = "durable-reconstruction"
                     assertTrue(UserAnimeStore(stateFile).state.extensions.any { it.pkg == pkg })
                     val id = installed.getString("id")!!
@@ -81,6 +71,7 @@ class AniyomiVideoJourneyDeviceTest {
                     android.util.Log.i("VANTARA_ANIYOMI_REAL", "PLAYBACK_PASS source=$suffix;version=${entry.getString("version")};$facts")
                     if (searchMatches) {
                         android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_PASS source=$suffix;version=${entry.getString("version")};$facts")
+                        if(playableWork == null) { playableWork=detail;playableEpisode=episode.number }
                         passed++
                     } else {
                         android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=search;code=SEARCH_MISSING_EXPECTED_WORK;upstreamComparison=NOT_TESTED")
@@ -96,7 +87,25 @@ class AniyomiVideoJourneyDeviceTest {
                     android.util.Log.i("VANTARA_ANIYOMI_REAL", "JOURNEY_FAIL source=$suffix;stage=$stage;code=$code;http=$httpStatus;origin=$origin;upstreamComparison=NOT_TESTED")
                 }
             }
+            val checkpoint = org.json.JSONObject()
+                .put("pid",android.os.Process.myPid()).put("stateSha",com.vantara.plugins.sha256Hex(stateFile.readBytes()))
+                .put("state",org.json.JSONObject(stateFile.readText())).put("episode",playableEpisode.toDouble())
+            playableWork?.let { checkpoint.put("work",kotlinx.serialization.json.Json.encodeToString(com.vantara.anime.adapters.SourceAnime.serializer(),it)) }
+            File(ins.targetContext.filesDir,"debug-video-qa/checkpoint.json").apply { parentFile!!.mkdirs();writeText(checkpoint.toString()) }
             assertTrue("No real Aniyomi repository source completed decoded playback; inspect every JOURNEY_FAIL", passed > 0)
         } finally { ins.runOnMainSync { activity.finish() } }
     }
 }
+
+internal fun invokeVideoEngine(plugin: AnimeEnginePlugin, method: String, data: JSObject): JSObject {
+        val completed = CompletableFuture<JSObject>()
+        val call = object : PluginCall(null, "AnimeEngine", "real-video-qa", method, data) {
+            override fun resolve(result: JSObject?) { completed.complete(result ?: JSObject()) }
+            override fun resolve() { completed.complete(JSObject()) }
+            override fun reject(msg: String?, code: String?, error: Exception?, details: JSObject?) {
+                completed.completeExceptionally(IllegalStateException(code ?: "NATIVE_OPERATION_REJECTED", error))
+            }
+        }
+        plugin.javaClass.getMethod(method, PluginCall::class.java).invoke(plugin, call)
+        return completed.get(150, TimeUnit.SECONDS)
+    }

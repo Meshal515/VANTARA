@@ -12,6 +12,9 @@ args=(
   "-Pandroid.testInstrumentationRunnerArguments.vantaraMaxPackages=${VANTARA_LIVE_LIMIT:-4}"
   ${VANTARA_LIVE_CONTENT:+-Pandroid.testInstrumentationRunnerArguments.vantaraContent=${VANTARA_LIVE_CONTENT}}
 )
+if [[ -n "${VANTARA_LIVE_REPO:-}" ]]; then
+  args+=("-Pandroid.testInstrumentationRunnerArguments.vantaraRepo=$VANTARA_LIVE_REPO")
+fi
 bash android/gradlew -p android :app:connectedDebugAndroidTest "${args[@]}" --no-daemon --stacktrace
 status=$?
 adb logcat -d -v raw -s VANTARA_SWEEP:I > live-video-sweep.jsonl 2>/dev/null || true

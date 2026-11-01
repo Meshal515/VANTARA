@@ -20,6 +20,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - cohort: mehdi-anime
+            ecosystem: cloudstream
+            content: anime
+            repository: https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
+            providers: انمي فور اب (Anime4Up),انمي زد (Animezid),أنمي داي (AnimeDay),أنمي سلاير (AnimeSlayer),ويت أنمي (WitAnime),أنمي عرب (Anime3rb),أنمي رِفت (AnimeRift)
+          - cohort: csar-anime
+            ecosystem: cloudstream
+            content: anime
+            repository: https://raw.githubusercontent.com/mo7AmMeD64/cs-ar/main/repo/repo.json
+            providers: AnimeWitcher,Anime3rb,Anime Phoenix,أنمي سلاير,أنمي داي,أنمي رِفت (AnimeRift),ويت أنمي (WitAnime)
+          - cohort: mehdi-cinema
+            ecosystem: cloudstream
+            content: cinema
+            repository: https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
+            providers: فاصل إعلاني (FaselHD),شاهد فور يو (Shahid4u),توك توك سينما (TukTuk),سيما كلاود (CimaCloud),إيجي ديد (EgyDead),إيجي واتش (Egywatch),سيما وبس (Cimawbas),سيما ناو (CimaNow)
           - cohort: anime-extra
             ecosystem: cloudstream
             content: anime
@@ -42,6 +57,7 @@ jobs:
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
       VANTARA_NATIVE_VIDEO: 'true'
+      VANTARA_LIVE_REPO: ${{ matrix.repository }}
       VANTARA_LIVE_ONLY: ${{ matrix.providers }}
       VANTARA_LIVE_REQUIRED: ${{ matrix.providers }}
       VANTARA_LIVE_HEALTHY: ''
@@ -107,6 +123,8 @@ jobs:
         with:
           name: video-cohort-${{ matrix.cohort }}-evidence
           path: |
+            aniyomi-install-instrumentation.txt
+            aniyomi-restart-instrumentation.txt
             aniyomi-sweep.log
             live-video-sweep.jsonl
             live-video-sweep-logcat.txt
