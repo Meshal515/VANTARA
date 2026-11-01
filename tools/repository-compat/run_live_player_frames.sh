@@ -5,6 +5,16 @@
 set -uo pipefail
 adb logcat -G 16M || true
 adb logcat -c || true
+# First prove that an update whose source website fails stays staged, with zero data loss.
+bash android/gradlew -p android :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.RuntimeCandidateUpdateTest \
+  --no-daemon --stacktrace
+candidate_status=$?
+if [[ "$candidate_status" -ne 0 ]]; then
+  adb logcat -d -v threadtime VantaraRuntime:V AndroidRuntime:E TestRunner:I '*:S' > live-player-frames-logcat.txt 2>&1 || true
+  printf 'CANDIDATE_PREFLIGHT_DATA_SAFETY_FAILED exit=%s\n' "$candidate_status" > live-player-frames-summary.txt
+  exit "$candidate_status"
+fi
 bash android/gradlew -p android :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.RuntimeAppIntegrationTest#witcherLiveEpisodeRunsInTheExistingPlayerWithSustainedClockAndBothSeeks \
   --no-daemon --stacktrace
