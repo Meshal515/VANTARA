@@ -1,0 +1,73 @@
+name: VANTARA real video frame and seek proof (Debug, no publish)
+
+on:
+  push:
+    branches: [codex/vantara-video-repo-debug-20261101]
+    paths:
+      - '.github/workflows/video-player-decoded-frame-qa.yml'
+      - 'tools/repository-compat/run_live_player_frames.sh'
+      - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/RuntimeAppIntegrationTest.kt'
+      - 'extensions/runtime-android/integration/src/main/**'
+      - 'extensions/runtime-android/cloudstream/**'
+      - 'android/app/src/main/kotlin/com/vantara/anime/player/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-real-decoded-frames-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-device-frames:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare actual published CloudStream DEX fixture and matching manifest pin
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Build runtime-enabled Debug and instrumentation APKs
+        run: |
+          set -euo pipefail
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - run: sudo chmod 666 /dev/kvm
+      - name: Assert decoded frames and two seek operations in real VANTARA PlayerActivity
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: bash tools/repository-compat/run_live_player_frames.sh
+      - name: Preserve device logs and instrumentation evidence, including failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-player-decoded-frame-evidence
+          path: |
+            live-player-frames-logcat.txt
+            live-player-frames-summary.txt
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+          if-no-files-found: warn
+          retention-days: 14
