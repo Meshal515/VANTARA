@@ -1,4 +1,5 @@
 name: Actual Android addon UI delivery (no publish)
+# Active-sheet session proof: never reuse READY from another playback session.
 on:
   workflow_dispatch:
   push:
