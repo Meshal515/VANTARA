@@ -186,3 +186,17 @@ it('reports a player launch failure even though launch closes the selector', asy
   await body.querySelector('.an-srv').onclick();
   expect(deps.toast).toHaveBeenCalledWith(expect.stringContaining('player rejected launch'));
 });
+
+
+it('recovers a native READY route from the live session after both the initial snapshot and WebView event were missed', async () => {
+  engine.routes.mockResolvedValueOnce({ done: false, routes: [] })
+    .mockResolvedValueOnce({ done: true, routes: [route('late-native-ready')] });
+  const { body, anime, close } = screen();
+  anime.play(media, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(1300);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  close();
+  expect(vi.getTimerCount()).toBe(0);
+});
