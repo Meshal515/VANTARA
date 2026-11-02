@@ -41,6 +41,7 @@ async function observer(value){observing=true;try{const id=`${phase}-${Date.now(
 const heartbeat=setInterval(()=>{if(!observing){try{execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id:'heartbeat-'+Date.now(),action:'ping'}),encoding:'utf8',timeout:15000});}catch{}}},45000);
 async function caseFailure(operation,error){
   report.checks.push({operation,result:'FAIL',error:String(error.message).replace(/https?:\/\/\S+/g,'[url]')});
+  if(socket.readyState===1){try{report.nativeRouteSummary=await evaluate(`Object.values(window.__deliveryRoutes||{}).map(r=>({sourceId:r.sourceId,state:r.state,probed:r.probed,quality:r.quality,code:r.code,reason:String(r.reason||'').replace(/https?:\\/\\/\\S+/g,'[url]'),candidates:r.candidates?.length||0}))`,5000);}catch{}}
   if(socket.readyState===1){try{await screenshot(operation+'-failure');}catch{}try{report.visibleCases??={};report.visibleCases[operation]=await evaluate(`document.body.innerText.slice(-4500)`,5000);}catch{}}
   await writeFile(`${out}/${phase}-ui-progress.json`,JSON.stringify(report,null,2)+'\n');
 }

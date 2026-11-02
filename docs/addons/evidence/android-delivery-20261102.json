@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T05:08:00Z",
+  "updatedAtUtc": "2026-11-02T05:27:13.104928+00:00",
   "branch": "codex/android-addon-delivery-20261101",
   "applicationCommit": "6d99ddb12bdcd3251d252a9f4b23b58543170d86",
   "published": false,
@@ -98,6 +98,23 @@
       ],
       "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027",
       "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027/artifacts/13117856460"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "testCommit": "135c569f",
+      "run": 41392437626,
+      "artifact": 13118113243,
+      "result": "FAIL",
+      "renderer": "swiftshader with guest Vulkan disabled",
+      "findings": [
+        "installed UI counts 1,2,3 passed again",
+        "source cinema details and explicit type choice passed",
+        "same host RenderThread instruction segfault at 05:19:27 UTC; decoded playback not proven"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626/artifacts/13118113243"
     }
-  ]
+  ],
+  "nextRenderer": "swangle (ANGLE GLES backend)",
+  "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu"
 }
