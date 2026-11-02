@@ -989,6 +989,7 @@ export function createCinema(deps) {
     state.warm = null;
     w.closed = true;
     clearTimeout(w.deadline);
+    clearTimeout(w.reconcileTimer);
     w.controller.abort();
     w.handle.cancel?.();
     if (state.works.get(w.key) === w.handle) state.works.delete(w.key);
@@ -1023,6 +1024,7 @@ export function createCinema(deps) {
       w.done = true;
       w.routes = w.routes.map(route => routePending(route) ? { ...route, state: 'FAILED', reason: 'TIMEOUT' } : route);
       clearTimeout(w.deadline);
+      clearTimeout(w.reconcileTimer);
       w.controller.abort(error);
       h.cancel?.();
       if (state.works.get(key) === h) state.works.delete(key);
@@ -1045,6 +1047,36 @@ export function createCinema(deps) {
       if (route.state === 'READY' && route.probed === true && !w.remembered) {
         w.remembered = true;
         memory.remember(key, h.found.copies, h.found.copies.find(copy => copy.sourceId === route.sourceId));
+      }
+    };
+    // Re-read the current native session when a route event arrives before
+    // Capacitor has installed its WebView listener. Keep real READY routes
+    // monotonic and do not let a stale snapshot erase them.
+    const reconcileEndsAt = Date.now() + 45_000;
+    let reconciling = false;
+    const reconcileNativeRoutes = async () => {
+      if (w.closed || w.expired || w.launched || !w.session || reconciling) return;
+      reconciling = true;
+      const session = w.session;
+      try {
+        const snapshot = await engine.routes(session, { signal: w.controller.signal });
+        if (w.closed || w.expired || w.launched || w.session !== session) return;
+        for (const route of snapshot?.routes ?? []) {
+          const current = w.routes.find(row => row.id === route.id);
+          if (current?.state === 'READY' && current.probed === true && !(route.state === 'READY' && route.probed === true)) continue;
+          adoptRoute(route);
+        }
+        w.done = w.done || Boolean(snapshot?.done);
+        if (w.done) clearTimeout(w.deadline);
+        notify();
+      } catch {
+        // A transient IPC snapshot error must not lose already visible routes.
+      } finally {
+        reconciling = false;
+        if (!w.closed && !w.expired && !w.launched && Date.now() < reconcileEndsAt &&
+            !(w.done && w.routes.some(routeSelectable) && !w.routes.some(routePending))) {
+          w.reconcileTimer = setTimeout(reconcileNativeRoutes, 1200);
+        }
       }
     };
     w.off.push(
@@ -1100,6 +1132,7 @@ export function createCinema(deps) {
         recovered = true;
         if (w.done) clearTimeout(w.deadline);
         notify();
+        w.reconcileTimer = setTimeout(reconcileNativeRoutes, 1200);
         const extend = fresh => {
           if (w.closed || w.expired || w.launched || !w.session) return;
           const prepared = forPreparation(fresh);
@@ -1940,6 +1973,7 @@ export function createCinema(deps) {
       if (w) {
         w.launched = true;
         clearTimeout(w.deadline);
+        clearTimeout(w.reconcileTimer);
         w.controller.abort();
         w.copyOff?.();
         w.handle.cancel?.();
