@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "updatedAtUtc": "2026-11-02T05:08:00Z",
+  "branch": "codex/android-addon-delivery-20261101",
+  "applicationCommit": "6d99ddb12bdcd3251d252a9f4b23b58543170d86",
+  "published": false,
+  "gate": "BLOCKED_PENDING_LIVE_PLAYBACK_AND_RESTART",
+  "verification": {
+    "web": {
+      "files": 214,
+      "passed": 2038
+    },
+    "nativeUnit": {
+      "suites": 122,
+      "passed": 627,
+      "failed": 0,
+      "skipped": 0
+    },
+    "repositorySafety": {
+      "passed": 55
+    },
+    "chromium": {
+      "passed": 7,
+      "backend": "controlled Capacitor fixture",
+      "liveAndroidPlayback": false
+    }
+  },
+  "actualAndroid": {
+    "platform": "API 35 x86_64 emulator",
+    "account": "anonymous local shell fixture",
+    "backend": "real Capacitor APK/CS3/repositories",
+    "physicalDevice": false,
+    "verifiedInstalls": [
+      "Manhatok",
+      "asia2tv",
+      "AnimeWitcher"
+    ],
+    "installedUiCounts": [
+      1,
+      2,
+      3
+    ],
+    "sameManagerAndRows": true,
+    "scrollPreserved": true,
+    "manhatokIconDecodedWidth": 96,
+    "cinemaWorkDetailsReached": true,
+    "decodedPlaybackObservations": 0,
+    "generalPlaybackProven": false,
+    "processRestartProven": false
+  },
+  "attempts": [
+    {
+      "applicationCommit": "e57f7b2f",
+      "run": 41384284074,
+      "artifact": 13115975984,
+      "result": "CANCELLED_FOR_DIAGNOSIS",
+      "findings": [
+        "real native installation and icons passed",
+        "untyped cinema work blocked",
+        "emulator disconnected; unbounded logcat collection waited for missing device"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41384284074",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41384284074/artifacts/13115975984"
+    },
+    {
+      "applicationCommit": "97656157",
+      "run": 41387919342,
+      "artifact": 13116204013,
+      "result": "FAIL",
+      "findings": [
+        "untyped cinema source rejected; explicit choice subsequently added",
+        "host kernel proved RenderThread segfault with 9.7GB RAM available"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41387919342",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41387919342/artifacts/13116204013"
+    },
+    {
+      "applicationCommit": "a73276d4",
+      "run": 41389803448,
+      "artifact": 13116759435,
+      "result": "FAIL",
+      "findings": [
+        "native installed UI counts 1,2,4 instead of 1,2,3",
+        "canonical cinema source counted twice; subsequently fixed"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41389803448",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41389803448/artifacts/13116759435"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "run": 41391127027,
+      "artifact": 13117856460,
+      "result": "FAIL",
+      "findings": [
+        "native installed UI counts 1,2,3 passed",
+        "source cinema details opened through explicit type choice",
+        "emulator host RenderThread segfault persisted with Vulkan disabled; no decoded playback proven"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027/artifacts/13117856460"
+    }
+  ]
+}
