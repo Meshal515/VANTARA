@@ -81,6 +81,21 @@ class CinemaFastPathTest {
         assertNull(r.pick(zero, 1f))
     }
 
+    @Test fun `a season or title number cannot override a known episode identity`() {
+        val resolver = EpisodeResolver({ null }, HealthStore(null))
+        val first = SourceEpisode("s1", "/season2/episode1", "Season 2 Episode 1", 1f)
+        assertNull(resolver.pick(listOf(first), 2f))
+        assertEquals(first, resolver.pick(listOf(first), 1f))
+        val zero = first.copy(name = "Season 2 Special", number = 0f)
+        assertNull(resolver.pick(listOf(zero), 2f))
+        assertEquals(zero, resolver.pick(listOf(zero), 0f))
+        val special = first.copy(name = "Season 2 Special", number = 1.5f)
+        assertNull(resolver.pick(listOf(special), 2f))
+        assertEquals(special, resolver.pick(listOf(special), 1.5f))
+        val unknown = first.copy(url = "/unknown", name = "Episode 2", number = -1f)
+        assertEquals(unknown, resolver.pick(listOf(first, unknown), 2f))
+    }
+
     @Test fun `a parent series resolves the requested season and caches each season independently`() = runBlocking {
         val seen = mutableListOf<String>()
         val adapter = object : AnimeAdapter {
@@ -171,6 +186,16 @@ class CinemaFastPathTest {
         p.job?.cancel()
         assertFalse(p.beginBatch())
     }
+    @Test fun `absolute deadline closes late discovery even when an earlier batch already finished`() {
+        val p = prepared()
+        p.finish()
+        assertTrue(p.done)
+        p.forceComplete()
+        assertFalse("The one-shot watchdog must close an already idle session", p.beginBatch())
+        assertEquals(0, p.reserveAddonBatches(listOf("addon|late")))
+        assertFalse(p.beginFullPreparation())
+    }
+
     @Test fun `external addon reservation survives immediate empty native completion`() {
         val p = prepared()
         p.reserveAddonBatches(listOf("addon|one", "addon|two", "addon|one"))
@@ -222,6 +247,16 @@ class CinemaFastPathTest {
         p.finish()
         assertTrue(p.done)
         assertEquals(0, p.reserveAddonBatches(listOf("addon|one")))
+    }
+
+    @Test fun `native late-copy batches reject a reused sessions old generation`() {
+        val p = prepared()
+        assertFalse(p.beginBatch("old-generation"))
+        assertTrue(p.beginBatch(p.addonGeneration))
+        p.finish()
+        assertFalse(p.done)
+        p.finish()
+        assertTrue(p.done)
     }
 
     @Test fun `old addon generation cannot claim or reserve batches in reused session`() {

@@ -26,7 +26,7 @@ import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
-import { isValid, validity } from '../lib/route-validity.js';
+import { isChecking, isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
@@ -122,6 +122,8 @@ export function createAnime(deps) {
     work: null,
     workFor: null,
     workPending: null,
+    workGeneration: 0,
+    workController: null,
     workError: false,
     playing: null,
     newestFirst: false,
@@ -1943,17 +1945,29 @@ export function createAnime(deps) {
   };
 
   /** يبحث عن الأنمي في كل المصادر العربية (محرك التطبيق): أول مصدر يطابق يكفي، والبقية تُضاف حين تصل. */
-  async function locateWork(m, token = state.detailToken) {
+  async function locateWork(m, token = state.detailToken, signal = null) {
     if (!engine.available()) return null;
+    const link = controller => {
+      if (!signal) return;
+      if (signal.aborted) controller.abort(signal.reason);
+      else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    };
+    if (state.workFor === m.id && state.workController) link(state.workController);
     if (state.workFor === m.id && state.work) return state.work;
     // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
     if (state.workFor === m.id && state.workPending) return state.workPending;
+    state.workController?.abort();
+    const controller = new AbortController();
+    state.workController = controller;
+    link(controller);
     state.work = null;
     state.workError = false;
     state.workFor = m.id;
     const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
-    const current = () => token === state.detailToken && state.workFor === m.id;
+    const generation = ++state.workGeneration;
+    const current = () => token === state.detailToken && state.workFor === m.id && generation === state.workGeneration;
     const adopt = (work) => {
+      if (controller.signal.aborted) return;
       keepWork(m.id, work);
       if (!current()) return;
       const copies = [...(state.work?.copies ?? []), ...work.copies];
@@ -1967,7 +1981,7 @@ export function createAnime(deps) {
       state.work = remembered;
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
-      void engine.findWorkStream(titles, adopt, { year: m.year ?? null }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
+      void engine.findWorkStream(titles, adopt, { year: m.year ?? null, signal: controller.signal }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
       void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(() => {});
       return remembered;
     }
@@ -1975,7 +1989,7 @@ export function createAnime(deps) {
     const pending = (async () => {
       try {
         let sourceError = null;
-        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null }).catch(error => { sourceError = error; return null; });
+        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null, signal: controller.signal }).catch(error => { sourceError = error; return null; });
         const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { if (copies.length) adopt({ title: m.title, copies }); return copies; });
         const work = await engine.firstAvailableCopies(core, addons);
         if (!work?.copies?.length && sourceError) throw sourceError;
@@ -1984,7 +1998,7 @@ export function createAnime(deps) {
         else paintSources(m, 'none');
         return work?.copies?.length ? state.work : null;
       } catch {
-        if (current()) { state.workError = true; paintSources(m, 'error'); }
+        if (current() && !controller.signal.aborted) { state.workError = true; paintSources(m, 'error'); }
         return null;
       } finally {
         if (state.workPending === pending) state.workPending = null;
@@ -2234,7 +2248,20 @@ export function createAnime(deps) {
     const togetherRef = `anime:${m.id}`;
     sheet.autoTogether = Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
     let paintQueued = false;
+    let paintFrame = null;
     let off = [];
+    const controller = new AbortController();
+    const preparation = new AbortController();
+    let cooldownTimer = null;
+    const closeSession = session => { if (session) void Promise.resolve().then(() => engine.closeSession(session)).catch(() => {}); };
+    const wait = (operation, signal = controller.signal, timeout = null) => new Promise((resolve, reject) => {
+      const cleanup = () => { signal.removeEventListener('abort', aborted); clearTimeout(timer); };
+      const aborted = () => { cleanup(); reject(signal.reason ?? new Error('تم إلغاء التجهيز')); };
+      const timer = timeout == null ? null : setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة تجهيز التشغيل')); }, timeout);
+      if (signal.aborted) aborted();
+      else signal.addEventListener('abort', aborted, { once: true });
+      Promise.resolve(operation).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+    });
 
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
@@ -2285,15 +2312,16 @@ export function createAnime(deps) {
       }
 
       // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
-      const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some(isValid);
+      const exhausted = () => sheet.done && !sheet.routes.some(isValid);
 
       const playRoute = async (r) => {
-        if (sheet.busy) return;
+        if (sheet.closed || sheet.busy) return;
         sheet.touched = true;
         sheet.busy = true;
         paint();
         try {
-          const candidate = await engine.pick(sheet.session, r.id);
+          const candidate = await wait(engine.pick(sheet.session, r.id), controller.signal, 15000);
+          if (sheet.closed) return;
           if (!candidate) {
             toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
             return;
@@ -2301,7 +2329,7 @@ export function createAnime(deps) {
           rememberCode(m.id, r.code);
           await launch(candidate, r.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
@@ -2310,11 +2338,11 @@ export function createAnime(deps) {
 
       // بلا جاهز بعد: «شغّل أول سيرفر يجهز» ينتظره المحرك ويزن الموثوقية وسيرفرك السابق
       const playBest = async () => {
-        if (sheet.busy || !sheet.session) return;
+        if (sheet.closed || sheet.busy || !sheet.session) return;
         sheet.busy = true;
         paint();
         try {
-          const out = await engine.best(sheet.session, prefer);
+          const out = await wait(engine.best(sheet.session, prefer), controller.signal, 15000);
           if (sheet.closed) return;
           if (!out?.candidate) {
             toast('لم يجهز أي سيرفر لهذه الحلقة الآن');
@@ -2322,7 +2350,7 @@ export function createAnime(deps) {
           }
           await launch(out.candidate, out.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
@@ -2356,11 +2384,11 @@ export function createAnime(deps) {
         sheet.noSources = true;
         paint();
       }, () => {});
-      const status = ui.status;
 
       const statusLine = () => {
         const ready = sheet.routes.filter(isValid).length;
         const total = sheet.routes.length;
+        if (sheet.prepareError) return { text: 'تعذّر تجهيز بعض السيرفرات — أعد المحاولة' };
         if (!sheet.session) {
           if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
           if (sheet.work === false) return { text: 'غير متوفر في المصادر العربية حاليًا' };
@@ -2374,6 +2402,9 @@ export function createAnime(deps) {
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
+        clearTimeout(cooldownTimer);
+        const retryWait = exhausted() ? engine.retrySeconds(sheet.retryAt) : 0;
+        if (retryWait) cooldownTimer = setTimeout(paint, 1000);
         ui.update({
           routes: sheet.routes,
           busy: sheet.busy,
@@ -2381,24 +2412,24 @@ export function createAnime(deps) {
           missing: sheet.work === false,
           // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر» (لا نلوم المصادر على غيابها)
           noSources: sheet.noSources === true && !sheet.routes.length,
-          error: Boolean(sheet.searchError),
+          error: Boolean(sheet.searchError || sheet.prepareError),
           status: statusLine(),
-          retry: exhausted() ? { wait: engine.retrySeconds(sheet.retryAt) } : null,
+          retry: exhausted() ? { wait: retryWait } : null,
         });
         // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
         if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some(isValid)) {
           sheet.autoTogether = false;
-          queueMicrotask(() => ui.best.onclick());
+          queueMicrotask(() => { if (!sheet.closed) ui.best.onclick(); });
         }
       };
       const queuePaint = () => {
-        if (paintQueued) return;
+        if (sheet.closed || paintQueued) return;
         paintQueued = true;
-        requestAnimationFrame(paint);
+        paintFrame = requestAnimationFrame(paint);
       };
 
       const onWork = (id, work) => {
-        if (sheet.closed || id !== m.id) return;
+        if (sheet.closed || sheet.expired || id !== m.id) return;
         sheet.work = work;
         sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
         if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
@@ -2406,67 +2437,106 @@ export function createAnime(deps) {
       workListeners.add(onWork);
       off.push(() => workListeners.delete(onWork));
       paint();
-      const cooldownTimer = setInterval(() => {
-        if (!sheet.closed && exhausted()) paint();
-      }, 1000);
-      void (async () => {
-        const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
-        if (sheet.closed) return;
-        if (!work) {
-          sheet.searchError = state.workFor === m.id && state.workError;
-          sheet.work = sheet.searchError ? null : false;
-          sheet.done = true;
-          paint();
-          return;
+      let preparationComplete = false;
+      const stopDeadline = () => { if (preparationComplete && sheet.done) clearTimeout(deadline); };
+      const fail = error => {
+        if (sheet.closed || sheet.expired) return;
+        sheet.expired = true;
+        sheet.prepareError = error || true;
+        sheet.done = true;
+        sheet.busy = false;
+        sheet.routes = sheet.routes.map(route => isChecking(route) ? { ...route, state: 'FAILED', reason: 'TIMEOUT' } : route);
+        // A new attempt must not reuse a search that never completed.
+        if (!sheet.work && state.workFor === m.id && state.workPending) {
+          state.workGeneration++;
+          state.workPending = null;
         }
-        sheet.work = work;
-        off.push(
-          engine.on('route', (e) => {
-            if (e.session !== sheet.session || !e.route) return;
-            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
-            sheet.routes = engine.upsertRoute(sheet.routes, e.route);
-            queuePaint();
-          }),
-          engine.on('prepared', (e) => {
-            if (e.session !== sheet.session) return;
-            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
-            sheet.done = true;
-            queuePaint();
-          }),
-        );
+        clearTimeout(deadline);
+        preparation.abort(error);
+        for (const unsubscribe of off) unsubscribe();
+        off = [];
+        paint();
+      };
+      const deadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), 45000);
+      const buffered = [];
+      const applyEvent = (type, event) => {
+        if (sheet.closed || sheet.expired || event.session !== sheet.session) return;
+        sheet.retryAt = Math.max(sheet.retryAt, Number(event.retryAt) || 0);
+        if (type === 'route' && event.route) sheet.routes = engine.upsertRoute(sheet.routes, event.route);
+        if (type === 'prepared') { sheet.done = true; stopDeadline(); }
+      };
+      const receiveEvent = (type, event) => {
+        if (sheet.closed || sheet.expired) return;
+        // The bridge may emit before its prepare reply identifies this session.
+        if (!sheet.session || !preparationComplete) buffered.push({ type, event });
+        if (sheet.session) { applyEvent(type, event); queuePaint(); }
+      };
+      off.push(engine.on('route', event => receiveEvent('route', event)), engine.on('prepared', event => receiveEvent('prepared', event)));
+      void (async () => {
         try {
+          const work = state.work && state.workFor === m.id ? state.work : await wait(locateWork(m, state.detailToken, preparation.signal), preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          if (!work) {
+            sheet.searchError = state.workFor === m.id && state.workError;
+            sheet.work = sheet.searchError ? null : false;
+            sheet.done = true;
+            preparationComplete = true;
+            stopDeadline();
+            paint();
+            return;
+          }
+          sheet.work = work;
           const copies = previousServer?.sourceId
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
-          // نفس ما يُعطى للمشغّل في playEpisode: يجهز من القرص قبل الضغط على تشغيل
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          // probe: «صالح» يُقال فقط لرابط فُحص فعلًا وأعاد وسائط (lib/route-validity.js)
-          const out = await engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true });
-          if (sheet.closed) {
-            if (out?.session) void engine.closeSession(out.session);
-            return;
-          }
+          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
+          // A bridge that ignores cancellation can reply after close or deadline.
+          void preparing.then(out => { if (sheet.closed || sheet.expired) closeSession(out?.session); }, () => {});
+          const out = await wait(preparing, preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          if (!out?.session) throw new Error('لم تبدأ جلسة تجهيز السيرفرات');
           sheet.session = out.session;
           sheet.copies = out.copies ?? copies;
+          sheet.routes = out.routes ?? [];
+          sheet.done = Boolean(out.done);
+          sheet.retryAt = Math.max(sheet.retryAt, Number(out.retryAt) || 0);
+          for (const { type, event } of buffered) applyEvent(type, event);
+          paint();
           if (state.workFor === m.id && state.work) onWork(m.id, state.work);
-          // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
-          const snap = await engine.routes(out.session);
-          sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);
-          sheet.routes = snap?.routes ?? out.routes ?? [];
-          sheet.done = Boolean(snap?.done ?? out.done);
+          const snap = await wait(engine.routes(out.session, { signal: preparation.signal }), preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt) || 0);
+          for (const route of snap?.routes ?? []) sheet.routes = engine.upsertRoute(sheet.routes, route);
+          sheet.done = sheet.done || Boolean(snap?.done);
+          // Events newer than the snapshot win, including those emitted before prepare returned.
+          for (const { type, event } of buffered) applyEvent(type, event);
+          buffered.length = 0;
+          preparationComplete = true;
+          stopDeadline();
           queuePaint();
-        } catch (e) {
-          status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
+        } catch (error) {
+          fail(error);
         }
       })();
 
       return () => {
+        if (sheet.closed) return;
         sheet.closed = true;
-        clearInterval(cooldownTimer);
-        for (const f of off) f();
+        clearTimeout(deadline);
+        clearTimeout(cooldownTimer);
+        if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);
+        controller.abort();
+        preparation.abort();
+        ui.destroy?.();
+        for (const unsubscribe of off) unsubscribe();
         off = [];
-        // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
-        if (!sheet.launched && sheet.session) void engine.closeSession(sheet.session);
+        buffered.length = 0;
+        if (!sheet.work && state.workFor === m.id && state.workPending) {
+          state.workGeneration++;
+          state.workPending = null;
+        }
+        if (!sheet.launched) closeSession(sheet.session);
       };
     }, { tone: 'anime', full: true });
 

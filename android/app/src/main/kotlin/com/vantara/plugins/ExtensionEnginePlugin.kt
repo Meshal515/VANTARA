@@ -97,6 +97,17 @@ class ExtensionEnginePlugin : Plugin() {
         val spec = packageSpec(pkg)?.let { builtinSpecs.current(it) } ?: return false
         return loader.readVerifiedCache(spec) != null || readBundled(spec) != null
     }
+    /** Durable legacy entitlement: inspect verified local artifacts only, without preparing a source. */
+    private fun localArtifactSpec(base: SourceSpec): SourceSpec? {
+        val candidates = listOfNotNull(builtinSpecs.current(base), builtinSpecs.previousOf(base), base)
+            .distinctBy { it.sha256.lowercase() }
+        return candidates.firstOrNull { candidate ->
+            loader.readVerifiedCache(candidate) != null ||
+                // Match the loader's preference: a valid current bundled artifact wins
+                // before an older cached candidate. Only the base digest can use assets.
+                (candidate.sha256.equals(base.sha256, true) && readBundled(base) != null)
+        }
+    }
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override fun load() {
@@ -155,8 +166,16 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val st = userStore.state
                 val list = JSArray()
+                // Filler language rows can share a package. Cache misses as well as hits so
+                // each package's archive digests are checked only once during this listing.
+                val artifacts = mutableMapOf<String, SourceSpec?>()
+                fun artifact(base: SourceSpec): SourceSpec? {
+                    if (!artifacts.containsKey(base.pkg)) artifacts[base.pkg] = localArtifactSpec(base)
+                    return artifacts[base.pkg]
+                }
                 for (spec in SPIKE_SOURCES) {
                     if (spec.blockedReason != null) continue
+                    val installed = artifact(spec)
                     list.put(
                         JSObject()
                             .put("id", spec.pkg)
@@ -169,6 +188,8 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("lang", "ar")
                             .put("domain", runCatching { (loaded[spec.pkg] as? HttpSource)?.baseUrl }.getOrNull())
                             .put("ready", loaded.containsKey(spec.pkg))
+                            .put("artifactPresent", installed != null)
+                            .put("installedVersion", installed?.versionName ?: org.json.JSONObject.NULL)
                             .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
                     )
                 }
@@ -176,6 +197,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (filler in FILLER_SOURCES) {
                     val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
                     val id = "${filler.pkg}@${filler.lang}"
+                    val installed = artifact(spec)
                     list.put(
                         JSObject()
                             .put("id", id)
@@ -189,12 +211,15 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("filler", true)
                             .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
                             .put("ready", loaded.containsKey(id))
+                            .put("artifactPresent", installed != null)
+                            .put("installedVersion", installed?.versionName ?: org.json.JSONObject.NULL)
                             .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", spec.pkg, spec.sha256)),
                     )
                 }
                 // ما ثبّته المستخدم من مستودعاته: معرّفه pkg#sourceId، والعربي يظهر في القوائم
                 for (ext in st.extensions) {
                     val icon = NativeExtensionIcons.iconUrl(context, "extensions", ext.pkg, ext.sha256)
+                        ?: RepoIndex.iconUrl(ext.iconUrl, ext.repoUrl) ?: RepoIndex.legacyIconUrl(ext.repoUrl, ext.pkg)
                     for (src in ext.sources) {
                         val id = "${ext.pkg}#${src.id}"
                         list.put(
@@ -298,6 +323,8 @@ class ExtensionEnginePlugin : Plugin() {
                         .put("installed", JSArray(st.extensions.map {
                             JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl)
                                 .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256)
+                                    ?: RepoIndex.iconUrl(it.iconUrl, it.repoUrl)
+                                    ?: RepoIndex.legacyIconUrl(it.repoUrl, it.pkg)
                                     ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
                         })),
                 )
@@ -405,7 +432,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val fresh = UserExtension(
                     repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
                     versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
-                    sources = visible.map { UserSource(it.id, it.name, it.lang) }, versionCode = ext.versionCode,
+                    sources = visible.map { UserSource(it.id, it.name, it.lang) }, versionCode = ext.versionCode, iconUrl = ext.iconUrl,
                 )
                 // التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا،
                 // وإن فشل بقي القديم محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم)

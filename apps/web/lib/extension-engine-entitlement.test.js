@@ -12,8 +12,8 @@ async function load(createdAt) {
   written = [];
   plugin = {
     sources: vi.fn(async () => ({ sources: [
-      { id: DILAR, label: 'Dilar', version: '1.4.5', lang: 'ar' },
-      { id: AZORA, label: 'Azora', version: '1.4.9', lang: 'ar' },
+      { id: DILAR, label: 'Dilar', version: '1.4.5', installedVersion: '1.4.5', artifactPresent: true, ready: false, lang: 'ar' },
+      { id: AZORA, label: 'Azora', version: '1.4.9', installedVersion: '1.4.9', artifactPresent: true, ready: false, lang: 'ar' },
       { id: `${AZORA}@en`, label: 'Azora EN', filler: true, lang: 'en' },
       { id: `${OTHER}#9`, label: 'Other', user: true, lang: 'ar' },
     ] })),
@@ -81,7 +81,7 @@ it('مستودع Keiyoushi: الحزمة المدمجة سابقًا لا تُث
   expect(list[1]).toMatchObject({ pkg: OTHER, installed: '1.0' });
   await repos.install('https://repo', DILAR);
   expect(plugin.installExtension).not.toHaveBeenCalled();
-  expect((await repos.extensions('https://repo'))[0].installed).toBe('1.4.6');
+  expect((await repos.extensions('https://repo'))[0].installed).toBe('1.4.5');
   await repos.install('https://repo', OTHER);
   expect(plugin.installExtension).toHaveBeenCalledWith({ repo: 'https://repo', pkg: OTHER });
 });
@@ -261,4 +261,75 @@ it('refuses a stale explicit context after returning to the original account', a
   await expect(e.choosePackage(DILAR, true, context)).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
   expect(written).toEqual([]);
   expect(e.entitlement().added.has(DILAR)).toBe(false);
+});
+
+it('keeps a verified cached legacy package installed after runtime unload and uses its stored version', async () => {
+  await load(EXISTING);
+  plugin.sources.mockResolvedValue({ sources: [
+    { id: DILAR, label: 'Dilar', version: '1.4.5', installedVersion: '1.4.4', artifactPresent: true, ready: false, lang: 'ar' },
+  ] });
+  const ready = engine.readySources();
+  expect(await ready.extensions()).toMatchObject([{ pkg: DILAR, selected: true, installed: '1.4.4', pendingRestore: false }]);
+  expect((await ready.list()).installed).toMatchObject([{ pkg: DILAR, installed: '1.4.4' }]);
+});
+
+it('keeps selected packages without verified artifacts recoverable without counting them installed', async () => {
+  await load(EXISTING);
+  plugin.sources.mockResolvedValue({ sources: [
+    { id: DILAR, label: 'Dilar', version: '1.4.5', installedVersion: null, artifactPresent: false, ready: false, lang: 'ar' },
+  ] });
+  const ready = engine.readySources();
+  expect(await ready.extensions()).toMatchObject([{ pkg: DILAR, selected: true, installed: null, pendingRestore: true }]);
+  const list = await ready.list();
+  expect(list.installed).toEqual([]);
+  expect(list.pending).toMatchObject([{ pkg: DILAR, selected: true, pendingRestore: true, repo: engine.READY_REPOSITORY }]);
+  expect(list.repos).toEqual([{ url: engine.READY_REPOSITORY, name: 'مصادر جاهزة' }]);
+  await ready.uninstall(DILAR);
+  expect(e.visible({ id: DILAR })).toBe(false);
+  expect((await ready.list()).pending).toEqual([]);
+  expect((await ready.list()).repos).toEqual([]);
+});
+
+it('reads formerly bundled installed versions from native artifacts instead of the repository candidate', async () => {
+  await load(EXISTING);
+  plugin.sources.mockResolvedValue({ sources: [
+    { id: DILAR, label: 'Dilar', version: '1.4.5', installedVersion: '1.4.4', artifactPresent: true, ready: false },
+  ] });
+  const repos = engine.repositories();
+  expect((await repos.extensions('https://repo'))[0]).toMatchObject({
+    pkg: DILAR, version: '1.4.6', installed: '1.4.4', selected: true, pendingRestore: false, formerlyBundled: true,
+  });
+  plugin.repoIndex.mockRejectedValue(new Error('repository offline'));
+  expect((await engine.readySources().list()).installed).toMatchObject([{ pkg: DILAR, installed: '1.4.4' }]);
+});
+
+it('does not convert a selected missing artifact into an installed repository candidate', async () => {
+  await load(EXISTING);
+  plugin.sources.mockResolvedValue({ sources: [
+    { id: DILAR, label: 'Dilar', version: '1.4.5', artifactPresent: false, ready: true },
+  ] });
+  expect((await engine.repositories().extensions('https://repo'))[0]).toMatchObject({
+    pkg: DILAR, installed: null, selected: true, pendingRestore: true,
+  });
+});
+
+it('keeps a clean account empty even when legacy artifacts are stored on the device', async () => {
+  await load(NEW);
+  plugin.sources.mockResolvedValue({ sources: [
+    { id: DILAR, label: 'Dilar', version: '1.4.5', installedVersion: '1.4.4', artifactPresent: true, ready: true },
+  ] });
+  expect(await engine.readySources().list()).toMatchObject({ repos: [], installed: [], pending: [] });
+  expect((await engine.readySources().extensions())[0]).toMatchObject({ selected: false, installed: null, pendingRestore: false });
+  expect((await engine.repositories().extensions('https://repo'))[0]).toMatchObject({ selected: false, installed: null, pendingRestore: false });
+});
+
+it('preserves older bridge source access while keeping unknown storage evidence pending', async () => {
+  await load(EXISTING);
+  plugin.sources.mockResolvedValue({ sources: [{ id: DILAR, label: 'Dilar', version: '1.4.5', ready: true }] });
+  const list = await engine.readySources().list();
+  expect(list.installed).toEqual([]);
+  expect(list.pending).toMatchObject([{ pkg: DILAR, selected: true, installed: null, pendingRestore: true, installationEvidence: 'unknown' }]);
+  expect(list.pending[0].artifactPresent).toBeUndefined();
+  expect(list.repos).toHaveLength(1);
+  expect((await engine.sources()).map(source => source.id)).toEqual([DILAR]);
 });

@@ -897,13 +897,20 @@ export function createCinema(deps) {
       .sort((a, b) => b.score - a.score)
       .slice(0, 6)
       .map((x) => x.c);
-  const locator = createLocator({
-    searchStream: (query, content, onHit) => engine.searchStream(query, content, onHit),
+  const locator = (input, signal) => createLocator({
+    searchStream: (query, content, onHit) => engine.searchStream(query, content, onHit, { signal }),
     queries: queriesFor,
     match: (items, c) => pickCopies(items, c),
     near: nearCopies,
     memory,
-  });
+    wait: ms => new Promise((resolve, reject) => {
+      const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+      const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason ?? new Error('تم إلغاء البحث')); };
+      const timer = setTimeout(finish, ms);
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+    }),
+  })(input);
 
   // إخوة الاسم من بحث Cinemeta (مرتبًا بالشهرة): نتائج شاشة البحث تُحفظ هنا،
   // وما لم يمرّ بها يُسأل عنه مرة. الاستعلام مفتاح نتائج بحث، لا هوية عمل.
@@ -917,9 +924,16 @@ export function createCinema(deps) {
     return Promise.all(keys.map((k) => peerResults.get(k))).then((lists) => (lists.every((l) => l == null) ? null : [...new Map(lists.flat().filter(Boolean).map((r) => [r.id, r])).values()]));
   }
   /** معايير هوية العمل للمطابقة؛ إخوة الاسم بمهلة قصيرة كي لا يتأخر البحث. */
-  function identityFor(m, season) {
-    const timeout = new Promise((r) => setTimeout(() => r(null), 2500));
-    return Promise.race([peersOf(m), timeout]).then((results) => matchCriteria(m, { season, results: results ?? null }));
+  const waitFor = (operation, signal, timeout = null) => new Promise((resolve, reject) => {
+    const cleanup = () => { signal.removeEventListener('abort', abort); clearTimeout(timer); };
+    const abort = () => { cleanup(); reject(signal.reason ?? new Error('تم إلغاء الطلب')); };
+    const timer = timeout == null ? null : setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة الطلب')); }, timeout);
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(operation).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+  });
+  function identityFor(m, season, signal) {
+    return waitFor(peersOf(m), signal, 2500).catch(() => null).then(results => matchCriteria(m, { season, results }));
   }
 
   /** بحث حيّ لهذا العمل/الموسم، مشترك بين صفحة العمل وورقة السيرفرات والتجهيز المسبق. */
@@ -928,7 +942,10 @@ export function createCinema(deps) {
     const key = playKey(m, season);
     const old = state.works.get(key);
     if (old) return old;
-    const h = locator({ key, ...matchCriteria(m, { season }), ready: identityFor(m, season) });
+    const controller = new AbortController();
+    const h = locator({ key, ...matchCriteria(m, { season }), ready: identityFor(m, season, controller.signal) }, controller.signal);
+    const cancel = h.cancel;
+    h.cancel = () => { controller.abort(); cancel(); };
     h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
     if (h.found.fast) h.run.fastPath();
     h.onHit((hit, info) => {
@@ -965,118 +982,138 @@ export function createCinema(deps) {
   // «شاهد» يكون أول سيرفر جاهزًا غالبًا، والبقية تكمل بالخلفية. جلسة واحدة دافئة.
 
   const WARM_TTL = 8 * 60_000; // روابط الفيديو تنتهي خلال دقائق
+  const closeSession = session => { if (session) void Promise.resolve().then(() => engine.closeSession(session)).catch(() => {}); };
   function dropWarm() {
     const w = state.warm;
     if (!w) return;
     state.warm = null;
     w.closed = true;
+    clearTimeout(w.deadline);
+    w.controller.abort();
+    w.handle.cancel?.();
+    if (state.works.get(w.key) === w.handle) state.works.delete(w.key);
     for (const f of w.off) f();
     w.off = [];
     w.copyOff?.();
+    w.listeners.clear();
     w.run?.save();
-    if (w.session && !w.launched) void engine.closeSession(w.session);
+    if (!w.launched) closeSession(w.session);
   }
   function warmUp(m, season, n) {
     const key = playKey(m, season);
     const episode = m.type === 'movie' ? -1 : n;
     const forPreparation = copies => m.type === 'series' ? copies.map(c => ({ ...c, requestedSeason: season })) : copies;
     const cur = state.warm;
-    if (cur && !cur.closed && cur.key === key && cur.episode === episode && Date.now() - cur.at < WARM_TTL) return cur;
+    if (cur && !cur.closed && !cur.error && cur.key === key && cur.episode === episode && Date.now() - cur.at < WARM_TTL) return cur;
     dropWarm();
     const h = locateHandle(m, season);
-    // فتحة ثانية لنفس العمل بعد انتهاء الأولى: قياس جديد يبدأ من الآن
     if (h.run.saved) {
       h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
       h.run.fastPath();
     }
     const session = `cn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    const w = { key, episode, at: Date.now(), session: null, routes: [], done: false, missing: false, closed: false, launched: false, remembered: false, handle: h, copies: [], run: h.run, off: [], listeners: new Set() };
+    const w = { key, episode, at: Date.now(), session: null, routes: [], done: false, missing: false, closed: false, launched: false, remembered: false, handle: h, copies: [], run: h.run, off: [], listeners: new Set(), controller: new AbortController() };
     state.warm = w;
-    const notify = () => {
-      for (const fn of w.listeners) fn(w);
-    };
+    const notify = () => { if (!w.closed) for (const fn of w.listeners) fn(w); };
     w.notify = notify;
-    void (async () => {
-      const identity = {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n};
-      const found = await engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identity));
-      if (w.closed) return;
-      if (!found.copies.length) {
-        w.missing = true;
+    const fail = error => {
+      if (w.closed || w.expired || w.launched) return;
+      w.expired = true;
+      w.error = String(error?.message ?? error);
+      w.done = true;
+      w.routes = w.routes.map(route => routePending(route) ? { ...route, state: 'FAILED', reason: 'TIMEOUT' } : route);
+      clearTimeout(w.deadline);
+      w.controller.abort(error);
+      h.cancel?.();
+      if (state.works.get(key) === h) state.works.delete(key);
+      for (const off of w.off) off();
+      w.off = [];
+      w.copyOff?.();
+      w.run.save();
+      notify();
+    };
+    const armDeadline = () => {
+      clearTimeout(w.deadline);
+      w.deadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), 45000);
+    };
+    armDeadline();
+    let recovered = false;
+    const buffered = [];
+    const adoptRoute = route => {
+      w.routes = engine.upsertRoute(w.routes, route);
+      w.run.route(route);
+      if (route.state === 'READY' && route.probed === true && !w.remembered) {
+        w.remembered = true;
+        memory.remember(key, h.found.copies, h.found.copies.find(copy => copy.sourceId === route.sourceId));
+      }
+    };
+    w.off.push(
+      engine.on('route', event => {
+        if (event.session !== session || w.closed || w.expired || !event.route) return;
+        if (!recovered) buffered.push(event.route);
+        adoptRoute(event.route);
+        notify();
+      }),
+      engine.on('prepared', event => {
+        if (event.session !== session || w.closed || w.expired) return;
         w.done = true;
+        if (recovered) clearTimeout(w.deadline);
+        noteServer(w.routes);
         w.run.save();
         notify();
-        return;
-      }
-      // المستمعان قبل الطلب: أول سيرفر قد يجهز قبل أن يعود النداء نفسه
-      w.off.push(
-        engine.on('route', (e) => {
-          if (e.session !== session || w.closed) return;
-          const i = w.routes.findIndex((r) => r.id === e.route.id);
-          if (i >= 0) w.routes[i] = e.route;
-          else w.routes.push(e.route);
-          w.run.route(e.route);
-          // أول سيرفر جاهز: نسخة مصدره تُحفظ للعمل، فالفتحة القادمة تبدأ منها مباشرة
-          if (e.route.state === 'READY' && e.route.probed === true && !w.remembered) {
-            w.remembered = true;
-            memory.remember(key, h.found.copies, h.found.copies.find((c) => c.sourceId === e.route.sourceId));
-          }
-          notify();
-        }),
-        engine.on('prepared', (e) => {
-          if (e.session !== session || w.closed) return;
+      }),
+    );
+    void (async () => {
+      try {
+        const identity = {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n};
+        const found = await waitFor(engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identity)), w.controller.signal);
+        if (w.closed || w.expired) return;
+        if (!found.copies.length) {
+          if (!found.answered && Object.values(found.sources ?? {}).some(source => source.error || source.skipped)) throw new Error('تعذّر البحث في المصادر');
+          w.missing = true;
           w.done = true;
-          noteServer(w.routes);
+          clearTimeout(w.deadline);
           w.run.save();
           notify();
-        }),
-      );
-      const pref = memory.server(key);
-      w.run.prepared();
-      // لقطة ثابتة: ما يصل أثناء النداء يُضاف بعده (`extend`) فلا يضيع ولا يتكرر
-      const initial = [...found.copies];
-      // نفس ما يُعطى للمشغّل: يجهز من القرص قبل الضغط على تشغيل
-      engine.warmArt([m.background, m.logo]);
-      try {
-        const out = await engine.prepare({
-          session,
-          copies: forPreparation(initial),
-          identity: {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n},
-          episode,
-          preferredSourceId: pref?.sourceId ?? null,
-          preferredServer: pref?.server ?? null,
-          probe: true,
-        });
-        if (w.closed) return;
-        w.session = out?.session ?? session;
-        w.copies = out?.copies ?? forPreparation(initial);
-        for (const r of out?.routes ?? []) if (!w.routes.some((x) => x.id === r.id)) w.routes.push(r);
-        if (out?.done) w.done = true;
-      } catch (e) {
-        w.error = String(e?.message ?? e);
-        w.done = true;
-      }
-      notify();
-      // مصدر ردّ بعد بدء التجهيز: نسخته تدخل الجلسة نفسها، وما يعمل لا يتوقف
-      w.copyOff = h.onCopies((fresh) => {
-          if (w.closed || !w.session) return;
-          const prepared = forPreparation(fresh);
-          for (const c of prepared) if (!w.copies.some(old => old.sourceId === c.sourceId && old.url === c.url)) w.copies.push(c);
-          void engine.extend(w.session, prepared).then((added) => {
-            if (added && !w.closed) {
-              w.done = false;
-              notify();
-            }
-          });
-        });
-      h.done.finally(() => {
-        w.copyOff?.();
+          return;
+        }
+        const pref = memory.server(key);
+        w.run.prepared();
+        const initial = [...found.copies];
+        engine.warmArt([m.background, m.logo]);
+        const preparing = Promise.resolve(engine.prepare({ session, copies: forPreparation(initial), identity, episode, preferredSourceId: pref?.sourceId ?? null, preferredServer: pref?.server ?? null, probe: true, signal: w.controller.signal }));
+        void preparing.then(out => { if (w.closed || w.expired) closeSession(out?.session); }, () => {});
+        const out = await waitFor(preparing, w.controller.signal);
+        if (w.closed || w.expired) return;
+        if (!out?.session) throw new Error('لم تبدأ جلسة تجهيز السيرفرات');
+        w.session = out.session;
+        w.copies = out.copies ?? forPreparation(initial);
+        for (const route of out.routes ?? []) if (!w.routes.some(old => old.id === route.id)) adoptRoute(route);
+        w.done = w.done || Boolean(out.done);
         notify();
-      });
-      const late = h.found.copies.filter((c) => !initial.includes(c));
-      if (late.length && w.session) {
-        const prepared = forPreparation(late);
-        for (const c of prepared) if (!w.copies.some(old => old.sourceId === c.sourceId && old.url === c.url)) w.copies.push(c);
-        void engine.extend(w.session, prepared);
+        const snapshot = await waitFor(engine.routes(w.session, { signal: w.controller.signal }), w.controller.signal);
+        if (w.closed || w.expired) return;
+        for (const route of snapshot?.routes ?? []) adoptRoute(route);
+        for (const route of buffered) adoptRoute(route);
+        buffered.length = 0;
+        w.done = w.done || Boolean(snapshot?.done);
+        recovered = true;
+        if (w.done) clearTimeout(w.deadline);
+        notify();
+        const extend = fresh => {
+          if (w.closed || w.expired || w.launched || !w.session) return;
+          const prepared = forPreparation(fresh);
+          for (const copy of prepared) if (!w.copies.some(old => old.sourceId === copy.sourceId && old.url === copy.url)) w.copies.push(copy);
+          void engine.extend(w.session, prepared).then(added => {
+            if (added && !w.closed && !w.expired && !w.launched) { w.done = false; armDeadline(); notify(); }
+          }, fail);
+        };
+        w.copyOff = h.onCopies(extend);
+        void h.done.then(() => { w.copyOff?.(); notify(); }, fail);
+        const late = h.found.copies.filter(copy => !initial.includes(copy));
+        if (late.length) extend(late);
+      } catch (error) {
+        fail(error);
       }
     })();
     return w;
@@ -1726,6 +1763,8 @@ export function createCinema(deps) {
     sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
     let off = [];
     let queued = false;
+    let paintFrame = null;
+    const controller = new AbortController();
     deps.openSheet((body) => {
       // رأس الورقة (server-sheet.js): لقطة الحلقة (أو خلفية العمل) بشعار metahub، ثم التقييم والتاريخ والمدة والوصف
       const epMeta = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n);
@@ -1773,31 +1812,32 @@ export function createCinema(deps) {
       }
 
       const playRoute = async (r) => {
-        if (sheet.busy) return;
+        if (sheet.closed || sheet.busy || !sheet.session) return;
         sheet.busy = true;
         queuePaint();
         try {
-          const candidate = await engine.pick(sheet.session, r.id);
+          const candidate = await waitFor(engine.pick(sheet.session, r.id), controller.signal, 15000);
+          if (sheet.closed) return;
           if (!candidate) return void toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
           await launch(candidate, r.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
         }
       };
       const playBest = async () => {
-        if (sheet.busy || !sheet.session) return;
+        if (sheet.closed || sheet.busy || !sheet.session) return;
         sheet.busy = true;
         queuePaint();
         try {
-          const out = await engine.best(sheet.session);
+          const out = await waitFor(engine.best(sheet.session), controller.signal, 15000);
           if (sheet.closed) return;
           if (!out?.candidate) return void toast('لم يجهز أي سيرفر الآن');
           await launch(out.candidate, out.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
@@ -1819,11 +1859,11 @@ export function createCinema(deps) {
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
+        onRetry: () => { deps.closeSheet(); dropWarm(); play(m, season, n, position); },
         onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('cinema'); } } : {}),
       });
-      const status = ui.status;
       const best = ui.best;
       // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر»
       void deps.playableSources?.('cinema').then((count) => {
@@ -1837,7 +1877,7 @@ export function createCinema(deps) {
         const ready = sheet.routes.filter(routeSelectable).length;
         if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.session && ready) {
           sheet.autoTogether = false;
-          queueMicrotask(() => best.onclick());
+          queueMicrotask(() => { if (!sheet.closed) best.onclick(); });
         }
         // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
         // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
@@ -1845,7 +1885,8 @@ export function createCinema(deps) {
         const settled = sheet.done || (sheet.routes.length > 0 && !pendingRoute && sheet.found?.done === true);
         const torrents = sheet.routes.filter((r) => routeSelectable(r) && isTorrentRoute(r)).length;
         let line;
-        if (sheet.missing) line = { text: m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا' };
+        if (sheet.error) line = { text: 'تعذّر تجهيز بعض السيرفرات — أعد المحاولة' };
+        else if (sheet.missing) line = { text: m.type === 'series' ? `الموسم ${season} غير متوفر في المصادر العربية حاليًا` : 'غير متوفر في المصادر العربية حاليًا' };
         else if (!sheet.session) line = { text: 'نبحث في المصادر العربية والإضافات…', spin: true };
         else if (!settled && !ready) line = { text: 'نجهّز السيرفرات…', spin: true };
         else if (!ready) line = { text: 'لم يجهز أي سيرفر الآن' };
@@ -1854,13 +1895,12 @@ export function createCinema(deps) {
           const parts = [direct ? `${direct} مباشر` : null, torrents ? `${torrents} تورنت` : null].filter(Boolean).join(' · ');
           line = { text: `${parts} جاهز${settled ? '' : ' · البقية تصل'}`, spin: !settled };
         }
-        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, noSources: sheet.noSources === true && !sheet.routes.length, status: line });
-        if (sheet.error && !sheet.routes.length) status.textContent = `تعذّر تجهيز السيرفرات: ${sheet.error}`;
+        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, error: Boolean(sheet.error), noSources: sheet.noSources === true && !sheet.routes.length, status: line, retry: settled && !ready ? { wait: 0 } : null });
       };
       const queuePaint = () => {
-        if (queued) return;
+        if (sheet.closed || queued) return;
         queued = true;
-        requestAnimationFrame(paint);
+        paintFrame = requestAnimationFrame(paint);
       };
       paint();
 
@@ -1870,7 +1910,7 @@ export function createCinema(deps) {
       const sync = () => {
         if (sheet.closed) return;
         sheet.session = w.session;
-        sheet.routes = w.routes;
+        sheet.routes = w.session ? w.routes : [];
         sheet.done = w.done;
         sheet.missing = w.missing;
         sheet.found = w.handle.found;
@@ -1882,10 +1922,14 @@ export function createCinema(deps) {
       sync();
 
       return () => {
+        if (sheet.closed) return;
         sheet.closed = true;
+        controller.abort();
+        if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);
+        ui.destroy();
         for (const f of off) f();
         off = [];
-        // الجلسة تبقى دافئة لصفحة العمل؛ تُغلق حين تغادر العمل أو تنتهي صلاحيتها
+        if (!sheet.launched && state.warm === w) dropWarm();
       };
     }, { tone: 'cinema', full: true });
 
@@ -1895,6 +1939,10 @@ export function createCinema(deps) {
       // الجلسة صارت للمشغّل: لا تُغلق من هنا، والتجهيز القادم يبدأ جلسة جديدة
       if (w) {
         w.launched = true;
+        clearTimeout(w.deadline);
+        w.controller.abort();
+        w.copyOff?.();
+        w.handle.cancel?.();
         if (state.warm === w) state.warm = null;
         for (const f of w.off) f();
         w.off = [];

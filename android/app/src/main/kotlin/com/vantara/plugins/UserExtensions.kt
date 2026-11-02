@@ -70,23 +70,43 @@ object RepoIndex {
         return url.takeIf { uri.scheme.equals("https", ignoreCase = true) && uri.host != null && uri.rawUserInfo == null }
     }
 
-    fun parseMeta(text: String): Meta {
+    fun parseMeta(text: String, base: String? = null): Meta {
         val meta = json.parseToJsonElement(text).jsonObject["meta"]?.jsonObject ?: error("repo.json بلا meta")
         val name = meta["name"]?.jsonPrimitive?.contentOrNull?.take(80)?.ifBlank { null } ?: error("المستودع بلا اسم")
         val fingerprint = meta["signingKeyFingerprint"]?.jsonPrimitive?.contentOrNull?.lowercase()?.replace(":", "")
         require(fingerprint != null && SHA256.matches(fingerprint)) { "المستودع لا يعلن مفتاح توقيع؛ لا نشغّل كودًا بلا توقيع معروف" }
-        return Meta(name, fingerprint, declaredIcon(meta))
+        return Meta(name, fingerprint, declaredIcon(meta, base))
     }
 
-    /** Only an actual HTTPS image reference supplied by the repository; no guessed paths. */
-    private fun declaredIcon(value: JsonObject): String? = sequenceOf("iconUrl", "logo", "icon")
+    /** Public image metadata only: relative references resolve against the repository root. */
+    fun iconUrl(raw: String?, base: String? = null): String? = runCatching {
+        require(!raw.isNullOrBlank() && raw.length <= 2048)
+        val reference = URI(raw.trim())
+        val uri = if (reference.isAbsolute) reference else {
+            require(base != null)
+            URI("${this.base(base)}/").resolve(reference)
+        }.normalize()
+        require(uri.scheme.equals("https", true) && uri.host != null && uri.rawUserInfo == null && uri.port == -1)
+        require(uri.rawFragment == null)
+        val path = uri.rawPath.orEmpty()
+        val github = if (uri.host.equals("github.com", true))
+            Regex("^/([^/]+)/([^/]+)/raw/(?:refs/heads/)?(.+)$").matchEntire(path) else null
+        val rawGithub = if (uri.host.equals("raw.githubusercontent.com", true))
+            Regex("^/([^/]+)/([^/]+)/refs/heads/(.+)$").matchEntire(path) else null
+        val match = github ?: rawGithub
+        if (match != null) {
+            "https://raw.githubusercontent.com/${match.groupValues[1]}/${match.groupValues[2]}/${match.groupValues[3]}" +
+                (uri.rawQuery?.let { "?$it" } ?: "")
+        } else uri.toASCIIString()
+    }.getOrNull()
+
+    /** Mihon's legacy index protocol publishes one package image at this path. No APK download. */
+    fun legacyIconUrl(base: String, pkg: String): String? =
+        if (PKG.matches(pkg)) runCatching { iconUrl("icon/$pkg.png", this.base(base)) }.getOrNull() else null
+
+    private fun declaredIcon(value: JsonObject, base: String? = null): String? = sequenceOf("iconUrl", "logo", "icon")
         .mapNotNull { key -> (value[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-        .firstOrNull { raw ->
-            raw.length <= 2048 && runCatching {
-                val uri = URI(raw)
-                uri.scheme.equals("https", true) && uri.host != null && uri.rawUserInfo == null && uri.port == -1
-            }.getOrDefault(false)
-        }
+        .mapNotNull { iconUrl(it, base) }.firstOrNull()
 
     fun parseIndex(text: String, base: String): List<Extension> {
         val list = json.parseToJsonElement(text) as? JsonArray ?: error("index.min.json ليس قائمة")
@@ -106,7 +126,7 @@ object RepoIndex {
             Extension(
                 name = (o["name"]?.jsonPrimitive?.contentOrNull ?: pkg).removePrefix("Tachiyomi: ").removePrefix("Aniyomi: "),
                 pkg = pkg, apkUrl = "$base/apk/$apk", lang = o["lang"]?.jsonPrimitive?.contentOrNull ?: "",
-                version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources, iconUrl = declaredIcon(o),
+                version = version, lib = lib, nsfw = (o["nsfw"]?.jsonPrimitive?.intOrNull ?: 0) == 1, sources = sources, iconUrl = declaredIcon(o, base) ?: legacyIconUrl(base, pkg),
                 versionCode = o["code"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 } ?: 0,
             )
         }
@@ -114,41 +134,53 @@ object RepoIndex {
 
     /**
      * index.pb (v2): Index { 1 name, 3 signingKeyFingerprint, 101 { 1 Extension... } }
-     * Extension { 1 name, 2 pkg, 3 { 1 apkUrl }, 4 lib, 6 versionName, 7 contentWarning (1 آمن، 2 مختلط، 3 للكبار),
-     *             8 Source { 1 id, 2 name, 3 lang } }
+     * Extension { 1 name, 2 pkg, 3 { 1 apkUrl, 2 iconUrl }, 4 lib, 6 versionName, 7 contentWarning (1 آمن، 2 مختلط، 3 للكبار),
+     *             8 Source (Mihon) / 9 Source (Aniyomi) { 1 id, 2 name, 3 lang } }
      * يُفك يدويًا (حقول قليلة ثابتة) بلا مخطط مولَّد.
      */
-    fun parseIndexV2(raw: ByteArray): Pair<Meta, List<Extension>> {
+    fun parseIndexV2(raw: ByteArray, base: String? = null): Pair<Meta, List<Extension>> {
         val top = Pb(unpack(raw)).fields()
         val name = top.text(1)?.take(80)?.ifBlank { null } ?: error("فهرس المستودع بلا اسم")
         val fingerprint = top.text(3)?.lowercase()?.replace(":", "")
         require(fingerprint != null && SHA256.matches(fingerprint)) { "المستودع لا يعلن مفتاح توقيع؛ لا نشغّل كودًا بلا توقيع معروف" }
         val listUrl = top.text(102)?.takeIf { it.startsWith("https://") }
-        return Meta(name, fingerprint, extensionListUrl = listUrl) to entries(top.all(101).flatMap { Pb(it).fields().all(1) })
+        return Meta(name, fingerprint, extensionListUrl = listUrl) to entries(top.all(101).flatMap { Pb(it).fields().all(1) }, base)
     }
 
     /** ملف `extensionListUrl`: ExtensionList { 1 Extension... } بلا اسم ولا مفتاح (يُحكم بمفتاح المستودع). */
-    fun parseExtensionList(raw: ByteArray): List<Extension> = entries(Pb(unpack(raw)).fields().all(1))
+    fun parseExtensionList(raw: ByteArray, base: String? = null): List<Extension> = entries(Pb(unpack(raw)).fields().all(1), base)
 
     private fun unpack(raw: ByteArray) = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) gunzip(raw, 32 * 1024 * 1024) else raw
 
-    private fun entries(list: List<ByteArray>): List<Extension> {
+    private fun entries(list: List<ByteArray>, base: String?): List<Extension> {
         require(list.size <= 5000) { "المستودع أكبر من الحد" }
         return list.mapNotNull { entry ->
             val e = Pb(entry).fields()
             val pkg = e.text(2)?.takeIf { PKG.matches(it) } ?: return@mapNotNull null
-            val apkUrl = e.bytes(3)?.let { Pb(it).fields().text(1) }?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
+            val assets = e.bytes(3)?.let { Pb(it).fields() } ?: return@mapNotNull null
+            val apkUrl = assets.text(1)?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
             val version = e.text(6) ?: return@mapNotNull null
             val lib = e.text(4)?.toDoubleOrNull() ?: version.split('.').take(2).joinToString(".").toDoubleOrNull() ?: return@mapNotNull null
-            val sources = e.all(8).mapNotNull { s ->
-                val so = Pb(s).fields()
-                val id = so.varint(1)?.toULong()?.toLong()?.toString() ?: return@mapNotNull null
-                Source(id, so.text(2) ?: pkg, so.text(3) ?: "", so.text(4) ?: "")
+            // Aniyomi's schema reserves field 8 for torrent metadata and publishes anime
+            // sources in field 9. Older anime publishers used Mihon's field 8; only use that
+            // schema when field 9 is absent, never concatenate two incompatible field sets.
+            val sourceField = if (pkg.contains(".animeextension.") && e.has(9)) 9 else 8
+            val declaredSources = e.all(sourceField)
+            val parsedSources = declaredSources.mapNotNull { bytes ->
+                val so = Pb(bytes).fields()
+                val id = so.varint(1)?.takeIf { it != 0L }?.toString() ?: return@mapNotNull null
+                val name = so.text(2)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val lang = so.text(3)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                Source(id, name, lang, so.text(4) ?: "")
             }
+            val sources = parsedSources.takeIf {
+                it.size == declaredSources.size && it.map { source -> source.id }.distinct().size == it.size
+            }.orEmpty()
             val langs = sources.map { it.lang }.distinct()
             Extension(
                 name = e.text(1) ?: pkg, pkg = pkg, apkUrl = apkUrl, lang = langs.singleOrNull() ?: "all",
                 version = version, lib = lib, nsfw = e.varint(7) == 3L, sources = sources,
+                iconUrl = iconUrl(assets.text(2), base),
                 versionCode = e.varint(5)?.takeIf { it > 0 } ?: 0,
             )
         }
@@ -170,6 +202,7 @@ object RepoIndex {
     /** قارئ protobuf صغير: حقول varint ونصوص/رسائل فقط (ما يحتاجه الفهرس). */
     private class Pb(private val b: ByteArray) {
         class Fields(private val map: Map<Int, List<Any>>) {
+            fun has(f: Int): Boolean = map.containsKey(f)
             fun all(f: Int): List<ByteArray> = map[f].orEmpty().filterIsInstance<ByteArray>()
             fun bytes(f: Int): ByteArray? = all(f).firstOrNull()
             fun text(f: Int): String? = bytes(f)?.toString(Charsets.UTF_8)
@@ -262,6 +295,8 @@ data class UserExtension(
      * (`pkg#id`)، فإن غيّرت الإضافة معرّف مصدرها في تحديث بقيت مكتبتك تصل إليه (PERSISTENT_PLUGINS §3.2).
      */
     val aliases: Map<String, String> = emptyMap(),
+    /** Repository image metadata retained independently of runtime source preparation. */
+    val iconUrl: String? = null,
 ) {
     fun spec(): SourceSpec = SourceSpec(
         label = name, pkg = pkg, expectedLib = lib, apkUrl = apkUrl, sha256 = sha256, versionName = versionName,
@@ -287,7 +322,7 @@ data class UserExtension(
     /** يصير الإصدار [next] هو الحالي، ويبقى هذا آخر سليم قبله، وتُرحَّل معرّفات المصادر التي تغيّرت. */
     fun upgradedTo(next: UserExtension): UserExtension {
         val keepPrev = if (next.sha256.equals(sha256, ignoreCase = true)) previous else asVersion()
-        return next.copy(previous = keepPrev, aliases = aliases + sourceAliases(sources, next.sources))
+        return next.copy(previous = keepPrev, aliases = aliases + sourceAliases(sources, next.sources), iconUrl = next.iconUrl ?: iconUrl)
     }
 
     /** الرجوع لآخر سليم: يصير هو الحالي بمصادره، ومعرّفات الإصدار المتعطّل تُرحَّل إليه. */
@@ -487,14 +522,14 @@ class RepoClient(private val context: Context, private val client: okhttp3.OkHtt
     /** repo.json ثم فهرسه: index.pb (v2) إن أعلنه، وإلا index.min.json (v1). */
     fun read(base: String): Pair<RepoIndex.Meta, List<RepoIndex.Extension>> {
         val repoJson = fetchText("$base/repo.json")
-        val declared = RepoIndex.parseMeta(repoJson)
+        val declared = RepoIndex.parseMeta(repoJson, base)
         val v2 = RepoIndex.indexV2(repoJson)
         if (v2 != null) {
-            val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024))
+            val (meta, list) = RepoIndex.parseIndexV2(fetchBytes(v2, 16 * 1024 * 1024), base)
             require(declared.fingerprint == meta.fingerprint) { "مفتاح التوقيع في repo.json لا يطابق الفهرس" }
             // القائمة قد تكون في ملف مستقل (الحقل 102): تُتبع مرة واحدة فقط، فلا حلقة إعادة توجيه
             // بلا حد كما في Mihon، وبحد حجم. بدون هذا كان نقل Keiyoushi القائمة إليه يُظهر صفر إضافات
-            val all = if (list.isEmpty() && meta.extensionListUrl != null) RepoIndex.parseExtensionList(fetchBytes(meta.extensionListUrl, 16 * 1024 * 1024)) else list
+            val all = if (list.isEmpty() && meta.extensionListUrl != null) RepoIndex.parseExtensionList(fetchBytes(meta.extensionListUrl, 16 * 1024 * 1024), base) else list
             // v2 can omit source factories for published Aniyomi packages even when the
             // matching publisher's legacy index lists them. Keep v2 package/signature authority.
             val supplemented = if (all.any { it.anime && it.sources.isEmpty() }) {

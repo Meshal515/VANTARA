@@ -187,6 +187,21 @@ export async function clearImageCache() {
 	return required().clearImageCache();
 }
 
+/** Account selection and verified APK storage are independent of runtime readiness. */
+function legacyInstallation(source, selected) {
+	const artifactPresent = source?.artifactPresent;
+	const known = typeof artifactPresent === 'boolean';
+	const installedVersion = source?.installedVersion;
+	return {
+		selected,
+		installed: selected && artifactPresent === true ? installedVersion ?? true : null,
+		pendingRestore: selected && artifactPresent !== true,
+		...(known ? { artifactPresent } : {}),
+		...(installedVersion != null ? { installedVersion } : {}),
+		installationEvidence: known ? 'confirmed' : 'unknown',
+	};
+}
+
 /**
  * مستودعات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi). داخل التطبيق وحده:
  * الإضافة كود DEX يعمل في الجهاز، والمتصفح لا يشغّله. `null` حيث لا تتوفر.
@@ -201,12 +216,16 @@ export function repositories() {
 		list: () => plugin.repos(),
 		add: (url) => plugin.addRepo({ url }),
 		remove: (url) => plugin.removeRepo({ url }),
-		extensions: async (url) => ((await plugin.repoIndex({ url })).extensions ?? []).map((ext) => {
-			if (!ext?.builtin) return ext;
-			formerlyBundled.add(ext.pkg);
-			const added = visible({ id: ext.pkg });
-			return { ...ext, builtin: false, formerlyBundled: true, installed: added ? ext.installed ?? ext.version : null, update: false };
-		}),
+		extensions: async (url) => {
+			const extensions = (await plugin.repoIndex({ url })).extensions ?? [];
+			const list = extensions.some(ext => ext?.builtin) ? (await plugin.sources()).sources ?? [] : [];
+			return extensions.map((ext) => {
+				if (!ext?.builtin) return ext;
+				formerlyBundled.add(ext.pkg);
+				const source = list.find(s => isBundled(s) && !s.filler && packageOf(s.id) === ext.pkg);
+				return { ...ext, builtin: false, formerlyBundled: true, ...legacyInstallation(source, visible({ id: ext.pkg })), update: false };
+			});
+		},
 		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
 		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
 	};
@@ -248,11 +267,10 @@ export function readySources() {
 			if (!isBundled(source) || source.filler) continue;
 			const pkg = packageOf(source.id);
 			if (byPackage.has(pkg)) continue;
-			const added = visible(source);
 			byPackage.set(pkg, {
 				pkg, name: source.label ?? pkg, version: String(source.version ?? ''), lang: source.lang ?? 'ar',
 				arabic: String(source.lang ?? 'ar').toLowerCase() === 'ar', nsfw: false, anime: false,
-				installed: added ? String(source.version ?? true) : null, update: false, formerlyBundled: true,
+				...legacyInstallation(source, visible(source)), update: false, formerlyBundled: true,
 				sources: source.names ?? [source.label ?? pkg], ...(source.iconUrl ? { iconUrl: source.iconUrl } : {}),
 			});
 		}
@@ -260,11 +278,13 @@ export function readySources() {
 	};
 	return {
 		list: async () => {
-			const installed = (await items()).filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY }));
+			const catalog = await items();
+			const installed = catalog.filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY }));
+			const pending = catalog.filter((x) => x.pendingRestore).map((x) => ({ ...x, repo: READY_REPOSITORY }));
 			const state = typeof bridge()?.repos === 'function' ? await required().repos() : {};
 			return {
-				repos: !state.readyCatalogDismissed && installed.length ? [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }] : [],
-				installed,
+				repos: !state.readyCatalogDismissed && catalog.some(x => x.selected || x.installed || x.pendingRestore) ? [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }] : [],
+				installed, pending,
 			};
 		},
 		// This is a legacy catalogue, never an importer for external repository URLs.

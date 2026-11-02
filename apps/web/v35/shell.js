@@ -57,7 +57,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentRange, momentStart, repositories as animeRepositories } from '../lib/anime-engine.js';
+import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
@@ -158,6 +158,42 @@ const el = (tag, cls, text) => {
 };
 const genreAr = (g) => AR_GENRE[g] || g;
 const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?? '؟';
+
+/** Source opening owns one cancellable lookup, shared across native/runtime hand-off. */
+export function createAddonNavigation() {
+  let current = null;
+  const cancel = () => { current?.cancel(); current = null; };
+  return {
+    cancel,
+    begin() {
+      cancel();
+      const controller = new AbortController();
+      const error = Object.assign(new Error('انتهت مهلة فتح المصدر. أعد المحاولة.'), { code: 'ADDON_TOTAL_TIMEOUT' });
+      const timer = setTimeout(() => controller.abort(error), 40_000);
+      const check = () => { if (controller.signal.aborted) throw controller.signal.reason; };
+      const operation = {
+        signal: controller.signal,
+        async wait(work, code = 'ADDON_STAGE_TIMEOUT') {
+          check();
+          try {
+            const result = await withPhaseDeadline(Promise.resolve().then(() => { check(); return work(controller.signal); }), 15_000, code, { signal: controller.signal });
+            check();
+            return result;
+          } catch (failure) {
+            const reason = controller.signal.aborted ? controller.signal.reason : failure;
+            controller.abort(reason);
+            clearTimeout(timer);
+            throw reason;
+          }
+        },
+        finish() { clearTimeout(timer); },
+        cancel() { clearTimeout(timer); controller.abort(new DOMException('ألغي فتح المصدر', 'AbortError')); },
+      };
+      current = operation;
+      return operation;
+    },
+  };
+}
 
 /**
  * @param {{ sync: any, mount: (node: Element) => void, go: (route: object) => Promise<void>,
@@ -3762,17 +3798,26 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   let sourceView = null, addonHubView = null, sourceSnapshot = null, addonViewGeneration = 0;
   let addonHubState = null, addonHubContext = null, addonSourcePending = false;
+  const addonNavigation = createAddonNavigation();
   function closeAddonSource() {
+    addonNavigation.cancel();
     if(addonHubView?.snapshot)addonHubState={context:addonHubContext,value:addonHubView.snapshot()};
     addonHubView?.close?.(); addonHubView=null;
     sourceView?.close?.(); sourceView=null;
     sourceSnapshot?.release(); sourceSnapshot=null;
+  }
+  function addonSourceError(error, retry) {
+    const message = error?.code?.endsWith('TIMEOUT') ? 'انتهت مهلة فتح المصدر. أعد المحاولة.' : error?.message ?? 'تعذّر فتح المصدر';
+    const button = el('button', 'addon-button', 'أعد المحاولة');
+    button.onclick = () => { void retry(); };
+    q('utilityBody').replaceChildren(el('p', 'work-meta', message), button);
   }
   async function openAddons() {
     closeAddonSource();
     addonSourcePending=false;
     addonHubContext=`${sync.user?.userId??"local"}|${root.dataset.section??"all"}`;
     const run=++addonViewGeneration;
+    const profile=sync.user?.userId??'local';
     q('utilityTitle').textContent = 'الإضافات';
     showPage('utility');
     q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
@@ -3793,42 +3838,61 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if(run!==addonViewGeneration || currentPage()!=='utility' || (sync.user?.userId??'local')!==profile)return; resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
   async function openNativeAddonSource(record, sourceId) {
-    const generation=++addonViewGeneration;
-    closeAddonSource();addonSourcePending=true;showPage('utility');
+    closeAddonSource();
+    const generation=++addonViewGeneration, lookup=addonNavigation.begin();
+    const profile=sync.user?.userId??'local';
+    const active=()=>generation===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
+    addonSourcePending=true;showPage('utility');
     q('utilityTitle').textContent=record.name??'المصدر';
     q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
     try{
-      const result=await createNativeCatalog(record,{sourceId});
-      if(generation!==addonViewGeneration||currentPage()!=='utility')return;
+      const result=await lookup.wait(signal=>createNativeCatalog(record,{sourceId,signal}),'SOURCE_DISCOVERY_TIMEOUT');
+      if(!active())return;
       if(result.status==='select-source'){
         const list=el('div','addon-source-choices');
         for(const source of result.sources){const b=el('button','addon-button',source.name);b.disabled=source.enabled===false;b.onclick=()=>{void openNativeAddonSource(record,source.sourceId);};list.append(b);}
         q('utilityBody').replaceChildren(list);return;
       }
       if(result.status!=='ready')throw new Error(result.reason??'محرك المصدر غير متاح على هذه المنصة');
-      const addons=await getAddonRuntime();await addons.ready;await addons.reloadSources?.();
-      if(generation!==addonViewGeneration||currentPage()!=='utility')return;
+      const addons=await lookup.wait(()=>getAddonRuntime(),'ADDON_RUNTIME_TIMEOUT');
+      await lookup.wait(()=>addons.ready,'ADDON_READY_TIMEOUT');
+      if(!active())return;
+      await lookup.wait(()=>addons.registry.setProfile(profile),'ADDON_PROFILE_TIMEOUT');
+      await lookup.wait(signal=>addons.reloadSources?.({signal}),'ADDON_RELOAD_TIMEOUT');
+      if(!active())return;
       const canonical=addons.registry.list().find(addon=>addon.sourceId===result.sourceId);
       if(!canonical)throw new Error('المصدر مثبت، لكن المحرك لم يربطه بكتالوج صالح بعد. أعد فتح الإضافات.');
-      await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter});
-    }catch(error){if(generation===addonViewGeneration&&currentPage()==='utility')q('utilityBody').replaceChildren(el('p','work-meta',error.message??'تعذّر فتح المصدر'));}
+      await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter,lookup,generation});
+    }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openNativeAddonSource(record,sourceId));}
+    finally{lookup.finish();}
   }
-  async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter} = {}) {
-    const run=++addonViewGeneration;
-    const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local");
-    if(run!==addonViewGeneration)return;
-    closeAddonSource();
-    addonSourcePending=false;
-    sourceSnapshot=addons.registry.snapshot();
-    q('utilityTitle').textContent = addon.name;
+  async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter,lookup: continuedLookup,generation} = {}) {
+    if(!continuedLookup)closeAddonSource();
+    const run=continuedLookup?generation:++addonViewGeneration;
+    const lookup=continuedLookup??addonNavigation.begin();
+    const profile=sync.user?.userId??'local';
+    const active=()=>run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
+    addonSourcePending=true;
+    q('utilityTitle').textContent=addon.name;
     showPage('utility');
+    q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
+    try{
+    const addons=await lookup.wait(()=>getAddonRuntime(),'ADDON_RUNTIME_TIMEOUT');
+    await lookup.wait(()=>addons.ready,'ADDON_READY_TIMEOUT');
+    if(!active())return;
+    await lookup.wait(()=>addons.registry.setProfile(profile),'ADDON_PROFILE_TIMEOUT');
+    if(!active())return;
+    sourceSnapshot=addons.registry.snapshot();
+    addonSourcePending=false;
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
     const openSelectedWork = async function openSelectedWork(item) {
+      if(!active())return;
+      const workLookup=addonNavigation.begin();
       try {
         toast('جارٍ فتح «' + String(item?.title ?? item?.name ?? 'العمل').slice(0, 40) + '»…');
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
@@ -3836,29 +3900,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');
         let copy = { ...item, url: item.url ?? item.id, type: item.type };
         if(sourceId.startsWith('addon|cs3|') && !copy._nativeDetailsLoaded && nativeAdapter?.series){
-          const details=await nativeAdapter.series(copy);if(run!==addonViewGeneration)return;
+          const details=await workLookup.wait(signal=>nativeAdapter.series(copy,{signal}),'SOURCE_DETAILS_TIMEOUT');if(!active())return;
           copy={...copy,...details.work,_nativeDetailsLoaded:true};
         }
         if(sourceId.startsWith('addon|cs3|') && copy.hasSeasons && copy.requestedSeason==null){
           if(!nativeAdapter?.seasons)throw new Error('اختيار مواسم هذا المصدر غير متاح في نسخة التطبيق الحالية.');
-          const seasons=await nativeAdapter.seasons(copy);if(run!==addonViewGeneration)return;
+          const seasons=await workLookup.wait(signal=>nativeAdapter.seasons(copy,{signal}),'SOURCE_SEASONS_TIMEOUT');if(!active())return;
           if(!seasons.length)throw new Error('لم يُرجع المصدر مواسم قابلة للفتح.');
           openSheet(body=>{
             body.append(el('h3',null,'اختر الموسم'));
             for(const season of seasons)body.append(sheetItem('layers',season.title,()=>{
-              closeSheet();if(run===addonViewGeneration)void openSelectedWork({...copy,...season,_nativeDetailsLoaded:true});
+              closeSheet();if(active())void openSelectedWork({...copy,...season,_nativeDetailsLoaded:true});
             }));
           });return;
         }
-        const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
-        if(run!==addonViewGeneration)return;
+        const episodes = addon.contentTypes.includes('manga') ? [] : await workLookup.wait(signal=>source.episodes(copy,{signal}),'SOURCE_EPISODES_TIMEOUT');
+        if(!active())return;
         const work = sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes });
         // كل عمل يُفتح ببطاقة نوعه هو، لا بنوع الإضافة: مصدر متنوع قد يحمل مانجا داخل واجهة أنمي
         const itemType = String(item.type ?? '').toLowerCase();
-        if (work._work || itemType === 'manga') { applySection('manga'); buildDrawer(); await openWork(work); }
-        else if (itemType === 'anime' || (!['movie', 'series', 'tv'].includes(itemType) && addon.contentTypes.includes('anime'))) { applySection('anime'); buildDrawer(); await anime.openAnime(work); }
-        else { applySection('cinema'); buildDrawer(); await cinema.openWork(work); }
-      } catch (error) { toast(error.message); }
+        if (work._work || itemType === 'manga') { applySection('manga'); buildDrawer(); await workLookup.wait(()=>openWork(work),'SOURCE_WORK_TIMEOUT'); }
+        else if (itemType === 'anime' || (!['movie', 'series', 'tv'].includes(itemType) && addon.contentTypes.includes('anime'))) { applySection('anime'); buildDrawer(); await workLookup.wait(()=>anime.openAnime(work),'SOURCE_WORK_TIMEOUT'); }
+        else { applySection('cinema'); buildDrawer(); await workLookup.wait(()=>cinema.openWork(work),'SOURCE_WORK_TIMEOUT'); }
+      } catch (error) {
+        if(!active() || error?.name==='AbortError')return;
+        toast(error.message);
+        openSheet(body=>{body.append(el('p','work-meta',error.message??'تعذّر فتح العمل'),sheetItem('refresh','أعد المحاولة',()=>{closeSheet();void openSelectedWork(item);}));});
+      } finally { workLookup.finish(); }
     };
     // واجهة الإضافة بلغة قسمها (source-home.js)، والقائمة الكاملة خلف أبوابها؛ الرجوع منها إلى واجهة الإضافة
     const showList = (tab) => {
@@ -3875,6 +3943,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       q('utilityBody').replaceChildren(sourceView);
     }
     if (home) showHome(); else showList(null);
+    }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
+    finally{lookup.finish();}
   }
   // ───────────────────────── PIN وحذف الحساب ─────────────────────────
 
@@ -4112,7 +4182,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const from = currentPage();
     if (from !== id) scrollOf.set(from, window.scrollY);
-    if(from === "utility" && id !== "utility")sourceView?.pause?.();
+    if(from === "utility" && id !== "utility"){sourceView?.pause?.();addonNavigation.cancel();}
     if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
     // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));

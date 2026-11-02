@@ -476,15 +476,21 @@ class AnimeEngine(context: Context) {
      * نسخ وصلت بعد بدء التجهيز (مصدر ردّ متأخرًا): تُضاف للجلسة نفسها وتُجهَّز
      * سيرفراتها، وما يعمل لا يتوقف. يرجع عدد النسخ الجديدة فعلًا.
      */
-    fun extendPreparation(id: String, more: List<SourceAnime>): Int {
-        val prep = prepared[id] ?: return 0
-        val req = sessionRequests[id] ?: return 0
-        val known = req.copies.map { it.sourceId to it.url }.toSet()
-        val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
-        if (fresh.isEmpty() || !prep.beginBatch()) return 0
-        sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
-        launchPreparation(prep, fresh)
-        return fresh.size
+    fun extendPreparation(id: String, more: List<SourceAnime>, generation: String? = null): Int {
+        var added = 0
+        // Replacing/closing this key cannot interleave generation validation and
+        // reservation, so a late bridge call never extends a reused session ID.
+        prepared.computeIfPresent(id) { _, prep ->
+            val req = sessionRequests[id] ?: return@computeIfPresent prep
+            val known = req.copies.map { it.sourceId to it.url }.toSet()
+            val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
+            if (fresh.isEmpty() || !prep.beginBatch(generation)) return@computeIfPresent prep
+            sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
+            launchPreparation(prep, fresh)
+            added = fresh.size
+            prep
+        }
+        return added
     }
 
     fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =

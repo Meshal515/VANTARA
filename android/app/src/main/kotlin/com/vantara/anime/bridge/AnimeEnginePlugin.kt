@@ -209,7 +209,7 @@ class AnimeEnginePlugin : Plugin() {
         val copiesJson = call.getArray("copies") ?: return call.reject("copies مطلوب")
         val copies = runCatching { (0 until copiesJson.length()).map { animeFrom(copiesJson.getJSONObject(it)) } }
             .getOrElse { return call.reject(it.message ?: "copies غير صالحة") }
-        call.resolve(JSObject().put("added", engine.extendPreparation(session, copies)))
+        call.resolve(JSObject().put("added", engine.extendPreparation(session, copies, call.getString("addonGeneration"))))
     }
 
     @PluginMethod
@@ -289,6 +289,9 @@ class AnimeEnginePlugin : Plugin() {
                     val rec = engine.health.get(HealthStore.sourceKey(s.id))
                     val installed = s.extension?.let { ref -> st?.extensions?.firstOrNull { it.pkg == ref.pkg } }
                     val icon = s.extension?.let { ref -> NativeExtensionIcons.iconUrl(context, "anime-extensions", ref.pkg, ref.sha256) }
+                        ?: installed?.let { ext -> com.vantara.plugins.RepoIndex.iconUrl(ext.iconUrl, ext.repoUrl)
+                            ?: com.vantara.plugins.RepoIndex.legacyIconUrl(ext.repoUrl, ext.pkg)
+                            ?: st?.repos?.firstOrNull { it.url == ext.repoUrl }?.iconUrl }
                     list.put(
                         JSObject()
                             .put("id", s.id).put("name", s.name).put("content", s.content)
@@ -349,6 +352,8 @@ class AnimeEnginePlugin : Plugin() {
                         .put("installed", JSArray(st.extensions.map {
                             JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl)
                                 .withIcon(NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
+                                    ?: com.vantara.plugins.RepoIndex.iconUrl(it.iconUrl, it.repoUrl)
+                                    ?: com.vantara.plugins.RepoIndex.legacyIconUrl(it.repoUrl, it.pkg)
                                     ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
                         })),
                 )
@@ -493,6 +498,7 @@ class AnimeEnginePlugin : Plugin() {
                     sourceName = primary.name, baseUrl = primary.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
                     stableId = previous?.id ?: "user-$pkg", sourceLang = primary.lang,
                     primarySourceId = primary.id, additionalSources = additional, versionCode = ext.versionCode,
+                    iconUrl = ext.iconUrl,
                 )
                 val entries = user.entries()
                 val ids = entries.map { it.id }

@@ -25,8 +25,9 @@ const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugi
 export const available = () => bridge() !== null;
 
 /** A bridge/runtime promise that never settles must not block a work screen forever. */
-export function withPhaseDeadline(promise, timeoutMs, code = 'PREPARE_STAGE_TIMEOUT') {
+export function withPhaseDeadline(promise, timeoutMs, code = 'PREPARE_STAGE_TIMEOUT', { signal } = {}) {
   let timer;
+  let onAbort;
   return Promise.race([
     Promise.resolve(promise),
     new Promise((_, reject) => {
@@ -36,7 +37,15 @@ export function withPhaseDeadline(promise, timeoutMs, code = 'PREPARE_STAGE_TIME
         reject(error);
       }, timeoutMs);
     }),
-  ]).finally(() => clearTimeout(timer));
+    ...(signal ? [new Promise((_, reject) => {
+      onAbort = () => reject(new DOMException('تم إلغاء تجهيز السيرفرات', 'AbortError'));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    })] : []),
+  ]).finally(() => {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  });
 }
 
 /**
@@ -102,10 +111,11 @@ export function configure({ force = false, fetchImpl = globalThis.fetch } = {}) 
   return configured;
 }
 
-async function call(method, args = {}) {
+async function call(method, args = {}, { signal } = {}) {
   const plugin = bridge();
   if (!plugin) return null;
   await configure();
+  signal?.throwIfAborted();
   return plugin[method](args);
 }
 
@@ -144,7 +154,7 @@ export async function verify(sourceId) {
  * حين يرد الجميع، أو null إن تعذّر البحث. محرك أقدم بلا البث يُغذّى من البحث
  * المجمّع (نفس الشكل، بزمن واحد للكل).
  */
-export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null } = {}) {
+export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined } = {}) {
   const plugin = bridge();
   if (!plugin) return { done: Promise.resolve(null), cancel() {} };
   const searchId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -155,12 +165,22 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
   const end = (value) => {
     if (over) return;
     over = true;
+    signal?.removeEventListener('abort', cancel);
     for (const h of handles) void Promise.resolve(h).then((x) => x?.remove?.());
     handles = [];
     settle(value);
   };
+  const cancel = () => {
+    if (over) return;
+    try { void Promise.resolve(plugin.cancelSearch?.({ searchId })).catch(() => {}); } catch {}
+    end(false);
+  };
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
   void (async () => {
+    if (over) return;
     await configure();
+    if (over) return;
     if (typeof plugin.searchStream !== 'function') {
       const t0 = Date.now();
       const works = await search(query, content).catch(() => null);
@@ -171,24 +191,23 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
       return end(true);
     }
     // المستمعان قبل الطلب: أسرع مصدر قد يرد قبل أن يعود النداء نفسه
-    handles = [
-      await plugin.addListener('searchHit', (e) => {
-        if (e.searchId !== searchId) return;
+    const listen = async (name, fn) => {
+      const handle = await plugin.addListener(name, fn);
+      if (over) { handle?.remove?.(); return false; }
+      handles.push(handle);
+      return true;
+    };
+    if (!await listen('searchHit', (e) => {
+        if (over || e.searchId !== searchId) return;
         if (e.needsHuman) for (const fn of humanListeners) fn(e.sourceId);
-        if (!over) onHit(e);
-      }),
-      await plugin.addListener('searchDone', (e) => e.searchId === searchId && end(true)),
-    ];
-    if (over) return end(false);
+        onHit(e);
+      })) return;
+    if (!await listen('searchDone', (e) => e.searchId === searchId && end(true))) return;
     await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}) });
   })().catch(() => end(null));
   return {
     done,
-    cancel() {
-      if (over) return;
-      void plugin.cancelSearch?.({ searchId })?.catch?.(() => {});
-      end(false);
-    },
+    cancel,
   };
 }
 
@@ -202,9 +221,9 @@ export async function extend(session, copies) {
   if (isNative() && plugin.appendAddonStreams && plugin.extendAddonSources) {
     const state = nativeAddonSessions.get(session);
     if (!state) return 0;
-    const native = copies.filter(c => !c.sourceId?.startsWith('addon|'));
-    const external = copies.filter(c => c.sourceId?.startsWith('addon|') && !state.sources.has(c.sourceId));
-    let added = native.length ? (await withPhaseDeadline(plugin.extend({ session, copies: native }), 15_000, 'ENGINE_EXTEND_TIMEOUT').catch(() => null))?.added ?? 0 : 0;
+    const native = copies.filter(isNativeRuntimeCopy);
+    const external = copies.filter(c => !isNativeRuntimeCopy(c) && !state.sources.has(c.sourceId));
+    let added = native.length ? (await withPhaseDeadline(plugin.extend({ session, copies: native, addonGeneration: state.generation }), 15_000, 'ENGINE_EXTEND_TIMEOUT').catch(() => null))?.added ?? 0 : 0;
     if (nativeAddonSessions.get(session) !== state) return 0;
     if (external.length) {
       const runtime = await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await withPhaseDeadline(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
@@ -306,6 +325,8 @@ export function pickCopies(items, titles, criteria = {}) {
  */
 export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
   return new Promise((resolve, reject) => {
+    const { signal } = criteria;
+    if (signal?.aborted) { reject(new DOMException('تم إلغاء البحث', 'AbortError')); return; }
     let first = null;
     let next = 0;
     let uncertain = false;
@@ -315,7 +336,7 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
     // English and romaji must not wait behind each other's slow sources.
     // Matching still uses the complete canonical titles and season/year guards.
     const worker = async () => {
-      while (next < queries.length && !first) {
+      while (next < queries.length && !first && !signal?.aborted) {
         const query = queries[next++];
         const { done } = searchStream(query, 'anime', (hit) => {
           if (hit.error || hit.skipped) uncertain = true;
@@ -329,8 +350,9 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
             first = work;
             onWork(work);
           }
-        });
+        }, { signal });
         if (await done === null) uncertain = true;
+        if (signal?.aborted) throw new DOMException('تم إلغاء البحث', 'AbortError');
       }
     };
     void Promise.all([worker(), worker()]).then(() => {
@@ -374,11 +396,13 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null }) {
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null, signal = undefined }) {
+  signal?.throwIfAborted();
   const plugin = bridge();
   const native = isNative() && plugin?.appendAddonStreams;
   const id = session ?? `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let state;
+  const phase = (promise, timeoutMs, code) => withPhaseDeadline(promise, timeoutMs, code, { signal });
   if (native) {
     cancelNativeAddons(id);
     state = { episode, sources: new Set(), jobs: new Set(), generation: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` };
@@ -395,26 +419,33 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   };
   try {
   if (identity && !deferMapping) {
-    copies = await withAddonCopies(copies, context.identity);
+    copies = await phase(withAddonCopies(copies, context.identity), 45_000, 'ADDON_DISCOVERY_TIMEOUT');
     const mapped = copies.find(c => c.identity?.externalIds?.kitsu);
     if (mapped) context.identity = mapped.identity;
   }
   if (native) {
     if (nativeAddonSessions.get(id) !== state) return null;
-    const runtime = await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await withPhaseDeadline(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
+    const runtime = await phase(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await phase(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     state.snapshot = runtime.registry.snapshot?.();
     const plan = nativeAddonPreparation({ runtime, copies, episode });
-    await withPhaseDeadline(configure(), 15_000, 'ENGINE_CONFIG_TIMEOUT');
+    await phase(configure(), 15_000, 'ENGINE_CONFIG_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
-    const out = await withPhaseDeadline(plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation }), 15_000, 'ENGINE_PREPARE_TIMEOUT');
+    const preparing = Promise.resolve(plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation }));
+    void preparing.then(() => {
+      // An RPC can open native resources after its caller already abandoned it.
+      if (!nativeAddonSessions.has(id)) {
+        try { void Promise.resolve(plugin.closeSession?.({ session: id })).catch(() => {}); } catch {}
+      }
+    }, () => {});
+    const out = await phase(preparing, 15_000, 'ENGINE_PREPARE_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);
     if (out?.session === id) attachDiscovery();
     return out ? { ...out, copies } : null;
   }
-  const out = await withPhaseDeadline(call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id }), 30_000, 'ENGINE_PREPARE_TIMEOUT');
+  const out = await phase(call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id }, { signal }), 30_000, 'ENGINE_PREPARE_TIMEOUT');
   if (out?.session === id && addonDiscoverySessions.get(id) === context) attachDiscovery();
   else if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
   return out ? { ...out, copies: out.copies ?? copies } : null;
@@ -459,8 +490,9 @@ export function retrySeconds(retryAt, now = Date.now()) {
   return Number.isFinite(retryAt) ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 }
 
-export async function routes(session) {
-  return (await call('routes', { session })) ?? null;
+export async function routes(session, { signal } = {}) {
+  signal?.throwIfAborted();
+  return (await withPhaseDeadline(call('routes', { session }, { signal }), 15_000, 'ENGINE_ROUTES_TIMEOUT', { signal })) ?? null;
 }
 
 /** «شغّل الأفضل»: ينتظر أول سيرفر يجهز إن لم يجهز شيء بعد. */

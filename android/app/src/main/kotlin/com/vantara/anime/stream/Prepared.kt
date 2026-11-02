@@ -169,8 +169,8 @@ class PreparedEpisode(
      * دفعة نسخ إضافية (مصدر رد متأخرًا بعد بدء التجهيز): الجلسة نفسها تكبر، ولا
      * يتوقف ما يعمل. يرجع false إن أُغلقت الجلسة.
      */
-    fun beginBatch(): Boolean = synchronized(this) {
-        if (terminal || job?.isActive != true) return@synchronized false
+    fun beginBatch(generation: String? = null): Boolean = synchronized(this) {
+        if (terminal || job?.isActive != true || (generation != null && generation != addonGeneration)) return@synchronized false
         pendingBatches++
         done = false
         true
@@ -204,12 +204,13 @@ class PreparedEpisode(
     /** Terminal watchdog: no JS/WebView failure may leave native preparation unresolved. */
     fun forceComplete(): Boolean {
         val changed = synchronized(this) {
-            if (done) return@synchronized false
+            if (terminal) return@synchronized false
             terminal = true
             pendingAddons.clear()
             pendingBatches = 0
+            val changed = !done
             done = true
-            true
+            changed
         }
         if (changed) {
             session.changes.value = session.changes.value + 1

@@ -1,0 +1,85 @@
+name: Actual Android addon UI delivery (no publish)
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-addon-delivery-20261101]
+    paths:
+      - '.github/workflows/addon-delivery-ui-qa.yml'
+      - 'tools/repository-compat/android-addon-delivery.mjs'
+      - 'tools/repository-compat/run_android_addon_delivery.sh'
+      - 'android/app/src/androidTest/java/com/vantara/anime/LiveDeliveryUiDeviceTest.kt'
+permissions:
+  contents: read
+concurrency:
+  group: addon-delivery-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-native-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      VANTARA_RUNTIME_DEBUG: 'true'
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Install browser test client separately from application dependencies
+        run: npm install --prefix "$RUNNER_TEMP/vantara-browser" --no-audit --no-fund --no-package-lock playwright@1.56.1
+      - name: Real Chromium UI regression with explicitly controlled backend
+        env:
+          VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vantara-browser/node_modules/playwright/index.mjs
+          VANTARA_PLAYWRIGHT_EVIDENCE: addon-delivery-evidence/browser-fixture
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: node tools/repository-compat/playwright-addon-manager.mjs
+      - name: Unit regressions and actual APK build
+        run: |
+          pnpm --filter @vantara/domain build
+          pnpm test:web
+          node tools/repository-compat/scope-guard.mjs
+          npx cap sync android
+          bash android/gradlew -p android --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Real virtual audio clock
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
+          vantara_audio="$RUNNER_TEMP/vantara-delivery-audio"
+          mkdir -p "$vantara_audio"
+          chmod 700 "$vantara_audio"
+          pulseaudio -n --daemonize=yes --use-pid-file=no --exit-idle-time=-1 \
+            --load="module-native-protocol-unix socket=$vantara_audio/native" \
+            --load="module-null-sink sink_name=vantara_delivery rate=48000 channels=2"
+          echo "PULSE_SERVER=unix:$vantara_audio/native" >> "$GITHUB_ENV"
+      - name: Real repositories, DOM installation, server sheets and decoded playback
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          script: bash tools/repository-compat/run_android_addon_delivery.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: actual-addon-delivery-ui-evidence
+          path: |
+            addon-delivery-evidence/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn

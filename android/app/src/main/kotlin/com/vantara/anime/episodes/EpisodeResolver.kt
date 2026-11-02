@@ -63,7 +63,7 @@ class EpisodeResolver(
         // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم
         if (number < 0f) episodes.firstOrNull()
         else episodes.firstOrNull { abs(it.number - number) < 0.01f }
-            ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
+            ?: episodes.firstOrNull { (it.number < 0f || !it.number.isFinite()) && Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
     /**
      * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة

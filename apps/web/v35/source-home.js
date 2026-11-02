@@ -45,8 +45,8 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
   let kind = types.includes("manga") ? "manga" : types.includes("anime") ? "anime" : "cinema";
   const root = node("div", "addon-source-home");
   root.dir = "rtl";
-  let closed = false, timer = null;
-  const controller = new AbortController();
+  let closed = false, timer = null, renderVersion = 0;
+  const requests = new Set();
 
   /** الغلاف بنفس طريق القائمة: مانجا الإضافة الأصلية بعميلها وكوكيزها، وغيرها رابط مباشر. */
   const cover = (box, work, cls = "poster") => {
@@ -54,19 +54,20 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
     if (!raw) return;
     let url;
     try { url = publicUrl(raw).href; } catch { return; }
+    const version = renderVersion;
     const img = node("img", cls);
     img.alt = "";
     img.loading = "lazy";
     img.referrerPolicy = "no-referrer";
     // صنف .an-img في رئيسية الأنمي يُخفي الصورة حتى «loaded»: تُعلَّم هنا حين تُفكّ فعلًا، وإلا بقيت البطاقات فارغة
-    img.onload = () => img.classList.add("loaded");
-    img.onerror = () => img.classList.add("failed");
+    img.onload = () => { if (!closed && version === renderVersion) img.classList.add("loaded"); };
+    img.onerror = () => { if (!closed && version === renderVersion) img.classList.add("failed"); };
     if (addon.sourceId && (addon.bundled || addon.protocol === "native") && kind === "manga") {
-      void nativeCover(url, addon.sourceId).then((local) => { if (!closed && local) { img.src = local; box.append(img); } });
+      void nativeCover(url, addon.sourceId).then((local) => { if (!closed && version === renderVersion && local) { img.src = local; box.append(img); } }).catch(() => {});
     } else { img.src = url; box.append(img); }
   };
   const open = (work) => {
-    if (open.busy) return;
+    if (closed || open.busy) return;
     open.busy = true;
     try {
       void Promise.resolve(onOpenWork(work, { addon, adapter }))
@@ -224,21 +225,47 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
     return b;
   }
 
-  const take = async (fn) => {
-    if (typeof fn !== "function") return [];
-    try { return (await fn.call(adapter, 1, { signal: controller.signal }))?.items ?? []; } catch { return []; }
-  };
-  void (async () => {
-    const [popular, latest] = await Promise.all([take(adapter.popular), take(adapter.latest ?? adapter.home)]);
+  const feeds = [
+    { fn: adapter.popular, items: [], state: typeof adapter.popular === "function" ? "loading" : "empty" },
+    { fn: adapter.latest ?? adapter.home, items: [], state: typeof (adapter.latest ?? adapter.home) === "function" ? "loading" : "empty" },
+  ];
+  const render = () => {
     if (closed) return;
+    renderVersion++;
+    for (const img of body.querySelectorAll("img")) { img.onload = null; img.onerror = null; }
+    clearInterval(timer);
+    timer = null;
+    const [popular, latest] = feeds.map(feed => feed.items);
+    const loading = feeds.some(feed => feed.state === "loading");
+    const failed = feeds.some(feed => feed.state === "error");
+    const feedback = () => {
+      const info = node("div", "addon-home-empty");
+      if (loading) info.append(node("p", "addon-source-note", "جارٍ جلب المصدر…"));
+      if (failed) info.append(node("p", "addon-source-note", "تعذّر جلب بعض أعمال المصدر الآن."));
+      if (!loading && (failed || !popular.length && !latest.length)) {
+        const retry = node("button", "addon-button addon-home-retry", "أعد المحاولة");
+        retry.type = "button";
+        retry.onclick = () => {
+          if (closed) return;
+          const retrying = feeds.filter(feed => typeof feed.fn === "function" && (feed.state === "error" || !feed.items.length));
+          for (const feed of retrying) feed.state = "loading";
+          render();
+          for (const feed of retrying) take(feed);
+        };
+        info.append(retry);
+      }
+      return info;
+    };
     const lead = popular.length ? popular : latest;
     // تخصص الإضافة يحسم القسم؛ المعلِنة لأكثر من نوع تأخذ قسم أغلب ما أرجعته فعلًا
     if (types.length !== 1) kind = dominantKind([...popular, ...latest], kind);
+    root.classList.remove("addon-source-home--manga", "addon-source-home--anime", "addon-source-home--cinema");
     root.classList.add(`addon-source-home--${kind}`);
     sectionWord();
     if (!lead.length && !latest.length) {
       const empty = node("div", "addon-home-empty");
-      empty.append(node("p", "addon-source-note", "لم يُرجع المصدر أعمالًا الآن."));
+      if (!loading && !failed) empty.append(node("p", "addon-source-note", "لم يُرجع المصدر أعمالًا الآن."));
+      empty.append(feedback());
       const all = node("button", "addon-button", "افتح القائمة الكاملة");
       all.type = "button";
       all.onclick = () => onOpenList("home");
@@ -269,9 +296,42 @@ export function renderSourceHome({ addon, adapter, pulse = null, onOpenWork = ()
       all.onclick = () => onOpenList("search");
       blocks.push(all);
     }
+    if (loading || failed) blocks.push(feedback());
     body.replaceChildren(...blocks);
-  })();
+  };
+  const take = (feed) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (state, items = []) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      requests.delete(cancel);
+      if (closed) return;
+      feed.state = state;
+      feed.items = items;
+      render();
+    };
+    const cancel = () => { finish("error"); controller.abort(); };
+    const deadline = setTimeout(cancel, 15000);
+    requests.add(cancel);
+    Promise.resolve().then(() => controller.signal.aborted ? null : feed.fn.call(adapter, 1, { signal: controller.signal }))
+      .then(result => {
+        const items = Array.isArray(result?.items) ? result.items : [];
+        finish(items.length ? "ready" : "empty", items);
+      }, () => finish("error"));
+  };
+  render();
+  for (const feed of feeds) if (feed.state === "loading") take(feed);
 
-  root.close = () => { closed = true; controller.abort(); clearInterval(timer); };
+  root.close = () => {
+    closed = true;
+    renderVersion++;
+    for (const cancel of requests) cancel();
+    clearInterval(timer);
+    for (const element of root.querySelectorAll("button, img")) {
+      element.onclick = null; element.onload = null; element.onerror = null;
+    }
+  };
   return root;
 }

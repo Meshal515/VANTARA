@@ -39,6 +39,8 @@ data class UserAnimeExtension(
     val additionalSources: List<InstalledAnimeSource> = emptyList(),
     /** Zero means an old saved record/repository did not declare an Android version code. */
     val versionCode: Long = 0,
+    /** Publisher package icon; absent on older saved installations. */
+    val iconUrl: String? = null,
 ) {
     val id: String get() = stableId ?: ("user-" + pkg.substringAfterLast('.').ifEmpty { pkg })
 

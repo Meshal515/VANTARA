@@ -38,6 +38,40 @@ class RepoIndexTest {
         field(1, field(1, name) + field(2, pkg) + field(3, field(1, "https://github.com/keiyoushi/extensions/releases/download/x/$pkg.apk")) +
             field(4, "1.6") + num(5, 106004) + field(6, "1.6.4") + num(7, warning) + sources.fold(ByteArray(0)) { a, b -> a + b })
 
+    @Test fun readsRealPublisherAssetIconsFromTheProtobufAssetMessage() {
+        // Keiyoushi and Yuzono publish iconUrl as Extension.assets(3).icon(2).
+        val pkg = "eu.kanade.tachiyomi.extension.ar.manhatok"
+        val icon = "https://cdn.jsdelivr.net/gh/keiyoushi/extensions-source@main/src/ar/manhatok/res/mipmap-xhdpi/ic_launcher.png"
+        val entry = field(1, "Manhatok") + field(2, pkg) +
+            field(3, field(1, "https://publisher.example/extension.apk") + field(2, icon)) + field(4, "1.6") + field(6, "1.6.1")
+        val (_, extensions) = RepoIndex.parseIndexV2(field(1, "Publisher") + field(3, fp) + field(101, field(1, entry)))
+        assertEquals(icon, extensions.single().iconUrl)
+    }
+
+    @Test fun readsYuzonoAnimeFieldNineSourcesAndKeepsMihonFieldEightSeparate() {
+        val pkg = "eu.kanade.tachiyomi.animeextension.all.animeonsen"
+        fun entry(vararg sources: ByteArray) = field(1, "AnimeOnsen") + field(2, pkg) +
+            field(3, field(1, "https://publisher.example/extension.apk")) + field(4, "14") + field(6, "14.10") +
+            sources.fold(ByteArray(0)) { a, b -> a + b }
+        val animeSource = field(9, num(1, 8542735178285060053) + field(2, "AnimeOnsen") + field(3, "all") + field(4, "https://www.animeonsen.xyz"))
+        fun read(vararg sources: ByteArray) = RepoIndex.parseIndexV2(field(1, "Yuzono") + field(3, fp) + field(101, field(1, entry(*sources)))).second.single()
+        assertEquals("8542735178285060053", read(animeSource).sources.single().id)
+        assertEquals("https://www.animeonsen.xyz", read(animeSource).sources.single().baseUrl)
+        // Torrent field8 is not a second anime source list; don't merge conflicting schemas.
+        assertEquals(listOf("8542735178285060053"), read(source(5, "Not the anime source", "xx"), animeSource).sources.map { it.id })
+    }
+
+    @Test fun resolvesDeclaredRelativeAndGithubRawIconReferences() {
+        val relative = index.replace("\"nsfw\":0,", "\"nsfw\":0,\"iconUrl\":\"icon/custom.png\",")
+        assertEquals("$base/icon/custom.png", RepoIndex.parseIndex(relative, base)[0].iconUrl)
+        val github = index.replace("\"nsfw\":0,", "\"nsfw\":0,\"iconUrl\":\"https://github.com/yuzono/anime-repo/raw/refs/heads/repo/icon/custom.png\",")
+        assertEquals("https://raw.githubusercontent.com/yuzono/anime-repo/repo/icon/custom.png", RepoIndex.parseIndex(github, base)[0].iconUrl)
+    }
+
+    @Test fun legacyCatalogUsesTheMihonPublishedPackageIconConvention() {
+        assertEquals("$base/icon/eu.kanade.tachiyomi.extension.ar.manga3asq.png", RepoIndex.parseIndex(index, base)[0].iconUrl)
+    }
+
     @Test fun acceptsTheRepoOrAnyOfItsFiles() {
         assertEquals(base, RepoIndex.base(base))
         assertEquals(base, RepoIndex.base("$base/index.min.json"))
@@ -107,7 +141,7 @@ class RepoIndexTest {
         assertThrows(IllegalArgumentException::class.java) { RepoIndex.parseMeta("{\"meta\":{\"name\":\"X\"}}") }
     }
 
-    @Test fun onlyExposesDeclaredHttpsLogosAndNeverGuessesAnIconUrl() {
+    @Test fun onlyExposesSafeDeclaredLogosAndUsesTheLegacyIconProtocol() {
         val fingerprint = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
         fun meta(logo: String) = RepoIndex.parseMeta("""{"meta":{"name":"Example","signingKeyFingerprint":"$fingerprint","logo":"$logo"}}""")
         assertEquals("https://example.com/logo.png", meta("https://example.com/logo.png").iconUrl)
@@ -116,8 +150,57 @@ class RepoIndexTest {
         assertNull(meta("/logo.png").iconUrl)
         assertNull(meta("").iconUrl)
         assertNull(RepoIndex.parseMeta("""{"meta":{"name":"Example","signingKeyFingerprint":"$fingerprint","logo":{"url":"https://example.com/logo.png"}}}""").iconUrl)
-        assertNull(RepoIndex.parseIndex(index, base)[0].iconUrl)
+        assertEquals("$base/icon/eu.kanade.tachiyomi.extension.ar.manga3asq.png", RepoIndex.parseIndex(index, base)[0].iconUrl)
         assertEquals("https://example.com/icon.png", RepoIndex.parseIndex(index.replace("\"nsfw\":0,", "\"nsfw\":0,\"iconUrl\":\"https://example.com/icon.png\","), base)[0].iconUrl)
+    }
+
+    @Test fun validatesNormalizedIconReferencesAndPackagePaths() {
+        assertEquals("https://raw.githubusercontent.com/yuzono/anime-repo/repo/icon/a.png",
+            RepoIndex.iconUrl("https://raw.githubusercontent.com/yuzono/anime-repo/refs/heads/repo/icon/a.png"))
+        assertEquals("$base/icon/a.png", RepoIndex.iconUrl("./icon/a.png", "$base/index.pb"))
+        assertNull(RepoIndex.iconUrl("http://example.com/icon.png", base))
+        assertNull(RepoIndex.iconUrl("https://user:pass@example.com/icon.png", base))
+        assertNull(RepoIndex.iconUrl("https://example.com:8443/icon.png", base))
+        assertNull(RepoIndex.iconUrl("data:image/png;base64,eA==", base))
+        assertNull(RepoIndex.iconUrl("javascript:alert(1)", base))
+        assertNull(RepoIndex.iconUrl("file:///tmp/icon.png", base))
+        assertNull(RepoIndex.iconUrl("https://example.com/" + "x".repeat(2048), base))
+        assertNull(RepoIndex.legacyIconUrl(base, "../outside"))
+        assertNull(RepoIndex.legacyIconUrl(base, "a..b"))
+    }
+
+    @Test fun malformedAnimeFieldNineDoesNotFallBackToAnotherSourceSchema() {
+        val pkg = "eu.kanade.tachiyomi.animeextension.all.animeonsen"
+        val invalid = field(9, field(2, "Missing source id") + field(3, "all"))
+        val entry = field(1, "AnimeOnsen") + field(2, pkg) + field(3, field(1, "https://publisher.example/extension.apk")) +
+            field(4, "14") + field(6, "14.10") + source(5, "Different schema", "en") + invalid
+        val parsed = RepoIndex.parseIndexV2(field(1, "Yuzono") + field(3, fp) + field(101, field(1, entry))).second.single()
+        assertTrue(parsed.sources.isEmpty())
+        val duplicated = entry.dropLast(invalid.size).toByteArray() +
+            field(9, num(1, 10) + field(2, "One") + field(3, "all")) +
+            field(9, num(1, 10) + field(2, "Another") + field(3, "en"))
+        assertTrue(RepoIndex.parseIndexV2(field(1, "Yuzono") + field(3, fp) + field(101, field(1, duplicated))).second.single().sources.isEmpty())
+    }
+
+    @Test fun installedImagesSurviveReloadWithoutPreparingASourceAndOlderRecordsStillDecode() {
+        val directory = java.nio.file.Files.createTempDirectory("installed-icons-test").toFile()
+        try {
+            val file = java.io.File(directory, "state.json")
+            val extension = UserExtension(base, "Manhatok", "eu.kanade.tachiyomi.extension.ar.manhatok",
+                "$base/apk/extension.apk", "a".repeat(64), "1.6.16", 1.6, "ar", false, emptyList(),
+                iconUrl = "https://cdn.example/icon.png")
+            val store = UserExtensionStore(file)
+            store.update { it.copy(extensions = listOf(extension)) }
+            // A separate path avoids the process-local shared store and exercises decoding.
+            val reopenedFile = java.io.File(directory, "reopened.json")
+            reopenedFile.writeText(file.readText())
+            assertEquals(extension, UserExtensionStore(reopenedFile).state.extensions.single())
+            assertEquals(extension.iconUrl, extension.upgradedTo(extension.copy(versionName = "1.6.17", iconUrl = null)).iconUrl)
+            val stored = file.readText()
+            val legacyFile = java.io.File(directory, "legacy.json")
+            legacyFile.writeText(stored.replace(",\"iconUrl\":\"https://cdn.example/icon.png\"", ""))
+            assertNull(UserExtensionStore(legacyFile).state.extensions.single().iconUrl)
+        } finally { directory.deleteRecursively() }
     }
 
     @Test fun addingRepoLogosPreservesLegacyInstalledPackagesAndSourceIds() {

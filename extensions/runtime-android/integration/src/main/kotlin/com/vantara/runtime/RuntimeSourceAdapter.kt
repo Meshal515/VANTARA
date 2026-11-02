@@ -2,6 +2,8 @@ package com.vantara.runtime
 
 import com.vantara.anime.adapters.*
 import com.vantara.anime.stream.Candidate
+import com.vantara.anime.stream.RouteReport
+import com.vantara.anime.stream.RouteState
 import com.vantara.addons.NativeAddonCandidates
 import kotlinx.serialization.json.*
 
@@ -83,6 +85,13 @@ class RuntimeSourceAdapter(
             }
         })
         // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.
-        return NativeAddonCandidates.parse("cs3-${now}",id,name,streams,now)
+        val candidates=NativeAddonCandidates.parse("cs3-${now}",id,name,streams,now)
+        // Native preparation schedules media probes from route reports. Returning
+        // a list alone only adopts the links, leaving probe-gated sessions unusable.
+        candidates.groupBy { it.server }.forEach { (server,links) ->
+            trace?.route(RouteReport(id,"x"+Integer.toHexString(server.hashCode()),server,
+                links.mapNotNull { it.quality }.maxOrNull(),links.first().variant,RouteState.READY,links))
+        }
+        return candidates
     }
 }

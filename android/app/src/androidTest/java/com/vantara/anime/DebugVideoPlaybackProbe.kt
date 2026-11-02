@@ -23,10 +23,11 @@ object DebugVideoPlaybackProbe {
 
     suspend fun run(ins: Instrumentation, engine: AnimeEngine, work: SourceAnime, number: Float): String {
         val id = "real-repository-" + UUID.randomUUID()
-        val prep = engine.prepare(id, listOf(work), number, Preferences(quality = 480))
+        val prep = engine.prepare(id, listOf(work), number, Preferences(quality = 480), probe = true)
         var activity: PlayerActivity? = null
         try {
             val first = prep.awaitBest(null, 90_000) ?: error("NO_NATIVE_PREPARED_CANDIDATE")
+            assertEquals("Native preparation must admit an HTTP candidate through its real media probe", true, prep.routeOf(first.id)?.probed)
             activity = ins.startActivitySync(PlayerActivity.intent(ins.targetContext,
                 PlayerActivity.Launch(session = id, title = "VANTARA compatibility test", episode = number,
                     candidate = first.id)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as PlayerActivity
