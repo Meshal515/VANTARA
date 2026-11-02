@@ -189,8 +189,10 @@ it('reports a player launch failure even though launch closes the selector', asy
 
 
 it('recovers a native READY route from the live session after both the initial snapshot and WebView event were missed', async () => {
-  engine.routes.mockResolvedValueOnce({ done: false, routes: [] })
-    .mockResolvedValueOnce({ done: true, routes: [route('late-native-ready')] });
+  const start = Date.now();
+  engine.routes.mockImplementation(async () => Date.now() - start < 1000
+    ? { done: false, routes: [] }
+    : { done: true, routes: [route('late-native-ready')] });
   const { body, anime, close } = screen();
   anime.play(media, 1);
   await vi.advanceTimersByTimeAsync(1);
