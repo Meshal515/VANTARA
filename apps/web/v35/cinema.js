@@ -1943,6 +1943,8 @@ export function createCinema(deps) {
       const sync = () => {
         if (sheet.closed) return;
         sheet.session = w.session;
+        // Keep the visible selection bound to this warm native session only.
+        body.dataset.vantaraPlaybackSession = w.session ?? '';
         sheet.routes = w.session ? w.routes : [];
         sheet.done = w.done;
         sheet.missing = w.missing;
