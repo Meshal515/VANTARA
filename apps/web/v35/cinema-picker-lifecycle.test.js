@@ -156,8 +156,10 @@ it('rehydrates a saved provider-local cinema reference that has no source copy',
 
 
 it('restores a native READY route missed by early events and initial server-sheet snapshot', async () => {
-  engine.routes.mockResolvedValueOnce({ done: false, routes: [] })
-    .mockResolvedValueOnce({ done: true, routes: [ready('late-cinema-native')] });
+  const start = Date.now();
+  engine.routes.mockImplementation(async () => Date.now() - start < 1000
+    ? { done: false, routes: [] }
+    : { done: true, routes: [ready('late-cinema-native')] });
   const { body, cinema, close } = screen();
   await cinema.openWork(title, { autoplay: true });
   await vi.advanceTimersByTimeAsync(1);
