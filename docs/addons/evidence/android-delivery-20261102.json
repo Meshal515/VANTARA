@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T07:58:08.664986+00:00",
+  "updatedAtUtc": "2026-11-02T08:03:56Z",
   "branch": "codex/android-addon-delivery-20261101",
-  "applicationCommit": "6d99ddb12bdcd3251d252a9f4b23b58543170d86",
+  "applicationCommit": "3f1da5f544e5cefd599ed1110770e20f7e73f133",
   "published": false,
   "gate": "BLOCKED_PENDING_LIVE_PLAYBACK_AND_RESTART",
   "verification": {
     "web": {
       "files": 214,
-      "passed": 2038
+      "passed": 2044
     },
     "nativeUnit": {
       "suites": 122,
@@ -44,18 +44,30 @@
     "scrollPreserved": true,
     "manhatokIconDecodedWidth": 96,
     "cinemaWorkDetailsReached": true,
-    "decodedPlaybackObservations": 1,
+    "decodedPlaybackObservations": 2,
     "generalPlaybackProven": false,
     "processRestartProven": false,
-    "playbackEvidence": {
-      "entry": "cinema-source",
-      "advancedMs": 4915,
-      "decodedFrames": 33,
-      "droppedFrames": 110,
-      "sampleMs": 5041,
-      "functionalOnly": true,
-      "smoothnessCertified": false
-    }
+    "playbackEvidence": [
+      {
+        "entry": "cinema-source",
+        "advancedMs": 4439,
+        "decodedFrames": 26,
+        "droppedFrames": 96,
+        "sampleMs": 5041,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "entry": "cinema-general",
+        "advancedMs": 3426,
+        "decodedFrames": 24,
+        "droppedFrames": 78,
+        "sampleMs": 5014,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      }
+    ],
+    "cinemaSourceAndGeneralPlaybackProven": true
   },
   "attempts": [
     {
@@ -138,6 +150,21 @@
       ],
       "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788",
       "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788/artifacts/13119285909"
+    },
+    {
+      "applicationCommit": "bc8626ad",
+      "run": 41407518401,
+      "artifact": 13124820748,
+      "result": "FAIL",
+      "findings": [
+        "cinema source and general decoded functional playback passed; no smoothness certification",
+        "anime-source visible UI had one probed READY route in its actual new session",
+        "driver captured previous closed cinema session from reused sheetBody dataset before new anime prepare replied; waited for old session for 180 seconds",
+        "regressions reproduced stale session binding and lack of close cleanup; fixed in 3f1da5f5",
+        "four fresh observations and restart still required"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401/artifacts/13124820748"
     }
   ],
   "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu",
