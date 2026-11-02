@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T08:30:19Z",
+  "updatedAtUtc": "2026-11-02T08:45:12Z",
   "branch": "codex/android-addon-delivery-20261101",
   "applicationCommit": "80b3b1ca24ad89dd038dfcc9bb2526c3cca7217d",
   "published": false,
-  "gate": "BLOCKED_PENDING_LIVE_PLAYBACK_AND_RESTART",
+  "gate": "LIVE_GATE_PASSED_SIGNED_DEBUG_PUBLICATION_IN_PROGRESS",
   "verification": {
     "web": {
       "files": 214,
-      "passed": 2045
+      "passed": 2048
     },
     "nativeUnit": {
       "suites": 122,
@@ -26,8 +26,7 @@
     },
     "focusedMetadataAndPlayback": {
       "passed": 45,
-      "files": 4,
-      "fullWebOnFinalGuard": "pending CI; prior canonical metadata implementation passed 2045 tests"
+      "files": 4
     },
     "codeReview": {
       "status": "PASS",
@@ -56,40 +55,111 @@
     "scrollPreserved": true,
     "manhatokIconDecodedWidth": 96,
     "cinemaWorkDetailsReached": true,
-    "decodedPlaybackObservations": 3,
-    "generalPlaybackProven": false,
-    "processRestartProven": false,
+    "decodedPlaybackObservations": 8,
+    "generalPlaybackProven": true,
+    "processRestartProven": true,
     "playbackEvidence": [
       {
+        "phase": "fresh",
         "entry": "cinema-source",
-        "advancedMs": 4518,
-        "decodedFrames": 24,
-        "droppedFrames": 103,
-        "sampleMs": 5013,
+        "probed": true,
+        "advancedMs": 4786,
+        "decodedFrames": 40,
+        "droppedFrames": 98,
+        "sampleMs": 5021,
         "functionalOnly": true,
         "smoothnessCertified": false
       },
       {
+        "phase": "fresh",
         "entry": "anime-source",
-        "advancedMs": 4398,
-        "decodedFrames": 31,
-        "droppedFrames": 65,
-        "sampleMs": 5057,
+        "probed": true,
+        "advancedMs": 4367,
+        "decodedFrames": 96,
+        "droppedFrames": 9,
+        "sampleMs": 5091,
         "functionalOnly": true,
         "smoothnessCertified": false
       },
       {
+        "phase": "fresh",
         "entry": "cinema-general",
-        "advancedMs": 4443,
-        "decodedFrames": 27,
-        "droppedFrames": 97,
-        "sampleMs": 5072,
+        "probed": true,
+        "advancedMs": 4800,
+        "decodedFrames": 44,
+        "droppedFrames": 96,
+        "sampleMs": 5019,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "fresh",
+        "entry": "anime-general",
+        "probed": true,
+        "advancedMs": 4275,
+        "decodedFrames": 90,
+        "droppedFrames": 12,
+        "sampleMs": 5060,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "cinema-source",
+        "probed": true,
+        "advancedMs": 5002,
+        "decodedFrames": 45,
+        "droppedFrames": 102,
+        "sampleMs": 5051,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "anime-source",
+        "probed": true,
+        "advancedMs": 4929,
+        "decodedFrames": 65,
+        "droppedFrames": 59,
+        "sampleMs": 5014,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "cinema-general",
+        "probed": true,
+        "advancedMs": 5026,
+        "decodedFrames": 47,
+        "droppedFrames": 102,
+        "sampleMs": 5113,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "anime-general",
+        "probed": true,
+        "advancedMs": 5056,
+        "decodedFrames": 52,
+        "droppedFrames": 67,
+        "sampleMs": 5102,
         "functionalOnly": true,
         "smoothnessCertified": false
       }
     ],
     "cinemaSourceAndGeneralPlaybackProven": true,
-    "animeSourcePlaybackProven": true
+    "animeSourcePlaybackProven": true,
+    "functionalOnly": true,
+    "smoothnessCertified": false,
+    "retention": {
+      "status": "PASS",
+      "freshPid": 2488,
+      "restartPid": 5653,
+      "sameApkAndData": true,
+      "sourceAndPackageInventoryUnchanged": true,
+      "inventorySha256": "68f9e6b5bc74ca80506255a65c0b89b4109964b56702d1e134e801f3d6dad0a9"
+    }
   },
   "attempts": [
     {
@@ -204,8 +274,32 @@
       ],
       "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717",
       "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717/artifacts/13125861581"
+    },
+    {
+      "applicationCommit": "80b3b1ca",
+      "testCommit": "394a6f6c",
+      "run": 41413601304,
+      "artifact": 13126484728,
+      "result": "PASS",
+      "findings": [
+        "all four source/general DOM-to-actual-decoder cases passed fresh and after real force-stop/restart",
+        "distinct PIDs 2488 and 5653; identical package, source-ID and protected install-file inventory",
+        "2048 web tests, 627 native tests with zero failures/skips, 7 Chromium fixture tests",
+        "functional-only emulator evidence; dropped frames recorded and smoothness not certified"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41413601304",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41413601304/artifacts/13126484728"
     }
   ],
   "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu",
-  "renderer": "swangle (ANGLE GLES backend)"
+  "renderer": "swangle (ANGLE GLES backend)",
+  "testedCommit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
+  "release": {
+    "status": "PUBLISHING",
+    "commit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
+    "branch": "feat/addons-v7-native-manager-20261027",
+    "run": 41415157110,
+    "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41415157110",
+    "webRun": 41415157078
+  }
 }

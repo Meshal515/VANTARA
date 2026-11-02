@@ -110,3 +110,12 @@ Android يستخدم مستودعات وحزمًا حقيقية، ويضغط أ�
 - في `80b3b1ca` يُتجاوز انتظار metadata عند وجود `_sourceCopy` أو copies حالية أو `knownWork` محفوظة. العمل الجديد غير المطابق فقط ينتظر الأسماء الكاملة. اختبارات إغلاق sheet أثناء metadata معلّقة وانتهاء 45 ثانية ثم وصول metadata متأخر تثبت عدم بدء prepare من نافذة انتهت.
 - أُصلح أيضًا فحص QA بعد ضغطة Back الثالثة: يفحص الحالة النهائية قبل إعلان فشل الرجوع، دون ضغط Back رابع.
 - التحقق المحدد **45/45** في أربعة ملفات، سلامة **55/55**، scope **123 مسارًا**، digest محدث. إعادة المراجعة لم تجد Critical/Important/Minor متبقية؛ lifecycle **35/35** لديها. suite الويب الكامل **2045** اجتاز على إصلاح metadata السابق؛ suite النهائي مع الاختبارات الثلاثة الجديدة ينتظر CI. لا ادعاء بنجاح فحص حي لم ينتهِ، ولا نشر قبل نفس-head fresh/restart.
+
+
+## اجتياز الفحص الحي وإطلاق قناة Debug
+
+- [المحاولة 41413601304](https://github.com/Meshal515/VANTARA/actions/runs/41413601304) على **394a6f6c** اجتازت كاملًا؛ artifact [13126484728](https://github.com/Meshal515/VANTARA/actions/runs/41413601304/artifacts/13126484728). فُحصت ملفات الإثبات نفسها: `fresh` و`restart` كلاهما PASS، لا أخطاء ولا حالات ساقطة.
+- **8 ملاحظات تشغيل فعلية:** cinema-source، anime-source، cinema-general، anime-general في كل مرحلة. الوقت تقدم 4275–5056ms خلال نحو 5 ثوانٍ، وعدد الإطارات المفكوكة 40–96. جميعها من صف مرئي حقيقي، same-session، probed READY، وPlayerActivity الأصلي الذي ضغطته الواجهة. هذه أدلة وظيفية على محاكي؛ dropped frames محفوظة، والسلاسة غير معتمدة.
+- PID جديد **2488 → 5653** بعد force-stop، دون clear أو reinstall. المقارنة المستقلة أكدت تطابق inventory للحزم والملفات المحمية ومعرّفات المصادر.
+- كامل الويب على نفس الرأس **2048/2048 في 214 ملفًا**؛ Native HTML report **627 tests، صفر failures وignored**؛ Chromium fixture **7/7**. جميع بوابات CI الأخرى اجتازت.
+- دُفع **نفس الرأس المختبر 394a6f6c** إلى فرع Debug المصرح به `feat/addons-v7-native-manager-20261027` دون تغيير main/Stable. [توقيع ونشر Android 41415157110](https://github.com/Meshal515/VANTARA/actions/runs/41415157110) و[Web Debug 41415157078](https://github.com/Meshal515/VANTARA/actions/runs/41415157078) بدآ. اكتمال نشر APK وتحقق manifest لا يزالان قيد المتابعة.
