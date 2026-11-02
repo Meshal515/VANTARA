@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T08:45:12Z",
+  "updatedAtUtc": "2026-11-02T09:07:14Z",
   "branch": "codex/android-addon-delivery-20261101",
   "applicationCommit": "80b3b1ca24ad89dd038dfcc9bb2526c3cca7217d",
-  "published": false,
-  "gate": "LIVE_GATE_PASSED_SIGNED_DEBUG_PUBLICATION_IN_PROGRESS",
+  "published": true,
+  "gate": "PASS_DEBUG_PUBLISHED_AND_DOWNLOADED_VERIFIED",
   "verification": {
     "web": {
       "files": 214,
@@ -295,11 +295,26 @@
   "renderer": "swangle (ANGLE GLES backend)",
   "testedCommit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
   "release": {
-    "status": "PUBLISHING",
+    "status": "PUBLISHED_VERIFIED",
     "commit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
     "branch": "feat/addons-v7-native-manager-20261027",
     "run": 41415157110,
     "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41415157110",
-    "webRun": 41415157078
+    "webRun": 41415157078,
+    "versionName": "0.0.2558",
+    "versionCode": 2558,
+    "native": "b40db82b2cfa3508a51ca6cb",
+    "apk": {
+      "url": "https://github.com/Meshal515/VANTARA/releases/download/debug-channel/VANTARA-debug.apk",
+      "sha256": "e1020b065db176e7db06d8a607515fe69bf70764a9e78e5ff52efee059aff602",
+      "size": 53798411
+    },
+    "certificateSha256": "0b5cce2127f3bb107a3ee01fe7e6c51b58d18ab3fe5292e6b944bbfe86a76bb0",
+    "downloadedApkHashAndSizeVerified": true,
+    "bundledMetadataAndSessionFixesVerified": true,
+    "signedUpgradeGate": "PASS",
+    "webUrl": "https://web-debug.vantara-bcf.pages.dev",
+    "webStatus": "PUBLISHED_HTTP_200_FIX_VERIFIED",
+    "runtimeDebugFingerprintVerified": true
   }
 }

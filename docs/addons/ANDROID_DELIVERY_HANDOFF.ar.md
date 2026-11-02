@@ -119,3 +119,13 @@ Android يستخدم مستودعات وحزمًا حقيقية، ويضغط أ�
 - PID جديد **2488 → 5653** بعد force-stop، دون clear أو reinstall. المقارنة المستقلة أكدت تطابق inventory للحزم والملفات المحمية ومعرّفات المصادر.
 - كامل الويب على نفس الرأس **2048/2048 في 214 ملفًا**؛ Native HTML report **627 tests، صفر failures وignored**؛ Chromium fixture **7/7**. جميع بوابات CI الأخرى اجتازت.
 - دُفع **نفس الرأس المختبر 394a6f6c** إلى فرع Debug المصرح به `feat/addons-v7-native-manager-20261027` دون تغيير main/Stable. [توقيع ونشر Android 41415157110](https://github.com/Meshal515/VANTARA/actions/runs/41415157110) و[Web Debug 41415157078](https://github.com/Meshal515/VANTARA/actions/runs/41415157078) بدآ. اكتمال نشر APK وتحقق manifest لا يزالان قيد المتابعة.
+
+
+## النشر المكتمل — Debug 0.0.2558
+
+- [نشر Android 41415157110](https://github.com/Meshal515/VANTARA/actions/runs/41415157110) **SUCCESS** على الرأس المختبر `394a6f6c`. اجتازت بوابات runtime وعقد التطبيق، ثم اختبارات ما قبل التوقيع و627 وحدة أصلية وعقد توقيع وترقية APK فوق الإصدار السابق وواجهة Home/Addons وrestart.
+- نُشر APK وSHA256 ثم manifest أخيرًا عند **2026-11-02 09:05:50 UTC** في قناة `debug-channel` التجريبية. النسخة **0.0.2558 / versionCode 2558**، والحجم **53,798,411 bytes**.
+- أُعيد تنزيل APK المنشور نفسه: SHA256 **e1020b065db176e7db06d8a607515fe69bf70764a9e78e5ff52efee059aff602** يطابق manifest، وشهادة apksigner تطابق pin الدائم **0b5cce2127f3bb107a3ee01fe7e6c51b58d18ab3fe5292e6b944bbfe86a76bb0**. فُحص وجود إصلاح metadata/cache ومسح ربط الجلسة داخل ملفات APK المعبأة، وتطابق bundle stamp مع manifest.
+- native fingerprint **b40db82b2cfa3508a51ca6cb** يطابق الحساب المحلي مع تفعيل `VANTARA_RUNTIME_DEBUG=true` و`ORG_GRADLE_PROJECT_vantaraRuntimeDebug=true` كما في النشر. البصمة العادية دون opt-in مختلفة عمدًا.
+- [تحميل APK](https://github.com/Meshal515/VANTARA/releases/download/debug-channel/VANTARA-debug.apk) · [manifest](https://github.com/Meshal515/VANTARA/releases/download/debug-channel/vantara-debug-update.json) · [Web Debug](https://web-debug.vantara-bcf.pages.dev). نشر Web Debug **SUCCESS**، وفحص HTTP فعلي أعاد 200 وأكد `hasKnownCopies` في ملف anime.js المنشور.
+- الأدلة الوظيفية الحية **8/8** قبل/بعد restart، **2048/2048** ويب، **627** Native بلا إخفاق، وحفظ inventory للحزم ومعرّفات المصادر. السلاسة الطويلة والجهاز الفعلي غير معتمدين بهذا الفحص. كل التغييرات والأدلة الموجزة مرفوعة؛ main/Stable خارج هذا النشر.
