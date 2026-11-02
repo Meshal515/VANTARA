@@ -2531,6 +2531,9 @@ export function createAnime(deps) {
           if (sheet.closed || sheet.expired) return;
           if (!out?.session) throw new Error('لم تبدأ جلسة تجهيز السيرفرات');
           sheet.session = out.session;
+          // Associate this visible server sheet with its actual native playback session.
+          // The delivery QA must never count READY from another or previous sheet.
+          body.dataset.vantaraPlaybackSession = out.session;
           sheet.copies = out.copies ?? copies;
           sheet.routes = out.routes ?? [];
           sheet.done = Boolean(out.done);
