@@ -112,6 +112,30 @@ async function caseFailure(operation,error){
   try{report.foregroundCases??={};report.foregroundCases[operation]={activity:resumedActivity(),visibility:await evaluate(`document.visibilityState`,5000)};}catch{}
   if(socket.readyState===1){try{report.nativeRouteSummary=await evaluate(`Object.values(window.__deliveryRoutes||{}).map(r=>({sourceId:r.sourceId,state:r.state,probed:r.probed,quality:r.quality,code:r.code,reason:String(r.reason||'').replace(/https?:\\/\\/\\S+/g,'[url]'),candidates:r.candidates?.length||0}))`,5000);}catch{}}
   if(socket.readyState===1){try{await screenshot(operation+'-failure');}catch{}try{report.visibleCases??={};report.visibleCases[operation]=await evaluate(`document.body.innerText.slice(-4500)`,5000);}catch{}}
+  // Failure-only diagnosis: distinguish a provider that cannot search its own
+  // catalogue from a general-page alias/mapping or native search-stream bug.
+  // This cannot count as playback or turn a failed case into a pass.
+  if(operation==='anime-general'){
+    const sourceTitle=report.checks.find(c=>c.operation==='actual catalogue work with exact general counterpart'&&c.metadata?.metadata==='AniList')?.title;
+    const sourceId=report.livePlayback.find(c=>c.entry==='anime-source')?.route?.sourceId;
+    if(sourceTitle&&sourceId){
+      try{
+        report.animeGeneralSearchDiagnostic=await invoke(async({query,sourceId})=>{
+          const engine=Capacitor.Plugins.AnimeEngine;
+          const inventory=await engine.sources();
+          let search;
+          try{
+            const page=await Promise.race([
+              engine.page({sourceId,listing:'search',page:1,query}),
+              new Promise((_,reject)=>setTimeout(()=>reject(Error('QA_DIAGNOSTIC_TIMEOUT')),20000))
+            ]);
+            search={items:(page.page?.items||[]).slice(0,12).map(x=>({title:x.title,sourceId:x.sourceId})),total:page.page?.items?.length||0};
+          }catch(error){search={error:String(error?.message||error).slice(0,180)};}
+          return {query,expectedSourceId:sourceId,installedSources:(inventory.sources||[]).map(x=>({id:x.id,name:x.name,content:x.content,enabled:x.enabled})),directSourceSearch:search};
+        },{query:sourceTitle,sourceId},35000);
+      }catch(error){report.animeGeneralSearchDiagnostic={error:String(error?.message||error).slice(0,180)};}
+    }
+  }
   await writeFile(`${out}/${phase}-ui-progress.json`,JSON.stringify(report,null,2)+'\n');
 }
 async function openManager(){await evaluate(`(()=>{window.__deliveryShell.showPage('home');document.querySelector('[data-act="openDrawer"]').click();const b=[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات');if(!b)throw Error('Addons navigation missing');b.click()})()`);await until(()=>evaluate(`!!document.querySelector('#utility.active .v7-addon')`),'production addon manager');}
@@ -217,6 +241,7 @@ try{
     await browse(repos.cloud);await install(repos.cloudPackage.name,{expectedCount:3});
   }
   const sources=await evaluate(`(async()=>{const out=await Capacitor.Plugins.AnimeEngine.sources();return out.sources.map(s=>({id:s.id,pkg:s.pkg,label:s.label,name:s.name,content:s.content}));})()`);
+  report.sourceInventory=sources.filter(s=>s.pkg===repos.animePackage.pkg||s.pkg===repos.cloudPackage.pkg||/asia2tv/i.test(s.id)).map(({id,name,content,pkg})=>({id,name,content,pkg}));
   const ani=sources.find(s=>s.pkg===repos.animePackage.pkg||/asia2tv/i.test(s.id)),cs=sources.find(s=>s.id.startsWith('addon|cs3|'+repos.cloudPackage.pkg+'|'));assert.ok(ani&&cs,'Installed native sources missing');
   const general=[];
   for(const [source,name,repo,kind] of [[ani,repos.animePackage.name,repos.anime,'cinema'],[cs,repos.cloudPackage.name,repos.cloud,'anime']]){
