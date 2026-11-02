@@ -2523,7 +2523,8 @@ export function createAnime(deps) {
           // display title can settle this sheet as missing before the romaji
           // match arrives. Share the in-flight detail request and sheet deadline.
           const detailLoad = state.detailLoad;
-          if (detailLoad?.id === m.id && detailLoad.token === state.detailToken) {
+          const hasKnownCopies = m._sourceCopy || (state.workFor === m.id && state.work?.copies?.length) || knownWork(m.id);
+          if (!hasKnownCopies && detailLoad?.id === m.id && detailLoad.token === state.detailToken) {
             let full;
             try { full = await wait(detailLoad.promise, preparation.signal); }
             catch (error) { if (preparation.signal.aborted) throw error; }

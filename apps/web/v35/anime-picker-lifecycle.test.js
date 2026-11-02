@@ -233,25 +233,68 @@ it('does not expose a previous sheet session while a new native preparation is p
   expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
 });
 
-it('uses canonical aliases when play is tapped before AniList details arrive', async () => {
+const minimalConan = { id: 235, title: 'Detective Conan' };
+const fullConan = { ...minimalConan, romaji: 'Meitantei Conan', synonyms: [], genres: [], episodes: 1200, aired: 1200, relations: [], recommendations: [] };
+function pendingMetadataScreen() {
   document.body.innerHTML = '<main><section id="anime"></section></main><div id="playbackSheet"></div>';
   const root = document.querySelector('main'), body = document.getElementById('playbackSheet');
   let resolveDetail, close;
-  engine.detail.mockImplementation(() => new Promise(resolve => { resolveDetail = resolve; }));
-  engine.find.mockImplementation(async titles => titles.includes('Meitantei Conan') ? { copies: [{ sourceId: 'wit', url: '/conan', title: 'Meitantei Conan' }] } : null);
-  engine.routes.mockResolvedValue({ done: true, routes: [route()] });
+  engine.detail.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text != null) node.textContent = text; return node; };
   const anime = createAnime({ root, q: id => root.querySelector('#'+id), el, toast() {}, genreAr: value => value,
     showPage() {}, currentPage: () => 'anime', sync: { user: null, rows: () => [], enqueue() {} },
     openSheet: build => { body.replaceChildren(); close = build(body); cleanups.push(close); }, closeSheet: () => close?.() });
-  const minimal = { id: 235, title: 'Detective Conan' };
-  const opening = anime.openAnime(minimal);
-  anime.play(minimal, 1);
+  const opening = anime.openAnime(minimalConan);
+  return { anime, body, opening, close: () => close?.(), finish: () => resolveDetail(fullConan) };
+}
+
+it('uses canonical aliases when play is tapped before AniList details arrive', async () => {
+  engine.find.mockImplementation(async titles => titles.includes('Meitantei Conan') ? { copies: [{ sourceId: 'wit', url: '/conan', title: 'Meitantei Conan' }] } : null);
+  engine.routes.mockResolvedValue({ done: true, routes: [route()] });
+  const view = pendingMetadataScreen();
+  view.anime.play(minimalConan, 1);
   await vi.advanceTimersByTimeAsync(1);
-  resolveDetail({ ...minimal, romaji: 'Meitantei Conan', synonyms: [], genres: [], episodes: 1200, aired: 1200, relations: [], recommendations: [] });
-  await opening;
+  view.finish(); await view.opening;
   await vi.advanceTimersByTimeAsync(2);
   expect(engine.find).toHaveBeenCalledWith(expect.arrayContaining(['Meitantei Conan']), expect.any(Function), expect.any(Object));
-  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
-  anime.leaveDetail();
+  expect(view.body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  view.anime.leaveDetail();
+});
+
+it('prepares remembered source copies while unrelated metadata is still pending', async () => {
+  const values = new Map([['vantara.anime.found.v1', JSON.stringify({235: {at: Date.now(), work: {title: 'Meitantei Conan', copies: [{sourceId: 'wit', url: '/conan'}]}}})]]);
+  vi.stubGlobal('localStorage', { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) });
+  engine.routes.mockResolvedValue({ done: true, routes: [route()] });
+  const view = pendingMetadataScreen();
+  view.anime.play(minimalConan, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(engine.prepare).toHaveBeenCalledTimes(1);
+  expect(view.body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  view.close(); view.finish(); await view.opening;
+  view.anime.leaveDetail();
+});
+
+it('does not prepare after the sheet closes while metadata is pending', async () => {
+  engine.find.mockResolvedValue({ copies: [{sourceId: 'wit', url: '/conan'}] });
+  const view = pendingMetadataScreen();
+  view.anime.play(minimalConan, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  view.close(); view.finish(); await view.opening;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(engine.prepare).not.toHaveBeenCalled();
+  expect(engine.listeners.get('route')?.size ?? 0).toBe(0);
+  view.anime.leaveDetail();
+});
+
+it('settles pending metadata at the sheet deadline and ignores its late completion', async () => {
+  engine.find.mockResolvedValue({ copies: [{sourceId: 'wit', url: '/conan'}] });
+  const view = pendingMetadataScreen();
+  view.anime.play(minimalConan, 1);
+  await vi.advanceTimersByTimeAsync(45001);
+  expectRetry(view.body);
+  view.finish(); await view.opening;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(engine.prepare).not.toHaveBeenCalled();
+  expectRetry(view.body);
+  view.anime.leaveDetail();
 });

@@ -69,13 +69,14 @@ function resumedActivity(){
 async function returnFromPlayer(){
   // CDP can still mutate an obscured WebView. Never start the next UI case
   // until a real Android Back action has resumed MainActivity and its frames.
-  for(let attempt=0;attempt<3;attempt++){
+  for(let attempt=0;attempt<=3;attempt++){
     const activity=resumedActivity();
     if(activity===`${pkg}/com.vantara.app.MainActivity`||activity===`${pkg}/.MainActivity`){
       await until(()=>evaluate(`document.visibilityState==='visible'`),'actual WebView foreground',10000);
       report.checks.push({operation:'returned from actual player',activity,backActions:attempt});
       return;
     }
+    if(attempt===3)break;
     assert.ok(activity?.includes('PlayerActivity'),'Unexpected activity while returning from player: '+activity);
     adb('shell','input','keyevent','4');
     await delay(1500);
