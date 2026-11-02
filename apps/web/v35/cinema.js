@@ -1933,7 +1933,10 @@ export function createCinema(deps) {
       const queuePaint = () => {
         if (sheet.closed || queued) return;
         queued = true;
-        paintFrame = requestAnimationFrame(paint);
+        // A returning native player may leave WebView frame callbacks paused
+        // although the route bridge is already READY. DOM updates must not
+        // depend on a new rendering frame to expose available servers.
+        queueMicrotask(paint);
       };
       paint();
 
