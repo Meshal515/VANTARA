@@ -1799,6 +1799,7 @@ export function createCinema(deps) {
     let paintFrame = null;
     const controller = new AbortController();
     deps.openSheet((body) => {
+      delete body.dataset.vantaraPlaybackSession;
       // رأس الورقة (server-sheet.js): لقطة الحلقة (أو خلفية العمل) بشعار metahub، ثم التقييم والتاريخ والمدة والوصف
       const epMeta = m.seasons?.find((s) => s.n === season)?.episodes.find((e) => e.n === n);
       const thumb = epMeta?.thumb;
@@ -1962,6 +1963,7 @@ export function createCinema(deps) {
       return () => {
         if (sheet.closed) return;
         sheet.closed = true;
+        if (body.dataset.vantaraPlaybackSession === sheet.session) delete body.dataset.vantaraPlaybackSession;
         controller.abort();
         if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);
         ui.destroy();

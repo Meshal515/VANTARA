@@ -179,3 +179,13 @@ it('renders a READY cinema route without waiting for an animation frame after na
   expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
   close();
 });
+
+it('releases the visible session binding when the cinema sheet closes', async () => {
+  engine.prepare.mockImplementation(async options => ({ session: options.session, routes: [ready('bound')], done: true }));
+  const { body, cinema, close } = screen();
+  await cinema.openWork(title, { autoplay: true });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.dataset.vantaraPlaybackSession).toBeTruthy();
+  close();
+  expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
+});

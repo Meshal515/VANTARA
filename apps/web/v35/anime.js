@@ -2267,6 +2267,9 @@ export function createAnime(deps) {
 
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
+      // The shell reuses this body across cinema/anime sheets. Preparation is
+      // asynchronous, so a previous session must not identify the new sheet.
+      delete body.dataset.vantaraPlaybackSession;
       // رأس الورقة (server-sheet.js): لقطة الحلقة بشعار العمل، ثم تقييمها وتاريخها ومدتها ووصفها من ani.zip
       const art = state.art?.id === m.id ? state.art : null;
       const shot = episodeStill(m, n, art, { full: true });
@@ -2565,6 +2568,7 @@ export function createAnime(deps) {
       return () => {
         if (sheet.closed) return;
         sheet.closed = true;
+        if (body.dataset.vantaraPlaybackSession === sheet.session) delete body.dataset.vantaraPlaybackSession;
         clearTimeout(deadline);
         clearTimeout(cooldownTimer);
         clearTimeout(reconciliationTimer);

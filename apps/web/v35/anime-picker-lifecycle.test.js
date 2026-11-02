@@ -216,3 +216,18 @@ it('renders a probed native READY route when Android pauses WebView animation fr
   expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
   close();
 });
+
+it('does not expose a previous sheet session while a new native preparation is pending', async () => {
+  let resolve;
+  engine.prepare.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const { body, anime, close } = screen();
+  body.dataset.vantaraPlaybackSession = 'previous-cinema-session';
+  anime.play(media, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
+  resolve({ session: 'new-anime-session', done: true, routes: [route()] });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.dataset.vantaraPlaybackSession).toBe('new-anime-session');
+  close();
+  expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
+});
