@@ -153,3 +153,17 @@ it('rehydrates a saved provider-local cinema reference that has no source copy',
   await cinema.openWork({ id: work.id, type: work.type, title: work.title });
   expect(document.querySelector('.cn-btn--play.cn-btn--block')).not.toBeNull();
 });
+
+
+it('restores a native READY route missed by early events and initial server-sheet snapshot', async () => {
+  engine.routes.mockResolvedValueOnce({ done: false, routes: [] })
+    .mockResolvedValueOnce({ done: true, routes: [ready('late-cinema-native')] });
+  const { body, cinema, close } = screen();
+  await cinema.openWork(title, { autoplay: true });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(1300);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  close();
+  expect(vi.getTimerCount()).toBe(0);
+});
