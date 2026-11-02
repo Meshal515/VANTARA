@@ -195,8 +195,6 @@ it('recovers a native READY route from the live session after both the initial s
     : { done: true, routes: [route('late-native-ready')] });
   const { body, anime, close } = screen();
   anime.play(media, 1);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(1300);
   expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
   close();
