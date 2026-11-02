@@ -35,7 +35,27 @@ function command(method,params={},ms=150000){return new Promise((resolve,reject)
 socket.onclose=()=>{for(const job of pending.values()){clearTimeout(job.timer);const error=new Error('Actual Android WebView disconnected');error.code='CDP_DISCONNECTED';job.reject(error);}pending.clear();};
 async function evaluate(expression,timeoutMs=150000){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true},timeoutMs);if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;}
 const invoke=(fn,arg,timeoutMs)=>evaluate(`(${fn.toString()})(${JSON.stringify(arg)})`,timeoutMs);
-async function screenshot(name){const r=await command('Page.captureScreenshot',{format:'png'},10000);await writeFile(`${out}/${phase}-${name}.png`,Buffer.from(r.data,'base64'));}
+async function screenshot(name){
+  // On Android emulators CDP Page.captureScreenshot can hang when the GPU or
+  // native player transitions surfaces, even though the live DOM has READY
+  // rows. Capture the actual device first; screenshots are supplementary
+  // evidence, never a prerequisite to selecting a real playable route.
+  try {
+    const png=execFileSync('adb',['exec-out','screencap','-p'],{timeout:18000,maxBuffer:16*1024*1024});
+    const signature=Buffer.from([137,80,78,71,13,10,26,10]);
+    if (!png.subarray(0,8).equals(signature)) throw Error('adb screencap did not return PNG');
+    await writeFile(`${out}/${phase}-${name}.png`,png);
+  } catch (deviceError) {
+    try {
+      const r=await command('Page.captureScreenshot',{format:'png'},8000);
+      await writeFile(`${out}/${phase}-${name}.png`,Buffer.from(r.data,'base64'));
+    } catch (cdpError) {
+      report.screenshotWarnings??=[];
+      report.screenshotWarnings.push({name,device:String(deviceError?.message||deviceError).slice(0,160),cdp:String(cdpError?.message||cdpError).slice(0,160)});
+      console.warn('[Android UI delivery] screenshot unavailable, continuing real playback:',name);
+    }
+  }
+}
 let observing=false,finished=false,restartCountChecked=false;
 async function observer(value){observing=true;try{const id=`${phase}-${Date.now()}-${++seq}`;execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id,...value}),encoding:'utf8',timeout:15000});const r=await until(()=>{const r=read('response.json');return r.id===id&&r;},'native playback observer',65000);assert.equal(r.status,'PASS',JSON.stringify(r));return r;}finally{observing=false;}}
 const heartbeat=setInterval(()=>{if(!observing){try{execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id:'heartbeat-'+Date.now(),action:'ping'}),encoding:'utf8',timeout:15000});}catch{}}},45000);
