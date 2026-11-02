@@ -41,6 +41,26 @@ async function observer(value){observing=true;try{const id=`${phase}-${Date.now(
 const heartbeat=setInterval(()=>{if(!observing){try{execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id:'heartbeat-'+Date.now(),action:'ping'}),encoding:'utf8',timeout:15000});}catch{}}},45000);
 async function caseFailure(operation,error){
   report.checks.push({operation,result:'FAIL',error:String(error.message).replace(/https?:\/\/\S+/g,'[url]')});
+  if(socket.readyState===1){
+    try{
+      report.caseTelemetry??={};
+      report.caseTelemetry[operation]=await evaluate(`(async()=>{
+        const host=document.querySelector('#sheet:not([hidden]) #sheetBody');
+        const session=host?.dataset.vantaraPlaybackSession||null;
+        let native=null;
+        if(session){try{
+          const state=await Capacitor.Plugins.AnimeEngine.routes({session});
+          native={done:state.done,routes:(state.routes||[]).map(r=>({
+            id:r.id,sourceId:r.sourceId,state:r.state,probed:r.probed,
+            candidates:r.candidates?.length||0,quality:r.quality,reason:String(r.reason||'').slice(0,90)
+          }))};
+        }catch(error){native={error:String(error?.message||error).slice(0,120)};}}
+        return {session,visibleReady:document.querySelectorAll('#sheet .an-srv--ready').length,
+          visibleRows:document.querySelectorAll('#sheet .an-srv').length,
+          status:document.querySelector('#sheet .an-srv-status')?.textContent||'',native};
+      })()`,8000);
+    }catch{}
+  }
   if(socket.readyState===1){try{report.nativeRouteSummary=await evaluate(`Object.values(window.__deliveryRoutes||{}).map(r=>({sourceId:r.sourceId,state:r.state,probed:r.probed,quality:r.quality,code:r.code,reason:String(r.reason||'').replace(/https?:\\/\\/\\S+/g,'[url]'),candidates:r.candidates?.length||0}))`,5000);}catch{}}
   if(socket.readyState===1){try{await screenshot(operation+'-failure');}catch{}try{report.visibleCases??={};report.visibleCases[operation]=await evaluate(`document.body.innerText.slice(-4500)`,5000);}catch{}}
   await writeFile(`${out}/${phase}-ui-progress.json`,JSON.stringify(report,null,2)+'\n');
@@ -55,15 +75,15 @@ async function clickSourceWork(title,type){await invoke(({title,type})=>{window.
 async function resetTrace(){await evaluate(`(async()=>{await window.__deliveryRouteHandle?.remove?.();await window.__deliveryPreparedHandle?.remove?.();window.__deliveryRoutes={};window.__deliverySessions={};const p=Capacitor.Plugins.AnimeEngine;window.__deliveryRouteHandle=await p.addListener('route',e=>{if(e.route)__deliveryRoutes[e.route.id]={...e.route,session:e.session,addonGeneration:e.addonGeneration,at:Date.now()};});window.__deliveryPreparedHandle=await p.addListener('prepared',e=>{__deliverySessions[e.session]={session:e.session,addonGeneration:e.addonGeneration,at:Date.now()};});})()`);}
 async function sheetAndPlay(sourceId,label){
   await evaluate(`(()=>{const b=document.querySelector('#anime.active .aw-play,#cinema.active .cn-btn--play.cn-btn--block');if(!b)throw Error('Actual work play button missing');b.click()})()`);
-  const route=await until(()=>invoke(async sourceId=>{
-    const plugin=Capacitor.Plugins.AnimeEngine;
-    for(const s of Object.values(window.__deliverySessions||{}).sort((a,b)=>b.at-a.at)){
-      const snap=await plugin.routes({session:s.session});
-      for(const r of snap.routes||[])if(r.sourceId===sourceId)__deliveryRoutes[r.id]={...r,...s};
-    }
-    const r=Object.values(window.__deliveryRoutes||{}).sort((a,b)=>b.at-a.at).find(r=>r.sourceId===sourceId&&r.state==='READY'&&r.probed===true&&r.candidates?.length);
-    return r?{id:r.id,sourceId:r.sourceId,session:r.session,addonGeneration:r.addonGeneration,candidate:r.candidates[0],quality:r.quality}:null;
-  },sourceId),'probed real route reaches '+label,100000);
+  // Never use a READY route from a previously opened source/warmup.
+  // Inspect only the native session currently mounted inside this sheet.
+  const activeSession=await until(()=>evaluate(`document.querySelector('#sheet:not([hidden]) #sheetBody')?.dataset.vantaraPlaybackSession||null`),
+    'current active server-sheet session '+label,45000);
+  const route=await until(()=>invoke(async ({sourceId,session})=>{
+    const snap=await Capacitor.Plugins.AnimeEngine.routes({session});
+    const r=(snap.routes||[]).find(r=>r.sourceId===sourceId&&r.state==='READY'&&r.probed===true&&r.candidates?.length);
+    return r?{id:r.id,sourceId:r.sourceId,session,candidate:r.candidates[0],quality:r.quality}:null;
+  },{sourceId,session:activeSession}),'probed native route in active sheet '+label,100000);
   await until(()=>evaluate(`!!document.querySelector('.an-srv--ready:not([disabled])')`),'ready route in server sheet',20000);
   await screenshot(label+'-server-sheet');const spinner=await evaluate(`document.querySelector('.an-srv-status')?.textContent||''`);
   await evaluate(`(()=>{const b=document.querySelector('.an-srv--ready:not([disabled])');b.scrollIntoView({block:'center'});b.click()})()`);
