@@ -194,6 +194,10 @@ it('recovers a native READY route from the live session after both the initial s
     ? { done: false, routes: [] }
     : { done: true, routes: [route('late-native-ready')] });
   const { body, anime, close } = screen();
+  // createAnime also schedules an unrelated app-wide outbox flush at 2500ms.
+  // Drain it before opening the sheet so this regression only measures timers
+  // owned by the live server-sheet lifecycle, not the application outbox.
+  await vi.advanceTimersByTimeAsync(2500);
   anime.play(media, 1);
   await vi.advanceTimersByTimeAsync(1300);
   expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
