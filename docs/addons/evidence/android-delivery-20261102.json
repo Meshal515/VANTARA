@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T08:22:22Z",
+  "updatedAtUtc": "2026-11-02T08:30:19Z",
   "branch": "codex/android-addon-delivery-20261101",
-  "applicationCommit": "c0f1c981b27f855fc2e82be23f05beda908d6e5d",
+  "applicationCommit": "80b3b1ca24ad89dd038dfcc9bb2526c3cca7217d",
   "published": false,
   "gate": "BLOCKED_PENDING_LIVE_PLAYBACK_AND_RESTART",
   "verification": {
@@ -23,6 +23,18 @@
       "passed": 7,
       "backend": "controlled Capacitor fixture",
       "liveAndroidPlayback": false
+    },
+    "focusedMetadataAndPlayback": {
+      "passed": 45,
+      "files": 4,
+      "fullWebOnFinalGuard": "pending CI; prior canonical metadata implementation passed 2045 tests"
+    },
+    "codeReview": {
+      "status": "PASS",
+      "critical": 0,
+      "important": 0,
+      "minor": 0,
+      "reviewScope": "metadata, cache, cancellation/deadline and visible-session fixes"
     }
   },
   "actualAndroid": {
