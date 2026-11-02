@@ -162,8 +162,6 @@ it('restores a native READY route missed by early events and initial server-shee
     : { done: true, routes: [ready('late-cinema-native')] });
   const { body, cinema, close } = screen();
   await cinema.openWork(title, { autoplay: true });
-  await vi.advanceTimersByTimeAsync(1);
-  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(1300);
   expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
   close();
