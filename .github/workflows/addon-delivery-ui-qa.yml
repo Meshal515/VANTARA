@@ -4,6 +4,14 @@ on:
   push:
     branches: [codex/android-addon-delivery-20261101]
     paths:
+      - 'apps/web/v35/addons-v7.js'
+      - 'apps/web/v35/shell.js'
+      - 'apps/web/v35/anime.js'
+      - 'apps/web/v35/cinema.js'
+      - 'apps/web/lib/anime-engine.js'
+      - 'apps/web/lib/extension-engine.js'
+      - 'android/app/src/main/**'
+      - 'extensions/runtime-android/integration/src/main/**'
       - '.github/workflows/addon-delivery-ui-qa.yml'
       - 'tools/repository-compat/android-addon-delivery.mjs'
       - 'tools/repository-compat/run_android_addon_delivery.sh'

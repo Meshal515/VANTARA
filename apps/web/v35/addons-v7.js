@@ -506,8 +506,15 @@ export function renderV7Addons({
   }
   function managerRecords(){
     const managedCloudStream=new Set((installedMetadata.get('cloudstream')||[]).filter(isInstalledMetadata).map(nativePackage));
-    const managedBy=item=>stores.some(g=>(item.contentTypes||[]).includes(g.kind)&&
-      (item.pkg||(installedMetadata.get(g.id)||[]).some(local=>nativePackage(local)===nativePackage(item)||(local.sourceIds||[]).includes(item.sourceId))));
+    const managedBy=item=>{
+      // CloudStream ownership is proven by its own package store above. Its
+      // canonical sources must never disappear because Aniyomi is available.
+      if(String(item.sourceId||'').startsWith('addon|cs3|'))return false;
+      const types=item.contentTypes||[];
+      return stores.some(g=>
+        (g.id==='anime'?types.some(t=>['anime','movie','series'].includes(t)):g.kind==='manga'&&types.includes('manga'))&&
+        (item.pkg||(installedMetadata.get(g.id)||[]).some(local=>nativePackage(local)===nativePackage(item)||(local.sourceIds||[]).includes(item.sourceId))));
+    };
     const allRemote=(registry.list?.()||[]).filter(item=>
       (!String(item.sourceId||'').startsWith('addon|cs3|') || !managedCloudStream.has(nativePackage(item))) &&
       !(String(item.key||'').startsWith('core|') && managedBy(item)));

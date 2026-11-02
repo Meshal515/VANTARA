@@ -690,3 +690,36 @@ it('keeps an offline pending restore choice reviewable and lets its owner explic
  const view=renderV7Addons({registry:registry(),readySources:api});d.body.append(view);await tick();browse(view);await tick();const row=view.querySelector('.v7-row');expect(row).toBeTruthy();expect(row.querySelector('.v7-front').textContent).toBe('استعادة');expect(installedTab(view).querySelector('.v7-count').textContent).toBe('0');
  row.querySelector('.v7-trash').click();expect(view.querySelector('.v7-dialog').textContent).toContain('اختيار');expect(api.uninstall).not.toHaveBeenCalled();view.querySelector('.v7-confirm-actions .danger').click();await tick();expect(api.uninstall).toHaveBeenCalledWith(pkg);expect(api.install).not.toHaveBeenCalled();expect(view.querySelector('.v7-body').textContent).not.toContain('Offline Choice');view.close();
 });
+
+
+it('counts native cinema packages once when their canonical movie/series source appears after reload', async () => {
+  const document = setup();
+  const manga = { pkg: 'eu.kanade.tachiyomi.extension.ar.manhatok', name: 'Manhatok', version: '1' };
+  const anime = { pkg: 'eu.kanade.tachiyomi.animeextension.ar.asia2tv', name: 'asia2tv', version: '1', content: 'cinema' };
+  const cloud = { pkg: 'cs3_witcher', name: 'AnimeWitcher', version: 1, installed: true, protocol: 'cloudstream' };
+  const items = [
+    { key: 'core|manga', sourceId: manga.pkg+'#1', pkg: manga.pkg, name: manga.name, bundled: true, user: true, contentTypes: ['manga'] },
+    { key: 'core|cloud', sourceId: 'addon|cs3|cs3_witcher|provider|ulocal', pkg: cloud.pkg, name: cloud.name, bundled: true, user: true, contentTypes: ['anime'] },
+  ];
+  const api = record => ({ list: async () => ({ repos: [], installed: [record] }), extensions: async () => [] });
+  const view = renderV7Addons({ registry: registry(items), repositories: api(manga), animeRepositories: api(anime), cloudstreamRepositories: api(cloud) });
+  document.body.append(view); await tick();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('3');
+  items.push({ key: 'core|user-asia', sourceId: 'user-'+anime.pkg, pkg: anime.pkg, name: 'Asia2TV', bundled: true, user: true, contentTypes: ['movie', 'series'] });
+  installedTab(view).click();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('3');
+  expect(view.querySelectorAll('.v7-body .v7-row')).toHaveLength(3);
+  expect([...view.querySelectorAll('.v7-name')].map(node => node.textContent)).toEqual(expect.arrayContaining(['Manhatok', 'asia2tv', 'AnimeWitcher']));
+  view.close();
+});
+
+it('keeps a canonical CloudStream source visible when only the independent Aniyomi store is available', async () => {
+  const document = setup(), sourceId = 'addon|cs3|cs3_actual|provider|ulocal';
+  const canonical = { key: 'core|'+sourceId, sourceId, pkg: 'cs3_actual', name: 'Actual CloudStream source', bundled: true, user: true, contentTypes: ['anime'] };
+  const animeRepositories = { list: async () => ({ repos: [], installed: [] }), extensions: async () => [] };
+  const view = renderV7Addons({ registry: registry([canonical]), animeRepositories });
+  document.body.append(view); await tick(); installedTab(view).click();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');
+  expect(view.querySelector('.v7-name')?.textContent).toBe('Actual CloudStream source');
+  view.close();
+});
