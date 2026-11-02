@@ -1464,7 +1464,7 @@ export function createCinema(deps) {
     window.scrollTo?.(0, 0);
     renderDetail(m, { partial: true });
     let fetched;
-    try { fetched = String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`cinema:${m.id}`, m) : m._sourceCopy ? m : await prefetch(m); }
+    try { fetched = m._sourceCopy ? m : String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`cinema:${m.id}`, m) : await prefetch(m); }
     catch (error) { if (token === state.token) toast(error.message); return; }
     if (token !== state.token) return;
     // التفاصيل تُقبل لنفس المعرّف والنوع فقط، والاسم الذي ضغطه الشخص يبقى اسم الصفحة

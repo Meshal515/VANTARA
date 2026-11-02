@@ -130,3 +130,26 @@ it('aborts a pending warm request on close and reopens independently of its late
   emit('route', { session: abandoned, route: ready('old-event') }); await vi.advanceTimersByTimeAsync(1);
   expect(body.querySelectorAll('.an-srv')).toHaveLength(1); expect(engine.close).toHaveBeenCalledWith(abandoned);
 });
+
+
+it('opens a fully loaded provider-local cinema work while another source read is offline', async () => {
+  const { sourceWorkModel } = await import('../addons/work-view.js');
+  const work = sourceWorkModel({ url: 'https://provider.example/drama/local', type: 'series', title: 'Native drama' }, {
+    addon: { key: 'core|user-native-drama', sourceId: 'user-native-drama', contentTypes: ['series'] },
+    episodes: [{ number: 1, season: 1 }, { number: 2, season: 1 }],
+  });
+  const { cinema, deps } = screen();
+  deps.restoreSourceWork = async () => { throw new Error('Source is offline after catalogue navigation'); };
+  await cinema.openWork(work);
+  const play = document.querySelector('.cn-btn--play.cn-btn--block');
+  expect(play).not.toBeNull();
+  expect(play.textContent).toContain('الحلقة 1');
+});
+
+it('rehydrates a saved provider-local cinema reference that has no source copy', async () => {
+  const work = { id: 'addon-saved-drama', type: 'series', title: 'Saved drama', seasons: [{ n: 1, episodes: [{ n: 1 }] }], _sourceCopy: { sourceId: 'user-native-drama', url: '/drama/saved' } };
+  const { cinema, deps } = screen();
+  deps.restoreSourceWork = async ref => { expect(ref).toBe('cinema:addon-saved-drama'); return work; };
+  await cinema.openWork({ id: work.id, type: work.type, title: work.title });
+  expect(document.querySelector('.cn-btn--play.cn-btn--block')).not.toBeNull();
+});

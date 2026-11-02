@@ -38,7 +38,7 @@ const setup = ({ detail = DETAIL } = {}) => {
   const pages = [];
   const deps = { root, q: (id) => root.querySelector(`#${id}`), el, toast: vi.fn(), genreAr: (s) => s, openSheet: vi.fn(), closeSheet: vi.fn(), showPage: (id) => pages.push(id), currentPage: () => 'anime', sync };
   const anime = createAnime(deps);
-  return { root, anime, store, calls, pages, document, window };
+  return { root, anime, store, calls, pages, document, window, deps };
 };
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0)); };
 
@@ -152,4 +152,25 @@ it('hero: waits for the IMDb link, prefers its key art, and never uses the AniLi
   expect(heroSrcs()).toEqual(['https://images.metahub.space/background/large/tt26743760/img']);
   expect(heroSrcs()).not.toContain('https://img/banner.jpg');
   anime.leaveDetail();
+});
+
+
+it('renders episodes of an already loaded provider-local anime without a second source read', async () => {
+  const { sourceWorkModel } = await import('../addons/work-view.js');
+  const work = sourceWorkModel({ url: 'https://provider.example/anime/local', type: 'anime', title: 'Native anime' }, {
+    addon: { key: 'core|user-native-anime', sourceId: 'user-native-anime', contentTypes: ['anime'] },
+    episodes: [{ number: 1 }, { number: 2 }],
+  });
+  const { root, anime, deps } = setup();
+  deps.restoreSourceWork = async () => { throw new Error('Source is offline after catalogue navigation'); };
+  await anime.openAnime(work);
+  expect([...root.querySelectorAll('.an-er')].map(row => row.dataset.ep)).toEqual(['1', '2']);
+});
+
+it('rehydrates a saved provider-local anime reference before rendering its episodes', async () => {
+  const work = { id: 'addon-saved-anime', title: 'Saved anime', episodes: 2, aired: 2, _sourceCopy: { sourceId: 'user-native-anime', url: '/anime/saved' } };
+  const { root, anime, deps } = setup();
+  deps.restoreSourceWork = async ref => { expect(ref).toBe('anime:addon-saved-anime'); return work; };
+  await anime.openAnime({ id: work.id, title: work.title });
+  expect([...root.querySelectorAll('.an-er')].map(row => row.dataset.ep)).toEqual(['1', '2']);
 });

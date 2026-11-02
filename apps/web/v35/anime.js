@@ -601,7 +601,7 @@ export function createAnime(deps) {
     for (const ev of INPUT) window.addEventListener?.(ev, touched, { once: true, passive: true });
     const untouch = () => { for (const ev of INPUT) window.removeEventListener?.(ev, touched); };
     try {
-      const full = String(m.id).startsWith('addon-') ? await deps.restoreSourceWork(`anime:${m.id}`, m) : m._sourceCopy ? m : await fetchAnimeDetail(m.id);
+      const full = m._sourceCopy ? m : String(m.id).startsWith('addon-') ? await deps.restoreSourceWork(`anime:${m.id}`, m) : await fetchAnimeDetail(m.id);
       if (token !== state.detailToken || !full) return;
       state.detail = full;
       if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
