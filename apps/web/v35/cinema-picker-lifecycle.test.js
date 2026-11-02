@@ -167,3 +167,15 @@ it('restores a native READY route missed by early events and initial server-shee
   close();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('renders a READY cinema route without waiting for an animation frame after native playback', async () => {
+  // A previously open native player can throttle frame callbacks while route
+  // delivery is already complete; the visible sheet must still get its rows.
+  vi.stubGlobal('requestAnimationFrame', () => 1);
+  engine.prepare.mockImplementation(async options => ({ session: options.session, routes: [ready('native-ready-with-paused-raf')], done: true }));
+  const { body, cinema, close } = screen();
+  await cinema.openWork(title, { autoplay: true });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  close();
+});
