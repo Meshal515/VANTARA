@@ -1,3 +1,4 @@
+import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as shell from './shell.js';
 
@@ -56,4 +57,39 @@ it('cancels a pending work detail lookup when leaving its source and suppresses 
   expect((await outcome).name).toBe('AbortError');
   expect(adopted).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+
+function typePrompt(work, { active = () => true, contentTypes = ['movie', 'series'] } = {}) {
+  const { document } = parseHTML('<main></main>');
+  const body = document.querySelector('main');
+  const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text) node.textContent = text; return node; };
+  let chosen = null, closed = false;
+  expect(shell.promptSourceWorkType).toBeTypeOf('function');
+  const prompted = shell.promptSourceWorkType(work, { contentTypes }, { el, active, openSheet: build => build(body), closeSheet: () => { closed = true; },
+    sheetItem: (_icon, label, run) => { const button = el('button', 'sheet-item', label); button.onclick = run; return button; }, onChoose: value => { chosen = value; } });
+  return { body, prompted, selected: () => chosen, closed: () => closed };
+}
+
+it('lets a person choose series for an untyped native cinema work without changing its identity', () => {
+  const work = { sourceId: 'user-asia', url: '/published-work', title: 'Published title' };
+  const view = typePrompt(work);
+  expect(view.prompted).toBe(true);
+  expect([...view.body.querySelectorAll('button')].map(button => button.textContent)).toEqual(['فيلم', 'مسلسل']);
+  [...view.body.querySelectorAll('button')].find(button => button.textContent === 'مسلسل').click();
+  expect(view.selected()).toEqual({ sourceId: 'user-asia', url: '/published-work', title: 'Published title', type: 'series' });
+  expect(view.closed()).toBe(true);
+  expect(work.type).toBeUndefined();
+});
+
+it('does not prompt or replace a type already declared by the source', () => {
+  const view = typePrompt({ url: '/movie', type: 'movie' });
+  expect(view.prompted).toBe(false);expect(view.body.children.length).toBe(0);expect(view.selected()).toBeNull();
+  expect(typePrompt({ url: '/anime' }, { contentTypes: ['anime'] }).prompted).toBe(false);
+});
+
+it('ignores a delayed cinema type choice after leaving the source', () => {
+  const view = typePrompt({ url: '/old-work' }, { active: () => false });
+  view.body.querySelector('button').click();
+  expect(view.selected()).toBeNull();expect(view.closed()).toBe(false);
 });

@@ -73,7 +73,9 @@ jobs:
           cores: 4
           ram-size: 4096M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          # The host emulator RenderThread segfaulted with Vulkan enabled;
+          # retain real software video decode and the same playback assertions.
+          emulator-options: -no-window -gpu swiftshader_indirect -feature -Vulkan -no-boot-anim -camera-back none
           script: bash tools/repository-compat/run_android_addon_delivery.sh
       - uses: actions/upload-artifact@v4
         if: always()

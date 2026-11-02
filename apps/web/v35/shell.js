@@ -195,6 +195,24 @@ export function createAddonNavigation() {
   };
 }
 
+/** A mixed cinema catalogue can omit type; let the person choose without inventing metadata. */
+export function promptSourceWorkType(work, addon, { el, openSheet, closeSheet, sheetItem, active, onChoose }) {
+  if (work.type || !addon.contentTypes.includes('movie') || !addon.contentTypes.includes('series')) return false;
+  let selected = false;
+  openSheet(body => {
+    body.append(el('h3', null, 'اختر نوع العمل'), el('p', 'work-meta', 'المصدر لم يحدد نوع هذا العمل. كيف تريد فتحه؟'));
+    for (const [type, label, icon] of [['movie', 'فيلم', 'film'], ['series', 'مسلسل', 'layers']]) {
+      body.append(sheetItem(icon, label, () => {
+        if (selected || !active()) return;
+        selected = true;
+        closeSheet();
+        void onChoose({ ...work, type });
+      }));
+    }
+  });
+  return true;
+}
+
 /**
  * @param {{ sync: any, mount: (node: Element) => void, go: (route: object) => Promise<void>,
  *           openReader: (route: object) => void, switchAccount: () => void, version: string,
@@ -3903,6 +3921,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           const details=await workLookup.wait(signal=>nativeAdapter.series(copy,{signal}),'SOURCE_DETAILS_TIMEOUT');if(!active())return;
           copy={...copy,...details.work,_nativeDetailsLoaded:true};
         }
+        if (promptSourceWorkType(copy, addon, { el, openSheet, closeSheet, sheetItem, active: () => active() && !workLookup.signal.aborted, onChoose: openSelectedWork })) return;
         if(sourceId.startsWith('addon|cs3|') && copy.hasSeasons && copy.requestedSeason==null){
           if(!nativeAdapter?.seasons)throw new Error('اختيار مواسم هذا المصدر غير متاح في نسخة التطبيق الحالية.');
           const seasons=await workLookup.wait(signal=>nativeAdapter.seasons(copy,{signal}),'SOURCE_SEASONS_TIMEOUT');if(!active())return;
