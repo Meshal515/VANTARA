@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T08:03:56Z",
+  "updatedAtUtc": "2026-11-02T08:22:22Z",
   "branch": "codex/android-addon-delivery-20261101",
-  "applicationCommit": "3f1da5f544e5cefd599ed1110770e20f7e73f133",
+  "applicationCommit": "c0f1c981b27f855fc2e82be23f05beda908d6e5d",
   "published": false,
   "gate": "BLOCKED_PENDING_LIVE_PLAYBACK_AND_RESTART",
   "verification": {
     "web": {
       "files": 214,
-      "passed": 2044
+      "passed": 2045
     },
     "nativeUnit": {
       "suites": 122,
@@ -44,30 +44,40 @@
     "scrollPreserved": true,
     "manhatokIconDecodedWidth": 96,
     "cinemaWorkDetailsReached": true,
-    "decodedPlaybackObservations": 2,
+    "decodedPlaybackObservations": 3,
     "generalPlaybackProven": false,
     "processRestartProven": false,
     "playbackEvidence": [
       {
         "entry": "cinema-source",
-        "advancedMs": 4439,
-        "decodedFrames": 26,
-        "droppedFrames": 96,
-        "sampleMs": 5041,
+        "advancedMs": 4518,
+        "decodedFrames": 24,
+        "droppedFrames": 103,
+        "sampleMs": 5013,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "entry": "anime-source",
+        "advancedMs": 4398,
+        "decodedFrames": 31,
+        "droppedFrames": 65,
+        "sampleMs": 5057,
         "functionalOnly": true,
         "smoothnessCertified": false
       },
       {
         "entry": "cinema-general",
-        "advancedMs": 3426,
-        "decodedFrames": 24,
-        "droppedFrames": 78,
-        "sampleMs": 5014,
+        "advancedMs": 4443,
+        "decodedFrames": 27,
+        "droppedFrames": 97,
+        "sampleMs": 5072,
         "functionalOnly": true,
         "smoothnessCertified": false
       }
     ],
-    "cinemaSourceAndGeneralPlaybackProven": true
+    "cinemaSourceAndGeneralPlaybackProven": true,
+    "animeSourcePlaybackProven": true
   },
   "attempts": [
     {
@@ -165,6 +175,23 @@
       ],
       "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401",
       "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401/artifacts/13124820748"
+    },
+    {
+      "applicationCommit": "3f1da5f5",
+      "testCommit": "13c188ba",
+      "run": 41410406717,
+      "artifact": 13125861581,
+      "result": "FAIL",
+      "findings": [
+        "cinema-source, anime-source and cinema-general decoded playback passed in actual UI",
+        "actual MainActivity foreground and visible WebView confirmed after each player exit",
+        "anime-general had no session and reported work missing",
+        "regression reproduced tapping play before canonical AniList aliases arrive: late matching search did not restart an already settled sheet",
+        "c0f1c981 shares the current detail request with playback preparation under the existing cancellation and 45-second deadline; RED/GREEN test and 2045 web tests passed",
+        "restart not attempted; no release published"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717/artifacts/13125861581"
     }
   ],
   "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu",
