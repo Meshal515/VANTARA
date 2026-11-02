@@ -2427,7 +2427,11 @@ export function createAnime(deps) {
       const queuePaint = () => {
         if (sheet.closed || paintQueued) return;
         paintQueued = true;
-        paintFrame = requestAnimationFrame(paint);
+        // Native player activities can pause WebView animation frames while
+        // Android bridge callbacks and route snapshots continue to arrive.
+        // Apply the data to the DOM even when requestAnimationFrame is
+        // throttled; paint() itself ignores updates after the sheet closes.
+        queueMicrotask(paint);
       };
 
       const onWork = (id, work) => {
