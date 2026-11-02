@@ -62,6 +62,28 @@ async function screenshot(name){
     }
   }
 }
+function resumedActivity(){
+  const activities=adb('shell','dumpsys','activity','activities');
+  return activities.match(/(?:topResumedActivity|mResumedActivity)[:=][^\n]*?\s(com\.vantara\.[^\s}]+)/)?.[1]||null;
+}
+async function returnFromPlayer(){
+  // CDP can still mutate an obscured WebView. Never start the next UI case
+  // until a real Android Back action has resumed MainActivity and its frames.
+  for(let attempt=0;attempt<3;attempt++){
+    const activity=resumedActivity();
+    if(activity===`${pkg}/com.vantara.app.MainActivity`||activity===`${pkg}/.MainActivity`){
+      await until(()=>evaluate(`document.visibilityState==='visible'`),'actual WebView foreground',10000);
+      report.checks.push({operation:'returned from actual player',activity,backActions:attempt});
+      return;
+    }
+    assert.ok(activity?.includes('PlayerActivity'),'Unexpected activity while returning from player: '+activity);
+    adb('shell','input','keyevent','4');
+    await delay(1500);
+  }
+  const error=Error('ACTUAL_PLAYER_STILL_FOREGROUND: '+resumedActivity());
+  error.code='ACTUAL_PLAYER_STILL_FOREGROUND';
+  throw error;
+}
 let observing=false,finished=false,restartCountChecked=false;
 async function observer(value){observing=true;try{const id=`${phase}-${Date.now()}-${++seq}`;execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id,...value}),encoding:'utf8',timeout:15000});const r=await until(()=>{const r=read('response.json');return r.id===id&&r;},'native playback observer',65000);assert.equal(r.status,'PASS',JSON.stringify(r));return r;}finally{observing=false;}}
 const heartbeat=setInterval(()=>{if(!observing){try{execFileSync('adb',['shell',`run-as ${pkg} sh -c 'cat > files/debug-ui-delivery/command.json'`],{input:JSON.stringify({id:'heartbeat-'+Date.now(),action:'ping'}),encoding:'utf8',timeout:15000});}catch{}}},45000);
@@ -87,6 +109,7 @@ async function caseFailure(operation,error){
       })()`,8000);
     }catch{}
   }
+  try{report.foregroundCases??={};report.foregroundCases[operation]={activity:resumedActivity(),visibility:await evaluate(`document.visibilityState`,5000)};}catch{}
   if(socket.readyState===1){try{report.nativeRouteSummary=await evaluate(`Object.values(window.__deliveryRoutes||{}).map(r=>({sourceId:r.sourceId,state:r.state,probed:r.probed,quality:r.quality,code:r.code,reason:String(r.reason||'').replace(/https?:\\/\\/\\S+/g,'[url]'),candidates:r.candidates?.length||0}))`,5000);}catch{}}
   if(socket.readyState===1){try{await screenshot(operation+'-failure');}catch{}try{report.visibleCases??={};report.visibleCases[operation]=await evaluate(`document.body.innerText.slice(-4500)`,5000);}catch{}}
   await writeFile(`${out}/${phase}-ui-progress.json`,JSON.stringify(report,null,2)+'\n');
@@ -128,11 +151,7 @@ async function sheetAndPlay(sourceId,label){
   await evaluate(`(()=>{const b=document.querySelector('.an-srv--ready:not([disabled])');b.scrollIntoView({block:'center'});b.click()})()`);
   const measured=await observer({action:'observe',sourceId,session:route.session,addonGeneration:route.addonGeneration});
   report.livePlayback.push({entry:label,route:{id:route.id,sourceId:route.sourceId,session:route.session,addonGeneration:route.addonGeneration,quality:route.quality},serverSheetStatus:spinner,facts:measured.facts});
-  adb('shell','input','keyevent','4');
-  // Do not operate the WebView through CDP while PlayerActivity remains
-  // foreground. A system immersive-mode prompt can consume the first BACK.
-  await until(()=>evaluate(`document.visibilityState==='visible'`),
-    'WebView foreground after real player exit '+label,20000);
+  await returnFromPlayer();
 }
 async function metadataFor(item,kind){
   return invoke(async({item,kind})=>{
@@ -201,10 +220,10 @@ try{
   const ani=sources.find(s=>s.pkg===repos.animePackage.pkg||/asia2tv/i.test(s.id)),cs=sources.find(s=>s.id.startsWith('addon|cs3|'+repos.cloudPackage.pkg+'|'));assert.ok(ani&&cs,'Installed native sources missing');
   const general=[];
   for(const [source,name,repo,kind] of [[ani,repos.animePackage.name,repos.anime,'cinema'],[cs,repos.cloudPackage.name,repos.cloud,'anime']]){
-    try {await browse(repo);const catalogue=await sourceWork(source.id);await openSource(name);const original=await chooseCatalogueWork(catalogue,kind);await resetTrace();await clickSourceWork(original.item.title,original.item.type||original.metadata?.type);await sheetAndPlay(source.id,kind+'-source');general.push({item:original.item,sourceId:source.id,kind,metadata:original.metadata});}
-    catch(error){await caseFailure(kind+'-source',error);if(socket.readyState!==1)throw error;}
+    try {await browse(repo);const catalogue=await sourceWork(source.id);await openSource(name);const original=await chooseCatalogueWork(catalogue,kind);await resetTrace();await clickSourceWork(original.item.title,original.item.type||original.metadata?.type);general.push({item:original.item,sourceId:source.id,kind,metadata:original.metadata});await sheetAndPlay(source.id,kind+'-source');}
+    catch(error){await caseFailure(kind+'-source',error);if(socket.readyState!==1||error.code==='ACTUAL_PLAYER_STILL_FOREGROUND')throw error;}
   }
-  for(const entry of general){try{await generalWork(entry.item,entry.sourceId,entry.kind,entry.metadata);}catch(error){await caseFailure(entry.kind+'-general',error);if(socket.readyState!==1)throw error;}}
+  for(const entry of general){try{await generalWork(entry.item,entry.sourceId,entry.kind,entry.metadata);}catch(error){await caseFailure(entry.kind+'-general',error);if(socket.readyState!==1||error.code==='ACTUAL_PLAYER_STILL_FOREGROUND')throw error;}}
   assert.equal(report.livePlayback.length,4,'Four real source/general playback observations required');report.retention=await observer({action:'finish'});finished=true;report.result='PASS';
 }catch(error){report.result='FAIL';report.failure=String(error?.stack||error).replace(/https?:\/\/\S+/g,'[url]');try{await screenshot('failure');report.visibleFailure=await evaluate(`document.body.innerText.slice(-3500)`,5000);}catch{}if(!finished&&socket.readyState===1)try{await observer({action:'finish'});}catch{}throw error;
 }finally{clearInterval(heartbeat);await writeFile(`${out}/${phase}-ui-proof.json`,JSON.stringify(report,null,2)+'\n');for(const p of pending.values())clearTimeout(p.timer);socket.close();try{adb('forward','--remove','tcp:9223');}catch{}}

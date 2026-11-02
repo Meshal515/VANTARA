@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAtUtc": "2026-11-02T05:27:13.104928+00:00",
+  "updatedAtUtc": "2026-11-02T07:58:08.664986+00:00",
   "branch": "codex/android-addon-delivery-20261101",
   "applicationCommit": "6d99ddb12bdcd3251d252a9f4b23b58543170d86",
   "published": false,
@@ -44,9 +44,18 @@
     "scrollPreserved": true,
     "manhatokIconDecodedWidth": 96,
     "cinemaWorkDetailsReached": true,
-    "decodedPlaybackObservations": 0,
+    "decodedPlaybackObservations": 1,
     "generalPlaybackProven": false,
-    "processRestartProven": false
+    "processRestartProven": false,
+    "playbackEvidence": {
+      "entry": "cinema-source",
+      "advancedMs": 4915,
+      "decodedFrames": 33,
+      "droppedFrames": 110,
+      "sampleMs": 5041,
+      "functionalOnly": true,
+      "smoothnessCertified": false
+    }
   },
   "attempts": [
     {
@@ -113,8 +122,24 @@
       ],
       "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626",
       "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626/artifacts/13118113243"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "testCommit": "f73af30a",
+      "run": 41394115788,
+      "artifact": 13119285909,
+      "result": "FAIL",
+      "renderer": "swangle ANGLE with guest Vulkan disabled",
+      "findings": [
+        "Host RenderThread did not crash; source cinema route reached actual server UI and decoded playback",
+        "cinema-source advanced 4915ms with 33 decoded frames; 110 dropped frames; functional only, smoothness not certified",
+        "anime-source and cinema-general timed out waiting for visible server rows although native routes were available; foreground lifecycle under investigation",
+        "restart not executed; four observations remain required"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788/artifacts/13119285909"
     }
   ],
-  "nextRenderer": "swangle (ANGLE GLES backend)",
-  "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu"
+  "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu",
+  "renderer": "swangle (ANGLE GLES backend)"
 }

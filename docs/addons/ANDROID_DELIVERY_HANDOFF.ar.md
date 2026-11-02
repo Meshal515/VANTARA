@@ -76,3 +76,11 @@ Android يستخدم مستودعات وحزمًا حقيقية، ويضغط أ�
 - [المحاولة 41392437626](https://github.com/Meshal515/VANTARA/actions/runs/41392437626) على `135c569f`، artifact `13118113243`: تكرر نجاح عداد 1/2/3 وفتح تفاصيل السينما، ثم تكرر نفس host `RenderThread` segfault عند 05:19:27 UTC مع `swiftshader` أيضًا. لا يوجد إثبات تشغيل فيديو أو restart.
 - [توثيق Google الرسمي](https://developer.android.com/studio/run/emulator-acceleration#command-gpu) يميز `swiftshader` عن `swangle`: الثاني يستخدم ANGLE لـ GLES. الإعادة التالية ستجرب `swangle` بدل مسار GLES السابق، مع نفس API 35 والتطبيق وعتبات الإطارات. لا نجاح مفترض لإعداد الرسوم.
 - أضيف حفظ ملخص حالات routes الحقيقية عند إخفاق حالة مع بقاء CDP متصلًا، دون روابط الفيديو أو ترويساته؛ هذا يساعد على فصل خطأ المصدر/الجسر عن انهيار المختبر إذا استقرت الرسوم.
+
+
+## المحاولة السادسة — أول تشغيل من الواجهة الفعلية
+
+- [المحاولة 41394115788](https://github.com/Meshal515/VANTARA/actions/runs/41394115788) على `f73af30a`، artifact `13119285909`: وضع ANGLE `swangle` تجاوز انهيار host RenderThread. وصلت routes الخاصة بـ ASIA إلى صفوف السيرفرات الفعلية، وضغط الصف فتح PlayerActivity نفسه، وتحقق المراقب من session/source/generation وprobed READY وURI المرشح.
+- قياس سينما المصدر: **4915ms تقدم، 33 إطارًا مفكوكًا، 110 إطارات ساقطة في 5041ms، 1920×1080**. هذا نجاح وظيفي لحالة واحدة فقط؛ ليس شهادة سلاسة ولا اكتمال أربع حالات أو restart.
+- فشل anime-source وcinema-general بمهلة ظهور الصفوف مع وصول native routes؛ واصل المضيف إصدار رسائل decoder بعد أمر الرجوع. يجري التحقق من احتمال أن CDP يتعامل مع WebView مخفي خلف PlayerActivity. أضيف تحقق foreground Android وvisibility بعد رجوع حقيقي، وثلاث محاولات Back محدودة ثم FAIL؛ لا finish مصطنع للمشغل ولا تغيير لمسارات المنتج أو شروط الإثبات.
+- صار اختيار نظير metadata العام مستقلًا عن نجاح تشغيل المصدر، حتى يحاول الفحص المسارين ويحتفظ بنتيجة كل منهما. شرط أربع ملاحظات fresh وأربع restart باقٍ. لا إصدار Debug منشور.
