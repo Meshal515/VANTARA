@@ -1,0 +1,248 @@
+{
+  "purpose": "Pinned source evidence; no implementation copied. Review coverage described in ENGINE_ARCHITECTURE_STUDY.md; files are not claimed audited line by line.",
+  "files": [
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "app/src/main/java/com/lagradost/cloudstream3/plugins/Plugin.kt",
+      "bytes": 1251,
+      "sha256": "ab51e108f989e183f77a97a41af4e9321ae70235b182bafaaa5df3bf814e0731",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/app/src/main/java/com/lagradost/cloudstream3/plugins/Plugin.kt"
+    },
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "app/src/main/java/com/lagradost/cloudstream3/plugins/PluginManager.kt",
+      "bytes": 37264,
+      "sha256": "5d5c509fdc2668c7985c0c93a56e87a71acb8a776bc109f913b09ab534b09eb5",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/app/src/main/java/com/lagradost/cloudstream3/plugins/PluginManager.kt"
+    },
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "library/src/commonMain/kotlin/com/lagradost/cloudstream3/MainAPI.kt",
+      "bytes": 96080,
+      "sha256": "767431c1cd8a40eba575e84c157ddb2453c8a93112fb35bdc07fa0b5f79c562f",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/library/src/commonMain/kotlin/com/lagradost/cloudstream3/MainAPI.kt"
+    },
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "library/src/commonMain/kotlin/com/lagradost/cloudstream3/plugins/BasePlugin.kt",
+      "bytes": 2297,
+      "sha256": "58a10ccb577b9e4bda3b9938ec4ee956fcaa66030802704d22eb60cdea57aaab",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/library/src/commonMain/kotlin/com/lagradost/cloudstream3/plugins/BasePlugin.kt"
+    },
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "library/src/commonMain/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt",
+      "bytes": 49087,
+      "sha256": "0a3bf8278a365d5d51107aaf0264271c9a30a4c4b6e60b96c12e1d6985e5487b",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/library/src/commonMain/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/anime/AnimeExtensionManager.kt",
+      "bytes": 15576,
+      "sha256": "361e1cd22349a24beb765caf63b79b7101fa4cf276baac7d0df7a2d70c28829c",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/app/src/main/java/eu/kanade/tachiyomi/extension/anime/AnimeExtensionManager.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/anime/api/AnimeExtensionApi.kt",
+      "bytes": 3136,
+      "sha256": "48faaac917649d150fc20d05427306ff1cc11acd0783f32764b11d8fec2f2680",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/app/src/main/java/eu/kanade/tachiyomi/extension/anime/api/AnimeExtensionApi.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/anime/util/AnimeExtensionInstaller.kt",
+      "bytes": 11958,
+      "sha256": "a0edf8b7be40f5c267e0a20c84194c52a16828aeaad1f132148bebf8c26ebf7d",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/app/src/main/java/eu/kanade/tachiyomi/extension/anime/util/AnimeExtensionInstaller.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/anime/util/AnimeExtensionLoader.kt",
+      "bytes": 17443,
+      "sha256": "1208102b9f7b8f1f719893a0e9f457e6166ddd2998ded9084ff6932f659ad56a",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/app/src/main/java/eu/kanade/tachiyomi/extension/anime/util/AnimeExtensionLoader.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/source/anime/AndroidAnimeSourceManager.kt",
+      "bytes": 4824,
+      "sha256": "de1cc61389165c90b2810caadf9591a751e4c1895d70bd8de1fb034385854be0",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/app/src/main/java/eu/kanade/tachiyomi/source/anime/AndroidAnimeSourceManager.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "core/common/src/main/java/eu/kanade/tachiyomi/network/NetworkHelper.kt",
+      "bytes": 2708,
+      "sha256": "ecec9efcea87a026b59ee9c0a6e09d9770bb13e41cf7b00bbcb667ab8094b889",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/core/common/src/main/java/eu/kanade/tachiyomi/network/NetworkHelper.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "core/common/src/main/java/eu/kanade/tachiyomi/network/AndroidCookieJar.kt",
+      "bytes": 1496,
+      "sha256": "2dfeb7542a2bb0bb7a5ebcfcd5e7de386e34d169cd15bea4e3f64b3cae296ac5",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/core/common/src/main/java/eu/kanade/tachiyomi/network/AndroidCookieJar.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "core/common/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt",
+      "bytes": 5089,
+      "sha256": "53b6aabe677b93568a86a580003003acd4451d027dc74ddbd6eabc2f50bd74b1",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/core/common/src/main/java/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "core/common/src/main/java/eu/kanade/tachiyomi/network/interceptor/SpecificHostRateLimitInterceptor.kt",
+      "bytes": 3254,
+      "sha256": "b13b10bf4abf3dbcd46a99d3f9a911f8867818378f2b632c5a9ff2657bc11318",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/core/common/src/main/java/eu/kanade/tachiyomi/network/interceptor/SpecificHostRateLimitInterceptor.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/animesource/online/AnimeHttpSource.kt",
+      "bytes": 26836,
+      "sha256": "52376b53e3ce7486cd0e79d37804af8c089e8b69e4eeca7e430ff8211aec9b75",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/animesource/online/AnimeHttpSource.kt"
+    },
+    {
+      "family": "aniyomi",
+      "repo": "aniyomiorg/aniyomi",
+      "commit": "97414446b8a95994c72dd33c41c971a89d4d25b8",
+      "path": "source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/online/HttpSource.kt",
+      "bytes": 15829,
+      "sha256": "e2a91d260e0c385310c03f99cacc0043f67e26e8c9ecc17a923042b236dbfe04",
+      "url": "https://github.com/aniyomiorg/aniyomi/blob/97414446b8a95994c72dd33c41c971a89d4d25b8/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/online/HttpSource.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/ExtensionManager.kt",
+      "bytes": 18041,
+      "sha256": "5bfa10e9c06e8a1a7a18dbd837c1e3e5a00349f489be395e64bbd10e2b840977",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/app/src/main/java/eu/kanade/tachiyomi/extension/ExtensionManager.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/util/ExtensionInstaller.kt",
+      "bytes": 8229,
+      "sha256": "bd38cce67d1bd007fac27badf0f5d685cf5bf11a3734f583fe6aabfff6e037d2",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/app/src/main/java/eu/kanade/tachiyomi/extension/util/ExtensionInstaller.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/extension/util/ExtensionLoader.kt",
+      "bytes": 22232,
+      "sha256": "e292292b15beb9afae7977725ecd2deaf0629b4a751bccdc6f7b76030d527c0e",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/app/src/main/java/eu/kanade/tachiyomi/extension/util/ExtensionLoader.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "app/src/main/java/eu/kanade/tachiyomi/source/AndroidSourceManager.kt",
+      "bytes": 4313,
+      "sha256": "7d2a7e299d8090c36190f5ce42262329e381c4dc0f9563a5148ca7a0d20ca44c",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/app/src/main/java/eu/kanade/tachiyomi/source/AndroidSourceManager.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "core/common/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt",
+      "bytes": 3196,
+      "sha256": "d2fea6befa597275481ab2182bdc1d9b4f488e98c9852d357d957b69a8f1b832",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/core/common/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "core/common/src/main/kotlin/eu/kanade/tachiyomi/network/AndroidCookieJar.kt",
+      "bytes": 1506,
+      "sha256": "98e625062a7005547b0cb138ad1d262666c5047ceb947cf0fa6c7a03fbdc870f",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/core/common/src/main/kotlin/eu/kanade/tachiyomi/network/AndroidCookieJar.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "core/common/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt",
+      "bytes": 11560,
+      "sha256": "bd53a3a240097e2d4b4d304eb0374431cecf1519db8559589e745e02b8b25103",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/core/common/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "core/common/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/SpecificHostRateLimitInterceptor.kt",
+      "bytes": 3260,
+      "sha256": "9404ad54c1edc5dd8d8973bc63bfffb00a57272932d4adce066cb8f866ffc059",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/core/common/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/SpecificHostRateLimitInterceptor.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "core/common/src/main/kotlin/tachiyomi/core/common/preference/AndroidPreferenceStore.kt",
+      "bytes": 4261,
+      "sha256": "f979a45aa2bb18d6c0a805248a84e59f2cbc04b3f6e5e09da85fc717be68867e",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/core/common/src/main/kotlin/tachiyomi/core/common/preference/AndroidPreferenceStore.kt"
+    },
+    {
+      "family": "mihon",
+      "repo": "mihonapp/mihon",
+      "commit": "e588e04359fe1058206a2cbac1b01018ad787359",
+      "path": "source-api/src/main/kotlin/eu/kanade/tachiyomi/source/online/HttpSource.kt",
+      "bytes": 18927,
+      "sha256": "663bd6c4067a2f529adae0241e7b0a6f86e84a7829f17a67835d46754ae021bb",
+      "url": "https://github.com/mihonapp/mihon/blob/e588e04359fe1058206a2cbac1b01018ad787359/source-api/src/main/kotlin/eu/kanade/tachiyomi/source/online/HttpSource.kt"
+    },
+    {
+      "family": "cloudstream",
+      "repo": "recloudstream/cloudstream",
+      "commit": "5024ace2922a148d38df2a816b483b529789cf58",
+      "path": "app/src/main/java/com/lagradost/cloudstream3/plugins/RepositoryManager.kt",
+      "bytes": 11890,
+      "sha256": "749f8557102e936b0a3aaa43236480fa18dcf314e4ece829fda6ec55a256d483",
+      "url": "https://github.com/recloudstream/cloudstream/blob/5024ace2922a148d38df2a816b483b529789cf58/app/src/main/java/com/lagradost/cloudstream3/plugins/RepositoryManager.kt"
+    }
+  ]
+}
