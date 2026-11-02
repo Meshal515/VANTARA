@@ -23,6 +23,12 @@ const adb=(...args)=>execFileSync('adb',args,{encoding:'utf8',timeout:15000,maxB
 async function mark(operation){report.operation=operation;report.updatedAt=new Date().toISOString();console.log('[Android UI delivery] '+operation);await writeFile(`${out}/${phase}-ui-progress.json`,JSON.stringify(report,null,2)+'\n');}
 const read=name=>JSON.parse(adb('shell','run-as',pkg,'cat',`files/debug-ui-delivery/${name}`));
 async function until(fn,label,ms=45000){await mark(label);const end=Date.now()+ms;let last;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch(e){if(['CDP_DISCONNECTED','QA_SOURCE_TYPE_NOT_PROVEN'].includes(e.code))throw e;last=e;}await delay(250);}throw new Error(`${label}: ${last?.message||'deadline exceeded'}`);}
+// The emulator can show Android's first-run immersive-mode confirmation over
+// PlayerActivity. Dismiss the OS-only prompt before starting real playback;
+// otherwise BACK is consumed by the prompt and later WebView clicks occur
+// behind a still-resumed player, invalidating the UI journey.
+try { adb('shell','settings','put','secure','immersive_mode_confirmations','confirmed'); }
+catch(error) { report.systemWarnings=['Unable to pre-confirm Android immersive mode: '+String(error?.message||error).slice(0,120)]; }
 const ready=await until(()=>{const r=read('ready.json');return r.phase===phase&&r;},'real instrumentation ready',120000);
 assert.ok(Number.isInteger(ready.pid));
 adb('forward','tcp:9223',`localabstract:webview_devtools_remote_${ready.pid}`);
@@ -99,16 +105,34 @@ async function sheetAndPlay(sourceId,label){
   // Inspect only the native session currently mounted inside this sheet.
   const activeSession=await until(()=>evaluate(`document.querySelector('#sheet:not([hidden]) #sheetBody')?.dataset.vantaraPlaybackSession||null`),
     'current active server-sheet session '+label,45000);
-  const route=await until(()=>invoke(async ({sourceId,session})=>{
-    const snap=await Capacitor.Plugins.AnimeEngine.routes({session});
-    const r=(snap.routes||[]).find(r=>r.sourceId===sourceId&&r.state==='READY'&&r.probed===true&&r.candidates?.length);
-    return r?{id:r.id,sourceId:r.sourceId,session,candidate:r.candidates[0],quality:r.quality}:null;
-  },{sourceId,session:activeSession}),'probed native route in active sheet '+label,100000);
+  let lastRouteSnapshot=null;
+  const route=await until(async()=>{
+    const snap=await invoke(async ({sourceId,session})=>{
+      const state=await Capacitor.Plugins.AnimeEngine.routes({session});
+      const routes=(state.routes||[]).map(r=>({
+        id:r.id,sourceId:r.sourceId,state:r.state,probed:r.probed,
+        candidates:r.candidates?.length||0,quality:r.quality
+      }));
+      const match=routes.find(r=>r.sourceId===sourceId&&r.state==='READY'&&r.probed===true&&r.candidates>0);
+      return {done:state.done,routes,match};
+    },{sourceId,session:activeSession});
+    lastRouteSnapshot=snap;
+    return snap.match?{id:snap.match.id,sourceId:snap.match.sourceId,session:activeSession,quality:snap.match.quality}:null;
+  },'probed native route in active sheet '+label,180000).catch(error=>{
+    report.routeTimeouts??=[];
+    report.routeTimeouts.push({label,expectedSourceId:sourceId,session:activeSession,lastRouteSnapshot,error:String(error?.message||error)});
+    throw error;
+  });
   await until(()=>evaluate(`!!document.querySelector('.an-srv--ready:not([disabled])')`),'ready route in server sheet',20000);
   await screenshot(label+'-server-sheet');const spinner=await evaluate(`document.querySelector('.an-srv-status')?.textContent||''`);
   await evaluate(`(()=>{const b=document.querySelector('.an-srv--ready:not([disabled])');b.scrollIntoView({block:'center'});b.click()})()`);
   const measured=await observer({action:'observe',sourceId,session:route.session,addonGeneration:route.addonGeneration});
-  report.livePlayback.push({entry:label,route:{id:route.id,sourceId:route.sourceId,session:route.session,addonGeneration:route.addonGeneration,quality:route.quality},serverSheetStatus:spinner,facts:measured.facts});adb('shell','input','keyevent','4');await delay(1200);
+  report.livePlayback.push({entry:label,route:{id:route.id,sourceId:route.sourceId,session:route.session,addonGeneration:route.addonGeneration,quality:route.quality},serverSheetStatus:spinner,facts:measured.facts});
+  adb('shell','input','keyevent','4');
+  // Do not operate the WebView through CDP while PlayerActivity remains
+  // foreground. A system immersive-mode prompt can consume the first BACK.
+  await until(()=>evaluate(`document.visibilityState==='visible'`),
+    'WebView foreground after real player exit '+label,20000);
 }
 async function metadataFor(item,kind){
   return invoke(async({item,kind})=>{
