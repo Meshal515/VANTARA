@@ -204,3 +204,15 @@ it('recovers a native READY route from the live session after both the initial s
   close();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('renders a probed native READY route when Android pauses WebView animation frames', async () => {
+  // Android may have just returned from the native player: CDP and bridge
+  // promises resume before requestAnimationFrame is allowed to run.
+  vi.stubGlobal('requestAnimationFrame', () => 1);
+  engine.prepare.mockResolvedValue({ session: 'test-session', done: true, routes: [route('native-ready-with-paused-raf')] });
+  const { body, anime, close } = screen();
+  anime.play(media, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  close();
+});
