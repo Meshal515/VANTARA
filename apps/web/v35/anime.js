@@ -114,6 +114,7 @@ export function createAnime(deps) {
     home: null,
     loading: null,
     detail: null,
+    detailLoad: null,
     detailToken: 0,
     view: null,
     hideSeen: false,
@@ -546,6 +547,7 @@ export function createAnime(deps) {
 
   async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false } = {}) {
     const token = ++state.detailToken;
+    state.detailLoad = null;
     state.episodeRange = 0;
     state.epQuery = '';
     state.detail = m;
@@ -601,7 +603,9 @@ export function createAnime(deps) {
     for (const ev of INPUT) window.addEventListener?.(ev, touched, { once: true, passive: true });
     const untouch = () => { for (const ev of INPUT) window.removeEventListener?.(ev, touched); };
     try {
-      const full = m._sourceCopy ? m : String(m.id).startsWith('addon-') ? await deps.restoreSourceWork(`anime:${m.id}`, m) : await fetchAnimeDetail(m.id);
+      const loading = Promise.resolve(m._sourceCopy ? m : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
+      state.detailLoad = { id: m.id, token, promise: loading };
+      const full = await loading;
       if (token !== state.detailToken || !full) return;
       state.detail = full;
       if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
@@ -2515,6 +2519,17 @@ export function createAnime(deps) {
       off.push(engine.on('route', event => receiveEvent('route', event)), engine.on('prepared', event => receiveEvent('prepared', event)));
       void (async () => {
         try {
+          // A fast tap can precede AniList aliases. Searching only the initial
+          // display title can settle this sheet as missing before the romaji
+          // match arrives. Share the in-flight detail request and sheet deadline.
+          const detailLoad = state.detailLoad;
+          if (detailLoad?.id === m.id && detailLoad.token === state.detailToken) {
+            let full;
+            try { full = await wait(detailLoad.promise, preparation.signal); }
+            catch (error) { if (preparation.signal.aborted) throw error; }
+            if (sheet.closed || sheet.expired) return;
+            if (full?.id === m.id) m = { ...m, ...full };
+          }
           const work = state.work && state.workFor === m.id ? state.work : await wait(locateWork(m, state.detailToken, preparation.signal), preparation.signal);
           if (sheet.closed || sheet.expired) return;
           if (!work) {

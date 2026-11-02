@@ -1,7 +1,8 @@
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const engine = vi.hoisted(() => ({ listeners: new Map(), prepare: vi.fn(), routes: vi.fn(), close: vi.fn(), pick: vi.fn(), best: vi.fn(), open: vi.fn(), extend: vi.fn(), find: vi.fn(), addons: vi.fn() }));
+const engine = vi.hoisted(() => ({ listeners: new Map(), prepare: vi.fn(), routes: vi.fn(), close: vi.fn(), pick: vi.fn(), best: vi.fn(), open: vi.fn(), extend: vi.fn(), find: vi.fn(), addons: vi.fn(), detail: vi.fn() }));
+vi.mock('../lib/anime-meta.js', async original => ({ ...await original(), fetchAnimeDetail: engine.detail }));
 vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() {} }));
 vi.mock('../lib/anime-engine.js', async original => ({
   ...await original(), available: () => true, sources: async () => [], onNeedsHuman() {},
@@ -230,4 +231,27 @@ it('does not expose a previous sheet session while a new native preparation is p
   expect(body.dataset.vantaraPlaybackSession).toBe('new-anime-session');
   close();
   expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
+});
+
+it('uses canonical aliases when play is tapped before AniList details arrive', async () => {
+  document.body.innerHTML = '<main><section id="anime"></section></main><div id="playbackSheet"></div>';
+  const root = document.querySelector('main'), body = document.getElementById('playbackSheet');
+  let resolveDetail, close;
+  engine.detail.mockImplementation(() => new Promise(resolve => { resolveDetail = resolve; }));
+  engine.find.mockImplementation(async titles => titles.includes('Meitantei Conan') ? { copies: [{ sourceId: 'wit', url: '/conan', title: 'Meitantei Conan' }] } : null);
+  engine.routes.mockResolvedValue({ done: true, routes: [route()] });
+  const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text != null) node.textContent = text; return node; };
+  const anime = createAnime({ root, q: id => root.querySelector('#'+id), el, toast() {}, genreAr: value => value,
+    showPage() {}, currentPage: () => 'anime', sync: { user: null, rows: () => [], enqueue() {} },
+    openSheet: build => { body.replaceChildren(); close = build(body); cleanups.push(close); }, closeSheet: () => close?.() });
+  const minimal = { id: 235, title: 'Detective Conan' };
+  const opening = anime.openAnime(minimal);
+  anime.play(minimal, 1);
+  await vi.advanceTimersByTimeAsync(1);
+  resolveDetail({ ...minimal, romaji: 'Meitantei Conan', synonyms: [], genres: [], episodes: 1200, aired: 1200, relations: [], recommendations: [] });
+  await opening;
+  await vi.advanceTimersByTimeAsync(2);
+  expect(engine.find).toHaveBeenCalledWith(expect.arrayContaining(['Meitantei Conan']), expect.any(Function), expect.any(Object));
+  expect(body.querySelectorAll('.an-srv--ready')).toHaveLength(1);
+  anime.leaveDetail();
 });
