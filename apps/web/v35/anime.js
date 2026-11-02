@@ -2253,6 +2253,8 @@ export function createAnime(deps) {
     const controller = new AbortController();
     const preparation = new AbortController();
     let cooldownTimer = null;
+    let reconciliationTimer = null;
+    let reconciliationBusy = false;
     const closeSession = session => { if (session) void Promise.resolve().then(() => engine.closeSession(session)).catch(() => {}); };
     const wait = (operation, signal = controller.signal, timeout = null) => new Promise((resolve, reject) => {
       const cleanup = () => { signal.removeEventListener('abort', aborted); clearTimeout(timer); };
@@ -2452,6 +2454,7 @@ export function createAnime(deps) {
           state.workPending = null;
         }
         clearTimeout(deadline);
+        clearTimeout(reconciliationTimer);
         preparation.abort(error);
         for (const unsubscribe of off) unsubscribe();
         off = [];
@@ -2459,6 +2462,37 @@ export function createAnime(deps) {
       };
       const deadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), 45000);
       const buffered = [];
+      // Native extractors often complete after prepare() returns. A WebView
+      // listener can attach after an early native event; a single routes()
+      // snapshot is also racy. Reconcile the *same* bounded session while the
+      // sheet is visible. Never resurrect an expired or closed session.
+      const reconciliationEndsAt = Date.now() + 45_000;
+      const reconcileNativeRoutes = async () => {
+        if (sheet.closed || sheet.expired || !sheet.session || reconciliationBusy) return;
+        reconciliationBusy = true;
+        const session = sheet.session;
+        try {
+          const snapshot = await engine.routes(session, { signal: preparation.signal });
+          if (sheet.closed || sheet.expired || session !== sheet.session) return;
+          for (const route of snapshot?.routes ?? []) {
+            const previous = sheet.routes.find(row => row.id === route.id);
+            // Late or cached RESOLVING snapshots must not downgrade a probed READY route.
+            if (previous?.state === 'READY' && previous.probed === true && !(route.state === 'READY' && route.probed === true)) continue;
+            sheet.routes = engine.upsertRoute(sheet.routes, route);
+          }
+          sheet.done = sheet.done || Boolean(snapshot?.done);
+          queuePaint();
+        } catch {
+          // The absolute sheet deadline owns failures; a transient snapshot
+          // failure never hides already delivered playable routes.
+        } finally {
+          reconciliationBusy = false;
+          if (!sheet.closed && !sheet.expired && Date.now() < reconciliationEndsAt &&
+              !(sheet.done && !sheet.routes.some(isChecking))) {
+            reconciliationTimer = setTimeout(reconcileNativeRoutes, 1200);
+          }
+        }
+      };
       const applyEvent = (type, event) => {
         if (sheet.closed || sheet.expired || event.session !== sheet.session) return;
         sheet.retryAt = Math.max(sheet.retryAt, Number(event.retryAt) || 0);
@@ -2515,6 +2549,7 @@ export function createAnime(deps) {
           preparationComplete = true;
           stopDeadline();
           queuePaint();
+          reconciliationTimer = setTimeout(reconcileNativeRoutes, 1200);
         } catch (error) {
           fail(error);
         }
@@ -2525,6 +2560,7 @@ export function createAnime(deps) {
         sheet.closed = true;
         clearTimeout(deadline);
         clearTimeout(cooldownTimer);
+        clearTimeout(reconciliationTimer);
         if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);
         controller.abort();
         preparation.abort();
