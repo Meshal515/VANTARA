@@ -602,8 +602,13 @@ class AnimeEngine(context: Context) {
                 probeSlots.withPermit {
                     val t0 = System.nanoTime()
                     val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
-                        kotlinx.coroutines.runInterruptible {
-                            runCatching { com.vantara.anime.stream.StreamProbe.check(if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient, c) }.getOrDefault(false)
+                        try {
+                            val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient
+                            com.vantara.anime.stream.StreamProbe.checkCancellable(client, c)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            false
                         }
                     } ?: false
                     val ms = (System.nanoTime() - t0) / 1_000_000

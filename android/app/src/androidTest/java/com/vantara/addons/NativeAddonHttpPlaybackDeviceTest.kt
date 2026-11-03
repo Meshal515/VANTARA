@@ -5,23 +5,21 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.text.CueGroup
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vantara.anime.health.HealthStore
+import com.vantara.anime.player.CandidateMediaSources
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import com.vantara.anime.stream.PlaybackSession
 import com.vantara.anime.stream.Preferences
 import com.vantara.anime.stream.PreparedEpisode
 import com.vantara.anime.stream.StreamProbe
 import kotlinx.coroutines.Job
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -61,7 +59,7 @@ class NativeAddonHttpPlaybackDeviceTest {
             }) }
             val c = NativeAddonCandidates.parse("proof", "addon|proof", "Authored proof", raw, System.currentTimeMillis()).single()
             val transport = nativeAddonMediaClient(OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build())
-            assertTrue("Real public HTTPS candidate must pass video probe", StreamProbe.check(transport, c))
+            assertTrue("Real public HTTPS candidate must pass video probe", runBlocking { withTimeout(15_000) { StreamProbe.checkCancellable(transport, c) } })
             val health = HealthStore(null)
             val prep = PreparedEpisode("proof", emptyList(), -1f, Preferences(), PlaybackSession(emptyList(), health), health, probe = true).also { it.job = Job() }
             prep.reserveAddonBatches(listOf(c.sourceId)); prep.finish()
@@ -76,7 +74,7 @@ class NativeAddonHttpPlaybackDeviceTest {
             val seeking = AtomicBoolean(false)
             val failure = AtomicReference<Throwable?>()
             instrumentation.runOnMainSync {
-                player = ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(transport).setDefaultRequestProperties(selected.headers))).build().also { p ->
+                player = ExoPlayer.Builder(context).build().also { p ->
                     p.setVideoSurface(images.surface)
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
                     p.addListener(object : Player.Listener {
@@ -90,9 +88,8 @@ class NativeAddonHttpPlaybackDeviceTest {
                         if (seeking.get() && presentationTimeUs >= 4_900_000) sought.countDown()
                         if (seeking.get() && presentationTimeUs >= 6_000_000) progressed.countDown()
                     }
-                    val item = MediaItem.Builder().setUri(selected.url).setMimeType(MimeTypes.VIDEO_MP4)
-                        .setSubtitleConfigurations(selected.subtitles.map { t -> MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(t.url)).setMimeType(MimeTypes.TEXT_VTT).setLanguage(t.lang).setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build() }).build()
-                    p.setMediaItem(item); p.prepare(); p.play()
+                    val built = CandidateMediaSources.create(selected, OkHttpDataSource.Factory(transport).setDefaultRequestProperties(selected.headers))
+                    p.setMediaSource(built.mediaSource); p.prepare(); p.play()
                 }
             }
             assertTrue("No real first frame", firstFrame.await(60, TimeUnit.SECONDS)); assertNull(failure.get())
@@ -114,6 +111,7 @@ class NativeAddonHttpPlaybackDeviceTest {
             instrumentation.runOnMainSync { player?.release() }
             images.close(); consumer.quitSafely(); consumer.join(3000)
             proof.put("elapsedMs", SystemClock.elapsedRealtime() - begun); proofFile.writeText(proof.toString(2))
+            android.util.Log.i("VantaraRuntime", "PHASE2_PUBLIC_HTTP_PROOF ${proof}")
         }
     }
 }

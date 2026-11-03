@@ -20,6 +20,41 @@ const deliverySeams=[
 ];
 const seams=new Set(['apps/web/v35/server-sheet-add-source.test.js','apps/web/lib/source-entitlement.test.js','apps/web/lib/source-entitlement.js','apps/web/lib/extension-engine-entitlement.test.js','apps/web/v35/works.js','apps/web/lib/extension-engine.js','apps/web/app.js','.github/workflows/android-debug.yml','android/settings.gradle','android/app/build.gradle','android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt','android/app/src/main/kotlin/com/vantara/anime/episodes/EpisodeResolver.kt','android/app/src/main/kotlin/com/vantara/anime/RuntimeSourceBinding.kt','android/app/src/main/kotlin/com/vantara/anime/bridge/AnimeEnginePlugin.kt','android/app/src/main/kotlin/com/vantara/anime/registry/Manifest.kt','apps/web/addons/cloudstream-runtime.js','apps/web/addons/cloudstream-runtime.test.js','apps/web/addons/native-catalog.js','apps/web/addons/runtime.js','apps/web/pwa/boot.js','android/app/src/test/java/eu/kanade/tachiyomi/network/HttpsUpgradeTest.kt','spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HttpsUpgradeInterceptor.kt','android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HttpsUpgradeInterceptor.kt','android/app/src/test/java/eu/kanade/tachiyomi/network/UncaughtLinkageTest.kt','spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/SourceCompatRepairs.kt','spike/extension-engine/app/build.gradle.kts','spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/UncaughtExceptionInterceptor.kt','android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/UncaughtExceptionInterceptor.kt','android/app/src/main/kotlin/dev/vantara/spike/SourceCompatRepairs.kt','.github/workflows/apk-sources-live.yml','spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt','android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt','apps/web/v35/work-looks.test.js','apps/web/v35/anime-hero-race.test.js','apps/web/v35/addon-profile-boot.test.js','android/app/src/test/java/com/vantara/plugins/ExtensionFailureTest.kt','android/app/src/main/kotlin/com/vantara/plugins/ExtensionFailure.kt','apps/web/lib/host-breaker.js','apps/web/lib/host-breaker.test.js','apps/web/lib/plugin-vault.js','apps/web/lib/plugin-vault.test.js','apps/web/lib/plugin-failure.js','apps/web/lib/plugin-failure.test.js','apps/web/pwa/sources/registry.js','apps/web/pwa/sources/plugin-persistence.test.js','apps/web/pwa/runtime.js','apps/web/desktop/runtime.js','apps/web/addons/registry.js','apps/web/addons/transport.js','apps/web/addons/persistent-addons.test.js','apps/web/addons/adapters/stremio.js','services/sync-worker/wrangler.toml','services/web-fetcher/wrangler.toml','spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HostCircuitBreaker.kt','android/app/src/test/java/eu/kanade/tachiyomi/network/HostBreakerTest.kt','android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HostCircuitBreaker.kt','spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt','android/app/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt','android/app/src/main/kotlin/com/vantara/plugins/NativeExtensionIcons.kt','spike/extension-engine/app/src/main/kotlin/dev/vantara/spike/FileExtensionLoader.kt','android/app/src/test/java/com/vantara/plugins/UserExtensionVaultTest.kt','android/app/src/test/java/com/vantara/plugins/RepoIndexTest.kt','android/app/src/main/kotlin/dev/vantara/spike/FileExtensionLoader.kt','android/app/src/main/kotlin/com/vantara/plugins/UserExtensions.kt','.github/workflows/web-debug.yml','apps/web/lib/route-validity.test.js','apps/web/lib/route-validity.js','apps/web/v35/cinema.test.js','apps/web/v35/cinema-playback.test.js','apps/web/v35/anime-playback.test.js','apps/web/lib/source-states.js','apps/web/lib/route-failure.test.js','apps/web/desktop/player.test.js','android/app/src/test/java/com/vantara/plugins/BuiltinSourceRefreshTest.kt','android/app/src/main/kotlin/com/vantara/plugins/BuiltinSourceRefresh.kt','android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt','android/app/src/test/java/com/vantara/anime/RockResolutionTest.kt','android/app/src/test/java/com/vantara/anime/RateAndResolveTest.kt','android/app/src/test/java/com/vantara/anime/ManifestFileTest.kt','tools/repository-safety.test.mjs','apps/web/pwa/sources/engines/index.js','apps/web/pwa/sources/defs.json','apps/web/anime/sources.json','apps/web/styles.css','apps/web/v35/together.css','apps/web/v35/majlis.css','apps/web/v35/rafiq.css','apps/web/v35/social.css','apps/web/v35/reader.css','apps/web/lib/anime-meta.test.js','apps/web/lib/anime-meta.js','apps/web/v35/work-looks.js','apps/web/v35/appearance.test.js','apps/web/v35/appearance.js','apps/web/v35/core.css','apps/web/v35/cinema.js','apps/web/lib/together/art.js','apps/web/lib/cinema-meta.js','apps/web/lib/anime-art.test.js','apps/web/lib/anime-art.js','apps/web/v35/icons.js','apps/web/v35/addons-v7.css','apps/web/lib/start-memory.js','apps/web/v35/cinema-releases.test.js','apps/web/v35/server-sheet.test.js','apps/web/v35/server-sheet.js','apps/web/v35/server-sheet.css','apps/web/v35/anime-depth.test.js','apps/web/v35/anime-depth.js','apps/web/v35/collapse-hero.test.js','apps/web/v35/collapse-hero.js','apps/web/v35/cinema.css','apps/web/v35/anime.js','apps/web/v35/anime.css','apps/web/v35/anime-work.test.js','apps/web/addons/runtime.test.js','apps/web/addons/native-catalog.test.js','apps/web/addons/native-runtime.js','apps/web/addons/native-runtime.test.js','apps/web/lib/anime-engine.js','apps/web/v35/addons-v7.js','apps/web/v35/addons-v7.test.js','apps/web/v35/shell.js','apps/web/addons/work-view.js','apps/web/addons/work-view.test.js','android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt','apps/web/lib/source-verification.js','apps/web/lib/source-verification.test.js','apps/web/v35/anime.js','apps/web/v35/anime-verification-silent.test.js','apps/web/sw.js','tools/android-debug/webview-proof.mjs','tools/native-fingerprint.mjs','.github/workflows/spike-extension-engine.yml','android/.gitignore','tools/bundle-extensions.mjs','.github/workflows/debug-journeys.yml','tools/android-debug/journeys.mjs','tools/android-debug/journeys.sh','apps/web/v35/addons.css','apps/web/v35/source-mode.js','apps/web/v35/source-home.js','apps/web/v35/source-home.test.js','apps/web/lib/anime-engine-native-addons.test.js','apps/api/src/lib/sessions.atomic.test.ts']);
 for(const path of deliverySeams)seams.add(path);
+// Owner-authorized discovery fixes, reviewed and tested in b8253ccf. Exact files only.
+const discoveryGroupOneSeams=[
+  "android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/DiscoveryFailure.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/SearchPages.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/bridge/AnimeEnginePlugin.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/catalog/CatalogCrawler.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/episodes/EpisodeResolver.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackWork.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt",
+  "android/app/src/test/java/com/vantara/anime/CatalogCrawlerTest.kt",
+  "android/app/src/test/java/com/vantara/anime/DiscoveryFailureTest.kt",
+  "android/app/src/test/java/com/vantara/anime/EpisodeCacheGenerationTest.kt",
+  "android/app/src/test/java/com/vantara/anime/SearchPagesTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/PlaybackWorkTest.kt",
+  "apps/web/addons/native-preparation.js",
+  "apps/web/addons/native-preparation.test.js",
+  "apps/web/lib/anime-engine.js",
+  "apps/web/lib/anime-engine.test.js",
+  "apps/web/lib/anime-title.js",
+  "apps/web/lib/discovery-diagnostics.js",
+  "apps/web/lib/discovery-diagnostics.test.js",
+  "apps/web/sw.js",
+  "apps/web/v35/anime-account.js",
+  "apps/web/v35/anime-account.test.js",
+  "apps/web/v35/anime-picker-lifecycle.test.js",
+  "apps/web/v35/anime-playback.test.js",
+  "apps/web/v35/anime-work.test.js",
+  "apps/web/v35/anime.js",
+  "apps/web/v35/work-looks.js",
+  "apps/web/v35/work-looks.test.js",
+  "docs/addons/DISCOVERY_GROUP1_20261103.ar.md"
+];
+for(const path of discoveryGroupOneSeams)seams.add(path);
+
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
@@ -80,6 +115,62 @@ seams.add('.github/workflows/video-auto-recovery-qa.yml');
 seams.add('.github/workflows/video-cinema-live-qa.yml');
 seams.add('.github/workflows/video-player-decoded-frame-qa.yml');
 seams.add('.github/workflows/video-repository-live-qa.yml');
+// Owner-authorized playback phase two: exact reviewed media/transport regressions and integration seams.
+const playbackPhaseTwoSeams = [
+  "android/app/src/androidTest/assets/player-audio/README.md",
+  "android/app/src/androidTest/assets/player-audio/alternate.m4a",
+  "android/app/src/androidTest/assets/player-audio/primary.mp4",
+  "android/app/src/androidTest/assets/player-formats/README.md",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-001.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-002.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-003.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-004.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-005.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/init-0.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/manifest.mpd",
+  "android/app/src/androidTest/assets/player-formats/hls/manifest.m3u8",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-00.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-01.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-02.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-03.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-04.ts",
+  "android/app/src/androidTest/java/com/vantara/addons/NativeAddonHttpPlaybackDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/addons/PreparedHttpPlaybackDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/anime/player/CandidateExternalAudioDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/anime/player/PlayerStartupDeviceTest.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/adapters/Adapters.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/CandidateMediaSources.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioFallbackPolicy.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioPlan.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackBudgets.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackDiagnostics.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackStartup.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/StartupReveal.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/Prepared.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/StreamProbe.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/Streams.kt",
+  "android/app/src/test/java/com/vantara/anime/CinemaFastPathTest.kt",
+  "android/app/src/test/java/com/vantara/anime/LazyVideoResolutionTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/ExternalAudioFallbackPolicyTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/ExternalAudioPlanTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/PlaybackDiagnosticsTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/PlaybackStartupTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/StartupRevealTest.kt",
+  "android/app/src/test/java/com/vantara/anime/stream/CandidatePreparationTimingTest.kt",
+  "android/app/src/test/java/com/vantara/anime/stream/StreamProbeTest.kt",
+  "extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/nicehttp/Requests.kt",
+  "extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/NetworkBridge.kt",
+  "extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/NetworkBridgeConcurrencyTest.kt",
+  "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimePipeCapacity.java",
+  "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimePipes.java",
+  "extensions/runtime-android/executor/src/test/java/dev/vantara/runtime/android/RuntimePipeCapacityTest.java",
+  "extensions/runtime-android/executor/src/test/java/dev/vantara/runtime/android/RuntimePipesQueueTest.java",
+  "extensions/runtime-android/harness/src/androidTest/java/dev/vantara/runtime/android/PipeIngressTest.java",
+  "tools/repository-compat/run_app_integration.sh"
+];
+for (const path of playbackPhaseTwoSeams) seams.add(path);
 // Owner decision (30 Oct 2026): every built-in anime/cinema source is removed. Deletions are admitted only
 // for these exact paths/prefixes; anything else deleted still fails the guard.
 const removedPrefixes=['android/app/src/main/assets/anime-extensions/'];

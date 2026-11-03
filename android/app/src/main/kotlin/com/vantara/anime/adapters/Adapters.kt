@@ -345,8 +345,10 @@ class ExtensionAdapter(
             hosters.mapIndexed { i, hoster ->
                 async {
                     val got = withTimeoutOrNull(hosterTimeoutMs) {
-                        runCatching { videosOf(hoster) }.getOrDefault(emptyList())
-                            .mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
+                        val videos = try { videosOf(hoster) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Throwable) { emptyList() }
+                        videos.mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
                     }.orEmpty()
                     if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = "لا رابط فيديو")
                     else report(trace, "h$i", nameOf(hoster), got.maxOfOrNull { it.quality ?: 0 }?.takeIf { it > 0 }, variant, RouteState.READY, got)
@@ -359,8 +361,14 @@ class ExtensionAdapter(
     private suspend fun videosOf(hoster: Hoster): List<Video> {
         val listed = hoster.videoList ?: source.getVideoList(hoster)
         val http = source as? AnimeHttpSource ?: return listed
-        // الفيديو الكسول يُحل الآن (قبل التشغيل مباشرة)، والفاشل يسقط وحده
-        return listed.mapNotNull { v -> if (v.initialized || v.videoUrl.isNotBlank()) v else runCatching { http.resolveVideo(v) }.getOrNull() }
+        // initialized governs resolution: a nonblank URL can still be an embed or token placeholder.
+        // Resolve each listed video once; the result need not set initialized (legacy default is identity).
+        // Keep this request-local so a later playback request can refresh expiring links.
+        return listed.mapNotNull { video ->
+            if (video.initialized) video else try { http.resolveVideo(video) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { null }
+        }
     }
 
     private fun toCandidate(hoster: Hoster, video: Video, episode: SourceEpisode, now: Long): Candidate? {
