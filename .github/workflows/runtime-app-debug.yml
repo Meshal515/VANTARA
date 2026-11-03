@@ -141,7 +141,9 @@ jobs:
           node tools/repository-compat/scope-guard.mjs
           pnpm test:safety
       - name: Verify native diagnostics gate in Debug and Release builds
-        run: bash android/gradlew -p android :app:testDebugUnitTest --tests '*DiagnosticVisibilityTest' :app:testReleaseUnitTest --tests '*DiagnosticVisibilityTest' --no-daemon --stacktrace
+        run: |
+          npx cap sync android
+          bash android/gradlew -p android :app:testDebugUnitTest --tests '*DiagnosticVisibilityTest' :app:testReleaseUnitTest --tests '*DiagnosticVisibilityTest' --no-daemon --stacktrace
       - name: Render actual production components in Chromium
         env:
           VANTARA_UI_EVIDENCE: ${{ runner.temp }}/visual-ui-evidence
