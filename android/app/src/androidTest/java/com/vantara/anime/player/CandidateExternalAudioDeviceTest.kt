@@ -30,7 +30,7 @@ class CandidateExternalAudioDeviceTest {
     @Test fun extraVideoAndTextInAnAudioSidecarNeverCompeteWithThePrimary() = playAndSelect("primary.mp4")
 
     @Test fun retryWithoutSidecarsPreservesPrimaryMimeAndSubtitleConfiguration() {
-        val factory = DefaultDataSource.Factory(InstrumentationRegistry.getInstrumentation().context)
+        val factory = DefaultDataSource.Factory(InstrumentationRegistry.getInstrumentation().targetContext)
         for ((container, mime) in listOf(Container.HLS to "application/x-mpegURL", Container.DASH to "application/dash+xml")) {
             val candidate = Candidate("retry", "fixture", "fixture", "fixture", "local", "https://example.test/signed?id=1",
                 container = container, subtitles = listOf(TrackRef("https://example.test/sub.srt?token=x", "ar")),
@@ -49,12 +49,19 @@ class CandidateExternalAudioDeviceTest {
     private fun playAndSelect(sidecar: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        // Test APK assets are accessed through the instrumentation context, not the app context.
-        val sourceFactory = DefaultDataSource.Factory(instrumentation.context)
+        // Instrumentation's APK context has no Application. DefaultDataSource stores
+        // getApplicationContext(), so use the real target context and owned fixture files.
+        val files = java.io.File(context.cacheDir, "audio-proof-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+        fun fixture(path: String): String {
+            val file = java.io.File(files, path.substringAfterLast('/'))
+            if (!file.exists()) instrumentation.context.assets.open(path).use { input -> file.outputStream().use(input::copyTo) }
+            return android.net.Uri.fromFile(file).toString()
+        }
+        val sourceFactory = DefaultDataSource.Factory(context)
         val candidate = Candidate("external-audio", "fixture", "fixture", "fixture", "local",
-            "asset:///player-audio/primary.mp4", container = Container.MP4,
-            audio = listOf(TrackRef("asset:///player-audio/$sidecar", "ar")),
-            subtitles = listOf(TrackRef("asset:///addon-http-proof.vtt", "en")), resolvedAt = 0, expiresAt = Long.MAX_VALUE)
+            fixture("player-audio/primary.mp4"), container = Container.MP4,
+            audio = listOf(TrackRef(fixture("player-audio/$sidecar"), "ar")),
+            subtitles = listOf(TrackRef(fixture("addon-http-proof.vtt"), "en")), resolvedAt = 0, expiresAt = Long.MAX_VALUE)
         val frame = CountDownLatch(1)
         val selected = CountDownLatch(1)
         val externalDecoderFormat = CountDownLatch(1)
@@ -142,6 +149,7 @@ class CandidateExternalAudioDeviceTest {
         } finally {
             instrumentation.runOnMainSync { player?.release() }
             images.close(); consumer.quitSafely(); consumer.join(3000)
+            files.deleteRecursively() // Only this test's UUID fixture directory.
         }
     }
 }
