@@ -1,12 +1,10 @@
 package com.vantara.anime.stream
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
-import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
@@ -39,23 +37,22 @@ object StreamProbe {
                 call.cancel()
                 activeResponse.getAndSet(null)?.close()
             }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isActive) continuation.resumeWithException(e)
-                }
-
-                override fun onResponse(call: Call, response: Response) {
+            // OkHttp.enqueue rethrows non-IO interceptor failures on its dispatcher
+            // thread. Source URL/redirect rejection must reach this suspended caller,
+            // not crash Android. Keep transport/read cancellation tied to this Call.
+            Dispatchers.IO.dispatch(continuation.context, Runnable {
+                if (!continuation.isActive) return@Runnable
+                try {
+                    val response = call.execute()
                     activeResponse.set(response)
-                    try {
-                        val result = response.use {
-                            if (continuation.isActive) inspect(c, it, range) else Result.REJECT
-                        }
-                        if (continuation.isActive) continuation.resume(result)
-                    } catch (error: Exception) {
-                        if (continuation.isActive) continuation.resumeWithException(error)
-                    } finally {
-                        activeResponse.compareAndSet(response, null)
+                    val result = response.use {
+                        if (continuation.isActive) inspect(c, it, range) else Result.REJECT
                     }
+                    if (continuation.isActive) continuation.resume(result)
+                } catch (failure: Throwable) {
+                    if (continuation.isActive) continuation.resumeWithException(failure)
+                } finally {
+                    activeResponse.getAndSet(null)?.close()
                 }
             })
         }

@@ -148,4 +148,19 @@ class StreamProbeTest {
             }
         }
     }
+    @Test fun interceptorRejectionReturnsItsRealCauseWithoutAnUncaughtDispatcherFailure() {
+        val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "probe-rejection-proof").apply { uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) } }
+        }
+        val client = OkHttpClient.Builder().dispatcher(okhttp3.Dispatcher(pool))
+            .addInterceptor { throw IllegalArgumentException("PUBLIC_URL_REJECTED") }.build()
+        try {
+            val failure = runBlocking { runCatching { withTimeout(3_000) { StreamProbe.checkCancellable(client, candidate("https://fixture.example/proof.mpd")) } }.exceptionOrNull() }
+            assertTrue("Real interceptor cause was lost: $failure", failure is IllegalArgumentException)
+            assertEquals("PUBLIC_URL_REJECTED", failure?.message)
+            assertNull("Interceptor rejection must never escape on a dispatcher thread", uncaught.get())
+        } finally { pool.shutdownNow(); client.connectionPool.evictAll() }
+    }
+
 }

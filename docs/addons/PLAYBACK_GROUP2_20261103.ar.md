@@ -8,7 +8,7 @@
 
 **الملفات والإصلاح:**
 
-- `android/app/src/main/kotlin/com/vantara/anime/stream/StreamProbe.kt`: قراءة مقدمة محدودة بـ8KiB؛ فحص MPD مع BOM وتعريف XML وتعليقات وnamespace، وHLS وMP4؛ رفض HTML/JSON ورسائل التحدي حتى إن حملت اسم ملف فيديو؛ إعادة واحدة بلا Range عند HTTP416 فقط. لا تحليل كيانات XML ولا تحميل ملف كامل.
+- `android/app/src/main/kotlin/com/vantara/anime/stream/StreamProbe.kt`: قراءة مقدمة محدودة بـ8KiB؛ فحص MPD مع BOM وتعريف XML وتعليقات وnamespace، وHLS وMP4؛ رفض HTML/JSON ورسائل التحدي حتى إن حملت اسم ملف فيديو؛ إعادة واحدة بلا Range عند HTTP416 فقط. لا تحليل كيانات XML ولا تحميل ملف كامل. ينفذ الطلب على IO مع Call.cancel، بدل enqueue الذي يمكن أن يعيد رمي رفض interceptor غير IOException على thread فينهار التطبيق. اختبار انحدار منفذ أثبت فقد السبب وظهور الخطر قبل هذا التصحيح، ثم يتحقق من وصول السبب الأصلي إلى المستدعي.
 - `android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt`: استخدام `checkCancellable`، وإبقاء إلغاء الجلسة إلغاءً، دون تحويله إلى حكم فشل على الرابط.
 - `android/app/src/test/java/com/vantara/anime/stream/StreamProbeTest.kt`: نجاح وفشل وترويسات وكوكيز و416 وقراءة متوقفة بعد الترويسات وإلغاء الطلب الفعلي.
 - `android/app/src/androidTest/java/com/vantara/addons/PreparedHttpPlaybackDeviceTest.kt`: بيانات HTTP محلية مؤلفة للاختبار، تمر عبر parser الإضافة ثم الفحص ثم قبول PreparedEpisode ثم `CandidateMediaSources` ثم مفكك Media3 الحقيقي، لكل من MPD وHLS وMP4. خادم الاختبار يطلب Referer/Origin/User-Agent/Authorization/Cookie في كل طلب manifest/segment. يختبر أيضًا رفض HTML قبل دخوله جلسة التشغيل.
@@ -75,7 +75,7 @@
 
 - اختبارات Vitest الكاملة: **2881/2881**، وصفر اختبارات فاشلة/معلّقة.
 - اختبارات سلامة المستودع ومدخلات Debug: **56/56** في التحقق المحلي الأول؛ يعاد التحقق بعد حفظ كل الملفات.
-- اختبارات Android JVM للتطبيق: **689/689**، وتجميع androidTest وRelease نجحا محليًا بعد آخر مراجعة. اختبارات CloudStream: **67 ناجحة و1 live probe اختياري متجاوز**؛ HTTP: **35/35**؛ executor: **50/50**. فشل بناء أول بسبب امتلاء قرص البيئة، ثم أعيد بعد تحرير مخرجات تجميع قابلة لإعادة الإنشاء فقط.
+- اختبارات Android JVM للتطبيق: **690/690**، وتجميع androidTest وRelease نجحا محليًا بعد آخر مراجعة. اختبارات CloudStream: **67 ناجحة و1 live probe اختياري متجاوز**؛ HTTP: **35/35**؛ executor: **50/50**. فشل بناء أول بسبب امتلاء قرص البيئة، ثم أعيد بعد تحرير مخرجات تجميع قابلة لإعادة الإنشاء فقط.
 - لا جهاز Android ولا KVM/AVD في البيئة المحلية. اختبارات Media3 وIPC على الجهاز لم تُحسب ناجحة من التجميع وحده. جرى إدراج اختبارات Media3 الجديدة في `tools/repository-compat/run_app_integration.sh` لتشغيلها على محاكي CI، ويُحدّث هذا القسم بنتيجته الفعلية.
 - نطاق scope-guard يحتفظ بخط الأساس القديم، ويضم بالاسم إصلاحات المجموعة الأولى المعتمدة ثم مسارات هذه الدفعة. لا تعطيل لاختبارات أو حمايات، ولا نقل إلى المجموعة الثالثة.
 
