@@ -23,8 +23,10 @@ class PreparedEpisode(
     /** يُفحص كل سيرفر جاهز بطلب قصير (السينما). الأنمي بلا فحص كما كان. */
     val probe: Boolean = false,
     val addonGeneration: String = java.util.UUID.randomUUID().toString(),
+    private val monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val preparationStartedAt = monotonicClock()
     private val primaryQuality = HashMap<String, Int?>()
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
@@ -86,11 +88,17 @@ class PreparedEpisode(
         val route: Route
         val fresh: List<Candidate>
         synchronized(this) {
+            // A cancelled/terminal preparation cannot publish late adapter results.
+            if (terminal || job?.isCancelled == true) return
             val rid = "${r.sourceId}|${r.key}"
+            val measured = r.candidates.map { candidate ->
+                candidate.copy(preparationMs = candidates[candidate.id]?.preparationMs
+                    ?: (monotonicClock() - preparationStartedAt).coerceAtLeast(0))
+            }
             val old = byId[rid]
             val code = old?.code ?: uniqueCode(ServerCodes.code(r.server), r.quality, rid)
-            fresh = r.candidates.filter { it.id !in candidates }
-            for (c in r.candidates) {
+            fresh = measured.filter { it.id !in candidates }
+            for (c in measured) {
                 candidates[c.id] = c
                 routeOfCandidate[c.id] = rid
             }

@@ -152,6 +152,62 @@ seams.add('.github/workflows/video-auto-recovery-qa.yml');
 seams.add('.github/workflows/video-cinema-live-qa.yml');
 seams.add('.github/workflows/video-player-decoded-frame-qa.yml');
 seams.add('.github/workflows/video-repository-live-qa.yml');
+// Owner-authorized playback phase two: exact reviewed media/transport regressions and integration seams.
+const playbackPhaseTwoSeams = [
+  "android/app/src/androidTest/assets/player-audio/README.md",
+  "android/app/src/androidTest/assets/player-audio/alternate.m4a",
+  "android/app/src/androidTest/assets/player-audio/primary.mp4",
+  "android/app/src/androidTest/assets/player-formats/README.md",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-001.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-002.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-003.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-004.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/chunk-0-005.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/init-0.m4s",
+  "android/app/src/androidTest/assets/player-formats/dash/manifest.mpd",
+  "android/app/src/androidTest/assets/player-formats/hls/manifest.m3u8",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-00.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-01.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-02.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-03.ts",
+  "android/app/src/androidTest/assets/player-formats/hls/segment-04.ts",
+  "android/app/src/androidTest/java/com/vantara/addons/NativeAddonHttpPlaybackDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/addons/PreparedHttpPlaybackDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/anime/player/CandidateExternalAudioDeviceTest.kt",
+  "android/app/src/androidTest/java/com/vantara/anime/player/PlayerStartupDeviceTest.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/adapters/Adapters.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/CandidateMediaSources.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioFallbackPolicy.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioPlan.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackBudgets.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackDiagnostics.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlaybackStartup.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/player/StartupReveal.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/Prepared.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/StreamProbe.kt",
+  "android/app/src/main/kotlin/com/vantara/anime/stream/Streams.kt",
+  "android/app/src/test/java/com/vantara/anime/CinemaFastPathTest.kt",
+  "android/app/src/test/java/com/vantara/anime/LazyVideoResolutionTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/ExternalAudioFallbackPolicyTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/ExternalAudioPlanTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/PlaybackDiagnosticsTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/PlaybackStartupTest.kt",
+  "android/app/src/test/java/com/vantara/anime/player/StartupRevealTest.kt",
+  "android/app/src/test/java/com/vantara/anime/stream/CandidatePreparationTimingTest.kt",
+  "android/app/src/test/java/com/vantara/anime/stream/StreamProbeTest.kt",
+  "extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/nicehttp/Requests.kt",
+  "extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/NetworkBridge.kt",
+  "extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/NetworkBridgeConcurrencyTest.kt",
+  "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimePipeCapacity.java",
+  "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimePipes.java",
+  "extensions/runtime-android/executor/src/test/java/dev/vantara/runtime/android/RuntimePipeCapacityTest.java",
+  "extensions/runtime-android/executor/src/test/java/dev/vantara/runtime/android/RuntimePipesQueueTest.java",
+  "extensions/runtime-android/harness/src/androidTest/java/dev/vantara/runtime/android/PipeIngressTest.java",
+  "tools/repository-compat/run_app_integration.sh"
+];
+for (const path of playbackPhaseTwoSeams) seams.add(path);
 // Owner decision (30 Oct 2026): every built-in anime/cinema source is removed. Deletions are admitted only
 // for these exact paths/prefixes; anything else deleted still fails the guard.
 const removedPrefixes=['android/app/src/main/assets/anime-extensions/'];

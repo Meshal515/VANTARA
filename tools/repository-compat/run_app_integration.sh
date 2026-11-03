@@ -2,8 +2,11 @@
 set -euo pipefail
 trap 'timeout 15s adb logcat -d VantaraRuntime:V AndroidRuntime:E ActivityManager:I TestRunner:I "*:S" > runtime-app-logcat.txt 2>&1 || true' EXIT
 if ! adb logcat -c; then printf '%s\n' 'Unable to clear old logs; still running the required integration test.' >&2; fi
+candidate_sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 bash android/gradlew -p android :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.RuntimeAppIntegrationTest --no-daemon --stacktrace
+  -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.RuntimeAppIntegrationTest,com.vantara.addons.PreparedHttpPlaybackDeviceTest,com.vantara.addons.NativeAddonHttpPlaybackDeviceTest,com.vantara.anime.player.CandidateExternalAudioDeviceTest,com.vantara.anime.player.PlayerStartupDeviceTest \
+  "-Pandroid.testInstrumentationRunnerArguments.addonHttpFixtureUrl=https://raw.githubusercontent.com/Meshal515/VANTARA/$candidate_sha/android/app/src/androidTest/assets/addon-torrent-proof.mp4" \
+  "-Pandroid.testInstrumentationRunnerArguments.addonSubtitleFixtureUrl=https://raw.githubusercontent.com/Meshal515/VANTARA/$candidate_sha/android/app/src/androidTest/assets/addon-http-proof.vtt" --no-daemon --stacktrace
 # Same candidate APK throughout: these phases prove bootstrap/UI/process restart,
 # not an upgrade from another signed APK. No account authentication is simulated.
 export DEBUG_EVIDENCE=runtime-app-webview

@@ -35,7 +35,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
@@ -50,14 +49,12 @@ import com.vantara.addons.*
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.vantara.anime.AnimeEngine
 import com.vantara.app.BuildConfig
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.stream.Candidate
-import com.vantara.anime.stream.Container
 import com.vantara.anime.stream.PlaybackSession
 import com.vantara.anime.stream.Preferences
 import com.vantara.anime.stream.PreparedEpisode
@@ -436,16 +433,41 @@ class PlayerActivity : Activity() {
     private var resume: MutableMap<Int, Long> = mutableMapOf()
     private val settings by lazy { getSharedPreferences("vantara.player", MODE_PRIVATE) }
 
-    private val startupWatchdog = Runnable { if (!reportedStart) fail("لم يبدأ خلال ${PlaybackBudgets.startupMs(current?.url) / 1000} ثانية") }
+    private val startup = PlaybackStartup(SystemClock::elapsedRealtime)
+    private var mediaAttempt = 0L
+    private var activeMediaId = ""
+    private var externalAudioUrls: Set<String> = emptySet()
+    private var retriedWithoutAudio = false
+    private val startupWatchdog = object : Runnable {
+        override fun run() {
+            if (current == null || reportedStart) return
+            startup.active(usageForeground && player.playWhenReady)
+            startup.timeout()?.let { reason ->
+                val detail = "engine watchdog: ${reason.name}; READY=$readyAt frame=$frameAt"
+                if (BuildConfig.DEBUG) diag.error(detail)
+                val retry = ExternalAudioFallbackPolicy.decision(externalAudioUrls, retriedWithoutAudio, reportedStart,
+                    isSourceError = false, isStartupTimeout = true)
+                val c = current
+                if (retry != null && c != null) {
+                    start(c, position(), withoutExternalAudio = true)
+                    if (BuildConfig.DEBUG) diag.error("engine recovery: ${retry.name}; optional audio omitted once; original: $detail")
+                    return
+                }
+                fail(reason.name)
+                return
+            }
+            main.postDelayed(this, 250)
+        }
+    }
     private val seekBudget = PlaybackSeekBudget()
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
-        if (player.playbackState == Player.STATE_BUFFERING) fail("توقف التحميل")
+        if (usageForeground && player.playWhenReady && player.playbackState == Player.STATE_BUFFERING) fail("BUFFERING_STALL_TIMEOUT")
     }
     private fun watchStall() {
         main.removeCallbacks(stallWatchdog)
-        if (reportedStart && player.playbackState == Player.STATE_BUFFERING) {
+        if (reportedStart && usageForeground && player.playWhenReady && player.playbackState == Player.STATE_BUFFERING) {
             main.postDelayed(stallWatchdog, seekBudget.stalledMs(current?.url, SystemClock.elapsedRealtime()))
         }
     }
@@ -545,8 +567,30 @@ class PlayerActivity : Activity() {
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
-        if (BuildConfig.DEBUG) player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
-            override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) { videoDecoder = decoderName }
+        player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            private fun current(event: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime): Boolean {
+                if (event.timeline.isEmpty || current == null) return false
+                val id = event.timeline.getWindow(event.windowIndex, androidx.media3.common.Timeline.Window()).mediaItem.mediaId
+                return id == activeMediaId
+            }
+            override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                if (BuildConfig.DEBUG && current(eventTime)) videoDecoder = decoderName
+            }
+            override fun onRenderedFirstFrame(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+                if (!current(eventTime)) return
+                if (BuildConfig.DEBUG) diag.firstFrame()
+                val first = !firstFrameShown
+                firstFrameShown = true
+                startup.frame(activeMediaId)
+                if (frameAt == 0L) { frameAt = SystemClock.elapsedRealtime(); android.util.Log.i("VantaraStartup", startupLine()) }
+                if (StartupReveal.hideOnFirstFrame(first, player.playbackState == Player.STATE_READY)) loading(false)
+                recordStartupOutput()
+            }
+            override fun onAudioPositionAdvancing(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+                if (!current(eventTime)) return
+                startup.audio(activeMediaId)
+                recordStartupOutput()
+            }
         })
         buildUi()
         attach(sessionId)
@@ -646,27 +690,15 @@ class PlayerActivity : Activity() {
             }
             if (state == Player.STATE_READY) {
                 seekBudget.reset()
-                // قبل أول إطار: READY وحده لا يكمل الشعار (الشاشة قد تكون سوداء بعد)
-                if (StartupReveal.hideOnReady(firstFrameShown, player.currentTracks.containsType(C.TRACK_TYPE_VIDEO))) loading(false)
-                if (presenceActive) sendPresence()
-                if (!reportedStart) {
-                    reportedStart = true
-                    readyAt = SystemClock.elapsedRealtime()
-                    main.removeCallbacks(startupWatchdog)
-                    attemptEnd("ok")
-                    current?.let { c -> playStat("server", codeOf(c) ?: c.server, "ok", ms = System.currentTimeMillis() - startedAt) }
-                    current?.let { c ->
-                        session?.started(c, System.currentTimeMillis() - startedAt)
-                        codeOf(c)?.let { code ->
-                            preferCode = code
-                            PlaybackEvents.emit(
-                                "server", JSONObject().put("animeId", launch.animeId).put("code", code)
-                                    .put("sourceId", c.sourceId).put("server", c.server).put("quality", c.quality),
-                            )
-                        }
-                    }
-                    updateQualityLabel()
+                if (current != null && player.currentMediaItem?.mediaId == activeMediaId) {
+                    if (readyAt == 0L) readyAt = SystemClock.elapsedRealtime()
+                    startup.ready(activeMediaId)
+                    startup.tracks(activeMediaId, player.currentTracks.containsType(C.TRACK_TYPE_VIDEO), player.currentTracks.containsType(C.TRACK_TYPE_AUDIO))
                 }
+                // A selected audio-only stream still needs advancing audio output, not just READY.
+                recordStartupOutput()
+                if (StartupReveal.hideOnReady(firstFrameShown, startup.output == PlaybackStartup.Output.AUDIO_ONLY)) loading(false)
+                if (presenceActive) sendPresence()
             }
             if (state == Player.STATE_ENDED) {
                 report(final = false)
@@ -676,18 +708,6 @@ class PlayerActivity : Activity() {
             bar.durationMs = player.duration.takeIf { it > 0 } ?: 0
         }
 
-        override fun onRenderedFirstFrame() {
-            if (BuildConfig.DEBUG) diag.firstFrame()
-            val startup = !firstFrameShown
-            firstFrameShown = true
-            if (frameAt == 0L) {
-                frameAt = SystemClock.elapsedRealtime()
-                android.util.Log.i("VantaraStartup", startupLine())
-            }
-            if (StartupReveal.hideOnFirstFrame(startup, player.playbackState == Player.STATE_READY)) loading(false)
-            usageStarted = true
-            sampleUsage()
-        }
 
         override fun onCues(cueGroup: CueGroup) {
             if (ownCues != null) return
@@ -721,16 +741,40 @@ class PlayerActivity : Activity() {
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) together?.onUserPlayPause(playWhenReady)
+            startup.active(usageForeground && playWhenReady)
+            watchStall()
             playButton.setImageDrawable(Glyph(if (playWhenReady) Glyph.Kind.PAUSE else Glyph.Kind.PLAY, Color.WHITE))
             playButton.contentDescription = if (playWhenReady) "إيقاف مؤقت" else "تشغيل"
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            if (BuildConfig.DEBUG) diag.error("${error.errorCodeName}: ${error.cause ?: ""}")
+            val causes = generateSequence<Throwable>(error) { it.cause }.take(12).toList()
+            val failureDetail = causes.asReversed().joinToString(" ← ") { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" }
+            if (BuildConfig.DEBUG) diag.error(failureDetail)
+            val fallback = ExternalAudioFallbackPolicy.decision(externalAudioUrls, retriedWithoutAudio, reportedStart,
+                (error as? androidx.media3.exoplayer.ExoPlaybackException)?.type == androidx.media3.exoplayer.ExoPlaybackException.TYPE_SOURCE,
+                causes.filterIsInstance<androidx.media3.datasource.HttpDataSource.HttpDataSourceException>().map { it.dataSpec.uri.toString() }.toSet(),
+                causes.any { it is androidx.media3.exoplayer.source.MergingMediaSource.IllegalMergeException || it.message == "EXTERNAL_AUDIO_NO_AUDIO_TRACKS" },
+                isAudioRendererFailure = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.let {
+                    it.type == androidx.media3.exoplayer.ExoPlaybackException.TYPE_RENDERER &&
+                        it.rendererFormat?.sampleMimeType?.startsWith("audio/") == true &&
+                        it.rendererFormat?.id?.startsWith("external-audio|") == true
+                } == true)
+            if (fallback != null) {
+                val c = current ?: return
+                if (BuildConfig.DEBUG) diag.error("engine recovery: ${fallback.name}; retry same candidate without optional audio")
+                start(c, position(), withoutExternalAudio = true)
+                if (BuildConfig.DEBUG) diag.error("engine recovery: ${fallback.name}; original root cause: $failureDetail")
+                return
+            }
             fail(error.errorCodeName)
         }
 
         override fun onTracksChanged(tracks: Tracks) {
+            if (player.currentMediaItem?.mediaId == activeMediaId) {
+                startup.tracks(activeMediaId, tracks.containsType(C.TRACK_TYPE_VIDEO), tracks.containsType(C.TRACK_TYPE_AUDIO))
+                recordStartupOutput()
+            }
             updateQualityLabel()
             autoArabicSubtitle()
             val selected = selectedAddonSubtitle ?: return
@@ -744,7 +788,38 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun start(c: Candidate, positionMs: Long) {
+    /** Only renderer evidence reaches success metrics, health and preferred-server learning. */
+    private fun recordStartupOutput() {
+        val output = startup.output ?: return
+        if (reportedStart || current == null) return
+        reportedStart = true
+        main.removeCallbacks(startupWatchdog)
+        val c = current ?: return
+        val ms = SystemClock.elapsedRealtime() - openAt
+        if (output == PlaybackStartup.Output.VIDEO) {
+            attemptEnd("ok")
+            playStat("server", codeOf(c) ?: c.server, "ok", ms = ms)
+            session?.started(c, ms)
+            codeOf(c)?.let { code ->
+                preferCode = code
+                PlaybackEvents.emit("server", JSONObject().put("animeId", launch.animeId).put("code", code)
+                    .put("sourceId", c.sourceId).put("server", c.server).put("quality", c.quality))
+            }
+        } else {
+            // Audio is playable, but must not inflate visual success or teach video startup speed.
+            attemptDone = true
+            playStat("audio_play", "episode", "ok", ms = SystemClock.elapsedRealtime() - attemptAt)
+            playStat("audio_server", codeOf(c) ?: c.server, "ok", ms = ms)
+            if (BuildConfig.DEBUG) diag.audioOnly()
+        }
+        loading(false)
+        usageStarted = true
+        sampleUsage()
+        updateQualityLabel()
+        watchStall()
+    }
+
+    private fun start(c: Candidate, positionMs: Long, withoutExternalAudio: Boolean = false) {
         seekBudget.reset()
         main.removeCallbacks(stallWatchdog)
         waiting?.cancel()
@@ -752,46 +827,35 @@ class PlayerActivity : Activity() {
         clearSkipTimings()
         val subtitleGeneration = clearAddonSubtitles()
         current = c
+        retriedWithoutAudio = withoutExternalAudio
         reportedStart = false
+        usageStarted = false
+        activeMediaId = "${c.id}|attempt|${++mediaAttempt}"
+        startup.begin(activeMediaId, PlaybackBudgets.startupMs(c.url), PlaybackBudgets.firstOutputMs(c.url))
         firstFrameShown = false
         // سيرفر جديد: الشعار يبدأ من الصفر لا من نسبة السيرفر السابق
         if (::stage.isInitialized) stage.restart()
         startedAt = System.currentTimeMillis()
         openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
         net.markStart()
-        if (BuildConfig.DEBUG) { diag.start(); videoDecoder = null }
+        if (BuildConfig.DEBUG) { diag.start(c.preparationMs); videoDecoder = null }
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
-        val item = MediaItem.Builder()
-            .setUri(c.url)
-            .apply {
-                when (c.container) {
-                    Container.HLS -> setMimeType(MimeTypes.APPLICATION_M3U8)
-                    Container.DASH -> setMimeType(MimeTypes.APPLICATION_MPD)
-                    else -> Unit
-                }
-                if (c.subtitles.isNotEmpty()) {
-                    setSubtitleConfigurations(
-                        c.subtitles.map { t ->
-                            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(t.url))
-                                .setMimeType(subtitleMime(t.url))
-                                .setLanguage(t.lang)
-                                .setLabel(t.lang)
-                                .setSelectionFlags(if (t.lang.contains("ar", true) || t.lang.contains("عرب")) C.SELECTION_FLAG_DEFAULT else 0)
-                                .build()
-                        },
-                    )
-                }
-            }
-            .build()
+        val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
+        externalAudioUrls = media.externalAudioUrls
+        if (BuildConfig.DEBUG) {
+            if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")
+            media.rejectedAudio.forEach { diag.error("external audio omitted: ${it.reason}") }
+        }
         // جودة اختارها المستخدم تخص السيرفر السابق؛ السيرفر الجديد يبدأ تلقائيًا
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-        player.setMediaSource(DefaultMediaSourceFactory(mediaFactory).createMediaSource(item), positionMs.coerceAtLeast(0))
+        player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
         player.prepare()
         player.playWhenReady = clip == null
         main.removeCallbacks(startupWatchdog)
-        main.postDelayed(startupWatchdog, PlaybackBudgets.startupMs(c.url))
+        startup.active(usageForeground && player.playWhenReady)
+        main.post(startupWatchdog)
         updateQualityLabel()
         if (openSheet == SheetKind.SERVERS) sheet.refresh()
         discoverAddonSubtitles(c, subtitleGeneration)
@@ -832,6 +896,8 @@ class PlayerActivity : Activity() {
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
         clearSkipTimings()
+        startup.cancel()
+        usageStarted = false
         reportedStart = false
         main.removeCallbacks(startupWatchdog)
         main.removeCallbacks(stallWatchdog)
@@ -969,6 +1035,8 @@ class PlayerActivity : Activity() {
         main.removeCallbacks(stallWatchdog)
         sampleUsage()
         usageStarted = false
+        startup.cancel()
+        activeMediaId = ""
         player.stop()
         current = null
         val warmed = warmedSessionId?.takeIf { warmedEpisode == n && engine.prepared(it)?.best() != null }
@@ -1795,7 +1863,8 @@ class PlayerActivity : Activity() {
     private fun startupLine(): String {
         fun at(t: Long) = if (t >= openAt && openAt > 0) String.format(java.util.Locale.US, "+%.1f", (t - openAt) / 1000.0) else "—"
         val piece = torrentStats()?.firstPieceAt ?: 0L
-        val parts = listOfNotNull(if (current?.url?.startsWith("vantara-torrent:") == true) "قطعة ${at(piece)}" else null,
+        val preparation = current?.preparationMs?.let { String.format(java.util.Locale.US, "%.1f", it / 1000.0) } ?: "—"
+        val parts = listOfNotNull("استخراج وتجهيز $preparation", if (current?.url?.startsWith("vantara-torrent:") == true) "قطعة ${at(piece)}" else null,
             "بايت ${at(net.firstByteAt)}", "جاهز ${at(readyAt)}", "إطار ${at(frameAt)}")
         return parts.joinToString(" · ") + " ث"
     }
@@ -2263,6 +2332,8 @@ class PlayerActivity : Activity() {
         presenceActive = false
         main.removeCallbacks(presenceTick)
         player.playWhenReady = false
+        startup.active(false)
+        main.removeCallbacks(stallWatchdog)
         report(final = false)
     }
 
@@ -2273,6 +2344,8 @@ class PlayerActivity : Activity() {
             netChip?.visibility = View.GONE
             if (openSheet == SheetKind.NETWORK) sheet.close()
         }
+        startup.active(player.playWhenReady)
+        watchStall()
         sampleUsage()
         presenceActive = true
         main.removeCallbacks(presenceTick)
@@ -2280,6 +2353,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        startup.cancel()
         usageForeground = false
         sampleUsage()
         presenceActive = false

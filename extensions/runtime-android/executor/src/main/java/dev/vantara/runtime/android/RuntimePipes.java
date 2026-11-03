@@ -4,6 +4,7 @@ import android.os.*;
 import android.system.*;
 import java.io.*;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 /** Local IPC deadlines, independent of network deadlines and worker cooperation. */
@@ -12,7 +13,7 @@ final class RuntimePipes {
     // Stable Linux UAPI values on Android's supported ARM/x86 ABIs. OsConstants
     // does not expose these flags. Per-call flags cannot be cleared by the peer.
     private static final int MSG_DONTWAIT=0x40,MSG_NOSIGNAL=0x4000;
-    private static final Semaphore writers=new Semaphore(4);
+    private static final Semaphore writers=new Semaphore(4,true);
     private static void active(BooleanSupplier closed,long deadline) {
         if(closed.getAsBoolean())throw new RuntimeFailure("WORKER_CLOSED");
         if(SystemClock.elapsedRealtime()>=deadline)throw new RuntimeFailure("PIPE_TIMEOUT");
@@ -55,17 +56,22 @@ final class RuntimePipes {
         finally{if(independent!=null)try{Os.close(independent);}catch(ErrnoException ignored){}}
     }
     static void write(Parcel parcel,byte[] bytes,BooleanSupplier closed) throws IOException {
-        if(!writers.tryAcquire())throw new RuntimeFailure("PIPE_CAPACITY");
+        // Six worker HTTP exchanges may finish together, while only four large
+        // frames may have writer threads. Queue within the existing frame budget.
+        long deadlineNanos=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(MAX_PIPE_MILLIS);
+        RuntimePipeCapacity.acquire(writers,closed,deadlineNanos);
         ParcelFileDescriptor[] ends=null;
         try {
             if(closed.getAsBoolean())throw new RuntimeFailure("WORKER_CLOSED");
+            long remaining=deadlineNanos-System.nanoTime();
+            if(remaining<=0)throw new RuntimeFailure("PIPE_TIMEOUT");
+            long deadline=SystemClock.elapsedRealtime()+TimeUnit.NANOSECONDS.toMillis(remaining);
             // Unix stream sockets support per-call nonblocking I/O across UIDs.
             // Reopening a peer-owned FIFO is correctly denied by Android; mutable
             // shared fcntl flags are not a safe substitute for MSG_DONTWAIT.
             ends=ParcelFileDescriptor.createSocketPair();
             parcel.writeTypedObject(ends[0],0);ends[0].close();
             ParcelFileDescriptor output=ends[1];
-            long deadline=SystemClock.elapsedRealtime()+MAX_PIPE_MILLIS;
             Thread writer=new Thread(()->{
                 try(ParcelFileDescriptor owned=output) {
                     int offset=0;

@@ -57,17 +57,40 @@ public class PipeIngressTest {
         List<Parcel> replies=new ArrayList<>();byte[] bytes=new byte[RuntimeProtocol.MAX_RESPONSE];
         try {
             for(int i=0;i<4;i++){Parcel reply=Parcel.obtain();replies.add(reply);RuntimeProtocol.writeBytes(reply,bytes,RuntimeProtocol.MAX_RESPONSE);}
-            Parcel rejected=Parcel.obtain();replies.add(rejected);
-            try{RuntimeProtocol.writeBytes(rejected,bytes,RuntimeProtocol.MAX_RESPONSE);fail("Unbounded pipe writers accepted");}catch(RuntimeFailure expected){assertEquals("PIPE_CAPACITY",expected.code);}
-            long deadline=SystemClock.elapsedRealtime()+RuntimePipes.MAX_PIPE_MILLIS+1000;boolean recovered=false;
-            do {
-                Parcel candidate=Parcel.obtain();replies.add(candidate);
-                try{RuntimeProtocol.writeBytes(candidate,bytes,RuntimeProtocol.MAX_RESPONSE);recovered=true;break;}
-                catch(RuntimeFailure expected){assertEquals("PIPE_CAPACITY",expected.code);}
-                Thread.sleep(50);
-            }while(SystemClock.elapsedRealtime()<deadline);
-            assertTrue("Unconsumed peer permanently retained host writer capacity",recovered);
+            Parcel queued=Parcel.obtain();replies.add(queued);long start=SystemClock.elapsedRealtime();
+            // It may acquire a slot as an old writer expires, or exhaust its own absolute budget.
+            try{RuntimeProtocol.writeBytes(queued,bytes,RuntimeProtocol.MAX_RESPONSE);}
+            catch(RuntimeFailure expected){assertEquals("PIPE_TIMEOUT",expected.code);}
+            assertTrue("Saturated writer did not wait for bounded capacity",SystemClock.elapsedRealtime()-start>=1000);
+            assertTrue("Admission exceeded the absolute frame budget",SystemClock.elapsedRealtime()-start<RuntimePipes.MAX_PIPE_MILLIS+1000);
+            Parcel recovered=Parcel.obtain();replies.add(recovered);RuntimeProtocol.writeBytes(recovered,bytes,RuntimeProtocol.MAX_RESPONSE);
         }finally{for(Parcel reply:replies)reply.recycle();}
+    }
+    @Test public void sixIndependentLargeFramesTransferThroughFourWriterSlots() throws Exception {
+        ExecutorService transfers=Executors.newFixedThreadPool(8);List<Parcel> frames=new CopyOnWriteArrayList<>();
+        List<Future<byte[]>> received=new ArrayList<>();List<Future<Parcel>> queued=new ArrayList<>();
+        try {
+            for(int i=0;i<4;i++){Parcel frame=largeFrame(i,frames,()->false);received.add(null);frames.get(i).setDataPosition(0);}
+            CountDownLatch attempting=new CountDownLatch(2);
+            for(int i=4;i<6;i++){final int value=i;queued.add(transfers.submit(()->{attempting.countDown();return largeFrame(value,frames,()->false);}));}
+            assertTrue(attempting.await(1,TimeUnit.SECONDS));
+            for(Future<Parcel> future:queued)try{future.get(100,TimeUnit.MILLISECONDS);fail("Large frame did not wait for a writer slot");}catch(TimeoutException expected){}
+            for(int i=0;i<4;i++){final Parcel frame=frames.get(i);received.set(i,transfers.submit(()->RuntimeProtocol.readBytes(frame,RuntimeProtocol.MAX_RESPONSE)));}
+            for(Future<Parcel> future:queued){Parcel frame=future.get(2,TimeUnit.SECONDS);frame.setDataPosition(0);received.add(transfers.submit(()->RuntimeProtocol.readBytes(frame,RuntimeProtocol.MAX_RESPONSE)));}
+            for(int i=0;i<6;i++){byte[] expected=new byte[RuntimeProtocol.MAX_RESPONSE];Arrays.fill(expected,(byte)i);assertArrayEquals(expected,received.get(i).get(3,TimeUnit.SECONDS));}
+        }finally{transfers.shutdownNow();assertTrue(transfers.awaitTermination(3,TimeUnit.SECONDS));for(Parcel frame:frames)frame.recycle();}
+    }
+    @Test public void cancelledGenerationStopsQueuedOutboundFrameBeforeAllocation() throws Exception {
+        List<Parcel> frames=new CopyOnWriteArrayList<>();AtomicBoolean closed=new AtomicBoolean();CountDownLatch attempting=new CountDownLatch(1);
+        try {
+            for(int i=0;i<4;i++)largeFrame(i,frames,()->false);
+            Future<String> result=executor.submit(()->{attempting.countDown();try{largeFrame(5,frames,closed::get);return "UNEXPECTED_SUCCESS";}catch(RuntimeFailure expected){return expected.code;}});
+            assertTrue(attempting.await(1,TimeUnit.SECONDS));closed.set(true);assertEquals("WORKER_CLOSED",result.get(500,TimeUnit.MILLISECONDS));
+        }finally{for(Parcel frame:frames)frame.recycle();}
+    }
+    private Parcel largeFrame(int value,List<Parcel> frames,java.util.function.BooleanSupplier closed) throws Exception {
+        Parcel frame=Parcel.obtain();frames.add(frame);byte[] bytes=new byte[RuntimeProtocol.MAX_RESPONSE];Arrays.fill(bytes,(byte)value);
+        RuntimeProtocol.writeBytes(frame,bytes,RuntimeProtocol.MAX_RESPONSE,closed);return frame;
     }
     private long flags(ParcelFileDescriptor fd) throws Exception {
         String info=new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("/proc/self/fdinfo/"+fd.getFd())),java.nio.charset.StandardCharsets.UTF_8);
