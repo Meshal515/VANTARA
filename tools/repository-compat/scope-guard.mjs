@@ -55,6 +55,39 @@ const discoveryGroupOneSeams=[
 ];
 for(const path of discoveryGroupOneSeams)seams.add(path);
 
+
+// Owner-authorized focused diagnostics visibility and floating-card visual corrections.
+const visualUiSeams = [
+  ".github/workflows/runtime-app-debug.yml",
+  "android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt",
+  "android/app/src/main/kotlin/com/vantara/plugins/DiagnosticVisibility.kt",
+  "android/app/src/main/kotlin/com/vantara/plugins/SystemUiPlugin.kt",
+  "android/app/src/test/java/com/vantara/plugins/DiagnosticVisibilityTest.kt",
+  "apps/web/lib/diagnostics-ui.js",
+  "apps/web/lib/diagnostics-ui.test.js",
+  "apps/web/sw.js",
+  "apps/web/v35/addons-v7.js",
+  "apps/web/v35/addons-v7.test.js",
+  "apps/web/v35/addons-view.js",
+  "apps/web/v35/addons-view.test.js",
+  "apps/web/v35/anime-work.test.js",
+  "apps/web/v35/anime.css",
+  "apps/web/v35/anime.js",
+  "apps/web/v35/cinema.js",
+  "apps/web/v35/icons.js",
+  "apps/web/v35/logo-layer.js",
+  "apps/web/v35/logo-layer.test.js",
+  "apps/web/v35/server-sheet.js",
+  "apps/web/v35/sheet-lifecycle.js",
+  "apps/web/v35/sheet-lifecycle.test.js",
+  "apps/web/v35/shell.js",
+  "apps/web/v35/work-looks.js",
+  "docs/superpowers/plans/2026-11-03-visual-diagnostics.md",
+  "docs/superpowers/specs/2026-11-03-visual-diagnostics-design.md",
+  "tools/repository-compat/visual-ui.mjs"
+];
+for (const path of visualUiSeams) seams.add(path);
+
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');

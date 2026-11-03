@@ -4,9 +4,10 @@ vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() 
 vi.mock('../lib/anime-engine.js', async (original) => ({ ...await original(), available: () => false, sources: async () => [], on: () => () => {}, onNeedsHuman() {} }));
 const { createAnime, recordWatch } = await import('./anime.js');
 const { cycleGenre, collectionSpec } = await import('./anime-discover.js');
+const { diagnosticsUi } = await import('../lib/diagnostics-ui.js');
 const { beginDiscovery, setDiscoveryDebug } = await import('../lib/discovery-diagnostics.js');
 
-afterEach(() => { setDiscoveryDebug(false); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); setDiscoveryDebug(false); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const DETAIL = {
   id: 161645, idMal: null, title: { english: 'The Apothecary Diaries', romaji: 'Kusuriya no Hitorigoto' }, coverImage: { extraLarge: 'https://img/cover.jpg', large: 'https://img/cover-s.jpg', color: '#e4a15d' },
@@ -64,6 +65,7 @@ it('keeps a finished film in history without a next episode label', () => {
 });
 
 it('Debug exposes recorded discovery evidence from the actual work page', async () => {
+  vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(true);
   setDiscoveryDebug(true);
   beginDiscovery({ workId: DETAIL.id }).record('candidate_rejected', { reason: 'sequel', sourceId: 'example' });
   const { root, anime, deps, document } = setup();
@@ -75,6 +77,16 @@ it('Debug exposes recorded discovery evidence from the actual work page', async 
   expect(sheet.textContent).toContain('candidate_rejected');
   expect(sheet.textContent).toContain('sequel');
   expect(sheet.textContent).toContain('example');
+});
+
+it('hides diagnostics and its content while internal Debug evidence continues recording', async () => {
+  setDiscoveryDebug(true);
+  const { root, anime } = setup();
+  await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' });
+  await settle();
+  expect(root.querySelector('.aw-discovery-debug')).toBeNull();
+  expect(root.querySelector('#animeSources').hidden).toBe(true);
+  expect(root.querySelector('#animeSources').childElementCount).toBe(0);
 });
 
 it('the work page is built once and filled in place: no re-render when details arrive, title is long-press copyable', async () => {
@@ -209,4 +221,22 @@ it('rehydrates a saved provider-local anime reference before rendering its episo
   deps.restoreSourceWork = async ref => { expect(ref).toBe('anime:addon-saved-anime'); return work; };
   await anime.openAnime({ id: work.id, title: work.title });
   expect([...root.querySelectorAll('.an-er')].map(row => row.dataset.ep)).toEqual(['1', '2']);
+});
+
+it('updates the mounted work diagnostics without moving the card or clearing engine traces', async () => {
+  let visible = false, changed;
+  vi.spyOn(diagnosticsUi, 'visible').mockImplementation(() => visible);
+  vi.spyOn(diagnosticsUi, 'subscribe').mockImplementation(fn => { changed = fn; return () => {}; });
+  const { root, anime, store } = setup();
+  store.set('vantara.appearance.v1', JSON.stringify({ style: { anime: 'card' } }));
+  await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' }); await settle();
+  const cover = root.querySelector('.wl-stage3d');
+  expect(root.querySelector('.aw-discovery-debug')).toBeNull();
+  visible = true; changed();
+  expect(root.querySelector('.aw-discovery-debug')).not.toBeNull();
+  expect(root.querySelector('#animeSources').previousElementSibling.classList.contains('wl')).toBe(true);
+  visible = false; changed();
+  expect(root.querySelector('.aw-discovery-debug')).toBeNull();
+  expect(root.querySelector('#animeSources').hidden).toBe(true);
+  expect(root.querySelector('.wl-stage3d')).toBe(cover);
 });

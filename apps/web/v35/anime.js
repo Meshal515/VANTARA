@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
@@ -34,7 +35,7 @@ import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
-import { beginDiscovery, discoveryDiagnostics, isDiscoveryDebug } from '../lib/discovery-diagnostics.js';
+import { beginDiscovery, discoveryDiagnostics } from '../lib/discovery-diagnostics.js';
 
 const isMovie = m => m?.format === 'MOVIE';
 const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
@@ -719,14 +720,14 @@ export function createAnime(deps) {
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
     sources.hidden = true;
-    body.append(sources, about, insightHost, eps, more);
+    body.append(about, insightHost, eps, more, sources);
     // الأنماط الأربعة: كل ما تحت البطل يرسمه work-looks.js كما في تصميمه المعتمد؛ عناصر الأساسي
     // تبقى مخفية لأن بقية الصفحة (الحلقات، التشغيل، التحديثات) تعمل عليها
     const lw = look === 'core' ? null : el('div', 'wl');
     if (lw) {
       stage.hidden = true;
       body.hidden = true;
-      wrap.append(bar, hero, sources, lw, stage, body);
+      wrap.append(bar, hero, lw, sources, stage, body);
     } else {
       // «المحور»: الرأس والجسم في حاوية واحدة؛ على الشاشة العريضة شبكة تضع اللقطة والمعلومات
       // جنبًا إلى جنب (anime.css). على الجوال حاوية عادية لا تغيّر شيئًا
@@ -2034,8 +2035,17 @@ export function createAnime(deps) {
   }
 
   /** المصادر سطرًا هادئًا واحدًا: نقطة حالة، ومن أين تشاهد. لا شرائح بإطارات. */
+  diagnosticsUi.subscribe(() => {
+    const m = state.detail;
+    if (m?.id != null) paintSources(m);
+    else if (!diagnosticsUi.visible()) { const host = q('animeSources'); if (host) { host.hidden = true; host.replaceChildren(); } }
+  });
+
   function discoveryButton(m) {
+    if (!diagnosticsUi.visible()) return null;
     return button('aw-link aw-discovery-debug', 'تشخيص الاكتشاف', () => deps.openSheet(body => {
+      if (!diagnosticsUi.visible()) return;
+      body.dataset.diagnosticSheet = '';
       const title = el('h3', null, 'تشخيص الاكتشاف — Debug');
       const output = el('pre');
       output.dir = 'ltr';
@@ -2050,12 +2060,13 @@ export function createAnime(deps) {
   function paintSources(m, phase = state.work && sameWork(m) ? 'found' : engine.available() ? 'loading' : 'web') {
     const host = q('animeSources');
     if (!host) return;
-    host.hidden = !isDiscoveryDebug();
+    host.hidden = !diagnosticsUi.visible();
+    if (!diagnosticsUi.visible()) { host.replaceChildren(); return; }
     host.dataset.state = phase;
     const dot = el('i', 'aw-dot');
     const text = el('span', 'aw-sources-text');
     host.replaceChildren(dot, text);
-    if (isDiscoveryDebug()) host.append(discoveryButton(m));
+    if (diagnosticsUi.visible()) host.append(discoveryButton(m));
     if (phase === 'web') {
       text.textContent = 'التشغيل من المصادر العربية داخل تطبيق أندرويد';
       return;
@@ -2408,7 +2419,8 @@ export function createAnime(deps) {
         kicker: unitLabel(m, n),
         title: m.title,
         media,
-        extraFoot: [...extraFoot, ...(isDiscoveryDebug() ? [discoveryButton(m)] : [])],
+        extraFoot,
+        diagnosticAction: () => discoveryButton(m),
         prefer,
         // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة
         directLang: 'مترجم عربي',

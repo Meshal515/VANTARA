@@ -17,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   actual-app:
+    if: ${{ !startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -113,3 +114,47 @@ jobs:
             release-runtime-classpath.txt
           if-no-files-found: error
           retention-days: 14
+
+  visual-ui:
+    if: ${{ github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Verify web UI regressions and repository protection
+        run: |
+          pnpm test:web
+          node tools/repository-compat/scope-guard.mjs
+          pnpm test:safety
+      - name: Verify native diagnostics gate in Debug and Release builds
+        run: bash android/gradlew -p android :app:testDebugUnitTest --tests '*DiagnosticVisibilityTest' :app:testReleaseUnitTest --tests '*DiagnosticVisibilityTest' --no-daemon --stacktrace
+      - name: Render actual production components in Chromium
+        env:
+          VANTARA_UI_EVIDENCE: ${{ runner.temp }}/visual-ui-evidence
+        run: |
+          npm install --prefix "$RUNNER_TEMP/visual-qa" --no-save playwright@1.56.1
+          export VANTARA_PLAYWRIGHT_MODULE="$RUNNER_TEMP/visual-qa/node_modules/playwright/index.mjs"
+          export VANTARA_CHROMIUM="$(command -v google-chrome || command -v chromium)"
+          node tools/repository-compat/visual-ui.mjs "$GITHUB_WORKSPACE" after
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-ui-and-native-gate-evidence-NO-APK
+          path: |
+            ${{ runner.temp }}/visual-ui-evidence/
+            android/app/build/test-results/
+            android/app/build/reports/tests/
+          if-no-files-found: warn

@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 
 /* VANTARA V7 live add-on manager.
  * Presentation only: no migration, reset, deletion, or replacement of stored data.
@@ -677,13 +678,14 @@ export function renderV7Addons({
     requests.set(r.key,promise);queue.push({repo:r,run,resolve});
     draw();drainRequests();return promise;
   }
+  let releaseDiagnosticUi = () => {};
   function cancelDiagnostic(){
     if(diagnosticController){diagnosticController.abort();diagnosticController=null;busy=false;}
   }
-  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;cancelDiagnostic();layer.hidden=true;disposeLogos(dialog);dialog.replaceChildren();}
+  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=true;disposeLogos(dialog);dialog.replaceChildren();}
   function showDialog(title,description){
     if(!alive)return;
-    cancelDiagnostic();layer.hidden=false;disposeLogos(dialog);dialog.replaceChildren();
+    releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=false;disposeLogos(dialog);dialog.replaceChildren();
     dialog.append(el("h3",null,title));
     if(description)dialog.append(el("p",null,description));
   }
@@ -695,7 +697,7 @@ export function renderV7Addons({
   function renderDiagnostics(a,container,actions){
     const results=el("div","v7-checks");results.setAttribute("aria-live","polite");
     const check=btn("فحص الإضافة","v7-btn",async()=>{
-      if(busy)return;busy=true;check.disabled=true;results.textContent="جارٍ فحص الإضافة…";
+      if(busy||!diagnosticsUi.visible())return;busy=true;check.disabled=true;results.textContent="جارٍ فحص الإضافة…";
       const controller=new AbortController();diagnosticController=controller;
       try{
         const result=await onCheck(a,{signal:controller.signal});
@@ -715,7 +717,12 @@ export function renderV7Addons({
         const detail=dialog.querySelector(".v7-evidence-detail");if(detail)detail.textContent=installedState(a).detail;draw();
       }catch(err){if(alive&&!controller.signal.aborted&&dialog.contains(results))results.replaceChildren(el("p","v7-notice",fmtErr(err)));}
       finally{if(diagnosticController===controller){diagnosticController=null;busy=false;}check.disabled=false;}
-    });actions.append(check);container.append(results);
+    });
+    const paint = () => {
+      if (diagnosticsUi.visible()) { actions.append(check); container.append(results); }
+      else { cancelDiagnostic(); check.remove(); results.remove(); }
+    };
+    releaseDiagnosticUi = diagnosticsUi.subscribe(paint); paint();
   }
   function showDetails(a,mode,parent){
     showDialog(a.name,a.description||"");
@@ -1040,7 +1047,7 @@ export function renderV7Addons({
     }
   }
   let removePulse=pulse?.onChange?.(refreshStatuses)||(()=>{});
-  root.close=()=>{cancelDiagnostic();disposeLogos(root);alive=false;nativeRows.clear();installs.clear();removePulse();removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
+  root.close=()=>{releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();disposeLogos(root);alive=false;nativeRows.clear();installs.clear();removePulse();removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
   root.reload=()=>{alive=true;removePulse();removePulse=pulse?.onChange?.(refreshStatuses)||(()=>{});removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
   search.oninput=()=>{restoreScroll=false;currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();

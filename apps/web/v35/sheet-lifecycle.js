@@ -24,6 +24,7 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     body.replaceChildren();
     body.className = 'sheet';
     body.removeAttribute('aria-label');
+    body.removeAttribute('data-diagnostic-sheet');
   };
 
   function close() {
@@ -61,6 +62,7 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     body.className = 'sheet';
     body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
     body.removeAttribute('aria-label');
+    body.removeAttribute('data-diagnostic-sheet');
     if (tone) overlay.dataset.tone = tone;
     else delete overlay.dataset.tone;
     overlay.classList.toggle('sheet-backdrop--full', Boolean(full));

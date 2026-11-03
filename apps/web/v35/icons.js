@@ -115,12 +115,21 @@ const P = {
 /** رموزٌ لها حالة «مفعّل» تُملأ فيها بدل أن تُحدَّد. */
 const FILLABLE = new Set(['bolt', 'heart', 'library', 'star', 'bell', 'play', 'pause']);
 
+// Optical corrections after inspecting the whole family in actual circular buttons.
+// Values are local 24-unit geometry, not a blanket shift of buttons or all SVGs.
+const OPTICAL = Object.freeze({
+  play: [-0.35, 0], heart: [0, 0.65], share: [-0.55, 0],
+  send: [-0.55, 0.55], puzzle: [0.55, -0.55], check: [0, -0.4],
+});
+
 /**
  * @param {keyof typeof P} name
  * @param {{ size?: number, filled?: boolean, cls?: string }} [opts]
  */
 export function glyph(name, { size = 22, filled = false, cls = 'icon', id } = {}) {
-  const body = P[name] ?? P.info;
+  const path = P[name] ?? P.info;
+  const correction = OPTICAL[name];
+  const body = correction ? `<g transform="translate(${correction.join(' ')})">${path}</g>` : path;
   const fill = filled && FILLABLE.has(name) ? 'currentColor' : 'none';
   return (
     `<svg${id ? ` id="${id}"` : ''} class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="currentColor" ` +

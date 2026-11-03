@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * VANTARA CINEMA — أفلام ومسلسلات عالمية مترجمة.
  *
@@ -1241,7 +1242,9 @@ export function createCinema(deps) {
   }
 
   function openSourcesDebug() {
+    if (!diagnosticsUi.visible()) return;
     deps.openSheet((body) => {
+      body.dataset.diagnosticSheet = '';
       const head = el('div', 'an-sheet-head');
       head.append(el('div', 'an-sheet-kicker', 'أداء المصادر'), text('div', 'an-sheet-title', 'السينما'));
       const note = el('p', 'cn-note', 'كل فتح عمل يُقاس هنا: من فتح الصفحة حتى أول تشغيل صالح، ولكل مصدر.');
@@ -1341,11 +1344,13 @@ export function createCinema(deps) {
    * وحالتها. من جلسة البحث نفسها، بلا طلبات جديدة؛ ثم الفحص العميق بالمحرك.
    */
   function diagnoseSheet(m) {
+    if (!diagnosticsUi.visible()) return;
     const season = m.type === 'series' ? state.season : null;
     const h = state.works.get(playKey(m, season));
     const crit = h?.criteria ?? matchCriteria(m, { season });
     deps.openSheet((body) => {
       const head = el('div', 'an-sheet-head');
+      body.dataset.diagnosticSheet = '';
       head.append(el('div', 'an-sheet-kicker', 'فحص المصادر'), text('div', 'an-sheet-title', m.title));
       const id = el('ol', 'cn-diag-steps');
       const step = (cls, label, detail) => {
@@ -1451,7 +1456,7 @@ export function createCinema(deps) {
         }
         nodes.push(near);
       }
-      nodes.push(button('cn-link cn-diag-open', 'افحص المصادر', () => diagnoseSheet(m)));
+      if (diagnosticsUi.visible()) nodes.push(button('cn-link cn-diag-open', 'افحص المصادر', () => diagnoseSheet(m)));
       host.replaceChildren(...nodes);
       return;
     }

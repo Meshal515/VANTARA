@@ -1,3 +1,4 @@
+import { mountLogoLayer } from './logo-layer.js';
 /**
  * أنماط صفحة عمل الأنمي الأربعة (إعدادات ← المظهر)، منقولة من التصاميم المعتمدة كما هي:
  * المنصة، البطاقة الطائرة، شاشة السينما، الحلقة أولًا. البطل (البنر وحركة العمق) من صفحة العمل
@@ -77,6 +78,15 @@ function worldLabel(w) {
 /** الأنمي يُفتح في صفحة الأنمي، والمانجا في قسم المانجا ببحث عن اسمها. */
 const openAttr = (w) => (w.here ? '' : w.kind === 'manga' ? `data-manga="${esc(w.title)}"` : `data-open="${esc(w.id)}"`);
 
+/** Two identical tracks share a phase; their masks change color behind the real cover. */
+function logoLayer(c) {
+  if (!c.logo) return '';
+  const unit = `<img src="${esc(c.logo)}" crossorigin="anonymous" alt="" decoding="async">`;
+  const group = `<span class="wl-logo-group">${unit}${unit}</span>`;
+  const train = `<span class="wl-logo-train">${group}${group}</span>`;
+  return `<div class="wl-logo-layer" aria-hidden="true" hidden><div class="wl-logo-lane wl-logo-color">${train}</div><div class="wl-logo-lane wl-logo-white">${train}</div></div>`;
+}
+
 const LOOKS = {
   /* ── المنصة ── */
   platform(c, p) {
@@ -101,6 +111,7 @@ const LOOKS = {
     const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}">${p.thumb(n)}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span></button>`).join('');
     return `
       <div class="wl-head">
+        ${logoLayer(c)}
         <div class="wl-stage3d"><div class="wl-card">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div></div>
         <div class="wl-info">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div><div class="wl-row"><button type="button" class="wl-big" data-ep="${p.cur}"><span class="dot">${p.play}</span>${esc(c.label)}</button><span class="wl-sub">${esc(c.progressText)}</span></div>${p.next}${p.social}</div>
       </div>
@@ -159,8 +170,10 @@ export function renderLook(look, host, c, { center = true } = {}) {
   if (!make || !host) return;
   // إعادة الرسم (وصول بيانات أو تقدّم) تحفظ موضع الشرائط الأفقية؛ لا تقفز تحت إصبع المستخدم
   const kept = [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].map((el) => el.scrollLeft);
+  host._releaseLogoLayer?.();
   host.className = `wl wl-${look}`;
   host.innerHTML = make(c, parts(c));
+  host._releaseLogoLayer = mountLogoLayer(host);
   if (!center) [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].forEach((el, i) => { if (kept[i] != null) el.scrollLeft = kept[i]; });
   // صورة تعذّرت: الشعار يحل محله الاسم مكتوبًا، وغيره يختفي بدل رمز الصورة المكسورة
   for (const im of host.querySelectorAll('img')) {
@@ -268,7 +281,8 @@ ${sel}{animation:${name} linear both;animation-timeline:scroll(root block);anima
  * @returns {() => void} فكّ الربط
  */
 export function bindLookExtras(look, host, { active = () => true } = {}) {
-  const offs = [];
+  const offs = [() => host._releaseLogoLayer?.()];
+  host._logoActive = active;
   if (look === 'episode') {
     let on = null;
     const check = () => {

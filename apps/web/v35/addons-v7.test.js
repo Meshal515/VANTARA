@@ -1,10 +1,12 @@
+import { beforeEach } from 'vitest';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { renderV7Addons } from './addons-v7.js';
 import { createSourcePulse } from '../addons/source-pulse.js';
 import { SHELL_HTML } from './markup.js';
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const tick = async () => { for(let i=0;i<8;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
 const setup = () => {
   const {document,window}=parseHTML('<html><body></body></html>');
@@ -722,4 +724,16 @@ it('keeps a canonical CloudStream source visible when only the independent Aniyo
   expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');
   expect(view.querySelector('.v7-name')?.textContent).toBe('Actual CloudStream source');
   view.close();
+});
+
+beforeEach(() => { vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(true); });
+
+it('omits diagnostic tools while retaining installed addon actions when the shared gate is off', async () => {
+  setup(); vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(false);
+  const onCheck = vi.fn();
+  const view = renderV7Addons({ registry: registry([{ key: 'hidden-check', name: 'Check' }]), onCheck });
+  await tick(); installedTab(view).click(); view.querySelector('.v7-row').click();
+  expect([...view.querySelectorAll('button')].some(b => b.textContent === 'فحص الإضافة')).toBe(false);
+  expect(view.querySelector('.v7-checks')).toBeNull();
+  expect(onCheck).not.toHaveBeenCalled(); view.close();
 });

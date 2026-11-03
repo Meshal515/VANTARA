@@ -1203,7 +1203,7 @@ class PlayerActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(netChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.LEFT).apply { topMargin = dp(18); leftMargin = dp(22) })
-        if (settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
+        if (com.vantara.plugins.DiagnosticVisibility.visible(this) && settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
 
         sheet = VSheet(root)
         sheet.onClose = {
@@ -1809,6 +1809,7 @@ class PlayerActivity : Activity() {
     }
 
     private fun showNetwork() {
+        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) return
         open(SheetKind.NETWORK, "الشبكة", "قياس حي من طلبات هذا الفيديو نفسها") { body ->
             val latency = net.latencyMs()
             val bps = net.bytesPerSecond()
@@ -1838,7 +1839,7 @@ class PlayerActivity : Activity() {
             body.addView(metricRow("تسلسل البدء", startupLine(), Tone.TEXT_2))
             net.host?.let { body.addView(metricRow("السيرفر", it, Tone.TEXT_3)) }
             body.addView(label(NetStats.verdict(latency, bps, need, buffered, t?.peers, torrent), 14f, Tone.TEXT, bold = true).apply { setPadding(0, dp(12), 0, dp(4)) })
-            if (BuildConfig.DEBUG) diagnosticsSection(body, t)
+            if (com.vantara.plugins.DiagnosticVisibility.visible(this)) diagnosticsSection(body, t)
             val chipOn = netChip?.visibility == View.VISIBLE
             body.addView(sheetRow("إظهار القياس فوق الفيديو", "زمن الاستجابة · السرعة · الجاهز", trailing = if (chipOn) check() else null, selected = chipOn) {
                 val on = netChip?.visibility != View.VISIBLE
@@ -1847,11 +1848,7 @@ class PlayerActivity : Activity() {
                 main.removeCallbacks(netTick); main.post(netTick)
                 sheet.refresh()
             })
-            val warmOn = settings.getBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, false)
-            body.addView(sheetRow("تسخين كامل على باقة الجوال", "قبل التشغيل: أول قطعة ونهاية الملف حتى 16MB لكل خيار. على Wi-Fi يعمل دائمًا", trailing = if (warmOn) check() else null, selected = warmOn) {
-                settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
-                sheet.refresh()
-            })
+
         }
         main.removeCallbacks(netTick); main.post(netTick)
     }
@@ -1943,7 +1940,12 @@ class PlayerActivity : Activity() {
         open(SheetKind.MORE, "المزيد") { body ->
             body.addView(sheetRow("تخطي المقدمة والنهاية", skipStatusText(), leading = glyphView(Glyph.Kind.NEXT)) { showSkips() })
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
-            body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
+            val warmOn = settings.getBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, false)
+            body.addView(sheetRow("تسخين كامل على باقة الجوال", "قبل التشغيل: أول قطعة ونهاية الملف حتى 16MB لكل خيار. على Wi-Fi يعمل دائمًا", trailing = if (warmOn) check() else null, selected = warmOn) {
+                settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
+                sheet.refresh()
+            })
+            if (com.vantara.plugins.DiagnosticVisibility.visible(this)) body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow(if (isMovie()) "رشّح الفيلم لصديق" else "رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
                     pickFriend("رشّح ${episodeLabel()}") { to, name -> queueMoment(to, name, null) }
@@ -2267,6 +2269,10 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
+        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) {
+            netChip?.visibility = View.GONE
+            if (openSheet == SheetKind.NETWORK) sheet.close()
+        }
         sampleUsage()
         presenceActive = true
         main.removeCallbacks(presenceTick)

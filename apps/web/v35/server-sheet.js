@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * ورقة السيرفرات المشتركة بين الأنمي والسينما.
  *
@@ -389,6 +390,21 @@ export function createServerSheet(body, o) {
   const foot = el('footer', 'an-pick-foot');
   bar.append(extras);
   body.append(bar, scroll, foot);
+
+  // Debug actions live below source content; header geometry belongs to navigation/friends.
+  const diagnostics = el('div', 'ss-diagnostics');
+  const paintDiagnostics = () => {
+    diagnostics.replaceChildren();
+    diagnostics.hidden = !diagnosticsUi.visible();
+    if (diagnosticsUi.visible()) {
+      const action = o.diagnosticAction?.();
+      if (action) diagnostics.append(action);
+      else diagnostics.hidden = true;
+    }
+  };
+  scroll.append(diagnostics);
+  subscriptions.push(diagnosticsUi.subscribe(paintDiagnostics));
+  paintDiagnostics();
 
   // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
   const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);

@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -220,6 +221,7 @@ export function promptSourceWorkType(work, addon, { el, openSheet, closeSheet, s
  *           report?: (input: object) => Promise<unknown> }} deps
  */
 export function mountV35(deps, { page = 'home' } = {}) {
+  void diagnosticsUi.initialize();
   const { sync } = deps;
   setSharedLatest(createSourceLatest(sync));
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
@@ -1690,11 +1692,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * ترجمتها؛ ونسخ التقرير كاملًا.
    */
   function openPerfSheet() {
+    if (!diagnosticsUi.visible()) return;
     let benchmarks = [];
     let engines = null;
     let cleaning = null;
     const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
     const build = (body) => {
+      body.dataset.diagnosticSheet = '';
       body.append(el('h3', null, 'أداء الترجمة'));
       const entries = readPerf();
       const s = summarize(entries);
@@ -4367,6 +4371,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مطويًّا، وما قد يفصل التطبيق عن الخادم في «منطقة الخطر» بتأكيد صريح.
   // الشاشة القديمة تبقى لحالة واحدة: لا حساب بعد (أول إقلاع)، ولا واجهة أصلًا.
   let systemOpen = false;
+  diagnosticsUi.subscribe(() => {
+    if (currentPage() === 'settings') renderSettings();
+    if (!diagnosticsUi.visible() && root.querySelector('[data-diagnostic-sheet]')) closeSheet();
+  });
   let apkVersion = null;
   let apkVersionAsked = false;
   /**
@@ -4460,7 +4468,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         );
       }
       const perf = summarize(readPerf());
-      rows.push(
+      if (diagnosticsUi.visible()) rows.push(
         row('activity', 'أداء الترجمة', 'زمن كل مرحلة على جوالك، لكل صفحة وفصل، وقياس القديم مقابل الجديد', {
           value: perf.text.median ? `${(perf.text.median / 1000).toFixed(1)} ث/صفحة` : null,
           run: openPerfSheet,
@@ -4904,9 +4912,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
+    if (diagnosticsUi.available()) group('أدوات Debug', [
+      toggle('activity', 'إظهار التشخيصات', 'أدوات الفحص على هذا الجهاز فقط', diagnosticsUi.visible(), async visible => {
+        await diagnosticsUi.setVisible(visible);
+        renderSettings();
+      }),
+    ]);
+
     group('عن التطبيق', [
       // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
-      globalThis.Capacitor?.Plugins?.AnimeEngine
+      diagnosticsUi.visible() && globalThis.Capacitor?.Plugins?.AnimeEngine
         ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
@@ -4950,7 +4965,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
     group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
-      ...(bad ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
+      ...(bad && diagnosticsUi.visible() ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
         run: async () => {
           toast('جارٍ المزامنة…');
@@ -4975,7 +4990,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
     }
 
-    if (available()) {
+    if (diagnosticsUi.visible() && available()) {
       group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
     }
 
@@ -4997,9 +5012,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
   function openSourceCheck() {
+    if (!diagnosticsUi.visible()) return;
     const rows = new Map();
     const report = [];
     openSheet((body) => {
+      body.dataset.diagnosticSheet = '';
       body.append(el('h3', null, 'فحص المصادر'));
       const note = el('p', null, 'يجرّب كل مصدر كما يستعمله القارئ. ياخذ دقيقة تقريبًا.');
       note.style.marginBottom = '10px';
