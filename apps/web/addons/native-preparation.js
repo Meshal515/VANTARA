@@ -27,8 +27,9 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
     const source = runtime.sources.source(copy.sourceId);
     if (!source) throw new Error('source unavailable');
     const episodes = await source.episodes({ ...copy, episode: Number(episode) }, { signal });
-    const current = copy.type === 'movie'
-      ? episodes.find(ep => ep.type === 'movie' && ep.url === (copy.id ?? copy.url))
+    const movie = copy.type === 'movie' || copy.identity?.kind === 'anime' && copy.identity?.format === 'MOVIE';
+    const current = movie
+      ? episodes.find(ep => ep.url === (copy.id ?? copy.url)) ?? (episodes.length === 1 ? episodes[0] : null)
       : episodes.find(ep => Number(ep.number) === Number(episode) && (copy.requestedSeason == null || Number(ep.season) === Number(copy.requestedSeason)));
     if (!current) throw new Error('episode identity unavailable');
     const servers = await source.servers(current);

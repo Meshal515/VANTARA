@@ -46,6 +46,18 @@ const dom = () => {
   return document.getElementById('h');
 };
 
+it('every look presents a movie without episode headings, numbering or a next episode', () => {
+  for (const look of LOOK_IDS) {
+    const host = dom();
+    renderLook(look, host, ctx({ m: { id: 1, title: 'A Film', format: 'MOVIE' }, total: 1,
+      next: null, facts: [['المدة', '112 دقيقة']], meta: ['فيلم'], point: { episode: 1 },
+      label: 'شاهد الفيلم', progressText: 'لم يُشاهد بعد', epTitle: () => null }));
+    expect(host.textContent, look).not.toMatch(/الحلقات|الحلقة|حلقة 1/);
+    expect(host.textContent, look).toContain('شاهد الفيلم');
+    expect(host.querySelectorAll('.er, .sp, [data-range]'), look).toHaveLength(0);
+  }
+});
+
 it('every look carries the core functions: next-episode time, a slot for friends activity, facts, progress', () => {
   for (const look of LOOK_IDS) {
     const host = dom();

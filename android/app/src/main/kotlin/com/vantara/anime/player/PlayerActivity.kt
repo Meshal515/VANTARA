@@ -115,6 +115,8 @@ class PlayerActivity : Activity() {
         val episode: Float = 1f,
         /** آخر حلقة متاحة (لقائمة الحلقات و«التالية»). */
         val total: Int = 0,
+        /** Known metadata format, independent of section or episode count. */
+        val format: String? = null,
         val positionMs: Long = 0,
         /** السيرفر الذي اختاره المستخدم من الورقة؛ وإلا الأفضل. */
         val candidate: String? = null,
@@ -620,7 +622,8 @@ class PlayerActivity : Activity() {
     }
 
     /** «الحلقة 12»، والفيلم في السينما «فيلم». */
-    private fun episodeLabel() = if (launch.section == "cinema" && launch.total <= 1) "فيلم" else "الحلقة ${fmtEpisode(episode)}"
+    private fun isMovie() = PlaybackWork.isMovie(launch.section, launch.format, launch.total)
+    private fun episodeLabel() = if (isMovie()) "الفيلم" else "الحلقة ${fmtEpisode(episode)}"
 
     // ───────────── التشغيل والتبديل ─────────────
 
@@ -923,7 +926,7 @@ class PlayerActivity : Activity() {
 
     private fun episodeInt() = floor(episode).toInt()
 
-    private fun hasNext() = (copies.isNotEmpty() || engine.addonProviders(sessionId).isNotEmpty()) && launch.total > 0 && episodeInt() + 1 <= launch.total
+    private fun hasNext() = !isMovie() && (copies.isNotEmpty() || engine.addonProviders(sessionId).isNotEmpty()) && launch.total > 0 && episodeInt() + 1 <= launch.total
 
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
@@ -1514,7 +1517,7 @@ class PlayerActivity : Activity() {
     private fun showServers() {
         val p = prep ?: return message("السيرفرات غير متاحة لهذه الجلسة")
         engine.completePreparation(sessionId)
-        open(SheetKind.SERVERS, "السيرفرات", "الحلقة ${fmtEpisode(episode)}") { body ->
+        open(SheetKind.SERVERS, "السيرفرات", episodeLabel()) { body ->
             val routes = p.routes()
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
             val ready = routes.count { it.state == RouteState.READY }
@@ -1908,7 +1911,7 @@ class PlayerActivity : Activity() {
         val close = { clipEndCard?.let(root::removeView); clipEndCard = null }
         buttons.addView(pillButton("إعادة اللقطة", primary = true) { close(); player.seekTo(range.first); clipLast = range.first; player.play() })
         buttons.addView(pillButton("أكمل من هنا", primary = false) { close(); endClipMode(); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-        buttons.addView(pillButton("الحلقة من البداية", primary = false) { close(); endClipMode(); player.seekTo(0); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        buttons.addView(pillButton(if (isMovie()) "الفيلم من البداية" else "الحلقة من البداية", primary = false) { close(); endClipMode(); player.seekTo(0); player.play() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         card.addView(buttons)
         root.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         clipEndCard = card
@@ -1918,7 +1921,7 @@ class PlayerActivity : Activity() {
     private fun endClipMode() {
         clipWatch = null
         main.removeCallbacks(clipTick)
-        message("الحلقة كاملة")
+        message(if (isMovie()) "الفيلم كاملًا" else "الحلقة كاملة")
     }
 
     private fun showSpeed() {
@@ -1942,27 +1945,29 @@ class PlayerActivity : Activity() {
             body.addView(sheetRow("قفل الشاشة", "يمنع اللمس العارض أثناء المشاهدة", leading = glyphView(Glyph.Kind.LOCK)) { sheet.close(); setLocked(true) })
             body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
-                body.addView(sheetRow("رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
-                    pickFriend("رشّح الحلقة ${fmtEpisode(episode)}") { to, name -> queueMoment(to, name, null) }
+                body.addView(sheetRow(if (isMovie()) "رشّح الفيلم لصديق" else "رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
+                    pickFriend("رشّح ${episodeLabel()}") { to, name -> queueMoment(to, name, null) }
                 })
             }
-            body.addView(sectionLabel("الحلقة التالية تلقائيًا"))
-            val cur = settings.getInt("autoNext", 10)
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for ((v, name) in listOf(0 to "إيقاف", 5 to "5 ث", 10 to "10 ث", 15 to "15 ث")) {
-                val on = v == cur
-                row.addView(label(name, 13.5f, if (on) Color.WHITE else Tone.TEXT_2, bold = true).apply {
-                    gravity = Gravity.CENTER
-                    textAlignment = View.TEXT_ALIGNMENT_CENTER
-                    minHeight = dp(44)
-                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat())
-                    setOnClickListener {
-                        settings.edit().putInt("autoNext", v).apply()
-                        sheet.refresh()
-                    }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+            if (!isMovie()) {
+                body.addView(sectionLabel("الحلقة التالية تلقائيًا"))
+                val cur = settings.getInt("autoNext", 10)
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for ((v, name) in listOf(0 to "إيقاف", 5 to "5 ث", 10 to "10 ث", 15 to "15 ث")) {
+                    val on = v == cur
+                    row.addView(label(name, 13.5f, if (on) Color.WHITE else Tone.TEXT_2, bold = true).apply {
+                        gravity = Gravity.CENTER
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                        minHeight = dp(44)
+                        background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat())
+                        setOnClickListener {
+                            settings.edit().putInt("autoNext", v).apply()
+                            sheet.refresh()
+                        }
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                }
+                body.addView(row)
             }
-            body.addView(row)
         }
     }
 
@@ -2035,7 +2040,7 @@ class PlayerActivity : Activity() {
         // لا إيقاف: المحرّر يُبقي المشغّل يعمل ويدوّره داخل المدى
         clip = ClipEditor(
             this, root, player, c, ClipMath.initial(moment, d), d, network.client,
-            episodeLabel = "الحلقة ${fmtEpisode(episode)}", title = launch.title,
+            episodeLabel = episodeLabel(), title = launch.title,
             keyframeAt = ::segmentStartAt,
         ) {
             clip = null
@@ -2058,13 +2063,13 @@ class PlayerActivity : Activity() {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "${launch.title} — الحلقة ${fmtEpisode(episode)} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})")
+            putExtra(Intent.EXTRA_TEXT, "${launch.title} — ${episodeLabel()} (${ClipMath.clock(range.startMs)}–${ClipMath.clock(range.endMs)})")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(send, "شارك المقطع"))
     }
 
-    fun clipName(range: ClipRange) = "${launch.title} - الحلقة ${fmtEpisode(episode)} - ${ClipMath.clock(range.momentMs).replace(':', '.')}"
+    fun clipName(range: ClipRange) = "${launch.title} - ${episodeLabel()} - ${ClipMath.clock(range.momentMs).replace(':', '.')}"
 
     // ───────────── الإيماءات ─────────────
 

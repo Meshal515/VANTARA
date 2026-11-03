@@ -75,6 +75,7 @@ class AnimeEngine(context: Context) {
     private val publications = AnimeSourcePublication(this)
     @Volatile private var runtimeSources: Map<String, RuntimeSourceBinding> = emptyMap()
     private val loadErrors = ConcurrentHashMap<String, String>()
+    private val loadDiagnostics = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val sessions = ConcurrentHashMap<String, PlaybackSession>()
 
@@ -135,6 +136,7 @@ class AnimeEngine(context: Context) {
         // A verified APK update under the same source ID must invalidate its old adapter.
         adapters.keys.removeAll { id -> previous[id] != next[id] }
         loadErrors.keys.removeAll { id -> previous[id] != next[id] }
+        loadDiagnostics.keys.removeAll { id -> previous[id] != next[id] }
         manifest = parsed
         for (s in parsed.sources) {
             if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
@@ -186,11 +188,13 @@ class AnimeEngine(context: Context) {
                         AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
                         adapters[id] = a
                         loadErrors.remove(id)
+                        loadDiagnostics.remove(id)
                     }
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Throwable) {
                 publications.publish(id, generation) {
+                    if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[id] = DiscoveryFailure.describe(error)
                     loadErrors[id] = error.message ?: error.javaClass.simpleName
                     health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${error.message}")
                 }
@@ -248,7 +252,9 @@ class AnimeEngine(context: Context) {
             ids.map { id ->
                 async {
                     val a = withTimeoutOrNull(loadTimeoutMs) { adapter(id) } ?: return@async emptyList()
-                    guarded(id, timeoutMs) { a.page(Listing.SEARCH, 1, query) }?.items.orEmpty()
+                    val items = mutableListOf<SourceAnime>()
+                    guarded(id, timeoutMs) { SearchPages.walk(a, query) { items.addAll(it.items) } }
+                    items
                 }
             }.awaitAll().flatten()
         }
@@ -266,6 +272,10 @@ class AnimeEngine(context: Context) {
         val skipped: Boolean = false,
         /** Cloudflare يطلب إنسانًا لهذا المصدر: الواجهة تعرض «تحقّق» لحظات. */
         val needsHuman: Boolean = false,
+        val page: Int = 0,
+        val hasNext: Boolean = false,
+        val stop: String? = null,
+        val diagnostic: String? = null,
     )
 
     private fun needsHuman(id: String): Boolean = health.get(HealthStore.sourceKey(id))?.blocked == "cloudflare_interactive"
@@ -333,27 +343,38 @@ class AnimeEngine(context: Context) {
                 gate.withPermit {
                     val t0 = System.nanoTime()
                     val elapsed = { (System.nanoTime() - t0) / 1_000_000 }
-                    val a = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) }
+                    // A completed null lookup is different from a timed-out load.
+                    val loading = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) to true }
+                    val a = loading?.first
                     if (a == null) {
-                        onHit(SourceHit(s.id, emptyList(), elapsed(), loadErrors[s.id] ?: "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية"))
+                        val reason = if (loading == null) "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية" else loadErrors[s.id] ?: "لا يوجد محوّل متاح للمصدر في حالته الحالية"
+                        onHit(SourceHit(s.id, emptyList(), elapsed(), reason, stop = "load_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[s.id] ?: if (loading == null) "LOAD_TIMEOUT" else "SOURCE_ADAPTER_UNAVAILABLE" else null))
                         return@withPermit
                     }
                     val key = HealthStore.sourceKey(s.id)
-                    val hit = try {
-                        val page = withTimeout(timeoutMs) { a.page(Listing.SEARCH, 1, query) }
-                        SourceHit(s.id, page.items, elapsed())
+                    var pageNumber = 0
+                    val hit: SourceHit? = try {
+                        withTimeout(timeoutMs) {
+                            SearchPages.walk(a, query) { page ->
+                                pageNumber = page.number
+                                onHit(SourceHit(s.id, page.items, elapsed(),
+                                    error = if (page.hasNext && page.stop != null) "توقف البحث قبل تأكيد نهاية نتائج المصدر" else null,
+                                    page = page.number, hasNext = page.hasNext, stop = page.stop))
+                            }
+                        }
+                        null
                     } catch (e: TimeoutCancellationException) {
                         health.fail(key, "لم يرد خلال ${timeoutMs / 1000} ثانية")
-                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية")
+                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية", page = pageNumber + 1, stop = "search_timeout", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: IOException) {
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: Throwable) {
                         health.fail(key, "خطأ في قراءة الصفحة: ${AnimeHostRouter.describe(e)}")
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     }
-                    onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
+                    if (hit != null) onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
                 }
             }
         }

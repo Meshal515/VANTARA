@@ -6,6 +6,16 @@ const copy={sourceId:'addon|provider',type:'series',id:'tt123',url:'tt123',reque
 const runtime=streams=>({registry:{list:()=>[manifest]},adapter:()=>({streams}),sources:{source:()=>null}});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 
+it('resolves an anime film single unit when the native caller uses the movie sentinel', async () => {
+  const a = runtime(async () => []);
+  a.sources.source = () => ({ episodes: async () => [{ number: 0, url: 'private:film', type: 'anime' }],
+    servers: async () => [{ url: 'server' }], streams: async () => [{ url: 'https://cdn.test/film.mp4', status: 'RESOLVED' }] });
+  const published = [];
+  await nativeAddonPreparation({ runtime: a, copies: [{ sourceId: 'addon|provider', type: 'anime', url: 'private:film', identity: { kind: 'anime', format: 'MOVIE' } }], episode: -1 })
+    .start('s', { appendAddonStreams: async row => published.push(row) }).done;
+  expect(published[0].streams).toEqual([expect.objectContaining({ url: 'https://cdn.test/film.mp4' })]);
+});
+
 it('publishes each native provider independently without waiting for another provider or starting playback', async()=>{
  const slow=deferred(), calls=[], fast={...manifest,key:'fast',name:'Fast'};
  const a=runtime(({videoId})=>{expect(videoId).toBe('tt123:2:3');return slow.promise;});

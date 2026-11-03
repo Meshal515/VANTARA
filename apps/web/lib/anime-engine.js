@@ -17,6 +17,8 @@ import { isNativeRuntimeCopy } from '../addons/cloudstream-runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
 import { isNative, webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { withImdbEpisode } from './anime-imdb.js';
+import { animeTitle } from './anime-title.js';
+import { beginDiscovery, isDiscoveryDebug, setDiscoveryDebug } from './discovery-diagnostics.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
@@ -102,6 +104,7 @@ export function configure({ force = false, fetchImpl = globalThis.fetch } = {}) 
     const res = await fetchImpl('/anime/sources.json', { cache: 'no-cache' });
     const manifest = await res.json();
     const out = await plugin.configure({ manifest });
+    setDiscoveryDebug(out?.debug === true);
     if (!out?.ok) throw new Error(`بيان المصادر مرفوض: ${(out?.errors ?? []).join('، ')}`);
     return manifest;
   })().catch((e) => {
@@ -154,7 +157,7 @@ export async function verify(sourceId) {
  * حين يرد الجميع، أو null إن تعذّر البحث. محرك أقدم بلا البث يُغذّى من البحث
  * المجمّع (نفس الشكل، بزمن واحد للكل).
  */
-export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined } = {}) {
+export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined, diagnostic = null } = {}) {
   const plugin = bridge();
   if (!plugin) return { done: Promise.resolve(null), cancel() {} };
   const searchId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -202,9 +205,13 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
         if (e.needsHuman) for (const fn of humanListeners) fn(e.sourceId);
         onHit(e);
       })) return;
-    if (!await listen('searchDone', (e) => e.searchId === searchId && end(true))) return;
+    if (!await listen('searchDone', (e) => {
+      if (e.searchId !== searchId) return;
+      if (e.error) diagnostic?.record('bridge_search_failed', { query, searchId, error: e.error, diagnostic: e.diagnostic });
+      end(e.error ? null : true);
+    })) return;
     await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}) });
-  })().catch(() => end(null));
+  })().catch(error => { diagnostic?.record('bridge_search_failed', { query, searchId, error }); end(null); });
   return {
     done,
     cancel,
@@ -268,23 +275,35 @@ const YEAR = /(?:^|\D)((?:19|20)\d{2})(?!\d)/;
 // وسم صيغة/نسخة بين قوسين ليس من الاسم: «Jujutsu Kaisen (TV)» = «Jujutsu Kaisen»
 const FORMAT_TAG = /\s*[([]\s*(?:tv|dub|dubbed|sub|subbed|uncensored|مترجم|مدبلج)\s*[)\]]\s*/giu;
 
-export function judgeAnimeCopy(c, titles, { year = null } = {}) {
+export function judgeAnimeCopy(c, titles, { year = null, format = null } = {}) {
   const wanted = titles.filter(Boolean).map(fold);
   const title = fold(String(c.title ?? '').replace(FORMAT_TAG, ' '));
   const y = Number(YEAR.exec(String(c.title ?? ''))?.[1] ?? NaN);
   if (year && Number.isFinite(y) && Math.abs(y - year) > 1 && !wanted.some((t) => t.includes(String(y)))) return { ok: false, score: 0, reason: 'year' };
+  if (format && c.format && (format === 'MOVIE') !== (c.format === 'MOVIE')) return { ok: false, score: 0, reason: 'sequel', expected: format, actual: c.format };
   if (wanted.includes(title)) return { ok: true, score: 1, reason: null };
-  const words = new Set(title.split(' '));
+  const edition = animeTitle(title);
+  const sourceMovie = c.format ? c.format === 'MOVIE' : edition.movie ? true : /\b(?:tv|series)\b|مسلسل/i.test(String(c.title ?? '')) ? false : null;
+  const keys = wanted.map(animeTitle);
+  const seasons = keys.map(k => k.season).filter(n => n != null);
+  const parts = keys.map(k => k.part).filter(n => n != null);
+  const words = new Set(edition.base.split(' '));
   let best = 0;
   let bestWanted = '';
-  for (const t of wanted) {
-    const tw = t.split(' ').filter(Boolean);
+  let compatible = false;
+  for (const [index, key] of keys.entries()) {
+    const tw = key.base.split(' ').filter(Boolean);
     const score = tw.length ? tw.filter((x) => words.has(x)).length / Math.max(tw.length, words.size) : 0;
-    if (score > best) [best, bestWanted] = [score, t];
+    if (score > best) [best, bestWanted] = [score, wanted[index]];
+    const movie = format ? format === 'MOVIE' : keys.some(k => k.movie);
+    if (score >= 0.75 && (edition.season ?? 1) === (key.season ?? seasons[0] ?? 1)
+      && (edition.part ?? 1) === (key.part ?? parts[0] ?? 1) && (sourceMovie == null || sourceMovie === movie)) compatible = true;
   }
   if (best < 0.75) return { ok: false, score: best, reason: 'title' };
-  const extra = [...words].filter((w) => !bestWanted.split(' ').includes(w)).join(' ');
-  if (SEQUEL.test(` ${extra} `) && !wanted.some((t) => SEQUEL.test(` ${t} `))) return { ok: false, score: best, reason: 'sequel' };
+  if (!compatible) return { ok: false, score: best, reason: 'sequel', expected: keys, actual: edition };
+  const originalWords = new Set(title.split(' '));
+  const extra = [...originalWords].filter((w) => !bestWanted.split(' ').includes(w)).join(' ');
+  if (SEQUEL.test(` ${extra} `) && !wanted.some((t) => SEQUEL.test(` ${t} `)) && !(format === 'MOVIE' && edition.movie)) return { ok: false, score: best, reason: 'sequel' };
   return { ok: true, score: best, reason: null };
 }
 
@@ -321,11 +340,12 @@ export function pickCopies(items, titles, criteria = {}) {
 /**
  * مثل [findWork] لكن متدفقًا: يرجع العمل لحظة يطابق أول مصدر، ولا ينتظر أبطأ
  * المصادر (مصدر معطّل قد يأخذ 20 ثانية ليفشل). ما يصل بعدها من نسخ يُبلَّغ
- * عبر `onWork(work)` بالعمل نفسه وقد كبر. عنوان بديل يُسأل فقط إن لم يطابق الأول.
+ * عبر `onWork(work)` بالعمل نفسه وقد كبر. تستمر بقية الأسماء في الخلفية بعد أول تطابق.
  */
 export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
   return new Promise((resolve, reject) => {
     const { signal } = criteria;
+    const trace = criteria.diagnostic ?? beginDiscovery({ titles, format: criteria.format, year: criteria.year });
     if (signal?.aborted) { reject(new DOMException('تم إلغاء البحث', 'AbortError')); return; }
     let first = null;
     let next = 0;
@@ -336,9 +356,17 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
     // English and romaji must not wait behind each other's slow sources.
     // Matching still uses the complete canonical titles and season/year guards.
     const worker = async () => {
-      while (next < queries.length && !first && !signal?.aborted) {
+      await configure();
+      while (next < queries.length && !signal?.aborted) {
         const query = queries[next++];
+        trace.record('query_started', { query });
         const { done } = searchStream(query, 'anime', (hit) => {
+          trace.record('source_page', { query, sourceId: hit.sourceId, page: hit.page, hasNext: hit.hasNext, stop: hit.stop,
+            received: hit.items?.length ?? 0, error: hit.error, diagnostic: hit.diagnostic, skipped: hit.skipped });
+          if (isDiscoveryDebug()) for (const copy of hit.items ?? []) {
+            const judgment = judgeAnimeCopy(copy, titles, criteria);
+            trace.record(judgment.ok ? 'candidate_accepted' : 'candidate_rejected', { sourceId: copy.sourceId, title: copy.title, ...judgment });
+          }
           if (hit.error || hit.skipped) uncertain = true;
           items.push(...(hit.items ?? []));
           const work = pickCopies(items, titles, criteria);
@@ -350,12 +378,13 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
             first = work;
             onWork(work);
           }
-        }, { signal });
+        }, { signal, diagnostic: trace });
         if (await done === null) uncertain = true;
         if (signal?.aborted) throw new DOMException('تم إلغاء البحث', 'AbortError');
       }
     };
     void Promise.all([worker(), worker()]).then(() => {
+      trace.record('discovery_complete', { sources: first?.copies?.map(c => c.sourceId) ?? [], uncertain, aliasesSearched: next, aliasesTotal: queries.length });
       if (first) return;
       if (uncertain) reject(new Error('تعذّر التحقق من بعض المصادر — أعد المحاولة'));
       else resolve(null);

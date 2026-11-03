@@ -34,6 +34,10 @@ import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
+import { beginDiscovery, discoveryDiagnostics, isDiscoveryDebug } from '../lib/discovery-diagnostics.js';
+
+const isMovie = m => m?.format === 'MOVIE';
+const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
 
@@ -86,7 +90,7 @@ export function readWatch(userId = null) {
 export function recordWatch(m, episode, position, duration, userId = null) {
   const all = readWatch(userId);
   const w = all[m.id] ?? { id: m.id, episodes: {} };
-  Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null });
+  Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null, format: m.format ?? null });
   const done = duration > 0 && position / duration >= 0.9;
   w.episodes[episode] = { position, duration, at: Date.now(), done: done || Boolean(w.episodes[episode]?.done) };
   w.episode = episode;
@@ -122,6 +126,8 @@ export function createAnime(deps) {
     episodeRange: 0,
     work: null,
     workFor: null,
+    workScope: null,
+    workTrace: null,
     workPending: null,
     workGeneration: 0,
     workController: null,
@@ -244,7 +250,7 @@ export function createAnime(deps) {
       meta.append(sc);
     }
     // سطر قصير يتسع للبطاقة: مع التقييم شيء واحد بعده (الحلقة لما يُعرض، أو السنة)
-    const airing = m.status === 'RELEASING' && m.aired ? `ح ${m.aired}` : null;
+    const airing = !isMovie(m) && m.status === 'RELEASING' && m.aired ? `ح ${m.aired}` : null;
     const rest = (m.relation ? [m.relation] : m.score ? [airing ?? m.year] : [airing ?? FORMAT_AR[m.format], m.year]).filter(Boolean);
     for (const t of rest) {
       if (meta.childElementCount) meta.append(el('i', 'aw-sep', '·'));
@@ -279,7 +285,7 @@ export function createAnime(deps) {
   function episodeCard(m) {
     const c = el('button', 'an-ep-card');
     c.type = 'button';
-    c.setAttribute('aria-label', `${m.title} — الحلقة ${m.episode}`);
+    c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
     tint(c, m.color);
     const art = el('div', 'an-ep-art');
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }), el('span', 'an-ep-shade'));
@@ -287,7 +293,8 @@ export function createAnime(deps) {
     play.innerHTML = glyph('play', { size: 18, filled: true });
     // رقم الحلقة كبيرًا كشاشة بثّ، و«جديدة» لما نزل خلال يومين
     const num = el('span', 'an-ep-num');
-    num.append(el('small', null, 'الحلقة'), el('b', null, String(m.episode)));
+    num.append(el('small', null, isMovie(m) ? 'الفيلم' : 'الحلقة'));
+    if (!isMovie(m)) num.append(el('b', null, String(m.episode)));
     art.append(play, num);
     const copy = el('span', 'an-ep-copy');
     const t = el('span', 'an-ep-title', m.title);
@@ -333,12 +340,12 @@ export function createAnime(deps) {
     const aired = m.airingAt <= now;
     const c = el('button', `an-slot${aired ? ' aired' : ''}`);
     c.type = 'button';
-    c.setAttribute('aria-label', `${m.title} — الحلقة ${m.episode}`);
+    c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
     tint(c, m.color);
     const art = el('span', 'an-slot-art');
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }));
     const line = el('span', 'an-slot-line');
-    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, `الحلقة ${m.episode}`));
+    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, unitLabel(m, m.episode)));
     const t = el('span', 'an-slot-title', m.title);
     t.dir = 'auto';
     const when = el('span', 'an-slot-when', aired ? `نزلت ${relativeAr(m.airingAt)}` : relativeAr(m.airingAt));
@@ -411,6 +418,7 @@ export function createAnime(deps) {
       entries.set(String(id), {
         id, episode, at: row.viewed_at, title: row.series_title ?? old?.title ?? `#${id}`,
         poster: row.cover_url ?? old?.poster ?? null, episodes: old?.episodes ?? {},
+        format: row.chapter_label === 'الفيلم' ? 'MOVIE' : old?.format ?? null,
       });
     }
     return [...entries.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
@@ -608,7 +616,7 @@ export function createAnime(deps) {
       const full = await loading;
       if (token !== state.detailToken || !full) return;
       state.detail = full;
-      if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
+      if (!isMovie(full) && full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
       if (episode) state.episodeRange = Math.floor((episode - 1) / EP_PAGE);
       fillWork(full);
       void locateWork(full, token);
@@ -710,14 +718,15 @@ export function createAnime(deps) {
     const eps = el('section', 'aw-episodes');
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
-    body.append(about, insightHost, eps, more);
+    sources.hidden = true;
+    body.append(sources, about, insightHost, eps, more);
     // الأنماط الأربعة: كل ما تحت البطل يرسمه work-looks.js كما في تصميمه المعتمد؛ عناصر الأساسي
     // تبقى مخفية لأن بقية الصفحة (الحلقات، التشغيل، التحديثات) تعمل عليها
     const lw = look === 'core' ? null : el('div', 'wl');
     if (lw) {
       stage.hidden = true;
       body.hidden = true;
-      wrap.append(bar, hero, lw, stage, body);
+      wrap.append(bar, hero, sources, lw, stage, body);
     } else {
       // «المحور»: الرأس والجسم في حاوية واحدة؛ على الشاشة العريضة شبكة تضع اللقطة والمعلومات
       // جنبًا إلى جنب (anime.css). على الجوال حاوية عادية لا تغيّر شيئًا
@@ -731,11 +740,11 @@ export function createAnime(deps) {
     paintMeta(m);
     paintCta(m);
     paintTools(m);
-    paintSources(m);
     paintAbout(m, { pending: !m.description });
     eps.append(...Array.from({ length: 3 }, () => el('div', 'an-skel an-skel-ep')));
     paintSide(m);
     page.replaceChildren(wrap);
+    paintSources(m);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
     const live = () => deps.currentPage() === 'anime' && state.detailToken === token;
@@ -999,7 +1008,7 @@ export function createAnime(deps) {
         v.still.classList.toggle('aw-still--cover', !shot.still);
       }
     }
-    const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const label = `${point.resume ? 'تابع' : 'شاهد'} ${unitLabel(m, point.episode)}`;
     const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
     const cap = el('span', 'aw-still-cap');
     cap.append(play, el('b', null, label));
@@ -1089,7 +1098,7 @@ export function createAnime(deps) {
         FORMAT_AR[m.format],
         m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year,
         m.score ? { html: `★ <b>${m.score.toFixed(1)}</b>` } : null,
-        m.episodes ? `${m.episodes} حلقة` : null,
+        isMovie(m) ? (m.duration ? `${m.duration} دقيقة` : null) : m.episodes ? `${m.episodes} حلقة` : null,
         STATUS_AR[m.status],
       ].filter(Boolean),
       genres: (m.genres ?? []).slice(0, 4).map(genreAr),
@@ -1104,7 +1113,7 @@ export function createAnime(deps) {
       ratio,
       left,
       seenRatio: total ? Math.min(1, seen / total) : 0,
-      progressText: `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
+      progressText: isMovie(m) ? (seen ? 'شاهدت الفيلم' : point.record?.position ? 'تقدّم المشاهدة' : 'لم يُشاهد بعد') : `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
       lineDone: Math.min(100, ((Math.min(seen, shown) + 0.5) / shown) * 100).toFixed(1),
       characters: m.characters ?? [],
       // عدد التوصيات الظاهر في كل نمط كما في تصميمه (الجوال / العريض)؛ الباقي خلف «الكل»
@@ -1167,7 +1176,7 @@ export function createAnime(deps) {
       parts.push(s);
     }
     // عدد الحلقات بدل الاستوديو (الاستوديو في «معلومات» أسفل الصفحة)
-    add(m.episodes ? `${m.episodes} حلقة` : null);
+    add(isMovie(m) ? (m.duration ? `${m.duration} دقيقة` : null) : m.episodes ? `${m.episodes} حلقة` : null);
     if (m.status) add(STATUS_AR[m.status], `aw-status aw-status--${String(m.status).toLowerCase()}`);
     // الفواصل عناصر بين الأجزاء لا ‎::before‎: جزء لاتيني (الاستوديو، التقييم) لا يقلب موضعها
     v.meta.replaceChildren(...parts.flatMap((part, i) => (i ? [el('i', 'aw-sep', '·'), part] : [part])));
@@ -1195,10 +1204,10 @@ export function createAnime(deps) {
     let text = '';
     if (rec?.duration && rec.position > 0) {
       ratio = Math.min(1, rec.position / rec.duration);
-      text = [minutesLeft(rec), aired ? `شاهدت ${seen} من ${aired}` : null].filter(Boolean).join(' · ');
+      text = [minutesLeft(rec), isMovie(m) ? (seen ? 'شاهدت الفيلم' : null) : aired ? `شاهدت ${seen} من ${aired}` : null].filter(Boolean).join(' · ');
     } else if (seen && aired) {
       ratio = Math.min(1, seen / aired);
-      text = seen >= aired ? `شاهدت كل الحلقات المعروضة (${aired})` : `شاهدت ${seen} من ${aired}`;
+      text = isMovie(m) ? 'شاهدت الفيلم' : seen >= aired ? `شاهدت كل الحلقات المعروضة (${aired})` : `شاهدت ${seen} من ${aired}`;
     }
     if (text) {
       line.append(progress(ratio), el('span', null, text));
@@ -1269,7 +1278,8 @@ export function createAnime(deps) {
       }, { pressed: later }));
       const w = work();
       const total = w.aired || w.episodes || 0;
-      if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
+      if (isMovie(w)) rows.push(entry('eye', epRecord(w, 1).done ? 'ألغِ مشاهدة الفيلم' : 'شاهدت الفيلم', () => { closeMenu(); toggleSeen(w, 1); }));
+      else if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
     }
     if (deps.openWorkMenu) rows.push(entry('star', 'أفضل 5', () => {
       closeMenu();
@@ -1346,11 +1356,12 @@ export function createAnime(deps) {
       ['الاستوديو', m.studio],
       ['الأصل', SOURCE_AR[m.source]],
       ['العرض', [m.start?.year ? [m.start.day, m.start.month ? MONTHS_AR[m.start.month - 1] : null, m.start.year].filter(Boolean).join(' ') : null, STATUS_AR[m.status]].filter(Boolean).join(' · ')],
-      ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
+      isMovie(m) ? ['المدة', m.duration ? `${m.duration} دقيقة` : null] : ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
       ['أسماء أخرى', [m.romaji !== m.title ? m.romaji : null, m.native].filter(Boolean).join(' · ')],
     ].filter(([, val]) => val);
   }
   function nextAiring(m, now = Date.now()) {
+    if (isMovie(m)) return null;
     const n = m?.next;
     if (!n?.at || !(n.at > now)) return null;
     return { episode: n.episode ?? null, at: n.at, rel: relativeAr(n.at, now), time: meccaTime(n.at) };
@@ -1359,7 +1370,7 @@ export function createAnime(deps) {
     const point = resumePoint(m);
     const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
     const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;
-    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.resume ? 'تابع' : 'شاهد'} ${unitLabel(m, point.episode)}`;
     return { point, aired, upcoming, label };
   }
   /** «لم يُعرض بعد»: تنبيه بالموعد بدل التشغيل (نفس سلوك زر المحور). */
@@ -1493,7 +1504,7 @@ export function createAnime(deps) {
     art.append(chip);
     const copy = el('span', 'an-er-copy');
     const title = episodeTitleOf(m, n, { mal: state.malTitles, art: artOf(m) });
-    const name = el('b', 'an-er-title', title || `الحلقة ${n}`);
+    const name = el('b', 'an-er-title', title || unitLabel(m, n));
     name.dir = 'auto';
     copy.append(name, el('span', 'an-er-sub'));
     main.append(art, copy);
@@ -1578,7 +1589,7 @@ export function createAnime(deps) {
       const head = el('div', 'an-sheet-head');
       const t = el('div', 'an-sheet-title', title || m.title);
       t.dir = 'auto';
-      head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
+      head.append(el('div', 'an-sheet-kicker', unitLabel(m, n)), t);
       const item = (icon, label, run, { pressed } = {}) => {
         const b = el('button', 'sheet-item');
         b.type = 'button';
@@ -1626,6 +1637,8 @@ export function createAnime(deps) {
   }
 
   function renderEpisodes(host, m) {
+    if (isMovie(m)) { host.replaceChildren(); host.hidden = true; return; }
+    host.hidden = false;
     const total = m.aired || m.episodes || 0;
     const head = el('div', 'aw-eps-head');
     const titles = el('div', 'aw-eps-titles');
@@ -1934,8 +1947,10 @@ export function createAnime(deps) {
 
   // نسخ كل أنمي في المصادر تُحفظ على الجهاز: الفتحة التالية تبدأ منها فورًا،
   // والبحث يتحدّث بصمت في الخلفية (كان يُعاد من الصفر مع كل دخول وخروج)
-  const FOUND_KEY = 'vantara.anime.found.v1';
+  const FOUND_KEY = 'vantara.anime.found.v2';
   const FOUND_TTL = 7 * 24 * 3600e3;
+  const workScope = m => JSON.stringify([m.id, m._sourceCopy?.sourceId ?? null, m._sourceCopy?.url ?? null]);
+  const sameWork = m => state.workFor === m.id && state.workScope === workScope(m);
   const knownWork = (id) => {
     const hit = readJson(FOUND_KEY, {})[id];
     return hit?.work?.copies?.length && Date.now() - (hit.at ?? 0) < FOUND_TTL ? hit.work : null;
@@ -1956,10 +1971,10 @@ export function createAnime(deps) {
       if (signal.aborted) controller.abort(signal.reason);
       else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
     };
-    if (state.workFor === m.id && state.workController) link(state.workController);
-    if (state.workFor === m.id && state.work) return state.work;
+    if (sameWork(m) && state.workController) link(state.workController);
+    if (sameWork(m) && state.work) { state.workTrace?.record('memory_cache_reused'); return state.work; }
     // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
-    if (state.workFor === m.id && state.workPending) return state.workPending;
+    if (sameWork(m) && state.workPending) return state.workPending;
     state.workController?.abort();
     const controller = new AbortController();
     state.workController = controller;
@@ -1967,41 +1982,47 @@ export function createAnime(deps) {
     state.work = null;
     state.workError = false;
     state.workFor = m.id;
+    state.workScope = workScope(m);
+    state.workTrace = beginDiscovery({ workId: m.id, title: m.title, format: m.format, entry: m._sourceCopy ? 'explicit_source' : 'general_card', sourceId: m._sourceCopy?.sourceId });
+    const trace = state.workTrace;
+    trace.record('discovery_started');
     const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
     const generation = ++state.workGeneration;
-    const current = () => token === state.detailToken && state.workFor === m.id && generation === state.workGeneration;
+    const current = () => token === state.detailToken && sameWork(m) && generation === state.workGeneration;
     const adopt = (work) => {
       if (controller.signal.aborted) return;
-      keepWork(m.id, work);
       if (!current()) return;
       const copies = [...(state.work?.copies ?? []), ...work.copies];
       state.work = { ...work, copies: copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId && c.url === copy.url) === index) };
+      if (!m._sourceCopy) keepWork(m.id, state.work);
       paintSources(m, 'found');
       for (const listener of workListeners) listener(m.id, state.work);
     };
-    if (m._sourceCopy) { const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
+    if (m._sourceCopy) { trace.record('explicit_source_selected', { sourceId: m._sourceCopy.sourceId }); const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
     const remembered = knownWork(m.id);
     if (remembered) {
+      trace.record('disk_cache_reused', { sources: remembered.copies.map(c => c.sourceId) });
       state.work = remembered;
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
-      void engine.findWorkStream(titles, adopt, { year: m.year ?? null, signal: controller.signal }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
-      void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(() => {});
+      void engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).then((fresh) => fresh && adopt(fresh)).catch(error => trace.record('core_search_failed', { error }));
+      void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(error => trace.record('addon_search_failed', { error }));
       return remembered;
     }
     paintSources(m, 'loading');
     const pending = (async () => {
       try {
         let sourceError = null;
-        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null, signal: controller.signal }).catch(error => { sourceError = error; return null; });
-        const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { if (copies.length) adopt({ title: m.title, copies }); return copies; });
+        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
+        const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { trace.record('addon_copies', { sources: copies.map(c => c.sourceId) }); if (copies.length) adopt({ title: m.title, copies }); return copies; }).catch(error => { trace.record('addon_search_failed', { error }); throw error; });
         const work = await engine.firstAvailableCopies(core, addons);
         if (!work?.copies?.length && sourceError) throw sourceError;
         if (!current()) return null;
         if (work?.copies?.length) adopt(work);
         else paintSources(m, 'none');
         return work?.copies?.length ? state.work : null;
-      } catch {
+      } catch (error) {
+        trace.record('discovery_failed', { error });
         if (current() && !controller.signal.aborted) { state.workError = true; paintSources(m, 'error'); }
         return null;
       } finally {
@@ -2013,13 +2034,28 @@ export function createAnime(deps) {
   }
 
   /** المصادر سطرًا هادئًا واحدًا: نقطة حالة، ومن أين تشاهد. لا شرائح بإطارات. */
-  function paintSources(m, phase = state.work && state.workFor === m.id ? 'found' : engine.available() ? 'loading' : 'web') {
+  function discoveryButton(m) {
+    return button('aw-link aw-discovery-debug', 'تشخيص الاكتشاف', () => deps.openSheet(body => {
+      const title = el('h3', null, 'تشخيص الاكتشاف — Debug');
+      const output = el('pre');
+      output.dir = 'ltr';
+      output.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;user-select:text';
+      const refresh = () => { output.textContent = JSON.stringify(discoveryDiagnostics(m.id), null, 2); };
+      refresh();
+      body.append(title, el('p', null, 'الاستعلامات والصفحات وقرارات المطابقة وسلسلة الخطأ الأصلية. السجل محلي ومحدود.'),
+        button('aw-link', 'تحديث السجل', refresh), output);
+    }, { tone: 'anime' }));
+  }
+
+  function paintSources(m, phase = state.work && sameWork(m) ? 'found' : engine.available() ? 'loading' : 'web') {
     const host = q('animeSources');
     if (!host) return;
+    host.hidden = !isDiscoveryDebug();
     host.dataset.state = phase;
     const dot = el('i', 'aw-dot');
     const text = el('span', 'aw-sources-text');
     host.replaceChildren(dot, text);
+    if (isDiscoveryDebug()) host.append(discoveryButton(m));
     if (phase === 'web') {
       text.textContent = 'التشغيل من المصادر العربية داخل تطبيق أندرويد';
       return;
@@ -2057,7 +2093,7 @@ export function createAnime(deps) {
     if (!out?.ok) return toast(`لم يكتمل التحقق: ${out?.error ?? 'تعذّر'}`);
     toast(`تم التحقق من ${sourceName(id)}`);
     const m = state.detail;
-    if (m && state.workFor === m.id) {
+    if (m && sameWork(m)) {
       state.workFor = null;
       state.work = null;
       void locateWork(m);
@@ -2230,12 +2266,13 @@ export function createAnime(deps) {
    * لهذا الأنمي دون أن يقفل عليه.
    */
   function playEpisode(m, n, { position = null, clip = null } = {}) {
+    if (isMovie(m)) n = 1;
     if (!engine.available()) {
       deps.openSheet((body) => {
         const head = el('div', 'an-sheet-head');
         const t = el('div', 'an-sheet-title', m.title);
         t.dir = 'auto';
-        head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
+        head.append(el('div', 'an-sheet-kicker', unitLabel(m, n)), t);
         const note = el('div', 'an-sheet-note');
         note.innerHTML = `${glyph('layers', { size: 22 })}<div><b>التشغيل داخل التطبيق</b><span>المصادر العربية والسيرفرات تعمل في تطبيق VANTARA على أندرويد.</span></div>`;
         body.append(head, note);
@@ -2288,7 +2325,7 @@ export function createAnime(deps) {
         backdropFallbacks: thumb ? shot.fallbacks : [],
         backdropFallback: m.banner ?? m.poster ?? null,
         backdropPosition: thumb || m.banner ? null : 'center 25%',
-        label: `الحلقة ${n}`,
+        label: unitLabel(m, n),
         episodeTitle: epTitle,
         description: epArt?.overview ?? null,
         rating: epArt?.rating ? { value: epArt.rating } : null,
@@ -2303,7 +2340,7 @@ export function createAnime(deps) {
           hub.openInvite({
             kind: 'anime',
             key: `${togetherRef}#${n}`,
-            label: `${m.title} — الحلقة ${n}`,
+            label: `${m.title} — ${unitLabel(m, n)}`,
             seriesRef: togetherRef,
             title: m.title,
             cover: m.posterSmall ?? m.poster ?? null,
@@ -2368,10 +2405,10 @@ export function createAnime(deps) {
 
       const ui = createServerSheet(body, {
         el,
-        kicker: `الحلقة ${n}`,
+        kicker: unitLabel(m, n),
         title: m.title,
         media,
-        extraFoot,
+        extraFoot: [...extraFoot, ...(isDiscoveryDebug() ? [discoveryButton(m)] : [])],
         prefer,
         // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة
         directLang: 'مترجم عربي',
@@ -2442,7 +2479,7 @@ export function createAnime(deps) {
       };
 
       const onWork = (id, work) => {
-        if (sheet.closed || sheet.expired || id !== m.id) return;
+        if (sheet.closed || sheet.expired || id !== m.id || !sameWork(m)) return;
         sheet.work = work;
         sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
         if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
@@ -2453,6 +2490,7 @@ export function createAnime(deps) {
       let preparationComplete = false;
       const stopDeadline = () => { if (preparationComplete && sheet.done) clearTimeout(deadline); };
       const fail = error => {
+        state.workTrace?.record('preparation_failed', { error });
         if (sheet.closed || sheet.expired) return;
         sheet.expired = true;
         sheet.prepareError = error || true;
@@ -2460,7 +2498,7 @@ export function createAnime(deps) {
         sheet.busy = false;
         sheet.routes = sheet.routes.map(route => isChecking(route) ? { ...route, state: 'FAILED', reason: 'TIMEOUT' } : route);
         // A new attempt must not reuse a search that never completed.
-        if (!sheet.work && state.workFor === m.id && state.workPending) {
+        if (!sheet.work && sameWork(m) && state.workPending) {
           state.workGeneration++;
           state.workPending = null;
         }
@@ -2523,7 +2561,7 @@ export function createAnime(deps) {
           // display title can settle this sheet as missing before the romaji
           // match arrives. Share the in-flight detail request and sheet deadline.
           const detailLoad = state.detailLoad;
-          const hasKnownCopies = m._sourceCopy || (state.workFor === m.id && state.work?.copies?.length) || knownWork(m.id);
+          const hasKnownCopies = m._sourceCopy || (sameWork(m) && state.work?.copies?.length) || knownWork(m.id);
           if (!hasKnownCopies && detailLoad?.id === m.id && detailLoad.token === state.detailToken) {
             let full;
             try { full = await wait(detailLoad.promise, preparation.signal); }
@@ -2531,10 +2569,10 @@ export function createAnime(deps) {
             if (sheet.closed || sheet.expired) return;
             if (full?.id === m.id) m = { ...m, ...full };
           }
-          const work = state.work && state.workFor === m.id ? state.work : await wait(locateWork(m, state.detailToken, preparation.signal), preparation.signal);
+          const work = state.work && sameWork(m) ? state.work : await wait(locateWork(m, state.detailToken, preparation.signal), preparation.signal);
           if (sheet.closed || sheet.expired) return;
           if (!work) {
-            sheet.searchError = state.workFor === m.id && state.workError;
+            sheet.searchError = sameWork(m) && state.workError;
             sheet.work = sheet.searchError ? null : false;
             sheet.done = true;
             preparationComplete = true;
@@ -2547,7 +2585,7 @@ export function createAnime(deps) {
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
+          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
           // A bridge that ignores cancellation can reply after close or deadline.
           void preparing.then(out => { if (sheet.closed || sheet.expired) closeSession(out?.session); }, () => {});
           const out = await wait(preparing, preparation.signal);
@@ -2563,7 +2601,7 @@ export function createAnime(deps) {
           sheet.retryAt = Math.max(sheet.retryAt, Number(out.retryAt) || 0);
           for (const { type, event } of buffered) applyEvent(type, event);
           paint();
-          if (state.workFor === m.id && state.work) onWork(m.id, state.work);
+          if (sameWork(m) && state.work) onWork(m.id, state.work);
           const snap = await wait(engine.routes(out.session, { signal: preparation.signal }), preparation.signal);
           if (sheet.closed || sheet.expired) return;
           sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt) || 0);
@@ -2595,7 +2633,7 @@ export function createAnime(deps) {
         for (const unsubscribe of off) unsubscribe();
         off = [];
         buffered.length = 0;
-        if (!sheet.work && state.workFor === m.id && state.workPending) {
+        if (!sheet.work && sameWork(m) && state.workPending) {
           state.workGeneration++;
           state.workPending = null;
         }
@@ -2625,7 +2663,8 @@ export function createAnime(deps) {
         subtitleIdentity: { ...animeAddonIdentity(m, n), externalIds: { ...animeAddonIdentity(m, n).externalIds, ...(sheet.copies?.find(c => c.identity?.externalIds?.kitsu)?.identity?.externalIds ?? {}) } },
         usageUserId: currentUser(),
         episode: n,
-        total: m.aired || m.episodes || 0,
+        total: isMovie(m) ? 1 : m.aired || m.episodes || 0,
+        format: m.format ?? null,
         position: startAt,
         ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
         poster: m.posterSmall ?? m.poster ?? null,
@@ -2721,7 +2760,7 @@ export function createAnime(deps) {
   function historyCard(w) {
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
-    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — الحلقة ${w.episode}`);
+    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — ${unitLabel(w, w.episode)}`);
     c.dataset.ref = `anime:${w.id}`;
     tint(c, w.color);
     const stage = el('div', 'an-hc-stage');
@@ -2729,10 +2768,11 @@ export function createAnime(deps) {
     const still = image(wide, 'an-img an-hc-still', { position: w.banner ? 'center' : 'center 22%' });
     stage.append(still, el('span', 'an-hc-shade'));
     const chip = el('span', 'an-hc-chip');
-    chip.append(el('small', null, 'الحلقة'), el('b', null, String(w.episode)));
+    chip.append(el('small', null, isMovie(w) ? 'الفيلم' : 'الحلقة'));
+    if (!isMovie(w)) chip.append(el('b', null, String(w.episode)));
     const when = el('span', 'an-hc-when', relativeAr(w.at));
     const play = el('span', 'an-hc-play');
-    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? 'التالية' : 'تابع'}</span>`;
+    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? isMovie(w) ? 'أعد المشاهدة' : 'التالية' : 'تابع'}</span>`;
     const bar = el('span', 'an-hc-bar');
     const fill = el('i');
     fill.style.width = `${(ratio * 100).toFixed(1)}%`;
@@ -2748,12 +2788,12 @@ export function createAnime(deps) {
     const name = el('span', 'cw-name');
     name.append(t, moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
     const meta = el('span', 'an-hc-meta');
-    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? `الحلقة ${w.episode}`), el('span', 'an-hc-watched'));
+    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? unitLabel(w, w.episode)), el('span', 'an-hc-watched'));
     info.append(name, meta);
     // البوستر في زاوية النهاية: بداية شريط التقدّم (جهة البداية) تبقى ظاهرة
     foot.append(info, poster);
     c.append(stage, foot);
-    c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
+    c.onclick = () => void openAnime({ id: w.id, title: w.title, format: w.format, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
 
     // لقطة الحلقة نفسها حين تصل (لا وميض: تُبدَّل بعد أن تُحمَّل)
     void loadAnimeArt(w.id).then((art) => {

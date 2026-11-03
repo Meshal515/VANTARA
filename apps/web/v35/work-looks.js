@@ -23,24 +23,25 @@ const dashLine = (n = 4) => `<svg class="wl-dash" preserveAspectRatio="none" vie
 
 function parts(c) {
   const { m, glyph } = c;
+  const movie = m.format === 'MOVIE';
   const meta = c.meta.map((x) => `<span>${x.html ?? esc(x)}</span>`).join('');
   // الأنواع روابط كما في المحور: تفتح مجموعة النوع
   const genres = c.genres.map((g, i) => (c.genreKeys?.[i] ? `<button type="button" class="wl-genre" data-genre="${esc(c.genreKeys[i])}">${esc(g)}</button>` : `<span>${esc(g)}</span>`)).join('');
   // الوظائف المشتركة مع المحور: موعد الحلقة القادمة (من AniList فقط) ونشاط الأصدقاء وتقدّمهم
-  const next = c.next ? `<div class="wl-next"><b>الحلقة ${esc(c.next.episode ?? '')} ${esc(c.next.rel)}</b><span>${esc(c.next.time)}</span></div>` : '';
+  const next = !movie && c.next ? `<div class="wl-next"><b>الحلقة ${esc(c.next.episode ?? '')} ${esc(c.next.rel)}</b><span>${esc(c.next.time)}</span></div>` : '';
   const social = '<div class="wl-social" data-slot="insights"></div>';
   const factsBox = c.facts.length ? `<div class="wl-facts">${c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('')}</div>` : '';
   const logo = c.logo ? `<img class="wl-logo" src="${esc(c.logo)}" alt="${esc(m.title)}">` : `<h1 class="wl-name" dir="auto">${esc(m.title)}</h1>`;
   const facts = c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('');
   const play = glyph('play', { size: 22, filled: true });
   const cur = c.point.episode;
-  const curTitle = c.epTitle(cur);
+  const curTitle = movie ? m.title : c.epTitle(cur);
   const range = episodeRange(c.total, cur, c.rangeAt);
   const ranges = range.groups.length
     ? `<div class="wl-ranges">${range.groups.map(([a, b], i) => `<button type="button" data-range="${i}" class="${i === range.at ? 'on' : ''}">${a}–${b}</button>`).join('')}</div>`
     : '';
   const eps = [];
-  for (let n = range.from; n <= range.to; n++) eps.push(n);
+  if (!movie) for (let n = range.from; n <= range.to; n++) eps.push(n);
   const epState = (n) => (c.seen(n) ? 'seen' : n === cur ? 'cur' : '');
   const epSub = (n) => (c.seen(n) ? `${c.minutes(n)} · شوهدت` : n === cur && c.left ? `باقي ${c.left} د` : c.minutes(n));
   const bar = (n) => (c.seen(n) ? '<u style="width:100%"></u>' : n === cur && c.ratio != null ? `<u style="width:${(c.ratio * 100).toFixed(1)}%"></u>` : '');
@@ -53,8 +54,8 @@ function parts(c) {
   const recs = (cls) => (m.recommendations?.length ? `<div class="${cls}">${m.recommendations.map((r) => `<button type="button" class="rc" data-open="${esc(r.id)}">${img(r.posterSmall ?? r.poster)}<b dir="auto">${esc(r.title)}</b><span>${r.score ? `★ ${r.score.toFixed(1)}` : esc(r.year ?? '')}</span></button>`).join('')}</div>` : '');
   const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : '';
   const section = (title, body, key = '') =>
-    body ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}"><div class="wl-h"><h2>${title}</h2></div>${body}</section>` : '';
-  return { meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, eps, epState, epSub, bar, thumb, epRows, chars, recs, desc, section };
+    body && !(movie && /الحلقات/.test(title)) ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}"><div class="wl-h"><h2>${title}</h2></div>${body}</section>` : '';
+  return { movie, meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, eps, epState, epSub, bar, thumb, epRows, chars, recs, desc, section };
 }
 
 /** «من نفس العالم»: ما قبله، ثم العمل نفسه («أنت هنا»)، ثم ما بعده، ثم بقية المرتبط؛ أنمي ومانجا. */
@@ -103,7 +104,7 @@ const LOOKS = {
         <div class="wl-stage3d"><div class="wl-card">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%')}</div></div>
         <div class="wl-info">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div><div class="wl-row"><button type="button" class="wl-big" data-ep="${p.cur}"><span class="dot">${p.play}</span>${esc(c.label)}</button><span class="wl-sub">${esc(c.progressText)}</span></div>${p.next}${p.social}</div>
       </div>
-      <div class="wl-body">${p.desc}<section class="wl-sec wl-full"><h2>الحلقات</h2>${p.ranges}<div class="wl-strip">${strip}</div></section>${c.characters.length ? `<section class="wl-sec wl-full"><h2>الشخصيات</h2>${p.chars('wl-tall', 8)}</section>` : ''}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join(dashLine(4))}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
+      <div class="wl-body">${p.desc}${p.movie ? '' : `<section class="wl-sec wl-full"><h2>الحلقات</h2>${p.ranges}<div class="wl-strip">${strip}</div></section>`}${c.characters.length ? `<section class="wl-sec wl-full"><h2>الشخصيات</h2>${p.chars('wl-tall', 8)}</section>` : ''}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join(dashLine(4))}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
   },
 
   /* ── شاشة السينما ── */
@@ -130,7 +131,7 @@ const LOOKS = {
     }
     return `
       <div class="wl-headrow">
-        <div class="wl-now"><small>${c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'} · الحلقة ${p.cur}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1>${c.epOverview(p.cur) ? `<p dir="auto">${esc(c.epOverview(p.cur))}</p>` : ''}<div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
+        <div class="wl-now"><small>${c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'}${p.movie ? ' · الفيلم' : ` · الحلقة ${p.cur}`}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1>${c.epOverview(p.cur) ? `<p dir="auto">${esc(c.epOverview(p.cur))}</p>` : ''}<div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
         <div class="wl-series">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}<div>${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div></div>
       </div>
       <div class="wl-scrub"><div class="wl-track">${scrub.join('')}</div><div class="wl-sline" style="--w:${c.seenRatio * 100}%"></div></div>

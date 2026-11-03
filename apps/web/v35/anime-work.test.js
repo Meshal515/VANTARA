@@ -2,10 +2,11 @@ import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() {} }));
 vi.mock('../lib/anime-engine.js', async (original) => ({ ...await original(), available: () => false, sources: async () => [], on: () => () => {}, onNeedsHuman() {} }));
-const { createAnime } = await import('./anime.js');
+const { createAnime, recordWatch } = await import('./anime.js');
 const { cycleGenre, collectionSpec } = await import('./anime-discover.js');
+const { beginDiscovery, setDiscoveryDebug } = await import('../lib/discovery-diagnostics.js');
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { setDiscoveryDebug(false); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const DETAIL = {
   id: 161645, idMal: null, title: { english: 'The Apothecary Diaries', romaji: 'Kusuriya no Hitorigoto' }, coverImage: { extraLarge: 'https://img/cover.jpg', large: 'https://img/cover-s.jpg', color: '#e4a15d' },
@@ -41,6 +42,40 @@ const setup = ({ detail = DETAIL } = {}) => {
   return { root, anime, store, calls, pages, document, window, deps };
 };
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0)); };
+
+it('presents an anime movie as a film with duration and no episode list', async () => {
+  const { root, anime } = setup({ detail: { ...DETAIL, format: 'MOVIE', episodes: 1, duration: 112 } });
+  await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries', format: 'MOVIE', episodes: 1 });
+  await settle();
+  expect(root.querySelector('.aw-cta').textContent).toContain('شاهد الفيلم');
+  expect(root.querySelector('.aw-meta').textContent).not.toContain('حلقة');
+  expect(root.querySelector('.aw-info').textContent).toContain('112 دقيقة');
+  expect(root.querySelectorAll('.an-er')).toHaveLength(0);
+  expect(root.querySelector('.aw-episodes').textContent).not.toContain('الحلقات');
+});
+
+it('keeps a finished film in history without a next episode label', () => {
+  const { root, anime } = setup();
+  recordWatch({ id: 91, title: 'A Film', format: 'MOVIE', episodes: 1 }, 1, 112000, 112000);
+  anime.renderLibrary();
+  const card = root.querySelector('.an-hc');
+  expect(card.textContent).toContain('الفيلم');
+  expect(card.textContent).not.toMatch(/الحلقة|التالية/);
+});
+
+it('Debug exposes recorded discovery evidence from the actual work page', async () => {
+  setDiscoveryDebug(true);
+  beginDiscovery({ workId: DETAIL.id }).record('candidate_rejected', { reason: 'sequel', sourceId: 'example' });
+  const { root, anime, deps, document } = setup();
+  const sheet = document.createElement('section');
+  deps.openSheet = fn => fn(sheet);
+  await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' });
+  await settle();
+  root.querySelector('.aw-discovery-debug').click();
+  expect(sheet.textContent).toContain('candidate_rejected');
+  expect(sheet.textContent).toContain('sequel');
+  expect(sheet.textContent).toContain('example');
+});
 
 it('the work page is built once and filled in place: no re-render when details arrive, title is long-press copyable', async () => {
   const { root, anime } = setup();
@@ -135,10 +170,11 @@ it('hero: waits for the IMDb link, prefers its key art, and never uses the AniLi
   const made = [];
   vi.stubGlobal('Image', function () { const n = document.createElement('img'); made.push(n); return n; });
   const anilist = globalThis.fetch;
+  let finishArt;
   vi.stubGlobal('fetch', vi.fn(async (url, init) => {
     if (String(url).startsWith('https://api.ani.zip/')) {
       // ربط IMDb يصل بعد بيانات AniList: هذا السباق كان يثبّت بانر AniList
-      await new Promise((r) => setTimeout(r, 60));
+      await new Promise(resolve => { finishArt = resolve; });
       return { ok: true, json: async () => ({ mappings: { imdb_id: 'tt26743760' }, episodes: {} }) };
     }
     return anilist(url, init);
@@ -147,7 +183,7 @@ it('hero: waits for the IMDb link, prefers its key art, and never uses the AniLi
   await settle();
   const heroSrcs = () => made.filter((n) => /aw-bg-img/.test(n.className)).map((n) => n.src);
   expect(heroSrcs()).toEqual([]);
-  await new Promise((r) => setTimeout(r, 120));
+  finishArt();
   await settle();
   expect(heroSrcs()).toEqual(['https://images.metahub.space/background/large/tt26743760/img']);
   expect(heroSrcs()).not.toContain('https://img/banner.jpg');

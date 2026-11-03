@@ -261,8 +261,8 @@ it('uses canonical aliases when play is tapped before AniList details arrive', a
   view.anime.leaveDetail();
 });
 
-it('prepares remembered source copies while unrelated metadata is still pending', async () => {
-  const values = new Map([['vantara.anime.found.v1', JSON.stringify({235: {at: Date.now(), work: {title: 'Meitantei Conan', copies: [{sourceId: 'wit', url: '/conan'}]}}})]]);
+it('prepares copies validated by the current matcher while unrelated metadata is still pending', async () => {
+  const values = new Map([['vantara.anime.found.v2', JSON.stringify({235: {at: Date.now(), work: {title: 'Meitantei Conan', copies: [{sourceId: 'wit', url: '/conan'}]}}})]]);
   vi.stubGlobal('localStorage', { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) });
   engine.routes.mockResolvedValue({ done: true, routes: [route()] });
   const view = pendingMetadataScreen();

@@ -109,6 +109,7 @@ class AnimeEnginePlugin : Plugin() {
                 malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
                 total = call.getInt("total") ?: 0,
+                format = call.getString("format"),
                 positionMs = (call.getDouble("position") ?: 0.0).toLong(),
                 candidate = call.getString("candidate"),
                 preferCode = call.getString("prefer"),
@@ -254,7 +255,8 @@ class AnimeEnginePlugin : Plugin() {
             try {
                 call.resolve(block())
             } catch (t: Throwable) {
-                call.reject(t.message ?: t.javaClass.simpleName)
+                val diagnostic = if (com.vantara.app.BuildConfig.DEBUG) JSObject().put("diagnostic", com.vantara.anime.DiscoveryFailure.describe(t)) else JSObject()
+                call.reject(t.message ?: t.javaClass.simpleName, t.javaClass.simpleName, diagnostic)
             }
         }
     }
@@ -273,7 +275,7 @@ class AnimeEnginePlugin : Plugin() {
     fun configure(call: PluginCall) {
         val manifest = call.getObject("manifest") ?: return call.reject("manifest مطلوب")
         val errors = engine.configure(manifest.toString())
-        call.resolve(JSObject().put("ok", errors.isEmpty()).put("errors", JSArray(errors)))
+        call.resolve(JSObject().put("ok", errors.isEmpty()).put("errors", JSArray(errors)).put("debug", com.vantara.app.BuildConfig.DEBUG))
     }
 
     @PluginMethod
@@ -604,20 +606,29 @@ class AnimeEnginePlugin : Plugin() {
         val loadTimeout = (call.getInt("loadTimeoutMs") ?: AnimeEngine.STREAM_LOAD_TIMEOUT_MS.toInt()).toLong()
         searches.remove(id)?.cancel()
         searches[id] = scope.launch {
+            var failure: Throwable? = null
             try {
                 engine.searchEach(query, content, timeoutMs = timeout, loadTimeoutMs = loadTimeout) { hit ->
                     notifyListeners(
                         "searchHit",
                         JSObject().put("searchId", id).put("sourceId", hit.sourceId).put("ms", hit.ms)
                             .put("error", hit.error).put("skipped", hit.skipped).put("needsHuman", hit.needsHuman)
+                            .put("page", hit.page).put("hasNext", hit.hasNext).put("stop", hit.stop)
+                            .apply { if (com.vantara.app.BuildConfig.DEBUG) put("diagnostic", hit.diagnostic) }
                             .put("items", hit.items, ListSerializer(SourceAnime.serializer())),
                     )
                 }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
+                failure = t
             } finally {
                 searches.remove(id)
-                notifyListeners("searchDone", JSObject().put("searchId", id))
+                notifyListeners("searchDone", JSObject().put("searchId", id).apply {
+                    failure?.let { error ->
+                        put("error", error.javaClass.simpleName)
+                        if (com.vantara.app.BuildConfig.DEBUG) put("diagnostic", com.vantara.anime.DiscoveryFailure.describe(error))
+                    }
+                })
             }
         }
         call.resolve(JSObject().put("searchId", id))
