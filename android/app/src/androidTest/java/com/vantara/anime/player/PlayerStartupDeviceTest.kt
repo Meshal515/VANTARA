@@ -45,6 +45,8 @@ class PlayerStartupDeviceTest {
         val files = File(context.cacheDir, id).apply { mkdirs() }
         val events = CopyOnWriteArrayList<JSONObject>()
         val previous = PlaybackEvents.events
+        // This class also runs independently of RuntimeAppIntegrationTest/MainActivity.
+        com.vantara.plugins.ensureEngineInjekt(context.applicationContext as android.app.Application)
         val engine = AnimeEngine.get(context)
         val session = PlaybackSession(emptyList(), HealthStore(null))
         @Suppress("UNCHECKED_CAST")
