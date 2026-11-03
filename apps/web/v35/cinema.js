@@ -187,6 +187,17 @@ export function createCinema(deps) {
     discover: { query: '', type: 'movie', token: 0, filters: { ...DISCOVER_DEFAULTS, genres: [] } },
   };
 
+  // Update retained work UI without running discovery again or touching source state.
+  const paintDiagnosticEntry = () => {
+    const host = q('cinemaSources');
+    if (!host) return;
+    host.querySelectorAll('.cn-diag-open').forEach(node => node.remove());
+    if (diagnosticsUi.visible() && host.dataset.state === 'none' && state.detail) {
+      host.append(button('cn-link cn-diag-open', 'افحص المصادر', () => diagnoseSheet(state.detail)));
+    }
+  };
+  diagnosticsUi.subscribe(paintDiagnosticEntry);
+
   // ───────────── التخزين المحلي ─────────────
 
   const watchAll = () => readJson(userKey('watch', currentUser()), {});
@@ -1456,8 +1467,8 @@ export function createCinema(deps) {
         }
         nodes.push(near);
       }
-      if (diagnosticsUi.visible()) nodes.push(button('cn-link cn-diag-open', 'افحص المصادر', () => diagnoseSheet(m)));
       host.replaceChildren(...nodes);
+      paintDiagnosticEntry();
       return;
     }
     host.dataset.state = 'found';

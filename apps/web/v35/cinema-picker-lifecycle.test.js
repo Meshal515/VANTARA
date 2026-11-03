@@ -189,3 +189,23 @@ it('releases the visible session binding when the cinema sheet closes', async ()
   close();
   expect(body.dataset.vantaraPlaybackSession).toBeUndefined();
 });
+
+it('removes and restores retained cinema diagnostics without restarting source discovery', async () => {
+  const { diagnosticsUi } = await import('../lib/diagnostics-ui.js');
+  let visible = true, changed;
+  vi.spyOn(diagnosticsUi, 'visible').mockImplementation(() => visible);
+  vi.spyOn(diagnosticsUi, 'subscribe').mockImplementation(fn => { changed = fn; return () => {}; });
+  const { cinema } = screen();
+  await cinema.openWork(title); await vi.advanceTimersByTimeAsync(1);
+  // Retained no-match result while navigating to settings; source requests are out of scope here.
+  const host = document.getElementById('cinemaSources');
+  host.dataset.state = 'none';
+  const old = document.createElement('button'); old.className = 'cn-diag-open'; old.textContent = 'افحص المصادر';
+  host.replaceChildren(old);
+  expect(host.querySelector('.cn-diag-open')).not.toBeNull();
+  const calls = engine.search.mock.calls.length;
+  visible = false; changed(); expect(host.querySelector('.cn-diag-open')).toBeNull();
+  visible = true; changed(); expect(host.querySelector('.cn-diag-open')).not.toBeNull();
+  expect(engine.search.mock.calls.length).toBe(calls);
+  vi.restoreAllMocks();
+});

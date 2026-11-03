@@ -58,6 +58,10 @@ for(const path of discoveryGroupOneSeams)seams.add(path);
 
 // Owner-authorized focused diagnostics visibility and floating-card visual corrections.
 const visualUiSeams = [
+  "apps/web/v35/cinema-picker-lifecycle.test.js",
+  "apps/web/desktop/overlay.js",
+  "apps/web/desktop/overlay.test.js",
+  "apps/web/pwa/player/player.js",
   ".github/workflows/runtime-app-debug.yml",
   "android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt",
   "android/app/src/main/kotlin/com/vantara/plugins/DiagnosticVisibility.kt",

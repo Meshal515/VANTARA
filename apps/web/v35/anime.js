@@ -2036,6 +2036,8 @@ export function createAnime(deps) {
 
   /** المصادر سطرًا هادئًا واحدًا: نقطة حالة، ومن أين تشاهد. لا شرائح بإطارات. */
   diagnosticsUi.subscribe(() => {
+    const health = q('animeLibrary')?.querySelector('.an-health');
+    if (health) void renderSourcesHealth(health);
     const m = state.detail;
     if (m?.id != null) paintSources(m);
     else if (!diagnosticsUi.visible()) { const host = q('animeSources'); if (host) { host.hidden = true; host.replaceChildren(); } }
@@ -2936,12 +2938,13 @@ export function createAnime(deps) {
       const rate = total ? Math.round(((r?.ok ?? 0) / total) * 100) : null;
       const mood = !s.enabled ? 'off' : r?.blocked ? 'blocked' : r && r.streak >= 3 ? 'down' : rate === null ? 'new' : rate >= 70 ? 'good' : 'weak';
       const top = el('div', 'an-src-top');
-      top.append(el('i', `an-dot-state an-dot-state--${mood}`), el('b', null, s.name), el('span', 'an-src-rate', rate === null ? '—' : `${rate}%`));
+      top.append(el('i', `an-dot-state an-dot-state--${mood}`), el('b', null, s.name));
+      if (diagnosticsUi.visible()) top.append(el('span', 'an-src-rate', rate === null ? '—' : `${rate}%`));
       const facts = [
         s.domain ? String(s.domain).replace(/^https?:\/\//, '') : null,
-        r?.latencyMs ? `${Math.round(r.latencyMs)} ms` : null,
-        r?.lastOkAt ? `آخر نجاح ${relativeAr(r.lastOkAt)}` : null,
-        r?.lastFailAt ? `آخر فشل ${relativeAr(r.lastFailAt)}` : null,
+        diagnosticsUi.visible() && r?.latencyMs ? `${Math.round(r.latencyMs)} ms` : null,
+        diagnosticsUi.visible() && r?.lastOkAt ? `آخر نجاح ${relativeAr(r.lastOkAt)}` : null,
+        diagnosticsUi.visible() && r?.lastFailAt ? `آخر فشل ${relativeAr(r.lastFailAt)}` : null,
       ].filter(Boolean);
       const meta = el('div', 'an-src-meta', facts.join(' · '));
       meta.dir = 'ltr';
@@ -2967,8 +2970,9 @@ export function createAnime(deps) {
           void renderSourcesHealth(box);
         }));
         const report = el('div', 'an-diag');
-        line.append(button('an-src-btn', 'تشخيص', () => runDiagnosis(s, report)));
-        row.append(line, report);
+        if (diagnosticsUi.visible()) line.append(button('an-src-btn', 'تشخيص', () => runDiagnosis(s, report)));
+        row.append(line);
+        if (diagnosticsUi.visible()) row.append(report);
       }
       return row;
     });
@@ -2977,6 +2981,7 @@ export function createAnime(deps) {
 
   /** يفحص المصدر خطوة خطوة ويعرض أين ينكسر، مع نسخ التقرير لإرساله. */
   async function runDiagnosis(s, report) {
+    if (!diagnosticsUi.visible()) return;
     report.replaceChildren(el('p', 'an-diag-wait', 'جارٍ الفحص… (قد يأخذ حتى دقيقة على شبكة بطيئة)'));
     let steps;
     try {

@@ -116,7 +116,7 @@ jobs:
           retention-days: 14
 
   visual-ui:
-    if: ${{ github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-') }}
+    if: ${{ github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -136,6 +136,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Verify web UI regressions and repository protection
         run: |
+          pnpm --filter @vantara/domain build
           pnpm test:web
           node tools/repository-compat/scope-guard.mjs
           pnpm test:safety

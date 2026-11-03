@@ -3462,15 +3462,15 @@ html[data-section='cinema'] {
 
 /* The band occupies the former source-strip coordinates, below the banner. It adds no height.
    Cover and info own the foreground; the two masked trains remain synchronized behind them. */
-.v35 .wl-card .wl-logo-layer { position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--art, var(--accent)) 12%, transparent), transparent 72%); }
+.v35 .wl-card .wl-logo-layer { --wl-logo-gap: clamp(40px, 12vw, 64px); position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; }
 .v35 .wl-card .wl-logo-layer[hidden] { display: none; }
 .v35 .wl-card .wl-logo-lane { position: absolute; inset: 0; direction: ltr; }
 .v35 .wl-card .wl-logo-color { opacity: .45; mask-image: linear-gradient(to right, transparent, #000 7%, #000 calc(var(--wl-logo-color-edge) - 4%), transparent var(--wl-logo-color-edge)); }
 .v35 .wl-card .wl-logo-white { opacity: .33; mask-image: linear-gradient(to right, transparent var(--wl-logo-color-edge), #000 calc(var(--wl-logo-color-edge) + 4%), #000 93%, transparent); }
 .v35 .wl-card .wl-logo-train { display: flex; width: 200%; height: 100%; animation: wl-logo-drift 36s linear infinite; animation-play-state: paused; }
 .v35 .wl-card .wl-logo-layer[data-running='true'] .wl-logo-train { animation-play-state: running; }
-.v35 .wl-card .wl-logo-group { display: flex; justify-content: space-around; align-items: center; flex: 0 0 50%; min-width: 0; gap: 8%; }
-.v35 .wl-card .wl-logo-group img { flex: 0 0 40%; width: 40%; height: 86%; object-fit: contain; }
+.v35 .wl-card .wl-logo-group { display: flex; justify-content: space-around; align-items: center; flex: 0 0 50%; min-width: 0; gap: 0; }
+.v35 .wl-card .wl-logo-group img { flex: 0 0 50%; width: 50%; min-width: 0; box-sizing: border-box; padding-inline: calc(var(--wl-logo-gap) / 2); height: 86%; object-fit: contain; }
 .v35 .wl-card .wl-logo-white img { filter: brightness(0) invert(1); }
 .v35 .wl-card .wl-info { position: relative; z-index: 1; }
 .v35 .wl-card .wl-big:active { background: var(--accent-press) !important; }

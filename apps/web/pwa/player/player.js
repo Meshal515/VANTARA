@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../../lib/diagnostics-ui.js';
 /**
  * مشغّل الويب (بديل المشغّل الأصلي في الـAPK) — بنفس تصميمه.
  *
@@ -1099,9 +1100,16 @@ export function openPlayer(args) {
       ...(q ? [['إطارات ساقطة', `${q.droppedVideoFrames} من ${q.totalVideoFrames}`, q.totalVideoFrames && q.droppedVideoFrames / q.totalVideoFrames > 0.02 ? 'warn' : 'ok']] : []),
     ];
   }
+  const releaseDiagnostics = diagnosticsUi.subscribe(() => {
+    if (diagnosticsUi.visible()) return;
+    if (sheet.querySelector('[data-diagnostic-sheet]')) closeSheet();
+    sheet.querySelectorAll('[data-diagnostic-tool]').forEach(node => node.remove());
+  });
   function showNetwork() {
+    if (!diagnosticsUi.visible()) return;
     const render = (body) => {
       body.replaceChildren();
+      body.dataset.diagnosticSheet = '';
       for (const [name, value, tone] of networkRows()) {
         const r = el('div', `pp-metric${tone ? ` pp-metric--${tone}` : ''}`);
         const v = el('b', null, value);
@@ -1163,7 +1171,10 @@ export function openPlayer(args) {
       if (subtitleSession.available()) body.append(sheetRow('الترجمة', null, { onClick: () => { closeSheet(); showSubtitles(); } }));
       if (isAnime) body.append(sheetRow('تخطي المقدمة والنهاية', skipStatusText(state.skip.result, state.skip.pending, clock), { onClick: () => { closeSheet(); showSkips(); } }));
       body.append(sheetRow('السرعة', state.speed === 1 ? 'عادية' : `${state.speed}×`, { onClick: () => { closeSheet(); showSpeed(); } }));
-      body.append(sheetRow('الشبكة', 'السيرفر، الطريق، المخزَّن، والإطارات', { onClick: () => { closeSheet(); showNetwork(); } }));
+      if (diagnosticsUi.visible()) {
+        const network = sheetRow('الشبكة', 'السيرفر، الطريق، المخزَّن، والإطارات', { onClick: () => { closeSheet(); showNetwork(); } });
+        network.dataset.diagnosticTool = ''; body.append(network);
+      }
       const desktop = matchMedia('(hover: hover) and (pointer: fine)').matches;
       if (desktop) body.append(sheetRow('اختصارات الكيبورد', 'مسافة، الأسهم، F، M، S…', { onClick: () => { closeSheet(); showShortcuts(); } }));
       else body.append(sheetRow('قفل الشاشة', 'يمنع اللمس الخاطئ أثناء المشاهدة', { onClick: () => { closeSheet(); setLocked(true); } }));
@@ -1558,6 +1569,7 @@ export function openPlayer(args) {
     if (state.closed) return;
     if (notify) report(true);
     state.closed = true;
+    releaseDiagnostics();
     releaseTogether();
     clearInterval(countdown);
     clearInterval(watchdog);
