@@ -78,6 +78,12 @@ try {
     await page.waitForTimeout(1500);
   }
   await page.screenshot({ path:resolve(evidence, mode + '-settled.png') });
+  // GitHub Actions artifact storage can be full. Emit a low-bandwidth screenshot
+  // into this private QA job log for visual inspection without external uploads.
+  const auditJpeg = await page.screenshot({ type:'jpeg', quality:68 });
+  if (process.env.VANTARA_WORKCARD_LOG_IMAGES === 'true') {
+    process.stdout.write('WORKCARD_JPEG_' + mode.toUpperCase() + '=' + auditJpeg.toString('base64') + '\n');
+  }
   await page.evaluate(() => { window.savedLogo = document.querySelector('.wl-logo-layer'); });
   await page.evaluate(() => window.repaint(10));
   await page.screenshot({ path:resolve(evidence, mode + '-after-repaint.png') });
