@@ -19,6 +19,8 @@ on:
       - 'pnpm-workspace.yaml'
       - 'capacitor.config.*'
       - '.github/workflows/android-debug.yml'
+      - '.github/workflows/runtime-app-debug.yml'
+      - '.github/workflows/runtime-android.yml'
       - '!**/*.md'
   workflow_dispatch:
 
