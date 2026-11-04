@@ -38,6 +38,7 @@ jobs:
           VANTARA_UI_ROOT: ${{ runner.temp }}/vantara-ui-before
           VANTARA_WORKCARD_MODE: before
           VANTARA_WORKCARD_EVIDENCE: work-card-evidence
+          VANTARA_WORKCARD_LOG_IMAGES: 'true'
           CHROMIUM_PATH: /usr/bin/google-chrome
         run: node tools/repository-compat/playwright-work-card.mjs
       - name: Updated browser screenshots and regression assertions
@@ -45,12 +46,8 @@ jobs:
           VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vantara-browser/node_modules/playwright/index.mjs
           VANTARA_WORKCARD_MODE: after
           VANTARA_WORKCARD_EVIDENCE: work-card-evidence
+          VANTARA_WORKCARD_LOG_IMAGES: 'true'
           CHROMIUM_PATH: /usr/bin/google-chrome
         run: node tools/repository-compat/playwright-work-card.mjs
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: work-card-before-after-browser-screenshots
-          path: work-card-evidence/
-          if-no-files-found: warn
-          retention-days: 30
+      - name: Confirm evidence files exist locally (never publish)
+        run: ls -lh work-card-evidence/
