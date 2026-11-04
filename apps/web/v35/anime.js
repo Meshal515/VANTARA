@@ -996,6 +996,10 @@ export function createAnime(deps) {
     // الصورة الظاهرة تبقى بين إعادات الرسم (وصول الفن ثم الدقة الأعلى): تُستبدل بعد تحميل البديل
     // لا تُعاد من الصفر، فلا تختفي وتعود
     const prev = v.still.querySelector(':scope > .an-img');
+    // The play button is a persistent control: detail/artwork refreshes update
+    // the image and label without destroying a pressed/focused button.
+    const previousCap = v.still.querySelector(':scope > .aw-still-cap');
+    const previousPlay = previousCap?.querySelector('.aw-still-play');
     v.still.replaceChildren();
     if (shot?.src) {
       const opts = { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] };
@@ -1010,9 +1014,15 @@ export function createAnime(deps) {
       }
     }
     const label = `${point.resume ? 'تابع' : 'شاهد'} ${unitLabel(m, point.episode)}`;
-    const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
-    const cap = el('span', 'aw-still-cap');
-    cap.append(play, el('b', null, label));
+    // Never infer the episode from sequential watched counts: resume the last
+    // started episode (even when 1–9 were skipped and the user started 10).
+    const play = previousPlay ?? button('aw-still-play', glyph('play', { size: 22, filled: true }), () => {
+      const current = state.detail?.id === m.id ? state.detail : m;
+      playEpisode(current, resumePoint(current).episode);
+    }, label);
+    play.setAttribute('aria-label', label);
+    const cap = previousCap ?? el('span', 'aw-still-cap');
+    cap.replaceChildren(play, el('b', null, label));
     if (title && typeof title === 'string') {
       const t = el('span', 'aw-still-title', title);
       t.dir = 'auto';
