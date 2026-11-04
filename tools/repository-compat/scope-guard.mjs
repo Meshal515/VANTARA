@@ -114,6 +114,9 @@ seams.add('tools/repository-compat/run_live_video.sh');
 seams.add('tools/repository-compat/summarize_live_sweep.mjs');
 seams.add('tools/repository-compat/summarize_live_sweep.test.mjs');
 seams.add('.github/workflows/video-compat-cohort.yml');
+// Owner-approved Debug QA maintenance: optional artifact uploads may not fail a successful runtime test.
+// This explicit file remains subject to every other repository scope guard.
+seams.add('.github/workflows/runtime-android.yml');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPolicy.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeVersionPolicyTest.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');

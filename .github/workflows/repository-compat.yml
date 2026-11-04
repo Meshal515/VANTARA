@@ -37,7 +37,6 @@ jobs:
         run: python3 tools/repository-compat/probe_pinned_packages.py --output package-format-evidence.json
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: package-format-evidence-NOT-runtime-or-playback-success
           path: package-format-evidence.json
           if-no-files-found: error

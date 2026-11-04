@@ -39,7 +39,6 @@ jobs:
         run: ./tools/build-video-host.ps1
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: windows-pr195-video-host
           path: apps/desktop/native/vantara-video-host.exe
           if-no-files-found: error
@@ -66,7 +65,6 @@ jobs:
           test -s "VANTARA-0.1.0-preview.3-Windows-x64-Setup.exe"
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: windows-pr195-evaluation-unsigned
           path: |
             ${{ runner.temp }}/pr195/*-Setup.exe
@@ -105,7 +103,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          retention-days: 1
           name: windows-pr195-test-evidence
           path: ${{ runner.temp }}/pr195/*smoke.json
           if-no-files-found: warn

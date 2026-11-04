@@ -75,7 +75,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          retention-days: 1
           name: apk-player-shots
           path: player-shots/
           if-no-files-found: warn

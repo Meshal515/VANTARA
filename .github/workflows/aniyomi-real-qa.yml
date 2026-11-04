@@ -74,7 +74,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: aniyomi-9-real-sources-not-release
           path: |
             aniyomi-install-instrumentation.txt

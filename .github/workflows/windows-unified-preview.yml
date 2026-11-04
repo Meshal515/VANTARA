@@ -22,7 +22,6 @@ jobs:
         run: ./tools/build-video-host.ps1
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: preview-video-host
           path: apps/desktop/native/vantara-video-host.exe
           if-no-files-found: error
@@ -77,7 +76,6 @@ jobs:
           (cd "$RUNNER_TEMP/vantara-build" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: preview4-windows
           path: |
             ${{ runner.temp }}/vantara-build/*-Setup.exe

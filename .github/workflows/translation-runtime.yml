@@ -86,7 +86,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          retention-days: 1
           name: translation-runtime-${{ github.sha }}
           path: |
             runtime-evidence/

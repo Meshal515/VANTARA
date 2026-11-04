@@ -5,15 +5,7 @@ on:
   push:
     branches:
       - '**'
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'notes/**'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'notes/**'
 
 permissions:
   contents: read

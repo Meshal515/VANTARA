@@ -52,7 +52,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 1
           name: predebug-optional-runtime-qa-reports
           path: |
             android/app/build/reports/tests/testDebugUnitTest/

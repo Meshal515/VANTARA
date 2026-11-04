@@ -41,7 +41,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          retention-days: 1
           name: windows-current-verify-evidence
           path: |
             ${{ runner.temp }}/windows-current/*report.json
