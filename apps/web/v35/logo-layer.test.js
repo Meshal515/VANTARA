@@ -44,9 +44,7 @@ it('waits for image.decode before exposing an animated logo', async () => {
   expect(t.im.decode).toHaveBeenCalledOnce();
   expect(t.layer.hidden).toBe(true);
   resolveDecode();
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(t.layer.hidden).toBe(false);
+  await vi.waitFor(() => expect(t.layer.hidden).toBe(false));
   expect(t.layer.dataset.ready).toBe('true');
   off();
 });
