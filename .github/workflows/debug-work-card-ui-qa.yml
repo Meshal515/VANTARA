@@ -28,6 +28,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - name: Install dependencies and run targeted unit regressions
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @vantara/domain build
+          npx vitest run apps/web/v35/logo-layer.test.js apps/web/v35/work-looks.test.js apps/web/v35/anime-work.test.js
       - name: Install Playwright test driver separately from app dependencies
         run: npm install --prefix "$RUNNER_TEMP/vantara-browser" --no-audit --no-fund --no-package-lock playwright@1.56.1
       - name: Checkout READ-ONLY baseline to separate worktree
