@@ -1,7 +1,7 @@
 name: VANTARA Runtime actual Debug app integration (experimental)
 on:
   push:
-    branches: [feat/runtime-debug-integration-20261028, fix/witcher-verified-origin-refresh-20261029, fix/witcher-pixeldrain-extraction-20261029]
+    branches: [feat/runtime-debug-integration-20261028, fix/witcher-verified-origin-refresh-20261029, fix/witcher-pixeldrain-extraction-20261029, fix/debug-runner-emulator-disk-20261104]
     paths:
       - 'android/**'
       - 'extensions/runtime-android/**'
@@ -56,6 +56,8 @@ jobs:
           set -euo pipefail
           bash android/gradlew -p android :app:dependencies --configuration releaseRuntimeClasspath --no-daemon > release-runtime-classpath.txt
           if rg 'dev\.vantara\.runtime:|project :runtime-android' release-runtime-classpath.txt; then exit 1; fi
+      - name: Reclaim safe unused toolchains and verify emulator disk capacity
+        run: bash tools/repository-compat/prepare_emulator_disk.sh
       - name: Enable KVM
         run: |
           nproc
@@ -97,7 +99,7 @@ jobs:
           # requested 7.37GB and Android emulator aborted before any test ran.
           # Limit only virtual userdata storage, NOT the test coverage, RAM,
           # CPU, API level, video decoder or playback thresholds.
-          disk-size: 4G
+          disk-size: 6G
           disable-animations: true
           # -noaudio yielded ranchu pcmWrite I/O errors while media data was
           # already buffered. Keep audio enabled against the private null sink;

@@ -46,7 +46,7 @@ jobs:
 
   apk:
     # Ordinary debug artifacts for all other branches are intentionally ephemeral.
-    if: github.ref != 'refs/heads/feat/addons-v7-native-manager-20261027'
+    if: github.ref != 'refs/heads/feat/addons-v7-native-manager-20261027' && github.ref != 'refs/heads/fix/debug-runner-emulator-disk-20261104'
     permissions:
       contents: read
     runs-on: ubuntu-latest
