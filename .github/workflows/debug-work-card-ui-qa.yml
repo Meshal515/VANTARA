@@ -1,0 +1,56 @@
+name: Debug work-card browser QA (no publishing)
+# Dedicated isolated visual regression. No Cloudflare, release, signing, or Debug-channel publish permissions.
+on:
+  push:
+    branches: [fix/debug-work-card-visual-stability-20261104]
+    paths:
+      - 'apps/web/v35/anime.js'
+      - 'apps/web/v35/anime.css'
+      - 'apps/web/v35/work-looks.js'
+      - 'apps/web/v35/logo-layer.js'
+      - 'apps/web/v35/*test.js'
+      - 'tools/repository-compat/playwright-work-card.mjs'
+      - 'tools/repository-compat/work-card-fixture.html'
+      - '.github/workflows/debug-work-card-ui-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chrome-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright test driver separately from app dependencies
+        run: npm install --prefix "$RUNNER_TEMP/vantara-browser" --no-audit --no-fund --no-package-lock playwright@1.56.1
+      - name: Checkout READ-ONLY baseline to separate worktree
+        run: git worktree add --detach "$RUNNER_TEMP/vantara-ui-before" "origin/feat/addons-v7-native-manager-20261027"
+      - name: Baseline browser screenshots and behavior
+        env:
+          VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vantara-browser/node_modules/playwright/index.mjs
+          VANTARA_UI_ROOT: ${{ runner.temp }}/vantara-ui-before
+          VANTARA_WORKCARD_MODE: before
+          VANTARA_WORKCARD_EVIDENCE: work-card-evidence
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: node tools/repository-compat/playwright-work-card.mjs
+      - name: Updated browser screenshots and regression assertions
+        env:
+          VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vantara-browser/node_modules/playwright/index.mjs
+          VANTARA_WORKCARD_MODE: after
+          VANTARA_WORKCARD_EVIDENCE: work-card-evidence
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: node tools/repository-compat/playwright-work-card.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: work-card-before-after-browser-screenshots
+          path: work-card-evidence/
+          if-no-files-found: warn
+          retention-days: 30
