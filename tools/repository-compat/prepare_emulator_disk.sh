@@ -10,7 +10,9 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" || "${RUNNER_OS:-}" != "Linux" || "${HOME:
 fi
 
 mkdir -p "$HOME/.android/avd"
-target_kib=$((9 * 1024 * 1024))  # 9 GiB free: AVD requires 7.37 GB plus headroom
+target_gib="${1:-9}"
+case "$target_gib" in 9|14) ;; *) echo '::error::Unsupported free disk threshold'; exit 1 ;; esac
+target_kib=$((target_gib * 1024 * 1024))  # 14 GiB before SDK image download; 9 GiB at launch
 available_kib() { df -Pk "$HOME/.android/avd" | awk 'NR==2 { print $4 }'; }
 
 echo '=== Emulator disk capacity before safe cleanup ==='
