@@ -136,4 +136,4 @@ jobs:
             ${{ steps.apk.outputs.path }}
             spike/extension-engine/build/arabic-source-snapshot.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1

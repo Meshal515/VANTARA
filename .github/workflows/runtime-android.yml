@@ -36,6 +36,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 1
           name: http-and-cloudstream-contracts-NOT-live-source-success
           path: |
             extensions/runtime-android/http/build/test-results/
@@ -96,6 +97,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 1
           name: runtime-lab-api-${{ matrix.api }}-${{ matrix.profile }}-NOT-live-source-health
           path: |
             extensions/runtime-android/harness/build/outputs/androidTest-results/

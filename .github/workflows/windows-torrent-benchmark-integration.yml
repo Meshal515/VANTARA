@@ -100,6 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 1
           name: windows-torrent-first-frame-${{ github.sha }}
           path: ${{ runner.temp }}/vantara-torrent-benchmark/runs/
           if-no-files-found: warn

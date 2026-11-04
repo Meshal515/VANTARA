@@ -58,6 +58,7 @@ jobs:
           for a in previous candidate; do echo "$a bundles $(unzip -l "$GITHUB_WORKSPACE/$a.apk" | grep -c 'assets/extensions/.*\.apk' || true) source APKs"; done
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: journey-apks
           path: |
             previous.apk
@@ -105,5 +106,6 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: journey-${{ matrix.case }}
           path: android-debug-evidence/

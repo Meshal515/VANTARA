@@ -113,7 +113,7 @@ jobs:
             runtime-app-webview/
             release-runtime-classpath.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   visual-ui:
     if: ${{ github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-')) }}
@@ -155,6 +155,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 1
           name: visual-ui-and-native-gate-evidence-NO-APK
           path: |
             ${{ runner.temp }}/visual-ui-evidence/

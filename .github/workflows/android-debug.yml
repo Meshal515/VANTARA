@@ -8,6 +8,18 @@ on:
   push:
     branches:
       - '**'
+    paths:
+      - 'android/**'
+      - 'apps/web/**'
+      - 'extensions/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'capacitor.config.*'
+      - '.github/workflows/android-debug.yml'
+      - '!**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -146,7 +158,7 @@ jobs:
           name: vantara-debug-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   # The owner-approved feature branch gets a persistent signed QA build.
   # Other branches NEVER receive production signing secrets or release rights.
@@ -304,6 +316,7 @@ jobs:
 
       - name: Retain Debug upgrade, crash, ANR, and renderer evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-upgrade-evidence
@@ -311,7 +324,7 @@ jobs:
             android-debug-evidence/
             android/app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 1
 
       - name: Generate versioned SHA256 manifest for dedicated Debug updates
         env:
@@ -338,15 +351,7 @@ jobs:
           Path('dist/vantara-debug-update.json').write_text(json.dumps(out,ensure_ascii=False,separators=(',',':'))+'\n')
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: VANTARA-upgradeable-debug
-          path: |
-            dist/VANTARA-debug.apk
-            dist/VANTARA-debug.apk.sha256
-            dist/vantara-debug-update.json
-          if-no-files-found: error
-          retention-days: 30
+      # Signed Debug APK and manifest will be uploaded to GitHub Releases below.
 
       - name: Publish isolated prerelease Debug channel (never Stable/latest)
         env:

@@ -96,5 +96,5 @@ jobs:
             live-video-summary.md
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: warn
