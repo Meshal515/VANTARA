@@ -98,3 +98,43 @@ it('heroPlan: only «الحلقة أولًا» drops the blurred poster and the 
   expect(heroPlan('episode').ambient).toBe(false);
   expect(heroPlan('core').posterFallback).toBe(true);
 });
+
+it('flying-card preserves its logo DOM and animation phase when details or episode progress changes', () => {
+  const host = dom();
+  const first = ctx({ logo: 'https://img/logo.png' });
+  renderLook('card', host, first);
+  const originalLogo = host.querySelector('.wl-logo-layer');
+  const originalHead = host.querySelector('.wl-head');
+  const originalPoster = host.querySelector('.wl-stage3d .wl-card img');
+  originalLogo.dataset.ready = 'true';
+  originalLogo.dataset.entered = 'true';
+  originalLogo.dataset.running = 'true';
+
+  const afterProgress = ctx({
+    logo: first.logo,
+    point: { episode: 10, resume: true },
+    label: 'تابع الحلقة 10',
+    progressText: 'شاهدت 0 من 1100',
+  });
+  renderLook('card', host, afterProgress);
+  expect(host.querySelector('.wl-logo-layer')).toBe(originalLogo);
+  expect(host.querySelector('.wl-head')).toBe(originalHead);
+  expect(host.querySelector('.wl-stage3d .wl-card img')).toBe(originalPoster);
+  expect(originalLogo.dataset.running).toBe('true');
+  expect(host.querySelector('.wl-big').textContent).toContain('تابع الحلقة 10');
+  host.querySelector('.wl-big').click();
+  expect(afterProgress.play).toHaveBeenCalledWith(10);
+
+  renderLook('card', host, ctx({ logo: 'https://img/new-logo.png' }));
+  expect(host.querySelector('.wl-logo-layer')).not.toBe(originalLogo);
+  expect(host.querySelector('.wl-logo-layer').dataset.logoSrc).toBe('https://img/new-logo.png');
+});
+
+it('flying-card logos enter from outside the right edge and retain their original colors', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('./anime.css', import.meta.url), 'utf8');
+  expect(css).toContain('wl-logo-enter');
+  expect(css).toContain('translate3d(calc(100vw + 100%), 0, 0)');
+  expect(css).toContain('.wl-logo-white img { filter: none; }');
+  expect(css).not.toMatch(/\.wl-logo-white img\s*\{[^}]*brightness\(0\)\s+invert\(1\)/);
+});
