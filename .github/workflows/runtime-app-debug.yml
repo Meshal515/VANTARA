@@ -93,6 +93,11 @@ jobs:
           # four vCPUs while retaining the exact clock/frame/seek assertions.
           cores: 4
           ram-size: 4096M
+          # Hosted runner had 5.8GB free after Gradle; the default data disk
+          # requested 7.37GB and Android emulator aborted before any test ran.
+          # Limit only virtual userdata storage, NOT the test coverage, RAM,
+          # CPU, API level, video decoder or playback thresholds.
+          disk-size: 4G
           disable-animations: true
           # -noaudio yielded ranchu pcmWrite I/O errors while media data was
           # already buffered. Keep audio enabled against the private null sink;
