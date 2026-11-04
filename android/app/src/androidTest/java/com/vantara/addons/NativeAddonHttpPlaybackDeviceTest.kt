@@ -55,7 +55,7 @@ class NativeAddonHttpPlaybackDeviceTest {
             val raw = buildJsonArray { add(buildJsonObject {
                 put("id", "public-http"); put("status", "RESOLVED"); put("url", videoUrl); put("type", "mp4")
                 put("filename", "authored-proof.mp4")
-                putJsonArray("subtitles") { add(buildJsonObject { put("url", subtitleUrl); put("lang", "ar") }) }
+                putJsonArray("subtitles") { add(buildJsonObject { put("url", subtitleUrl); put("lang", "en") }) }
             }) }
             val c = NativeAddonCandidates.parse("proof", "addon|proof", "Authored proof", raw, System.currentTimeMillis()).single()
             val transport = nativeAddonMediaClient(OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build())
@@ -76,11 +76,11 @@ class NativeAddonHttpPlaybackDeviceTest {
             instrumentation.runOnMainSync {
                 player = ExoPlayer.Builder(context).build().also { p ->
                     p.setVideoSurface(images.surface)
-                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setPreferredTextLanguage("en").build()
                     p.addListener(object : Player.Listener {
                         override fun onRenderedFirstFrame() { firstFrame.countDown() }
                         override fun onCues(cueGroup: CueGroup) {
-                            if (cueGroup.cues.any { it.text.toString().contains("VANTARA_NATIVE_SUBTITLE_PROOF") }) cue.countDown()
+                            if (cueGroup.cues.any { it.text.toString().contains("Hello, welcome to the video!") }) cue.countDown()
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) { failure.set(error); firstFrame.countDown(); cue.countDown(); sought.countDown(); progressed.countDown() }
                     })

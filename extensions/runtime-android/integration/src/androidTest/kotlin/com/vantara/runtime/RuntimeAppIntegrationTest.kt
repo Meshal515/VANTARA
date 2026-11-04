@@ -154,7 +154,7 @@ class RuntimeAppIntegrationTest {
             val dropBudgetPercent=if(emulatorDecoder)25 else 10
             val totalFrames=rendered.toLong()+dropped.toLong()
             android.util.Log.i("VantaraRuntime","LIVE_WITCHER_FRAME_BUDGET:hardware=${android.os.Build.HARDWARE};emulator=$emulatorDecoder;budget=$dropBudgetPercent;dropped=$dropped;rendered=$rendered")
-            assertTrue("Excessive dropped frames (budget ${dropBudgetPercent}%): $dropped/$rendered; hardware=${android.os.Build.HARDWARE}",dropped.toLong()*100<=totalFrames*dropBudgetPercent)
+            assertTrue("Excessive dropped frames (budget ${dropBudgetPercent}%): $dropped/$rendered; hardware=${android.os.Build.HARDWARE}; dimensions=$dimensions; elapsed=$elapsed; advanced=$advanced; bufferingSamples=$bufferingSamples",dropped.toLong()*100<=totalFrames*dropBudgetPercent)
             val forward=onMain { player.currentPosition+60000 };onMain { player.seekTo(forward) };awaitPosition(forward+1000,forward+5000)
             val backward=(forward-30000).coerceAtLeast(0);onMain { player.seekTo(backward) };awaitPosition(backward+1000,backward+5000)
             android.util.Log.i("VantaraRuntime","LIVE_WITCHER_PLAYER:existing Activity/transport; elapsed=30000; advanced=$advanced; rendered=$rendered; dropped=$dropped; dimensions=$dimensions; forward/backward passed")
