@@ -115,6 +115,25 @@ it('the work page is built once and filled in place: no re-render when details a
   anime.leaveDetail();
 });
 
+
+it('axis-mode reuses the episode play button while detail and episode artwork arrive', async () => {
+  const { root, anime } = setup();
+  const opening = anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries', poster: 'https://img/cover.jpg' });
+  const play = root.querySelector('.aw-still-play');
+  expect(play).not.toBeNull();
+  await opening;
+  await settle();
+  expect(root.querySelector('.aw-still-play')).toBe(play);
+});
+
+it('resume follows last STARTED episode 10 even if episodes 1–9 were skipped', async () => {
+  const { root, anime } = setup();
+  recordWatch({ id: DETAIL.id, title: 'The Apothecary Diaries', episodes: 20 }, 10, 120000, 1440000);
+  await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' });
+  await settle();
+  expect(root.querySelector('.aw-still-cap b')?.textContent).toBe('تابع الحلقة 10');
+});
+
 it('toggling watched repaints only that row (same nodes, same image), and the CTA moves on', async () => {
   const { root, anime, store } = setup();
   await anime.openAnime({ id: 161645, title: 'The Apothecary Diaries', poster: 'https://img/cover.jpg' });
