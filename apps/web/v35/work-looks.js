@@ -84,7 +84,8 @@ function logoLayer(c) {
   const unit = `<img src="${esc(c.logo)}" crossorigin="anonymous" alt="" decoding="async">`;
   const group = `<span class="wl-logo-group">${unit}${unit}</span>`;
   const train = `<span class="wl-logo-train">${group}${group}</span>`;
-  return `<div class="wl-logo-layer" aria-hidden="true" hidden><div class="wl-logo-lane wl-logo-color">${train}</div><div class="wl-logo-lane wl-logo-white">${train}</div></div>`;
+  // Keep one stable, off-screen entrance shell around both synchronized logo lanes.
+  return `<div class="wl-logo-layer" data-logo-src="${esc(c.logo)}" aria-hidden="true" hidden><div class="wl-logo-entry"><div class="wl-logo-lane wl-logo-color">${train}</div><div class="wl-logo-lane wl-logo-white">${train}</div></div></div>`;
 }
 
 const LOOKS = {
@@ -170,10 +171,37 @@ export function renderLook(look, host, c, { center = true } = {}) {
   if (!make || !host) return;
   // إعادة الرسم (وصول بيانات أو تقدّم) تحفظ موضع الشرائط الأفقية؛ لا تقفز تحت إصبع المستخدم
   const kept = [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].map((el) => el.scrollLeft);
-  host._releaseLogoLayer?.();
+  // Incremental card repaint: logo lanes must keep their DOM, entrance state and
+  // animation clock when episode metadata, artwork or progress arrives.
+  const oldHead = look === 'card' && host.classList.contains('wl-card')
+    ? host.querySelector('.wl-head') : null;
+  const keepLogo = Boolean(oldHead && c.logo && oldHead.querySelector('.wl-logo-layer')?.dataset.logoSrc === c.logo);
+  let patched = false;
+  if (keepLogo) {
+    const fresh = document.createElement('div');
+    fresh.innerHTML = make(c, parts(c));
+    const newHead = fresh.querySelector('.wl-head');
+    const oldInfo = oldHead.querySelector('.wl-info');
+    const newInfo = newHead?.querySelector('.wl-info');
+    const oldBody = host.querySelector('.wl-body');
+    const newBody = fresh.querySelector('.wl-body');
+    if (oldInfo && newInfo && oldBody && newBody) {
+      oldInfo.replaceWith(newInfo);
+      const previousPoster = oldHead.querySelector('.wl-stage3d .wl-card img');
+      const updatedPoster = newHead.querySelector('.wl-stage3d .wl-card img');
+      if (previousPoster && updatedPoster && previousPoster.getAttribute('src') !== updatedPoster.getAttribute('src')) {
+        previousPoster.setAttribute('src', updatedPoster.getAttribute('src'));
+      }
+      oldBody.replaceWith(newBody);
+      patched = true;
+    }
+  }
   host.className = `wl wl-${look}`;
-  host.innerHTML = make(c, parts(c));
-  host._releaseLogoLayer = mountLogoLayer(host);
+  if (!patched) {
+    host._releaseLogoLayer?.();
+    host.innerHTML = make(c, parts(c));
+    host._releaseLogoLayer = mountLogoLayer(host);
+  }
   if (!center) [...host.querySelectorAll('.wl-strip, .wl-track, .wl-tall, .wl-ring')].forEach((el, i) => { if (kept[i] != null) el.scrollLeft = kept[i]; });
   // صورة تعذّرت: الشعار يحل محله الاسم مكتوبًا، وغيره يختفي بدل رمز الصورة المكسورة
   for (const im of host.querySelectorAll('img')) {
