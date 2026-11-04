@@ -7,3 +7,46 @@ it('rejects opaque or empty art and accepts visible ink with real transparency',
 it('reveals a validated image and pauses it when the document is hidden',()=>{const t=make();const off=mountLogoLayer(t.host,{validate:()=>true});t.im.dispatchEvent(new t.document.defaultView.Event('load'));expect(t.layer.hidden).toBe(false);expect(t.layer.dataset.running).toBe('true');t.hide(true);expect(t.layer.dataset.running).toBe('false');t.hide(false);expect(t.layer.dataset.running).toBe('true');off();expect(t.layer.dataset.running).toBe('false');});
 it('hides failed or nontransparent art rather than showing a rectangle or invented logo',()=>{const t=make();mountLogoLayer(t.host,{validate:()=>false});t.im.dispatchEvent(new t.document.defaultView.Event('load'));expect(t.layer.hidden).toBe(true);expect(t.layer.dataset.running).toBe('false');});
 it('honors reduced motion and releases event listeners on disposal',()=>{const t=make();t.mq.matches=true;const off=mountLogoLayer(t.host,{validate:()=>true});t.im.dispatchEvent(new t.document.defaultView.Event('load'));expect(t.layer.dataset.running).toBe('false');off();expect(t.mq.removeEventListener).toHaveBeenCalled();t.im.dispatchEvent(new t.document.defaultView.Event('load'));expect(t.layer.dataset.running).toBe('false');});
+
+it('does not show a mid-screen logo: waits for entry, then starts the perpetual drift', () => {
+  const t = make();
+  const entry = t.document.createElement('div');
+  entry.className = 'wl-logo-entry';
+  t.layer.append(entry);
+  const off = mountLogoLayer(t.host, { validate: () => true });
+  t.im.dispatchEvent(new t.document.defaultView.Event('load'));
+  expect(t.layer.hidden).toBe(false);
+  expect(t.layer.dataset.ready).toBe('true');
+  expect(t.layer.dataset.entered).toBeUndefined();
+  expect(t.layer.dataset.running).toBe('false');
+  const event = new t.document.defaultView.Event('animationend');
+  Object.defineProperty(event, 'animationName', { value: 'wl-logo-enter' });
+  entry.dispatchEvent(event);
+  expect(t.layer.dataset.entered).toBe('true');
+  expect(t.layer.dataset.running).toBe('true');
+  t.hide(true);
+  expect(t.layer.dataset.running).toBe('false');
+  t.hide(false);
+  expect(t.layer.dataset.running).toBe('true');
+  off();
+});
+
+it('waits for image.decode before exposing an animated logo', async () => {
+  const t = make();
+  const entry = t.document.createElement('div');
+  entry.className = 'wl-logo-entry';
+  t.layer.append(entry);
+  let resolveDecode;
+  t.im.decode = vi.fn(() => new Promise((resolve) => { resolveDecode = resolve; }));
+  const off = mountLogoLayer(t.host, { validate: () => true });
+  t.im.dispatchEvent(new t.document.defaultView.Event('load'));
+  await Promise.resolve();
+  expect(t.im.decode).toHaveBeenCalledOnce();
+  expect(t.layer.hidden).toBe(true);
+  resolveDecode();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(t.layer.hidden).toBe(false);
+  expect(t.layer.dataset.ready).toBe('true');
+  off();
+});
