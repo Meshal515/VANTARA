@@ -53,11 +53,23 @@ class SourceCertificationTest {
         const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
     }
 
+    private val libraryFrames = Regex("^(java|javax|kotlin|kotlinx|android|androidx|dalvik|libcore|sun|com\\.android|okhttp3|okio|org\\.jsoup|org\\.json|com\\.fasterxml|uy\\.kohesive)\\.")
+
+    /**
+     * Who threw it: the first frame outside platform/library code, as a package prefix. An extension's own frame
+     * (eu.kanade.tachiyomi.animeextension…) proves the fault is the extension's; com.vantara/dev.vantara is ours.
+     */
+    private fun thrower(error: Throwable): String? =
+        error.stackTrace.firstOrNull { !libraryFrames.containsMatchIn(it.className) }?.className
+            ?.split('.')?.let { parts -> parts.take(if (parts.size > 5) 6 else parts.size - 1).joinToString(".") }
+
     private fun reason(error: Throwable): String {
         val chain = generateSequence(error) { it.cause }.take(6).toList()
         val code = chain.mapNotNull { it.message }.firstOrNull { it.matches(Regex("[A-Z][A-Z0-9_]{2,80}(:.*)?")) }
-        return (code ?: (chain.last().javaClass.simpleName + ": " + (chain.last().message ?: "")))
-            .replace(Regex("https?://\\S+"), "<url>").take(200)
+        // A typed code already names its owner; an untyped exception carries where it was thrown.
+        val raw = chain.last()
+        return (code ?: (raw.javaClass.simpleName + ": " + (raw.message ?: "") + (thrower(raw)?.let { " @$it" } ?: "")))
+            .replace(Regex("https?://\\S+"), "<url>").take(240)
     }
 
     private fun emit(obj: JsonObject) = Log.i("VANTARA_CERT", obj.toString())
