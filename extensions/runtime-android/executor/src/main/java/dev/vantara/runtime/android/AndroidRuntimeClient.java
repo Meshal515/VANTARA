@@ -45,6 +45,15 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private final Context context;
     private final Scope scope;
     private final HostTransport transport;
+    /**
+     * Binding callbacks run here, not on the main thread: a busy UI (WebView boot, a page drawing) delayed
+     * onServiceConnected past BINDING_TIMEOUT although the isolated process was already up. The callback only
+     * stores the binder and hands HELLO to [io], so one shared daemon thread serves every worker.
+     */
+    private static final Executor bindingCallbacks=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"vrt-binding");t.setDaemon(true);return t;});
+    /** A cold isolated process start (zygote fork + app load) can exceed 10s on a low-end or busy device. */
+    private static final long BINDING_TIMEOUT_MS=25000;
+    private volatile long bindStarted;
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"vrt-call");t.setDaemon(true);return t;});
     private final ScheduledExecutorService clock=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"vrt-deadline");t.setDaemon(true);return t;});
     private final AtomicBoolean started=new AtomicBoolean(),closed=new AtomicBoolean(),busy=new AtomicBoolean(),brokerBusy=new AtomicBoolean();
@@ -56,6 +65,8 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private final ServiceConnection connection=new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name,IBinder service) {
             if(closed.get()) return;
+            long waited=SystemClock.elapsedRealtime()-bindStarted;
+            if(waited>3000) android.util.Log.w("VantaraRuntime","WORKER_BIND_SLOW:"+waited+"ms");
             endpoint=service;
             try { service.linkToDeath(()->retire("PROCESS_DIED",false),0); }
             catch(RemoteException e) { retire("PROCESS_DIED",false);return; }
@@ -84,11 +95,12 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         synchronized(this) {
             if(closed.get()) return failed("WORKER_CLOSED");
             if(started.compareAndSet(false,true)) {
+                bindStarted=SystemClock.elapsedRealtime();
                 try {
                     bound=context.bindIsolatedService(new Intent(context,RuntimeWorkerService.class),Context.BIND_AUTO_CREATE,
-                        "generation_"+UUID.randomUUID().toString().replace("-",""),context.getMainExecutor(),connection);
+                        "generation_"+UUID.randomUUID().toString().replace("-",""),bindingCallbacks,connection);
                     if(!bound) retire("BINDING_FAILED",false);
-                    else clock.schedule(()->{if(!ready.isDone()) retire("BINDING_TIMEOUT",true);},10000,TimeUnit.MILLISECONDS);
+                    else clock.schedule(()->{if(!ready.isDone()) retire("BINDING_TIMEOUT",true);},BINDING_TIMEOUT_MS,TimeUnit.MILLISECONDS);
                 } catch(RuntimeException e) { retire("BINDING_FAILED",false); }
             }
         }
