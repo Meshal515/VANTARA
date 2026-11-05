@@ -38,6 +38,9 @@ const ADDON = /^(NO_[A-Z_]+_RESULT|NO_VIDEO_LINKS|EXTENSION_PARSE|PROVIDER_FAILE
 export function owner(code, stage = '') {
   const c = String(code ?? '').replace(/^(popular|latest)#\d+:/, '');
   if (!c) return 'unknown';
+  // مكان الرمي يحسم ما لا يحسمه نوع الاستثناء: إطار فانتارا عطلها، وإطار الإضافة عطل الإضافة
+  const at = c.match(/ @([\w.]+)$/)?.[1];
+  if (at) return /^(com|dev)\.vantara\b/.test(at) ? 'vantara' : 'addon';
   if (VANTARA.test(c)) return 'vantara';
   if (c.startsWith('OPERATION_TIMEOUT')) return stage === 'install' ? 'vantara' : 'site';
   if (SITE.test(c)) return 'site';
@@ -57,6 +60,7 @@ export function failures(source, works = []) {
     if (!out.length) out.push({ code: 'EMPTY_CATALOGUE', owner: 'addon' });
   }
   for (const w of works) {
+    if (w.details) out.push({ code: w.details, owner: owner(w.details, 'details') });
     if (w.code) out.push({ code: w.code, owner: owner(w.code, w.stage) });
     // «جاهز» فشل في المشغّل الأصلي: وعد فانتارا للمستخدم، فهو عطل فانتارا مهما كان سببه
     for (const p of w.played ?? []) if (p.verdict === 'FALSE_READY') out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: 'vantara' });

@@ -36,6 +36,9 @@ test('مالك كل فشل: قيام العامل ومهلة التثبيت و«
   assert.equal(owner('popular#1:HttpException: HTTP error 503', 'catalogue'), 'site');
   assert.equal(owner('VERIFICATION_REQUIRED'), 'site');
   assert.equal(owner('SomethingNew: boom'), 'unknown');
+  assert.equal(owner("NullPointerException: getClass() on null @eu.kanade.tachiyomi.animeextension.ar.okanime", 'details'), 'addon');
+  assert.equal(owner('NullPointerException: x @com.vantara.anime.adapters', 'details'), 'vantara');
+  assert.deepEqual(failures({ worksTested: 1 }, [{ details: 'IllegalStateException: y @eu.kanade.tachiyomi.animeextension.ar.x', code: 'EMPTY_EPISODES', stage: 'episodes' }]).map((f) => f.owner), ['addon', 'addon']);
   const moved = failures({ worksTested: 0, siteMovedTo: 'new.example', catalogueErrors: ['popular#1:EMPTY_PAGE'] });
   assert.deepEqual(moved, [{ code: 'الموقع انتقل إلى new.example', owner: 'site' }]);
   const lied = failures({ worksTested: 1 }, [{ played: [{ verdict: 'PLAYS' }, { verdict: 'FALSE_READY', code: 'NO_FIRST_FRAME' }] }]);
