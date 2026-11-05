@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, table, verdict, site } from './summarize_certification.mjs';
+import { parse, table, verdict, site, owner, failures } from './summarize_certification.mjs';
 
 test('جدول الاعتماد: التغطية والاحتياط وصدق «جاهز» لكل مصدر', () => {
   const lines = [
@@ -13,7 +13,7 @@ test('جدول الاعتماد: التغطية والاحتياط وصدق «ج
   const records = parse(lines);
   assert.equal(records.length, 4);
   const md = table(records);
-  assert.match(md, /\| AnimeRift \| cs3\/anime \| معتمد \| 10\/10 \| 9\/10 \| 9\/10 \| 20\/30 \| 70 \| 0 \| 2\.4 ث \| 9000\/40 \|/);
+  assert.match(md, /\| AnimeRift \| cs3\/anime \| معتمد \| 0 \| 0 \| 0 \| 10\/10 \| 9\/10 \| 9\/10 \| 20\/30 \| 70 \| 0 \| 2\.4 ث \| 9000\/40 \|/);
   assert.match(md, /witanime .*جاهز يكذب.*NO_FIRST_FRAME×3/);
   assert.equal(verdict({ code: 'X' }), 'لم يكتمل: X');
   assert.equal(verdict({ worksTested: 30, worksPlayable: 20, worksWithBackup: 0, falseReady: 0 }), 'يعمل جزئيًا');
@@ -26,4 +26,21 @@ test('سبب الكتالوج الفارغ ومرحلة الفشل يظهران 
   assert.equal(verdict(moved), 'لا أعمال في الكتالوج (الموقع انتقل إلى new.example؛ popular#1:EMPTY_PAGE)');
   assert.equal(verdict({ worksTested: 0 }), 'لا أعمال في الكتالوج');
   assert.equal(site({ siteStatus: 403, siteChallenge: 'cloudflare' }), 'الموقع يطلب تحقق Cloudflare');
+});
+
+test('مالك كل فشل: قيام العامل ومهلة التثبيت و«جاهز يكذب» من فانتارا، والموقع والإضافة يُبلَّغان', () => {
+  assert.equal(owner('BINDING_TIMEOUT', 'install'), 'vantara');
+  assert.equal(owner('OPERATION_TIMEOUT', 'install'), 'vantara');
+  assert.equal(owner('OPERATION_TIMEOUT', 'catalogue'), 'site');
+  assert.equal(owner('popular#1:HttpException: HTTP error 404', 'catalogue'), 'addon');
+  assert.equal(owner('popular#1:HttpException: HTTP error 503', 'catalogue'), 'site');
+  assert.equal(owner('VERIFICATION_REQUIRED'), 'site');
+  assert.equal(owner('SomethingNew: boom'), 'unknown');
+  const moved = failures({ worksTested: 0, siteMovedTo: 'new.example', catalogueErrors: ['popular#1:EMPTY_PAGE'] });
+  assert.deepEqual(moved, [{ code: 'الموقع انتقل إلى new.example', owner: 'site' }]);
+  const lied = failures({ worksTested: 1 }, [{ played: [{ verdict: 'PLAYS' }, { verdict: 'FALSE_READY', code: 'NO_FIRST_FRAME' }] }]);
+  assert.deepEqual(lied, [{ code: 'FALSE_READY:NO_FIRST_FRAME', owner: 'vantara' }]);
+  const md = table(parse([JSON.stringify({ type: 'source', kind: 'cs3', name: 'X', content: 'anime', code: 'BINDING_TIMEOUT', stage: 'install' })].join('\n')));
+  assert.match(md, /\| X \| cs3\/anime \| لم يكتمل: BINDING_TIMEOUT عند التثبيت \| 1 \(BINDING_TIMEOUT\) \| 0 \| 0 \|/);
+  assert.match(md, /أعطال فانتارا: 1/);
 });

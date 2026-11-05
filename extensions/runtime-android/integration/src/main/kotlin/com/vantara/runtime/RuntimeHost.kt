@@ -332,9 +332,11 @@ class RuntimeHost(
         o.store.stage(file,hash).use { candidate ->
             // Registration has no network permission. A plugin's load() cannot probe a source site.
             val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,"registration",o.id,setOf("https://registration.example"))
-            val registration=worker(o,generation,scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
-                AndroidRuntimeClient.HostTransport { _,_ -> throw IOException("INITIALIZATION_NETWORK_DENIED") }) { client ->
-                RuntimeJson.parse(client.invokeJson("capabilities","{}",3000).await()).jsonObject
+            val registration=retryWorkerStart {
+                worker(o,generation,scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
+                    AndroidRuntimeClient.HostTransport { _,_ -> throw IOException("INITIALIZATION_NETWORK_DENIED") }) { client ->
+                    RuntimeJson.parse(client.invokeJson("capabilities","{}",3000).await()).jsonObject
+                }
             }
             val sources=RuntimeRegistration.validate(registration,pkg)
             val before=synchronized(lock) { checkPackage(o,pkg,generation);o.store.current(pkg) }
@@ -436,7 +438,7 @@ class RuntimeHost(
         val learned=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val started=System.nanoTime()
         var rejected:RuntimeFailure?=null
-        val initial=try { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) }
+        val initial=try { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) } }
         catch(failure:RuntimeFailure) { rejected=failure;null }
         val permissionChanged=RuntimeNetworkPolicy.PUBLIC_INTERNET !in origins && learned.any { it !in origins }
         // Some published providers catch a denied media request and return an
@@ -450,7 +452,7 @@ class RuntimeHost(
             val remaining=25000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
             if(remaining<=0)throw IllegalStateException("OPERATION_TIMEOUT")
             val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
-            try { withTimeout(remaining) { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } }
+            try { withTimeout(remaining) { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } } }
             catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
         }
     }.also { result ->
@@ -526,6 +528,16 @@ class RuntimeHost(
             return if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
         } finally { transport.close() }
     }
+    /**
+     * A worker that never came up is VANTARA's failure, not the provider's or the site's: no provider code
+     * ran and no request left the device. One fresh worker (and a fresh transport, since each attempt builds
+     * its own) before reporting it. Provider and network failures are never retried here.
+     */
+    private suspend fun <T> retryWorkerStart(block: suspend ()->T): T = try { block() } catch (failure: RuntimeFailure) {
+        if(failure.code !in WORKER_START_FAILURES)throw failure
+        android.util.Log.w("VantaraRuntime","WORKER_START_RETRY:"+failure.code)
+        block()
+    }
     private suspend fun <T> worker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
         val client=synchronized(lock) {
             checkPackage(o,scope.packageId(),generation)
@@ -590,6 +602,7 @@ class RuntimeHost(
     }
     fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
     companion object {
+        private val WORKER_START_FAILURES=setOf("BINDING_TIMEOUT","BINDING_FAILED")
         fun digest(value: String)=digest(value.toByteArray())
         fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         fun packageId(repository: String,internalName: String)="cs3_"+digest(repository+"\u0000"+internalName).take(32)
