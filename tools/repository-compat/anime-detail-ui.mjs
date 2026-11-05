@@ -75,6 +75,42 @@ async function pauseTop(page){await page.evaluate(()=>{for(const animation of do
 async function action(page,label){await page.locator('.aw-episode-controls [aria-label="الترتيب والتصفية"]').click();await page.locator('#dialog button').filter({hasText:label}).click();}
 async function rowNumbers(page){return page.locator('[data-episode-row]').evaluateAll(nodes=>nodes.map(n=>Number(n.dataset.ep)));}
 
+// Reach the final tab with actual gestures. Locator.click() alone would auto-scroll
+// and could pass while a real user is unable to pan the rail.
+async function reachLastGroup(page) {
+ const rail=page.locator('.aw-episode-controls .aw-ranges');
+ await rail.scrollIntoViewIfNeeded();
+ const rtl=await rail.evaluate(n=>getComputedStyle(n).direction==='rtl');
+ const mobile=page.viewportSize().width<700;
+ const cdp=mobile?await page.context().newCDPSession(page):null;
+ try {
+  for(let attempt=0;attempt<20;attempt++) {
+   const atEnd=await rail.evaluate(n=>Math.abs(n.scrollLeft)>=n.scrollWidth-n.clientWidth-1);
+   if(atEnd)break;
+   const b=await rail.boundingBox(),y=b.y+b.height/2;
+   const start=rtl?b.x+24:b.x+b.width-24,end=rtl?b.x+b.width-24:b.x+24;
+   if(cdp) {
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:start,y}]});
+    for(let step=1;step<=8;step++) {
+     await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:start+(end-start)*step/8,y}]});
+     await page.waitForTimeout(12);
+    }
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+   } else {
+    await page.mouse.move(start,y);await page.mouse.down();
+    await page.mouse.move(end,y,{steps:10});await page.mouse.up();
+   }
+   await page.waitForTimeout(80);
+  }
+  const end=await rail.locator('[data-episode-page]').last().evaluate(n=>{
+   const a=n.getBoundingClientRect(),b=n.parentElement.getBoundingClientRect();
+   return {visible:a.left>=b.left-1&&a.right<=b.right+1,offset:n.parentElement.scrollLeft};
+  });
+  assert.equal(end.visible,true,'Last group reached by '+(mobile?'native touch':'mouse drag'));
+  return {...end,gesture:mobile?'touch':'mouse'};
+ } finally {await cdp?.detach()}
+}
+
 try{
  for(const test of cases){
   const {style,width,dir,key}=test,row={...test,phases:{}};
@@ -110,8 +146,13 @@ try{
       await page.locator('.aw-still-play').screenshot({path:path.join(output,`${phase}-${style}-${width}-${dir}-${accent}-play.png`)});
       row.phases.after.optical=optical;
      }
+     const sharedHeader=await page.locator('.aw-episode-controls').evaluate(n=>{
+      const title=getComputedStyle(n.querySelector('h2')),tab=getComputedStyle(n.querySelector('.aw-range.active'));
+      return {fontSize:title.fontSize,fontWeight:title.fontWeight,background:tab.backgroundColor,borderRadius:tab.borderRadius,first:n.querySelector('.aw-range')?.textContent};
+     });
+     assert.deepEqual(sharedHeader,{fontSize:'20px',fontWeight:'800',background:'rgba(0, 0, 0, 0)',borderRadius:'0px',first:'1–50'},key+' shared core header');
      assert.equal(initial.pageWidth,width,key+' page overflow');assert.ok(initial.app.width<=width,key+' app bound');
-     assert.ok(initial.rows<= (style==='core'?50:25),key+' initial row bound');
+     assert.ok(initial.rows<= 50,key+' initial row bound');
      await page.evaluate(cover=>{window.retained={cover:document.querySelector(cover+' img'),hero:document.querySelector('.aw-bg img:last-of-type'),logo:document.querySelector('.wl-logo-layer'),animations:document.querySelector('.wl-logo-layer')?.getAnimations({subtree:true})??[]}},topSelector[style]);
      await action(page,'الأحدث أولًا');assert.equal((await rowNumbers(page))[0],1000,key+' global descending');
      await action(page,'أخفِ ما شاهدته');
@@ -121,7 +162,7 @@ try{
      await input.fill('Shared voyage');await page.waitForTimeout(260);
      assert.equal(await input.evaluate(node=>document.activeElement===node),true,key+' search update retains typing focus');
      assert.equal((await rowNumbers(page))[0],1000,key+' name search order');
-     assert.ok((await rowNumbers(page)).length<=(style==='core'?50:25),key+' bounded name search');
+     assert.ok((await rowNumbers(page)).length<=50,key+' bounded name search');
      // Synthetic activation leaves the typing focus in place so that the update
      // itself, rather than normal pointer focus transfer, is what we measure.
      await page.evaluate(()=>{document.querySelector('.aw-episode-controls [aria-label="الترتيب والتصفية"]').click();[...document.querySelectorAll('#dialog button')].find(b=>b.textContent.trim()==='أخفِ ما شاهدته').click()});
@@ -134,7 +175,8 @@ try{
      assert.equal(await input.evaluate(node=>document.activeElement===node),true,key+' restored filter retains typing focus');
      const retained=await page.evaluate(cover=>({input:document.querySelector('.aw-episode-controls input')===window.retained.input,cover:document.querySelector(cover+' img')===window.retained.cover,hero:document.querySelector('.aw-bg img:last-of-type')===window.retained.hero,rowImage:document.querySelector('[data-episode-row][data-ep="1000"] img')===window.retained.rowImage,logo:document.querySelector('.wl-logo-layer')===window.retained.logo,animation:!window.retained.logo||window.retained.animations.every(a=>window.retained.logo.getAnimations({subtree:true}).includes(a))}),topSelector[style]);
      assert.ok(Object.values(retained).every(Boolean),key+' retained DOM '+JSON.stringify(retained));row.phases.after.retained={...retained,typingFocus:true};
-     const groups=page.locator('[data-episode-page]');await groups.last().click();
+     const groups=page.locator('[data-episode-page]');
+     row.phases.after.manualGroupScroll=await reachLastGroup(page);await groups.last().click();
      const finalNumbers=await rowNumbers(page);assert.ok(finalNumbers.includes(10),key+' last filtered group reaches lowest unseen');assert.ok(finalNumbers.every(n=>n>=10),key+' hides all seen');
      const reachable=await groups.last().evaluate(node=>{const a=node.getBoundingClientRect(),b=node.parentElement.getBoundingClientRect();return{visible:a.left>=b.left-1&&a.right<=b.right+1,railWidth:b.width,viewport:innerWidth,offset:node.parentElement.scrollLeft}});
      assert.ok(reachable.visible,key+' last group horizontally reachable');assert.ok(reachable.railWidth<=width,key+' group rail bound');row.phases.after.reachable=reachable;

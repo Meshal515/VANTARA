@@ -620,7 +620,7 @@ export function createAnime(deps) {
       if (token !== state.detailToken || !full) return;
       state.detail = full;
       if (!isMovie(full) && full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
-      if (episode) state.episodeRange = Math.floor((episode - 1) / (state.view?.lw ? 25 : EP_PAGE));
+      if (episode) state.episodeRange = Math.floor((episode - 1) / EP_PAGE);
       fillWork(full);
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
@@ -1164,7 +1164,7 @@ export function createAnime(deps) {
     const point = resumePoint(m);
     const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
     const total = episodeCount(m);
-    const page = pageFor(m, 25);
+    const page = pageFor(m);
     const rec = epRecord(m, point.episode);
     const ratio = !rec.done && rec.duration > 0 ? Math.min(1, rec.position / rec.duration) : null;
     const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60_000)) : null;
@@ -1748,7 +1748,7 @@ export function createAnime(deps) {
     sub.textContent = lines.join(' · ') || 'لم تُعرض بعد';
   }
 
-  function pageFor(m, pageSize = state.view?.lw ? 25 : EP_PAGE) {
+  function pageFor(m, pageSize = EP_PAGE) {
     const watch = localWatch()[m.id];
     return episodePage({ total: episodeCount(m), pageSize, pageIndex: state.episodeRange,
       currentEpisode: resumePoint(m).episode, query: state.epQuery,
@@ -1759,7 +1759,7 @@ export function createAnime(deps) {
 
   function controlsFor(m, page) {
     const v = state.view;
-    if (!v.episodeControls) v.episodeControls = createEpisodeControls({document, el, glyph, look:v.look,
+    if (!v.episodeControls) v.episodeControls = createEpisodeControls({document, el, glyph,
       onQuery: value => {state.epQuery=value;state.episodeRange=0;paintEpisodeList(state.detail)},
       onPage: index => {state.episodeRange=index;paintEpisodeList(state.detail)},
       onTools: () => openEpisodeTools(state.detail)});

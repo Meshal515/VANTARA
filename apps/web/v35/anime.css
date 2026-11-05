@@ -1128,7 +1128,7 @@ html[data-section='cinema'] {
   display: grid;
   gap: 3px;
 }
-.v35 .aw-eps-head h2 {
+.v35 .aw-episode-controls .aw-eps-head h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
@@ -1196,23 +1196,23 @@ html[data-section='cinema'] {
   color: var(--text-3);
 }
 /* المواسم والمدى: ألسنة نصية بخط تحت المختار، لا صناديق */
-.v35 .an-seasons,
-.v35 .aw-ranges {
+.v35 .aw-episode-controls .an-seasons,
+.v35 .aw-episode-controls .aw-ranges {
   display: flex;
   gap: 20px;
   overflow-x: auto;
   margin-bottom: 8px;
   scrollbar-width: none;
 }
-.v35 .an-seasons::-webkit-scrollbar,
-.v35 .aw-ranges::-webkit-scrollbar {
+.v35 .aw-episode-controls .an-seasons::-webkit-scrollbar,
+.v35 .aw-episode-controls .aw-ranges::-webkit-scrollbar {
   display: none;
 }
-.v35 .aw-ranges[hidden] {
+.v35 .aw-episode-controls .aw-ranges[hidden] {
   display: none;
 }
-.v35 .an-season,
-.v35 .aw-range {
+.v35 .aw-episode-controls .an-season,
+.v35 .aw-episode-controls .aw-range {
   position: relative;
   flex: none;
   display: grid;
@@ -1227,23 +1227,23 @@ html[data-section='cinema'] {
   cursor: pointer;
   transition: color 0.2s ease;
 }
-.v35 .an-season b {
+.v35 .aw-episode-controls .an-season b {
   font-size: 14px;
   font-weight: 650;
   white-space: nowrap;
 }
-.v35 .an-season span {
+.v35 .aw-episode-controls .an-season span {
   font-size: 11px;
   color: var(--text-4);
   white-space: nowrap;
 }
-.v35 .aw-range {
+.v35 .aw-episode-controls .aw-range {
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.v35 .an-season::after,
-.v35 .aw-range::after {
+.v35 .aw-episode-controls .an-season::after,
+.v35 .aw-episode-controls .aw-range::after {
   content: '';
   position: absolute;
   inset-inline: 0;
@@ -1254,13 +1254,13 @@ html[data-section='cinema'] {
   transform: scaleX(0);
   transition: transform 0.25s ease;
 }
-.v35 .an-season.active,
-.v35 .aw-range.active {
+.v35 .aw-episode-controls .an-season.active,
+.v35 .aw-episode-controls .aw-range.active {
   color: var(--text-1);
   cursor: default;
 }
-.v35 .an-season.active::after,
-.v35 .aw-range.active::after {
+.v35 .aw-episode-controls .an-season.active::after,
+.v35 .aw-episode-controls .aw-range.active::after {
   transform: scaleX(1);
 }
 

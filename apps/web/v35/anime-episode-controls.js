@@ -1,7 +1,7 @@
-/** Shared episode actions; each layout retains its own cards, typography and spacing. */
-export function createEpisodeControls({document,el,glyph,onQuery,onPage,onTools,look='core'}) {
+/** The core episode header and actions, shared by every layout; cards remain independent. */
+export function createEpisodeControls({document,el,glyph,onQuery,onPage,onTools}) {
  const root=el('div','aw-episode-controls');
- const head=el('div',look==='core'?'aw-eps-head':'wl-eps-head'),titles=el('div','aw-eps-titles'),subtitle=el('span','aw-eps-sub');
+ const head=el('div','aw-eps-head'),titles=el('div','aw-eps-titles'),subtitle=el('span','aw-eps-sub');
  titles.append(el('h2',null,'الحلقات'),subtitle);head.append(titles);
  const tools=el('div','aw-eps-tools');
  const button=(name,label,run)=>{const b=el('button','icon-btn');b.type='button';b.innerHTML=glyph(name,{size:20});b.setAttribute('aria-label',label);b.onclick=run;return b};

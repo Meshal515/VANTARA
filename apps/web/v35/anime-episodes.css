@@ -1,18 +1,11 @@
-/* Functional parity only. Existing cards, banners, cover shadows and motion stay in their styles. */
+/* All work layouts reuse the core episode header and text tabs from anime.css.
+   Cards, banners, cover shadows and motion remain owned by each layout. */
 .v35 .aw-episode-controls { min-width: 0; }
 .v35 .aw-episode-controls h2 { margin-bottom: 0; }
 .v35 .aw-episode-controls :is(.aw-ranges,.an-seasons) { display: flex; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; overscroll-behavior-inline: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .v35 .aw-episode-controls :is(.aw-range,.an-season) { flex: 0 0 auto; white-space: nowrap; }
 .v35 .aw-episode-controls .aw-range { direction: ltr; unicode-bidi: isolate; }
 .v35 .aw-episode-controls [hidden] { display: none; }
-.v35 .wl .wl-eps-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.v35 .wl .wl-eps-head h2 { margin-bottom: 0; }
-.v35 .wl .aw-episode-controls .aw-ranges { gap: 8px; margin: -2px 0 12px; padding: 2px; }
-.v35 .wl .aw-episode-controls .icon-btn { width: var(--tap); height: var(--tap); padding: 0; }
-.v35 .wl .aw-episode-controls .aw-range { padding: 5px 11px; border-radius: 99px; font-size: 12.5px; color: var(--text-2); background: rgba(255,255,255,.05); }
-.v35 .wl .aw-episode-controls .aw-range.active { background: var(--text-1); color: var(--bg); font-weight: 700; }
-.v35 .wl .aw-episode-controls .an-season { padding: 4px 0 11px; }
-.v35 .wl .aw-episode-controls .aw-find-close { padding: 0; }
 .v35 .wl-card .wl-full > [data-slot='episode-controls'] { padding-inline: var(--wl-g); }
 .v35 .wl .wl-episode-empty { color: var(--text-3); padding: 14px 0; }
 .v35 .wl-ranges { overflow-x: auto; flex-wrap: nowrap; max-width: 100%; scrollbar-width: none; }

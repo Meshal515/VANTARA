@@ -22,7 +22,7 @@ function setup(style,{total=1180,work={}}={}){
 }
 const settle=async()=>{for(let i=0;i<8;i++)await vi.advanceTimersByTimeAsync(1)};
 const numbers=f=>[...f.root.querySelectorAll('[data-episode-row]')].map(n=>Number(n.dataset.ep));
-const pageSize=style=>style==='core'?50:25;
+const pageSize=()=>50;
 const buttonText=(host,text)=>[...host.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
 const tools=f=>f.root.querySelector('.aw-episode-controls');
 async function chooseTool(f,label){
