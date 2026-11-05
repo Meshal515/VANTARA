@@ -16,7 +16,7 @@ import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
-import { isChecking, isUnavailable, isValid, scoreRoute, VALIDITY_AR } from '../lib/route-validity.js';
+import { isChecking, isUnavailable, isValid, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
 export { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
@@ -619,7 +619,13 @@ export function createServerSheet(body, o) {
     b.classList.toggle('ss-row--busy', starting);
     if (starting) end.innerHTML = '<i class="ss-spin"></i><small>يبدأ…</small>';
     else if (pending) end.innerHTML = `<i class="ss-spin"></i><small>${VALIDITY_AR.CHECKING}</small>`;
-    else if (gone) end.innerHTML = `<small class="ss-bad">${VALIDITY_AR.UNAVAILABLE}</small>`;
+    else if (gone) {
+      // السبب في السطر نفسه («Cloudflare»، «لا رابط فيديو»…) لا بعد لمسة
+      const why = validity(r).reason;
+      const small = el('small', 'ss-bad', why || VALIDITY_AR.UNAVAILABLE);
+      small.title = why || VALIDITY_AR.UNAVAILABLE;
+      end.replaceChildren(small);
+    }
     else if (d.torrent) {
       const bars = meterBars(d);
       const meter = Array.from({ length: 4 }, (_, i) => `<i${i < bars ? ' class="on"' : ''}></i>`).join('');

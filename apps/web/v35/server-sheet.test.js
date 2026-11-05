@@ -276,3 +276,21 @@ it('live-installed CloudStream sources appear above torrents immediately and aut
   expect(body.querySelectorAll('.ss-group--direct .ss-row')).toHaveLength(2);
   expect(body.querySelectorAll('.ss-group--torrent .ss-row')).toHaveLength(1);
 });
+
+it('غير المتاح مطويّ تحت الجاهز ويقول سببه في سطره، لا بعد لمسة', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  ui.update({
+    routes: [
+      { id: 'ok', sourceId: 'witanime', server: 'ok.ru', quality: 1080, state: 'READY', probed: true, candidates: ['c1'] },
+      { id: 'cf', sourceId: 'witanime', server: 'videa', quality: 720, state: 'UNAVAILABLE', reason: 'CLOUDFLARE' },
+    ],
+    settled: true,
+    status: { text: 'سيرفر جاهز' },
+  });
+  const dead = body.querySelector('.ss-dead');
+  expect(dead.querySelector('summary').textContent).toContain('1');
+  const why = dead.querySelector('.ss-bad');
+  expect(why.textContent).not.toBe('');
+  expect(why.textContent).not.toBe('غير متاح');
+});

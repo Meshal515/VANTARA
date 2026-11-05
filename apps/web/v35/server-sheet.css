@@ -1444,3 +1444,10 @@
   font-weight: 600;
   cursor: pointer;
 }
+/* سبب عدم التوفر في السطر: سطر واحد يُقصّ لا يدفع الاسم */
+.v35 .ss-end .ss-bad {
+  max-width: 11em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
