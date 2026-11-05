@@ -31,7 +31,7 @@ export function site(s) {
 
 // مالك كل فشل: فانتارا (يُصلَح، والهدف صفر)، الإضافة أو الموقع (يُبلَّغ)، أو غير مصنّف (يُحقَّق فيه، لا يُفترض)
 const VANTARA = /^(BINDING_|WORKER_|PROCESS_DIED|IPC_CONTRACT|INVALID_DEADLINE|ABI_MISMATCH|UNSUPPORTED_HTTP_CLIENT_ABI|ORIGIN_NOT_ALLOWED|RUNTIME_|SOURCE_NOT_ROUTED|PIPE_CAPACITY|PROFILE_|PLAYER_|ISOLATION_REQUIRED|PLATFORM_UNSUPPORTED)/;
-const SITE = /^(SITE_|VERIFICATION_REQUIRED|SocketTimeoutException|UnknownHostException|SSLHandshakeException|ConnectException)|HTTP error (403|429|5\d\d)|HTTP (403|429|5\d\d)/;
+const SITE = /^(SITE_|VERIFICATION_REQUIRED|TRANSPORT_FAILED|RATE_LIMITED|HOST_COOLDOWN|CloudflareBypassException|SocketTimeoutException|UnknownHostException|SSLHandshakeException|ConnectException)|HTTP error (403|429|5\d\d)|HTTP (403|429|5\d\d)/;
 const ADDON = /^(NO_[A-Z_]+_RESULT|NO_VIDEO_LINKS|EXTENSION_PARSE|PROVIDER_FAILED|PROVIDER_INITIALIZATION_FAILED|NO_REGISTERED_SOURCES|PACKAGE_NOT_IN_REPOSITORY|PLUGIN_NOT_IN_REPOSITORY|PACKAGE_HASH_MISMATCH|EMPTY_EPISODES|INVALID_[A-Z_]+_RESULT|INVALID_EPISODE_DATA|EMPTY_PAGE|NullPointerException|IndexOutOfBoundsException|IllegalStateException|NumberFormatException|UnsupportedOperationException)|HTTP error (404|410)|HTTP (404|410)/;
 
 /** مالك رمز فشل واحد في مرحلته. مهلة التثبيت لا تلمس الشبكة (التسجيل ممنوع من الاتصال)، فهي من فانتارا. */
@@ -67,8 +67,18 @@ export function failures(source, works = []) {
     if (w.details) out.push({ code: w.details, owner: owner(w.details, 'details') });
     if (w.code) out.push({ code: w.code, owner: owner(w.code, w.stage) });
     // «جاهز» فشل في المشغّل الأصلي: وعد فانتارا للمستخدم، فهو عطل فانتارا مهما كان سببه
+    // عمل بلا سيرفر جاهز: سبب كل سيرفر من تتبّع التجهيز («لا رابط فيديو» = الإضافة لم تُرجع رابطًا)
+    if (!w.code && w.ready === 0 && (w.routes ?? 0) > 0) {
+      const why = w.unavailableReasons?.[0] ?? 'NO_READY_SERVER';
+      // «لا رابط فيديو» و«الإضافة: …» الإضافة؛ «انتهت مهلة السيرفر» الموقع؛ «رابط غير قابل للتشغيل» رفضه فانتارا
+      const who = /لا رابط فيديو|NO_VIDEO_LINKS|^الإضافة:/.test(why) ? 'addon' : /انتهت مهلة السيرفر/.test(why) ? 'site'
+        : /رابط غير قابل للتشغيل/.test(why) ? 'vantara' : owner(why, 'servers');
+      out.push({ code: `NO_READY_SERVER:${why}`, owner: who });
+    }
     for (const p of w.played ?? []) {
       if (p.verdict !== 'FALSE_READY') continue;
+      // أول إطار ظهر والوقت تقدّم بلا خطأ ولا انتقال، أبطأ من الحد: فك برمجي على المحاكي (1080p)، لا سيرفر يكذب
+      if (p.code === 'CLOCK_STALLED' && p.ttffMs > 0 && p.decoded > 0 && p.advancedMs > 0) { out.push({ code: 'FALSE_READY:CLOCK_STALLED', owner: 'slow' }); continue; }
       // انتقل المشغّل عند ميزانية البدء بلا خطأ تشغيل: أول مقطع بطيء (المحاكي يفك برمجيًا)، يُعرض منفصلًا لا عطلًا
       const slow = p.code === 'SWITCHED_BEFORE_FRAME' && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500;
       out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: slow ? 'slow' : 'vantara' });

@@ -344,13 +344,21 @@ class ExtensionAdapter(
         return coroutineScope {
             hosters.mapIndexed { i, hoster ->
                 async {
+                    // «لا رابط فيديو» وحده كان يغطي أربع حالات: مهلة، خطأ الإضافة، رابط رفضه فانتارا، وقائمة فارغة.
+                    // كل سيرفر يحمل الآن سببه الحقيقي، فتعرف الورقة والاعتماد من يملك العطل.
+                    var why = "لا رابط فيديو"
                     val got = withTimeoutOrNull(hosterTimeoutMs) {
                         val videos = try { videosOf(hoster) }
                         catch (e: CancellationException) { throw e }
-                        catch (e: Throwable) { emptyList() }
-                        videos.mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
-                    }.orEmpty()
-                    if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = "لا رابط فيديو")
+                        catch (e: Throwable) { why = "الإضافة: ${e.brief()}"; emptyList() }
+                        val accepted = videos.mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
+                        if (accepted.isEmpty() && videos.isNotEmpty()) {
+                            val scheme = videos.first().videoUrl.substringBefore(':', "").take(12).ifBlank { "بلا مخطط" }
+                            why = "رابط غير قابل للتشغيل ($scheme)"
+                        }
+                        accepted
+                    } ?: run { why = "انتهت مهلة السيرفر (${hosterTimeoutMs / 1000} ث)"; emptyList() }
+                    if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = why)
                     else report(trace, "h$i", nameOf(hoster), got.maxOfOrNull { it.quality ?: 0 }?.takeIf { it > 0 }, variant, RouteState.READY, got)
                     got
                 }
