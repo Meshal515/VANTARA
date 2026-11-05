@@ -4,6 +4,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 import {pathToFileURL} from 'node:url';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 const modulePath=process.env.VANTARA_PLAYWRIGHT_MODULE || '/workspace/vantara-browser-qa/node_modules/playwright/index.mjs';
 const {chromium}=await import(path.isAbsolute(modulePath)?pathToFileURL(modulePath).href:modulePath);
 const root=process.argv[2]||process.cwd(), phase=process.argv[3]||'after', out=process.env.VANTARA_UI_EVIDENCE || '/workspace/evidence/visual-ui-20261103';
@@ -73,15 +75,19 @@ for(const width of [360,390,430]) for(const direction of ['rtl','ltr']) {
 if(phase!=='before') {
  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>{document.documentElement.dir='rtl';window.draw();window.color('gold')});
  await page.waitForTimeout(150);
- const spacing=await page.locator('.wl-logo-color img').evaluateAll(nodes=>nodes.map(n=>{const b=n.getBoundingClientRect();return {center:b.x+b.width/2,padding:parseFloat(getComputedStyle(n).paddingLeft)*2}}));
- assert.ok(spacing.every(n=>n.padding>=40),'Logical logo separation');
- const steps=spacing.slice(1).map((n,i)=>n.center-spacing[i].center);assert.ok(Math.max(...steps)-Math.min(...steps)<1,'Uniform logo spacing across loop seam');
- const trains=page.locator('.wl-logo-train');
- for(const time of [0,9000,18000,35999,36000]){
-  await trains.evaluateAll((nodes,time)=>nodes.forEach(n=>{const a=n.getAnimations()[0];a.pause();a.currentTime=time}),time);
-  await page.screenshot({path:out+'/after-logo-phase-'+time+'.png'});
- }
- await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await trains.first().evaluate(n=>getComputedStyle(n).animationName),'none');await page.screenshot({path:out+'/after-reduced-motion.png'});await page.emulateMedia({reducedMotion:'no-preference'});
+ // The logo uses one pixel-speed compositor train now. Verify entry, speed,
+ // exact loop seam, responsive masking and real pause/resume using the same
+ // production-component verifier exercised during the UI repair.
+ const proof=await promisify(execFile)(process.execPath,[
+  path.join(root,'tools/repository-compat/anime-logo-ui.mjs'),
+  '--root',root,'--out',path.join(out,'logo-motion'),
+  '--playwright-module',modulePath,'--chromium',process.env.VANTARA_CHROMIUM || '/usr/bin/chromium',
+ ],{maxBuffer:1024*1024});
+ console.log(proof.stdout.trim());
+ await page.waitForFunction(()=>document.querySelector('.wl-logo-layer')?.dataset.ready==='true');
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await page.waitForFunction(()=>document.querySelector('.wl-logo-train').getAnimations().every(a=>a.playState==='paused'));
+ await page.screenshot({path:out+'/after-reduced-motion.png'});await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(()=>window.draw(5,null));assert.equal(await page.locator('.wl-logo-layer').count(),0,'Missing logo creates no decorative layer');
  await page.evaluate(()=>window.draw(5,'/qa-poster'));await page.waitForTimeout(200);assert.equal(await page.locator('.wl-logo-layer').isVisible(),false,'Opaque art must not become a logo');
  for(const style of ['platform','screen','episode']){await page.evaluate(style=>window.draw(5,'/qa-logo',style),style);assert.equal(await page.locator('.wl-logo-layer').count(),0,'Other work layouts are unchanged');}
