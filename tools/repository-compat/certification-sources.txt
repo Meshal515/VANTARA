@@ -2,7 +2,7 @@
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة)
 # جولة 6: إصلاح ربط العامل وإعادة محاولة قيامه مرة (BINDING_TIMEOUT في كل CloudStream بالجولة 5) + Aniyomi التي ترد مواقعها.
 # المتقادمة المثبتة (witanime وanime4up من Aniyomi) والمواقع المتوقفة خارج هذه الجولة.
-# set per_tier=2 servers=2 seconds=8 round=6b
+# set per_tier=2 servers=2 seconds=8 round=6c
 cs3:AnimeRift:anime
 cs3:AnimeWitcher:anime
 cs3:Anime4up:anime

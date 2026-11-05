@@ -501,16 +501,20 @@ class RuntimeHost(
                 catch (failure: RuntimeFailure) {
                     if(failure.code=="VERIFICATION_REQUIRED") {
                         val actualUserAgent=headers["User-Agent"]?.firstOrNull() ?: userAgent
+                        // The challenge belongs to the hop that answered it. After a redirect (a site moved to a new
+                        // domain or subdomain) that is not request.url(): verifying the old host opened a page that
+                        // redirected away and closed at once, and its cookie was saved for the wrong host.
+                        val challenged=(failure.cause as? HttpBroker.Failure)?.challengedUrl ?: request.url()
                         // كما يفعل CloudStream الأصلي: تحدٍّ يحلّ نفسه في متصفح مخفي لا يحتاج ضغطة من المستخدم.
                         // نجاحه يعيد الطلب نفسه مرة؛ تحدٍّ يطلب إنسانًا أو يتكرر يبقى «تحتاج تحقق» كما كان.
-                        if(clearSilently(scope,request.url(),actualUserAgent)) {
+                        if(clearSilently(scope,challenged,actualUserAgent)) {
                             try { return bound.exchange(caller,outbound) }
                             catch (again: RuntimeFailure) { if(again.code!="VERIFICATION_REQUIRED")throw again }
                         }
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
-                            pending[id]=Retry(o,generation,installed,source,id,operation,input,request.url(),actualUserAgent,scope)
-                            VerificationCoordinator.require(sourceEndpoint(request.url()),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
+                            pending[id]=Retry(o,generation,installed,source,id,operation,input,challenged,actualUserAgent,scope)
+                            VerificationCoordinator.require(sourceEndpoint(challenged),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
                         }
                     }
                     throw failure

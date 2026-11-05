@@ -45,8 +45,14 @@ public final class HttpBroker {
     }
     public static final class Failure extends IOException {
         public final String code; public final long retryAt;
+        /**
+         * VERIFICATION_REQUIRED only: the hop that was challenged, which after a redirect is not the requested
+         * URL. Host-side only: the worker transport forwards the code alone, never this URL.
+         */
+        public final String challengedUrl;
         public Failure(String code){this(code,0);}
-        public Failure(String code,long retryAt){super(code);this.code=code;this.retryAt=retryAt;}
+        public Failure(String code,long retryAt){super(code);this.code=code;this.retryAt=retryAt;this.challengedUrl=null;}
+        public Failure(String code,HttpUrl challenged){super(code);this.code=code;this.retryAt=0;this.challengedUrl=challenged.toString();}
     }
     public interface CookieVault {List<Cookie> load(HttpUrl url);void save(HttpUrl url,List<Cookie> cookies);}
     public interface Vaults {CookieVault forScope(Scope scope);}
@@ -157,7 +163,7 @@ public final class HttpBroker {
         private void admit(HttpUrl url) throws Failure {
             if(closed.get())throw new Failure("SESSION_CLOSED");
             if(!scope.origins().contains(PUBLIC_INTERNET)&&!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
-            if(needsVerification(origin(url)))throw new Failure("VERIFICATION_REQUIRED");
+            if(needsVerification(origin(url)))throw new Failure("VERIFICATION_REQUIRED",url);
         }
         public Output execute(Input input) throws IOException {return exchange(input,MAX_RESPONSE_BYTES,false);}
         /** Host-only media admission probe. Never exposed through the worker HTTP transport.
@@ -203,7 +209,7 @@ public final class HttpBroker {
                             cookies.save(url,Cookie.parseAll(url,response.headers()));
                             if("challenge".equalsIgnoreCase(response.header("cf-mitigated"))){
                                 synchronized(challenges){Challenge c=challenge(scope,origin(url));long now=clock.millis();challenges.values().removeIf(at->now-at>=CHALLENGE_TTL_MS);if(challenges.size()>=128&&!challenges.containsKey(c))throw new Failure("ENGINE_CAPACITY");challenges.put(c,now);}
-                                throw new Failure("VERIFICATION_REQUIRED");
+                                throw new Failure("VERIFICATION_REQUIRED",url);
                             }
                             if(response.code()==429){cooldown(host,retryAfter(response));throw new Failure("RATE_LIMITED",host.retryAt);}
                             // A bare 403/5xx is an ordinary response: providers read the status and try their next

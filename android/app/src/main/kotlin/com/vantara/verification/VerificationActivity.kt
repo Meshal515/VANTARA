@@ -142,7 +142,8 @@ class VerificationActivity : Activity() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     val target = VerificationPolicy.endpoint(request.url.toString())
-                    val blocked = target?.origin != current.origin || ++navigations > 30
+                    // A moved site hops between its own subdomains during the challenge; another site stays blocked.
+                    val blocked = target == null || !VerificationPolicy.sameSite(current, target) || ++navigations > 30
                     if (blocked) complete("failed", "navigation_blocked")
                     return blocked
                 }
@@ -155,7 +156,8 @@ class VerificationActivity : Activity() {
                     return null
                 }
                 override fun onPageStarted(view: WebView, url: String?, icon: android.graphics.Bitmap?) {
-                    if (VerificationPolicy.endpoint(url.orEmpty())?.origin != current.origin) complete("failed", "navigation_blocked")
+                    val target = VerificationPolicy.endpoint(url.orEmpty())
+                    if (target == null || !VerificationPolicy.sameSite(current, target)) complete("failed", "navigation_blocked")
                 }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     handler.cancel(); complete("failed", "tls_error")

@@ -116,6 +116,21 @@ public class HttpBrokerTest {
             first.enqueue(new MockResponse().setBody("back"));assertEquals("back",body(a.execute(input(one+"/recovered"))));
         }
     }
+    @Test public void challengeAfterRedirectNamesTheHopThatWasChallengedNotTheRequestedUrl() throws Exception {
+        // A site that moved: the old domain redirects and the new one answers the Cloudflare challenge.
+        first.enqueue(new MockResponse().setResponseCode(301).addHeader("Location",two+"/home"));
+        second.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));
+        try(HttpBroker.Session a=broker.open(scope("A"))) {
+            HttpBroker.Failure failure=assertThrows(HttpBroker.Failure.class,()->a.execute(input(one+"/old")));
+            assertEquals("VERIFICATION_REQUIRED",failure.code);
+            assertEquals("Verification must open the challenged host, or it redirects away and closes",two+"/home",failure.challengedUrl);
+            assertTrue(a.needsVerification(two));assertFalse(a.needsVerification(one));
+            // A later request to the still-challenged hop names it too, without contacting it.
+            first.enqueue(new MockResponse().setResponseCode(301).addHeader("Location",two+"/again"));
+            HttpBroker.Failure again=assertThrows(HttpBroker.Failure.class,()->a.execute(input(one+"/old2")));
+            assertEquals(two+"/again",again.challengedUrl);assertEquals(1,second.getRequestCount());
+        }
+    }
     @Test public void humanChallengeIsSilentAndScopedButBare403IsNotCloudflare() throws Exception {
         first.enqueue(new MockResponse().setResponseCode(403).addHeader("cf-mitigated","challenge"));
         try(HttpBroker.Session a=broker.open(scope("A"));HttpBroker.Session b=broker.open(scope("B"))) {
