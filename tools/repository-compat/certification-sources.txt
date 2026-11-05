@@ -1,7 +1,8 @@
 # قائمة اعتماد المصادر (source-certification.yml): سطر لكل مصدر بالشكل kind:name:content
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة)
-# جولة 5 عريضة: 20 مصدرًا بعينة صغيرة لخريطة الأعطال كلها، ثم per_tier=10 للمعتمد منها
-# set per_tier=2 servers=2 seconds=8 round=5
+# جولة 6: إصلاح ربط العامل (BINDING_TIMEOUT في كل CloudStream بالجولة 5) + Aniyomi التي ترد مواقعها.
+# المتقادمة المثبتة (witanime وanime4up من Aniyomi) والمواقع المتوقفة خارج هذه الجولة.
+# set per_tier=2 servers=2 seconds=8 round=6
 cs3:AnimeRift:anime
 cs3:AnimeWitcher:anime
 cs3:Anime4up:anime
@@ -9,16 +10,9 @@ cs3:Witanime:anime
 cs3:Anime3rb:anime
 cs3:Animerco:anime
 cs3:Anime-Phoenix:anime
-aniyomi:witanime:anime
-aniyomi:anime4up:anime
-aniyomi:okanime:anime
-aniyomi:animerco:anime
-aniyomi:animelek:anime
-aniyomi:animeblkom:anime
-aniyomi:arabanime:anime
 cs3:Akwam:cinema
 cs3:Faselhd:cinema
 cs3:TopCinema:cinema
+aniyomi:okanime:anime
 aniyomi:arabseed:cinema
 aniyomi:egydead:cinema
-aniyomi:faselhd:cinema
