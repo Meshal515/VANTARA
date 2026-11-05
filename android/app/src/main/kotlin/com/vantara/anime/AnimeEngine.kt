@@ -605,7 +605,8 @@ class AnimeEngine(context: Context) {
             for (c in prep.rank(r.candidates)) if (prep.claimProbe(c.id)) launch {
                 probeSlots.withPermit {
                     val t0 = System.nanoTime()
-                    val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
+                    // Up to three bounded calls for HLS: playlist, first variant, first segment (StreamProbe).
+                    val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS * 3 + 1_000) {
                         try {
                             val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient
                             com.vantara.anime.stream.StreamProbe.checkCancellable(client, c)

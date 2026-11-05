@@ -67,6 +67,8 @@ export function failures(source, works = []) {
     if (w.details) out.push({ code: w.details, owner: owner(w.details, 'details') });
     if (w.code) out.push({ code: w.code, owner: owner(w.code, w.stage) });
     // «جاهز» فشل في المشغّل الأصلي: وعد فانتارا للمستخدم، فهو عطل فانتارا مهما كان سببه
+    // لا سيرفر أصلًا: جواب المصدر نفسه (NO_VIDEO_LINKS = الإضافة لم تُرجع روابط)
+    if (!w.code && w.noRoute) out.push({ code: `NO_ROUTE:${w.noRoute}`, owner: w.noRoute === 'EMPTY_CANDIDATES' ? 'addon' : owner(w.noRoute, 'servers') });
     // عمل بلا سيرفر جاهز: سبب كل سيرفر من تتبّع التجهيز («لا رابط فيديو» = الإضافة لم تُرجع رابطًا)
     if (!w.code && w.ready === 0 && (w.routes ?? 0) > 0) {
       const why = w.unavailableReasons?.[0] ?? 'NO_READY_SERVER';

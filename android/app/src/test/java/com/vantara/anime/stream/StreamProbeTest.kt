@@ -81,6 +81,54 @@ class StreamProbeTest {
         }
     }
 
+    private val ts = ByteArray(376).also { it[0] = 0x47; it[188] = 0x47 }
+
+    @Test fun hlsIsReadyOnlyWhenItsFirstSegmentIsMediaAsThePlayerWillFetchIt() {
+        MockWebServer().use { server ->
+            server.start()
+            val master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow/index.m3u8\n"
+            val media = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg0.ts\n#EXTINF:6.0,\nseg1.ts\n"
+            fun hls(segment: MockResponse, playlist: String = media) = run {
+                server.enqueue(MockResponse().setBody(master)); server.enqueue(MockResponse().setBody(playlist)); server.enqueue(segment)
+                runBlocking { StreamProbe.checkCancellable(OkHttpClient(), candidate(server.url("/m.m3u8").toString(), Container.HLS)) }
+            }
+            assertTrue("MPEG-TS segment", hls(MockResponse().setBody(Buffer().write(ts))))
+            assertFalse("A segment that answers 403 is not ready (Eshek)", hls(MockResponse().setResponseCode(403)))
+            assertFalse("An HTML page in place of a segment", hls(MockResponse().setBody("<html>blocked</html>")))
+            val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()) + ts
+            assertFalse("A segment disguised as an image cannot be demuxed", hls(MockResponse().setBody(Buffer().write(png))))
+            val encrypted = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"\n#EXTINF:6.0,\nseg0.ts\n"
+            assertTrue("AES-128 ciphertext has no signature", hls(MockResponse().setBody(Buffer().write(ByteArray(64) { 7 })), encrypted))
+            // The variant and the segment are resolved against the playlists that named them.
+            server.takeRequest(); server.takeRequest(); server.takeRequest()
+            server.takeRequest(); server.takeRequest(); server.takeRequest()
+            server.takeRequest(); server.takeRequest(); server.takeRequest()
+            server.takeRequest(); server.takeRequest(); server.takeRequest()
+            assertEquals("/m.m3u8", server.takeRequest().path)
+            assertEquals("/low/index.m3u8", server.takeRequest().path)
+            val segment = server.takeRequest()
+            assertEquals("/low/seg0.ts", segment.path)
+            assertEquals("bytes=0-1023", segment.getHeader("Range"))
+        }
+    }
+
+    @Test fun hlsWithoutFollowableUrisKeepsThePlaylistVerdict() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("#EXTM3U\n#EXT-X-VERSION:3\n")); server.start()
+            assertTrue(StreamProbe.check(OkHttpClient(), candidate(server.url("/bare.m3u8").toString(), Container.HLS)))
+            assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test fun segmentSignatures() {
+        assertTrue(StreamProbe.segmentLooksPlayable(ts, false))
+        assertTrue(StreamProbe.segmentLooksPlayable(byteArrayOf(0, 0, 0, 24) + "styp".toByteArray(), false))
+        assertTrue(StreamProbe.segmentLooksPlayable("ID3\u0004".toByteArray(), false))
+        assertFalse(StreamProbe.segmentLooksPlayable("{\"error\":1}".toByteArray(), false))
+        assertFalse(StreamProbe.segmentLooksPlayable(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0), true))
+        assertEquals("https://cdn.example/a/b/seg.ts", StreamProbe.firstUri("#EXTM3U\n#EXTINF:4,\nseg.ts", "https://cdn.example/a/b/index.m3u8", "#EXTINF"))
+    }
+
     @Test fun explicitlySuppliedCookieIsPreservedOnCookieFreeClient() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("#EXTM3U\n")); server.start()

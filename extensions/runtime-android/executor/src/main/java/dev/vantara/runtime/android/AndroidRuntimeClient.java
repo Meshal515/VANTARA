@@ -116,8 +116,8 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private CompletableFuture<Void> loadProfile(File dex,String hash,String entry,boolean cloudstream) {
         if(dex==null || hash==null || entry==null) return failed("INVALID_DEX_INPUT");
         // InMemoryDexClassLoader runs without ahead-of-time compilation, unlike CloudStream's PathClassLoader;
-        // a large plugin's verification and load() can exceed 10s on a low-end device.
-        return submit(20000,true,()->{
+        // a large plugin's verification and load() can exceed 20s on a busy low-end device (3isk, round 11).
+        return submit(30000,true,()->{
             try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(dex,ParcelFileDescriptor.MODE_READ_ONLY)) {
                 transact(cloudstream?RuntimeProtocol.LOAD_CLOUDSTREAM:RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
                 return null;
