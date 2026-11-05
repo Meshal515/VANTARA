@@ -100,6 +100,9 @@ jobs:
           mkdir -p apks
           cp android/app/build/outputs/apk/debug/app-debug.apk apks/
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
+      # بعد Gradle يبقى قرص المشغّل قرابة 6GB والمحاكي يطلب أكثر فلا يقلع: نحرر ونحدّ قرصه كما في بوابات Debug
+      - name: Reserve disk before emulator SDK download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
       - name: KVM and a real virtual audio clock
         run: |
           set -euo pipefail
@@ -129,7 +132,9 @@ jobs:
           profile: pixel_3a
           cores: 4
           ram-size: 4096M
+          disk-size: 6G
           disable-animations: true
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
           # SwiftShader GLES crashes in host RenderThread during playback; ANGLE (swangle) does not.
           emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
           script: bash tools/repository-compat/run_source_certification.sh
