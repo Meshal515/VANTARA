@@ -96,7 +96,12 @@ jobs:
       - name: Build the actual Debug app with the runtime and its instrumentation
         run: |
           npx cap sync android
-          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+          # تنزيل NDK/SDK قد يتعثر حين تبني عشرون وظيفة معًا: ثلاث محاولات قبل الحكم بالفشل
+          for attempt in 1 2 3; do
+            bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "build attempt $attempt failed; retrying after a pause"; sleep $((attempt * 30))
+          done
           mkdir -p apks
           cp android/app/build/outputs/apk/debug/app-debug.apk apks/
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
