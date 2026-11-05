@@ -36,11 +36,15 @@ const ADDON = /^(NO_[A-Z_]+_RESULT|NO_VIDEO_LINKS|EXTENSION_PARSE|PROVIDER_FAILE
 
 /** مالك رمز فشل واحد في مرحلته. مهلة التثبيت لا تلمس الشبكة (التسجيل ممنوع من الاتصال)، فهي من فانتارا. */
 export function owner(code, stage = '') {
-  const c = String(code ?? '').replace(/^(popular|latest)#\d+:/, '');
+  const raw = String(code ?? '').replace(/^(popular|latest)#\d+:/, '');
+  // «@library:…» مكتبة مشتركة: لا تحسم، فتُكمل قواعد الرمز على نصه دون الإطار
+  const c = raw.replace(/ @library:[\w.$]*$/, '');
   if (!c) return 'unknown';
   // مكان الرمي يحسم ما لا يحسمه نوع الاستثناء: إطار فانتارا عطلها، وإطار الإضافة عطل الإضافة
-  const at = c.match(/ @([\w.]+)$/)?.[1];
-  if (at) return /^(com|dev)\.vantara\b/.test(at) ? 'vantara' : 'addon';
+  // الفحص يحسمه بمحمّل الفئات: فئة لا يحمّلها التطبيق من داخل الإضافة وحدها
+  const at = c.match(/ @(vantara|extension|library):[\w.$]*$/)?.[1];
+  if (at === 'vantara') return 'vantara';
+  if (at === 'extension') return 'addon';
   if (VANTARA.test(c)) return 'vantara';
   if (c.startsWith('OPERATION_TIMEOUT')) return stage === 'install' ? 'vantara' : 'site';
   if (SITE.test(c)) return 'site';
