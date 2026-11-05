@@ -765,3 +765,213 @@
     font-size: 32px;
   }
 }
+
+/* ───────────────────────── أنماط صفحة العمل ─────────────────────────
+ * نفس عناصر الصفحة بنفس أزرارها؛ النمط يغيّر ترتيبها وأحجامها فقط. لوحة النمط
+ * (#detailLook) والشريط الصغير (#detailMini) يصفان زرّ القراءة نفسه ولا يضيفان فعلًا. */
+.v35 .detail-look[hidden],
+.v35 .detail-mini[hidden] {
+  display: none;
+}
+
+/* ── تابع القراءة: فصلك القادم أول ما تفتح ── */
+.v35 #detail[data-look='resume'] {
+  display: flex;
+  flex-direction: column;
+}
+.v35 #detail[data-look='resume'] > .detail-head { order: 1; }
+.v35 #detail[data-look='resume'] > #detailLook { order: 2; }
+.v35 #detail[data-look='resume'] > .detail-cta { order: 3; }
+.v35 #detail[data-look='resume'] > .detail-quick { order: 4; }
+.v35 #detail[data-look='resume'] > #detailProgress { order: 5; }
+.v35 #detail[data-look='resume'] > #detailInsights { order: 6; }
+.v35 #detail[data-look='resume'] > #summaryBlock { order: 7; }
+.v35 #detail[data-look='resume'] > #sourcesBlock { order: 8; }
+.v35 #detail[data-look='resume'] > #chaptersBlock { order: 9; }
+.v35 #detail[data-look='resume'] > #infoBlock { order: 10; }
+.v35 #detail[data-look='resume'] > .detail-mini { order: 11; }
+
+/* الهوية سطرًا هادئًا: غلاف صغير والاسم بجانبه؛ عدد الفصول في عنوان «الفصول» تحت */
+.v35 #detail[data-look='resume'] .detail-head {
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+  padding-top: 4px;
+}
+.v35 #detail[data-look='resume'] .detail-meta {
+  margin: 0;
+  padding: 0 0 2px;
+  border: 0;
+  gap: 6px;
+}
+.v35 #detail[data-look='resume'] .detail-folio {
+  display: none;
+}
+.v35 #detail[data-look='resume'] .detail-meta h1 {
+  font-size: 20px;
+  -webkit-line-clamp: 2;
+}
+
+/* لوحة الفصل القادم: الرقم كبيرًا بخط ترقيم الصفحات، وما يلزم بجانبه */
+.v35 #detail[data-look='resume'] #detailLook {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 22px var(--gutter) 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.v35 #detailLook .look-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+.v35 #detailLook .look-num b {
+  display: block;
+  min-width: 2ch;
+  font-size: 64px;
+  line-height: 0.9;
+  font-weight: 800;
+  letter-spacing: -2.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper);
+}
+.v35 #detailLook .look-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 #detailLook .look-facts small {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 #detailLook .look-facts b {
+  font-size: var(--fs-title-sm);
+  font-weight: 750;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 #detailLook .look-facts span {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 #detailLook .look-bar {
+  height: 2px;
+  background: var(--surface-3);
+}
+.v35 #detailLook .look-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--paper);
+}
+.v35 #detailLook .look-bar[hidden] {
+  display: none;
+}
+.v35 #detailLook .look-left {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 #detailLook .look-skel {
+  font-size: var(--fs-body);
+  color: var(--text-3);
+}
+.v35 #detail[data-look='resume'] .detail-cta {
+  padding-top: 16px;
+}
+/* التقدّم الكلّي سطر واحد تحت الأفعال: كم قرأت من الكل، وتقييمك */
+.v35 #detail[data-look='resume'] #detailProgress {
+  margin-top: 16px;
+}
+
+/* الشريط الصغير: يظهر حين يغيب زرّ القراءة الأصلي عن الشاشة فقط */
+.v35 .detail-mini {
+  position: fixed;
+  z-index: 40;
+  inset-inline: 12px;
+  bottom: calc(12px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 8px;
+  padding-inline-start: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+  animation: detail-mini-in var(--dur-slow) var(--ease-out) both;
+}
+.v35 .detail-mini-cover {
+  flex: none;
+  width: 34px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: var(--m-r);
+  background: var(--surface-2);
+}
+.v35 .detail-mini-cover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .detail-mini-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.v35 .detail-mini-text b {
+  font-size: var(--fs-body);
+  font-weight: 750;
+  color: var(--text-1);
+}
+.v35 .detail-mini-text small {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v35 .detail-mini-go {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: var(--m-r);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.v35 .detail-mini-go .icon {
+  width: 20px;
+  height: 20px;
+}
+@keyframes detail-mini-in {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .detail-mini { animation: none; }
+}
+/* اللوحة فوق الزرّ تقول رقم الفصل؛ لا يتكرر داخل الزرّ ولا في خط تقدّم ثانٍ */
+.v35 #detail[data-look='resume'] #readCtaSub {
+  display: none;
+}
+.v35 #detail[data-look='resume'] #detailProgress .progress-bar {
+  display: none;
+}
+/* مكان للشريط الصغير تحت آخر سطر كي لا يغطي المعلومات */
+.v35 #detail[data-look='resume'] {
+  padding-bottom: calc(96px + var(--safe-bottom));
+}

@@ -126,6 +126,8 @@ export const SHELL_HTML = `<div class="app">
         <div class="chips" id="detailGenres"></div>
       </div>
     </div>
+    <!-- لوحة النمط (تابع القراءة…): وصف لما يفعله زرّ القراءة نفسه، لا زرّ ثانٍ -->
+    <div class="detail-look" id="detailLook" hidden></div>
 
     <div class="detail-cta" data-reveal>
       <button class="btn btn-primary read-cta" type="button" id="readCta" data-act="readNow" disabled>
@@ -155,7 +157,7 @@ export const SHELL_HTML = `<div class="app">
       <button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button>
     </div>
 
-    <div class="block">
+    <div class="block" id="chaptersBlock">
       <div class="block-head">
         <div class="section-titles"><span class="section-eyebrow">CHAPTERS</span><h2>الفصول<span class="count" id="chapterCount"></span></h2></div>
         ${iconButton('sort', 'عكس الترتيب', { act: 'flipChapterOrder', cls: 'icon-btn' })}
@@ -163,9 +165,15 @@ export const SHELL_HTML = `<div class="app">
       <div id="chapterPanel"></div>
     </div>
 
-    <div class="block">
+    <div class="block" id="infoBlock">
       <div class="block-head"><div class="section-titles"><span class="section-eyebrow">DETAILS</span><h2>معلومات</h2></div></div>
       <div class="info-grid" id="infoGrid"></div>
+    </div>
+    <!-- شريط صغير يظهر حين يغيب زرّ القراءة عن الشاشة فقط، ويضغط الزرّ نفسه -->
+    <div class="detail-mini" id="detailMini" hidden aria-hidden="true">
+      <span class="detail-mini-cover" id="detailMiniCover"></span>
+      <span class="detail-mini-text"><b id="detailMiniLabel"></b><small id="detailMiniSub" dir="auto"></small></span>
+      <button class="detail-mini-go" type="button" data-act="readNow" tabindex="-1" aria-label="اقرأ">${glyph('book')}</button>
     </div>
   </section>
 

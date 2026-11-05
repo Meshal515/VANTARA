@@ -17,6 +17,22 @@ export const WORK_STYLES = Object.freeze([
   { id: 'episode', name: 'الحلقة أولًا', note: 'ما ستكمله الآن في الأعلى' },
 ]);
 
+/** أنماط صفحة عمل المانجا: نفس عناصر الصفحة بنفس أزرارها، يتغيّر ما يأتي أولًا. الأول هو الأساسي. */
+export const MANGA_STYLES = Object.freeze([
+  { id: 'core', name: 'الأساسي', note: 'الغلاف وعدد الفصول متقابلان' },
+  { id: 'resume', name: 'تابع القراءة', note: 'فصلك القادم أول ما تفتح' },
+]);
+
+/** أنماط صفحة عمل السينما. الأول هو الأساسي. */
+export const CINEMA_STYLES = Object.freeze([
+  { id: 'core', name: 'الأساسي', note: 'الخلفية وفوقها الشعار' },
+]);
+
+/** قائمة أنماط القسم. */
+export function stylesFor(section) {
+  return section === 'manga' ? MANGA_STYLES : section === 'cinema' ? CINEMA_STYLES : WORK_STYLES;
+}
+
 /** ألوان هادئة غير فاقعة؛ أولها ألوان الأقسام الثلاثة ثم الأبيض. */
 export const ACCENTS = Object.freeze([
   { id: 'manga', name: 'بنفسجي المانجا', hex: '#8f5cff' },
@@ -73,7 +89,7 @@ export function writeAppearance(next, storage = globalThis.localStorage) {
 /** نمط صفحة العمل للقسم؛ قيمة غير معروفة ترجع للأساسي. */
 export function workStyleOf(section, a = readAppearance()) {
   const id = a.style?.[section];
-  return WORK_STYLES.some((s) => s.id === id) ? id : 'core';
+  return stylesFor(section).some((s) => s.id === id) ? id : 'core';
 }
 
 /** لون القسم المختار (hex) أو null = لون القسم المصمّم. */

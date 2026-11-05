@@ -1467,6 +1467,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     renderInfo(w);
   }
   function renderDetail(w) {
+    const look = workStyleOf('manga');
+    q('detail').dataset.look = look;
+    q('detailLook').hidden = look !== 'resume';
+    bindDetailMini();
     const title = titleOf(w);
     const h1 = q('detailTitle');
     h1.textContent = title;
@@ -2080,6 +2084,86 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sub.textContent = next.chapter.name || `الفصل ${next.number}`;
       sub.dir = 'auto';
     }
+    paintDetailLook(next, started);
+  }
+
+  /** موضعك داخل الفصل (0..1) من آخر تقدّم محفوظ لهذا العمل، أو null. */
+  function resumeRatio(ref, row) {
+    if (!row) return null;
+    const userId = sync.user?.userId;
+    const refs = refsOf(ref);
+    const rows = sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref));
+    if (!rows.length) return null;
+    const latest = rows.reduce((a, b) => ((b.updated_at ?? 0) > (a.updated_at ?? 0) ? b : a));
+    if (chapterKeyOf(latest.series_ref, row) !== latest.chapter_key) return null;
+    const ratio = Number(latest.ratio);
+    return ratio > 0 && ratio < 0.98 ? ratio : null;
+  }
+
+  /**
+   * لوحة نمط «تابع القراءة» وشريطه الصغير: يصفان الفصل الذي يفتحه زرّ القراءة نفسه
+   * (state.nextRow)، ولا يملكان فعلًا خاصًا بهما. النمط الأساسي لا يرسم شيئًا.
+   */
+  function paintDetailLook(next, started) {
+    const look = q('detail').dataset.look;
+    const panel = q('detailLook');
+    const w = state.current;
+    q('detailMiniLabel').textContent = q('readCtaLabel').textContent;
+    q('detailMiniSub').textContent = q('readCtaSub').textContent;
+    const miniCover = q('detailMiniCover');
+    const coverImg = q('detailCover').querySelector('img');
+    if (coverImg?.src && miniCover.dataset.src !== coverImg.src) {
+      miniCover.dataset.src = coverImg.src;
+      const im = new Image();
+      im.alt = '';
+      im.src = coverImg.src;
+      miniCover.replaceChildren(im);
+    }
+    if (look !== 'resume') return void panel.replaceChildren();
+    if (!next || !w) {
+      panel.replaceChildren(el('span', 'section-eyebrow', 'CONTINUE'), el('div', 'look-skel', next === null ? 'لا فصول متاحة الآن' : 'نجمع الفصول…'));
+      return;
+    }
+    const ratio = resumeRatio(String(w.id), next);
+    const all = w._chapters ?? [];
+    const head = el('span', 'section-eyebrow', ratio != null || started ? 'CONTINUE' : 'START');
+    const num = el('div', 'look-num');
+    num.dir = 'ltr';
+    num.append(el('b', null, String(next.number ?? '—')));
+    const facts = el('div', 'look-facts');
+    facts.append(el('small', null, ratio != null ? 'وقفت هنا' : started ? 'فصلك التالي' : 'ابدأ من أول فصل'));
+    // الرقم الكبير هو الفصل؛ الاسم يظهر فقط إن كان للفصل اسم حقيقي غير «الفصل 143»
+    const name = next.chapter?.name && !/^\s*(الفصل|chapter|ch\.?)\s*[\d.]+\s*$/i.test(next.chapter.name) ? next.chapter.name : null;
+    if (name) {
+      const title = el('b', null, name);
+      title.dir = 'auto';
+      facts.append(title);
+    }
+    const left = all.length ? all.filter((r) => (Number(r.number) || 0) > (Number(next.number) || 0)).length : 0;
+    facts.append(el('span', 'look-left', left ? (left === 1 ? 'بعده فصل واحد' : `بعده ${left} ${left <= 10 ? 'فصول' : 'فصلًا'}`) : 'آخر فصل متاح'));
+    const when = dateLabel(next.chapter?.dateUpload);
+    const line = [ratio != null ? `قرأت ${Math.round(ratio * 100)}٪ منه` : null, when || null, next.chapter?.scanlator || null].filter(Boolean);
+    if (line.length) facts.append(el('span', null, line.join(' · ')));
+    const row = el('div', 'look-row');
+    row.append(num, facts);
+    const bar = el('div', 'look-bar');
+    const fill = el('i');
+    fill.style.width = `${Math.round((ratio ?? 0) * 100)}%`;
+    bar.append(fill);
+    bar.hidden = ratio == null;
+    panel.replaceChildren(head, row, bar);
+  }
+
+  /** الشريط الصغير يظهر حين يغيب زرّ القراءة الأصلي عن الشاشة فقط (نمط «تابع القراءة»). */
+  let miniObserver = null;
+  function bindDetailMini() {
+    if (miniObserver || typeof IntersectionObserver !== 'function') return;
+    const mini = q('detailMini');
+    miniObserver = new IntersectionObserver(([e]) => {
+      const show = q('detail').dataset.look === 'resume' && !e.isIntersecting && e.boundingClientRect.top < 0 && !q('readCta').disabled;
+      mini.hidden = !show;
+    }, { threshold: 0 });
+    miniObserver.observe(q('readCta'));
   }
 
   /**
