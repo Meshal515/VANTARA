@@ -65,7 +65,8 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(folded).toEqual([]);
   const gone = [...sheet.querySelectorAll('.ss-dead .an-srv')];
   expect(gone.map((b) => b.title).sort()).toEqual(['Fight.Club.1999.1080p.BluRay.x265', 'Fight.Club.1999.2160p.HDCAM']);
-  expect(gone.every((b) => b.textContent.includes('غير متاح'))).toBe(true);
+  // تحت «غير متاح الآن»: كل سطر يحمل علامة عدم التوفر وسببه (لا «غير متاح» مكررة بلا سبب)
+  expect(gone.every((b) => b.querySelector('.ss-bad')?.textContent.trim())).toBe(true);
   const best = visible[1];
   // صف يُختار منه: الجودة، الإضافة، اللغة والحجم، والمشاركون. اسم الإصدار وDV وREMUX تحت السهم
   expect(best.querySelector('.ss-q').textContent).toBe('4K');
