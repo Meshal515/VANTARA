@@ -448,8 +448,8 @@ class RuntimeHost(
         }
         run {
             // A permission sync replay, once, only after an attested settings
-            // migration. Keep the original load10s + operation15s total budget.
-            val remaining=25000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
+            // migration, within one load plus one operation budget.
+            val remaining=OPERATION_BUDGET_MS+10_000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
             if(remaining<=0)throw IllegalStateException("OPERATION_TIMEOUT")
             val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
             try { withTimeout(remaining) { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } } }
@@ -524,7 +524,7 @@ class RuntimeHost(
         }
         val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
         try {
-            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),if(operation=="videoLinks")30000 else 15000).await()) }
+            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await()) }
             synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
@@ -607,6 +607,12 @@ class RuntimeHost(
     fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
     companion object {
         private val WORKER_START_FAILURES=setOf("BINDING_TIMEOUT","BINDING_FAILED")
+        /**
+         * Every operation gets the worker's maximum. CloudStream itself bounds none of them; a home page with many
+         * sections (Akwam: 22s on the emulator) or a slow details page timed out at 15s although the site answered.
+         * The bound still stops a hung provider.
+         */
+        private const val OPERATION_BUDGET_MS=30_000L
         fun digest(value: String)=digest(value.toByteArray())
         fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         fun packageId(repository: String,internalName: String)="cs3_"+digest(repository+"\u0000"+internalName).take(32)

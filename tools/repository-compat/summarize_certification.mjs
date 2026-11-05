@@ -63,7 +63,12 @@ export function failures(source, works = []) {
     if (w.details) out.push({ code: w.details, owner: owner(w.details, 'details') });
     if (w.code) out.push({ code: w.code, owner: owner(w.code, w.stage) });
     // «جاهز» فشل في المشغّل الأصلي: وعد فانتارا للمستخدم، فهو عطل فانتارا مهما كان سببه
-    for (const p of w.played ?? []) if (p.verdict === 'FALSE_READY') out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: 'vantara' });
+    for (const p of w.played ?? []) {
+      if (p.verdict !== 'FALSE_READY') continue;
+      // انتقل المشغّل عند ميزانية البدء بلا خطأ تشغيل: أول مقطع بطيء (المحاكي يفك برمجيًا)، يُعرض منفصلًا لا عطلًا
+      const slow = p.code === 'SWITCHED_BEFORE_FRAME' && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500;
+      out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: slow ? 'slow' : 'vantara' });
+    }
   }
   return out;
 }
@@ -87,8 +92,8 @@ export function table(records) {
   const lines = [
     '### اعتماد المصادر: 30 عملًا لكل مصدر (مشهور/متوسط/نادر) حتى أول إطار في المشغّل الأصلي',
     '',
-    '| المصدر | النوع | الحكم | أعطال فانتارا | الإضافة/الموقع | غير مصنّف | مشهور | متوسط | نادر | فيها احتياط | سيرفرات فُتحت | جاهز فشل | أول إطار (وسيط) | إطارات مفكوكة/ساقطة |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| المصدر | النوع | الحكم | أعطال فانتارا | الإضافة/الموقع | بطء بداية | غير مصنّف | مشهور | متوسط | نادر | فيها احتياط | سيرفرات فُتحت | جاهز فشل | أول إطار (وسيط) | إطارات مفكوكة/ساقطة |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   let engine = 0;
   let unknown = 0;
@@ -97,7 +102,7 @@ export function table(records) {
     const of = (o) => f.filter((x) => x.owner === o);
     const cell = (list) => (list.length ? `${list.length} (${[...new Set(list.map((x) => x.code))].slice(0, 3).join('، ')})` : '0');
     engine += of('vantara').length; unknown += of('unknown').length;
-    lines.push(`| ${s.name} | ${s.kind}/${s.content ?? '?'} | ${verdict(s)} | ${cell(of('vantara'))} | ${of('addon').length + of('site').length} | ${cell(of('unknown'))} | ${tierCell(s.tiers?.popular)} | ${tierCell(s.tiers?.mid)} | ${tierCell(s.tiers?.obscure)} | ${s.worksWithBackup ?? 0}/${s.worksTested ?? 0} | ${s.serversOpened ?? 0} | ${s.falseReady ?? 0}${s.falseReadyCodes?.length ? ` (${s.falseReadyCodes.join('، ')})` : ''} | ${s.ttffMedianMs > 0 ? `${(s.ttffMedianMs / 1000).toFixed(1)} ث` : '—'} | ${s.decodedFrames ?? 0}/${s.droppedFrames ?? 0} |`);
+    lines.push(`| ${s.name} | ${s.kind}/${s.content ?? '?'} | ${verdict(s)} | ${cell(of('vantara'))} | ${of('addon').length + of('site').length} | ${of('slow').length} | ${cell(of('unknown'))} | ${tierCell(s.tiers?.popular)} | ${tierCell(s.tiers?.mid)} | ${tierCell(s.tiers?.obscure)} | ${s.worksWithBackup ?? 0}/${s.worksTested ?? 0} | ${s.serversOpened ?? 0} | ${s.falseReady ?? 0}${s.falseReadyCodes?.length ? ` (${s.falseReadyCodes.join('، ')})` : ''} | ${s.ttffMedianMs > 0 ? `${(s.ttffMedianMs / 1000).toFixed(1)} ث` : '—'} | ${s.decodedFrames ?? 0}/${s.droppedFrames ?? 0} |`);
   }
   lines.push('', `**أعطال فانتارا: ${engine}** (الهدف صفر)، وغير المصنّف: ${unknown} (يُحقَّق فيه قبل نسبته لأحد).`);
   lines.push('', 'الخلية «اشتغل/وُجد». «جاهز فشل» = سيرفر عرضته ورقة السيرفرات جاهزًا ثم لم يصل لأول إطار أو توقف أو انتقل المشغّل لغيره. الإطارات الساقطة هنا من فك برمجي على المحاكي؛ السلاسة تُعتمد على جهاز فعلي.');

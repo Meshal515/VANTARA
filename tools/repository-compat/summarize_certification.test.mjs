@@ -13,7 +13,7 @@ test('جدول الاعتماد: التغطية والاحتياط وصدق «ج
   const records = parse(lines);
   assert.equal(records.length, 4);
   const md = table(records);
-  assert.match(md, /\| AnimeRift \| cs3\/anime \| معتمد \| 0 \| 0 \| 0 \| 10\/10 \| 9\/10 \| 9\/10 \| 20\/30 \| 70 \| 0 \| 2\.4 ث \| 9000\/40 \|/);
+  assert.match(md, /\| AnimeRift \| cs3\/anime \| معتمد \| 0 \| 0 \| 0 \| 0 \| 10\/10 \| 9\/10 \| 9\/10 \| 20\/30 \| 70 \| 0 \| 2\.4 ث \| 9000\/40 \|/);
   assert.match(md, /witanime .*جاهز يكذب.*NO_FIRST_FRAME×3/);
   assert.equal(verdict({ code: 'X' }), 'لم يكتمل: X');
   assert.equal(verdict({ worksTested: 30, worksPlayable: 20, worksWithBackup: 0, falseReady: 0 }), 'يعمل جزئيًا');
@@ -44,7 +44,7 @@ test('مالك كل فشل: قيام العامل ومهلة التثبيت و«
   const lied = failures({ worksTested: 1 }, [{ played: [{ verdict: 'PLAYS' }, { verdict: 'FALSE_READY', code: 'NO_FIRST_FRAME' }] }]);
   assert.deepEqual(lied, [{ code: 'FALSE_READY:NO_FIRST_FRAME', owner: 'vantara' }]);
   const md = table(parse([JSON.stringify({ type: 'source', kind: 'cs3', name: 'X', content: 'anime', code: 'BINDING_TIMEOUT', stage: 'install' })].join('\n')));
-  assert.match(md, /\| X \| cs3\/anime \| لم يكتمل: BINDING_TIMEOUT عند التثبيت \| 1 \(BINDING_TIMEOUT\) \| 0 \| 0 \|/);
+  assert.match(md, /\| X \| cs3\/anime \| لم يكتمل: BINDING_TIMEOUT عند التثبيت \| 1 \(BINDING_TIMEOUT\) \| 0 \| 0 \| 0 \|/);
   assert.match(md, /أعطال فانتارا: 1/);
 });
 
@@ -64,4 +64,13 @@ test('المانجا: النجاح صورة صفحة حقيقية، والوقو
   ]);
   const md = mangaTable(records);
   assert.match(md, /المانجا: 1\/4 يعمل، أعطال فانتارا: 2/);
+});
+
+test('انتقال المشغّل عند ميزانية البدء بلا خطأ = بطء بداية، ومع خطأ = جاهز يكذب على فانتارا', () => {
+  const slow = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'SWITCHED_BEFORE_FRAME', switchedAtMs: 15100, startupBudgetMs: 15000 }] }]);
+  assert.equal(slow[0].owner, 'slow');
+  const early = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'SWITCHED_BEFORE_FRAME', switchedAtMs: 3000, startupBudgetMs: 15000 }] }]);
+  assert.equal(early[0].owner, 'vantara');
+  const broken = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'ERROR_CODE_IO_BAD_HTTP_STATUS' }] }]);
+  assert.equal(broken[0].owner, 'vantara');
 });
