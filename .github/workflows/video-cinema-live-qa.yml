@@ -11,6 +11,15 @@ on:
       - 'extensions/runtime-android/integration/src/main/**'
       - 'extensions/runtime-android/cloudstream/**'
   workflow_dispatch:
+    inputs:
+      only:
+        description: CloudStream cinema plugin names (comma-separated, exact names)
+        required: false
+        default: 'Faselhd,Egydead,Akwam,Mycima,Cimalight'
+      limit:
+        description: Maximum plugins to sweep
+        required: false
+        default: '5'
 
 permissions:
   contents: read
@@ -22,14 +31,14 @@ concurrency:
 jobs:
   cinema-providers-live:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 170
     env:
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
       VANTARA_NATIVE_VIDEO: 'true'
-      VANTARA_LIVE_ONLY: 'Faselhd,Egydead,Akwam,Mycima,Cimalight'
-      VANTARA_LIVE_REQUIRED: 'Faselhd,Egydead,Akwam,Mycima,Cimalight'
-      VANTARA_LIVE_LIMIT: '5'
+      VANTARA_LIVE_ONLY: ${{ inputs.only || 'Faselhd,Egydead,Akwam,Mycima,Cimalight' }}
+      VANTARA_LIVE_REQUIRED: ${{ inputs.only || 'Faselhd,Egydead,Akwam,Mycima,Cimalight' }}
+      VANTARA_LIVE_LIMIT: ${{ inputs.limit || '5' }}
       VANTARA_LIVE_CONTENT: 'cinema'
       VANTARA_LIVE_HEALTHY: ''
     steps:
