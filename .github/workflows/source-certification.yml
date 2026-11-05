@@ -63,12 +63,19 @@ jobs:
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: list }) + "\n");
           '
 
-  build:
+  certify:
+    # حصة ملفات Actions ممتلئة: كل وظيفة تبني لنفسها، والنتائج في السجل وملخص الوظيفة، بلا رفع ملفات
+    needs: [plan]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 175
     env:
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.kind }} ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -81,6 +88,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
       - run: pnpm install --frozen-lockfile
       - name: Pinned provider fixtures used by the androidTest assets directory
         run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
@@ -91,27 +100,6 @@ jobs:
           mkdir -p apks
           cp android/app/build/outputs/apk/debug/app-debug.apk apks/
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certification-apks
-          path: apks/
-          retention-days: 1
-
-  certify:
-    needs: [plan, build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 170
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: ${{ matrix.kind }} ${{ matrix.name }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: certification-apks
-          path: apks
       - name: KVM and a real virtual audio clock
         run: |
           set -euo pipefail
@@ -145,35 +133,10 @@ jobs:
           # SwiftShader GLES crashes in host RenderThread during playback; ANGLE (swangle) does not.
           emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
           script: bash tools/repository-compat/run_source_certification.sh
-      - name: Source summary
+      - name: Source summary and raw lines
         if: always()
-        run: node tools/repository-compat/summarize_certification.mjs . >> "$GITHUB_STEP_SUMMARY" || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: cert-${{ matrix.kind }}-${{ strategy.job-index }}
-          path: cert-*/
-          retention-days: 7
-          if-no-files-found: warn
-
-  report:
-    needs: [certify]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: cert-*
-          path: all
-      - name: Certification table
         run: |
-          node tools/repository-compat/summarize_certification.mjs all > certification.md
-          cat certification.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certification-report
-          path: |
-            certification.md
-            all/
-          retention-days: 14
+          node tools/repository-compat/summarize_certification.mjs . >> "$GITHUB_STEP_SUMMARY" || true
+          # السطور الخام في السجل نفسه: تجمعها الجلسة من سجلات الوظائف لجدول كل المصادر
+          for f in cert-*/cert.jsonl; do [ -f "$f" ] && sed 's/^/VANTARA_CERT_LINE /' "$f"; done
+          for f in cert-*/instrumentation.txt; do [ -f "$f" ] && tail -n 40 "$f"; done

@@ -1,5 +1,5 @@
 # قائمة اعتماد المصادر (source-certification.yml): سطر لكل مصدر بالشكل kind:name:content
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة)
-# set per_tier=2 servers=2 seconds=8
+# set per_tier=2 servers=2 seconds=8 round=2
 cs3:AnimeRift:anime
 aniyomi:witanime:anime
