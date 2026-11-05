@@ -21,6 +21,9 @@ export const WORK_STYLES = Object.freeze([
 export const MANGA_STYLES = Object.freeze([
   { id: 'core', name: 'الأساسي', note: 'الغلاف وعدد الفصول متقابلان' },
   { id: 'resume', name: 'تابع القراءة', note: 'فصلك القادم أول ما تفتح' },
+  { id: 'volume', name: 'المجلّد', note: 'الغلاف كتاب والفصول أجزاء' },
+  { id: 'poster', name: 'الغلاف الكامل', note: 'الغلاف يملأ الأعلى ويغوص مع التمرير' },
+  { id: 'sources', name: 'المصادر', note: 'كل مصدر وآخر فصل عنده قبل الفصول' },
 ]);
 
 /** أنماط صفحة عمل السينما. الأول هو الأساسي. */

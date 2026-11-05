@@ -975,3 +975,305 @@
 .v35 #detail[data-look='resume'] {
   padding-bottom: calc(96px + var(--safe-bottom));
 }
+
+/* ── المجلّد: الغلاف كتاب مطبوع في الوسط، والفصول أجزاء من 50 ── */
+.v35 #detail[data-look='volume'] .detail-head {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 22px;
+  padding-top: 10px;
+}
+.v35 #detail[data-look='volume'] .detail-cover {
+  position: relative;
+  width: min(56%, 236px);
+  overflow: visible;
+  border-radius: 2px var(--m-r) var(--m-r) 2px;
+  /* حافة الورق: ثلاث صفحات تحت الغلاف من جهة الفتح، لا ظل متوهج */
+  box-shadow:
+    -3px 1px 0 -1px #e8e2d6,
+    -6px 2px 0 -2px #cfc8ba,
+    -9px 3px 0 -3px #a8a193,
+    0 34px 48px -26px rgba(0, 0, 0, 0.95);
+}
+.v35 #detail[data-look='volume'] .detail-cover > img {
+  border-radius: inherit;
+}
+/* الكعب: خط ظل رفيع على الجهة المقابلة كما في الكتاب الحقيقي */
+.v35 #detail[data-look='volume'] .detail-cover::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 10px;
+  border-radius: 0 var(--m-r) var(--m-r) 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.28) 60%, rgba(255, 255, 255, 0.08));
+  pointer-events: none;
+}
+.v35 #detail[data-look='volume'] .detail-meta {
+  align-items: center;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: 8px;
+  width: 100%;
+}
+.v35 #detail[data-look='volume'] .detail-meta h1 {
+  order: 2;
+  font-size: 26px;
+  text-align: center;
+  -webkit-line-clamp: 3;
+}
+.v35 #detail[data-look='volume'] .detail-kicker {
+  order: 1;
+}
+.v35 #detail[data-look='volume'] .detail-sub {
+  order: 3;
+  justify-content: center;
+}
+/* عدد الفصول سطرًا صغيرًا تحت الاسم بدل الرقم الكبير */
+.v35 #detail[data-look='volume'] .detail-folio {
+  order: 4;
+  margin: 0;
+  justify-content: center;
+}
+.v35 #detail[data-look='volume'] .detail-folio b {
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+.v35 #detail[data-look='volume'] .detail-cta {
+  padding-top: 20px;
+}
+
+/* شريط الأجزاء: أرقام بخط ترقيم الصفحات، المختار بخط تحته لا صندوق */
+.v35 .chapter-ranges {
+  display: flex;
+  gap: 4px;
+  margin: 2px calc(var(--gutter) * -1) 6px;
+  padding: 0 var(--gutter);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--line);
+}
+.v35 .chapter-ranges::-webkit-scrollbar {
+  display: none;
+}
+.v35 .chapter-range {
+  flex: none;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.v35 .chapter-range[aria-selected='true'] {
+  color: var(--paper);
+  border-bottom-color: var(--paper);
+}
+
+/* ── الغلاف الكامل: الغلاف يملأ أعلى الصفحة تحت الترويسة، والاسم على طرفه السفلي ── */
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-head {
+  display: block;
+  position: relative;
+  margin-top: calc(-1 * (var(--top-h) + var(--safe-top)));
+  padding: 0;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-cover {
+  width: 100%;
+  height: min(122vw, 580px);
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-cover > img {
+  object-position: center 16%;
+  transform-origin: 50% 0;
+}
+/* ظلّ للترويسة فوق الصورة وتلاشٍ إلى الخلفية تحت الاسم؛ لا توهّج ولا ضباب */
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 7, 12, 0.6) 0, rgba(8, 7, 12, 0) 18%, rgba(8, 7, 12, 0) 44%, rgba(8, 7, 12, 0.72) 74%, var(--bg) 100%);
+  pointer-events: none;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-meta {
+  position: absolute;
+  inset-inline: var(--gutter);
+  bottom: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: 8px;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-meta h1 {
+  order: 2;
+  font-size: 30px;
+  line-height: 1.15;
+  -webkit-line-clamp: 3;
+  text-wrap: balance;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-kicker { order: 1; }
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-sub { order: 3; }
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-folio {
+  order: 4;
+  margin: 0;
+  /* الرقم ltr: نهاية السطر هي يمين الشاشة مع بقية النص */
+  justify-content: flex-end;
+}
+.v35 #detail[data-look='poster']:not(.cover-low) .detail-folio b {
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+.v35 #detail[data-look='poster'] .detail-cta {
+  padding-top: 18px;
+}
+/* غلاف ضعيف الدقة: نفس الترتيب بإطار في الوسط بدل التمديد */
+.v35 #detail[data-look='poster'].cover-low .detail-head {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 18px;
+}
+.v35 #detail[data-look='poster'].cover-low .detail-cover {
+  width: min(52%, 220px);
+}
+.v35 #detail[data-look='poster'].cover-low .detail-meta {
+  align-items: center;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.v35 #detail[data-look='poster'].cover-low .detail-meta h1 { text-align: center; }
+
+/* العمق مع الإصبع: الغلاف يغوص أبطأ من الصفحة ويبهت، والاسم يرتفع ويخفت */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .v35 #detail[data-look='poster']:not(.cover-low) .detail-cover > img {
+      animation: detail-poster-sink linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 580px;
+    }
+    .v35 #detail[data-look='poster']:not(.cover-low) .detail-meta {
+      animation: detail-poster-rise linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 320px;
+    }
+  }
+}
+@keyframes detail-poster-sink {
+  to { transform: translateY(34%) scale(1.04); opacity: 0.3; }
+}
+@keyframes detail-poster-rise {
+  to { transform: translateY(-22px); opacity: 0; }
+}
+
+/* ── المصادر: الهوية كما في الأساسي، ثم كل مصدر سطرًا كاملًا قبل الفصول ── */
+.v35 #detail[data-look='sources'] {
+  display: flex;
+  flex-direction: column;
+}
+.v35 #detail[data-look='sources'] > .detail-head { order: 1; }
+.v35 #detail[data-look='sources'] > .detail-cta { order: 2; }
+.v35 #detail[data-look='sources'] > .detail-quick { order: 3; }
+.v35 #detail[data-look='sources'] > #sourcesBlock { order: 4; }
+.v35 #detail[data-look='sources'] > #detailProgress { order: 5; }
+.v35 #detail[data-look='sources'] > #detailInsights { order: 6; }
+.v35 #detail[data-look='sources'] > #summaryBlock { order: 7; }
+.v35 #detail[data-look='sources'] > #chaptersBlock { order: 8; }
+.v35 #detail[data-look='sources'] > #infoBlock { order: 9; }
+.v35 #detail[data-look='sources'] #sourcesBlock {
+  margin: 22px var(--gutter) 0;
+  padding: 0;
+}
+.v35 #detail[data-look='sources'] #sourceRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+.v35 #detail[data-look='sources'] #sourceRow > .section-titles {
+  margin-bottom: 8px;
+}
+.v35 #detail[data-look='sources'] #sourceRow h2 {
+  font-size: 20px;
+  font-weight: 800;
+}
+.v35 .source-line {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 14px;
+  min-height: 62px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+}
+.v35 .source-line > .icon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+}
+.v35 .source-line-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.v35 .source-line-text b {
+  font-size: var(--fs-body-lg);
+  font-weight: 700;
+}
+.v35 .source-line-text small {
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* علامة الاختيار: دائرة فارغة، وممتلئة بلون الورق للمختار */
+.v35 .source-line-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-4);
+}
+.v35 .source-line[aria-checked='true'] .source-line-mark {
+  border: 5px solid var(--paper);
+}
+.v35 .source-line[aria-checked='true'] > .icon,
+.v35 .source-line[aria-checked='true'] .source-line-text b {
+  color: var(--paper);
+}
+.v35 .source-line:active {
+  background: var(--surface-1);
+}
+.v35 .source-line--failed {
+  grid-template-columns: 22px minmax(0, 1fr);
+  opacity: 0.7;
+}
+.v35 .source-line--failed > .icon {
+  color: var(--warning);
+}
+.v35 #detail[data-look='sources'] #sourceRow > .section-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.v35 #detail[data-look='sources'] #sourceRow h2 {
+  margin: 0;
+  line-height: 1.2;
+}

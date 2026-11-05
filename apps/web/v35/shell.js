@@ -1352,6 +1352,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterSource = null;
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
+    state.chapterRange = null;
     if (work._work?.editions?.length) rememberWork(work);
     showPage('detail');
     renderDetail(work);
@@ -1501,6 +1502,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       glow.style.backgroundImage = '';
       void mountImage(cover, w).then((url) => {
         if (!url || state.current?.id !== w.id) return;
+        // غلاف صغير الدقة لا يُمدّ على عرض الشاشة في «الغلاف الكامل»: يبقى بإطاره
+        const im = cover.querySelector('img');
+        const mark = () => q('detail').classList.toggle('cover-low', im.naturalWidth > 0 && im.naturalWidth < 360);
+        if (im) im.complete ? mark() : im.addEventListener('load', mark, { once: true });
         glow.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
         glow.classList.add('ready');
       });
@@ -2194,6 +2199,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.onclick = () => pick(value);
       return b;
     };
+    if (q('detail').dataset.look === 'sources') return renderSourceRows(w, sources, failed, pick);
     const smart = chip('القارئ الذكي', null, null, ' source-chip--smart');
     smart.insertAdjacentHTML('afterbegin', glyph('spark'));
     const selected = sources.find((x) => x.sourceId === state.chapterSource);
@@ -2210,6 +2216,43 @@ export function mountV35(deps, { page = 'home' } = {}) {
       chips.push(all);
     }
     q('sourceRow').replaceChildren(...chips);
+  }
+  /**
+   * نمط «المصادر»: كل المصادر أسطرًا كاملة بلا ورقة «كل المصادر» — عدد فصول كل مصدر، وآخر
+   * فصل نزل عنده ومتى. نفس الاختيار (pick) ونفس «القارئ الذكي»؛ مصدر واحد يظهر أيضًا.
+   */
+  function renderSourceRows(w, sources, failed, pick) {
+    q('sourcesBlock').hidden = sources.length + failed.length < 1;
+    const latestOf = (rows) => rows.reduce((a, r) => ((Number(r.number) || 0) > (Number(a?.number) || -1) ? r : a), null);
+    const line = (icon, label, count, latest, value, extra = '') => {
+      const b = el('button', `source-line${extra}`);
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(state.chapterSource === value));
+      b.insertAdjacentHTML('afterbegin', glyph(icon));
+      const t = el('span', 'source-line-text');
+      t.append(el('b', null, label));
+      // المقارنة التي تهم: إلى أي فصل وصل كل مصدر ومتى نزل آخره
+      const when = latest ? dateLabel(latest.chapter?.dateUpload) : '';
+      const meta = value === null ? 'أوثق نسخة لكل فصل من كل المصادر' : latest ? `حتى الفصل ${latest.number}${when ? ` · ${when}` : ''}` : count != null ? countLabel(count, 'chapter') : '';
+      if (meta) t.append(el('small', null, meta));
+      b.append(t, el('i', 'source-line-mark'));
+      b.onclick = () => pick(value);
+      return b;
+    };
+    const rows = [line('spark', 'القارئ الذكي', w._chapters?.length ?? 0, latestOf(w._chapters ?? []), null, ' source-line--smart')];
+    for (const x of sources) rows.push(line('layers', x.label, x.count, latestOf(editionRows(w, x.sourceId)), x.sourceId));
+    for (const f of failed) {
+      const b = el('div', 'source-line source-line--failed');
+      b.innerHTML = glyph('alert');
+      const t = el('span', 'source-line-text');
+      t.append(el('b', null, displayName(f.label, f.sourceId)), el('small', null, f.reason ?? 'لم يرد في الوقت'));
+      b.append(t);
+      rows.push(b);
+    }
+    const head = el('div', 'section-titles');
+    head.append(el('span', 'section-eyebrow', 'SOURCES'), el('h2', null, 'المصادر'));
+    q('sourceRow').replaceChildren(head, ...rows);
   }
   function openSourcesSheet(w, sources, failed, pick) {
     openSheet((body) => {
@@ -2298,10 +2341,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
     q('progressText').textContent = readCount ? `قرأت ${readCount} من ${all.length}` : 'لم تبدأ بعد';
 
-    const rows = visibleRows(w);
+    const allRows = visibleRows(w);
     // العدد فصولٌ صحيحة فقط؛ الجانبية (128.1) تُعرض في القائمة ولا تُعدّ
-    const main = countMainChapters(rows);
-    q('chapterCount').textContent = main < rows.length ? `${main} · +${rows.length - main} جانبي` : String(main);
+    const main = countMainChapters(allRows);
+    q('chapterCount').textContent = main < allRows.length ? `${main} · +${allRows.length - main} جانبي` : String(main);
+    // نمط «المجلّد»: الفصول مجموعات من 50 كأجزاء كتاب، والمفتوحة هي التي فيها فصلك
+    const ranges = q('detail').dataset.look === 'volume' ? chapterRanges(allRows, next) : null;
+    const rows = ranges ? ranges.rows : allRows;
     const list = el('div', 'chapter-list');
     const fragment = document.createDocumentFragment();
     const nextKey = chapterKeyOf(ref, next);
@@ -2316,7 +2362,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       note.append(el('span',null,`في ${source.label} فصول مقفلة حتى الفصل ${source.lockedMax}`));
       parts.unshift(note);
     }
-    const rest = rows.length - state.chapterShown;
+    if (ranges) parts.unshift(ranges.tabs);
+    const rest = ranges ? 0 : rows.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
       more.type = 'button';
@@ -2327,6 +2374,43 @@ export function mountV35(deps, { page = 'home' } = {}) {
       parts.push(more);
     }
     q('chapterPanel').replaceChildren(...parts);
+  }
+  /**
+   * مجموعات «المجلّد»: 50 فصلًا لكل مجموعة بأرقام الفصول، بترتيب القائمة نفسه. عمل قصير
+   * (60 فصلًا أو أقل) يبقى قائمة واحدة. المختارة: ما اخترته، وإلا التي فيها فصلك التالي.
+   */
+  function chapterRanges(rows, next, size = 50) {
+    if (rows.length <= 60) return null;
+    const groupOf = (r) => Math.max(0, Math.floor(((Number(r.number) || 1) - 1) / size));
+    const keys = [...new Set(rows.map(groupOf))];
+    const at = state.chapterRange != null && keys.includes(state.chapterRange) ? state.chapterRange : next && keys.includes(groupOf(next)) ? groupOf(next) : keys[0];
+    const tabs = el('div', 'chapter-ranges');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'مجموعات الفصول');
+    for (const k of keys) {
+      const b = el('button', 'chapter-range');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(k === at));
+      b.dir = 'ltr';
+      // آخر مجموعة تنتهي عند آخر فصل موجود فعلًا، لا عند 250
+      const top = Math.max(...rows.filter((r) => groupOf(r) === k).map((r) => Math.floor(Number(r.number) || 0)));
+      b.textContent = `${k * size + 1}–${Math.min((k + 1) * size, top)}`;
+      b.onclick = () => {
+        state.chapterRange = k;
+        renderChapters(state.current);
+      };
+      tabs.append(b);
+    }
+    // المجموعة المختارة في وسط الشريط أفقيًا فقط؛ الصفحة لا تتحرك
+    requestAnimationFrame(() => {
+      const on = tabs.querySelector('[aria-selected="true"]');
+      if (!on) return;
+      const a = on.getBoundingClientRect();
+      const b = tabs.getBoundingClientRect();
+      tabs.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
+    });
+    return { tabs, rows: rows.filter((r) => groupOf(r) === at) };
   }
   function chapterRow(w, r, isRead, isNext) {
     const ref = String(w.id);
