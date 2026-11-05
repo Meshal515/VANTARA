@@ -76,3 +76,17 @@ test('انتقال المشغّل عند ميزانية البدء بلا خطأ
   const broken = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'ERROR_CODE_IO_BAD_HTTP_STATUS' }] }]);
   assert.equal(broken[0].owner, 'vantara');
 });
+
+test('عمل بلا سيرفر جاهز يُعدّ بسببه، والتشغيل الأبطأ من الحد بلا خطأ بطء لا كذب', () => {
+  const none = failures({ worksTested: 1 }, [{ routes: 1, ready: 0, unavailableReasons: ['لا رابط فيديو'] }]);
+  assert.deepEqual(none, [{ code: 'NO_READY_SERVER:لا رابط فيديو', owner: 'addon' }]);
+  const stalled = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'CLOCK_STALLED', ttffMs: 9620, decoded: 26, advancedMs: 4629 }] }]);
+  assert.equal(stalled[0].owner, 'slow');
+  const frozen = failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'CLOCK_STALLED', ttffMs: 9000, decoded: 3, advancedMs: 0 }] }]);
+  assert.equal(frozen[0].owner, 'vantara');
+  assert.equal(owner('TRANSPORT_FAILED', 'details'), 'site');
+  const why = (r) => failures({ worksTested: 1 }, [{ routes: 1, ready: 0, unavailableReasons: [r] }])[0].owner;
+  assert.equal(why('انتهت مهلة السيرفر (20 ث)'), 'site');
+  assert.equal(why('رابط غير قابل للتشغيل (blob)'), 'vantara');
+  assert.equal(why('الإضافة: IOException: x'), 'addon');
+});
