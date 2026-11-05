@@ -57,6 +57,29 @@ class RuntimeSourceAdapterTest {
     private val id="addon|cs3|cs3_0123456789abcdef0123456789abcdef|provider"
     private val work=SourceAnime(id,"https://source.example/work","العمل")
     private fun objectOf(value: String)=RuntimeJson.parse(value).jsonObject
+    @Test fun detailsThenEpisodesCostsOneProviderLoadLikeCloudStream()=runBlocking {
+        val calls=mutableListOf<String>()
+        val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->
+            calls+=operation
+            objectOf("""{"item":{"name":"Work","url":"https://source.example/work","episodes":{"Subbed":[{"data":"one","episode":1},{"data":"two","episode":2}]}}}""")
+        }
+        adapter.details(work)
+        assertEquals(listOf("one","two"),adapter.episodes(work).map { it.url })
+        assertEquals("episodes after a fresh details answer must not run load() again in a new worker",listOf("details"),calls)
+        val movie=RuntimeSourceAdapter(id,"Source") { operation,_->
+            calls+=operation
+            objectOf("""{"item":{"name":"Film","url":"https://source.example/film","dataUrl":"film-links"}}""")
+        }
+        calls.clear();movie.details(work)
+        assertEquals(listOf("film-links"),movie.episodes(work).map { it.url })
+        assertEquals(listOf("details"),calls)
+    }
+    @Test fun episodesWithoutRecentDetailsStillAskTheProvider()=runBlocking {
+        val calls=mutableListOf<String>()
+        val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->calls+=operation;objectOf("""{"items":[{"data":"one","episode":1}]}""") }
+        assertEquals(1,adapter.episodes(work).size)
+        assertEquals(listOf("episodes"),calls)
+    }
     @Test fun selectedSeasonDetailsDoNotRequestSeasonSelectionAgain()=runBlocking {
         val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"item":{"name":"Work","url":"https://source.example/work","episodes":{"Subbed":[{"data":"one","season":1},{"data":"two","season":2}]}}}""") }
         assertFalse(adapter.details(work.copy(requestedSeason=2,seasonNumber=2.0)).hasSeasons)

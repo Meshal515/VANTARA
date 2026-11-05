@@ -46,21 +46,40 @@ class RuntimeSourceAdapter(
         val flat=if(listing==Listing.SEARCH)items else JsonArray(items.flatMap { (it.jsonObject["list"] as? JsonArray) ?: error("INVALID_CATALOGUE_SECTION") })
         return SourcePage(flat.map { work(it.jsonObject) }.distinctBy { it.url },result["hasNext"]?.jsonPrimitive?.booleanOrNull ?: false)
     }
+    /**
+     * CloudStream's load() answers details AND episodes at once; CloudStream itself calls it once per work.
+     * The "episodes" operation repeats load(): another isolated worker and another page fetch. A details
+     * answer from the last two minutes serves the same rows (the worker flattens them identically).
+     */
+    private val recent=object:LinkedHashMap<String,Pair<Long,JsonArray>>(16,0.75f,true) {
+        override fun removeEldestEntry(eldest:MutableMap.MutableEntry<String,Pair<Long,JsonArray>>?)=size>32
+    }
+    private fun rowsOf(item: JsonObject): JsonArray? = when(val episodes=item["episodes"]) {
+        is JsonArray -> episodes
+        is JsonObject -> JsonArray(episodes.values.flatMap { (it as? JsonArray).orEmpty() })
+        // A movie or live channel: one playable item whose data is loadLinks' input, as the worker builds it.
+        else -> item.text("dataUrl").takeIf { it.isNotBlank() }?.let { JsonArray(listOf(buildJsonObject { put("data",it);put("name",item.text("name")) })) }
+    }
+    private suspend fun episodeRows(url: String): JsonArray {
+        synchronized(recent) { recent[url]?.takeIf { System.currentTimeMillis()-it.first<RECENT_MS }?.let { return it.second } }
+        return execute("episodes",input("url" to JsonPrimitive(url))).getValue("items").jsonArray
+    }
     override suspend fun details(anime: SourceAnime): SourceAnime {
         require(anime.sourceId==id)
-        return work(execute("details",input("url" to JsonPrimitive(anime.url))).getValue("item").jsonObject,anime)
+        val item=execute("details",input("url" to JsonPrimitive(anime.url))).getValue("item").jsonObject
+        rowsOf(item)?.let { rows -> synchronized(recent) { recent[anime.url]=System.currentTimeMillis() to rows } }
+        return work(item,anime)
     }
     override suspend fun seasons(anime: SourceAnime): List<SourceAnime> {
         require(anime.sourceId==id)
-        val items=execute("episodes",input("url" to JsonPrimitive(anime.url))).getValue("items").jsonArray
+        val items=episodeRows(anime.url)
         return items.mapNotNull { it.jsonObject["season"]?.jsonPrimitive?.intOrNull }.distinct().sorted().map { season ->
             anime.copy(title="${anime.title} · الموسم $season",hasSeasons=false,seasonNumber=season.toDouble(),requestedSeason=season)
         }
     }
     override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
         require(anime.sourceId==id)
-        val result=execute("episodes",input("url" to JsonPrimitive(anime.url))).getValue("items").jsonArray
-        val rows=result.map { it.jsonObject }
+        val rows=episodeRows(anime.url).map { it.jsonObject }
         val wanted=anime.requestedSeason ?: anime.seasonNumber.takeIf { it>=0 }?.toInt()
         require(wanted!=null || rows.mapNotNull { it["season"]?.jsonPrimitive?.intOrNull }.distinct().size<=1) { "SEASON_SELECTION_REQUIRED" }
         return rows.filter { wanted==null || it["season"]?.jsonPrimitive?.intOrNull==wanted }.map { row ->
@@ -94,4 +113,5 @@ class RuntimeSourceAdapter(
         }
         return candidates
     }
+    private companion object { const val RECENT_MS=120_000L }
 }
