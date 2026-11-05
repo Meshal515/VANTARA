@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, table, verdict, site, owner, failures } from './summarize_certification.mjs';
+import { parse, table, verdict, site, owner, failures, mangaRows, mangaTable } from './summarize_certification.mjs';
 
 test('جدول الاعتماد: التغطية والاحتياط وصدق «جاهز» لكل مصدر', () => {
   const lines = [
@@ -46,4 +46,22 @@ test('مالك كل فشل: قيام العامل ومهلة التثبيت و«
   const md = table(parse([JSON.stringify({ type: 'source', kind: 'cs3', name: 'X', content: 'anime', code: 'BINDING_TIMEOUT', stage: 'install' })].join('\n')));
   assert.match(md, /\| X \| cs3\/anime \| لم يكتمل: BINDING_TIMEOUT عند التثبيت \| 1 \(BINDING_TIMEOUT\) \| 0 \| 0 \|/);
   assert.match(md, /أعطال فانتارا: 1/);
+});
+
+test('المانجا: النجاح صورة صفحة حقيقية، والوقوف له خطوة ومالك، و«غير مدعوم» على فانتارا', () => {
+  const records = [
+    { extension: 'A', origin: 'builtin', download: { result: 'PASS' }, load: { result: 'PASS' }, sources: [{ name: 'A ar', popular: { result: 'PASS' }, series: { result: 'PASS' }, pages: { result: 'PASS' }, image: { result: 'PASS' }, chapters: 10 }] },
+    { extension: 'B', origin: 'keiyoushi', download: { result: 'PASS' }, load: { result: 'FAIL', code: 'ABI_MISMATCH', owner: 'vantara' } },
+    { extension: 'C', origin: 'keiyoushi', download: { result: 'PASS' }, load: { result: 'PASS' }, sources: [{ name: 'C ar', popular: { result: 'FAIL', code: 'SITE_HTTP_404', owner: 'site' }, latest: { result: 'PASS' }, series: { result: 'PASS' }, chapters: 0 }] },
+    { extension: 'D', origin: 'keiyoushi', download: { result: 'PASS' }, load: { result: 'PASS' }, sources: [{ name: 'D ar', popular: { result: 'FAIL', code: 'USER_INTERACTION_REQUIRED', owner: 'unsupported' } }] },
+  ];
+  const rows = mangaRows(records);
+  assert.deepEqual(rows.map((r) => [r.name, r.ok, r.step, r.owner]), [
+    ['A', true, undefined, null],
+    ['B', false, 'load', 'vantara'],
+    ['C', false, 'series', 'addon'],
+    ['D', false, 'popular', 'vantara'],
+  ]);
+  const md = mangaTable(records);
+  assert.match(md, /المانجا: 1\/4 يعمل، أعطال فانتارا: 2/);
 });

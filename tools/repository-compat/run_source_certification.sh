@@ -13,6 +13,21 @@ adb logcat -c || true
 adb install -r "$app" || exit 1
 adb install -r -t "$tests" || exit 1
 status=0
+if [[ "$CERT_KIND" == "manga" ]]; then
+  # مانجا: رحلة MangaLiveSweepTest لكل حزمة (المدمجة وعربية Keiyoushi) حتى صورة صفحة فعلية.
+  # CERT_NAME «all» = كل الحزم، وإلا أسماء مفصولة بفواصل.
+  only=()
+  [[ "$CERT_NAME" != "all" ]] && only=(-e vantaraOnly "$CERT_NAME")
+  timeout 9000 adb shell am instrument -r -w \
+    -e class com.vantara.runtime.MangaLiveSweepTest \
+    -e vantaraMangaSweep true "${only[@]}" \
+    "$runner" > "$out/instrumentation.txt" 2>&1 || status=$?
+  timeout 60s adb logcat -d -v raw -s VANTARA_MANGA:I > "$out/manga.jsonl" 2>/dev/null || true
+  timeout 60s adb logcat -d VantaraExtension:I VantaraRuntime:I AndroidRuntime:E '*:S' > "$out/logcat.txt" 2>&1 || true
+  echo "manga lines: $(grep -c '^{' "$out/manga.jsonl" || true)"
+  tail -n 20 "$out/instrumentation.txt"
+  exit 0
+fi
 timeout 9000 adb shell am instrument -r -w \
   -e class com.vantara.runtime.SourceCertificationTest \
   -e vantaraCertify true \
