@@ -18,9 +18,23 @@ export function parse(text) {
 
 const tierCell = (t) => (t ? `${t.playable}/${t.found}` : '—');
 
+const STAGES = { setup: 'التهيئة', repository: 'المستودع', index: 'فهرس المستودع', install: 'التثبيت', route: 'ربط المصدر', catalogue: 'الكتالوج', works: 'الأعمال' };
+
+/** حال الموقع خارج الإضافة: انتقل لمضيف آخر، أو يطلب تحقق Cloudflare، أو لا يرد. */
+export function site(s) {
+  if (s.siteMovedTo) return `الموقع انتقل إلى ${s.siteMovedTo}`;
+  if (s.siteChallenge) return 'الموقع يطلب تحقق Cloudflare';
+  if (s.site && s.site !== 'UNKNOWN_BASE') return `الموقع لا يرد (${s.site})`;
+  if (s.siteStatus >= 400) return `الموقع ردّ ${s.siteStatus}`;
+  return '';
+}
+
 export function verdict(s) {
-  if (s.code) return `لم يكتمل: ${s.code}`;
-  if (!s.worksTested) return 'لا أعمال في الكتالوج';
+  if (s.code) return `لم يكتمل: ${s.code}${s.stage ? ` عند ${STAGES[s.stage] ?? s.stage}` : ''}`;
+  if (!s.worksTested) {
+    const why = [site(s), s.catalogueErrors?.[0]].filter(Boolean).join('؛ ');
+    return `لا أعمال في الكتالوج${why ? ` (${why})` : ''}`;
+  }
   if (s.falseReady > 0) return 'جاهز يكذب';
   const rate = s.worksPlayable / s.worksTested;
   if (rate >= 0.9 && s.worksWithBackup / s.worksTested >= 0.5) return 'معتمد';

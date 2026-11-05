@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, table, verdict } from './summarize_certification.mjs';
+import { parse, table, verdict, site } from './summarize_certification.mjs';
 
 test('جدول الاعتماد: التغطية والاحتياط وصدق «جاهز» لكل مصدر', () => {
   const lines = [
@@ -17,4 +17,13 @@ test('جدول الاعتماد: التغطية والاحتياط وصدق «ج
   assert.match(md, /witanime .*جاهز يكذب.*NO_FIRST_FRAME×3/);
   assert.equal(verdict({ code: 'X' }), 'لم يكتمل: X');
   assert.equal(verdict({ worksTested: 30, worksPlayable: 20, worksWithBackup: 0, falseReady: 0 }), 'يعمل جزئيًا');
+});
+
+test('سبب الكتالوج الفارغ ومرحلة الفشل يظهران في الحكم: الموقع المنتقل لا يُحسب عطل محرك', () => {
+  assert.equal(verdict({ code: 'OPERATION_TIMEOUT', stage: 'install' }), 'لم يكتمل: OPERATION_TIMEOUT عند التثبيت');
+  const moved = { worksTested: 0, siteHost: 'old.example', siteMovedTo: 'new.example', catalogueErrors: ['popular#1:EMPTY_PAGE'] };
+  assert.equal(site(moved), 'الموقع انتقل إلى new.example');
+  assert.equal(verdict(moved), 'لا أعمال في الكتالوج (الموقع انتقل إلى new.example؛ popular#1:EMPTY_PAGE)');
+  assert.equal(verdict({ worksTested: 0 }), 'لا أعمال في الكتالوج');
+  assert.equal(site({ siteStatus: 403, siteChallenge: 'cloudflare' }), 'الموقع يطلب تحقق Cloudflare');
 });

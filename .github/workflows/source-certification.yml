@@ -150,3 +150,5 @@ jobs:
           # السطور الخام في السجل نفسه: تجمعها الجلسة من سجلات الوظائف لجدول كل المصادر
           for f in cert-*/cert.jsonl; do [ -f "$f" ] && sed 's/^/VANTARA_CERT_LINE /' "$f"; done
           for f in cert-*/instrumentation.txt; do [ -f "$f" ] && tail -n 40 "$f"; done
+          # سجل المحرك (VantaraRuntime/VantaraPrepare وانهيارات العملية) لتشخيص ما لا يظهر في سطور الاعتماد
+          for f in cert-*/logcat.txt; do [ -f "$f" ] && grep -v '^--------- beginning' "$f" | tail -n 150 | sed 's/^/VANTARA_CERT_LOG /'; done

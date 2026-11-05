@@ -103,7 +103,9 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     }
     private CompletableFuture<Void> loadProfile(File dex,String hash,String entry,boolean cloudstream) {
         if(dex==null || hash==null || entry==null) return failed("INVALID_DEX_INPUT");
-        return submit(10000,true,()->{
+        // InMemoryDexClassLoader runs without ahead-of-time compilation, unlike CloudStream's PathClassLoader;
+        // a large plugin's verification and load() can exceed 10s on a low-end device.
+        return submit(20000,true,()->{
             try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(dex,ParcelFileDescriptor.MODE_READ_ONLY)) {
                 transact(cloudstream?RuntimeProtocol.LOAD_CLOUDSTREAM:RuntimeProtocol.LOAD,p->{p.writeString(hash);p.writeString(entry);p.writeTypedObject(fd,0);p.writeStrongBinder(broker);});
                 return null;
@@ -140,15 +142,15 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         if(timeoutMs<1 || timeoutMs>30000) return failed("INVALID_DEADLINE");
         if(!busy.compareAndSet(false,true)) return failed("WORKER_BUSY");
         OperationFuture<T> result=new OperationFuture<>();current.set(result);
-        final ScheduledFuture<?> deadline;
-        try { deadline=clock.schedule(()->{
-            if(current.get()==result) retire("OPERATION_TIMEOUT",true);
-        },timeoutMs,TimeUnit.MILLISECONDS); }
-        catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return result; }
-        result.deadline=deadline;
+        // The operation budget starts once the isolated process answers. A cold process start has its own
+        // BINDING_TIMEOUT; counting it here let a slow first boot expire a plugin load that never ran.
         connect().whenComplete((value,error)->{
             if(error!=null) { finish(result,null,error);return; }
             if(closed.get()) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
+            try { result.deadline=clock.schedule(()->{
+                if(current.get()==result) retire("OPERATION_TIMEOUT",true);
+            },timeoutMs,TimeUnit.MILLISECONDS); }
+            catch(RejectedExecutionException e) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
             try { io.execute(()->{
                 if(closed.get()) { finish(result,null,new RuntimeFailure("WORKER_CLOSED"));return; }
                 try { T answer=operation.call();finish(result,answer,null); }
