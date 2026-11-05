@@ -113,8 +113,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo chmod 666 /dev/kvm
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
+          # عشرون وظيفة تحدّث المرايا معًا فتأخذ apt-get update حتى 18 دقيقة: التثبيت أولًا، والتحديث عند الحاجة فقط
+          apt_install() { sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 pulseaudio pulseaudio-utils; }
+          apt_install || { sudo apt-get update -o Acquire::Retries=3 && apt_install; }
           vantara_audio="$RUNNER_TEMP/vantara-cert-audio"
           mkdir -p "$vantara_audio"
           chmod 700 "$vantara_audio"
