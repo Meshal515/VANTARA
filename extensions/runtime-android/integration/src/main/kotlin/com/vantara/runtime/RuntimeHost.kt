@@ -335,7 +335,7 @@ class RuntimeHost(
             val registration=retryWorkerStart {
                 worker(o,generation,scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
                     AndroidRuntimeClient.HostTransport { _,_ -> throw IOException("INITIALIZATION_NETWORK_DENIED") }) { client ->
-                    RuntimeJson.parse(client.invokeJson("capabilities","{}",3000).await()).jsonObject
+                    RuntimeJson.parse(client.invokeJson("capabilities","{}",10_000).await()).jsonObject
                 }
             }
             val sources=RuntimeRegistration.validate(registration,pkg)

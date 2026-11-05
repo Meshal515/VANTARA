@@ -198,11 +198,17 @@ class SourceCertificationTest {
             val currentField = PlayerActivity::class.java.getDeclaredField("current").apply { isAccessible = true }
             fun player() = playerField.get(act) as ExoPlayer
             onMain { player().volume = 0f }
+            // The player clears its error when it moves to the next server; keep the first one it raised here.
+            val firstError = AtomicReference<String?>(null)
+            onMain { player().addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) { firstError.compareAndSet(null, error.errorCodeName) }
+            }) }
             var ttff = -1L
             var error: String? = null
             var switchedAt = -1L
-            while (SystemClock.elapsedRealtime() - started < 25_000) {
-                error = onMain { player().playerError?.errorCodeName }
+            // Up to 45s: the player's own budgets decide (slow emulator first frames reached 22s), not this loop.
+            while (SystemClock.elapsedRealtime() - started < 45_000) {
+                error = onMain { player().playerError?.errorCodeName } ?: firstError.get()
                 if (error != null) break
                 // The player left this server on its own: when, and with which error, says who failed.
                 if (onMain { (currentField.get(act) as? Candidate)?.id }.let { it != null && it != chosen.id }) { switchedAt = SystemClock.elapsedRealtime() - started; break }
@@ -214,6 +220,7 @@ class SourceCertificationTest {
                 put("verdict", "FALSE_READY"); put("code", error ?: if (switched) "SWITCHED_BEFORE_FRAME" else "NO_FIRST_FRAME")
                 put("waitedMs", SystemClock.elapsedRealtime() - started)
                 if (switchedAt >= 0) put("switchedAtMs", switchedAt)
+                firstError.get()?.let { put("playerError", it) }
                 // No player error and a switch at the startup budget: a slow first segment, not a broken route.
                 put("startupBudgetMs", com.vantara.anime.player.PlaybackBudgets.startupMs(chosen.url))
             }
@@ -258,7 +265,14 @@ class SourceCertificationTest {
             if (season != null) detail = runCatching { withTimeout(40_000) { adapter.details(season) } }.getOrDefault(season)
         }
         val t1 = SystemClock.elapsedRealtime()
-        val episodes = runCatching { withTimeout(45_000) { adapter.episodes(detail) } }.getOrElse { put("stage", "episodes"); put("code", reason(it)); return@buildJsonObject }
+        var episodes = runCatching { withTimeout(45_000) { adapter.episodes(detail) } }.getOrElse { failure ->
+            // As the episode list does in the app: a multi-season work is opened through its first season.
+            if (failure.message != "SEASON_SELECTION_REQUIRED") { put("stage", "episodes"); put("code", reason(failure)); return@buildJsonObject }
+            val season = runCatching { withTimeout(40_000) { adapter.seasons(detail.copy(hasSeasons = true)) } }.getOrNull()?.firstOrNull()
+                ?: run { put("stage", "seasons"); put("code", "NO_SEASONS"); return@buildJsonObject }
+            detail = season
+            runCatching { withTimeout(45_000) { adapter.episodes(season) } }.getOrElse { put("stage", "episodes"); put("code", reason(it)); return@buildJsonObject }
+        }
         put("episodesMs", SystemClock.elapsedRealtime() - t1)
         put("episodes", episodes.size)
         val episode = episodes.filter { it.number >= 1f }.minByOrNull { it.number } ?: episodes.firstOrNull()
@@ -281,6 +295,8 @@ class SourceCertificationTest {
             put("probeFailed", routes.count { it.state == RouteState.READY && it.probed == false })
             put("unavailable", routes.count { it.state != RouteState.READY })
             put("unavailableReasons", JsonArray(routes.filter { it.state != RouteState.READY }.mapNotNull { it.reason?.take(60) }.distinct().take(6).map(::JsonPrimitive)))
+            // No route at all: the preparation only logged why. Ask the source once, here, to record its answer.
+            if (routes.isEmpty()) put("noRoute", runCatching { withTimeout(40_000) { adapter.candidates(episode) }; "EMPTY_CANDIDATES" }.getOrElse { reason(it) })
             // كل سيرفر جاهز (حتى [servers] سيرفرات مختلفة) يُفتح في المشغّل الأصلي
             val toPlay = ready.distinctBy { it.server.lowercase() }.take(servers)
             val plays = toPlay.mapNotNull { route ->
