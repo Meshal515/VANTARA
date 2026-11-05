@@ -10,6 +10,11 @@ on:
       - 'android/app/src/androidTest/java/com/vantara/anime/**'
       - 'android/app/src/main/kotlin/com/vantara/anime/**'
   workflow_dispatch:
+    inputs:
+      packages:
+        description: Aniyomi package suffixes (comma-separated, up to 14)
+        required: false
+        default: 'okanime,anime4up,witanime,asia2tv'
 
 permissions:
   contents: read
@@ -17,8 +22,9 @@ permissions:
 jobs:
   actual-signed-aniyomi-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 150
     env:
+      VANTARA_ANIYOMI_PACKAGES: ${{ inputs.packages || 'okanime,anime4up,witanime,asia2tv' }}
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
     steps:

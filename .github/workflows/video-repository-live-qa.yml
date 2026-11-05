@@ -10,6 +10,15 @@ on:
       - 'extensions/runtime-android/cloudstream/**'
       - 'extensions/runtime-android/integration/src/main/**'
   workflow_dispatch:
+    inputs:
+      only:
+        description: CloudStream plugin names (comma-separated, exact names); empty keeps the default four
+        required: false
+        default: ''
+      limit:
+        description: Maximum plugins to sweep
+        required: false
+        default: '4'
 
 permissions:
   contents: read
@@ -21,12 +30,14 @@ concurrency:
 jobs:
   live-cloudstream-repository-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 65
+    timeout-minutes: 170
     env:
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
       VANTARA_NATIVE_VIDEO: 'true'
       VANTARA_NATIVE_REQUIRED: 'AnimeRift'
+      VANTARA_LIVE_ONLY: ${{ inputs.only }}
+      VANTARA_LIVE_LIMIT: ${{ inputs.limit || '4' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
