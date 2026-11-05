@@ -2696,9 +2696,10 @@ html[data-section='cinema'] {
   cursor: pointer;
   transition: transform 0.14s ease, background-color 0.2s ease;
 }
-/* المثلث في منتصف الدائرة رياضيًا يبدو مائلًا لجهة قاعدته؛ يُزاح نحو رأسه ليبدو في منتصفها */
+/* glyph(play) already balances the visible triangle. A second CSS shift
+   displaced it toward the circle edge; verified in the actual core CTA. */
 .v35 .aw-still-play .icon {
-  transform: translateX(2px);
+  transform: none;
 }
 .v35 .aw-still-play:active {
   transform: scale(0.92);
@@ -3460,33 +3461,15 @@ html[data-section='cinema'] {
   .v35 .aw[data-style='core'] .aw-main :is(.aw-cast, .an-rail) { margin-inline: calc(var(--gutter) * -1); }
 }
 
-/* The band occupies the former source-strip coordinates, below the banner. It adds no height.
-   Cover and info own the foreground; the two masked trains remain synchronized behind them. */
-.v35 .wl-card .wl-logo-layer { --wl-logo-gap: clamp(40px, 12vw, 64px); position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; }
+/* A transparent, compositor-driven logo corridor behind the original floating cover.
+   The controller measures the fixed title boundary and keeps one active-distance clock. */
+.v35 .wl-card .wl-logo-layer { position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; opacity: .45; mask-image: linear-gradient(to right, transparent var(--wl-logo-fade-start, 0px), #000 var(--wl-logo-fade-end, 48px), #000 var(--wl-logo-fade-out-start, calc(100% - 24px)), transparent var(--wl-logo-fade-out-end, 100%)); }
 .v35 .wl-card .wl-logo-layer[hidden] { display: none; }
-/* The entire band enters from beyond the physical right viewport edge.
-   It cannot flash into the middle while its source image is loading. */
-.v35 .wl-card .wl-logo-entry {
-  position: absolute;
-  inset: 0;
-  transform: translate3d(calc(100vw + 100%), 0, 0);
-}
-.v35 .wl-card .wl-logo-layer[data-ready='true']:not([data-entered='true']) .wl-logo-entry {
-  animation: wl-logo-enter 1.45s cubic-bezier(.19,.75,.25,1) both;
-}
-.v35 .wl-card .wl-logo-layer[data-entered='true'] .wl-logo-entry {
-  animation: none;
-  transform: translate3d(0, 0, 0);
-}
-.v35 .wl-card .wl-logo-lane { position: absolute; inset: 0; direction: ltr; }
-.v35 .wl-card .wl-logo-color { opacity: .45; mask-image: linear-gradient(to right, transparent, #000 7%, #000 calc(var(--wl-logo-color-edge) - 4%), transparent var(--wl-logo-color-edge)); }
- .v35 .wl-card .wl-logo-white { opacity: .42; mask-image: linear-gradient(to right, transparent var(--wl-logo-color-edge), #000 calc(var(--wl-logo-color-edge) + 4%), #000 93%, transparent); }
-.v35 .wl-card .wl-logo-train { display: flex; width: 200%; height: 100%; animation: wl-logo-drift 36s linear infinite; animation-play-state: paused; }
-.v35 .wl-card .wl-logo-layer[data-running='true'] .wl-logo-train { animation-play-state: running; }
-.v35 .wl-card .wl-logo-group { display: flex; justify-content: space-around; align-items: center; flex: 0 0 50%; min-width: 0; gap: 0; }
-.v35 .wl-card .wl-logo-group img { flex: 0 0 50%; width: 50%; min-width: 0; box-sizing: border-box; padding-inline: calc(var(--wl-logo-gap) / 2); height: 86%; object-fit: contain; }
-/* Preserve each show's actual logo color on BOTH sides; never force white. */
-.v35 .wl-card .wl-logo-white img { filter: none; }
+.v35 .wl-card .wl-logo-layer:not([data-ready='true']) { visibility: hidden; }
+.v35 .wl-card .wl-logo-entry { position: absolute; inset: 0; direction: ltr; }
+.v35 .wl-card .wl-logo-train { display: flex; align-items: center; width: max-content; height: 100%; transform: translate3d(100vw, 0, 0); will-change: transform; }
+.v35 .wl-card .wl-logo-group { display: flex; align-items: center; flex: 0 0 var(--wl-logo-period); width: var(--wl-logo-period); height: 100%; gap: var(--wl-logo-gap); padding-right: var(--wl-logo-gap); box-sizing: border-box; }
+.v35 .wl-card .wl-logo-group img { flex: 0 0 var(--wl-logo-width); width: var(--wl-logo-width); max-width: none; height: 86%; object-fit: contain; filter: none; }
 .v35 .wl-card .wl-info { position: relative; z-index: 1; }
 .v35 .wl-card .wl-big:active { background: var(--accent-press) !important; }
 .v35 .wl-card .wl-big:active .dot { color: var(--accent-press); }
@@ -3494,16 +3477,9 @@ html[data-section='cinema'] {
 .v35 .aw > .an-sources { margin: 28px var(--wl-g, 16px); max-width: calc(100% - 32px); }
 .v35 .an-sources[hidden], .v35 .ss-diagnostics[hidden] { display: none; }
 .v35 .ss-diagnostics { padding: 24px 16px; border-top: 1px solid var(--line); }
-@keyframes wl-logo-enter {
-  from { transform: translate3d(calc(100vw + 100%), 0, 0); }
-  to { transform: translate3d(0, 0, 0); }
-}
-@keyframes wl-logo-drift { to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) {
-  .v35 .wl-card .wl-logo-entry { animation: none !important; transform: none !important; }
-  .v35 .wl-card .wl-logo-train { animation: none; }
+  .v35 .wl-card .wl-logo-train { transform: none !important; will-change: auto; }
 }
 @container aw (min-width: 900px) {
-  .v35 .wl-card .wl-head { --wl-logo-band-top: 210px; --wl-logo-color-edge: calc(100% - 255px); }
-  .v35 .aw:dir(ltr) .wl-card .wl-head { --wl-logo-color-edge: 255px; }
+  .v35 .wl-card .wl-head { --wl-logo-band-top: 210px; }
 }

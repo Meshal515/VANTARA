@@ -60,6 +60,7 @@ it('a late, worse hero image never covers a better one already shown (core)', as
   await settle();
   // المهلة مضت بلا فن: الغلاف (رتبة 2) قيد التحميل
   const [poster] = heroImgs();
+  const latePosterOnload = poster.onload;
   expect(poster.src).toBe('https://img/cover.jpg');
   await wait(150);
   await settle();
@@ -68,7 +69,7 @@ it('a late, worse hero image never covers a better one already shown (core)', as
   // الخلفية الأفضل تكتمل أولًا، ثم يكتمل الغلاف المتأخر
   backdrop.onload();
   await settle();
-  poster.onload();
+  latePosterOnload();
   await wait(700);
   await settle();
   const bg = root.querySelector('.aw-bg');

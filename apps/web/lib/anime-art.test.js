@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anilistIdOf, animeLogoOf, episodeStill, episodeTitleOf, loadAnimeArt } from './anime-art.js';
 import { logoOfImdb } from './together/art.js';
 
@@ -86,5 +86,51 @@ describe('لقطات الحلقات بدقة 1920×1080', () => {
     expect(await loadHdStills(sameDay, { fetchImpl })).toEqual({});
     const uniqueDay = { imdb: 'tt1', episodes: { 9: { season: 17, number: 9, airDate: '2023-01-01' } } };
     expect((await loadHdStills(uniqueDay, { fetchImpl }))['9'].src).toBe('https://episodes.metahub.space/tt1/2/5/original.jpg');
+  });
+});
+
+
+describe('image budgets and HD fetch recovery', () => {
+  afterEach(() => vi.useRealTimers());
+  const art = { imdb: 'tt987654321', episodes: { 1: { image: 'https://tvdb/1.jpg', season: 1, number: 1, airDate: '2025-01-01' } } };
+  const video = { season: 1, episode: 1, released: '2025-01-01', thumbnail: 'https://episodes.metahub.space/tt987654321/1/1/w780.jpg' };
+
+  it('uses a native small still only when its pixels cover the requested display size', () => {
+    const hd = { 1: { src: 'https://episodes.metahub.space/tt987654321/1/1/original.jpg', mid: video.thumbnail } };
+    expect(episodeStill({}, 1, { ...art, hd }, { width: 170, dpr: 2 })).toEqual({
+      src: 'https://episodes.metahub.space/tt987654321/1/1/w342.jpg', still: true,
+      fallbacks: [video.thumbnail, 'https://tvdb/1.jpg'],
+    });
+    expect(episodeStill({}, 1, { ...art, hd }, { width: 300, dpr: 2 }).src).toBe(video.thumbnail);
+    expect(episodeStill({}, 1, { ...art, hd }, { full: true, width: 170, dpr: 2 }).src).toBe(hd[1].src);
+  });
+
+  it('uses the small cover for row fallback and the full cover for a hero', () => {
+    const m = { poster: 'https://img/full.jpg', posterSmall: 'https://img/small.jpg' };
+    expect(episodeStill(m, 1).src).toBe('https://img/small.jpg');
+    expect(episodeStill(m, 1, null, { full: true }).src).toBe('https://img/full.jpg');
+  });
+
+  it('retries an HD metadata server failure on the next open', async () => {
+    const m = { ...art, imdb: 'tt987654322' };
+    expect(await loadHdStills(m, { fetchImpl: async () => ({ ok: false, status: 503 }) })).toEqual({});
+    const hd = await loadHdStills(m, { fetchImpl: async () => ({ ok: true, json: async () => ({ meta: { videos: [video] } }) }) });
+    expect(hd['1']?.mid).toBe(video.thumbnail);
+  });
+
+  it('settles and permits retry when an HD metadata response body never arrives', async () => {
+    vi.useFakeTimers();
+    const m = { ...art, imdb: 'tt987654323' };
+    let signal;
+    const stalled = loadHdStills(m, { timeoutMs: 25, fetchImpl: async (_url, opts) => {
+      signal = opts?.signal;
+      return { ok: true, json: () => new Promise(() => {}) };
+    } });
+    let result;
+    void stalled.then(value => { result = value; });
+    await vi.advanceTimersByTimeAsync(30);
+    expect(result).toEqual({});
+    expect(signal?.aborted).toBe(true);
+    expect((await loadHdStills(m, { fetchImpl: async () => ({ ok: true, json: async () => ({ meta: { videos: [video] } }) }) }))['1']?.mid).toBe(video.thumbnail);
   });
 });

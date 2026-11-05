@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aniZipArt, episodeLine, imdbFromCinemeta, logoOfImdb, mediaKind, resolveArt } from './art.js';
 
 const memory = () => {
@@ -100,4 +100,121 @@ describe('room art', () => {
     expect(z.imdb).toBe('tt33092113');
     expect(z.fanart).toBe('https://artworks.thetvdb.com/s1.jpg');
   });
+});
+
+
+describe('art request deadlines', () => {
+  beforeEach(() => { globalThis.localStorage = memory(); vi.useFakeTimers(); });
+  afterEach(() => vi.useRealTimers());
+
+  it('settles a stalled mapping request and retries rather than remembering missing art', async () => {
+    let signal;
+    let result;
+    const pending = aniZipArt(98765001, { timeoutMs: 30, fetchImpl: (_url, opts) => {
+      signal = opts?.signal;
+      return new Promise(() => {});
+    } });
+    void pending.then(value => { result = value; });
+    await vi.advanceTimersByTimeAsync(35);
+    expect(result).toBeNull();
+    expect(signal?.aborted).toBe(true);
+    const retry = await aniZipArt(98765001, { fetchImpl: async () => ({ ok: true, json: async () => ({ mappings: { imdb_id: 'tt123' }, episodes: {} }) }) });
+    expect(retry?.imdb).toBe('tt123');
+  });
+
+  it('includes a stalled response body in the total art deadline', async () => {
+    let result;
+    void aniZipArt(98765002, { timeoutMs: 30, fetchImpl: async () => ({ ok: true, json: () => new Promise(() => {}) }) }).then(value => { result = value; });
+    await vi.advanceTimersByTimeAsync(35);
+    expect(result).toBeNull();
+    expect(globalThis.localStorage.getItem('vantara.tgart.az4-98765002')).toBeNull();
+  });
+
+  it('cancels every active parent/search request and never stores a cancelled mapping', async () => {
+    const ctrl = new AbortController();
+    const signals = [];
+    const fetchImpl = async (url, opts) => {
+      signals.push(opts?.signal);
+      if (url.endsWith('anilist_id=98765003')) return { ok: true, json: async () => ({ titles: { en: 'Audit Show' }, mappings: {}, episodes: {} }) };
+      if (url === 'https://graphql.anilist.co') return { ok: true, json: async () => ({ data: { Media: { title: { english: 'Audit Show' }, format: 'TV', startDate: { year: 2026 }, relations: { edges: [{ relationType: 'PREQUEL', node: { id: 98765004, type: 'ANIME' } }] } } } }) };
+      return new Promise(() => {});
+    };
+    const result = aniZipArt(98765003, { fetchImpl, signal: ctrl.signal });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signals.length).toBeGreaterThan(3);
+    ctrl.abort();
+    expect(await result).toBeNull();
+    expect(signals.every(signal => signal?.aborted)).toBe(true);
+    expect(globalThis.localStorage.getItem('vantara.tgart.az4-98765003')).toBeNull();
+  });
+});
+
+describe('independent subscribers of shared artwork', () => {
+  beforeEach(() => { globalThis.localStorage = memory(); });
+  const mapping = imdb => ({ ok: true, json: async () => ({ mappings: { imdb_id: imdb }, episodes: {} }) });
+
+  it('cancelling the first subscriber leaves another subscriber and its network request alive', async () => {
+    const first = new AbortController(), second = new AbortController();
+    let reply, network;
+    const fetchImpl = (_url, opts) => { network = opts.signal; return new Promise(resolve => { reply = resolve; }); };
+    const a = aniZipArt(98765101, { fetchImpl, signal: first.signal });
+    const b = aniZipArt(98765101, { fetchImpl, signal: second.signal });
+    first.abort();
+    expect(await a).toBeNull();
+    expect(network.aborted).toBe(false);
+    reply(mapping('tt98765101'));
+    expect((await b)?.imdb).toBe('tt98765101');
+  });
+
+  it('honors a later subscriber cancellation without cancelling the first subscriber', async () => {
+    const later = new AbortController();
+    let reply, network;
+    const fetchImpl = (_url, opts) => { network = opts.signal; return new Promise(resolve => { reply = resolve; }); };
+    const a = aniZipArt(98765102, { fetchImpl });
+    const b = aniZipArt(98765102, { fetchImpl, signal: later.signal });
+    let cancelled;
+    void b.then(value => { cancelled = value; });
+    later.abort();
+    await Promise.resolve();
+    expect(cancelled).toBeNull();
+    expect(network.aborted).toBe(false);
+    reply(mapping('tt98765102'));
+    expect((await a)?.imdb).toBe('tt98765102');
+  });
+
+  it('aborts shared network work only when every subscriber has cancelled, then allows retry', async () => {
+    const first = new AbortController(), second = new AbortController();
+    let network;
+    const fetchImpl = (_url, opts) => { network = opts.signal; return new Promise(() => {}); };
+    const a = aniZipArt(98765103, { fetchImpl, signal: first.signal });
+    const b = aniZipArt(98765103, { fetchImpl, signal: second.signal });
+    second.abort(); first.abort();
+    expect(await a).toBeNull(); expect(await b).toBeNull();
+    expect(network.aborted).toBe(true);
+    expect((await aniZipArt(98765103, { fetchImpl: async () => mapping('tt98765103') }))?.imdb).toBe('tt98765103');
+  });
+});
+
+it('an independently subscribed parent lookup survives cancellation of the detail graph that started it', async () => {
+  globalThis.localStorage = memory();
+  const ctrl = new AbortController();
+  let parentReply, parentSignal;
+  const fetchImpl = async (url, opts) => {
+    if (url.endsWith('anilist_id=98765104')) return { ok: true, json: async () => ({ titles: { en: 'Audit sequel' }, mappings: {}, episodes: {} }) };
+    if (url.endsWith('anilist_id=98765105')) {
+      parentSignal = opts.signal;
+      return new Promise(resolve => { parentReply = resolve; });
+    }
+    if (url === 'https://graphql.anilist.co') return { ok: true, json: async () => ({ data: { Media: { title: { english: 'Audit sequel' }, format: 'TV', startDate: { year: 2026 }, relations: { edges: [{ relationType: 'PREQUEL', node: { id: 98765105, type: 'ANIME' } }] } } } }) };
+    return new Promise(() => {});
+  };
+  const detail = aniZipArt(98765104, { fetchImpl, signal: ctrl.signal });
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  expect(parentReply).toBeTypeOf('function');
+  const room = aniZipArt(98765105, { fetchImpl });
+  ctrl.abort();
+  expect(await detail).toBeNull();
+  expect(parentSignal.aborted).toBe(false);
+  parentReply({ ok: true, json: async () => ({ mappings: { imdb_id: 'tt98765105' }, episodes: {} }) });
+  expect((await room)?.imdb).toBe('tt98765105');
 });

@@ -127,7 +127,7 @@ it('axis-mode reuses the episode play button while detail and episode artwork ar
 });
 
 it('resume follows last STARTED episode 10 even if episodes 1–9 were skipped', async () => {
-  const { root, anime } = setup();
+  const { root, anime } = setup({ detail: { ...DETAIL, episodes: 20 } });
   recordWatch({ id: DETAIL.id, title: 'The Apothecary Diaries', episodes: 20 }, 10, 120000, 1440000);
   await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' });
   await settle();
@@ -196,7 +196,7 @@ it('«الكل» opens its exact list, and genres cycle include → exclude → 
   expect(f).toEqual({ include: [], exclude: [] });
 });
 
-it('hero: waits for the IMDb link, prefers its key art, and never uses the AniList strip banner on a phone', async () => {
+it('hero: starts available art immediately and requests preferred IMDb artwork when metadata arrives', async () => {
   const { anime, document } = setup();
   const made = [];
   vi.stubGlobal('Image', function () { const n = document.createElement('img'); made.push(n); return n; });
@@ -213,11 +213,11 @@ it('hero: waits for the IMDb link, prefers its key art, and never uses the AniLi
   await anime.openAnime({ id: 161645, title: 'The Apothecary Diaries', poster: 'https://img/cover.jpg' });
   await settle();
   const heroSrcs = () => made.filter((n) => /aw-bg-img/.test(n.className)).map((n) => n.src);
-  expect(heroSrcs()).toEqual([]);
+  expect(heroSrcs()).toContain('https://img/cover.jpg');
+  expect(heroSrcs()).toContain('https://img/banner.jpg');
   finishArt();
   await settle();
-  expect(heroSrcs()).toEqual(['https://images.metahub.space/background/large/tt26743760/img']);
-  expect(heroSrcs()).not.toContain('https://img/banner.jpg');
+  expect(heroSrcs()).toContain('https://images.metahub.space/background/large/tt26743760/img');
   anime.leaveDetail();
 });
 

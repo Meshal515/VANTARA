@@ -92,6 +92,26 @@ const visualUiSeams = [
 ];
 for (const path of visualUiSeams) seams.add(path);
 
+// Owner-requested anime detail behavioral parity and PC logo repair, Nov 4.
+// Exact frontend seams only; no engine, data-schema or release allowance.
+const animeDetailSeams = [
+  'apps/web/index.html',
+  'apps/web/lib/together/art.test.js',
+  'apps/web/v35/anime-episodes.js',
+  'apps/web/v35/anime-episodes.test.js',
+  'apps/web/v35/anime-episode-controls.js',
+  'apps/web/v35/anime-episode-controls.test.js',
+  'apps/web/v35/anime-episodes.css',
+  'apps/web/v35/anime-functional-parity.test.js',
+  'apps/web/v35/anime-hero-scheduler.test.js',
+  'apps/web/v35/work-dom.js',
+  'apps/web/v35/work-dom.test.js',
+  'docs/plans/2026-11-04-anime-detail-behavior.md',
+  'docs/addons/ANIME_DETAIL_20261104.ar.md',
+];
+for (const path of animeDetailSeams) seams.add(path);
+
+
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');

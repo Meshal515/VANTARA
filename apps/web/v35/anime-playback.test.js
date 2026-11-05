@@ -126,3 +126,27 @@ it('joins late ordinary sources to an addon-first picker without autoplay', asyn
   expect(JSON.parse(persisted.get('vantara.anime.found.v2'))[21].work.copies.map(c => c.sourceId).sort()).toEqual(['addon|kitsu', 'wit']);
   expect(state.open).not.toHaveBeenCalled();cleanup?.();
 });
+
+it.each([
+  { localDone: false, accountSeen: true, expected: 0, label: 'replays from zero when the account marks the episode seen' },
+  { localDone: true, accountSeen: false, expected: 60000, label: 'resumes saved progress when the account clears a local seen flag' },
+])('$label', async ({localDone,accountSeen,expected}) => {
+  vi.useFakeTimers();
+  const {window,document}=parseHTML('<html><body><main></main></body></html>');
+  vi.stubGlobal('window',window);vi.stubGlobal('document',document);
+  vi.stubGlobal('Image',function(){return document.createElement('img')});
+  vi.stubGlobal('requestAnimationFrame',fn=>setTimeout(fn,0));
+  const memory=new Map([['vantara.anime.watch.v2.user.viewer',JSON.stringify({246:{id:246,episode:1,episodes:{1:{position:60000,duration:1440000,done:localDone}}}})]]);
+  vi.stubGlobal('localStorage',{getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v)});
+  const body=document.querySelector('main');let cleanup;
+  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text)n.textContent=text;return n};
+  const sync={user:{userId:'viewer'},rows:()=>[],row:(_table,key)=>key==='viewer/anime:246#ep:1'?{read:accountSeen}:null,enqueue(){}};
+  const anime=createAnime({root:body,q:()=>null,el,toast(){},genreAr:s=>s,openSheet:fn=>{cleanup=fn(body)},closeSheet(){},currentPage:()=> 'anime',sync});
+  anime.play({id:246,title:'Replay consistency',format:'TV',episodes:12,_sourceCopy:{sourceId:'source',url:'/series'}},1);
+  await vi.advanceTimersByTimeAsync(0);
+  state.listeners.get('route')({session:'test-session',route:{id:'480',sourceId:'source',server:'Megamax',code:'MMX',quality:480,state:'READY',probed:true,candidates:['stream-480']}});
+  await vi.advanceTimersByTimeAsync(0);await body.querySelector('.an-srv').onclick();
+  expect(state.open).toHaveBeenCalledWith(expect.objectContaining({episode:1,position:expected}));
+  expect(JSON.parse(memory.get('vantara.anime.watch.v2.user.viewer'))[246].episodes[1]).toMatchObject({position:60000,duration:1440000,done:localDone});
+  cleanup?.();
+});
