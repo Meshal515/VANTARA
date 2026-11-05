@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.Assume.assumeTrue
@@ -48,6 +49,9 @@ class SourceCertificationTest {
     private val arb = "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json"
     private val yuzono = "https://raw.githubusercontent.com/yuzono/anime-repo/repo"
     private val tiers = listOf("popular", "mid", "obscure")
+    private companion object {
+        const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+    }
 
     private fun reason(error: Throwable): String {
         val chain = generateSequence(error) { it.cause }.take(6).toList()
@@ -87,14 +91,38 @@ class SourceCertificationTest {
         return out
     }
 
+    /**
+     * حال موقع المصدر خارج الإضافة: هل يرد، وهل انتقل لمضيف آخر، وهل يطلب تحقق Cloudflare.
+     * يفرّق «الإضافة متقادمة/الموقع انتقل» عن «عطل في محرك VANTARA» دون أي معرفة بموقع بعينه.
+     */
+    private fun siteProbe(base: String?): JsonObject = buildJsonObject {
+        if (base.isNullOrBlank()) { put("site", "UNKNOWN_BASE"); return@buildJsonObject }
+        val from = base.toHttpUrlOrNull() ?: run { put("site", "INVALID_BASE"); return@buildJsonObject }
+        put("siteHost", from.host)
+        runCatching {
+            http.newCall(okhttp3.Request.Builder().url(from).header("User-Agent", BROWSER_UA).build()).execute().use { r ->
+                val head = r.peekBody(65_536).string()
+                put("siteStatus", r.code)
+                if (r.request.url.host != from.host) put("siteMovedTo", r.request.url.host)
+                if (r.code in setOf(403, 503) && Regex("cf[-_]chl|just a moment|challenge-platform", RegexOption.IGNORE_CASE).containsMatchIn(head)) put("siteChallenge", "cloudflare")
+            }
+        }.onFailure { put("site", reason(it)) }
+    }
+
     /** كتالوج المصدر نفسه: الرائج ثم الأحدث، صفحات حتى تتوفر عينة كافية. الموضع يُحفظ للسينما. */
     private suspend fun crawl(adapter: AnimeAdapter, out: JsonObjectBuilder): List<SourceAnime> {
         val seen = LinkedHashMap<String, SourceAnime>()
         var pages = 0
+        val errors = mutableListOf<String>()
+        val pageMs = mutableListOf<Long>()
         for (listing in listOf(Listing.POPULAR, Listing.LATEST)) {
             for (page in 1..12) {
-                val got = runCatching { withTimeout(40_000) { adapter.page(listing, page) } }.getOrNull() ?: break
+                val t = SystemClock.elapsedRealtime()
+                val got = runCatching { withTimeout(40_000) { adapter.page(listing, page) } }
+                    .onFailure { errors += "${listing.name.lowercase()}#$page:${reason(it)}" }.getOrNull() ?: break
+                pageMs += SystemClock.elapsedRealtime() - t
                 pages++
+                if (got.items.isEmpty() && page == 1) errors += "${listing.name.lowercase()}#1:EMPTY_PAGE"
                 got.items.forEach { seen.putIfAbsent(it.url.trimEnd('/'), it) }
                 if (!got.hasNext || got.items.isEmpty() || seen.size >= 400) break
             }
@@ -102,6 +130,8 @@ class SourceCertificationTest {
         }
         out.put("cataloguePages", pages)
         out.put("catalogueWorks", seen.size)
+        if (pageMs.isNotEmpty()) out.put("pageMsMedian", pageMs.sorted()[pageMs.size / 2])
+        if (errors.isNotEmpty()) out.put("catalogueErrors", JsonArray(errors.distinct().take(6).map(::JsonPrimitive)))
         return seen.values.toList()
     }
 
@@ -196,12 +226,16 @@ class SourceCertificationTest {
 
     private suspend fun certifyWork(engine: AnimeEngine, adapter: AnimeAdapter, work: SourceAnime, servers: Int, seconds: Int): JsonObject = buildJsonObject {
         put("title", work.title.take(90))
+        val t0 = SystemClock.elapsedRealtime()
         var detail = runCatching { withTimeout(40_000) { adapter.details(work) } }.getOrElse { put("details", reason(it)); work }
+        put("detailsMs", SystemClock.elapsedRealtime() - t0)
         if (detail.hasSeasons) {
             val season = runCatching { withTimeout(40_000) { adapter.seasons(detail) } }.getOrNull()?.firstOrNull()
             if (season != null) detail = runCatching { withTimeout(40_000) { adapter.details(season) } }.getOrDefault(season)
         }
+        val t1 = SystemClock.elapsedRealtime()
         val episodes = runCatching { withTimeout(45_000) { adapter.episodes(detail) } }.getOrElse { put("stage", "episodes"); put("code", reason(it)); return@buildJsonObject }
+        put("episodesMs", SystemClock.elapsedRealtime() - t1)
         put("episodes", episodes.size)
         val episode = episodes.filter { it.number >= 1f }.minByOrNull { it.number } ?: episodes.firstOrNull()
             ?: run { put("stage", "episodes"); put("code", "EMPTY_EPISODES"); return@buildJsonObject }
@@ -255,10 +289,14 @@ class SourceCertificationTest {
         val engine = AnimeEngine.get(context)
         val window = androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
         var host: RuntimeHost? = null
+        // المرحلة الجارية تُكتب في سطر الفشل: «OPERATION_TIMEOUT» وحده لا يفرّق تثبيتًا عن كتالوج
+        var stage = "setup"
+        val began = SystemClock.elapsedRealtime()
+        val bases = mutableMapOf<String, String>()
         try {
             val ids: List<String> = when (kind) {
                 "cs3" -> {
-                    val h = RuntimeHost(context, engine, "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36",
+                    val h = RuntimeHost(context, engine, BROWSER_UA,
                         silentClearance = { url, agent ->
                             val solver = eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current
                                 ?: run { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client; eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current }
@@ -266,34 +304,49 @@ class SourceCertificationTest {
                         }).also { host = it }
                     h.setProfile("cert-" + UUID.randomUUID())
                     val repo = args.getString("vantaraCertRepo") ?: arb
+                    stage = "repository"
                     h.addRepository(repo)
+                    stage = "index"
                     val row = h.extensions(repo).map { it.jsonObject }.firstOrNull {
                         (it["name"]?.jsonPrimitive?.contentOrNull ?: "").equals(name, ignoreCase = true)
                     } ?: error("PLUGIN_NOT_IN_REPOSITORY")
+                    stage = "install"
                     val installed = withTimeout(120_000) { h.install(repo, row.getValue("pkg").jsonPrimitive.content, content) }
-                    installed["sourceIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+                    val sourceIds = installed["sourceIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+                    val registered = installed["registration"]?.jsonObject?.get("sources")?.jsonArray.orEmpty().map { it.jsonObject }
+                    sourceIds.zip(registered).forEach { (id, src) -> src["mainUrl"]?.jsonPrimitive?.contentOrNull?.let { bases[id] = it } }
+                    sourceIds
                 }
                 "aniyomi" -> {
                     val plugin = AtomicReference<AnimeEnginePlugin>()
                     window.onActivity { plugin.set(it.bridge.getPlugin("AnimeEngine").instance as AnimeEnginePlugin) }
                     val repo = args.getString("vantaraCertRepo") ?: yuzono
+                    stage = "repository"
                     com.vantara.anime.invokeVideoEngine(plugin.get(), "addRepo", JSObject().put("url", repo))
+                    stage = "index"
                     val index = com.vantara.anime.invokeVideoEngine(plugin.get(), "repoIndex", JSObject().put("url", repo)).getJSONArray("extensions")
                     val entry = (0 until index.length()).map { index.getJSONObject(it) }
                         .firstOrNull { it.getString("pkg").endsWith(".$name") } ?: error("PACKAGE_NOT_IN_REPOSITORY")
+                    stage = "install"
                     val installed = com.vantara.anime.invokeVideoEngine(plugin.get(), "installExtension",
                         JSObject().put("repo", repo).put("pkg", entry.getString("pkg")).put("content", content))
                     listOf(installed.getString("id")!!)
                 }
                 else -> error("CERT_KIND_UNKNOWN")
             }
+            val installMs = SystemClock.elapsedRealtime() - began
             for (id in ids) {
+                stage = "route"
                 val adapter = engine.adapter(id) ?: run {
                     emit(buildJsonObject { put("type", "source"); put("kind", kind); put("name", name); put("id", id); put("code", "SOURCE_NOT_ROUTED") }); continue
                 }
                 val head = buildJsonObject {
                     put("type", "source"); put("kind", kind); put("name", name); put("id", id); put("content", content)
+                    put("installMs", installMs)
+                    siteProbe(bases[id] ?: (adapter as? com.vantara.anime.adapters.ExtensionAdapter)?.extensionBaseUrl).forEach { (k, v) -> put(k, v) }
+                    stage = "catalogue"
                     val catalogue = crawl(adapter, this)
+                    stage = "works"
                     val picked = sample(catalogue, content, perTier, this)
                     val results = mutableMapOf<String, MutableList<JsonObject>>()
                     for (tier in tiers) for (work in picked[tier].orEmpty()) {
@@ -331,7 +384,12 @@ class SourceCertificationTest {
                 emit(head)
             }
         } catch (e: Throwable) {
-            emit(buildJsonObject { put("type", "source"); put("kind", kind); put("name", name); put("code", reason(e)) })
+            emit(buildJsonObject {
+                put("type", "source"); put("kind", kind); put("name", name); put("code", reason(e))
+                put("stage", stage); put("elapsedMs", SystemClock.elapsedRealtime() - began)
+                // سلسلة الأسباب كاملة (بلا روابط) حين لا يكفي الرمز وحده
+                put("chain", JsonArray(generateSequence(e) { it.cause }.take(5).map { JsonPrimitive((it.javaClass.simpleName + ":" + (it.message ?: "")).replace(Regex("https?://\\S+"), "<url>").take(160)) }.toList()))
+            })
         } finally {
             runCatching { host?.close() }
             runCatching { engine.setRuntimeSources(emptyList()) }
