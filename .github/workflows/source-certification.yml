@@ -3,24 +3,29 @@ name: VANTARA source certification (30 works per source, report only, no publish
 # كل مصدر على محاكي مستقل: 10 أعمال مشهورة و10 متوسطة و10 نادرة من كتالوجه، كل سيرفر «جاهز»
 # يُفتح في المشغّل الأصلي حتى أول إطار. لا نشر ولا تغيير على Debug/Stable.
 on:
+  # الدفع على فرع العمل بعد تعديل قائمة المصادر يبدأ الاعتماد (سير جديد لا يُستدعى يدويًا قبل main)
+  push:
+    branches: [claude/supernatural-addons]
+    paths:
+      - 'tools/repository-compat/certification-sources.txt'
   workflow_dispatch:
     inputs:
       sources:
         description: 'kind:name:content, comma-separated (kind = cs3 | aniyomi)'
         required: false
-        default: 'cs3:AnimeWitcher:anime,cs3:AnimeRift:anime,cs3:Anime4up:anime,cs3:Witanime:anime,cs3:Anime3rb:anime,cs3:Animerco:anime,cs3:Dima toon:anime,aniyomi:witanime:anime,aniyomi:okanime:anime,aniyomi:anime4up:anime,aniyomi:animerco:anime,aniyomi:animelek:anime,aniyomi:animeblkom:anime,aniyomi:animeiat:anime,aniyomi:arabanime:anime,cs3:Faselhd:cinema,cs3:Egydead:cinema,cs3:Akwam:cinema,cs3:Mycima:cinema,cs3:WeCima:cinema'
+        default: ''
       per_tier:
         description: Works per popularity tier
         required: false
-        default: '10'
+        default: ''
       servers:
         description: Ready servers opened in the player per work
         required: false
-        default: '3'
+        default: ''
       seconds:
         description: Seconds of playback measured per server
         required: false
-        default: '10'
+        default: ''
 
 permissions:
   contents: read
@@ -34,13 +39,23 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      per_tier: ${{ inputs.per_tier || steps.m.outputs.per_tier || '10' }}
+      servers: ${{ inputs.servers || steps.m.outputs.servers || '3' }}
+      seconds: ${{ inputs.seconds || steps.m.outputs.seconds || '10' }}
     steps:
+      - uses: actions/checkout@v4
       - id: m
         env:
           SOURCES: ${{ inputs.sources }}
         run: |
           node -e '
-            const list = process.env.SOURCES.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+            const fs = require("fs");
+            // الاستدعاء اليدوي يمرّر القائمة؛ الدفع يقرأ ملفها (سطر لكل مصدر، والإعدادات في سطر يبدأ بـ# set)
+            const file = fs.readFileSync("tools/repository-compat/certification-sources.txt", "utf8").split("\n");
+            const settings = Object.fromEntries((file.find((l) => l.startsWith("# set ")) ?? "").slice(6).trim().split(/\s+/).filter(Boolean).map((kv) => kv.split("=")));
+            const raw = process.env.SOURCES || file.filter((l) => l.trim() && !l.startsWith("#")).join(",");
+            for (const k of ["per_tier", "servers", "seconds"]) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${settings[k] ?? ""}\n`);
+            const list = raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
               const [kind, name, content] = s.split(":").map((x) => x.trim());
               if (!["cs3", "aniyomi"].includes(kind) || !name || !["anime", "cinema"].includes(content)) throw new Error("bad source: " + s);
               return { kind, name, content };
@@ -116,9 +131,9 @@ jobs:
           CERT_KIND: ${{ matrix.kind }}
           CERT_NAME: ${{ matrix.name }}
           CERT_CONTENT: ${{ matrix.content }}
-          CERT_PER_TIER: ${{ inputs.per_tier }}
-          CERT_SERVERS: ${{ inputs.servers }}
-          CERT_SECONDS: ${{ inputs.seconds }}
+          CERT_PER_TIER: ${{ needs.plan.outputs.per_tier }}
+          CERT_SERVERS: ${{ needs.plan.outputs.servers }}
+          CERT_SECONDS: ${{ needs.plan.outputs.seconds }}
         with:
           api-level: 35
           target: google_apis
