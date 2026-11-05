@@ -57,7 +57,8 @@ jobs:
             for (const k of ["per_tier", "servers", "seconds"]) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${settings[k] ?? ""}\n`);
             const list = raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
               const [kind, name, content] = s.split(":").map((x) => x.trim());
-              if (!["cs3", "aniyomi"].includes(kind) || !name || !["anime", "cinema"].includes(content)) throw new Error("bad source: " + s);
+              const ok = (["cs3", "aniyomi"].includes(kind) && ["anime", "cinema"].includes(content)) || (kind === "manga" && content === "manga");
+              if (!ok || !name) throw new Error("bad source: " + s);
               return { kind, name, content };
             });
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: list }) + "\n");
@@ -152,4 +153,5 @@ jobs:
           for f in cert-*/instrumentation.txt; do [ -f "$f" ] && tail -n 12 "$f"; done
           # السطور الخام آخر السجل: تجمعها الجلسة بذيل قصير من get_job_logs لجدول كل المصادر
           for f in cert-*/cert.jsonl; do [ -f "$f" ] && grep '^{' "$f" | sed 's/^/VANTARA_CERT_LINE /'; done
+          for f in cert-*/manga.jsonl; do [ -f "$f" ] && grep '^{' "$f" | sed 's/^/VANTARA_MANGA_LINE /'; done
           true
