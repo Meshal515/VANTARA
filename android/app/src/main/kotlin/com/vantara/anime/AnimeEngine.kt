@@ -353,8 +353,12 @@ class AnimeEngine(context: Context) {
                     }
                     val key = HealthStore.sourceKey(s.id)
                     var pageNumber = 0
+                    // A CloudStream source starts an isolated worker per request before the site is even asked;
+                    // 12s cut it off (and recorded the timeout against the source) on a cold or busy device.
+                    // Its hits still reach the sheet the moment each page answers.
+                    val budget = if (s.id.startsWith(RUNTIME_SOURCE_PREFIX)) maxOf(timeoutMs, RUNTIME_SEARCH_TIMEOUT_MS) else timeoutMs
                     val hit: SourceHit? = try {
-                        withTimeout(timeoutMs) {
+                        withTimeout(budget) {
                             SearchPages.walk(a, query) { page ->
                                 pageNumber = page.number
                                 onHit(SourceHit(s.id, page.items, elapsed(),
@@ -364,8 +368,8 @@ class AnimeEngine(context: Context) {
                         }
                         null
                     } catch (e: TimeoutCancellationException) {
-                        health.fail(key, "لم يرد خلال ${timeoutMs / 1000} ثانية")
-                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية", page = pageNumber + 1, stop = "search_timeout", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
+                        health.fail(key, "لم يرد خلال ${budget / 1000} ثانية")
+                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${budget / 1000} ثانية", page = pageNumber + 1, stop = "search_timeout", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: IOException) {
@@ -914,6 +918,9 @@ class AnimeEngine(context: Context) {
         const val PREPARE_TIMEOUT_MS = 90_000L
         /** البحث المتدفق: لا ينتظر أحدٌ هذه المهل، فهي سقف للمصدر وحده لا للشاشة. */
         const val STREAM_SEARCH_TIMEOUT_MS = 12_000L
+        /** CloudStream sources: one isolated-worker start plus the site, as in [RuntimeHost]'s operation budget. */
+        const val RUNTIME_SEARCH_TIMEOUT_MS = 30_000L
+        const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
         const val STREAM_LOAD_TIMEOUT_MS = 25_000L
         /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */
         const val BLOCKED_RETRY_MS = 30 * 60_000L

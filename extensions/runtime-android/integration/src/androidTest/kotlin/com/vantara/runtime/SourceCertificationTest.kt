@@ -194,16 +194,22 @@ class SourceCertificationTest {
             onMain { player().volume = 0f }
             var ttff = -1L
             var error: String? = null
+            var switchedAt = -1L
             while (SystemClock.elapsedRealtime() - started < 25_000) {
                 error = onMain { player().playerError?.errorCodeName }
                 if (error != null) break
+                // The player left this server on its own: when, and with which error, says who failed.
+                if (onMain { (currentField.get(act) as? Candidate)?.id }.let { it != null && it != chosen.id }) { switchedAt = SystemClock.elapsedRealtime() - started; break }
                 if (onMain { (player().videoDecoderCounters?.renderedOutputBufferCount ?: 0) > 0 }) { ttff = SystemClock.elapsedRealtime() - started; break }
                 Thread.sleep(100)
             }
-            val switched = onMain { (currentField.get(act) as? Candidate)?.id }?.let { it != chosen.id } == true
+            val switched = switchedAt >= 0 || onMain { (currentField.get(act) as? Candidate)?.id }?.let { it != chosen.id } == true
             if (ttff < 0) return buildJsonObject {
                 put("verdict", "FALSE_READY"); put("code", error ?: if (switched) "SWITCHED_BEFORE_FRAME" else "NO_FIRST_FRAME")
                 put("waitedMs", SystemClock.elapsedRealtime() - started)
+                if (switchedAt >= 0) put("switchedAtMs", switchedAt)
+                // No player error and a switch at the startup budget: a slow first segment, not a broken route.
+                put("startupBudgetMs", com.vantara.anime.player.PlaybackBudgets.startupMs(chosen.url))
             }
             val pos0 = onMain { player().currentPosition }
             val r0 = onMain { player().videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
