@@ -143,6 +143,28 @@ export function visiblePackages(list, decision = current) {
 
 const LOCAL_KEY = 'vantara.sourcePackages.local';
 let writer = null;
+let choiceOwner = null;
+let activeChoiceContext = Object.freeze({});
+
+/** Owner identity is independent of cohort/choices: identical accounts still have distinct operations. */
+export function setChoiceOwner(ownerId) {
+  const next = ownerId == null ? null : String(ownerId);
+  if (next === choiceOwner) return false;
+  choiceOwner = next;
+  // A -> B -> A must invalidate work started in the first A session too.
+  activeChoiceContext = Object.freeze({});
+  return true;
+}
+
+export function choiceContext() {
+  return activeChoiceContext;
+}
+
+export function assertChoiceContext(context) {
+  if (context !== activeChoiceContext) {
+    throw Object.assign(new Error('تغيّر الحساب أثناء العملية؛ أعد المحاولة من الحساب الحالي.'), { code: 'ACCOUNT_CHANGED' });
+  }
+}
 
 /** app.js يضبط الكاتب: `settings.patch` للحساب، أو تخزين الجهاز في وضع «اقرأ بلا حساب». */
 export function setChoiceWriter(fn) {
@@ -161,9 +183,11 @@ export function writeLocalChoices(fields, storage = globalThis.localStorage) {
 }
 
 /** يضيف حزمة مدمجة سابقًا لحساب المستخدم أو يزيلها منه. لا يحذف مكتبة ولا تقدّمًا. */
-export async function choosePackage(pkg, on) {
+export async function choosePackage(pkg, on, context = choiceContext()) {
+  assertChoiceContext(context);
   if (!writer) throw new Error('الحساب غير جاهز بعد، حاول بعد لحظة');
-  await writer(choicePatch(pkg, on));
+  await writer(choicePatch(pkg, on), context);
+  assertChoiceContext(context);
   // الاختيار يُطبَّق هنا فورًا لا بعد رجوعه من المزامنة: كانت «تثبيت» تبقى ظاهرة بعد الضغط حتى تدور المزامنة
   const added = new Set(current.added), removed = new Set(current.removed);
   if (on) { added.add(String(pkg)); removed.delete(String(pkg)); } else { removed.add(String(pkg)); added.delete(String(pkg)); }

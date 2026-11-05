@@ -234,3 +234,45 @@ it('صف التورنت: الجودة والمصدر واللغة والحجم �
   expect(row.querySelector('.ss-details').textContent).toContain('HEVC');
   expect(onPick).not.toHaveBeenCalled();
 });
+
+
+const CS3_RIFT = 'addon|cs3|cs3_0123456789abcdef0123456789abcdef|aa0123456789abcdef012345|u123456789abcdef123456789';
+const CS3_4UP = 'addon|cs3|cs3_abcdef0123456789abcdef0123456789|bb0123456789abcdef012345|u123456789abcdef123456789';
+it('native CloudStream media routes are direct even when the runtime reported them ready', () => {
+  const direct = describeRoute({ id: 'rift-1', sourceId: CS3_RIFT, sourceName: 'AnimeRift', server: 'vidmoly', code: 'VDM',
+    quality: 1080, state: 'READY', runtimeReady: true, probed: true });
+  expect(direct.torrent).toBe(false);
+  expect(direct.name).toBe('AnimeRift');
+  const ordinary = describeRoute({ id: 'native', sourceId: 'witanime', sourceName: 'WitAnime', server: 'mp4upload',
+    state: 'READY', runtimeReady: true, probed: true });
+  expect(ordinary.torrent).toBe(false);
+  expect(describeRoute({ id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true }).torrent).toBe(true);
+});
+
+it('live-installed CloudStream sources appear above torrents immediately and automatically populate filter', () => {
+  const { body, el } = dom(), onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
+  const torrent = { id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true,
+    label: 'Series S01E01 1080p 👤 92' };
+  const rift = { id: 'rift', sourceId: CS3_RIFT, sourceName: 'AnimeRift', state: 'READY', server: 'vidmoly',
+    quality: 1080, variant: 'SUB', runtimeReady: true, probed: true, probeMs: 500 };
+  const anime4up = { id: 'fourup', sourceId: CS3_4UP, sourceName: 'Anime4up', state: 'READY', server: 'mp4upload',
+    quality: 720, variant: 'SUB', runtimeReady: true, probed: true, probeMs: 800 };
+  ui.update({ routes: [torrent], settled: false, status: { text: '1 جاهز' } });
+  expect(body.querySelector('.ss-addon-btn')).toBeNull(); // one source only
+  ui.update({ routes: [torrent, rift, anime4up], settled: true, status: { text: '3 جاهزة' } });
+  const direct = [...body.querySelectorAll('.ss-group--direct .ss-row')];
+  expect(direct.map(r => r.querySelector('.ss-name').textContent)).toEqual(['AnimeRift', 'Anime4up']);
+  expect([...body.querySelectorAll('.ss-group--torrent .ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Torrentio']);
+  expect(body.querySelector('.ss-addon-btn').textContent).toContain('كل المصادر');
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  expect([...body.querySelectorAll('.ss-addon-opt')].map(o => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'AnimeRift', 'Anime4up']);
+  // No user filter interaction needed: all 3 are visible, directly selectable.
+  body.querySelector('.ss-group--direct .ss-row').onclick();
+  expect(onPick).toHaveBeenCalledWith(rift);
+  choose(body, 'Anime4up');
+  expect([...body.querySelectorAll('.ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Anime4up']);
+  choose(body, 'all');
+  expect(body.querySelectorAll('.ss-group--direct .ss-row')).toHaveLength(2);
+  expect(body.querySelectorAll('.ss-group--torrent .ss-row')).toHaveLength(1);
+});

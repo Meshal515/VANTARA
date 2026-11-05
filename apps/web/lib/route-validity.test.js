@@ -44,3 +44,22 @@ it('الورقة: «قيد الفحص» الجاهز يُلمس فيُجرَّب
   row.onclick();
   expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'u' }));
 });
+
+it('native CloudStream video readiness follows HTTP probes not torrent seeder counts', () => {
+  const rift = { id: 'rift', sourceId: 'addon|cs3|cs3_1234|source|user', sourceName: 'AnimeRift',
+    state: 'READY', server: 'vidmoly', runtimeReady: true, probed: true, quality: 1080 };
+  expect(validity(rift).state).toBe(VALIDITY.VALID);
+  expect(validity({...rift,runtimeReady:false}).state).toBe(VALIDITY.VALID);
+  expect(validity({...rift,probed:null}).state).toBe(VALIDITY.CHECKING);
+  expect(validity({...rift,probed:false}).state).toBe(VALIDITY.UNAVAILABLE);
+  expect(validity({...rift,sourceId:'witanime',sourceName:'WitAnime'}).state).toBe(VALIDITY.VALID);
+  expect(validity(tor('A.1080p\\n👤 25')).state).toBe(VALIDITY.VALID);
+  expect(validity(tor('A.1080p\\n👤 25',{runtimeReady:false})).state).toBe(VALIDITY.UNAVAILABLE);
+});
+
+it('source-less legacy torrent ticket compatibility does not mask real named HTTP streams', () => {
+  expect(validity({state:'READY',runtimeReady:true,seeders:12}).state).toBe(VALIDITY.VALID);
+  expect(validity({state:'READY',runtimeReady:true}).state).toBe(VALIDITY.CHECKING);
+  expect(validity({state:'READY',runtimeReady:false}).state).toBe(VALIDITY.UNAVAILABLE);
+  expect(validity({sourceId:'addon|cs3|cs3_123|id',state:'READY',runtimeReady:true,probed:true}).state).toBe(VALIDITY.VALID);
+});

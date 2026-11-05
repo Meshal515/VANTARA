@@ -7,6 +7,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RuntimeSourceAdapterTest {
+    @Test fun publicHttpMediaIsUpgradedToTlsBeforeSharedMediaAdmission()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://media.example/video.mp4","quality":720,"headers":{"Referer":"https://source.example/watch"}}]}""") }
+        val candidates=adapter.candidates(SourceEpisode(id,"episode","Episode",1f))
+        assertEquals(1,candidates.size)
+        assertEquals("https://media.example/video.mp4",candidates.single().url)
+        assertEquals("https://source.example/watch",candidates.single().headers["Referer"])
+    }
+    @Test fun extractedRuntimeCandidatesReportRoutesSoNativePreparationCanProbeThem()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"https://media.example/master.m3u8","name":"CDN","quality":720,"type":"M3U8","referer":"https://source.example/watch"}]}""") }
+        val health=com.vantara.anime.health.HealthStore(null)
+        val prep=com.vantara.anime.stream.PreparedEpisode("runtime",listOf(work),1f,
+            com.vantara.anime.stream.Preferences(),com.vantara.anime.stream.PlaybackSession(emptyList(),health),health,probe=true)
+        val toProbe=mutableListOf<com.vantara.anime.stream.Candidate>()
+        val returned=adapter.candidates(SourceEpisode(id,"opaque-episode","Episode",1f),trace=ResolveTrace { report ->
+            prep.report(report)
+            if(report.state==com.vantara.anime.stream.RouteState.READY)toProbe+=report.candidates
+        })
+        assertEquals("Native preparation probes route callbacks, not the returned extraction list",returned,toProbe)
+        assertEquals(returned.single().id,prep.candidatesOf(prep.routes().single().id).single().id)
+        assertNull("Extracted media still needs an actual probe",prep.best())
+        val candidate=toProbe.single()
+        prep.markProbe(requireNotNull(prep.routeOf(candidate.id)).id,true,1,candidate.id)
+        assertEquals(candidate.id,prep.best()?.id)
+        assertEquals("https://source.example/watch",candidate.headers["Referer"])
+    }
+    @Test fun httpCredentialsAndNonstandardPortsNeverBecomePermittedMedia()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://user:secret@media.example/video.mp4"},{"url":"http://media.example:8080/video.mp4"},{"url":"http://127.0.0.1/private.mp4"}]}""") }
+        assertTrue(adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).isEmpty())
+    }
     @Test fun revokedRuntimeSourceCannotReturnPreviouslyCachedEpisodes()=runBlocking {
         val dir=kotlin.io.path.createTempDirectory("runtime-episodes-").toFile()
         try {

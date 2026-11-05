@@ -16,7 +16,7 @@ import kotlin.coroutines.coroutineContext
  *
  * يتوقف عند أول واحد من:
  *   - `hasNext=false` من المصدر؛
- *   - صفحة فارغة، أو صفحة كل عناصرها رأيناها (مواقع تعيد آخر صفحة لكل رقم
+ *   - صفحة فارغة، أو صفحة تكررت في الجولة الحالية (مواقع تعيد آخر صفحة لكل رقم
  *     أكبر منها — بدون هذا يدور الحلب للأبد)؛
  *   - [CatalogCursor.maxPages] سقف أمان.
  *
@@ -34,6 +34,7 @@ data class CatalogCursor(
     val startedAt: Long = 0,
     val finishedAt: Long = 0,
     val lastError: String? = null,
+    val diagnostic: String? = null,
     val maxPages: Int = 5000,
 )
 
@@ -107,20 +108,25 @@ class CatalogCrawler(
     ): CatalogCursor {
         var cursor = store.cursor(sourceId)?.takeUnless { it.done } ?: CatalogCursor(sourceId, maxPages = maxPages, startedAt = clock())
         val seen = store.urls(sourceId)
+        // Saved inventory is not evidence of a repeated page in this scan.
+        val pagesSeen = HashSet<List<String>>()
         while (!cursor.done) {
             coroutineContext.ensureActive()
             if (cursor.nextPage > cursor.maxPages) {
                 cursor = cursor.copy(done = true, finishedAt = clock(), lastError = "بلغ سقف الصفحات")
                 break
             }
-            val page = fetchWithRetry(fetcher, cursor.nextPage) ?: run {
-                cursor = cursor.copy(lastError = "توقف عند الصفحة ${cursor.nextPage} — يكمل في الجولة القادمة")
+            val page = fetchWithRetry(fetcher, cursor.nextPage).getOrElse { error ->
+                val detail = com.vantara.anime.DiscoveryFailure.describe(error)
+                cursor = cursor.copy(lastError = "توقف عند الصفحة ${cursor.nextPage}: ${detail.lineSequence().first()}",
+                    diagnostic = if (com.vantara.app.BuildConfig.DEBUG) detail else null)
                 store.saveCursor(cursor)
                 return cursor
             }
             val fresh = page.items.filter { seen.add(it.url) }
             store.append(sourceId, fresh)
-            val exhausted = (trustHasNext && !page.hasNext) || page.items.isEmpty() || fresh.isEmpty()
+            val repeated = !pagesSeen.add(page.items.map { it.url }.sorted())
+            val exhausted = (trustHasNext && !page.hasNext) || page.items.isEmpty() || repeated
             cursor = cursor.copy(
                 nextPage = cursor.nextPage + 1,
                 count = cursor.count + fresh.size,
@@ -128,6 +134,7 @@ class CatalogCrawler(
                 done = exhausted,
                 finishedAt = if (exhausted) clock() else 0,
                 lastError = null,
+                diagnostic = null,
             )
             store.saveCursor(cursor)
             onPage(cursor)
@@ -136,19 +143,19 @@ class CatalogCrawler(
         return cursor
     }
 
-    private suspend fun fetchWithRetry(fetcher: PageFetcher, page: Int): SourcePage? {
+    private suspend fun fetchWithRetry(fetcher: PageFetcher, page: Int): Result<SourcePage> {
         var wait = 2_000L
         repeat(RETRIES) { attempt ->
             try {
-                return fetcher.fetch(page)
+                return Result.success(fetcher.fetch(page))
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
-                if (!transient(t) || attempt == RETRIES - 1) return null
+                if (!transient(t) || attempt == RETRIES - 1) return Result.failure(t)
                 pause(wait)
                 wait *= 2
             }
         }
-        return null
+        error("Retry budget exhausted without a result")
     }
 
     private companion object {

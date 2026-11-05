@@ -14,6 +14,7 @@ public final class HttpBroker {
     public static final int MAX_REQUEST_BYTES=1024*1024, MAX_RESPONSE_BYTES=4*1024*1024;
     /** Same limit as OkHttp's own redirect follower; sites behind cookie or locale hops exceed five. */
     public static final int MAX_REDIRECTS=20;
+    public static final int MAX_PROBE_BYTES=64*1024;
     /**
      * Scope origin meaning "any public HTTP(S) host". Media providers reach CDNs, APIs and video hosts the
      * package cannot list in advance (as Mihon/Aniyomi/CloudStream allow). Isolation still holds: DNS answers
@@ -158,7 +159,17 @@ public final class HttpBroker {
             if(!scope.origins().contains(PUBLIC_INTERNET)&&!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
             if(needsVerification(origin(url)))throw new Failure("VERIFICATION_REQUIRED");
         }
-        public Output execute(Input input) throws IOException {
+        public Output execute(Input input) throws IOException {return exchange(input,MAX_RESPONSE_BYTES,false);}
+        /** Host-only media admission probe. Never exposed through the worker HTTP transport.
+         * Uses identical connection/admission/cookie/cancellation guards, but closes after a bounded prefix.
+         * Partial bytes are evidence only: callers must check status and actual media format.
+         */
+        public Output probePrefix(Input input,int limit) throws IOException {
+            if(limit<1||limit>MAX_PROBE_BYTES)throw new Failure("PROBE_BODY_LIMIT");
+            if(input==null||!"GET".equals(input.method()))throw new Failure("INVALID_PROBE_REQUEST");
+            return exchange(input,limit,true);
+        }
+        private Output exchange(Input input,int responseLimit,boolean prefix) throws IOException {
             if(closed.get())throw new Failure("SESSION_CLOSED");
             if(input==null)throw new Failure("INVALID_REQUEST");
             HttpUrl url;try{url=checkedUrl(input.url());}catch(IllegalArgumentException e){throw new Failure("INVALID_ENDPOINT");}
@@ -214,8 +225,16 @@ public final class HttpBroker {
                             if(encoding!=null&&!"identity".equalsIgnoreCase(encoding))throw new Failure("UNSUPPORTED_CONTENT_ENCODING");
                             ByteArrayOutputStream bytes=new ByteArrayOutputStream();ResponseBody stream=response.body();
                             if(stream!=null) {
-                                if(stream.contentLength()>MAX_RESPONSE_BYTES)throw new Failure("RESPONSE_BODY_LIMIT");
-                                try(InputStream in=stream.byteStream()) {byte[] chunk=new byte[8192];int n;while((n=in.read(chunk))!=-1){if(bytes.size()+n>MAX_RESPONSE_BYTES)throw new Failure("RESPONSE_BODY_LIMIT");bytes.write(chunk,0,n);}}
+                                if(!prefix&&stream.contentLength()>responseLimit)throw new Failure("RESPONSE_BODY_LIMIT");
+                                try(InputStream in=stream.byteStream()) {
+                                    byte[] chunk=new byte[Math.min(8192,responseLimit)];int n;
+                                    while(!prefix||bytes.size()<responseLimit) {
+                                        int wanted=prefix?Math.min(chunk.length,responseLimit-bytes.size()):chunk.length;
+                                        n=in.read(chunk,0,wanted);if(n==-1)break;
+                                        if(bytes.size()+n>responseLimit)throw new Failure("RESPONSE_BODY_LIMIT");
+                                        bytes.write(chunk,0,n);
+                                    }
+                                }
                             }
                             if(closed.get())throw new Failure("SESSION_CLOSED");
                             return new Output(url.toString(),status,response.headers(),bytes.toByteArray());

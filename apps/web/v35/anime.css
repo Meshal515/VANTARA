@@ -1128,7 +1128,7 @@ html[data-section='cinema'] {
   display: grid;
   gap: 3px;
 }
-.v35 .aw-eps-head h2 {
+.v35 .aw-episode-controls .aw-eps-head h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
@@ -1196,23 +1196,23 @@ html[data-section='cinema'] {
   color: var(--text-3);
 }
 /* المواسم والمدى: ألسنة نصية بخط تحت المختار، لا صناديق */
-.v35 .an-seasons,
-.v35 .aw-ranges {
+.v35 .aw-episode-controls .an-seasons,
+.v35 .aw-episode-controls .aw-ranges {
   display: flex;
   gap: 20px;
   overflow-x: auto;
   margin-bottom: 8px;
   scrollbar-width: none;
 }
-.v35 .an-seasons::-webkit-scrollbar,
-.v35 .aw-ranges::-webkit-scrollbar {
+.v35 .aw-episode-controls .an-seasons::-webkit-scrollbar,
+.v35 .aw-episode-controls .aw-ranges::-webkit-scrollbar {
   display: none;
 }
-.v35 .aw-ranges[hidden] {
+.v35 .aw-episode-controls .aw-ranges[hidden] {
   display: none;
 }
-.v35 .an-season,
-.v35 .aw-range {
+.v35 .aw-episode-controls .an-season,
+.v35 .aw-episode-controls .aw-range {
   position: relative;
   flex: none;
   display: grid;
@@ -1227,23 +1227,23 @@ html[data-section='cinema'] {
   cursor: pointer;
   transition: color 0.2s ease;
 }
-.v35 .an-season b {
+.v35 .aw-episode-controls .an-season b {
   font-size: 14px;
   font-weight: 650;
   white-space: nowrap;
 }
-.v35 .an-season span {
+.v35 .aw-episode-controls .an-season span {
   font-size: 11px;
   color: var(--text-4);
   white-space: nowrap;
 }
-.v35 .aw-range {
+.v35 .aw-episode-controls .aw-range {
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.v35 .an-season::after,
-.v35 .aw-range::after {
+.v35 .aw-episode-controls .an-season::after,
+.v35 .aw-episode-controls .aw-range::after {
   content: '';
   position: absolute;
   inset-inline: 0;
@@ -1254,13 +1254,13 @@ html[data-section='cinema'] {
   transform: scaleX(0);
   transition: transform 0.25s ease;
 }
-.v35 .an-season.active,
-.v35 .aw-range.active {
+.v35 .aw-episode-controls .an-season.active,
+.v35 .aw-episode-controls .aw-range.active {
   color: var(--text-1);
   cursor: default;
 }
-.v35 .an-season.active::after,
-.v35 .aw-range.active::after {
+.v35 .aw-episode-controls .an-season.active::after,
+.v35 .aw-episode-controls .aw-range.active::after {
   transform: scaleX(1);
 }
 
@@ -2696,9 +2696,10 @@ html[data-section='cinema'] {
   cursor: pointer;
   transition: transform 0.14s ease, background-color 0.2s ease;
 }
-/* المثلث في منتصف الدائرة رياضيًا يبدو مائلًا لجهة قاعدته؛ يُزاح نحو رأسه ليبدو في منتصفها */
+/* glyph(play) already balances the visible triangle. A second CSS shift
+   displaced it toward the circle edge; verified in the actual core CTA. */
 .v35 .aw-still-play .icon {
-  transform: translateX(2px);
+  transform: none;
 }
 .v35 .aw-still-play:active {
   transform: scale(0.92);
@@ -2933,7 +2934,7 @@ html[data-section='cinema'] {
 .v35 .wl .th u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
 .v35 .wl .seen .th img { opacity: 0.55; }
 .v35 .wl .dot { display: grid; place-items: center; border-radius: 50%; }
-.v35 .wl .dot .icon { transform: translateX(1.5px); }
+/* The shared play path already carries its optical correction. No second CSS offset. */
 .v35 .wl-recs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .v35 .wl-recs .rc img { width: 100%; aspect-ratio: 2 / 3; border-radius: 10px; }
 .v35 .wl-recs .rc b { display: block; font-size: 12px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2985,7 +2986,7 @@ html[data-section='cinema'] {
 
 /* ── ٣ البطاقة الطائرة ── */
 .v35 .aw[data-style='card'] .aw-hero::after { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to bottom, transparent 55%, var(--bg)); pointer-events: none; }
-.v35 .wl-card .wl-head { display: grid; }
+.v35 .wl-card .wl-head { display: grid; position: relative; --wl-logo-band-top: 0px; --wl-logo-color-edge: 50%; }
 .v35 .wl-card .wl-stage3d { perspective: 900px; display: grid; justify-items: center; margin-top: -96px; position: relative; z-index: 3; }
 .v35 .wl-card .wl-card { width: 168px; aspect-ratio: 2 / 3; border-radius: 16px; overflow: hidden; transform: rotateY(-18deg) rotateX(6deg); box-shadow: -24px 34px 50px -22px #000, 0 0 0 1px rgba(255, 255, 255, 0.08); will-change: transform; }
 .v35 .wl-card .wl-card img { width: 100%; height: 100%; }
@@ -2993,8 +2994,8 @@ html[data-section='cinema'] {
 .v35 .wl-card .wl-info .wl-logo { max-height: 72px; max-width: 280px; object-position: center; }
 .v35 .wl-card .wl-info .wl-meta, .v35 .wl-card .wl-info .wl-genres { justify-content: center; }
 .v35 .wl-card .wl-row { display: grid; justify-items: center; gap: 8px; margin-top: 6px; }
-.v35 .wl-card .wl-big { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 22px 0 8px !important; border-radius: 99px; background: #fff !important; color: #000 !important; font-weight: 800 !important; font-size: 15.5px; }
-.v35 .wl-card .wl-big .dot { width: 40px; height: 40px; background: #000; color: #fff; }
+.v35 .wl-card .wl-big { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 22px 0 8px !important; border-radius: 99px; background: var(--accent) !important; color: var(--on-accent, #fff) !important; font-weight: 800 !important; font-size: 15.5px; }
+.v35 .wl-card .wl-big .dot { width: 40px; height: 40px; background: var(--on-accent, #fff); color: var(--accent); }
 .v35 .wl-card .wl-sub { color: var(--text-3); font-size: 12.5px; }
 .v35 .wl-card .wl-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 28px 0 90px; }
 .v35 .wl-card .wl-body > * { padding: 0 var(--wl-g); min-width: 0; }
@@ -3344,8 +3345,8 @@ html[data-section='cinema'] {
 }
 /* حلقات البطاقة الطائرة: كل البطاقات بمقاس واحد، والحالية مرفوعة قليلًا فقط (لا أكبر)، وسحب حر سلس:
    الالتصاق الإجباري بكل بطاقة كان يشدّ الإصبع ويبدو كتعليق، والصورة 1920 للحالية كانت تثقل الشريط */
-.v35 .wl-card .wl-strip { scroll-snap-type: x proximity !important; align-items: flex-start !important; padding-top: 18px !important; -webkit-overflow-scrolling: touch; }
-.v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex: 0 0 160px !important; scroll-snap-align: start; contain: layout paint; }
+.v35 .wl-card .wl-strip { scroll-snap-type: x proximity !important; align-items: flex-start !important; padding-top: 20px !important; padding-bottom: 22px !important; -webkit-overflow-scrolling: touch; }
+.v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex: 0 0 160px !important; scroll-snap-align: start; contain: layout; }
 .v35 .wl-card .sp.cur { transform: translateY(-14px); }
 .v35 .wl-card .sp.cur b { font-size: 12.5px !important; }
 .v35 .wl-card .sp b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3458,4 +3459,27 @@ html[data-section='cinema'] {
   .v35 .aw[data-style='core'] .aw-main .an-er-list { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
   .v35 .aw[data-style='core'] .aw-main .an-er-main { grid-template-columns: 176px minmax(0, 1fr); }
   .v35 .aw[data-style='core'] .aw-main :is(.aw-cast, .an-rail) { margin-inline: calc(var(--gutter) * -1); }
+}
+
+/* A transparent, compositor-driven logo corridor behind the original floating cover.
+   The controller measures the fixed title boundary and keeps one active-distance clock. */
+.v35 .wl-card .wl-logo-layer { position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; opacity: .45; mask-image: linear-gradient(to right, transparent var(--wl-logo-fade-start, 0px), #000 var(--wl-logo-fade-end, 48px), #000 var(--wl-logo-fade-out-start, calc(100% - 24px)), transparent var(--wl-logo-fade-out-end, 100%)); }
+.v35 .wl-card .wl-logo-layer[hidden] { display: none; }
+.v35 .wl-card .wl-logo-layer:not([data-ready='true']) { visibility: hidden; }
+.v35 .wl-card .wl-logo-entry { position: absolute; inset: 0; direction: ltr; }
+.v35 .wl-card .wl-logo-train { display: flex; align-items: center; width: max-content; height: 100%; transform: translate3d(100vw, 0, 0); will-change: transform; }
+.v35 .wl-card .wl-logo-group { display: flex; align-items: center; flex: 0 0 var(--wl-logo-period); width: var(--wl-logo-period); height: 100%; gap: var(--wl-logo-gap); padding-right: var(--wl-logo-gap); box-sizing: border-box; }
+.v35 .wl-card .wl-logo-group img { flex: 0 0 var(--wl-logo-width); width: var(--wl-logo-width); max-width: none; height: 86%; object-fit: contain; filter: none; }
+.v35 .wl-card .wl-info { position: relative; z-index: 1; }
+.v35 .wl-card .wl-big:active { background: var(--accent-press) !important; }
+.v35 .wl-card .wl-big:active .dot { color: var(--accent-press); }
+.v35 .wl-card .wl-big:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 4px; }
+.v35 .aw > .an-sources { margin: 28px var(--wl-g, 16px); max-width: calc(100% - 32px); }
+.v35 .an-sources[hidden], .v35 .ss-diagnostics[hidden] { display: none; }
+.v35 .ss-diagnostics { padding: 24px 16px; border-top: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  .v35 .wl-card .wl-logo-train { transform: none !important; will-change: auto; }
+}
+@container aw (min-width: 900px) {
+  .v35 .wl-card .wl-head { --wl-logo-band-top: 210px; }
 }

@@ -445,9 +445,9 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   // Storage pressure must never delete an account's offline mirror. The server
   // may be unavailable and a newer cursor does not prove history is recoverable.
   let queueSaveVersion = 0;
-  const persistQueue = () => {
+  const persistQueue = (alreadySavedLocally = false) => {
     refreshOverlay();
-    const localSaved = writeLocalCache(QUEUE_KEY, queue);
+    const localSaved = alreadySavedLocally || writeLocalCache(QUEUE_KEY, queue);
     durable = localSaved;
     const version = ++queueSaveVersion;
     const generation = sessionGeneration;
@@ -1217,20 +1217,46 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (user?.userId && dataOwner !== user.userId) throw Object.assign(new Error('stale_session'), { stale: true });
     const existing = queue.find((op) => op.opId === opId);
     if (existing) {
-      if (!persistQueue() && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
+      if (requireDurable && !writeLocalCache(QUEUE_KEY, queue)) {
+        durable = false;
+        throw new Error('تعذّر حفظ العملية محليًا');
+      }
+      persistQueue(requireDurable);
       schedulePush();
       return opId;
     }
     const op = { opId, kind, payload, at: Date.now() };
-    queue.push(op);
-    if (queue.length > MAX_QUEUE) {
-      const trimmed = trimQueue(queue, MAX_QUEUE);
-      queue = trimmed.ops;
-      overflowing = trimmed.overflowing;
+    if (requireDurable) {
+      // Strict operations are private candidates until the synchronous durable commit.
+      // A failed save must not publish an optimistic choice or queue it for later backup/upload.
+      let candidate = [...queue, op];
+      let candidateOverflowing = overflowing;
+      if (candidate.length > MAX_QUEUE) {
+        const trimmed = trimQueue(candidate, MAX_QUEUE);
+        candidate = trimmed.ops;
+        candidateOverflowing = trimmed.overflowing;
+      }
+      if (!candidate.some(entry => entry.opId === opId)) {
+        throw Object.assign(new Error('طابور المزامنة ممتلئ؛ لم تُحفظ العملية الجديدة. أعد المحاولة بعد المزامنة.'), { code: 'QUEUE_CAPACITY_EXCEEDED' });
+      }
+      if (!writeLocalCache(QUEUE_KEY, candidate)) {
+        durable = false;
+        throw new Error('تعذّر حفظ العملية محليًا');
+      }
+      queue = candidate;
+      overflowing = candidateOverflowing;
       pruneAttempts();
+      persistQueue(true);
+    } else {
+      queue.push(op);
+      if (queue.length > MAX_QUEUE) {
+        const trimmed = trimQueue(queue, MAX_QUEUE);
+        queue = trimmed.ops;
+        overflowing = trimmed.overflowing;
+        pruneAttempts();
+      }
+      persistQueue();
     }
-    const saved = persistQueue();
-    if (!saved && requireDurable) throw new Error('تعذّر حفظ الوقت محليًا');
     // الأثر يظهر الآن لا بعد الرحلة: القلب والنقطة والتفاعل يتغيرون تحت الإصبع
     const touched = new Set();
     try {

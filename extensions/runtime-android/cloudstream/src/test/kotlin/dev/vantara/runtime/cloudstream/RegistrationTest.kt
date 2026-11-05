@@ -7,6 +7,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RegistrationTest {
+    class LegacyEntrypoint:BasePlugin() {
+        override fun load(){registerMainAPI(object:MainAPI(){override var name="legacy";override var mainUrl="https://legacy.example"})}
+    }
+    class ModernEntrypoint:com.lagradost.cloudstream3.plugins.Plugin()
+    @Test fun actualHostAdmissionAcceptsLegacyBasePluginEntrypoints() {
+        val type=LegacyEntrypoint::class.java
+        val plugin=PluginAdmission.instantiate(type,checkNotNull(type.classLoader))
+        val observed=Registration.collect {PluginAdmission.initialize(plugin,null)}
+        assertEquals("legacy",observed.sources.single().name)
+    }
+    @Test fun modernPluginStillRequiresARealScopedAndroidContext() {
+        val type=ModernEntrypoint::class.java
+        val plugin=PluginAdmission.instantiate(type,checkNotNull(type.classLoader))
+        try {PluginAdmission.initialize(plugin,null);fail("Modern plugin loaded without a worker Context")}
+        catch(expected:IllegalStateException){assertEquals("PLUGIN_CONTEXT_REQUIRED",expected.message)}
+    }
+
     @Test fun onlyCompletedInitializationPublishesRegisteredProviders() {
         val plugin=object:BasePlugin(){override fun load(){registerMainAPI(object:MainAPI(){override var name="actual";override var mainUrl="https://source.example"});registerExtractorAPI(object:ExtractorApi(){override val name="extractor"})}}
         val result=Registration.collect{plugin.load()}

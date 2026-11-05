@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { dominantKind, renderSourceHome, supportsSourceHome } from './source-home.js';
 
@@ -6,6 +6,7 @@ const item = (title, type) => ({ title, type, id: title, url: `/w/${title}`, thu
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('source home', () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => { globalThis.document = parseHTML('<html><body></body></html>').document; });
   it('picks the section from the content the source actually returns', () => {
     expect(dominantKind([item('a', 'manga'), item('b', 'anime'), item('c', 'anime')], 'manga')).toBe('anime');
@@ -57,4 +58,72 @@ describe('source home', () => {
     expect(supportsSourceHome({ popular() {} })).toBe(true);
     expect(supportsSourceHome({ search() {} })).toBe(false);
   });
+});
+
+
+describe('source home request lifecycle', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    globalThis.document = parseHTML('<html><body></body></html>').document;
+  });
+  afterEach(() => vi.useRealTimers());
+  const addon = { name: 'AnimeRift', contentTypes: ['anime'] };
+
+  it('renders completed rails while a peer hangs, then offers retry without losing results', async () => {
+    let slowSignal;
+    const adapter = {
+      popular: async () => ({ items: [item('ready', 'anime')] }),
+      latest: vi.fn((_page, { signal }) => { slowSignal = signal; return new Promise(() => {}); }),
+    };
+    const root = renderSourceHome({ addon, adapter }); document.body.append(root);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.an-card')?.getAttribute('aria-label')).toBe('ready');
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(slowSignal.aborted).toBe(true);
+    expect(root.textContent).toContain('تعذّر');
+    expect(root.textContent).not.toContain('جارٍ جلب');
+    expect(root.querySelector('.addon-home-retry')).not.toBeNull();
+    adapter.latest.mockResolvedValueOnce({ items: [item('retried', 'anime')] });
+    root.querySelector('.addon-home-retry').click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([...root.querySelectorAll('.an-card')].map(n => n.getAttribute('aria-label'))).toEqual(['ready', 'retried']);
+    expect(root.textContent).not.toContain('تعذّر');
+    root.close(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('distinguishes failed requests from a successful empty catalogue', async () => {
+    const failed = renderSourceHome({ addon, adapter: { popular: async () => { throw new Error('offline'); } } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed.textContent).toContain('تعذّر');
+    expect(failed.textContent).not.toContain('لم يُرجع');
+    failed.close();
+    const empty = renderSourceHome({ addon, adapter: { popular: async () => ({ items: [] }) } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(empty.textContent).toContain('لم يُرجع');
+    expect(empty.querySelector('.addon-home-retry')).not.toBeNull(); empty.close();
+  });
+
+  it('aborts on close, ignores late results and leaves reopening independent', async () => {
+    let finish, signal;
+    const adapter = { popular: (_page, opts) => { signal = opts.signal; return new Promise(resolve => { finish = resolve; }); } };
+    const old = renderSourceHome({ addon, adapter }); document.body.append(old);
+    await vi.advanceTimersByTimeAsync(0);
+    const oldText = old.textContent; old.close();
+    expect(signal.aborted).toBe(true); expect(vi.getTimerCount()).toBe(0);
+    const next = renderSourceHome({ addon, adapter: { popular: async () => ({ items: [item('new', 'anime')] }) } });
+    document.body.append(next); finish({ items: [item('late', 'anime')] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(old.textContent).toBe(oldText);
+    expect(next.textContent).toContain('new'); expect(next.textContent).not.toContain('late');
+    next.close(); expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+it('does not start source requests after an immediate close', async () => {
+  vi.useFakeTimers();
+  const popular = vi.fn(async () => ({ items: [item('late', 'anime')] }));
+  const root = renderSourceHome({ addon: { name: 'Closed', contentTypes: ['anime'] }, adapter: { popular } });
+  root.close(); await vi.advanceTimersByTimeAsync(0);
+  expect(popular).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
 });

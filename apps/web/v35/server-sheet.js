@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * ورقة السيرفرات المشتركة بين الأنمي والسينما.
  *
@@ -12,11 +13,13 @@
  * من يفتحها (الأنمي/السينما) يمرّر السيرفرات وحالتها ويقرّر ماذا يحدث عند اللمس.
  */
 import { parseRelease, swarmTier } from '../addons/release-info.js';
+import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, scoreRoute, VALIDITY_AR } from '../lib/route-validity.js';
 
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
+export { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 
 const ADDON_NAMES = { torrentio: 'Torrentio', comet: 'Comet', mediafusion: 'MediaFusion', knightcrawler: 'KnightCrawler', jackettio: 'Jackettio', peerflix: 'Peerflix', orion: 'Orion', annatar: 'Annatar', torbox: 'TorBox', debridio: 'Debridio' };
 const capital = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -68,10 +71,14 @@ const QUALITY_PREF = { 1080: 5, 2160: 4, 1440: 4, 720: 3, 480: 1 };
 
 /** ما يحتاجه الصف ليُرسم: الاسم والنوع والجودة واللغة والصحة. */
 export function describe(r, ctx = {}) {
-  const torrent = isAddonRoute(r) || r.runtimeReady != null;
+  const torrent = isTorrentRoute(r);
   const info = isAddonRoute(r) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
   const q = bucket(r.quality ?? info?.quality);
-  const name = torrent ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة') : ctx.sourceName?.(r) ?? r.sourceName ?? r.sourceId ?? 'سيرفر';
+  const name = torrent
+    ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة')
+    : isCloudStreamRoute(r)
+      ? (r.sourceName || ctx.sourceName?.(r) || 'مصدر مباشر')
+      : (ctx.sourceName?.(r) ?? r.sourceName ?? r.sourceId ?? 'سيرفر');
   const host = torrent ? ([...new Set([info?.site, releaseGroup(info?.filename)].filter(Boolean))].join(' · ') || info?.filename) : hostName(r.server) ?? (r.code && !/^[A-Z0-9]{2,5}$/.test(r.code) ? r.code : null);
   const langs = [];
   if (torrent) {
@@ -206,6 +213,22 @@ export function factDate(v) {
  * وقائمة المصادر بمرشّحاتها وزرّ التشغيل في الجهة الأخرى تُمرَّر وحدها.
  */
 export function createServerSheet(body, o) {
+  let destroyed = false;
+  const frames = new Set();
+  const subscriptions = [];
+  const frame = callback => {
+    if (destroyed) return;
+    if (typeof requestAnimationFrame !== 'function') return callback();
+    let id;
+    id = requestAnimationFrame(() => { frames.delete(id); if (!destroyed) callback(); });
+    if (id != null) frames.add(id);
+  };
+  const listen = (target, event, callback, options) => {
+    if (!target?.addEventListener) return;
+    const guarded = (...args) => { if (!destroyed) callback(...args); };
+    target.addEventListener(event, guarded, options);
+    subscriptions.push(() => target.removeEventListener?.(event, guarded, options));
+  };
   const el = o.el;
   const media = { title: o.title, label: o.kicker, ...(o.media ?? {}) };
   const btn = (cls, html, label) => {
@@ -334,7 +357,7 @@ export function createServerSheet(body, o) {
     const measure = () => {
       if (desc.scrollHeight - desc.clientHeight > 2) more.hidden = false;
     };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(measure);
+    frame(measure);
   }
   if (media.resume) {
     const r = el('div', 'ss-resume');
@@ -368,6 +391,21 @@ export function createServerSheet(body, o) {
   bar.append(extras);
   body.append(bar, scroll, foot);
 
+  // Debug actions live below source content; header geometry belongs to navigation/friends.
+  const diagnostics = el('div', 'ss-diagnostics');
+  const paintDiagnostics = () => {
+    diagnostics.replaceChildren();
+    diagnostics.hidden = !diagnosticsUi.visible();
+    if (diagnosticsUi.visible()) {
+      const action = o.diagnosticAction?.();
+      if (action) diagnostics.append(action);
+      else diagnostics.hidden = true;
+    }
+  };
+  scroll.append(diagnostics);
+  subscriptions.push(diagnosticsUi.subscribe(paintDiagnostics));
+  paintDiagnostics();
+
   // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
   const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);
   const wide = mq('(min-width: 900px)');
@@ -381,7 +419,7 @@ export function createServerSheet(body, o) {
     foot.hidden = !wide?.matches;
   };
   placeActions();
-  wide?.addEventListener?.('change', placeActions);
+  listen(wide, 'change', placeActions);
   const still = mq('(prefers-reduced-motion: reduce)');
   let ticking = false;
   let lastSpan = -1;
@@ -414,13 +452,12 @@ export function createServerSheet(body, o) {
     body.style.setProperty('--ss-p', p.toFixed(3));
     body.style.setProperty('--ss-bar', solid.toFixed(3));
   };
-  scroll.addEventListener('scroll', () => {
+  listen(scroll, 'scroll', () => {
     if (ticking) return;
     ticking = true;
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(collapse);
-    else collapse();
+    frame(collapse);
   }, { passive: true });
-  wide?.addEventListener?.('change', collapse);
+  listen(wide, 'change', collapse);
   collapse();
   // الصورة والشعار يتحركان بخط CSS مربوط بتمرير الورقة نفسها (كانت الكتابة بعد حدث scroll
   // متأخرة إطارًا فتهتز). WebView 153–156 يحبس الانزلاق بعد رفع الإصبع ما دامت حركة مربوطة
@@ -434,8 +471,8 @@ export function createServerSheet(body, o) {
     handed = false;
     body.classList.remove('ss-handed');
   };
-  scroll.addEventListener('touchstart', () => { moved = false; handBack(); }, { passive: true });
-  scroll.addEventListener('scroll', () => {
+  listen(scroll, 'touchstart', () => { moved = false; handBack(); }, { passive: true });
+  listen(scroll, 'scroll', () => {
     moved = true;
     if (handed) {
       clearTimeout(settleTimer);
@@ -450,11 +487,11 @@ export function createServerSheet(body, o) {
     clearTimeout(settleTimer);
     settleTimer = setTimeout(handBack, 180);
   };
-  scroll.addEventListener('touchend', fling, { passive: true });
-  scroll.addEventListener('touchcancel', fling, { passive: true });
-  scroll.addEventListener('scrollend', handBack, { passive: true });
+  listen(scroll, 'touchend', fling, { passive: true });
+  listen(scroll, 'touchcancel', fling, { passive: true });
+  listen(scroll, 'scrollend', handBack, { passive: true });
   // لمسة خارج قائمة المصدر تغلقها
-  body.addEventListener?.('click', () => {
+  listen(body, 'click', () => {
     const w = body.querySelector('.ss-addon.open');
     body.querySelectorAll('.ss-addon-menu').forEach((m) => m.remove());
     if (!w) return;
@@ -466,6 +503,7 @@ export function createServerSheet(body, o) {
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
+    if (destroyed) return;
     picked = r.id;
     const d = view(r);
     lastPick = d.torrent ? { features: startFeatures(d), at: Date.now() } : null;
@@ -475,7 +513,7 @@ export function createServerSheet(body, o) {
   const views = new Map();
   const view = (r) => {
     // الوصف يتغيّر بتغيّر الحالة لا بغيرها: يُحسب مرة لكل نسخة من السيرفر
-    const key = `${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}`;
+    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}`;
     const hit = views.get(r.id);
     if (hit?.key === key) return hit.d;
     const d = describe(r, { sourceName: o.sourceName, prefer: o.prefer, directLang: o.directLang });
@@ -727,7 +765,7 @@ export function createServerSheet(body, o) {
     filters.replaceChildren(...parts);
     filters.hidden = !parts.length;
     // سطر أعرض من الشاشة: يذوب طرفه إشارةً إلى أنه يُمرَّر، بدل قصّ كلمة في منتصفها
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => filters.classList.toggle('ss-filters--more', filters.scrollWidth > filters.clientWidth + 1));
+    frame(() => filters.classList.toggle('ss-filters--more', filters.scrollWidth > filters.clientWidth + 1));
   }
   const passes = (r) => (filter.q === 'all' || view(r).q === filter.q)
     && (filter.v == null || (filter.v === 'DUB') === (r.variant === 'DUB'))
@@ -738,6 +776,7 @@ export function createServerSheet(body, o) {
    * `noSources`: لا مصدر مشاهدة في الحساب: «أضف مصدرًا لتشاهد» مكان القائمة والزر يفتح الإضافات.
    */
   function update(model) {
+    if (destroyed) return;
     last = model;
     const routes = model.routes ?? [];
     paintFilters(routes);
@@ -839,5 +878,19 @@ export function createServerSheet(body, o) {
     };
   }
 
-  return { update, best, status, body, scroll };
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    clearTimeout(settleTimer);
+    for (const id of frames) globalThis.cancelAnimationFrame?.(id);
+    frames.clear();
+    for (const unsubscribe of subscriptions) unsubscribe();
+    subscriptions.length = 0;
+    body.classList.remove('ss-handed');
+    for (const element of [...body.querySelectorAll('button, img'), ...rows.values()]) {
+      element.onclick = null; element.onload = null; element.onerror = null;
+    }
+    rows.clear(); views.clear();
+  };
+  return { update, best, status, body, scroll, destroy };
 }

@@ -52,9 +52,12 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     @Volatile var readyAt = 0L; private set
     @Volatile var frameAt = 0L; private set
 
-    @Synchronized fun start() {
+    private var preparationMs: Long? = null
+    private var audioOnlyAt = 0L
+    @Synchronized fun start(preparationMs: Long? = null) {
         reads.clear(); seeks.clear(); events.clear(); opening.clear(); active.clear()
-        count = 0; openAt = now(); readyAt = 0; frameAt = 0
+        count = 0; openAt = now(); readyAt = 0; frameAt = 0; audioOnlyAt = 0
+        this.preparationMs = preparationMs
         event("فتح المصدر")
     }
 
@@ -101,7 +104,13 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         seeks.addLast(Seek(now(), fromMs, toMs).apply { if (readyNow) readyAt = at }); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
         event("قفزة ${clock(fromMs)} ← ${clock(toMs)}" + if (readyNow) " (داخل المحمّل)" else "")
     }
-    @Synchronized fun error(message: String) { if (openAt != 0L) event("خطأ: ${message.take(160)}") }
+    @Synchronized fun audioOnly() { if (openAt != 0L && audioOnlyAt == 0L) { audioOnlyAt = now(); event("صوت فقط: بدأ إخراج الصوت، لا إطار فيديو منتظر") } }
+    @Synchronized fun error(message: String) {
+        val safe = message.replace(Regex("""https?://[^\s"'<>]+""", RegexOption.IGNORE_CASE), "[url]")
+            .replace(Regex("""(?:authorization|cookie|set-cookie)\s*[:=][^\r\n]+""", RegexOption.IGNORE_CASE), "[redacted header]")
+            .replace(Regex("""(?:bearer\s+|(?:token|password|credential)\s*[:=]\s*)[^\s,;]+""", RegexOption.IGNORE_CASE), "[redacted]")
+        if (openAt != 0L) event("خطأ: ${safe.take(800)}")
+    }
 
     private fun event(text: String) {
         events.addLast("${rel(now())} $text"); while (events.size > MAX_EVENTS) events.removeFirst()
@@ -119,6 +128,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             return "التحميل ${mbps(t.downloadBps)} أقل مما يحتاجه الفيديو ${mbps(needBps)}"
         if (firstByte == 0L) return if (t != null && t.metadataAt == 0L) "لم تصل بيانات التورنت بعد (${secs(nowMs - openAt)} ث)" else "لم يصل أول بايت للمشغّل بعد (${secs(nowMs - openAt)} ث)"
         if (readyAt == 0L) return "وصل أول بايت ولم يجهز المشغّل بعد: قرأ ${bytes(reads.sumOf { it.bytes })} في ${reads.size} طلب"
+        if (frameAt == 0L && p.video != null) return "المشغّل جاهز لكن لم تظهر أول صورة بعد (${secs(nowMs - readyAt)} ث بعد READY)"
         val prep = firstByte - openAt
         val reading = readyAt - firstByte
         val before = reads.filter { it.at <= readyAt }
@@ -153,6 +163,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
             "أول بايت ${rel(firstByte)}", "جاهز ${rel(readyAt)}", "أول صورة ${rel(frameAt)}",
         ).joinToString(" · "))
+        appendLine("الاستخراج وتجهيز السيرفر: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر المرشح، قبل الفحص والمشغّل)")
+        appendLine("تهيئة المشغّل: ${if (readyAt > 0) "${secs(readyAt - openAt)} ث" else "لم تكتمل"} · أول صورة: ${if (frameAt > 0) "${secs(frameAt - openAt)} ث" else if (audioOnlyAt > 0) "صوت فقط — لا إطار منتظر" else "لم تظهر"}")
         appendLine("طلبات القراءة (${reads.size}):")
         for (r in reads) appendLine("  ${r.n}) ${rel(r.at)} ${where(r.position, t?.fileBytes)} → ${bytes(r.bytes)}" +
             (if (r.openedAt > r.at) " · فتح بعد ${secs(r.openedAt - r.at)} ث" else "") +

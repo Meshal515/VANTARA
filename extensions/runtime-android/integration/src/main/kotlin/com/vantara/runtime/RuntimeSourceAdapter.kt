@@ -2,6 +2,8 @@ package com.vantara.runtime
 
 import com.vantara.anime.adapters.*
 import com.vantara.anime.stream.Candidate
+import com.vantara.anime.stream.RouteReport
+import com.vantara.anime.stream.RouteState
 import com.vantara.addons.NativeAddonCandidates
 import kotlinx.serialization.json.*
 
@@ -77,12 +79,19 @@ class RuntimeSourceAdapter(
             val headers=(link["headers"] as? JsonObject).orEmpty().toMutableMap()
             if(link.text("referer").isNotBlank())headers.putIfAbsent("Referer",JsonPrimitive(link.text("referer")))
             buildJsonObject {
-                put("url",link.text("url"));put("name",link.text("name"));put("title",link.text("name"))
+                put("url",runCatching { runtimeMediaUrl(link.text("url")) }.getOrDefault(link.text("url")));put("name",link.text("name"));put("title",link.text("name"))
                 put("quality",link["quality"] ?: JsonNull);put("headers",JsonObject(headers))
                 put("type",mediaType(link.text("type"),link.text("url")))
             }
         })
         // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.
-        return NativeAddonCandidates.parse("cs3-${now}",id,name,streams,now)
+        val candidates=NativeAddonCandidates.parse("cs3-${now}",id,name,streams,now)
+        // Native preparation schedules media probes from route reports. Returning
+        // a list alone only adopts the links, leaving probe-gated sessions unusable.
+        candidates.groupBy { it.server }.forEach { (server,links) ->
+            trace?.route(RouteReport(id,"x"+Integer.toHexString(server.hashCode()),server,
+                links.mapNotNull { it.quality }.maxOrNull(),links.first().variant,RouteState.READY,links))
+        }
+        return candidates
     }
 }

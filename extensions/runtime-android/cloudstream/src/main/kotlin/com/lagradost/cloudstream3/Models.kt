@@ -64,7 +64,34 @@ interface LoadResponse {
     var tags:List<String>?;var recommendations:List<SearchResponse>?;var score:Score?
     var actors:List<ActorData>?;var backgroundPosterUrl:String?;var contentRating:String?;var duration:Int?
     var trailers:MutableList<TrailerData>
+    var syncData:MutableMap<String,String>
     companion object {
+        // This host retains provider IDs as metadata; it does not sign in to external sync services.
+        var malIdPrefix="mal"
+        var kitsuIdPrefix="kitsu"
+        var aniListIdPrefix="anilist"
+        var simklIdPrefix="simkl"
+        fun LoadResponse.addMalId(id:Int?) {
+            if(id==null)return
+            syncData[malIdPrefix]=id.toString()
+            retainSecondaryId("Mal",id)
+        }
+        fun LoadResponse.addAniListId(id:Int?) {
+            if(id==null)return
+            syncData[aniListIdPrefix]=id.toString()
+            retainSecondaryId("AniList",id)
+        }
+        fun LoadResponse.addKitsuId(id:Int?) { if(id!=null)syncData[kitsuIdPrefix]=id.toString() }
+        fun LoadResponse.getMalId():String?=syncData[malIdPrefix]
+        fun LoadResponse.getAniListId():String?=syncData[aniListIdPrefix]
+        fun LoadResponse.getKitsuId():String?=syncData[kitsuIdPrefix]
+        private fun LoadResponse.retainSecondaryId(service:String,id:Int) {
+            val node=runCatching { mapper.readTree(syncData[simklIdPrefix].orEmpty()) }
+                .getOrNull()?.takeIf { it.isObject } as? com.fasterxml.jackson.databind.node.ObjectNode
+                ?: mapper.createObjectNode()
+            node.put(service,id.toString())
+            syncData[simklIdPrefix]=mapper.writeValueAsString(node)
+        }
         fun LoadResponse.addActors(actors:List<Pair<Actor,String?>>?){this.actors=actors?.map{(actor,role)->ActorData(actor,roleString=role)}}
         @JvmName("addActorsOnly")
         fun LoadResponse.addActors(actors:List<Actor>?){this.actors=actors?.map{ActorData(it)}}
@@ -83,6 +110,7 @@ abstract class WorkResponse(override var name:String,override var url:String,ove
     override var actors:List<ActorData>?=null;override var backgroundPosterUrl:String?=null
     override var contentRating:String?=null;override var duration:Int?=null
     override var trailers:MutableList<TrailerData> = mutableListOf()
+    override var syncData:MutableMap<String,String> = linkedMapOf()
     var showStatus:ShowStatus?=null
 }
 class TvSeriesLoadResponse(name:String,url:String,apiName:String,type:TvType,var episodes:List<Episode>):WorkResponse(name,url,apiName,type),EpisodeResponse

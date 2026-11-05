@@ -21,6 +21,18 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "SystemUi")
 class SystemUiPlugin : Plugin() {
 
+    /** The sole local preference, shared with native playback UI. Stable is denied in Kotlin. */
+    @PluginMethod
+    fun diagnostics(call: PluginCall) {
+        val requested = call.getBoolean("visible")
+        if (requested != null && !com.vantara.app.BuildConfig.DEBUG) {
+            call.reject("Diagnostics are available in Debug builds only", "DEBUG_ONLY")
+            return
+        }
+        if (requested != null) DiagnosticVisibility.set(context, requested)
+        call.resolve(JSObject().put("debug", com.vantara.app.BuildConfig.DEBUG).put("visible", DiagnosticVisibility.visible(context)))
+    }
+
     /**
      * معرّف أندرويد الثابت لنفس (مفتاح توقيع التطبيق + المستخدم + الجهاز).
      *

@@ -1,7 +1,8 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import {expect,it,vi,afterEach} from 'vitest';
 import {parseHTML} from 'linkedom';
 import {createOverlayView} from './overlay.js';
-afterEach(()=>vi.useRealTimers());
+afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 function fixture(){
   vi.useFakeTimers();
   const {document}=parseHTML('<html><body></body></html>');
@@ -142,4 +143,13 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
  const before=[...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5');
  view.update({position:1000,subtitles:structuredClone(tracks),subtitleDelay:0});
  expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
+});
+
+it('uses the common visibility gate for technical network metrics without hiding player controls',()=>{
+ const gate=vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
+ const {view}=fixture();view.open.more();
+ expect(view.root.querySelector('.pp-net')).toBeNull();
+ expect(view.root.textContent).toContain('الإعدادات المتقدمة');
+ gate.mockReturnValue(true);view.open.more();
+ expect(view.root.querySelector('.pp-net')).not.toBeNull();
 });

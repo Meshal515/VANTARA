@@ -22,7 +22,47 @@ env:
   CF_PREVIEW_BRANCH: ${{ github.ref_name == 'claude/web-plugin-engine' && 'web-engine' || 'web-debug' }}
 
 jobs:
+  # Deterministic failures are checked before deployment and without Gradle.
+  # Android keeps every existing device/signing/upgrade gate unchanged.
+  fast-checks:
+    if: github.repository == 'Meshal515/VANTARA' && github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Shell integrity, WebView lifecycle and native-input contracts
+        run: |
+          node tools/repository-compat/scope-guard.mjs
+          node --test tools/repository-safety.test.mjs tools/repository-compat/webview-lifecycle.test.mjs tools/repository-compat/debug-native-inputs.test.mjs
+          python3 -m unittest discover -s tools/android-debug -p 'test_*.py' -v
+      - name: Parse production UI and device proof scripts
+        run: |
+          node --check apps/web/v35/anime.js
+          node --check apps/web/v35/work-looks.js
+          node --check apps/web/v35/logo-layer.js
+          node --check apps/web/v35/work-dom.js
+          node --check apps/web/v35/anime-episode-controls.js
+          node --check tools/android-debug/webview-proof.mjs
+      - name: Real compositor motion and layers before Android compilation
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fast-ui" --no-save playwright@1.56.1
+          node tools/repository-compat/anime-logo-ui.mjs \
+            --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/fast-ui-proof" \
+            --playwright-module "$RUNNER_TEMP/fast-ui/node_modules/playwright/index.mjs" \
+            --chromium "$(command -v google-chrome || command -v chromium)"
+
   deploy:
+    needs: [fast-checks]
+    # Preserve the existing web-engine/manual-ref behavior when this Debug-only gate is skipped.
+    if: always() && !cancelled() && (needs.fast-checks.result == 'success' || needs.fast-checks.result == 'skipped')
+    outputs:
+      workspace_build: ${{ steps.workspace-build.outcome }}
+      web_tests: ${{ steps.web-tests.outcome }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -41,10 +81,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # حزم مساحة العمل (@vantara/domain) تُبنى قبل الاختبارات كما في VANTARA CI
-      - run: pnpm build
+      - id: workspace-build
+        run: pnpm build
 
       # لا نشر لنسخة اختباراتها فاشلة
       - name: Web tests
+        id: web-tests
         run: npx vitest run apps/web
 
       - name: Verify Cloudflare secrets exist
@@ -103,3 +145,37 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PAGES_PROJECT" \
             | jq -r '.result.subdomain')
           echo "Web Debug ($CF_PREVIEW_BRANCH): https://$CF_PREVIEW_BRANCH.$sub" | tee -a "$GITHUB_STEP_SUMMARY"
+
+
+  stop-blocked-debug-build:
+    needs: [fast-checks, deploy]
+    if: >-
+      always() && github.repository == 'Meshal515/VANTARA' &&
+      github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' &&
+      (needs.fast-checks.result == 'failure' || needs.deploy.outputs.workspace_build == 'failure' || needs.deploy.outputs.web_tests == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Stop only this exact failed commit's Android Debug run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs=$(gh run list --repo "$GH_REPO" --workflow android-debug.yml \
+            --branch feat/addons-v7-native-manager-20261027 --commit "$EXPECTED_SHA" \
+            --limit 10 --json databaseId,headSha,status \
+            --jq '.[] | select(.status != "completed") | .databaseId')
+          for run_id in $runs; do
+            actual=$(gh run view "$run_id" --repo "$GH_REPO" --json headSha --jq .headSha)
+            test "$actual" = "$EXPECTED_SHA"
+            if ! gh run cancel "$run_id" --repo "$GH_REPO"; then
+              status=$(gh run view "$run_id" --repo "$GH_REPO" --json status --jq .status)
+              test "$status" = completed
+            fi
+          done

@@ -43,11 +43,15 @@ class LiveRepositorySweepTest {
         }
     }
 
-    private val http=okhttp3.OkHttpClient.Builder().connectTimeout(15,java.util.concurrent.TimeUnit.SECONDS).readTimeout(20,java.util.concurrent.TimeUnit.SECONDS).build()
+    // Exercise the actual player's TLS upgrade, cookies and origin handling. A raw OkHttp
+    // client produced a cleartext-policy failure that was never a test of VANTARA playback.
+    private val http by lazy { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
+        .newBuilder().connectTimeout(15,java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(20,java.util.concurrent.TimeUnit.SECONDS).callTimeout(30,java.util.concurrent.TimeUnit.SECONDS).build() }
     private fun head(url: String,headers: Map<String,String>): Pair<okhttp3.Response,ByteArray> {
         val request=okhttp3.Request.Builder().url(url).header("Range","bytes=0-4095").apply { headers.forEach { (k,v) -> header(k,v) } }
-            .header("User-Agent",headers["User-Agent"] ?: "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36").build()
-        val response=http.newCall(request).execute()
+            .build()
+        val response=com.vantara.addons.nativeAddonMediaClient(http,url,headers).newCall(request).execute()
         return response to response.use { r ->
             val input=r.body?.byteStream() ?: return@use ByteArray(0)
             val out=java.io.ByteArrayOutputStream();val buf=ByteArray(4096)
@@ -57,7 +61,7 @@ class LiveRepositorySweepTest {
     }
     /** MEDIA لفيديو حقيقي (MP4/WebM/MKV/TS) أو لقائمة HLS وصل أول مقطع منها؛ وإلا السبب. */
     private fun playable(url: String,headers: Map<String,String>,depth: Int=0): String {
-        val (response,bytes)=head(url,headers)
+        val (response,bytes)=head(runtimeMediaUrl(url),headers)
         if (!response.isSuccessful) {
             // فرضية تُختبر قبل تغيير المشغّل: CDN يرفض المقطع بلا Origin الذي يرسله المتصفح مع HLS
             val referer=headers["Referer"] ?: return "HTTP ${response.code}"
@@ -71,9 +75,9 @@ class LiveRepositorySweepTest {
             if (depth>2) return "HLS_TOO_DEEP"
             val next=text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: return "HLS_EMPTY"
             val absolute=java.net.URI(response.request.url.toString()).resolve(next).toString()
-            // مقاطع مشفّرة (AES-128): بايتاتها عشوائية؛ نزولها بنجاح يكفي، والمشغّل يفكّها بالمفتاح
+            // Encrypted bytes alone do not prove media/decoding. Keep this explicitly unverified.
             if (Regex("#EXT-X-KEY:METHOD=(AES-128|SAMPLE-AES)").containsMatchIn(text))
-                return head(absolute,headers).first.let { if (it.isSuccessful) "MEDIA hls-encrypted" else "HLS→HTTP ${it.code}" }
+                return "UNVERIFIED_ENCRYPTED_HLS"
             val inner=playable(absolute,headers,depth+1)
             return if (inner.startsWith("MEDIA")) "MEDIA hls" else "HLS→$inner"
         }
@@ -86,6 +90,7 @@ class LiveRepositorySweepTest {
         assumeTrue("Live sweep is opt-in",args.getString("vantaraLiveSweep")=="true")
         val repo=args.getString("vantaraRepo") ?: arb
         val only=args.getString("vantaraOnly")?.split(',')?.map { it.trim().lowercase() }?.toSet()
+        val maxPackages=args.getString("vantaraMaxPackages")?.toIntOrNull()?.coerceIn(1, 5000) ?: 5000
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         ensureEngineInjekt(context.applicationContext as Application)
         val engine=AnimeEngine.get(context)
@@ -103,11 +108,21 @@ class LiveRepositorySweepTest {
             host.setProfile("live-sweep-"+UUID.randomUUID())
             host.addRepository(repo)
             val packages=host.extensions(repo).map { it.jsonObject }
-            for (row in packages) {
+            // Filter before applying the execution limit: a named plugin later in a
+            // repository must not disappear just because earlier packages consumed
+            // the maxPackages window (the old sweep silently tested zero matches).
+            val selected=packages.filter { row ->
+                val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.contentOrNull ?: "?"
+                only==null || name.lowercase() in only
+            }.take(maxPackages)
+            for (row in selected) {
                 val name=row["name"]?.jsonPrimitive?.contentOrNull ?: row["pkg"]?.jsonPrimitive?.content ?: "?"
-                if (only!=null && name.lowercase() !in only) continue
                 val types=(row["tvTypes"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
-                val content=if (types.any { it.equals("Anime",true) || it.equals("AnimeMovie",true) || it.equals("OVA",true) }) "anime" else "cinema"
+                // The test is explicitly testing cinema or anime; a mixed-type publisher can
+                // support both. Never silently categorize Mycima/Egydead as anime
+                // during a cinema journey merely because Anime is in tvTypes.
+                val content=args.getString("vantaraContent")?.takeIf { it in setOf("anime","cinema") }
+                    ?: if (types.any { it.equals("Anime",true) || it.equals("AnimeMovie",true) || it.equals("OVA",true) }) "anime" else "cinema"
                 val report=buildJsonObject {
                     put("plugin",name);put("content",content)
                     val installed=step(this,"install",90_000) { host.install(repo,row.getValue("pkg").jsonPrimitive.content,content) }
@@ -143,11 +158,20 @@ class LiveRepositorySweepTest {
                             val link=raw.jsonObject
                             val headers=(link["headers"] as? JsonObject).orEmpty().mapValues { it.value.jsonPrimitive.content }.toMutableMap()
                             link["referer"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { headers.putIfAbsent("Referer",it) }
-                            val verdict=runCatching { playable(link.getValue("url").jsonPrimitive.content,headers) }.getOrElse { "ERR "+it.javaClass.simpleName }
+                            val verdict=runCatching { playable(link.getValue("url").jsonPrimitive.content,headers) }.getOrElse { error ->
+                                "ERR "+error.javaClass.simpleName+if(error.message.orEmpty().contains("CLEARTEXT",true)) ":CLEARTEXT_POLICY" else ""
+                            }
                             buildJsonObject { put("quality",link["quality"] ?: JsonNull);put("host",runCatching { java.net.URI(link.getValue("url").jsonPrimitive.content).host }.getOrNull() ?: "?");put("verdict",verdict) }
                         }
                         put("playable",checked.count { it["verdict"]?.jsonPrimitive?.content?.startsWith("MEDIA")==true })
                         put("playback",JsonArray(checked))
+                        if(args.getString("vantaraNativePlayback")=="true") {
+                            val facts=step(this,"nativePlayback",300_000) {
+                                com.vantara.anime.DebugVideoPlaybackProbe.run(
+                                    InstrumentationRegistry.getInstrumentation(),engine,work,episode.number)
+                            }
+                            if(facts!=null)put("nativePlaybackFacts",facts)
+                        }
                     } }))
                 }
                 reports+=report

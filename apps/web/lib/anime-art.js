@@ -19,14 +19,19 @@ export const anilistIdOf = (id) => (/^\d+$/.test(String(id ?? '')) && Number(id)
  * 4. غلاف العمل (ثم بنره). `fallbacks` تُجرَّب واحدة بعد الأخرى إن تعذّر تحميل ما قبلها.
  * @returns {{ src: string|null, still: boolean, fallbacks: string[] }}
  */
-export function episodeStill(m, n, art = null, { full = false } = {}) {
+export function episodeStill(m, n, art = null, { full = false, width = null, dpr = 1 } = {}) {
   const hd = art?.hd?.[String(n)] ?? null;
   const low = [m?.thumbs?.[n]?.thumbnail, art?.episodes?.[String(n)]?.image].filter(Boolean);
   // 1920 للصورة الكبيرة وحدها؛ صفوف الحلقات (عرضها ~170px) تكفيها 780، وعشرات الصور بدقة 1920
   // كانت تؤخر ظهور الصفوف على الجوال
-  const chain = (full ? [hd?.src, hd?.mid, ...low] : [hd?.mid, ...low]).filter(Boolean);
+  // Only rewrite our verified metahub source, never source/addon URLs or query strings.
+  // A 170px row at DPR 2 fits TMDB's native 342px still; larger cards keep 780.
+  const pixels = Number(width) * Math.max(1, Number(dpr) || 1);
+  const small = !full && pixels > 0 && pixels <= 342 && /^https:\/\/episodes\.metahub\.space\//.test(hd?.mid ?? '')
+    ? hd.mid.replace(/\/w\d+\.jpg$/, '/w342.jpg') : null;
+  const chain = [...new Set((full ? [hd?.src, hd?.mid, ...low] : [small, hd?.mid, ...low]).filter(Boolean))];
   if (chain.length) return { src: chain[0], still: true, fallbacks: [...new Set(chain.slice(1))] };
-  return { src: m?.poster ?? m?.posterSmall ?? m?.banner ?? null, still: false, fallbacks: [] };
+  return { src: (full ? m?.poster ?? m?.posterSmall : m?.posterSmall ?? m?.poster) ?? m?.banner ?? null, still: false, fallbacks: [] };
 }
 
 const DAY = 86400000;
@@ -43,20 +48,30 @@ const dayOf = (v) => {
  * والرقمَ وتاريخَ العرض (±3 أيام) كما في ani.zip؛ غير ذلك تبقى لقطة TVDB. لا يرمي.
  * @returns {Promise<Record<string, {src: string, mid: string}>>}
  */
-export async function loadHdStills(art, { fetchImpl = globalThis.fetch } = {}) {
+export async function loadHdStills(art, { fetchImpl = globalThis.fetch, timeoutMs = 6000 } = {}) {
   const imdb = art?.imdb;
   if (!/^tt\d+$/.test(imdb ?? '') || !art?.episodes) return {};
   if (!hdCache.has(imdb)) {
-    hdCache.set(imdb, (async () => {
-      try {
-        const r = await fetchImpl(`https://v3-cinemeta.strem.io/meta/series/${imdb}.json`);
-        const videos = r.ok ? (await r.json())?.meta?.videos : null;
-        return Array.isArray(videos) ? videos : [];
-      } catch {
-        hdCache.delete(imdb);
-        return [];
-      }
-    })());
+    const ctrl = new AbortController();
+    let timer;
+    const expired = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        ctrl.abort();
+        reject(new Error('hd_art_timeout'));
+      }, timeoutMs);
+    });
+    const request = Promise.resolve().then(async () => {
+      const r = await fetchImpl(`https://v3-cinemeta.strem.io/meta/series/${imdb}.json`, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`hd_art_${r.status}`);
+      const videos = (await r.json())?.meta?.videos;
+      return Array.isArray(videos) ? videos : [];
+    });
+    const pending = Promise.race([request, expired]).catch(() => {
+      // Transient HTTP/body/timeout errors must not suppress HD art for the session.
+      if (hdCache.get(imdb) === pending) hdCache.delete(imdb);
+      return [];
+    }).finally(() => clearTimeout(timer));
+    hdCache.set(imdb, pending);
   }
   const videos = await hdCache.get(imdb);
   const out = {};

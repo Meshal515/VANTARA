@@ -64,6 +64,7 @@ class MangaLiveSweepTest {
         val args=InstrumentationRegistry.getArguments()
         assumeTrue("Manga live sweep is opt-in",args.getString("vantaraMangaSweep")=="true")
         val only=args.getString("vantaraOnly")?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
+        val maxPackages=args.getString("vantaraMaxPackages")?.toIntOrNull()?.coerceIn(1, 5000) ?: 5000
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         ensureEngineInjekt(context.applicationContext as Application)
         val network=Injekt.get<NetworkHelper>()
@@ -109,7 +110,7 @@ class MangaLiveSweepTest {
             }
         }
 
-        try { for ((origin,base,fetch) in packages) {
+        try { for ((origin,base,fetch) in packages.take(maxPackages)) {
             if (only!=null && base.label.lowercase() !in only) continue
             val report=buildJsonObject {
                 put("extension",base.label);put("origin",origin);put("version",base.versionName)

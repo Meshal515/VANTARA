@@ -80,7 +80,7 @@ export function createAnimeAccount(sync) {
     const k = `${me()}:${m.id}:${episode}`;
     if (viewed.has(k)) return;
     viewed.add(k);
-    sync.enqueue('view.add', { ...descriptor(m), chapterLabel: `الحلقة ${episode}`, chapterNumber: episode });
+    sync.enqueue('view.add', { ...descriptor(m), chapterLabel: m.format === 'MOVIE' ? 'الفيلم' : `الحلقة ${episode}`, chapterNumber: episode });
   }
 
   /** «أنهى الحلقة N» للأصدقاء (حسب خصوصيتك في الخادم). مرة لكل حلقة في الجلسة. */

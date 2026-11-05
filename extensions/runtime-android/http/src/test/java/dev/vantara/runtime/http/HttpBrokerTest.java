@@ -219,4 +219,13 @@ public class HttpBrokerTest {
         } finally {try(java.util.stream.Stream<java.nio.file.Path> paths=java.nio.file.Files.walk(directory)){paths.sorted(Comparator.reverseOrder()).forEach(path->{try{java.nio.file.Files.deleteIfExists(path);}catch(IOException e){throw new java.io.UncheckedIOException(e);}});}}
     }
 
+    @Test public void hostProbeReadsOnlyPrefixOfLargeMediaWithoutRequiringFullDownload() throws Exception {
+        byte[] large=new byte[HttpBroker.MAX_RESPONSE_BYTES+4096];Arrays.fill(large,(byte)0x47);
+        first.enqueue(new MockResponse().setBody(new okio.Buffer().write(large)));
+        try(HttpBroker.Session session=broker.open(scope("prefix"))) {
+            HttpBroker.Output out=session.probePrefix(input(one+"/video.ts"),1024);
+            assertEquals(1024,out.body().length);
+        }
+    }
+
 }

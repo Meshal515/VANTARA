@@ -13,7 +13,7 @@
  */
 
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
-import { assertVisible, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
+import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
 /**
  * المحرك الأصلي يحمّل عند الإقلاع حزم المصادر الظاهرة لهذا الحساب فقط، فلا يُنزّل حساب جديد
@@ -187,6 +187,21 @@ export async function clearImageCache() {
 	return required().clearImageCache();
 }
 
+/** Account selection and verified APK storage are independent of runtime readiness. */
+function legacyInstallation(source, selected) {
+	const artifactPresent = source?.artifactPresent;
+	const known = typeof artifactPresent === 'boolean';
+	const installedVersion = source?.installedVersion;
+	return {
+		selected,
+		installed: selected && artifactPresent === true ? installedVersion ?? true : null,
+		pendingRestore: selected && artifactPresent !== true,
+		...(known ? { artifactPresent } : {}),
+		...(installedVersion != null ? { installedVersion } : {}),
+		installationEvidence: known ? 'confirmed' : 'unknown',
+	};
+}
+
 /**
  * مستودعات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi). داخل التطبيق وحده:
  * الإضافة كود DEX يعمل في الجهاز، والمتصفح لا يشغّله. `null` حيث لا تتوفر.
@@ -201,12 +216,16 @@ export function repositories() {
 		list: () => plugin.repos(),
 		add: (url) => plugin.addRepo({ url }),
 		remove: (url) => plugin.removeRepo({ url }),
-		extensions: async (url) => ((await plugin.repoIndex({ url })).extensions ?? []).map((ext) => {
-			if (!ext?.builtin) return ext;
-			formerlyBundled.add(ext.pkg);
-			const added = visible({ id: ext.pkg });
-			return { ...ext, builtin: false, formerlyBundled: true, installed: added ? ext.installed ?? ext.version : null, update: false };
-		}),
+		extensions: async (url) => {
+			const extensions = (await plugin.repoIndex({ url })).extensions ?? [];
+			const list = extensions.some(ext => ext?.builtin) ? (await plugin.sources()).sources ?? [] : [];
+			return extensions.map((ext) => {
+				if (!ext?.builtin) return ext;
+				formerlyBundled.add(ext.pkg);
+				const source = list.find(s => isBundled(s) && !s.filler && packageOf(s.id) === ext.pkg);
+				return { ...ext, builtin: false, formerlyBundled: true, ...legacyInstallation(source, visible({ id: ext.pkg })), update: false };
+			});
+		},
 		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
 		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
 	};
@@ -218,14 +237,18 @@ export function repositories() {
  * (lib/source-entitlement.js)، والمعرّف هو نفسه دائمًا، فلا تتكرر المصادر ولا تنقطع المكتبة.
  */
 /**
- * حزمة كانت مدمجة، بعد فصلها، تُثبَّت كأي إضافة فعلًا: تُضاف لحسابك ثم تُنزَّل موثّقة وتُحمَّل الآن
- * (يظهر شعارها ويُعرف فشلها فورًا). فشل التحميل يرجع الاختيار كما كان ويُعرض سببه.
+ * حزمة كانت مدمجة، بعد فصلها، تُنزَّل موثّقة وتُحمَّل أولًا ثم تُضاف لحسابك بمعرّفها القديم.
+ * فشل الاستعادة لا يغيّر اختيار الحساب السابق ولا يخفي مصادره أثناء انقطاع الشبكة.
  */
 async function installFormer(plugin, pkg) {
-	await choosePackage(pkg, true);
+	const context = choiceContext();
 	const id = ((await plugin.sources()).sources ?? []).map((s) => s.id).find((sid) => packageOf(sid) === pkg && !String(sid).includes('#'));
-	try { if (id) await plugin.prepare({ sourceId: id }); }
-	catch (error) { await choosePackage(pkg, false).catch(() => {}); throw error; }
+	assertChoiceContext(context);
+	if (!id) throw Object.assign(new Error('لم يعلن المحرك مصدرًا لهذه الإضافة؛ لم تُثبّت.'), { code: 'SOURCE_NOT_DECLARED' });
+	const prepared = await plugin.prepare({ sourceId: id });
+	assertChoiceContext(context);
+	if (prepared?.ok !== true) throw Object.assign(new Error('لم يؤكد المحرك تجهيز الإضافة؛ لم يتغير اختيار حسابك.'), { code: 'SOURCE_PREPARE_UNCONFIRMED' });
+	await choosePackage(pkg, true, context);
 }
 
 /** حذف حقيقي: من حسابك ومن الجهاز (نسختها المحفوظة)، فإعادة التثبيت تنزّلها من Keiyoushi. المكتبة والتقدم باقيان. */
@@ -244,23 +267,33 @@ export function readySources() {
 			if (!isBundled(source) || source.filler) continue;
 			const pkg = packageOf(source.id);
 			if (byPackage.has(pkg)) continue;
-			const added = visible(source);
 			byPackage.set(pkg, {
 				pkg, name: source.label ?? pkg, version: String(source.version ?? ''), lang: source.lang ?? 'ar',
 				arabic: String(source.lang ?? 'ar').toLowerCase() === 'ar', nsfw: false, anime: false,
-				installed: added ? String(source.version ?? true) : null, update: false, formerlyBundled: true,
+				...legacyInstallation(source, visible(source)), update: false, formerlyBundled: true,
 				sources: source.names ?? [source.label ?? pkg], ...(source.iconUrl ? { iconUrl: source.iconUrl } : {}),
 			});
 		}
 		return [...byPackage.values()];
 	};
 	return {
-		list: async () => ({
-			repos: [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }],
-			installed: (await items()).filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY })),
-		}),
-		add: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
-		remove: async () => { throw new Error('هذا المستودع جزء من التطبيق'); },
+		list: async () => {
+			const catalog = await items();
+			const installed = catalog.filter((x) => x.installed).map((x) => ({ ...x, repo: READY_REPOSITORY }));
+			const pending = catalog.filter((x) => x.pendingRestore).map((x) => ({ ...x, repo: READY_REPOSITORY }));
+			const state = typeof bridge()?.repos === 'function' ? await required().repos() : {};
+			return {
+				repos: !state.readyCatalogDismissed && catalog.some(x => x.selected || x.installed || x.pendingRestore) ? [{ url: READY_REPOSITORY, name: 'مصادر جاهزة' }] : [],
+				installed, pending,
+			};
+		},
+		// This is a legacy catalogue, never an importer for external repository URLs.
+		remove: async (url) => {
+			if (url !== READY_REPOSITORY) throw new Error('معرّف القائمة غير صالح');
+			const plugin = required();
+			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث نسخة Debug لإزالة هذه القائمة');
+			await plugin.removeReadySources();
+		},
 		extensions: () => items(),
 		// مثل مستودعها الأصلي: التثبيت يُنزّل ويحمّل فعلًا، والحذف يمحو نسختها من الجهاز
 		install: (_repo, pkg) => installFormer(required(), pkg),

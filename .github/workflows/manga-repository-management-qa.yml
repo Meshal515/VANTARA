@@ -1,0 +1,47 @@
+name: Debug optional manga repository management (no publish)
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-video-hardening-20261101]
+    paths:
+      - '.github/workflows/manga-repository-management-qa.yml'
+      - 'android/app/src/main/kotlin/com/vantara/plugins/UserExtensions.kt'
+      - 'android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt'
+      - 'android/app/src/androidTest/java/com/vantara/plugins/OptionalMangaRepositoriesDeviceTest.kt'
+permissions:
+  contents: read
+jobs:
+  actual-owner-repositories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      - run: sudo chmod 666 /dev/kvm
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          disable-animations: true
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          script: bash tools/repository-compat/run_optional_manga_repositories.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optional-manga-repositories-real-evidence
+          path: optional-manga-*.txt

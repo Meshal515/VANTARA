@@ -1,7 +1,7 @@
 name: VANTARA Runtime isolated Android execution (authored and pinned CS3 DEX)
 on:
   push:
-    branches: [feat/repository-compat-runtime-20261028, feat/runtime-debug-integration-20261028]
+    branches: [feat/repository-compat-runtime-20261028, feat/runtime-debug-integration-20261028, codex/vantara-video-repo-debug-20261101]
     paths:
       - 'extensions/runtime-android/**'
       - '.github/workflows/runtime-android.yml'
@@ -34,8 +34,10 @@ jobs:
       - name: Real TLS HTTP, disk session recovery and original CloudStream contract tests
         run: bash android/gradlew -p extensions/runtime-android :http:test :cloudstream:testDebugUnitTest :executor:testDebugUnitTest --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
+        continue-on-error: true # optional evidence upload only
         if: always()
         with:
+          retention-days: 1
           name: http-and-cloudstream-contracts-NOT-live-source-success
           path: |
             extensions/runtime-android/http/build/test-results/
@@ -94,8 +96,10 @@ jobs:
         if: always()
         run: test -f runtime-lab-logcat.txt || timeout 5s adb logcat -d VantaraRuntimeAbi:V AndroidRuntime:E ActivityManager:I TestRunner:I '*:S' > runtime-lab-logcat.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
+        continue-on-error: true # optional evidence upload only
         if: always()
         with:
+          retention-days: 1
           name: runtime-lab-api-${{ matrix.api }}-${{ matrix.profile }}-NOT-live-source-health
           path: |
             extensions/runtime-android/harness/build/outputs/androidTest-results/

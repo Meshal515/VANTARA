@@ -1,3 +1,6 @@
+import { episodeCount, episodePage, normalizeEpisodeRange, resumeEpisode } from './anime-episodes.js';
+import { createEpisodeControls } from './anime-episode-controls.js';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
@@ -26,14 +29,18 @@ import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
 import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
-import { isValid, validity } from '../lib/route-validity.js';
+import { isChecking, isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
-import { bindLookExtras, heroPlan, lookMotion, renderLook } from './work-looks.js';
+import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
+import { beginDiscovery, discoveryDiagnostics } from '../lib/discovery-diagnostics.js';
+
+const isMovie = m => m?.format === 'MOVIE';
+const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
 
@@ -86,7 +93,7 @@ export function readWatch(userId = null) {
 export function recordWatch(m, episode, position, duration, userId = null) {
   const all = readWatch(userId);
   const w = all[m.id] ?? { id: m.id, episodes: {} };
-  Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null });
+  Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null, format: m.format ?? null });
   const done = duration > 0 && position / duration >= 0.9;
   w.episodes[episode] = { position, duration, at: Date.now(), done: done || Boolean(w.episodes[episode]?.done) };
   w.episode = episode;
@@ -114,14 +121,19 @@ export function createAnime(deps) {
     home: null,
     loading: null,
     detail: null,
+    detailLoad: null,
     detailToken: 0,
     view: null,
     hideSeen: false,
     epQuery: '',
-    episodeRange: 0,
+    episodeRange: null,
     work: null,
     workFor: null,
+    workScope: null,
+    workTrace: null,
     workPending: null,
+    workGeneration: 0,
+    workController: null,
     workError: false,
     playing: null,
     newestFirst: false,
@@ -138,7 +150,8 @@ export function createAnime(deps) {
     img.alt = '';
     img.className = cls;
     img.decoding = 'async';
-    if (!eager) img.loading = 'lazy';
+    img.loading = eager ? 'eager' : 'lazy';
+    if (eager) img.fetchPriority = 'high';
     if (position) img.style.objectPosition = position;
     img.onload = () => img.classList.add('loaded');
     // بدائل بالترتيب (أصلية 1920 ← 780 ← TVDB ← الغلاف): كل واحد مرة، لا إطار فارغ
@@ -241,7 +254,7 @@ export function createAnime(deps) {
       meta.append(sc);
     }
     // سطر قصير يتسع للبطاقة: مع التقييم شيء واحد بعده (الحلقة لما يُعرض، أو السنة)
-    const airing = m.status === 'RELEASING' && m.aired ? `ح ${m.aired}` : null;
+    const airing = !isMovie(m) && m.status === 'RELEASING' && m.aired ? `ح ${m.aired}` : null;
     const rest = (m.relation ? [m.relation] : m.score ? [airing ?? m.year] : [airing ?? FORMAT_AR[m.format], m.year]).filter(Boolean);
     for (const t of rest) {
       if (meta.childElementCount) meta.append(el('i', 'aw-sep', '·'));
@@ -276,7 +289,7 @@ export function createAnime(deps) {
   function episodeCard(m) {
     const c = el('button', 'an-ep-card');
     c.type = 'button';
-    c.setAttribute('aria-label', `${m.title} — الحلقة ${m.episode}`);
+    c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
     tint(c, m.color);
     const art = el('div', 'an-ep-art');
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }), el('span', 'an-ep-shade'));
@@ -284,7 +297,8 @@ export function createAnime(deps) {
     play.innerHTML = glyph('play', { size: 18, filled: true });
     // رقم الحلقة كبيرًا كشاشة بثّ، و«جديدة» لما نزل خلال يومين
     const num = el('span', 'an-ep-num');
-    num.append(el('small', null, 'الحلقة'), el('b', null, String(m.episode)));
+    num.append(el('small', null, isMovie(m) ? 'الفيلم' : 'الحلقة'));
+    if (!isMovie(m)) num.append(el('b', null, String(m.episode)));
     art.append(play, num);
     const copy = el('span', 'an-ep-copy');
     const t = el('span', 'an-ep-title', m.title);
@@ -330,12 +344,12 @@ export function createAnime(deps) {
     const aired = m.airingAt <= now;
     const c = el('button', `an-slot${aired ? ' aired' : ''}`);
     c.type = 'button';
-    c.setAttribute('aria-label', `${m.title} — الحلقة ${m.episode}`);
+    c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
     tint(c, m.color);
     const art = el('span', 'an-slot-art');
     art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }));
     const line = el('span', 'an-slot-line');
-    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, `الحلقة ${m.episode}`));
+    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, unitLabel(m, m.episode)));
     const t = el('span', 'an-slot-title', m.title);
     t.dir = 'auto';
     const when = el('span', 'an-slot-when', aired ? `نزلت ${relativeAr(m.airingAt)}` : relativeAr(m.airingAt));
@@ -408,6 +422,7 @@ export function createAnime(deps) {
       entries.set(String(id), {
         id, episode, at: row.viewed_at, title: row.series_title ?? old?.title ?? `#${id}`,
         poster: row.cover_url ?? old?.poster ?? null, episodes: old?.episodes ?? {},
+        format: row.chapter_label === 'الفيلم' ? 'MOVIE' : old?.format ?? null,
       });
     }
     return [...entries.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
@@ -542,20 +557,29 @@ export function createAnime(deps) {
   const artOf = (m) => (state.art?.id === m?.id ? state.art : null);
   const SOURCE_AR = { ORIGINAL: 'عمل أصلي', MANGA: 'مانجا', LIGHT_NOVEL: 'رواية خفيفة', WEB_NOVEL: 'رواية ويب', NOVEL: 'رواية', VIDEO_GAME: 'لعبة فيديو', VISUAL_NOVEL: 'رواية مرئية', MANHWA: 'مانهوا', ONE_SHOT: 'قصة قصيرة', OTHER: 'أخرى' };
 
-  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false } = {}) {
     const token = ++state.detailToken;
-    state.episodeRange = 0;
-    state.epQuery = '';
+    state.detailLoad = null;
+    state.episodeRange = null;
+    if (!preserveEpisodeControls) state.epQuery = '';
     state.detail = m;
     state.malTitles = {};
     if (state.art?.id !== m.id) state.art = null;
+    // Start independent network work before synchronous DOM construction.
+    const artworkLoading = loadAnimeArt(m.id);
+    let detailLoading;
+    try {
+      detailLoading = Promise.resolve(m._sourceCopy ? m : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
+    } catch (error) { detailLoading = Promise.reject(error); }
+    // The original promise remains rejected for the guarded UI handler below.
+    void detailLoading.catch(() => {});
     deps.showPage('anime');
     buildWork(m, token);
     // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
     window.scrollTo?.({ top: 0, behavior: 'instant' });
     // لقطات الحلقات والشعار وخلفية IMDb من ani.zip: المخبّأ يصل في لحظة، والبطل
     // ينتظره قليلًا فيُختار مرة واحدة (لا بانر يتبدّل بعد ثانية بخلفية أخرى)
-    const artReady = loadAnimeArt(m.id).then((art) => {
+    void artworkLoading.then((art) => {
       if (token !== state.detailToken) return null;
       // «الحلقة أولًا» ينتظر هذه اللحظة قبل أي صورة غير لقطة الحلقة (لا خلفية تسبق اللقطة)
       if (state.view?.id === m.id) state.view.artDone = true;
@@ -580,18 +604,9 @@ export function createAnime(deps) {
       paintHero(state.detail);
       return art;
     });
-    // خلفية ظهرت لهذا العمل من قبل: تُرسم الآن (غالبًا من كاش الصور) بلا انتظار الفن
-    if (heroMemory.get(m.id) && state.view?.id === m.id) {
-      state.view.artSettled = true;
-      paintHero(state.detail ?? m);
-    }
-    // البطل لا يُرسم قبل أن يستقر ربط IMDb (أو تمضي المهلة): رسمه مبكرًا كان يثبّت
-    // بانر AniList قبل وصول الخلفية الدعائية فلا تُستبدل بعده
-    void Promise.race([artReady, new Promise((r) => setTimeout(r, 1200))]).then(() => {
-      if (token !== state.detailToken) return;
-      if (state.view?.id === m.id) state.view.artSettled = true;
-      paintHero(state.detail);
-    });
+    // Available artwork starts immediately; independent metadata may upgrade it after decode.
+    if (state.view?.id === m.id) state.view.artSettled = true;
+    paintHero(state.detail ?? m);
     // لمسة أو عجلة أثناء التحميل = المستخدم يتصفّح؛ لا نعيده للأعلى بعدها
     let userScrolled = false;
     const touched = () => (userScrolled = true);
@@ -599,10 +614,12 @@ export function createAnime(deps) {
     for (const ev of INPUT) window.addEventListener?.(ev, touched, { once: true, passive: true });
     const untouch = () => { for (const ev of INPUT) window.removeEventListener?.(ev, touched); };
     try {
-      const full = String(m.id).startsWith('addon-') ? await deps.restoreSourceWork(`anime:${m.id}`, m) : m._sourceCopy ? m : await fetchAnimeDetail(m.id);
+      const loading = detailLoading;
+      state.detailLoad = { id: m.id, token, promise: loading };
+      const full = await loading;
       if (token !== state.detailToken || !full) return;
       state.detail = full;
-      if (full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
+      if (!isMovie(full) && full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
       if (episode) state.episodeRange = Math.floor((episode - 1) / EP_PAGE);
       fillWork(full);
       void locateWork(full, token);
@@ -635,12 +652,8 @@ export function createAnime(deps) {
 
   /** من أين يكمل زر المشاهدة: الحلقة غير المكتملة الأخيرة، أو التالية لآخر مكتملة. */
   function resumePoint(m) {
-    const w = localWatch()[m.id];
-    if (!w?.episode) return { episode: 1, resume: false };
-    const e = w.episodes?.[w.episode];
-    if (e && !e.done) return { episode: w.episode, resume: true, record: e };
-    const total = m.aired || m.episodes || w.episode + 1;
-    return { episode: Math.min(total, w.episode + 1), resume: true };
+    const watch = localWatch()[m.id];
+    return resumeEpisode({ m, watch, isSeen: signedIn() ? n => account.isSeen(m.id,n) : n => Boolean(watch?.episodes?.[n]?.done) });
   }
 
   /** موعد بتوقيت مكة بصيغة 12 ساعة: «السبت 6:30 م». */
@@ -704,14 +717,15 @@ export function createAnime(deps) {
     const eps = el('section', 'aw-episodes');
     eps.id = 'animeEpisodes';
     const more = el('div', 'aw-below');
-    body.append(about, insightHost, eps, more);
+    sources.hidden = true;
+    body.append(about, insightHost, eps, more, sources);
     // الأنماط الأربعة: كل ما تحت البطل يرسمه work-looks.js كما في تصميمه المعتمد؛ عناصر الأساسي
     // تبقى مخفية لأن بقية الصفحة (الحلقات، التشغيل، التحديثات) تعمل عليها
     const lw = look === 'core' ? null : el('div', 'wl');
     if (lw) {
       stage.hidden = true;
       body.hidden = true;
-      wrap.append(bar, hero, lw, stage, body);
+      wrap.append(bar, hero, lw, sources, stage, body);
     } else {
       // «المحور»: الرأس والجسم في حاوية واحدة؛ على الشاشة العريضة شبكة تضع اللقطة والمعلومات
       // جنبًا إلى جنب (anime.css). على الجوال حاوية عادية لا تغيّر شيئًا
@@ -725,11 +739,11 @@ export function createAnime(deps) {
     paintMeta(m);
     paintCta(m);
     paintTools(m);
-    paintSources(m);
     paintAbout(m, { pending: !m.description });
     eps.append(...Array.from({ length: 3 }, () => el('div', 'an-skel an-skel-ep')));
     paintSide(m);
     page.replaceChildren(wrap);
+    paintSources(m);
     paintLogo(m);
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
     const live = () => deps.currentPage() === 'anime' && state.detailToken === token;
@@ -762,6 +776,8 @@ export function createAnime(deps) {
     state.view.unbind = () => {
       unHero?.();
       unLook();
+      state.view?.episodeControls?.destroy();
+      state.view?.unbindEpisodeRails?.();
     };
   }
 
@@ -780,7 +796,7 @@ export function createAnime(deps) {
     paintTools(m);
     paintAbout(m);
     renderEpisodes(v.eps, m);
-    paintBelow(m);
+    if (!v.lw) paintBelow(m);
     paintHero(m);
     paintLogo(m);
     if (!String(m.id).startsWith('addon-')) void paintWorkInsights(v.insightHost, { sync: deps.sync, ref: `anime:${m.id}`, openProfile: deps.openProfile });
@@ -816,100 +832,177 @@ export function createAnime(deps) {
 
   function paintHero(m) {
     const v = state.view;
-    if (!v || v.id !== m?.id || !v.artSettled) return;
-    const imdb = artOf(m)?.imdb;
-    const wide = globalThis.matchMedia?.('(min-width: 900px)').matches === true;
-    // الحلقة أولًا: البطل لقطة الحلقة التي ستكملها كما هي، بلا أي ضباب ولا غلاف مضبّب بديلًا عنها
-    // (heroPlan في work-looks.js). بلا لقطة بعد اكتمال الفن: خلفية العمل الواضحة إن وُجدت، وإلا لون العمل
+    if (!v || v.id !== m?.id) return;
     const plan = heroPlan(v.look);
+    const current = () => state.detail?.id === v.id ? state.detail : m;
+    const targetOf = (work) => plan.episodeStill ? `episode:${resumePoint(work).episode}` : 'work';
+    const target = targetOf(m);
+    let load = v.heroLoad;
+    if (!load) {
+      load = v.heroLoad = { target, active: new Map(), tried: new Set(), shown: null, attempts: 0 };
+      const previousUnbind = v.unbind;
+      v.unbind = () => {
+        load.disposed = true;
+        for (const task of [...load.active.values()]) task.cancel();
+        previousUnbind?.();
+      };
+    }
+    if (load.disposed) return;
+    if (load.target !== target) {
+      for (const task of [...load.active.values()]) task.cancel();
+      load.target = target;
+      load.tried.clear();
+      load.attempts = 0;
+      // The former episode remains visible until this target has decoded artwork.
+    }
+    const art = artOf(m);
+    const imdb = art?.imdb;
     const ep = resumePoint(m).episode;
-    const firstShot = plan.episodeStill ? episodeStill(m, ep, artOf(m), { full: true }) : null;
+    const shot = plan.episodeStill ? episodeStill(m, ep, art, { full: true }) : null;
     const known = plan.episodeStill ? null : heroMemory.get(m.id);
-    // كل لقطات الحلقة بالترتيب (1920 ← 780 ← TVDB ← المنصات): رابط محجوب أو معطوب ينتقل للتالي.
-    // اللقطة الظاهرة لا تُستبدل بلقطة أخرى (قد تكون إطارًا مختلفًا من الحلقة: تبديل مرئي)
-    const shots = firstShot?.still ? [firstShot.src, ...(firstShot.fallbacks ?? [])] : [];
-    // لا خلفية ولا غلاف قبل أن يُعرف هل للحلقة لقطة: كانت تسبقها ثم تتسابق معها
-    if (plan.episodeStill && !shots.length && !v.artDone) return;
-    const list = [
-      ...shots.map((src, i) => ({ src, rank: -2 + i * 0.01 })),
-      known ? { src: known, rank: -1 } : null,
-      // large مباشرة (البطل يقصّ الصورة ويكبّرها على الجوال فتُخسف medium ‏1280)، صورةً واحدة
-      // بلا تبديل لاحق — large في metahub قد تكون لقطة غير medium؛ medium إن تعذّرت
-      /^tt\d+$/.test(imdb ?? '') ? { src: `https://images.metahub.space/background/large/${imdb}/img`, rank: 0 } : null,
-      /^tt\d+$/.test(imdb ?? '') ? { src: `https://images.metahub.space/background/medium/${imdb}/img`, rank: 0.1 } : null,
-      v.seriesBg ? { src: v.seriesBg, rank: 0.3 } : null,
-      artOf(m)?.fanart ? { src: artOf(m).fanart, rank: 0.5 } : null,
-      m.banner && wide ? { src: m.banner, rank: 1 } : null,
-      plan.posterFallback && (m.poster ?? m.posterSmall) ? { src: m.poster ?? m.posterSmall, rank: 2 } : null,
-    ].filter((c) => c && !v.heroTried.has(c.src));
-    const pick = list[0];
-    if (!pick || pick.rank >= v.heroRank) return;
-    // صورة ظاهرة عريضة لا تُستبدل؛ الغلاف الطولي وحده يُرقّى. في «الحلقة أولًا» لقطة الحلقة تحل محل
-    // خلفية العمل إن سبقتها (عمل بلا لقطة عند اكتمال الفن ثم وصلت لقطته مع التفاصيل)
-    if (v.heroShown && v.heroShownRank < 2 && !(plan.episodeStill && pick.rank < -1.5 && v.heroShownRank > -1.5)) return;
-    // في الطريق صورة أفضل: الحالية تبقى حتى تحل محلها بتلاشٍ، لا فراغ بينهما
-    v.heroRank = pick.rank;
-    v.heroTried.add(pick.src);
-    const img = new Image();
-    img.alt = '';
-    img.className = `aw-bg-img${pick.rank === 2 ? ' aw-bg-img--poster' : ''}`;
-    img.decoding = 'async';
-    const show = () => {
-      if (state.view !== v) return;
-      // صورة اختيرت قبل الأفضل ووصلت بعده (الغلاف بعد لقطة الحلقة): تُهمل، لا تغطي الأفضل.
-      // هذا سبب تغبيش «الحلقة أولًا»: اللقطة تظهر واضحة ثم يحل فوقها الغلاف المضبّب حين يكتمل تحميله
-      if (v.heroShown && pick.rank > v.heroShownRank) return;
-      v.bg.append(img);
-      // نسخة مضبّبة ثابتة خلف البنر: حين ينطوي بالعمق تملأ الأطراف بألوانه هو لا بفراغ
-      if (plan.ambient) {
-        v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
-        // تظهر تدريجيًا مع الصورة لا دفعة واحدة
-        requestAnimationFrame(() => v.hero.classList.add('amb'));
-      }
-      v.heroShown = true;
-      v.heroShownRank = pick.rank;
-      // المشغّل يعرض الخلفية نفسها في شاشة التحميل (لا الغلاف الطولي)
-      v.heroSrc = pick.rank < 2 ? pick.src : null;
-      if (pick.rank < 1 && pick.rank > -1.5) heroMemory.set(m.id, pick.src);
-      // ارتفاع البطل من شكل صورته نفسها (لا قص)، بين حدين في CSS
-      if (pick.rank < 2 && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
-      requestAnimationFrame(() => {
-        img.classList.add('in');
-        // ما تحتها يُزال بعد أن تغطيه
-        setTimeout(() => { for (const old of [...v.bg.querySelectorAll('.aw-bg-img')]) if (old !== img) old.remove(); }, 600);
-      });
+    const candidates = [];
+    const add = (src, rank, kind, immediate = false) => {
+      if (src && !candidates.some(c => c.src === src)) candidates.push({ src, rank, kind, immediate });
     };
-    img.onload = () => (img.decode ? img.decode().catch(() => {}).then(show) : show());
-    img.onerror = () => {
-      if (pick.rank === -1) heroMemory.set(m.id, null);
-      if (state.view !== v) return;
-      v.heroRank = Infinity;
-      if (v.heroShown) return;
-      // للعمل IMDb بلا خلفية (فيلم جديد مثلًا): خلفية السلسلة الأم قبل الغلاف
-      if (pick.rank === 0.1 && !v.seriesTried) {
-        v.seriesTried = true;
-        void seriesBackdrop(state.detail ?? m).then((src) => {
-          if (state.view !== v) return;
-          if (src) v.seriesBg = src;
-          paintHero(state.detail);
+    // Ranks describe the source itself; a newly arrived HD map must improve the
+    // same episode even when its earlier TVDB frame was already displayed.
+    if (shot?.still) {
+      for (const src of [shot.src, ...(shot.fallbacks ?? [])]) {
+        const rank = src === art?.hd?.[String(ep)]?.src ? -4
+          : src === art?.hd?.[String(ep)]?.mid ? -3.8
+            : src === m.thumbs?.[ep]?.thumbnail ? -3 : -2.8;
+        add(src, rank, 'still');
+      }
+    }
+    if (/^tt\d+$/.test(imdb ?? '')) {
+      add(`https://images.metahub.space/background/large/${imdb}/img`, 0, 'backdrop');
+      add(`https://images.metahub.space/background/medium/${imdb}/img`, 0.1, 'backdrop');
+    }
+    add(v.seriesBg, 0.3, 'backdrop');
+    add(art?.fanart, 0.5, 'backdrop', true);
+    // Remembered art is an immediate candidate, not an immutable quality lock.
+    const knownRank = known?.includes('/background/large/') ? 0 : known?.includes('/background/medium/') ? 0.1 : 0.6;
+    add(known, knownRank, 'backdrop', true);
+    // A clear banner can appear on every viewport while preferred art is loading.
+    add(m.banner, 1, 'backdrop', true);
+    if (plan.posterFallback) add(m.poster ?? m.posterSmall, 2, 'poster', true);
+    candidates.sort((a, b) => a.rank - b.rank);
+    const shownRank = load.shown?.target === target ? load.shown.rank : Infinity;
+    const usable = c => c.rank < shownRank && !load.tried.has(c.src);
+    const alive = () => state.view === v && v.heroLoad === load && !load.disposed && load.target === target && targetOf(current()) === target;
+    const refresh = () => { if (state.view === v && !load.disposed) paintHero(current()); };
+
+    const start = (pick) => {
+      if (!pick || load.active.size >= 2 || load.attempts >= 8) return;
+      load.tried.add(pick.src);
+      load.attempts++;
+      const img = new Image();
+      img.alt = '';
+      img.className = `aw-bg-img${pick.kind === 'poster' ? ' aw-bg-img--poster' : ''}`;
+      img.decoding = 'async';
+      img.fetchPriority = pick.rank === candidates[0]?.rank ? 'high' : 'auto';
+      const task = { ...pick, img, done: false, timer: null, cancel: null };
+      const finish = (cancel = false) => {
+        if (task.done) return false;
+        task.done = true;
+        clearTimeout(task.timer);
+        if (load.active.get(pick.src) === task) load.active.delete(pick.src);
+        img.onload = img.onerror = null;
+        if (cancel) img.removeAttribute('src');
+        return true;
+      };
+      task.cancel = () => finish(true);
+      load.active.set(pick.src, task);
+      const fail = () => {
+        if (!finish(true)) return;
+        if (pick.src === known) heroMemory.set(m.id, null);
+        if (!alive()) return refresh();
+        // Parent artwork is optional and must never delay visible fallback art.
+        if (pick.src.includes('/background/medium/') && !v.seriesTried) {
+          v.seriesTried = true;
+          void seriesBackdrop(current()).then(src => {
+            if (state.view !== v || load.disposed) return;
+            if (src) v.seriesBg = src;
+            refresh();
+          });
+        }
+        refresh();
+      };
+      const show = () => {
+        if (task.done) return;
+        if (!alive()) { finish(true); refresh(); return; }
+        const old = load.shown;
+        if (old?.target === target && old.rank <= pick.rank) { finish(true); return; }
+        finish();
+        v.bg.append(img);
+        load.shown = { ...pick, img, target };
+        v.heroRank = v.heroShownRank = pick.rank;
+        v.heroShown = true;
+        v.heroSrc = pick.kind === 'poster' ? null : pick.src;
+        if (plan.ambient) {
+          v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
+          requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
+        }
+        if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
+        if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+        // An earlier transition's delayed cleanup must never remove a newer image.
+        requestAnimationFrame(() => {
+          if (state.view !== v || load.shown?.img !== img) return;
+          img.classList.add('in');
+          setTimeout(() => {
+            if (state.view !== v || load.shown?.img !== img) return;
+            for (const oldImg of [...v.bg.querySelectorAll('.aw-bg-img')]) if (oldImg !== img) oldImg.remove();
+          }, 600);
         });
-        return;
-      }
-      paintHero(state.detail);
+        if (v.lw) paintLook(current());
+        for (const pending of [...load.active.values()]) if (pending.rank >= pick.rank) pending.cancel();
+        refresh();
+      };
+      img.onload = () => {
+        // Deadline includes decoding; browsers/doubles which never settle cannot
+        // occupy a slot forever. A successful load tolerates decode() rejection.
+        void Promise.resolve().then(() => img.decode?.()).catch(() => {}).then(show);
+      };
+      img.onerror = fail;
+      task.timer = setTimeout(fail, 6000);
+      img.src = pick.src;
     };
-    img.src = pick.src;
+
+    // At most one preferred source and one immediately available fallback compete.
+    // Newly arrived better metadata can replace a worse pending request in a full queue.
+    const best = candidates.find(c => c.rank < shownRank && (!load.tried.has(c.src) || load.active.has(c.src)));
+    if (best && load.active.size >= 2 && !load.active.has(best.src)) {
+      const worst = [...load.active.values()].sort((a, b) => b.rank - a.rank)[0];
+      if (best.rank < worst.rank) {
+        worst.cancel();
+        // Preemption is not failure: keep this fallback eligible if preferred art fails.
+        load.tried.delete(worst.src);
+      }
+    }
+    if (best && !load.active.has(best.src)) start(best);
+    if (!load.shown || load.shown.target !== target) {
+      const fallback = candidates.find(c => c.immediate && usable(c) && !load.active.has(c.src));
+      if (fallback) start(fallback);
+    }
   }
 
-  /** خلفية metahub لأقرب عمل أم/جزء سابق/نسخة أخرى له IMDb غير IMDb العمل (مهلة قصيرة). */
   async function seriesBackdrop(m) {
     const own = artOf(m)?.imdb;
     const order = [RELATION_AR.PARENT, RELATION_AR.PREQUEL, RELATION_AR.ALTERNATIVE];
-    const ups = order.flatMap((label) => (m?.relations ?? []).filter((r) => r.relation === label));
-    for (const r of ups) {
-      const art = await Promise.race([loadAnimeArt(r.id), new Promise((res) => setTimeout(() => res(null), 1500))]);
-      if (/^tt\d+$/.test(art?.imdb ?? '') && art.imdb !== own) return `https://images.metahub.space/background/medium/${art.imdb}/img`;
-    }
-    return null;
+    const seen = new Set();
+    const ups = order.flatMap(label => (m?.relations ?? []).filter(r => r.relation === label))
+      .filter(r => !seen.has(r.id) && seen.add(r.id)).slice(0, 3);
+    const found = await Promise.all(ups.map(async r => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1500);
+      try {
+        const art = await loadAnimeArt(r.id, { signal: ctrl.signal, timeoutMs: 1500 });
+        return /^tt\d+$/.test(art?.imdb ?? '') && art.imdb !== own
+          ? `https://images.metahub.space/background/medium/${art.imdb}/img` : null;
+      } catch { return null; }
+      finally { clearTimeout(timer); ctrl.abort(); }
+    }));
+    return found.find(Boolean) ?? null;
   }
 
   /** شعار العنوان (IMDb ← metahub) في صندوقه المحجوز، ونسخة صغيرة للترويسة. */
@@ -943,7 +1036,7 @@ export function createAnime(deps) {
   function paintCover(m) {
     const v = state.view;
     const src = m?.poster ?? m?.posterSmall ?? null;
-    if (!v || v.id !== m?.id) return;
+    if (!v || v.id !== m?.id || v.lw) return;
     v.wrap.classList.toggle('no-cover', !src);
     if (!src || v.cover.dataset.src === src) return;
     v.cover.dataset.src = src;
@@ -961,7 +1054,7 @@ export function createAnime(deps) {
   function paintSide(m) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
-    if (v.lw) paintLook(m);
+    if (v.lw) return paintLook(m);
     const next = nextAiring(m);
     v.side.replaceChildren();
     if (next) {
@@ -980,6 +1073,10 @@ export function createAnime(deps) {
     // الصورة الظاهرة تبقى بين إعادات الرسم (وصول الفن ثم الدقة الأعلى): تُستبدل بعد تحميل البديل
     // لا تُعاد من الصفر، فلا تختفي وتعود
     const prev = v.still.querySelector(':scope > .an-img');
+    // The play button is a persistent control: detail/artwork refreshes update
+    // the image and label without destroying a pressed/focused button.
+    const previousCap = v.still.querySelector(':scope > .aw-still-cap');
+    const previousPlay = previousCap?.querySelector('.aw-still-play');
     v.still.replaceChildren();
     if (shot?.src) {
       const opts = { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] };
@@ -993,10 +1090,16 @@ export function createAnime(deps) {
         v.still.classList.toggle('aw-still--cover', !shot.still);
       }
     }
-    const label = `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
-    const play = button('aw-still-play', glyph('play', { size: 22, filled: true }), () => playEpisode(m, point.episode), label);
-    const cap = el('span', 'aw-still-cap');
-    cap.append(play, el('b', null, label));
+    const label = `${point.replay ? 'أعد مشاهدة' : point.resume ? 'تابع' : 'شاهد'} ${unitLabel(m, point.episode)}`;
+    // Never infer the episode from sequential watched counts: resume the last
+    // started episode (even when 1–9 were skipped and the user started 10).
+    const play = previousPlay ?? button('aw-still-play', glyph('play', { size: 22, filled: true }), () => {
+      const current = state.detail?.id === m.id ? state.detail : m;
+      playEpisode(current, resumePoint(current).episode);
+    }, label);
+    play.setAttribute('aria-label', label);
+    const cap = previousCap ?? el('span', 'aw-still-cap');
+    cap.replaceChildren(play, el('b', null, label));
     if (title && typeof title === 'string') {
       const t = el('span', 'aw-still-title', title);
       t.dir = 'auto';
@@ -1060,7 +1163,8 @@ export function createAnime(deps) {
     const art = artOf(m);
     const point = resumePoint(m);
     const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
-    const total = aired || m.episodes || point.episode;
+    const total = episodeCount(m);
+    const page = pageFor(m);
     const rec = epRecord(m, point.episode);
     const ratio = !rec.done && rec.duration > 0 ? Math.min(1, rec.position / rec.duration) : null;
     const left = ratio != null ? Math.max(1, Math.round((rec.duration - rec.position) / 60_000)) : null;
@@ -1083,7 +1187,7 @@ export function createAnime(deps) {
         FORMAT_AR[m.format],
         m.season && m.year ? `${SEASON_AR[m.season]} ${m.year}` : m.year,
         m.score ? { html: `★ <b>${m.score.toFixed(1)}</b>` } : null,
-        m.episodes ? `${m.episodes} حلقة` : null,
+        isMovie(m) ? (m.duration ? `${m.duration} دقيقة` : null) : m.episodes ? `${m.episodes} حلقة` : null,
         STATUS_AR[m.status],
       ].filter(Boolean),
       genres: (m.genres ?? []).slice(0, 4).map(genreAr),
@@ -1098,18 +1202,20 @@ export function createAnime(deps) {
       ratio,
       left,
       seenRatio: total ? Math.min(1, seen / total) : 0,
-      progressText: `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
+      progressText: isMovie(m) ? (seen ? 'شاهدت الفيلم' : point.record?.position ? 'تقدّم المشاهدة' : 'لم يُشاهد بعد') : `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
       lineDone: Math.min(100, ((Math.min(seen, shown) + 0.5) / shown) * 100).toFixed(1),
       characters: m.characters ?? [],
       // عدد التوصيات الظاهر في كل نمط كما في تصميمه (الجوال / العريض)؛ الباقي خلف «الكل»
       heroSrc: v.heroSrc ?? null,
-      rangeAt: v.lwRange ?? null,
+      rangeAt: page.pageIndex,
+      episodePage: page,
+      episodeControls: !isMovie(m),
       epTitle: (n) => {
         const t = episodeTitleOf(m, n, { mal: state.malTitles, art });
         return typeof t === 'string' ? t : null;
       },
       epOverview: (n) => art?.episodes?.[String(n)]?.overview ?? null,
-      still: (n, full = false) => episodeStill(m, n, art, { full }),
+      still: (n, full = false) => episodeStill(m, n, art, { full, width: full ? null : v.look === 'episode' ? Math.max(200, ((globalThis.innerWidth || 390) - (globalThis.innerWidth >= 900 ? 638 : 42)) / 2) : 250, dpr: globalThis.devicePixelRatio || 1 }),
       seen: (n) => epRecord(m, n).done,
       minutes,
       play: (n) => (upcoming ? soonToast(m) : playEpisode(m, n)),
@@ -1120,19 +1226,26 @@ export function createAnime(deps) {
       },
       openManga: (title) => deps.openMangaTitle?.(title),
       onRange: (i) => {
-        v.lwRange = i;
+        state.episodeRange = i;
         v.lwCenter = true;
         paintLook(m);
       },
     };
     // لا رسم من جديد إن لم يتغيّر ما يُعرض (وصول نفس البيانات، أو تقدّم لم يتغيّر)
-    const sig = JSON.stringify([v.look, point, total, ratio, seen, label, next?.episode, next?.rel, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, v.lwRange, m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, state.malTitles ? Object.keys(state.malTitles).length : 0]);
+    const sig = JSON.stringify([m.title,m.poster,m.posterSmall,m.banner,m.format,m.status,m.episodes,m.duration,m.genres,m.season,m.year,m.score,facts,page.numbers.map(n=>ctx.epTitle(n)),v.look, point, total, ratio, seen, label, next?.episode, next?.rel, art ? Object.keys(art.episodes ?? {}).length : 0, art?.logo, art?.hd ? Object.keys(art.hd).length : 0, v.heroSrc, page.numbers, state.epQuery, state.hideSeen, state.newestFirst, page.pageIndex, page.numbers.map(n => epRecord(m,n).done), m.description?.length, m.characters?.length, m.recommendations?.length, m.world?.length ?? m.relations?.length, state.malTitles ? Object.keys(state.malTitles).length : 0]);
     if (sig === v.lwSig) return;
     v.lwSig = sig;
     renderLook(v.look, v.lw, ctx, { center: v.lwCenter !== false });
     v.lwCenter = false;
+    if (!isMovie(m)) {
+      const controls = controlsFor(m, page);
+      const controlsSlot = v.lw.querySelector('[data-slot="episode-controls"]');
+      if (controlsSlot && controls.root.parentElement !== controlsSlot) controlsSlot.append(controls.root);
+      paintEpisodeHead(m);
+    }
     // نشاط الأصدقاء وتقدّمهم (work-insights) عنصر واحد يُرسم مرة؛ كل نمط يحجز له موضعًا ويُنقل إليه
-    v.lw.querySelector('[data-slot="insights"]')?.append(v.insightHost);
+    const insightsSlot = v.lw.querySelector('[data-slot="insights"]');
+    if(insightsSlot && v.insightHost.parentElement !== insightsSlot) insightsSlot.append(v.insightHost);
     // ضغطة مطوّلة (أو الزر الأيمن) على حلقة: نفس قائمة المحور (شوهدت، علّم حتى هنا…)
     for (const b of v.lw.querySelectorAll('.er[data-ep], .sp[data-ep], .wl-track [data-ep]')) bindLongPress(b, () => openEpisodeMenu(m, Number(b.dataset.ep)));
     const dock = v.lw.querySelector('.wl-dock');
@@ -1161,7 +1274,7 @@ export function createAnime(deps) {
       parts.push(s);
     }
     // عدد الحلقات بدل الاستوديو (الاستوديو في «معلومات» أسفل الصفحة)
-    add(m.episodes ? `${m.episodes} حلقة` : null);
+    add(isMovie(m) ? (m.duration ? `${m.duration} دقيقة` : null) : m.episodes ? `${m.episodes} حلقة` : null);
     if (m.status) add(STATUS_AR[m.status], `aw-status aw-status--${String(m.status).toLowerCase()}`);
     // الفواصل عناصر بين الأجزاء لا ‎::before‎: جزء لاتيني (الاستوديو، التقييم) لا يقلب موضعها
     v.meta.replaceChildren(...parts.flatMap((part, i) => (i ? [el('i', 'aw-sep', '·'), part] : [part])));
@@ -1189,10 +1302,10 @@ export function createAnime(deps) {
     let text = '';
     if (rec?.duration && rec.position > 0) {
       ratio = Math.min(1, rec.position / rec.duration);
-      text = [minutesLeft(rec), aired ? `شاهدت ${seen} من ${aired}` : null].filter(Boolean).join(' · ');
+      text = [minutesLeft(rec), isMovie(m) ? (seen ? 'شاهدت الفيلم' : null) : aired ? `شاهدت ${seen} من ${aired}` : null].filter(Boolean).join(' · ');
     } else if (seen && aired) {
       ratio = Math.min(1, seen / aired);
-      text = seen >= aired ? `شاهدت كل الحلقات المعروضة (${aired})` : `شاهدت ${seen} من ${aired}`;
+      text = isMovie(m) ? 'شاهدت الفيلم' : seen >= aired ? `شاهدت كل الحلقات المعروضة (${aired})` : `شاهدت ${seen} من ${aired}`;
     }
     if (text) {
       line.append(progress(ratio), el('span', null, text));
@@ -1263,7 +1376,8 @@ export function createAnime(deps) {
       }, { pressed: later }));
       const w = work();
       const total = w.aired || w.episodes || 0;
-      if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
+      if (isMovie(w)) rows.push(entry('eye', epRecord(w, 1).done ? 'ألغِ مشاهدة الفيلم' : 'شاهدت الفيلم', () => { closeMenu(); toggleSeen(w, 1); }));
+      else if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
     }
     if (deps.openWorkMenu) rows.push(entry('star', 'أفضل 5', () => {
       closeMenu();
@@ -1340,11 +1454,12 @@ export function createAnime(deps) {
       ['الاستوديو', m.studio],
       ['الأصل', SOURCE_AR[m.source]],
       ['العرض', [m.start?.year ? [m.start.day, m.start.month ? MONTHS_AR[m.start.month - 1] : null, m.start.year].filter(Boolean).join(' ') : null, STATUS_AR[m.status]].filter(Boolean).join(' · ')],
-      ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
+      isMovie(m) ? ['المدة', m.duration ? `${m.duration} دقيقة` : null] : ['الحلقات', m.episodes ? `${m.episodes}${m.duration ? ` × ${m.duration} دقيقة` : ''}` : null],
       ['أسماء أخرى', [m.romaji !== m.title ? m.romaji : null, m.native].filter(Boolean).join(' · ')],
     ].filter(([, val]) => val);
   }
   function nextAiring(m, now = Date.now()) {
+    if (isMovie(m)) return null;
     const n = m?.next;
     if (!n?.at || !(n.at > now)) return null;
     return { episode: n.episode ?? null, at: n.at, rel: relativeAr(n.at, now), time: meccaTime(n.at) };
@@ -1352,8 +1467,8 @@ export function createAnime(deps) {
   function watchLabel(m) {
     const point = resumePoint(m);
     const aired = m.aired || (m.status === 'FINISHED' ? m.episodes : 0) || 0;
-    const upcoming = m.status === 'NOT_YET_RELEASED' && !aired;
-    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}`;
+    const upcoming = !isMovie(m) && (m.status === 'NOT_YET_RELEASED' || (m.status === 'RELEASING' && episodeCount(m) === 0 && (m.aired === 0 || m.next?.episode === 1)));
+    const label = upcoming ? (m.next ? `يبدأ ${relativeAr(m.next.at)}` : 'لم يُعرض بعد') : `${point.replay ? 'أعد مشاهدة' : point.resume ? 'تابع' : 'شاهد'} ${unitLabel(m, point.episode)}`;
     return { point, aired, upcoming, label };
   }
   /** «لم يُعرض بعد»: تنبيه بالموعد بدل التشغيل (نفس سلوك زر المحور). */
@@ -1412,15 +1527,29 @@ export function createAnime(deps) {
     const all = localWatch();
     const w = all[m.id] ?? { id: m.id, episodes: {} };
     Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color });
-    const prev = w.episodes[n] ?? { position: 0, duration: 0 };
-    if (on) w.episodes[n] = { ...prev, done: true, at: Date.now() };
-    else delete w.episodes[n];
-    if (on && (!w.episode || n >= w.episode)) {
-      w.episode = n;
-      w.at = Date.now();
-    }
+    updateSeenRecord(w, n, on);
     all[m.id] = w;
     saveWatch(all);
+  }
+
+  function updateSeenRecord(w, n, on) {
+    w.episodes ??= {};
+    const prev = w.episodes[n] ?? {position:0,duration:0};
+    if (on) w.episodes[n] = {...prev,done:true,at:prev.at ?? Date.now()};
+    else if (prev.position > 0 || prev.duration > 0) w.episodes[n] = {...prev,done:false};
+    else delete w.episodes[n];
+  }
+
+  function markSeenRange(m, from, to, on) {
+    const range=normalizeEpisodeRange(from,to,episodeCount(m));
+    if (!range.count) return 0;
+    if (signedIn()) return account.markRange(m,range.from,range.to,on);
+    const all=localWatch(), w=all[m.id]??{id:m.id,episodes:{}};
+    Object.assign(w,{title:m.title,poster:m.posterSmall??m.poster,banner:m.banner,color:m.color});
+    let changed=0;
+    for(let n=range.from;n<=range.to;n++)if(Boolean(w.episodes[n]?.done)!==on){updateSeenRecord(w,n,on);changed++;}
+    if(changed){all[m.id]=w;saveWatch(all);}
+    return changed;
   }
 
   /**
@@ -1442,6 +1571,8 @@ export function createAnime(deps) {
 
   /** ضغطة مطوّلة (لمس أو زر الفأرة الأيمن) بلا أن تصير لمسة تشغيل بعدها. */
   function bindLongPress(node, run) {
+    if (node._episodeLongPressBound) return;
+    node._episodeLongPressBound = true;
     let timer = null;
     let x = 0;
     let y = 0;
@@ -1475,9 +1606,10 @@ export function createAnime(deps) {
   function episodeRow(m, n) {
     const row = el('div', 'an-er');
     row.dataset.ep = String(n);
+    row.dataset.episodeRow = '';
     const main = el('button', 'an-er-main');
     main.type = 'button';
-    const shot = episodeStill(m, n, artOf(m));
+    const shot = episodeStill(m, n, artOf(m), { width: 176, dpr: globalThis.devicePixelRatio || 1 });
     const cover = m.poster ?? m.banner ?? null;
     const art = el('span', `an-er-art${shot.still ? '' : ' an-er-art--cover'}`);
     art.append(image(shot.src, 'an-img', { position: shot.still ? 'center' : 'center 22%', fallback: shot.still ? [...shot.fallbacks, cover] : null }));
@@ -1487,7 +1619,7 @@ export function createAnime(deps) {
     art.append(chip);
     const copy = el('span', 'an-er-copy');
     const title = episodeTitleOf(m, n, { mal: state.malTitles, art: artOf(m) });
-    const name = el('b', 'an-er-title', title || `الحلقة ${n}`);
+    const name = el('b', 'an-er-title', title || unitLabel(m, n));
     name.dir = 'auto';
     copy.append(name, el('span', 'an-er-sub'));
     main.append(art, copy);
@@ -1534,32 +1666,29 @@ export function createAnime(deps) {
 
   const rowOf = (n) => state.view?.eps.querySelector(`.an-er[data-ep="${n}"]`);
   function repaintRows(m) {
-    for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) paintRow(row, m, Number(row.dataset.ep));
+    paintEpisodeList(m);
     paintCta(m);
     paintEpisodeHead(m);
+    paintSide(m);
+    paintHero(m);
   }
 
   function toggleSeen(m, n) {
     const on = !epRecord(m, n).done;
     setSeen(m, n, on);
     account?.markEpisode(m, n, on);
+    paintEpisodeList(m);
     const row = rowOf(n);
-    if (row) {
-      paintRow(row, m, n);
-      pop(row.querySelector('.an-er-icon'));
-      if (on && state.hideSeen) {
-        row.classList.add('leaving');
-        setTimeout(() => row.remove(), 320);
-      }
-    }
+    if (row) pop(row.querySelector('.an-er-icon'));
     paintCta(m);
     paintEpisodeHead(m);
+    paintSide(m);
+    paintHero(m);
   }
 
   /** كل ما قبل الحلقة (وهي) شوهد: لمن بدأ يتابع من منتصفه. */
   function markUpTo(m, n) {
-    for (let k = 1; k <= n; k++) setSeen(m, k, true);
-    if (signedIn()) account.markRange(m, 1, n, true);
+    markSeenRange(m, 1, n, true);
     repaintRows(m);
     toast(`عُلّمت الحلقات 1–${n} شوهدت`);
   }
@@ -1572,7 +1701,7 @@ export function createAnime(deps) {
       const head = el('div', 'an-sheet-head');
       const t = el('div', 'an-sheet-title', title || m.title);
       t.dir = 'auto';
-      head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
+      head.append(el('div', 'an-sheet-kicker', unitLabel(m, n)), t);
       const item = (icon, label, run, { pressed } = {}) => {
         const b = el('button', 'sheet-item');
         b.type = 'button';
@@ -1591,15 +1720,15 @@ export function createAnime(deps) {
         item('check', e.done ? 'ألغِ «شوهدت»' : 'علّمها شوهدت', () => toggleSeen(m, n), { pressed: e.done }),
       );
       if (n > 1) body.append(item('layers', `شاهدت كل ما قبلها (1–${n})`, () => markUpTo(m, n)));
-      if (signedIn()) body.append(item('eye', 'علّم حلقات: من ← إلى', () => openMarkSheet(m, m.aired || m.episodes || n)));
+      body.append(item('eye', 'علّم حلقات: من ← إلى', () => openMarkSheet(m, episodeCount(m))));
     }, { tone: 'anime' });
   }
 
   /** رأس الحلقات: العدد، وموعد القادمة بتوقيت مكة لما يُعرض. */
   function paintEpisodeHead(m) {
-    const sub = state.view?.eps.querySelector('.aw-eps-sub');
+    const sub = state.view?.episodeControls?.subtitle;
     if (!sub) return;
-    const total = m.aired || m.episodes || 0;
+    const total = episodeCount(m);
     const seen = seenCountOf(m);
     const lines = [];
     if (m.status === 'RELEASING' && m.next) {
@@ -1619,110 +1748,55 @@ export function createAnime(deps) {
     sub.textContent = lines.join(' · ') || 'لم تُعرض بعد';
   }
 
-  function renderEpisodes(host, m) {
-    const total = m.aired || m.episodes || 0;
-    const head = el('div', 'aw-eps-head');
-    const titles = el('div', 'aw-eps-titles');
-    titles.append(el('h2', null, 'الحلقات'), el('span', 'aw-eps-sub'));
-    head.append(titles);
-    host.replaceChildren(head);
-    paintEpisodeHead(m);
-    if (!total) return;
-    // البحث رمزًا ينفتح سطرًا، والترتيب والتصفية في قائمة واحدة
-    const tools = el('div', 'aw-eps-tools');
-    const find = el('form', 'aw-find');
-    find.hidden = !state.epQuery;
-    find.innerHTML = `${glyph('search', { size: 18 })}<input type="search" enterkeyhint="search" autocomplete="off" placeholder="رقم الحلقة أو اسمها" aria-label="ابحث في الحلقات">`;
-    const input = find.querySelector('input');
-    input.value = state.epQuery ?? '';
-    let t = null;
-    input.oninput = () => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        const value = input.value.trim();
-        if (/^\d+$/.test(value)) return jumpTo(Number(value));
-        state.epQuery = value;
-        paintEpisodeList(m);
-      }, 220);
-    };
-    find.onsubmit = (ev) => {
-      ev.preventDefault();
-      input.blur();
-    };
-    const close = button('icon-btn aw-find-close', glyph('close', { size: 18 }), () => {
-      state.epQuery = '';
-      find.hidden = true;
-      searchBtn.setAttribute('aria-expanded', 'false');
-      paintEpisodeList(m);
-    }, 'أغلق البحث');
-    find.append(close);
-    const searchBtn = button('icon-btn', glyph('search', { size: 20 }), () => {
-      const open = find.hidden;
-      find.hidden = !open;
-      searchBtn.setAttribute('aria-expanded', String(open));
-      if (open) setTimeout(() => input.focus(), 30);
-    }, 'ابحث في الحلقات');
-    const menuBtn = button('icon-btn', glyph('sliders', { size: 20 }), () => openEpisodeTools(m), 'الترتيب والتصفية');
-    tools.append(searchBtn, menuBtn);
-    head.append(tools);
-    host.append(find);
-    const seasons = seasonsStrip(m);
-    if (seasons) host.append(seasons);
-    const ranges = el('div', 'aw-ranges');
-    host.append(ranges);
-    const list = el('div', 'an-er-list');
-    host.append(list);
+  function pageFor(m, pageSize = EP_PAGE) {
+    const watch = localWatch()[m.id];
+    return episodePage({ total: episodeCount(m), pageSize, pageIndex: state.episodeRange,
+      currentEpisode: resumePoint(m).episode, query: state.epQuery,
+      newestFirst: state.newestFirst, hideSeen: state.hideSeen,
+      titleOf: n => episodeTitleOf(m,n,{mal:state.malTitles,art:artOf(m)}) ?? '',
+      isSeen: signedIn() ? n => account.isSeen(m.id,n) : n => Boolean(watch?.episodes?.[n]?.done) });
+  }
 
-    const jumpTo = (n) => {
-      const k = Math.max(1, Math.min(total, n));
-      state.epQuery = '';
-      state.episodeRange = Math.floor((k - 1) / EP_PAGE);
-      paintEpisodeList(m);
-      const target = rowOf(k);
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      target?.classList.add('flash');
-      setTimeout(() => target?.classList.remove('flash'), 2200);
-    };
+  function controlsFor(m, page) {
+    const v = state.view;
+    if (!v.episodeControls) v.episodeControls = createEpisodeControls({document, el, glyph,
+      onQuery: value => {state.epQuery=value;state.episodeRange=0;paintEpisodeList(state.detail)},
+      onPage: index => {state.episodeRange=index;paintEpisodeList(state.detail)},
+      onTools: () => openEpisodeTools(state.detail)});
+    if(!v.lw&&!v.unbindEpisodeRails)v.unbindEpisodeRails=bindRails(v.episodeControls.root);
+    v.episodeControls.update({page,query:state.epQuery,seasonNode:seasonsStrip(m)});
+    return v.episodeControls;
+  }
+
+  function renderEpisodes(host, m) {
+    if (isMovie(m)) {host.replaceChildren();host.hidden=true;return;}
+    if (state.view?.lw) {host.replaceChildren();host.hidden=true;paintLook(m);return;}
+    host.hidden=false;
+    const controls=controlsFor(m,pageFor(m));
+    let list=host.querySelector('.an-er-list');
+    if (!list) {list=el('div','an-er-list');host.replaceChildren(controls.root,list);}
     paintEpisodeList(m);
   }
 
-  /** صفوف الحلقات بحسب المدى والبحث والترتيب و«أخفِ ما شاهدته». */
+  /** Filter and sort the complete set before slicing a bounded visible group. */
   function paintEpisodeList(m) {
-    const host = state.view?.eps;
-    const list = host?.querySelector('.an-er-list');
+    if (!m || isMovie(m)) return;
+    const v=state.view;
+    if (!v || v.id!==m.id) return;
+    if (v.lw) {v.lwSig=null;paintLook(m);return;}
+    const list=v.eps.querySelector('.an-er-list');
     if (!list) return;
-    const total = m.aired || m.episodes || 0;
-    const query = (state.epQuery ?? '').toLowerCase();
-    const pages = Math.ceil(total / EP_PAGE);
-    state.episodeRange = Math.min(state.episodeRange, Math.max(0, pages - 1));
-    const ranges = host.querySelector('.aw-ranges');
-    ranges.replaceChildren();
-    ranges.hidden = pages < 2 || Boolean(query);
-    if (pages > 1 && !query) {
-      for (let r = 0; r < pages; r++) {
-        const b = button(`aw-range${r === state.episodeRange ? ' active' : ''}`, `${r * EP_PAGE + 1}–${Math.min(total, (r + 1) * EP_PAGE)}`, () => {
-          state.episodeRange = r;
-          paintEpisodeList(m);
-        });
-        b.dir = 'ltr';
-        ranges.append(b);
-      }
-      requestAnimationFrame(() => centerInStrip(ranges, ranges.querySelector('.active')));
-    }
-    let nums = [];
-    if (query) {
-      for (let n = 1; n <= total; n++) {
-        const title = episodeTitleOf(m, n, { mal: state.malTitles, art: artOf(m) }) ?? '';
-        if (title.toLowerCase().includes(query)) nums.push(n);
-      }
-    } else {
-      const start = state.episodeRange * EP_PAGE + 1;
-      for (let n = start; n <= Math.min(total, start + EP_PAGE - 1); n++) nums.push(n);
-    }
-    if (state.hideSeen) nums = nums.filter((n) => !epRecord(m, n).done);
-    if (state.newestFirst) nums.reverse();
-    list.replaceChildren(...nums.map((n) => episodeRow(m, n)));
-    if (!nums.length) list.append(el('p', 'an-note', query ? 'لا حلقة بهذا الاسم' : 'شاهدت كل حلقات هذا المدى'));
+    const page=pageFor(m);
+    controlsFor(m,page);
+    const previous=new Map([...list.querySelectorAll('.an-er')].map(row=>[Number(row.dataset.ep),row]));
+    const rows=page.numbers.map(n=>{const row=previous.get(n)??episodeRow(m,n);paintRow(row,m,n);return row});
+    // Move retained rows without detaching them, keeping image requests and focus.
+    let cursor=list.firstChild;
+    for (const row of rows) {if(row!==cursor)list.insertBefore(row,cursor);cursor=row.nextSibling;}
+    const keep=new Set(rows);
+    for(const row of [...list.children])if(!keep.has(row))row.remove();
+    if(!rows.length)list.append(el('p','an-note',state.epQuery?'لا حلقة بهذا الرقم أو الاسم':state.hideSeen?'شاهدت كل الحلقات المتاحة':'لم تُعرض حلقات بعد'));
+    paintEpisodeHead(m);
   }
 
   /** الترتيب والتصفية وتعليم المدى: قائمة واحدة. */
@@ -1740,6 +1814,7 @@ export function createAnime(deps) {
         b.onclick = () => {
           deps.closeSheet();
           run();
+          state.episodeRange = 0;
           paintEpisodeList(m);
         };
         return b;
@@ -1750,14 +1825,14 @@ export function createAnime(deps) {
         item('sort', 'الأحدث أولًا', state.newestFirst, () => (state.newestFirst = true)),
         item('eye', 'أخفِ ما شاهدته', Boolean(state.hideSeen), () => (state.hideSeen = !state.hideSeen)),
       );
-      if (signedIn()) {
+      if (episodeCount(m)) {
         const range = el('button', 'sheet-item');
         range.type = 'button';
         range.innerHTML = glyph('layers');
         range.append(el('span', null, 'علّم حلقات: من ← إلى'));
         range.onclick = () => {
           deps.closeSheet();
-          openMarkSheet(m, m.aired || m.episodes || 0);
+          openMarkSheet(m, episodeCount(m));
         };
         body.append(range);
       }
@@ -1766,6 +1841,8 @@ export function createAnime(deps) {
 
   /** عناوين MAL وصلت: تُكتب في صفوفها. */
   function patchTitles(m) {
+    if (state.view?.lw) return paintLook(m);
+    if (state.epQuery) paintEpisodeList(m);
     for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) {
       const n = Number(row.dataset.ep);
       const title = episodeTitleOf(m, n, { mal: state.malTitles, art: artOf(m) });
@@ -1778,20 +1855,36 @@ export function createAnime(deps) {
   /** صفوف تعرض لقطة أصغر من المتاح: تُحمَّل الأعلى دقة أولًا ثم تحل محلها بلا وميض. */
   function upgradeStills(m) {
     if (!m) return;
+    if (state.view?.lw) return paintLook(m);
     for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) {
       const img = row.querySelector('.an-er-art img');
-      const shot = episodeStill(m, Number(row.dataset.ep), artOf(m));
+      const shot = episodeStill(m, Number(row.dataset.ep), artOf(m), {width:176,dpr:globalThis.devicePixelRatio||1});
       if (!img || !shot.still || img.src === shot.src) continue;
-      swapWhenReady(img, shot.src, { position: 'center', fallback: shot.fallbacks }, () => row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover'));
+      upgradeRowImage(row, img, shot);
+    }
+  }
+
+  function upgradeRowImage(row, img, shot) {
+    const rect = row.getBoundingClientRect?.();
+    const near = rect && rect.bottom > -200 && rect.top < (globalThis.innerHeight || 800) + 200;
+    if (near && img.classList.contains('loaded')) {
+      swapWhenReady(img, shot.src, {position:'center',fallback:shot.fallbacks}, () => row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover'));
+    } else {
+      // Existing lazy image defers network to the browser instead of preloading all 50 rows.
+      img.src=shot.src;img.style.objectPosition='center';
+      const chain=[...(shot.fallbacks??[])];
+      img.onerror=()=>{const next=chain.shift();if(next)img.src=next;else img.classList.add('failed')};
+      row.querySelector('.an-er-art')?.classList.remove('an-er-art--cover');
     }
   }
 
   function patchStills(m) {
     if (!m) return;
+    if (state.view?.lw) return paintLook(m);
     for (const row of state.view?.eps.querySelectorAll('.an-er') ?? []) {
       const art = row.querySelector('.an-er-art--cover');
       if (!art) continue;
-      const shot = episodeStill(m, Number(row.dataset.ep), artOf(m));
+      const shot = episodeStill(m, Number(row.dataset.ep), artOf(m), {width:176,dpr:globalThis.devicePixelRatio||1});
       if (!shot.still) continue;
       const img = art.querySelector('img');
       if (!img) continue;
@@ -1805,7 +1898,7 @@ export function createAnime(deps) {
         swap();
         continue;
       }
-      swapWhenReady(img, shot.src, { position: 'center', fallback: shot.fallbacks }, () => art.classList.remove('an-er-art--cover'));
+      upgradeRowImage(row, img, shot);
     }
     patchTitles(m);
   }
@@ -1837,7 +1930,7 @@ export function createAnime(deps) {
       b.append(el('b', null, label(r, rel)));
       const when = [SEASON_AR[r.season], r.year].filter(Boolean).join(' ');
       if (when) b.append(el('span', null, when));
-      if (!current) b.onclick = () => void openAnime(r);
+      if (!current) b.onclick = () => void openAnime(r, {preserveEpisodeControls:true});
       else b.setAttribute('aria-current', 'true');
       return b;
     };
@@ -1855,7 +1948,7 @@ export function createAnime(deps) {
       const head = el('div', 'an-sheet-head');
       const t = el('div', 'an-sheet-title', m.title);
       t.dir = 'auto';
-      const count = () => account.seenCount(m.id);
+      const count = () => seenCountOf(m);
       const kicker = el('div', 'an-sheet-kicker');
       const paintCount = () => (kicker.textContent = `شاهدت ${count()} من ${total}`);
       paintCount();
@@ -1874,11 +1967,13 @@ export function createAnime(deps) {
       };
       // البداية بعد آخر حلقة معلّمة: الغالب أنك تكمل من حيث وقفت
       let last = 0;
-      for (let n = 1; n <= total; n++) if (account.isSeen(m.id, n)) last = n;
+      const watch = localWatch()[m.id];
+      for (let n = 1; n <= total; n++) if (signedIn() ? account.isSeen(m.id,n) : watch?.episodes?.[n]?.done) last = n;
       const from = field('من الحلقة', Math.min(total, last + 1));
       const to = field('إلى الحلقة', total);
       const pair = el('div', 'an-mark-range');
       pair.append(from.f, to.f);
+      const applyRange = (from, to, on) => markSeenRange(m,from,to,on);
       const clamp = (v) => Math.max(1, Math.min(total, Math.round(Number(v) || 1)));
       const done = (changed, msg) => {
         paintCount();
@@ -1889,32 +1984,34 @@ export function createAnime(deps) {
       const seenBtn = button('btn btn-primary', 'علّمها شوهدت', () => {
         const a = clamp(from.input.value);
         const b = clamp(to.input.value);
-        const n = account.markRange(m, a, b, true);
+        const n = applyRange(a, b, true);
         done(n, `عُلّمت ${n} حلقة (${Math.min(a, b)}–${Math.max(a, b)})`);
       });
       const unseenBtn = button('btn', 'ألغِ تعليمها', () => {
         const a = clamp(from.input.value);
         const b = clamp(to.input.value);
-        const n = account.markRange(m, a, b, false);
+        const n = applyRange(a, b, false);
         done(n, `أُلغي تعليم ${n} حلقة`);
       });
       act.append(seenBtn, unseenBtn);
       const quick = el('div', 'an-mark-actions');
       quick.append(
         button('btn', 'شاهدته كله', () => {
-          const n = account.markRange(m, 1, total, true);
+          const n = applyRange(1, total, true);
           done(n, `عُلّمت كل الحلقات (${total})`);
         }),
         button('btn', 'ألغِ الكل', () => {
           const had = count();
-          account.clearAll(m);
+          if (signedIn()) account.clearAll(m);
+          else applyRange(1, total, false);
           done(had, 'أُلغي تعليم كل الحلقات');
         }),
       );
       const completed = el('label', 'an-mark-toggle');
+      completed.hidden = !signedIn();
       const box = el('input');
       box.type = 'checkbox';
-      box.checked = account.isCompleted(m.id);
+      box.checked = signedIn() && account.isCompleted(m.id);
       box.onchange = () => {
         account.setCompleted(m, box.checked);
         toast(box.checked ? 'أُضيف إلى «المكتمل»' : 'أُزيل من «المكتمل»');
@@ -1928,8 +2025,10 @@ export function createAnime(deps) {
 
   // نسخ كل أنمي في المصادر تُحفظ على الجهاز: الفتحة التالية تبدأ منها فورًا،
   // والبحث يتحدّث بصمت في الخلفية (كان يُعاد من الصفر مع كل دخول وخروج)
-  const FOUND_KEY = 'vantara.anime.found.v1';
+  const FOUND_KEY = 'vantara.anime.found.v2';
   const FOUND_TTL = 7 * 24 * 3600e3;
+  const workScope = m => JSON.stringify([m.id, m._sourceCopy?.sourceId ?? null, m._sourceCopy?.url ?? null]);
+  const sameWork = m => state.workFor === m.id && state.workScope === workScope(m);
   const knownWork = (id) => {
     const hit = readJson(FOUND_KEY, {})[id];
     return hit?.work?.copies?.length && Date.now() - (hit.at ?? 0) < FOUND_TTL ? hit.work : null;
@@ -1943,48 +2042,66 @@ export function createAnime(deps) {
   };
 
   /** يبحث عن الأنمي في كل المصادر العربية (محرك التطبيق): أول مصدر يطابق يكفي، والبقية تُضاف حين تصل. */
-  async function locateWork(m, token = state.detailToken) {
+  async function locateWork(m, token = state.detailToken, signal = null) {
     if (!engine.available()) return null;
-    if (state.workFor === m.id && state.work) return state.work;
+    const link = controller => {
+      if (!signal) return;
+      if (signal.aborted) controller.abort(signal.reason);
+      else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    };
+    if (sameWork(m) && state.workController) link(state.workController);
+    if (sameWork(m) && state.work) { state.workTrace?.record('memory_cache_reused'); return state.work; }
     // صفحة العمل وزر تشغيل الحلقة يصلان غالبًا قبل انتهاء البحث: يشتركان في طلب واحد.
-    if (state.workFor === m.id && state.workPending) return state.workPending;
+    if (sameWork(m) && state.workPending) return state.workPending;
+    state.workController?.abort();
+    const controller = new AbortController();
+    state.workController = controller;
+    link(controller);
     state.work = null;
     state.workError = false;
     state.workFor = m.id;
+    state.workScope = workScope(m);
+    state.workTrace = beginDiscovery({ workId: m.id, title: m.title, format: m.format, entry: m._sourceCopy ? 'explicit_source' : 'general_card', sourceId: m._sourceCopy?.sourceId });
+    const trace = state.workTrace;
+    trace.record('discovery_started');
     const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
-    const current = () => token === state.detailToken && state.workFor === m.id;
+    const generation = ++state.workGeneration;
+    const current = () => token === state.detailToken && sameWork(m) && generation === state.workGeneration;
     const adopt = (work) => {
-      keepWork(m.id, work);
+      if (controller.signal.aborted) return;
       if (!current()) return;
       const copies = [...(state.work?.copies ?? []), ...work.copies];
       state.work = { ...work, copies: copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId && c.url === copy.url) === index) };
+      if (!m._sourceCopy) keepWork(m.id, state.work);
       paintSources(m, 'found');
       for (const listener of workListeners) listener(m.id, state.work);
     };
-    if (m._sourceCopy) { const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
+    if (m._sourceCopy) { trace.record('explicit_source_selected', { sourceId: m._sourceCopy.sourceId }); const work = { title: m.title, copies: [m._sourceCopy] }; adopt(work); return work; }
     const remembered = knownWork(m.id);
     if (remembered) {
+      trace.record('disk_cache_reused', { sources: remembered.copies.map(c => c.sourceId) });
       state.work = remembered;
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
-      void engine.findWorkStream(titles, adopt, { year: m.year ?? null }).then((fresh) => fresh && adopt(fresh)).catch(() => {});
-      void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(() => {});
+      void engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).then((fresh) => fresh && adopt(fresh)).catch(error => trace.record('core_search_failed', { error }));
+      void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(error => trace.record('addon_search_failed', { error }));
       return remembered;
     }
     paintSources(m, 'loading');
     const pending = (async () => {
       try {
         let sourceError = null;
-        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null }).catch(error => { sourceError = error; return null; });
-        const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { if (copies.length) adopt({ title: m.title, copies }); return copies; });
+        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
+        const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { trace.record('addon_copies', { sources: copies.map(c => c.sourceId) }); if (copies.length) adopt({ title: m.title, copies }); return copies; }).catch(error => { trace.record('addon_search_failed', { error }); throw error; });
         const work = await engine.firstAvailableCopies(core, addons);
         if (!work?.copies?.length && sourceError) throw sourceError;
         if (!current()) return null;
         if (work?.copies?.length) adopt(work);
         else paintSources(m, 'none');
         return work?.copies?.length ? state.work : null;
-      } catch {
-        if (current()) { state.workError = true; paintSources(m, 'error'); }
+      } catch (error) {
+        trace.record('discovery_failed', { error });
+        if (current() && !controller.signal.aborted) { state.workError = true; paintSources(m, 'error'); }
         return null;
       } finally {
         if (state.workPending === pending) state.workPending = null;
@@ -1995,13 +2112,40 @@ export function createAnime(deps) {
   }
 
   /** المصادر سطرًا هادئًا واحدًا: نقطة حالة، ومن أين تشاهد. لا شرائح بإطارات. */
-  function paintSources(m, phase = state.work && state.workFor === m.id ? 'found' : engine.available() ? 'loading' : 'web') {
+  diagnosticsUi.subscribe(() => {
+    const health = q('animeLibrary')?.querySelector('.an-health');
+    if (health) void renderSourcesHealth(health);
+    const m = state.detail;
+    if (m?.id != null) paintSources(m);
+    else if (!diagnosticsUi.visible()) { const host = q('animeSources'); if (host) { host.hidden = true; host.replaceChildren(); } }
+  });
+
+  function discoveryButton(m) {
+    if (!diagnosticsUi.visible()) return null;
+    return button('aw-link aw-discovery-debug', 'تشخيص الاكتشاف', () => deps.openSheet(body => {
+      if (!diagnosticsUi.visible()) return;
+      body.dataset.diagnosticSheet = '';
+      const title = el('h3', null, 'تشخيص الاكتشاف — Debug');
+      const output = el('pre');
+      output.dir = 'ltr';
+      output.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;user-select:text';
+      const refresh = () => { output.textContent = JSON.stringify(discoveryDiagnostics(m.id), null, 2); };
+      refresh();
+      body.append(title, el('p', null, 'الاستعلامات والصفحات وقرارات المطابقة وسلسلة الخطأ الأصلية. السجل محلي ومحدود.'),
+        button('aw-link', 'تحديث السجل', refresh), output);
+    }, { tone: 'anime' }));
+  }
+
+  function paintSources(m, phase = state.work && sameWork(m) ? 'found' : engine.available() ? 'loading' : 'web') {
     const host = q('animeSources');
     if (!host) return;
+    host.hidden = !diagnosticsUi.visible();
+    if (!diagnosticsUi.visible()) { host.replaceChildren(); return; }
     host.dataset.state = phase;
     const dot = el('i', 'aw-dot');
     const text = el('span', 'aw-sources-text');
     host.replaceChildren(dot, text);
+    if (diagnosticsUi.visible()) host.append(discoveryButton(m));
     if (phase === 'web') {
       text.textContent = 'التشغيل من المصادر العربية داخل تطبيق أندرويد';
       return;
@@ -2039,7 +2183,7 @@ export function createAnime(deps) {
     if (!out?.ok) return toast(`لم يكتمل التحقق: ${out?.error ?? 'تعذّر'}`);
     toast(`تم التحقق من ${sourceName(id)}`);
     const m = state.detail;
-    if (m && state.workFor === m.id) {
+    if (m && sameWork(m)) {
       state.workFor = null;
       state.work = null;
       void locateWork(m);
@@ -2212,20 +2356,21 @@ export function createAnime(deps) {
    * لهذا الأنمي دون أن يقفل عليه.
    */
   function playEpisode(m, n, { position = null, clip = null } = {}) {
+    if (isMovie(m)) n = 1;
     if (!engine.available()) {
       deps.openSheet((body) => {
         const head = el('div', 'an-sheet-head');
         const t = el('div', 'an-sheet-title', m.title);
         t.dir = 'auto';
-        head.append(el('div', 'an-sheet-kicker', `الحلقة ${n}`), t);
+        head.append(el('div', 'an-sheet-kicker', unitLabel(m, n)), t);
         const note = el('div', 'an-sheet-note');
         note.innerHTML = `${glyph('layers', { size: 22 })}<div><b>التشغيل داخل التطبيق</b><span>المصادر العربية والسيرفرات تعمل في تطبيق VANTARA على أندرويد.</span></div>`;
         body.append(head, note);
       });
       return;
     }
-    const saved = localWatch()[m.id]?.episodes?.[n];
-    const startAt = clip?.startMs ?? position ?? (saved && !saved.done ? saved.position : 0);
+    const saved = epRecord(m, n);
+    const startAt = clip?.startMs ?? position ?? (!saved.done ? saved.position : 0);
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
@@ -2234,10 +2379,28 @@ export function createAnime(deps) {
     const togetherRef = `anime:${m.id}`;
     sheet.autoTogether = Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
     let paintQueued = false;
+    let paintFrame = null;
     let off = [];
+    const controller = new AbortController();
+    const preparation = new AbortController();
+    let cooldownTimer = null;
+    let reconciliationTimer = null;
+    let reconciliationBusy = false;
+    const closeSession = session => { if (session) void Promise.resolve().then(() => engine.closeSession(session)).catch(() => {}); };
+    const wait = (operation, signal = controller.signal, timeout = null) => new Promise((resolve, reject) => {
+      const cleanup = () => { signal.removeEventListener('abort', aborted); clearTimeout(timer); };
+      const aborted = () => { cleanup(); reject(signal.reason ?? new Error('تم إلغاء التجهيز')); };
+      const timer = timeout == null ? null : setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة تجهيز التشغيل')); }, timeout);
+      if (signal.aborted) aborted();
+      else signal.addEventListener('abort', aborted, { once: true });
+      Promise.resolve(operation).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+    });
 
     // صفحة كاملة لا ورقة: قرار قبل التشغيل فيه جودة ولغة وسيرفر
     deps.openSheet((body) => {
+      // The shell reuses this body across cinema/anime sheets. Preparation is
+      // asynchronous, so a previous session must not identify the new sheet.
+      delete body.dataset.vantaraPlaybackSession;
       // رأس الورقة (server-sheet.js): لقطة الحلقة بشعار العمل، ثم تقييمها وتاريخها ومدتها ووصفها من ani.zip
       const art = state.art?.id === m.id ? state.art : null;
       const shot = episodeStill(m, n, art, { full: true });
@@ -2252,7 +2415,7 @@ export function createAnime(deps) {
         backdropFallbacks: thumb ? shot.fallbacks : [],
         backdropFallback: m.banner ?? m.poster ?? null,
         backdropPosition: thumb || m.banner ? null : 'center 25%',
-        label: `الحلقة ${n}`,
+        label: unitLabel(m, n),
         episodeTitle: epTitle,
         description: epArt?.overview ?? null,
         rating: epArt?.rating ? { value: epArt.rating } : null,
@@ -2267,7 +2430,7 @@ export function createAnime(deps) {
           hub.openInvite({
             kind: 'anime',
             key: `${togetherRef}#${n}`,
-            label: `${m.title} — الحلقة ${n}`,
+            label: `${m.title} — ${unitLabel(m, n)}`,
             seriesRef: togetherRef,
             title: m.title,
             cover: m.posterSmall ?? m.poster ?? null,
@@ -2285,15 +2448,16 @@ export function createAnime(deps) {
       }
 
       // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
-      const exhausted = () => sheet.done && sheet.work !== false && !sheet.routes.some(isValid);
+      const exhausted = () => sheet.done && !sheet.routes.some(isValid);
 
       const playRoute = async (r) => {
-        if (sheet.busy) return;
+        if (sheet.closed || sheet.busy) return;
         sheet.touched = true;
         sheet.busy = true;
         paint();
         try {
-          const candidate = await engine.pick(sheet.session, r.id);
+          const candidate = await wait(engine.pick(sheet.session, r.id), controller.signal, 15000);
+          if (sheet.closed) return;
           if (!candidate) {
             toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
             return;
@@ -2301,7 +2465,7 @@ export function createAnime(deps) {
           rememberCode(m.id, r.code);
           await launch(candidate, r.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
@@ -2310,11 +2474,11 @@ export function createAnime(deps) {
 
       // بلا جاهز بعد: «شغّل أول سيرفر يجهز» ينتظره المحرك ويزن الموثوقية وسيرفرك السابق
       const playBest = async () => {
-        if (sheet.busy || !sheet.session) return;
+        if (sheet.closed || sheet.busy || !sheet.session) return;
         sheet.busy = true;
         paint();
         try {
-          const out = await engine.best(sheet.session, prefer);
+          const out = await wait(engine.best(sheet.session, prefer), controller.signal, 15000);
           if (sheet.closed) return;
           if (!out?.candidate) {
             toast('لم يجهز أي سيرفر لهذه الحلقة الآن');
@@ -2322,7 +2486,7 @@ export function createAnime(deps) {
           }
           await launch(out.candidate, out.code);
         } catch (e) {
-          toast(`تعذّر التشغيل: ${e?.message ?? e}`);
+          if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
           sheet.busy = false;
           queuePaint();
@@ -2331,10 +2495,11 @@ export function createAnime(deps) {
 
       const ui = createServerSheet(body, {
         el,
-        kicker: `الحلقة ${n}`,
+        kicker: unitLabel(m, n),
         title: m.title,
         media,
         extraFoot,
+        diagnosticAction: () => discoveryButton(m),
         prefer,
         // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة
         directLang: 'مترجم عربي',
@@ -2356,11 +2521,11 @@ export function createAnime(deps) {
         sheet.noSources = true;
         paint();
       }, () => {});
-      const status = ui.status;
 
       const statusLine = () => {
         const ready = sheet.routes.filter(isValid).length;
         const total = sheet.routes.length;
+        if (sheet.prepareError) return { text: 'تعذّر تجهيز بعض السيرفرات — أعد المحاولة' };
         if (!sheet.session) {
           if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
           if (sheet.work === false) return { text: 'غير متوفر في المصادر العربية حاليًا' };
@@ -2374,6 +2539,9 @@ export function createAnime(deps) {
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
+        clearTimeout(cooldownTimer);
+        const retryWait = exhausted() ? engine.retrySeconds(sheet.retryAt) : 0;
+        if (retryWait) cooldownTimer = setTimeout(paint, 1000);
         ui.update({
           routes: sheet.routes,
           busy: sheet.busy,
@@ -2381,24 +2549,28 @@ export function createAnime(deps) {
           missing: sheet.work === false,
           // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر» (لا نلوم المصادر على غيابها)
           noSources: sheet.noSources === true && !sheet.routes.length,
-          error: Boolean(sheet.searchError),
+          error: Boolean(sheet.searchError || sheet.prepareError),
           status: statusLine(),
-          retry: exhausted() ? { wait: engine.retrySeconds(sheet.retryAt) } : null,
+          retry: exhausted() ? { wait: retryWait } : null,
         });
         // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
         if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some(isValid)) {
           sheet.autoTogether = false;
-          queueMicrotask(() => ui.best.onclick());
+          queueMicrotask(() => { if (!sheet.closed) ui.best.onclick(); });
         }
       };
       const queuePaint = () => {
-        if (paintQueued) return;
+        if (sheet.closed || paintQueued) return;
         paintQueued = true;
-        requestAnimationFrame(paint);
+        // Native player activities can pause WebView animation frames while
+        // Android bridge callbacks and route snapshots continue to arrive.
+        // Apply the data to the DOM even when requestAnimationFrame is
+        // throttled; paint() itself ignores updates after the sheet closes.
+        queueMicrotask(paint);
       };
 
       const onWork = (id, work) => {
-        if (sheet.closed || id !== m.id) return;
+        if (sheet.closed || sheet.expired || id !== m.id || !sameWork(m)) return;
         sheet.work = work;
         sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
         if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
@@ -2406,67 +2578,157 @@ export function createAnime(deps) {
       workListeners.add(onWork);
       off.push(() => workListeners.delete(onWork));
       paint();
-      const cooldownTimer = setInterval(() => {
-        if (!sheet.closed && exhausted()) paint();
-      }, 1000);
-      void (async () => {
-        const work = state.work && state.workFor === m.id ? state.work : await locateWork(m);
-        if (sheet.closed) return;
-        if (!work) {
-          sheet.searchError = state.workFor === m.id && state.workError;
-          sheet.work = sheet.searchError ? null : false;
-          sheet.done = true;
-          paint();
-          return;
+      let preparationComplete = false;
+      const stopDeadline = () => { if (preparationComplete && sheet.done) clearTimeout(deadline); };
+      const fail = error => {
+        state.workTrace?.record('preparation_failed', { error });
+        if (sheet.closed || sheet.expired) return;
+        sheet.expired = true;
+        sheet.prepareError = error || true;
+        sheet.done = true;
+        sheet.busy = false;
+        sheet.routes = sheet.routes.map(route => isChecking(route) ? { ...route, state: 'FAILED', reason: 'TIMEOUT' } : route);
+        // A new attempt must not reuse a search that never completed.
+        if (!sheet.work && sameWork(m) && state.workPending) {
+          state.workGeneration++;
+          state.workPending = null;
         }
-        sheet.work = work;
-        off.push(
-          engine.on('route', (e) => {
-            if (e.session !== sheet.session || !e.route) return;
-            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
-            sheet.routes = engine.upsertRoute(sheet.routes, e.route);
-            queuePaint();
-          }),
-          engine.on('prepared', (e) => {
-            if (e.session !== sheet.session) return;
-            sheet.retryAt = Math.max(sheet.retryAt, Number(e.retryAt) || 0);
-            sheet.done = true;
-            queuePaint();
-          }),
-        );
+        clearTimeout(deadline);
+        clearTimeout(reconciliationTimer);
+        preparation.abort(error);
+        for (const unsubscribe of off) unsubscribe();
+        off = [];
+        paint();
+      };
+      const deadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), 45000);
+      const buffered = [];
+      // Native extractors often complete after prepare() returns. A WebView
+      // listener can attach after an early native event; a single routes()
+      // snapshot is also racy. Reconcile the *same* bounded session while the
+      // sheet is visible. Never resurrect an expired or closed session.
+      const reconciliationEndsAt = Date.now() + 45_000;
+      const reconcileNativeRoutes = async () => {
+        if (sheet.closed || sheet.expired || !sheet.session || reconciliationBusy) return;
+        reconciliationBusy = true;
+        const session = sheet.session;
         try {
+          const snapshot = await engine.routes(session, { signal: preparation.signal });
+          if (sheet.closed || sheet.expired || session !== sheet.session) return;
+          for (const route of snapshot?.routes ?? []) {
+            const previous = sheet.routes.find(row => row.id === route.id);
+            // Late or cached RESOLVING snapshots must not downgrade a probed READY route.
+            if (previous?.state === 'READY' && previous.probed === true && !(route.state === 'READY' && route.probed === true)) continue;
+            sheet.routes = engine.upsertRoute(sheet.routes, route);
+          }
+          sheet.done = sheet.done || Boolean(snapshot?.done);
+          queuePaint();
+        } catch {
+          // The absolute sheet deadline owns failures; a transient snapshot
+          // failure never hides already delivered playable routes.
+        } finally {
+          reconciliationBusy = false;
+          if (!sheet.closed && !sheet.expired && Date.now() < reconciliationEndsAt &&
+              !(sheet.done && !sheet.routes.some(isChecking))) {
+            reconciliationTimer = setTimeout(reconcileNativeRoutes, 1200);
+          }
+        }
+      };
+      const applyEvent = (type, event) => {
+        if (sheet.closed || sheet.expired || event.session !== sheet.session) return;
+        sheet.retryAt = Math.max(sheet.retryAt, Number(event.retryAt) || 0);
+        if (type === 'route' && event.route) sheet.routes = engine.upsertRoute(sheet.routes, event.route);
+        if (type === 'prepared') { sheet.done = true; stopDeadline(); }
+      };
+      const receiveEvent = (type, event) => {
+        if (sheet.closed || sheet.expired) return;
+        // The bridge may emit before its prepare reply identifies this session.
+        if (!sheet.session || !preparationComplete) buffered.push({ type, event });
+        if (sheet.session) { applyEvent(type, event); queuePaint(); }
+      };
+      off.push(engine.on('route', event => receiveEvent('route', event)), engine.on('prepared', event => receiveEvent('prepared', event)));
+      void (async () => {
+        try {
+          // A fast tap can precede AniList aliases. Searching only the initial
+          // display title can settle this sheet as missing before the romaji
+          // match arrives. Share the in-flight detail request and sheet deadline.
+          const detailLoad = state.detailLoad;
+          const hasKnownCopies = m._sourceCopy || (sameWork(m) && state.work?.copies?.length) || knownWork(m.id);
+          if (!hasKnownCopies && detailLoad?.id === m.id && detailLoad.token === state.detailToken) {
+            let full;
+            try { full = await wait(detailLoad.promise, preparation.signal); }
+            catch (error) { if (preparation.signal.aborted) throw error; }
+            if (sheet.closed || sheet.expired) return;
+            if (full?.id === m.id) m = { ...m, ...full };
+          }
+          const work = state.work && sameWork(m) ? state.work : await wait(locateWork(m, state.detailToken, preparation.signal), preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          if (!work) {
+            sheet.searchError = sameWork(m) && state.workError;
+            sheet.work = sheet.searchError ? null : false;
+            sheet.done = true;
+            preparationComplete = true;
+            stopDeadline();
+            paint();
+            return;
+          }
+          sheet.work = work;
           const copies = previousServer?.sourceId
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
-          // نفس ما يُعطى للمشغّل في playEpisode: يجهز من القرص قبل الضغط على تشغيل
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          // probe: «صالح» يُقال فقط لرابط فُحص فعلًا وأعاد وسائط (lib/route-validity.js)
-          const out = await engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true });
-          if (sheet.closed) {
-            if (out?.session) void engine.closeSession(out.session);
-            return;
-          }
+          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
+          // A bridge that ignores cancellation can reply after close or deadline.
+          void preparing.then(out => { if (sheet.closed || sheet.expired) closeSession(out?.session); }, () => {});
+          const out = await wait(preparing, preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          if (!out?.session) throw new Error('لم تبدأ جلسة تجهيز السيرفرات');
           sheet.session = out.session;
+          // Associate this visible server sheet with its actual native playback session.
+          // The delivery QA must never count READY from another or previous sheet.
+          body.dataset.vantaraPlaybackSession = out.session;
           sheet.copies = out.copies ?? copies;
-          if (state.workFor === m.id && state.work) onWork(m.id, state.work);
-          // ما وصل قبل أن نعرف رقم الجلسة: نأخذ اللقطة الكاملة الآن
-          const snap = await engine.routes(out.session);
-          sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt ?? out.retryAt) || 0);
-          sheet.routes = snap?.routes ?? out.routes ?? [];
-          sheet.done = Boolean(snap?.done ?? out.done);
+          sheet.routes = out.routes ?? [];
+          sheet.done = Boolean(out.done);
+          sheet.retryAt = Math.max(sheet.retryAt, Number(out.retryAt) || 0);
+          for (const { type, event } of buffered) applyEvent(type, event);
+          paint();
+          if (sameWork(m) && state.work) onWork(m.id, state.work);
+          const snap = await wait(engine.routes(out.session, { signal: preparation.signal }), preparation.signal);
+          if (sheet.closed || sheet.expired) return;
+          sheet.retryAt = Math.max(sheet.retryAt, Number(snap?.retryAt) || 0);
+          for (const route of snap?.routes ?? []) sheet.routes = engine.upsertRoute(sheet.routes, route);
+          sheet.done = sheet.done || Boolean(snap?.done);
+          // Events newer than the snapshot win, including those emitted before prepare returned.
+          for (const { type, event } of buffered) applyEvent(type, event);
+          buffered.length = 0;
+          preparationComplete = true;
+          stopDeadline();
           queuePaint();
-        } catch (e) {
-          status.textContent = `تعذّر تجهيز السيرفرات: ${e?.message ?? e}`;
+          reconciliationTimer = setTimeout(reconcileNativeRoutes, 1200);
+        } catch (error) {
+          fail(error);
         }
       })();
 
       return () => {
+        if (sheet.closed) return;
         sheet.closed = true;
-        clearInterval(cooldownTimer);
-        for (const f of off) f();
+        if (body.dataset.vantaraPlaybackSession === sheet.session) delete body.dataset.vantaraPlaybackSession;
+        clearTimeout(deadline);
+        clearTimeout(cooldownTimer);
+        clearTimeout(reconciliationTimer);
+        if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);
+        controller.abort();
+        preparation.abort();
+        ui.destroy?.();
+        for (const unsubscribe of off) unsubscribe();
         off = [];
-        // أُغلقت الورقة بلا تشغيل: لا نترك التجهيز يعمل في الخلفية
-        if (!sheet.launched && sheet.session) void engine.closeSession(sheet.session);
+        buffered.length = 0;
+        if (!sheet.work && sameWork(m) && state.workPending) {
+          state.workGeneration++;
+          state.workPending = null;
+        }
+        if (!sheet.launched) closeSession(sheet.session);
       };
     }, { tone: 'anime', full: true });
 
@@ -2492,7 +2754,8 @@ export function createAnime(deps) {
         subtitleIdentity: { ...animeAddonIdentity(m, n), externalIds: { ...animeAddonIdentity(m, n).externalIds, ...(sheet.copies?.find(c => c.identity?.externalIds?.kitsu)?.identity?.externalIds ?? {}) } },
         usageUserId: currentUser(),
         episode: n,
-        total: m.aired || m.episodes || 0,
+        total: isMovie(m) ? 1 : m.aired || m.episodes || 0,
+        format: m.format ?? null,
         position: startAt,
         ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
         poster: m.posterSmall ?? m.poster ?? null,
@@ -2588,7 +2851,7 @@ export function createAnime(deps) {
   function historyCard(w) {
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
-    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — الحلقة ${w.episode}`);
+    const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — ${unitLabel(w, w.episode)}`);
     c.dataset.ref = `anime:${w.id}`;
     tint(c, w.color);
     const stage = el('div', 'an-hc-stage');
@@ -2596,10 +2859,11 @@ export function createAnime(deps) {
     const still = image(wide, 'an-img an-hc-still', { position: w.banner ? 'center' : 'center 22%' });
     stage.append(still, el('span', 'an-hc-shade'));
     const chip = el('span', 'an-hc-chip');
-    chip.append(el('small', null, 'الحلقة'), el('b', null, String(w.episode)));
+    chip.append(el('small', null, isMovie(w) ? 'الفيلم' : 'الحلقة'));
+    if (!isMovie(w)) chip.append(el('b', null, String(w.episode)));
     const when = el('span', 'an-hc-when', relativeAr(w.at));
     const play = el('span', 'an-hc-play');
-    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? 'التالية' : 'تابع'}</span>`;
+    play.innerHTML = `${glyph('play', { size: 16, filled: true })}<span>${e.done ? isMovie(w) ? 'أعد المشاهدة' : 'التالية' : 'تابع'}</span>`;
     const bar = el('span', 'an-hc-bar');
     const fill = el('i');
     fill.style.width = `${(ratio * 100).toFixed(1)}%`;
@@ -2615,12 +2879,12 @@ export function createAnime(deps) {
     const name = el('span', 'cw-name');
     name.append(t, moreButton(el, () => openContinueMenu(w), `خيارات ${w.title}`));
     const meta = el('span', 'an-hc-meta');
-    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? `الحلقة ${w.episode}`), el('span', 'an-hc-watched'));
+    meta.append(el('span', e.done ? 'an-hc-left done' : 'an-hc-left', e.done ? 'شوهدت كاملة' : minutesLeft(e) ?? unitLabel(w, w.episode)), el('span', 'an-hc-watched'));
     info.append(name, meta);
     // البوستر في زاوية النهاية: بداية شريط التقدّم (جهة البداية) تبقى ظاهرة
     foot.append(info, poster);
     c.append(stage, foot);
-    c.onclick = () => void openAnime({ id: w.id, title: w.title, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
+    c.onclick = () => void openAnime({ id: w.id, title: w.title, format: w.format, poster: w.poster, posterSmall: w.poster, banner: w.banner, color: w.color }, { episode: w.episode });
 
     // لقطة الحلقة نفسها حين تصل (لا وميض: تُبدَّل بعد أن تُحمَّل)
     void loadAnimeArt(w.id).then((art) => {
@@ -2751,12 +3015,13 @@ export function createAnime(deps) {
       const rate = total ? Math.round(((r?.ok ?? 0) / total) * 100) : null;
       const mood = !s.enabled ? 'off' : r?.blocked ? 'blocked' : r && r.streak >= 3 ? 'down' : rate === null ? 'new' : rate >= 70 ? 'good' : 'weak';
       const top = el('div', 'an-src-top');
-      top.append(el('i', `an-dot-state an-dot-state--${mood}`), el('b', null, s.name), el('span', 'an-src-rate', rate === null ? '—' : `${rate}%`));
+      top.append(el('i', `an-dot-state an-dot-state--${mood}`), el('b', null, s.name));
+      if (diagnosticsUi.visible()) top.append(el('span', 'an-src-rate', rate === null ? '—' : `${rate}%`));
       const facts = [
         s.domain ? String(s.domain).replace(/^https?:\/\//, '') : null,
-        r?.latencyMs ? `${Math.round(r.latencyMs)} ms` : null,
-        r?.lastOkAt ? `آخر نجاح ${relativeAr(r.lastOkAt)}` : null,
-        r?.lastFailAt ? `آخر فشل ${relativeAr(r.lastFailAt)}` : null,
+        diagnosticsUi.visible() && r?.latencyMs ? `${Math.round(r.latencyMs)} ms` : null,
+        diagnosticsUi.visible() && r?.lastOkAt ? `آخر نجاح ${relativeAr(r.lastOkAt)}` : null,
+        diagnosticsUi.visible() && r?.lastFailAt ? `آخر فشل ${relativeAr(r.lastFailAt)}` : null,
       ].filter(Boolean);
       const meta = el('div', 'an-src-meta', facts.join(' · '));
       meta.dir = 'ltr';
@@ -2782,8 +3047,9 @@ export function createAnime(deps) {
           void renderSourcesHealth(box);
         }));
         const report = el('div', 'an-diag');
-        line.append(button('an-src-btn', 'تشخيص', () => runDiagnosis(s, report)));
-        row.append(line, report);
+        if (diagnosticsUi.visible()) line.append(button('an-src-btn', 'تشخيص', () => runDiagnosis(s, report)));
+        row.append(line);
+        if (diagnosticsUi.visible()) row.append(report);
       }
       return row;
     });
@@ -2792,6 +3058,7 @@ export function createAnime(deps) {
 
   /** يفحص المصدر خطوة خطوة ويعرض أين ينكسر، مع نسخ التقرير لإرساله. */
   async function runDiagnosis(s, report) {
+    if (!diagnosticsUi.visible()) return;
     report.replaceChildren(el('p', 'an-diag-wait', 'جارٍ الفحص… (قد يأخذ حتى دقيقة على شبكة بطيئة)'));
     let steps;
     try {
@@ -2841,5 +3108,5 @@ export function createAnime(deps) {
     else void navigator.clipboard?.writeText(url).then(() => toast('نُسخ الرابط'));
   }
 
-  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, leaveDetail: () => {} };
+  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, leaveDetail: () => {state.view?.episodeControls?.suspend();} };
 }

@@ -72,8 +72,10 @@ class AnimeEngine(context: Context) {
     /** إضافات Aniyomi التي ثبّتها المستخدم من مستودعاته (UserAnime.kt). */
     @Volatile private var userSources: List<com.vantara.anime.registry.SourceEntry> = emptyList()
     private val adapters = ConcurrentHashMap<String, AnimeAdapter>()
+    private val publications = AnimeSourcePublication(this)
     @Volatile private var runtimeSources: Map<String, RuntimeSourceBinding> = emptyMap()
     private val loadErrors = ConcurrentHashMap<String, String>()
+    private val loadDiagnostics = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val sessions = ConcurrentHashMap<String, PlaybackSession>()
 
@@ -97,7 +99,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** يُنادى من الواجهة عند الإقلاع وكلما وصل بيان أحدث. */
-    fun configure(text: String): List<String> {
+    @Synchronized fun configure(text: String): List<String> {
         val parsed = ManifestParser.parse(text)
         val errors = ManifestParser.validate(parsed)
         if (errors.isNotEmpty()) return errors
@@ -107,7 +109,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** المشحون + ما ثبّته المستخدم؛ يُنادى بعد كل تثبيت أو إزالة دون انتظار الواجهة. */
-    fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
+    @Synchronized fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
         userSources = list
         apply()
     }
@@ -128,6 +130,13 @@ class AnimeEngine(context: Context) {
 
     @Synchronized private fun apply() {
         val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
+        val previous = manifest.sources.associateBy { it.id }
+        val next = parsed.sources.associateBy { it.id }
+        publications.invalidate((previous.keys + next.keys).filter { previous[it] != next[it] })
+        // A verified APK update under the same source ID must invalidate its old adapter.
+        adapters.keys.removeAll { id -> previous[id] != next[id] }
+        loadErrors.keys.removeAll { id -> previous[id] != next[id] }
+        loadDiagnostics.keys.removeAll { id -> previous[id] != next[id] }
         manifest = parsed
         for (s in parsed.sources) {
             if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
@@ -160,29 +169,37 @@ class AnimeEngine(context: Context) {
     /** المصدر جاهزًا للعمل، أو null مع سبب في [loadErrors]. */
     suspend fun adapter(id: String): AnimeAdapter? {
         runtimeSources[id]?.let { return it.adapter.takeIf { _ -> it.entry.enabled && it.entry.disabledReason == null } }
-        adapters[id]?.let { return it }
-        val e = entry(id) ?: return null
-        if (!e.enabled || e.disabledReason != null) return null
-        e.adapter?.let { kind -> return native(e, kind).also { adapters[id] = it } }
-        val ext = e.extension ?: return null
+        synchronized(this) { adapters[id]?.let { return it } }
         return locks.getOrPut(id) { Mutex() }.withLock {
-            adapters[id] ?: runCatching {
+            val (e, generation) = synchronized(this) {
+                adapters[id]?.let { return@withLock it }
+                val current = entry(id)?.takeIf { it.enabled && it.disabledReason == null } ?: return@withLock null
+                current to publications.generation(id)
+            }
+            e.adapter?.let { kind -> return@withLock publications.publish(id, generation) {
+                native(e, kind).also { adapters[id] = it }
+            } }
+            val ext = e.extension ?: return@withLock null
+            try {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(
-                    id, source,
-                    pageEmbeds = { entry(id)?.embeds },
-                    resolver = embeds,
-                    pageEpisodes = { entry(id)?.episodes },
-                ).also { a ->
-                    // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
-                    AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
-                    adapters[id] = a
-                    loadErrors.remove(id)
+                publications.publish(id, generation) {
+                    ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds },
+                        resolver = embeds, pageEpisodes = { entry(id)?.episodes }).also { a ->
+                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
+                        adapters[id] = a
+                        loadErrors.remove(id)
+                        loadDiagnostics.remove(id)
+                    }
                 }
-            }.onFailure {
-                loadErrors[id] = it.message ?: it.javaClass.simpleName
-                health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
-            }.getOrNull()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Throwable) {
+                publications.publish(id, generation) {
+                    if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[id] = DiscoveryFailure.describe(error)
+                    loadErrors[id] = error.message ?: error.javaClass.simpleName
+                    health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${error.message}")
+                }
+                null
+            }
         }
     }
 
@@ -235,7 +252,9 @@ class AnimeEngine(context: Context) {
             ids.map { id ->
                 async {
                     val a = withTimeoutOrNull(loadTimeoutMs) { adapter(id) } ?: return@async emptyList()
-                    guarded(id, timeoutMs) { a.page(Listing.SEARCH, 1, query) }?.items.orEmpty()
+                    val items = mutableListOf<SourceAnime>()
+                    guarded(id, timeoutMs) { SearchPages.walk(a, query) { items.addAll(it.items) } }
+                    items
                 }
             }.awaitAll().flatten()
         }
@@ -253,6 +272,10 @@ class AnimeEngine(context: Context) {
         val skipped: Boolean = false,
         /** Cloudflare يطلب إنسانًا لهذا المصدر: الواجهة تعرض «تحقّق» لحظات. */
         val needsHuman: Boolean = false,
+        val page: Int = 0,
+        val hasNext: Boolean = false,
+        val stop: String? = null,
+        val diagnostic: String? = null,
     )
 
     private fun needsHuman(id: String): Boolean = health.get(HealthStore.sourceKey(id))?.blocked == "cloudflare_interactive"
@@ -320,27 +343,38 @@ class AnimeEngine(context: Context) {
                 gate.withPermit {
                     val t0 = System.nanoTime()
                     val elapsed = { (System.nanoTime() - t0) / 1_000_000 }
-                    val a = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) }
+                    // A completed null lookup is different from a timed-out load.
+                    val loading = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) to true }
+                    val a = loading?.first
                     if (a == null) {
-                        onHit(SourceHit(s.id, emptyList(), elapsed(), loadErrors[s.id] ?: "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية"))
+                        val reason = if (loading == null) "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية" else loadErrors[s.id] ?: "لا يوجد محوّل متاح للمصدر في حالته الحالية"
+                        onHit(SourceHit(s.id, emptyList(), elapsed(), reason, stop = "load_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[s.id] ?: if (loading == null) "LOAD_TIMEOUT" else "SOURCE_ADAPTER_UNAVAILABLE" else null))
                         return@withPermit
                     }
                     val key = HealthStore.sourceKey(s.id)
-                    val hit = try {
-                        val page = withTimeout(timeoutMs) { a.page(Listing.SEARCH, 1, query) }
-                        SourceHit(s.id, page.items, elapsed())
+                    var pageNumber = 0
+                    val hit: SourceHit? = try {
+                        withTimeout(timeoutMs) {
+                            SearchPages.walk(a, query) { page ->
+                                pageNumber = page.number
+                                onHit(SourceHit(s.id, page.items, elapsed(),
+                                    error = if (page.hasNext && page.stop != null) "توقف البحث قبل تأكيد نهاية نتائج المصدر" else null,
+                                    page = page.number, hasNext = page.hasNext, stop = page.stop))
+                            }
+                        }
+                        null
                     } catch (e: TimeoutCancellationException) {
                         health.fail(key, "لم يرد خلال ${timeoutMs / 1000} ثانية")
-                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية")
+                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية", page = pageNumber + 1, stop = "search_timeout", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: IOException) {
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: Throwable) {
                         health.fail(key, "خطأ في قراءة الصفحة: ${AnimeHostRouter.describe(e)}")
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     }
-                    onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
+                    if (hit != null) onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
                 }
             }
         }
@@ -446,6 +480,10 @@ class AnimeEngine(context: Context) {
         // Own both warm-up and later expansion so closing the session cancels both.
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
         prep.reserveAddonBatches(addonSources)
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            kotlinx.coroutines.delay(90_000)
+            if (prepared[sessionId] === prep) prep.forceComplete()
+        }
         if (requestAddons) {
             val providers = addonProviders.filter { it.valid() && (warmSourceId == null || it.sourceId == warmSourceId) && it.endpoint(number) != null }.distinctBy { it.sourceId }.take(128)
             prep.reserveAddonBatches(providers.map { it.sourceId })
@@ -459,19 +497,28 @@ class AnimeEngine(context: Context) {
      * نسخ وصلت بعد بدء التجهيز (مصدر ردّ متأخرًا): تُضاف للجلسة نفسها وتُجهَّز
      * سيرفراتها، وما يعمل لا يتوقف. يرجع عدد النسخ الجديدة فعلًا.
      */
-    fun extendPreparation(id: String, more: List<SourceAnime>): Int {
-        val prep = prepared[id] ?: return 0
-        val req = sessionRequests[id] ?: return 0
-        val known = req.copies.map { it.sourceId to it.url }.toSet()
-        val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
-        if (fresh.isEmpty() || !prep.beginBatch()) return 0
-        sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
-        launchPreparation(prep, fresh)
-        return fresh.size
+    fun extendPreparation(id: String, more: List<SourceAnime>, generation: String? = null): Int {
+        var added = 0
+        // Replacing/closing this key cannot interleave generation validation and
+        // reservation, so a late bridge call never extends a reused session ID.
+        prepared.computeIfPresent(id) { _, prep ->
+            val req = sessionRequests[id] ?: return@computeIfPresent prep
+            val known = req.copies.map { it.sourceId to it.url }.toSet()
+            val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
+            if (fresh.isEmpty() || !prep.beginBatch(generation)) return@computeIfPresent prep
+            sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
+            launchPreparation(prep, fresh)
+            added = fresh.size
+            prep
+        }
+        return added
     }
 
     fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =
         prepared[id]?.let { if (generation == null) 0 else it.reserveAddonBatches(sourceIds, generation) } ?: 0
+
+    fun finishAddonBatch(id: String, sourceId: String, generation: String?): Boolean =
+        if (generation == null) false else prepared[id]?.settleFailedAddon(sourceId, generation) ?: false
 
     fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
 
@@ -492,6 +539,7 @@ class AnimeEngine(context: Context) {
     fun appendAddonStreams(id: String, sourceId: String, name: String, raw: kotlinx.serialization.json.JsonElement, provider: com.vantara.addons.NativeStremioProvider? = null, generation: String? = null): Int {
         val prep = prepared[id] ?: return 0
         if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return 0
+        try {
         if (provider?.sourceId == sourceId && provider.valid()) sessionRequests.computeIfPresent(id) { _, req ->
             req.copy(addonProviders = (req.addonProviders.filter { it.sourceId != sourceId } + provider).take(128))
         }
@@ -529,6 +577,12 @@ class AnimeEngine(context: Context) {
             } finally { prep.finish() }
         }
         return list.size
+        } catch (error: Throwable) {
+            // claimAddonBatch already reserved this source; a parsing/launch error
+            // must settle it even if the reporting coroutine was never created.
+            prep.finish()
+            throw error
+        }
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
@@ -548,8 +602,13 @@ class AnimeEngine(context: Context) {
                 probeSlots.withPermit {
                     val t0 = System.nanoTime()
                     val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
-                        kotlinx.coroutines.runInterruptible {
-                            runCatching { com.vantara.anime.stream.StreamProbe.check(if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient, c) }.getOrDefault(false)
+                        try {
+                            val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient
+                            com.vantara.anime.stream.StreamProbe.checkCancellable(client, c)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            false
                         }
                     } ?: false
                     val ms = (System.nanoTime() - t0) / 1_000_000
@@ -866,5 +925,17 @@ class AnimeEngine(context: Context) {
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =
             instance ?: synchronized(this) { instance ?: AnimeEngine(context).also { instance = it } }
+    }
+}
+
+/** The engine's monitor covers both generation validation and publication, including ABA reinstalls. */
+internal class AnimeSourcePublication(private val monitor: Any) {
+    private val revisions = mutableMapOf<String, Long>()
+    fun generation(id: String): Long = synchronized(monitor) { revisions[id] ?: 0 }
+    fun invalidate(ids: Collection<String>) = synchronized(monitor) {
+        ids.forEach { revisions[it] = (revisions[it] ?: 0) + 1 }
+    }
+    fun <T> publish(id: String, expected: Long, block: () -> T): T? = synchronized(monitor) {
+        if ((revisions[id] ?: 0) != expected) null else block()
     }
 }

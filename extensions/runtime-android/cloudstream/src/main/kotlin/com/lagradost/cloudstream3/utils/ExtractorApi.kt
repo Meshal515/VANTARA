@@ -9,6 +9,8 @@ class ExtractorLink(val source:String,val name:String,val url:String,var type:Ex
     var referer:String=""
     var quality:Int=Qualities.Unknown.value
     var headers:Map<String,String> = emptyMap()
+    /** Opaque provider/extractor context; retained without interpreting or executing it. */
+    var extractorData:String?=null
     val isM3u8:Boolean get()=type==ExtractorLinkType.M3U8
 }
 open class ExtractorApi {

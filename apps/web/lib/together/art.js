@@ -43,15 +43,63 @@ function remember(key, data, now) {
 
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
 const inflight = new Map();
-export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0 } = {}) {
+export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0, timeoutMs = 8000, signal, _budget = null } = {}) {
+  const signals = [...new Set([signal, _budget?.signal].filter(Boolean))];
+  if (signals.some(s => s.aborted)) return Promise.resolve(null);
   const key = `az4-${anilistId}`;
   const hit = cached(key, now);
   if (hit) return Promise.resolve(hit);
-  // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
-  if (!inflight.has(key)) inflight.set(key, aniZip(anilistId, fetchImpl, now, depth).finally(() => inflight.delete(key)));
-  return inflight.get(key);
+  let entry = inflight.get(key);
+  if (entry?.ctrl.signal.aborted) { inflight.delete(key); entry = null; }
+  if (!entry) {
+    // Requests share results, but each consumer owns only its subscription.
+    // A parent cancellation must not cancel an independent room/detail consumer.
+    const ctrl = new AbortController();
+    const deadline = _budget?.deadline ?? Date.now() + timeoutMs;
+    const rawFetch = _budget?.fetchImpl ?? fetchImpl;
+    const budget = { signal: ctrl.signal, deadline, fetchImpl: rawFetch };
+    entry = { ctrl, subscribers: new Set(), done: false, promise: null };
+    const task = entry;
+    const timer = setTimeout(() => ctrl.abort(), Math.max(0, deadline - Date.now()));
+    let onAbort;
+    const stopped = new Promise(resolve => {
+      onAbort = () => resolve(null);
+      ctrl.signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const boundedFetch = (url, init = {}) => {
+      if (ctrl.signal.aborted) throw new Error('art_cancelled');
+      return rawFetch(url, { ...init, signal: ctrl.signal });
+    };
+    task.promise = Promise.race([
+      aniZip(anilistId, boundedFetch, now, depth, budget), stopped,
+    ]).finally(() => {
+      task.done = true;
+      if (inflight.get(key) === task) inflight.delete(key);
+      clearTimeout(timer);
+      ctrl.signal.removeEventListener('abort', onAbort);
+      // Release speculative children. Their independent subscribers stay alive.
+      ctrl.abort();
+    });
+    inflight.set(key, task);
+  }
+  return new Promise((resolve, reject) => {
+    const subscriber = {};
+    entry.subscribers.add(subscriber);
+    let finished = false;
+    const complete = (accept, value) => {
+      if (finished) return;
+      finished = true;
+      for (const s of signals) s.removeEventListener('abort', cancelled);
+      entry.subscribers.delete(subscriber);
+      if (!entry.done && !entry.subscribers.size) entry.ctrl.abort();
+      accept(value);
+    };
+    const cancelled = () => complete(resolve, null);
+    for (const s of signals) s.addEventListener('abort', cancelled, { once: true });
+    entry.promise.then(value => complete(resolve, value), error => complete(reject, error));
+  });
 }
-async function aniZip(anilistId, fetchImpl, now, depth) {
+async function aniZip(anilistId, fetchImpl, now, depth, budget) {
   const key = `az4-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
   // 404: عمل جديد لم يصل ani.zip بعد — يبقى له Cinemeta والسلسلة أدناه
@@ -89,7 +137,7 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
     // موسم/جزء/فيلم تكميلي («Gachiakuta Season 2»): فن السلسلة نفسها من الجزء السابق أو
     // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم.
     // الطريقان معًا لا بالتتابع؛ نتيجة Cinemeta تُقدَّم كما كانت
-    const ups = !(depth < 4 && info) ? [] : info.ups.map((id) => aniZipArt(id, { fetchImpl, now, depth: depth + 1 }).catch(() => undefined));
+    const ups = !(depth < 4 && info) ? [] : info.ups.map((id) => aniZipArt(id, { fetchImpl, now, depth: depth + 1, _budget: budget }).catch(() => undefined));
     imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
     for (const up of imdb ? [] : ups) {
       const z = await up;
@@ -102,7 +150,7 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
   }
   if (!d && !imdb) return null;
   const data = { imdb, fanart, episodes };
-  if (settled) remember(key, data, now);
+  if (settled && !budget.signal.aborted) remember(key, data, now);
   return data;
 }
 

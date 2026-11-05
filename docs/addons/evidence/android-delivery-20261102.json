@@ -1,0 +1,320 @@
+{
+  "schema": 1,
+  "updatedAtUtc": "2026-11-02T09:07:14Z",
+  "branch": "codex/android-addon-delivery-20261101",
+  "applicationCommit": "80b3b1ca24ad89dd038dfcc9bb2526c3cca7217d",
+  "published": true,
+  "gate": "PASS_DEBUG_PUBLISHED_AND_DOWNLOADED_VERIFIED",
+  "verification": {
+    "web": {
+      "files": 214,
+      "passed": 2048
+    },
+    "nativeUnit": {
+      "suites": 122,
+      "passed": 627,
+      "failed": 0,
+      "skipped": 0
+    },
+    "repositorySafety": {
+      "passed": 55
+    },
+    "chromium": {
+      "passed": 7,
+      "backend": "controlled Capacitor fixture",
+      "liveAndroidPlayback": false
+    },
+    "focusedMetadataAndPlayback": {
+      "passed": 45,
+      "files": 4
+    },
+    "codeReview": {
+      "status": "PASS",
+      "critical": 0,
+      "important": 0,
+      "minor": 0,
+      "reviewScope": "metadata, cache, cancellation/deadline and visible-session fixes"
+    }
+  },
+  "actualAndroid": {
+    "platform": "API 35 x86_64 emulator",
+    "account": "anonymous local shell fixture",
+    "backend": "real Capacitor APK/CS3/repositories",
+    "physicalDevice": false,
+    "verifiedInstalls": [
+      "Manhatok",
+      "asia2tv",
+      "AnimeWitcher"
+    ],
+    "installedUiCounts": [
+      1,
+      2,
+      3
+    ],
+    "sameManagerAndRows": true,
+    "scrollPreserved": true,
+    "manhatokIconDecodedWidth": 96,
+    "cinemaWorkDetailsReached": true,
+    "decodedPlaybackObservations": 8,
+    "generalPlaybackProven": true,
+    "processRestartProven": true,
+    "playbackEvidence": [
+      {
+        "phase": "fresh",
+        "entry": "cinema-source",
+        "probed": true,
+        "advancedMs": 4786,
+        "decodedFrames": 40,
+        "droppedFrames": 98,
+        "sampleMs": 5021,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "fresh",
+        "entry": "anime-source",
+        "probed": true,
+        "advancedMs": 4367,
+        "decodedFrames": 96,
+        "droppedFrames": 9,
+        "sampleMs": 5091,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "fresh",
+        "entry": "cinema-general",
+        "probed": true,
+        "advancedMs": 4800,
+        "decodedFrames": 44,
+        "droppedFrames": 96,
+        "sampleMs": 5019,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "fresh",
+        "entry": "anime-general",
+        "probed": true,
+        "advancedMs": 4275,
+        "decodedFrames": 90,
+        "droppedFrames": 12,
+        "sampleMs": 5060,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "cinema-source",
+        "probed": true,
+        "advancedMs": 5002,
+        "decodedFrames": 45,
+        "droppedFrames": 102,
+        "sampleMs": 5051,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "anime-source",
+        "probed": true,
+        "advancedMs": 4929,
+        "decodedFrames": 65,
+        "droppedFrames": 59,
+        "sampleMs": 5014,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "cinema-general",
+        "probed": true,
+        "advancedMs": 5026,
+        "decodedFrames": 47,
+        "droppedFrames": 102,
+        "sampleMs": 5113,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      },
+      {
+        "phase": "restart",
+        "entry": "anime-general",
+        "probed": true,
+        "advancedMs": 5056,
+        "decodedFrames": 52,
+        "droppedFrames": 67,
+        "sampleMs": 5102,
+        "functionalOnly": true,
+        "smoothnessCertified": false
+      }
+    ],
+    "cinemaSourceAndGeneralPlaybackProven": true,
+    "animeSourcePlaybackProven": true,
+    "functionalOnly": true,
+    "smoothnessCertified": false,
+    "retention": {
+      "status": "PASS",
+      "freshPid": 2488,
+      "restartPid": 5653,
+      "sameApkAndData": true,
+      "sourceAndPackageInventoryUnchanged": true,
+      "inventorySha256": "68f9e6b5bc74ca80506255a65c0b89b4109964b56702d1e134e801f3d6dad0a9"
+    }
+  },
+  "attempts": [
+    {
+      "applicationCommit": "e57f7b2f",
+      "run": 41384284074,
+      "artifact": 13115975984,
+      "result": "CANCELLED_FOR_DIAGNOSIS",
+      "findings": [
+        "real native installation and icons passed",
+        "untyped cinema work blocked",
+        "emulator disconnected; unbounded logcat collection waited for missing device"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41384284074",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41384284074/artifacts/13115975984"
+    },
+    {
+      "applicationCommit": "97656157",
+      "run": 41387919342,
+      "artifact": 13116204013,
+      "result": "FAIL",
+      "findings": [
+        "untyped cinema source rejected; explicit choice subsequently added",
+        "host kernel proved RenderThread segfault with 9.7GB RAM available"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41387919342",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41387919342/artifacts/13116204013"
+    },
+    {
+      "applicationCommit": "a73276d4",
+      "run": 41389803448,
+      "artifact": 13116759435,
+      "result": "FAIL",
+      "findings": [
+        "native installed UI counts 1,2,4 instead of 1,2,3",
+        "canonical cinema source counted twice; subsequently fixed"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41389803448",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41389803448/artifacts/13116759435"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "run": 41391127027,
+      "artifact": 13117856460,
+      "result": "FAIL",
+      "findings": [
+        "native installed UI counts 1,2,3 passed",
+        "source cinema details opened through explicit type choice",
+        "emulator host RenderThread segfault persisted with Vulkan disabled; no decoded playback proven"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41391127027/artifacts/13117856460"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "testCommit": "135c569f",
+      "run": 41392437626,
+      "artifact": 13118113243,
+      "result": "FAIL",
+      "renderer": "swiftshader with guest Vulkan disabled",
+      "findings": [
+        "installed UI counts 1,2,3 passed again",
+        "source cinema details and explicit type choice passed",
+        "same host RenderThread instruction segfault at 05:19:27 UTC; decoded playback not proven"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41392437626/artifacts/13118113243"
+    },
+    {
+      "applicationCommit": "6d99ddb1",
+      "testCommit": "f73af30a",
+      "run": 41394115788,
+      "artifact": 13119285909,
+      "result": "FAIL",
+      "renderer": "swangle ANGLE with guest Vulkan disabled",
+      "findings": [
+        "Host RenderThread did not crash; source cinema route reached actual server UI and decoded playback",
+        "cinema-source advanced 4915ms with 33 decoded frames; 110 dropped frames; functional only, smoothness not certified",
+        "anime-source and cinema-general timed out waiting for visible server rows although native routes were available; foreground lifecycle under investigation",
+        "restart not executed; four observations remain required"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41394115788/artifacts/13119285909"
+    },
+    {
+      "applicationCommit": "bc8626ad",
+      "run": 41407518401,
+      "artifact": 13124820748,
+      "result": "FAIL",
+      "findings": [
+        "cinema source and general decoded functional playback passed; no smoothness certification",
+        "anime-source visible UI had one probed READY route in its actual new session",
+        "driver captured previous closed cinema session from reused sheetBody dataset before new anime prepare replied; waited for old session for 180 seconds",
+        "regressions reproduced stale session binding and lack of close cleanup; fixed in 3f1da5f5",
+        "four fresh observations and restart still required"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41407518401/artifacts/13124820748"
+    },
+    {
+      "applicationCommit": "3f1da5f5",
+      "testCommit": "13c188ba",
+      "run": 41410406717,
+      "artifact": 13125861581,
+      "result": "FAIL",
+      "findings": [
+        "cinema-source, anime-source and cinema-general decoded playback passed in actual UI",
+        "actual MainActivity foreground and visible WebView confirmed after each player exit",
+        "anime-general had no session and reported work missing",
+        "regression reproduced tapping play before canonical AniList aliases arrive: late matching search did not restart an already settled sheet",
+        "c0f1c981 shares the current detail request with playback preparation under the existing cancellation and 45-second deadline; RED/GREEN test and 2045 web tests passed",
+        "restart not attempted; no release published"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41410406717/artifacts/13125861581"
+    },
+    {
+      "applicationCommit": "80b3b1ca",
+      "testCommit": "394a6f6c",
+      "run": 41413601304,
+      "artifact": 13126484728,
+      "result": "PASS",
+      "findings": [
+        "all four source/general DOM-to-actual-decoder cases passed fresh and after real force-stop/restart",
+        "distinct PIDs 2488 and 5653; identical package, source-ID and protected install-file inventory",
+        "2048 web tests, 627 native tests with zero failures/skips, 7 Chromium fixture tests",
+        "functional-only emulator evidence; dropped frames recorded and smoothness not certified"
+      ],
+      "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41413601304",
+      "artifactUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41413601304/artifacts/13126484728"
+    }
+  ],
+  "rendererDocumentation": "https://developer.android.com/studio/run/emulator-acceleration#command-gpu",
+  "renderer": "swangle (ANGLE GLES backend)",
+  "testedCommit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
+  "release": {
+    "status": "PUBLISHED_VERIFIED",
+    "commit": "394a6f6c431671e0b07985d9feede4f48ab20ac1",
+    "branch": "feat/addons-v7-native-manager-20261027",
+    "run": 41415157110,
+    "runUrl": "https://github.com/Meshal515/VANTARA/actions/runs/41415157110",
+    "webRun": 41415157078,
+    "versionName": "0.0.2558",
+    "versionCode": 2558,
+    "native": "b40db82b2cfa3508a51ca6cb",
+    "apk": {
+      "url": "https://github.com/Meshal515/VANTARA/releases/download/debug-channel/VANTARA-debug.apk",
+      "sha256": "e1020b065db176e7db06d8a607515fe69bf70764a9e78e5ff52efee059aff602",
+      "size": 53798411
+    },
+    "certificateSha256": "0b5cce2127f3bb107a3ee01fe7e6c51b58d18ab3fe5292e6b944bbfe86a76bb0",
+    "downloadedApkHashAndSizeVerified": true,
+    "bundledMetadataAndSessionFixesVerified": true,
+    "signedUpgradeGate": "PASS",
+    "webUrl": "https://web-debug.vantara-bcf.pages.dev",
+    "webStatus": "PUBLISHED_HTTP_200_FIX_VERIFIED",
+    "runtimeDebugFingerprintVerified": true
+  }
+}

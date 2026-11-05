@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '1fc718c57a212a2e6132b0a6e21caee7e52d82df956a789749b0ef638d8a9f2c';
+const SHELL_DIGEST = '5f487e90687c94a9f2a59a76ef113cb441de95403598a9865fd97e1bf3b4855a';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -71,6 +71,7 @@ const SHELL = [
   '/lib/plugin-vault.js',
   '/lib/plugin-failure.js',
   '/lib/host-breaker.js',
+  '/lib/route-family.js',
   '/lib/route-validity.js',
   '/addons/native-catalog.js',
   '/v35/reader-scroll.js',
@@ -225,6 +226,10 @@ const SHELL = [
   '/v35/server-sheet.js',
   '/v35/manga.css',
   '/v35/anime.js',
+  '/v35/anime-episodes.js',
+  '/v35/anime-episode-controls.js',
+  '/v35/anime-episodes.css',
+  '/v35/work-dom.js',
   '/v35/cinema.js',
   '/v35/watch-menu.js',
   '/lib/together/offset-controls.js',
@@ -232,6 +237,7 @@ const SHELL = [
   '/v35/anime-depth.js',
   '/v35/appearance.js',
   '/v35/work-looks.js',
+  '/v35/logo-layer.js',
   '/v35/anime-discover.js',
   '/v35/anime-account.js',
   '/v35/rafiq.js',
@@ -248,6 +254,9 @@ const SHELL = [
   '/vendor/gsap.esm.js',
   '/lib/anime-meta.js',
   '/lib/anime-engine.js',
+  '/lib/anime-title.js',
+  '/lib/discovery-diagnostics.js',
+  '/lib/diagnostics-ui.js',
   '/lib/anime-imdb.js',
   '/lib/anime-art.js',
   '/lib/start-memory.js',

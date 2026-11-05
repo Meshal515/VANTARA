@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.mapper
 import dev.vantara.runtime.cloudstream.NetworkBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -56,6 +57,19 @@ open class Requests {
         }.method(method,body).build()
         val configured=client.newBuilder().followRedirects(allowRedirects).followSslRedirects(allowRedirects).callTimeout(timeout,TimeUnit.SECONDS)
         if(interceptor!=null)configured.interceptors().add(0,interceptor)
-        NiceResponse(configured.build().newCall(request).execute(),parser)
+        val call=configured.build().newCall(request)
+        val response=suspendCancellableCoroutine<Response>{continuation->
+            // Cancellation stops bridge admission promptly. An already running synchronous
+            // Binder transaction finishes on its host deadline; the bridge discards its response.
+            continuation.invokeOnCancellation{call.cancel()}
+            // Use the existing bounded IO dispatcher. OkHttp.enqueue rethrows non-IO
+            // interceptor failures on its thread; broker rejections are checked Exceptions.
+            Dispatchers.IO.dispatch(continuation.context,Runnable{
+                if(!continuation.isActive)return@Runnable
+                val ready=try{call.execute()}catch(failure:Throwable){continuation.resumeWith(Result.failure(failure));return@Runnable}
+                continuation.resume(ready){_,unconsumed,_->unconsumed.close()}
+            })
+        }
+        NiceResponse(response,parser)
     }
 }

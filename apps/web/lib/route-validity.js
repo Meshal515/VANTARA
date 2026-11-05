@@ -13,12 +13,14 @@
  * معلن (RANK_CRITERIA) يطبّق على كل الأنواع (مباشر، تورنت، مستخرجات) بالأوزان نفسها.
  */
 import { parseRelease } from '../addons/release-info.js';
+import { isTorrentRoute } from './route-family.js';
 import { FAIL_MS, knownStart, startFeatures } from './start-memory.js';
 
 export const VALIDITY = Object.freeze({ VALID: 'VALID', CHECKING: 'CHECKING', UNAVAILABLE: 'UNAVAILABLE' });
 export const VALIDITY_AR = Object.freeze({ VALID: 'صالح', CHECKING: 'قيد الفحص', UNAVAILABLE: 'غير متاح' });
 
-const isTorrent = (r) => r?.runtimeReady != null || r?.type === 'torrent' || Boolean(r?.infoHash || r?.magnet);
+// The UI and eligibility gate must use the same transport classification.
+const isTorrent = isTorrentRoute;
 
 function seedersOf(r) {
   if (Number.isFinite(r?.seeders)) return r.seeders;

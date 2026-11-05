@@ -8,6 +8,20 @@ on:
   push:
     branches:
       - '**'
+    paths:
+      - 'android/**'
+      - 'apps/web/**'
+      - 'extensions/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'capacitor.config.*'
+      - '.github/workflows/android-debug.yml'
+      - '.github/workflows/runtime-app-debug.yml'
+      - '.github/workflows/runtime-android.yml'
+      - '!**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -32,11 +46,17 @@ jobs:
 
   apk:
     # Ordinary debug artifacts for all other branches are intentionally ephemeral.
-    if: github.ref != 'refs/heads/feat/addons-v7-native-manager-20261027'
+    if: github.ref != 'refs/heads/feat/addons-v7-native-manager-20261027' && github.ref != 'refs/heads/fix/debug-runner-emulator-disk-20261104'
     permissions:
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # Only the isolated experimental Debug branch packages the CloudStream DEX
+    # bridge. This is an ephemeral QA artifact; no Stable, signed Debug channel,
+    # or release workflow is enabled by this switch.
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: ${{ (github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101') && 'true' || 'false' }}
+      VANTARA_RUNTIME_DEBUG: ${{ (github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101') && 'true' || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +132,10 @@ jobs:
             exit "$status"
           done
 
+      - name: Verify the experimental Debug APK actually contains CloudStream native runtime
+        if: github.ref == 'refs/heads/codex/vantara-video-repo-debug-20261101' || github.ref == 'refs/heads/codex/android-video-hardening-20261101'
+        run: python3 tools/android-debug/verify-cloudstream-debug.py android/app/build/outputs/apk/debug/app-debug.apk
+
       # الفشل معلومة بقدر النجاح: نريد سببه كاملًا لا سطرًا واحدًا
       - name: Report build failure
         if: failure()
@@ -136,7 +160,7 @@ jobs:
           name: vantara-debug-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   # The owner-approved feature branch gets a persistent signed QA build.
   # Other branches NEVER receive production signing secrets or release rights.
@@ -171,6 +195,7 @@ jobs:
           pnpm --filter @vantara/domain build
           pnpm test:web
           pnpm test:safety
+          node --test tools/repository-compat/webview-lifecycle.test.mjs
           python3 -m unittest discover -s tools/android-debug -p 'test_*.py' -v
 
       - name: Download the actual previous signed Debug APK and manifest
@@ -268,6 +293,9 @@ jobs:
           cp "$apk" dist/VANTARA-debug.apk
           sha256sum dist/VANTARA-debug.apk > dist/VANTARA-debug.apk.sha256
 
+      - name: Reserve disk space before upgrade emulator SDK download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+
       - name: Enable KVM for Android emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -286,13 +314,18 @@ jobs:
           profile: pixel_3a
           ram-size: 4096M
           heap-size: 512M
-          disk-size: 8G
+          # Data image needs at least 6 GiB; keep test assertions unchanged.
+          disk-size: 6G
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # The Android image is downloaded AFTER the early preflight; assert
+          # enough free disk remains immediately before actual AVD startup.
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
           script: bash tools/android-debug/upgrade-check.sh "$RUNNER_TEMP/previous-debug/VANTARA-debug.apk" dist/VANTARA-debug.apk
 
       - name: Retain Debug upgrade, crash, ANR, and renderer evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-upgrade-evidence
@@ -300,7 +333,7 @@ jobs:
             android-debug-evidence/
             android/app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 1
 
       - name: Generate versioned SHA256 manifest for dedicated Debug updates
         env:
@@ -327,15 +360,7 @@ jobs:
           Path('dist/vantara-debug-update.json').write_text(json.dumps(out,ensure_ascii=False,separators=(',',':'))+'\n')
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: VANTARA-upgradeable-debug
-          path: |
-            dist/VANTARA-debug.apk
-            dist/VANTARA-debug.apk.sha256
-            dist/vantara-debug-update.json
-          if-no-files-found: error
-          retention-days: 30
+      # Signed Debug APK and manifest will be uploaded to GitHub Releases below.
 
       - name: Publish isolated prerelease Debug channel (never Stable/latest)
         env:

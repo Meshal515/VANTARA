@@ -1,5 +1,35 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, judgeAnimeCopy, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute, withPhaseDeadline } from './anime-engine.js';
+
+describe('canonical anime identity', () => {
+  it.each([
+    ['Attack on Titan Season 2', 'Attack on Titan Season 3'],
+    ['Re Zero Season 2 Part 1', 'Re Zero Season 2 Part 2'],
+    ['The Ancient Magus Bride', 'The Ancient Magus Bride 2'],
+    ['Mushoku Tensei II', 'Mushoku Tensei III'],
+    ['ون بيس الموسم الثاني', 'ون بيس الموسم الثالث'],
+    ['One Piece', 'One Piece Movie'],
+  ])('rejects a different edition: %s versus %s', (wanted, title) => {
+    expect(judgeAnimeCopy({ title }, [wanted])).toMatchObject({ ok: false, reason: 'sequel' });
+  });
+  it.each([
+    ['Attack on Titan Season 2', 'Attack on Titan 2nd Season'],
+    ['Mushoku Tensei II', 'Mushoku Tensei Season 2'],
+    ['Kaiju No. 8', 'Kaiju No. 8 (TV)'],
+    ['86', '86 (TV)'],
+    ['ون بيس Season 2', 'ون بيس الجزء الثاني'],
+  ])('accepts equivalent edition spelling: %s versus %s', (wanted, title) => {
+    expect(judgeAnimeCopy({ title }, [wanted]).ok).toBe(true);
+  });
+  it('uses known movie format even when the title has no movie suffix', () => {
+    expect(judgeAnimeCopy({ title: 'One Piece Movie' }, ['One Piece'], { format: 'MOVIE' }).ok).toBe(true);
+    expect(judgeAnimeCopy({ title: 'One Piece Movie' }, ['One Piece'], { format: 'TV' }).ok).toBe(false);
+  });
+  it('does not require a provider to repeat the known movie format in its title', () => {
+    expect(judgeAnimeCopy({ title: 'A Silent Voice مترجم' }, ['A Silent Voice'], { format: 'MOVIE' }).ok).toBe(true);
+    expect(judgeAnimeCopy({ title: 'A Silent Voice', format: 'TV' }, ['A Silent Voice'], { format: 'MOVIE' }).ok).toBe(false);
+  });
+});
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -91,11 +121,11 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
   });
 
   /** محرك وهمي: كل مصدر يرد بعد زمنه، و`searchDone` بعد أبطئهم. */
-  function fakeEngine(plan) {
+  function fakeEngine(plan, debug = false) {
     const listeners = {};
     const asked = [];
     globalThis.Capacitor = { Plugins: { AnimeEngine: {
-      configure: async () => ({ ok: true, errors: [] }),
+      configure: async () => ({ ok: true, errors: [], debug }),
       addListener: async (name, fn) => {
         (listeners[name] ??= new Set()).add(fn);
         return { remove() { listeners[name].delete(fn); } };
@@ -106,7 +136,7 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
         let last = 0;
         for (const h of hits) {
           last = Math.max(last, h.after);
-          setTimeout(() => { for (const fn of listeners.searchHit ?? []) fn({ searchId, sourceId: h.sourceId, items: h.items, ms: h.after }); }, h.after);
+          setTimeout(() => { for (const fn of listeners.searchHit ?? []) fn({ ...h, searchId, ms: h.after }); }, h.after);
         }
         setTimeout(() => { for (const fn of listeners.searchDone ?? []) fn({ searchId }); }, last + 1);
         return { searchId };
@@ -115,6 +145,29 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
     return { asked };
   }
   const copy = (sourceId, title) => ({ sourceId, url: `/${sourceId}/${title}`, title });
+
+  it('preserves a native page failure in Debug evidence instead of only the generic discovery error', async () => {
+    const { findWorkStream } = await import('./anime-engine.js');
+    const { discoveryDiagnostics } = await import('./discovery-diagnostics.js');
+    fakeEngine({ Example: [{ sourceId: 'source-b', items: [], after: 1, page: 2, error: 'HTTP 522', diagnostic: 'java.net.UnknownHostException: original DNS failure' }] }, true);
+    await configure({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+    await expect(findWorkStream(['Example'])).rejects.toThrow('تعذّر');
+    expect(discoveryDiagnostics().at(-1).events).toContainEqual(expect.objectContaining({ stage: 'source_page', sourceId: 'source-b', page: 2, diagnostic: 'java.net.UnknownHostException: original DNS failure' }));
+  });
+
+  it('discovers a source requiring a later alias after another source has matched', async () => {
+    vi.useFakeTimers();
+    try {
+      const { findWorkStream } = await import('./anime-engine.js');
+      fakeEngine({ English: [{ sourceId: 'a', items: [copy('a', 'English')], after: 1 }], Arabic: [{ sourceId: 'b', items: [copy('b', 'Arabic')], after: 1 }] });
+      await configure({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+      const updates = [];
+      const first = findWorkStream(['English', 'Romaji', 'Arabic'], w => updates.push(w));
+      await vi.advanceTimersByTimeAsync(20);
+      expect((await first).copies.map(c => c.sourceId)).toEqual(['a']);
+      expect(updates.at(-1)?.copies.map(c => c.sourceId)).toEqual(['a', 'b']);
+    } finally { vi.useRealTimers(); }
+  });
 
   it('ReZero romaji matches immediately while the English query is stalled', async () => {
     vi.useFakeTimers();
@@ -185,5 +238,16 @@ describe('شاهد اللقطة', () => {
     expect(momentRange('الحلقة 3 · 1:02:10–1:02:30')).toEqual({ startMs: 3_730_000, endMs: 3_750_000 });
     expect(momentRange('الحلقة 3')).toBeNull();
     expect(momentRange('الحلقة 3 · 2:00–1:00')).toBeNull();
+  });
+});
+
+describe('prepare stage timeouts', () => {
+  it('returns the original completed value and clears the deadline', async () => {
+    await expect(withPhaseDeadline(Promise.resolve({ ok: true }), 100, 'TEST')).resolves.toEqual({ ok: true });
+  });
+  it('returns a stable error code instead of awaiting an unresponsive bridge forever', async () => {
+    await expect(withPhaseDeadline(new Promise(() => {}), 10, 'BRIDGE_STAGE_TIMEOUT')).rejects.toMatchObject({
+      code: 'BRIDGE_STAGE_TIMEOUT',
+    });
   });
 });

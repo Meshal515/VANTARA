@@ -17,12 +17,38 @@ import { isNativeRuntimeCopy } from '../addons/cloudstream-runtime.js';
 import { nativeAddonPreparation } from '../addons/native-preparation.js';
 import { isNative, webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { withImdbEpisode } from './anime-imdb.js';
+import { animeTitle } from './anime-title.js';
+import { beginDiscovery, isDiscoveryDebug, setDiscoveryDebug } from './discovery-diagnostics.js';
 
 // الجسر الأصلي، أو جسر الـPWA في المتصفح (pwa/bridges/anime.js)، أو null.
 // داخل الـAPK `webPlugin()` يرجع null دائمًا.
 const bridge = () => desktopPlugin('AnimeEngine') ?? globalThis.Capacitor?.Plugins?.AnimeEngine ?? webPlugin('AnimeEngine');
 
 export const available = () => bridge() !== null;
+
+/** A bridge/runtime promise that never settles must not block a work screen forever. */
+export function withPhaseDeadline(promise, timeoutMs, code = 'PREPARE_STAGE_TIMEOUT', { signal } = {}) {
+  let timer;
+  let onAbort;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('انتهت مهلة تجهيز السيرفرات');
+        error.code = code;
+        reject(error);
+      }, timeoutMs);
+    }),
+    ...(signal ? [new Promise((_, reject) => {
+      onAbort = () => reject(new DOMException('تم إلغاء تجهيز السيرفرات', 'AbortError'));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    })] : []),
+  ]).finally(() => {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  });
+}
 
 /**
  * بنر العمل وشعاره إلى كاش المشغّل الأصلي لحظة تجهيز السيرفرات، فتفتح شاشة التحميل بهما فورًا
@@ -78,6 +104,7 @@ export function configure({ force = false, fetchImpl = globalThis.fetch } = {}) 
     const res = await fetchImpl('/anime/sources.json', { cache: 'no-cache' });
     const manifest = await res.json();
     const out = await plugin.configure({ manifest });
+    setDiscoveryDebug(out?.debug === true);
     if (!out?.ok) throw new Error(`بيان المصادر مرفوض: ${(out?.errors ?? []).join('، ')}`);
     return manifest;
   })().catch((e) => {
@@ -87,10 +114,11 @@ export function configure({ force = false, fetchImpl = globalThis.fetch } = {}) 
   return configured;
 }
 
-async function call(method, args = {}) {
+async function call(method, args = {}, { signal } = {}) {
   const plugin = bridge();
   if (!plugin) return null;
   await configure();
+  signal?.throwIfAborted();
   return plugin[method](args);
 }
 
@@ -129,7 +157,7 @@ export async function verify(sourceId) {
  * حين يرد الجميع، أو null إن تعذّر البحث. محرك أقدم بلا البث يُغذّى من البحث
  * المجمّع (نفس الشكل، بزمن واحد للكل).
  */
-export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null } = {}) {
+export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined, diagnostic = null } = {}) {
   const plugin = bridge();
   if (!plugin) return { done: Promise.resolve(null), cancel() {} };
   const searchId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -140,12 +168,22 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
   const end = (value) => {
     if (over) return;
     over = true;
+    signal?.removeEventListener('abort', cancel);
     for (const h of handles) void Promise.resolve(h).then((x) => x?.remove?.());
     handles = [];
     settle(value);
   };
+  const cancel = () => {
+    if (over) return;
+    try { void Promise.resolve(plugin.cancelSearch?.({ searchId })).catch(() => {}); } catch {}
+    end(false);
+  };
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
   void (async () => {
+    if (over) return;
     await configure();
+    if (over) return;
     if (typeof plugin.searchStream !== 'function') {
       const t0 = Date.now();
       const works = await search(query, content).catch(() => null);
@@ -156,24 +194,27 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
       return end(true);
     }
     // المستمعان قبل الطلب: أسرع مصدر قد يرد قبل أن يعود النداء نفسه
-    handles = [
-      await plugin.addListener('searchHit', (e) => {
-        if (e.searchId !== searchId) return;
+    const listen = async (name, fn) => {
+      const handle = await plugin.addListener(name, fn);
+      if (over) { handle?.remove?.(); return false; }
+      handles.push(handle);
+      return true;
+    };
+    if (!await listen('searchHit', (e) => {
+        if (over || e.searchId !== searchId) return;
         if (e.needsHuman) for (const fn of humanListeners) fn(e.sourceId);
-        if (!over) onHit(e);
-      }),
-      await plugin.addListener('searchDone', (e) => e.searchId === searchId && end(true)),
-    ];
-    if (over) return end(false);
+        onHit(e);
+      })) return;
+    if (!await listen('searchDone', (e) => {
+      if (e.searchId !== searchId) return;
+      if (e.error) diagnostic?.record('bridge_search_failed', { query, searchId, error: e.error, diagnostic: e.diagnostic });
+      end(e.error ? null : true);
+    })) return;
     await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}) });
-  })().catch(() => end(null));
+  })().catch(error => { diagnostic?.record('bridge_search_failed', { query, searchId, error }); end(null); });
   return {
     done,
-    cancel() {
-      if (over) return;
-      void plugin.cancelSearch?.({ searchId })?.catch?.(() => {});
-      end(false);
-    },
+    cancel,
   };
 }
 
@@ -187,15 +228,15 @@ export async function extend(session, copies) {
   if (isNative() && plugin.appendAddonStreams && plugin.extendAddonSources) {
     const state = nativeAddonSessions.get(session);
     if (!state) return 0;
-    const native = copies.filter(c => !c.sourceId?.startsWith('addon|'));
-    const external = copies.filter(c => c.sourceId?.startsWith('addon|') && !state.sources.has(c.sourceId));
-    let added = native.length ? (await plugin.extend({ session, copies: native }).catch(() => null))?.added ?? 0 : 0;
+    const native = copies.filter(isNativeRuntimeCopy);
+    const external = copies.filter(c => !isNativeRuntimeCopy(c) && !state.sources.has(c.sourceId));
+    let added = native.length ? (await withPhaseDeadline(plugin.extend({ session, copies: native, addonGeneration: state.generation }), 15_000, 'ENGINE_EXTEND_TIMEOUT').catch(() => null))?.added ?? 0 : 0;
     if (nativeAddonSessions.get(session) !== state) return 0;
     if (external.length) {
-      const runtime = await getAddonRuntime(); await runtime.ready;
+      const runtime = await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await withPhaseDeadline(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
       if (nativeAddonSessions.get(session) !== state) return 0;
       const plan = nativeAddonPreparation({ runtime, copies: external, episode: state.episode });
-      const reserved = await plugin.extendAddonSources({ session, sourceIds: plan.sourceIds, addonGeneration: state.generation });
+      const reserved = await withPhaseDeadline(plugin.extendAddonSources({ session, sourceIds: plan.sourceIds, addonGeneration: state.generation }), 15_000, 'ENGINE_EXTEND_TIMEOUT');
       if (nativeAddonSessions.get(session) !== state) return 0;
       if (reserved?.added) { startNativeAddons(session, plan, plugin, state); added += reserved.added; }
     }
@@ -234,23 +275,35 @@ const YEAR = /(?:^|\D)((?:19|20)\d{2})(?!\d)/;
 // وسم صيغة/نسخة بين قوسين ليس من الاسم: «Jujutsu Kaisen (TV)» = «Jujutsu Kaisen»
 const FORMAT_TAG = /\s*[([]\s*(?:tv|dub|dubbed|sub|subbed|uncensored|مترجم|مدبلج)\s*[)\]]\s*/giu;
 
-export function judgeAnimeCopy(c, titles, { year = null } = {}) {
+export function judgeAnimeCopy(c, titles, { year = null, format = null } = {}) {
   const wanted = titles.filter(Boolean).map(fold);
   const title = fold(String(c.title ?? '').replace(FORMAT_TAG, ' '));
   const y = Number(YEAR.exec(String(c.title ?? ''))?.[1] ?? NaN);
   if (year && Number.isFinite(y) && Math.abs(y - year) > 1 && !wanted.some((t) => t.includes(String(y)))) return { ok: false, score: 0, reason: 'year' };
+  if (format && c.format && (format === 'MOVIE') !== (c.format === 'MOVIE')) return { ok: false, score: 0, reason: 'sequel', expected: format, actual: c.format };
   if (wanted.includes(title)) return { ok: true, score: 1, reason: null };
-  const words = new Set(title.split(' '));
+  const edition = animeTitle(title);
+  const sourceMovie = c.format ? c.format === 'MOVIE' : edition.movie ? true : /\b(?:tv|series)\b|مسلسل/i.test(String(c.title ?? '')) ? false : null;
+  const keys = wanted.map(animeTitle);
+  const seasons = keys.map(k => k.season).filter(n => n != null);
+  const parts = keys.map(k => k.part).filter(n => n != null);
+  const words = new Set(edition.base.split(' '));
   let best = 0;
   let bestWanted = '';
-  for (const t of wanted) {
-    const tw = t.split(' ').filter(Boolean);
+  let compatible = false;
+  for (const [index, key] of keys.entries()) {
+    const tw = key.base.split(' ').filter(Boolean);
     const score = tw.length ? tw.filter((x) => words.has(x)).length / Math.max(tw.length, words.size) : 0;
-    if (score > best) [best, bestWanted] = [score, t];
+    if (score > best) [best, bestWanted] = [score, wanted[index]];
+    const movie = format ? format === 'MOVIE' : keys.some(k => k.movie);
+    if (score >= 0.75 && (edition.season ?? 1) === (key.season ?? seasons[0] ?? 1)
+      && (edition.part ?? 1) === (key.part ?? parts[0] ?? 1) && (sourceMovie == null || sourceMovie === movie)) compatible = true;
   }
   if (best < 0.75) return { ok: false, score: best, reason: 'title' };
-  const extra = [...words].filter((w) => !bestWanted.split(' ').includes(w)).join(' ');
-  if (SEQUEL.test(` ${extra} `) && !wanted.some((t) => SEQUEL.test(` ${t} `))) return { ok: false, score: best, reason: 'sequel' };
+  if (!compatible) return { ok: false, score: best, reason: 'sequel', expected: keys, actual: edition };
+  const originalWords = new Set(title.split(' '));
+  const extra = [...originalWords].filter((w) => !bestWanted.split(' ').includes(w)).join(' ');
+  if (SEQUEL.test(` ${extra} `) && !wanted.some((t) => SEQUEL.test(` ${t} `)) && !(format === 'MOVIE' && edition.movie)) return { ok: false, score: best, reason: 'sequel' };
   return { ok: true, score: best, reason: null };
 }
 
@@ -287,10 +340,13 @@ export function pickCopies(items, titles, criteria = {}) {
 /**
  * مثل [findWork] لكن متدفقًا: يرجع العمل لحظة يطابق أول مصدر، ولا ينتظر أبطأ
  * المصادر (مصدر معطّل قد يأخذ 20 ثانية ليفشل). ما يصل بعدها من نسخ يُبلَّغ
- * عبر `onWork(work)` بالعمل نفسه وقد كبر. عنوان بديل يُسأل فقط إن لم يطابق الأول.
+ * عبر `onWork(work)` بالعمل نفسه وقد كبر. تستمر بقية الأسماء في الخلفية بعد أول تطابق.
  */
 export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
   return new Promise((resolve, reject) => {
+    const { signal } = criteria;
+    const trace = criteria.diagnostic ?? beginDiscovery({ titles, format: criteria.format, year: criteria.year });
+    if (signal?.aborted) { reject(new DOMException('تم إلغاء البحث', 'AbortError')); return; }
     let first = null;
     let next = 0;
     let uncertain = false;
@@ -300,9 +356,17 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
     // English and romaji must not wait behind each other's slow sources.
     // Matching still uses the complete canonical titles and season/year guards.
     const worker = async () => {
-      while (next < queries.length && !first) {
+      await configure();
+      while (next < queries.length && !signal?.aborted) {
         const query = queries[next++];
+        trace.record('query_started', { query });
         const { done } = searchStream(query, 'anime', (hit) => {
+          trace.record('source_page', { query, sourceId: hit.sourceId, page: hit.page, hasNext: hit.hasNext, stop: hit.stop,
+            received: hit.items?.length ?? 0, error: hit.error, diagnostic: hit.diagnostic, skipped: hit.skipped });
+          if (isDiscoveryDebug()) for (const copy of hit.items ?? []) {
+            const judgment = judgeAnimeCopy(copy, titles, criteria);
+            trace.record(judgment.ok ? 'candidate_accepted' : 'candidate_rejected', { sourceId: copy.sourceId, title: copy.title, ...judgment });
+          }
           if (hit.error || hit.skipped) uncertain = true;
           items.push(...(hit.items ?? []));
           const work = pickCopies(items, titles, criteria);
@@ -314,11 +378,13 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
             first = work;
             onWork(work);
           }
-        });
+        }, { signal, diagnostic: trace });
         if (await done === null) uncertain = true;
+        if (signal?.aborted) throw new DOMException('تم إلغاء البحث', 'AbortError');
       }
     };
     void Promise.all([worker(), worker()]).then(() => {
+      trace.record('discovery_complete', { sources: first?.copies?.map(c => c.sourceId) ?? [], uncertain, aliasesSearched: next, aliasesTotal: queries.length });
       if (first) return;
       if (uncertain) reject(new Error('تعذّر التحقق من بعض المصادر — أعد المحاولة'));
       else resolve(null);
@@ -359,11 +425,13 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null }) {
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null, signal = undefined }) {
+  signal?.throwIfAborted();
   const plugin = bridge();
   const native = isNative() && plugin?.appendAddonStreams;
   const id = session ?? `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let state;
+  const phase = (promise, timeoutMs, code) => withPhaseDeadline(promise, timeoutMs, code, { signal });
   if (native) {
     cancelNativeAddons(id);
     state = { episode, sources: new Set(), jobs: new Set(), generation: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` };
@@ -380,41 +448,52 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   };
   try {
   if (identity && !deferMapping) {
-    copies = await withAddonCopies(copies, context.identity);
+    copies = await phase(withAddonCopies(copies, context.identity), 45_000, 'ADDON_DISCOVERY_TIMEOUT');
     const mapped = copies.find(c => c.identity?.externalIds?.kitsu);
     if (mapped) context.identity = mapped.identity;
   }
   if (native) {
     if (nativeAddonSessions.get(id) !== state) return null;
-    const runtime = await getAddonRuntime(); await runtime.ready;
+    const runtime = await phase(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT'); await phase(runtime.ready, 15_000, 'ADDON_READY_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     state.snapshot = runtime.registry.snapshot?.();
     const plan = nativeAddonPreparation({ runtime, copies, episode });
-    await configure();
+    await phase(configure(), 15_000, 'ENGINE_CONFIG_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
-    const out = await plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation });
+    const preparing = Promise.resolve(plugin.prepare({ copies: copies.filter(isNativeRuntimeCopy), identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id, addonSources: plan.sourceIds, addonProviders: plan.providers, addonGeneration: state.generation }));
+    void preparing.then(() => {
+      // An RPC can open native resources after its caller already abandoned it.
+      if (!nativeAddonSessions.has(id)) {
+        try { void Promise.resolve(plugin.closeSession?.({ session: id })).catch(() => {}); } catch {}
+      }
+    }, () => {});
+    const out = await phase(preparing, 15_000, 'ENGINE_PREPARE_TIMEOUT');
     if (nativeAddonSessions.get(id) !== state) return null;
     if (out?.session === id) startNativeAddons(id, plan, plugin, state);
     else cancelNativeAddons(id);
     if (out?.session === id) attachDiscovery();
     return out ? { ...out, copies } : null;
   }
-  const out = await call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id });
+  const out = await phase(call('prepare', { copies, identity, episode, quality, variant, preferredSourceId, preferredServer, probe, session: id }, { signal }), 30_000, 'ENGINE_PREPARE_TIMEOUT');
   if (out?.session === id && addonDiscoverySessions.get(id) === context) attachDiscovery();
   else if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
   return out ? { ...out, copies: out.copies ?? copies } : null;
   } catch (error) {
     if (addonDiscoverySessions.get(id) === context) addonDiscoverySessions.delete(id);
-    if (native && nativeAddonSessions.get(id) === state) cancelNativeAddons(id);
+    if (native && nativeAddonSessions.get(id) === state) {
+      cancelNativeAddons(id);
+      // A timed-out bridge could have opened native resources before JS was notified.
+      try { void Promise.resolve(plugin?.closeSession?.({ session: id })).catch(() => {}); } catch {}
+    }
     throw error;
   }
 }
 
 /** إضافات الفيديو تستخدم الهوية المؤكدة فقط، وتلتحق بالمصادر الأصلية على المنصتين. */
 export async function withAddonCopies(copies, identity) {
-  const a=await getAddonRuntime();await a.ready;
+  const a=await withPhaseDeadline(getAddonRuntime(), 15_000, 'ADDON_RUNTIME_TIMEOUT');await withPhaseDeadline(a.ready, 15_000, 'ADDON_READY_TIMEOUT');
   if (isNative() && a.nativeCapabilities?.().addonStreams !== true) return copies;
-  identity = await a.enrichAnimeIdentity?.(identity) ?? identity;
+  identity = await withPhaseDeadline(a.enrichAnimeIdentity?.(identity), 15_000, 'ADDON_IDENTITY_TIMEOUT') ?? identity;
   const extra=addonCopies(a.registry,identity,a.runtimeName ?? (isNative() ? 'apk' : 'pwa'));
   const refreshed = copies.map(c => extra.find(fresh => fresh.sourceId === c.sourceId && fresh.id === (c.id ?? c.url)) ?? c);
   return [...refreshed,...extra.filter(c=>!copies.some(old=>old.sourceId===c.sourceId))];
@@ -440,8 +519,9 @@ export function retrySeconds(retryAt, now = Date.now()) {
   return Number.isFinite(retryAt) ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 }
 
-export async function routes(session) {
-  return (await call('routes', { session })) ?? null;
+export async function routes(session, { signal } = {}) {
+  signal?.throwIfAborted();
+  return (await withPhaseDeadline(call('routes', { session }, { signal }), 15_000, 'ENGINE_ROUTES_TIMEOUT', { signal })) ?? null;
 }
 
 /** «شغّل الأفضل»: ينتظر أول سيرفر يجهز إن لم يجهز شيء بعد. */

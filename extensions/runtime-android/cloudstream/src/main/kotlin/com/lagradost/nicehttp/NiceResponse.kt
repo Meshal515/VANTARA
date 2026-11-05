@@ -8,6 +8,8 @@ import java.nio.charset.Charset
 
 /** Response snapshots keep repeated parser/text reads meaningful after the stream closes. */
 class NiceResponse(val response:Response,private val responseParser:ResponseParser?=null) {
+    /** NiceHttp's public name for the same already-brokered response; never another request. */
+    val okhttpResponse:Response get()=response
     private val bytes:ByteArray=response.body?.use{it.bytes()}?:ByteArray(0)
     val code:Int get()=response.code
     val url:String get()=response.request.url.toString()

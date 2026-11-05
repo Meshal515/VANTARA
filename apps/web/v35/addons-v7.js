@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 
 /* VANTARA V7 live add-on manager.
  * Presentation only: no migration, reset, deletion, or replacement of stored data.
@@ -60,9 +61,8 @@ const kindName=(a)=>{
   return "مصدر";
 };
 
-// فهارس المستودعات المقروءة تبقى بين إعادة رسم الصفحة: التثبيت يعيد بناءها، وكانت القائمة كلها تختفي
-// («جارٍ تحميل المصادر…») حتى يُقرأ الفهرس من جديد. القديم يُعرض فورًا ويُستبدل حين يصل الجديد.
-const indexCache=new Map();
+// Discovery belongs to this manager instance. Native installed flags and API objects
+// must never survive into another account or native-store instance.
 export function renderV7Addons({
   registry={}, filter="all", repositories=null, readySources=null, animeRepositories=null, cloudstreamRepositories=null, sites=null, verification=null, pulse=null,
   onOpenSource=()=>{}, onOpenNativeSource=null, onBack=()=>{}, onSourcesChanged=()=>{}, onCheck, initialState={},
@@ -71,9 +71,10 @@ export function renderV7Addons({
   root.dir="rtl";
   if(["anime","manga","cinema"].includes(filter))root.dataset.sectionHub=filter;
   let alive=true, tab=["repos","installed","verification"].includes(initialState.tab)?initialState.tab:"repos", opened=null, currentSearch=String(initialState.search||"").trim().toLocaleLowerCase(), type=String(initialState.type||"الكل");
-  let restoreKey=initialState.openedKey||null, restoreScroll=true;
+  let restoreKey=initialState.openedKey||null, restoreScroll=Number.isFinite(initialState.scrollTop)||Number.isFinite(initialState.scrollY);
   let busy=false, generation=0, lifecycle=0, menuOpen=false, diagnosticController=null;
-  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), diagnosticResults=new Map();
+  const timers=new Set(), extensionErrors=new Map(), installedMetadata=new Map(), pendingMetadata=new Map(), diagnosticResults=new Map();
+  const nativeRows=new Map(), installs=new Map(), metadataRevision=new Map();
   let requests=new Map(), queue=[], activeRequests=0;
   const stores=[
     ...(cloudstreamRepositories?[{id:"cloudstream",kind:"anime",family:"cloudstream",api:cloudstreamRepositories}]:[]),
@@ -82,7 +83,7 @@ export function renderV7Addons({
     // مصادر المانجا التي كانت مدمجة: تُضاف لحسابك بمعرّفها القديم (lib/extension-engine.js readySources)
     ...(readySources?[{id:"ready",kind:"manga",api:readySources}]:[])
   ];
-  let repos=[], extensions=new Map(indexCache), siteRows=[], loading=false;
+  let repos=[], extensions=new Map(), siteRows=[], loading=false;
   const head=el("div","v7-heading");
   const add=btn("أضف","v7-plus",()=>showImport());
   add.prepend(ico("plus"));
@@ -120,7 +121,7 @@ export function renderV7Addons({
     try{Promise.resolve(callback(...args)).catch(err=>notify(fmtErr(err)));}
     catch(err){notify(fmtErr(err));}
   };
-  const sourcesChanged=()=>invoke(onSourcesChanged);
+  const sourcesChanged=(change)=>invoke(onSourcesChanged,change);
   root.addEventListener("addon-configured",()=>{if(alive){void refresh();sourcesChanged();}});
   const later=(callback,delay)=>{
     const id=setTimeout(()=>{timers.delete(id);if(alive)callback();},delay);
@@ -184,16 +185,17 @@ export function renderV7Addons({
    * (apple-touch-icon ثم favicon، من الموقع مباشرة بلا طرف ثالث). بلا شيء: الحرف الأول بلون القسم.
    */
   function logoCandidates(item,fallback,repo){
-    const out=[item.iconUrl,item.icon,item.logo,item.imageUrl,fallback?.iconUrl,fallback?.icon,fallback?.logo];
+    const out=[item.iconUrl,item.icon,item.logo,item.imageUrl];
     const indexUrl=item._url||item.repo||item.repoUrl||(repo?item.url:null);
     try{
       const index=new URL(String(indexUrl||""));
-      if(item.pkg&&/\.json$/i.test(index.pathname))out.push(new URL("icon/"+item.pkg+".png",index).href);
+      if(item.pkg&&/\.(?:json|pb)$/i.test(index.pathname))out.push(new URL("icon/"+item.pkg+".png",index).href);
       const gh=index.hostname==="raw.githubusercontent.com"?index.pathname.split("/")[1]:/^([a-z0-9-]+)\.github\.io$/i.exec(index.hostname)?.[1];
       if(repo&&gh)out.push("https://avatars.githubusercontent.com/"+gh+"?size=96");
     }catch{}
     const site=[item.baseUrl,item.mainUrl,item.siteUrl,item.domain&&("https://"+String(item.domain).replace(/^https?:\/\//,"")),item.transportUrl,item.manifestUrl].find(Boolean);
     try{const host=new URL(String(site||"")).origin;if(/^https:/.test(host)&&!repo)out.push(host+"/apple-touch-icon.png",host+"/favicon.ico");}catch{}
+    out.push(fallback?.iconUrl,fallback?.icon,fallback?.logo);
     return [...new Set(out.map(u=>typeof u==="string"?u.replace(/%size%/g,"128"):u).map(safeIcon).filter(Boolean))];
   }
   function logo(item,fallback,repo=false){
@@ -204,16 +206,18 @@ export function renderV7Addons({
     if(initial){abbr.textContent=initial.toLocaleUpperCase();abbr.classList.add("v7-initial");}else abbr.append(ico("box"));
     box.append(abbr);
     const urls=logoCandidates(item,fallback,repo);
-    let idx=0;
+    let idx=0,cancelled=false;
+    box.disposeLogo=()=>{cancelled=true;for(const img of box.querySelectorAll("img")){img.onload=null;img.onerror=null;img.removeAttribute("src");}};
     const next=()=>{
-      if(!alive||idx>=urls.length)return;
+      if(!alive||cancelled||idx>=urls.length)return;
       const img=el("img");img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";
       // أيقونة 16px (favicon افتراضي) لا تُقرأ في مربع 44: التالية بدلها
-      img.onload=()=>{if(img.naturalWidth<=16){img.remove();next();}else{abbr.hidden=true;}};
-      img.onerror=()=>{img.remove();next();};
+      img.onload=()=>{if(!alive||cancelled)return;if(img.naturalWidth<=16){img.remove();next();}else{abbr.hidden=true;}};
+      img.onerror=()=>{if(!alive||cancelled)return;img.remove();next();};
       img.src=urls[idx++];box.append(img);
     };next();return box;
   }
+  function disposeLogos(container){for(const box of container.querySelectorAll(".v7-logo"))box.disposeLogo?.();}
   function empty(title,text){
     const e=el("div","v7-empty"),sym=el("div","v7-empty-symbol");sym.append(ico("box"));
     e.append(sym,el("h3",null,title),el("p",null,text));return e;
@@ -289,6 +293,7 @@ export function renderV7Addons({
   }
   // الحالة تظهر حين تهم فقط (مشكلة بسببها)؛ «مثبتة ·» داخل التبويب نفسه زائدة فتُخفى بصريًا
   function status(a){
+    if(a.pendingRestore){const node=el("span","v7-status visible");node.dataset.state="restore";node.append(el("span","v7-status-label","بانتظار الاستعادة"));node.title="اختيارك محفوظ؛ استعد الحزمة لفتح المصدر.";return node;}
     const result=installedState(a),node=el("span","v7-status visible");
     node.append(el("span","v7-status-pre","مثبتة · "),el("span","v7-status-label",result.label));
     node.dataset.state=result.state;node.title=result.detail;return node;
@@ -299,13 +304,13 @@ export function renderV7Addons({
     const node=el("span","v7-why",result.detail);node.dir="auto";return node;
   }
   function sourceRow(a,mode,parent){
-    const row=el("article","v7-row");row.tabIndex=0;
+    const row=el("article","v7-row");row.tabIndex=0;row.addonRecord=a;
     row.setAttribute("role","button");row.setAttribute("aria-label","تفاصيل "+a.name);
-    const logoBox=logo(a,parent),info=el("div","v7-info");
+    let logoBox=logo(a,parent);const info=el("div","v7-info");
     info.append(el("div","v7-name",a.name),el("div","v7-meta",sourceMeta(a)));
     const statusSlot=el("div","v7-status-slot"),stateLabel=status(a);
     const isAdded=mode==="remote"?true:!!(a.installed||a.builtin||a.update);
-    if(!isAdded)stateLabel.classList.remove("visible");
+    if(!isAdded&&!a.pendingRestore)stateLabel.classList.remove("visible");
     statusSlot.append(stateLabel);
     const reason=isAdded?why(a):null;if(reason)statusSlot.append(reason);
     info.append(statusSlot);
@@ -334,12 +339,12 @@ export function renderV7Addons({
       }else{
       const slot=el("div","v7-trash-holder");
       const trash=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"native");});
-      trash.append(ico("trash"));trash.setAttribute("aria-label","حذف "+a.name);if(!a.builtin)slot.append(trash);
-      if(isAdded)slot.classList.add("visible");
+      trash.append(ico("trash"));trash.setAttribute("aria-label",(a.pendingRestore?"إزالة اختيار ":"حذف ")+a.name);if(!a.builtin)slot.append(trash);
+      if(isAdded||a.pendingRestore)slot.classList.add("visible");
       const flip=el("button","v7-flip"+(isAdded?" installed":""));
-      flip.type="button";flip.setAttribute("aria-label",(isAdded?"فتح ":"تثبيت ")+a.name);
+      flip.type="button";flip.setAttribute("aria-label",(isAdded?"فتح ":a.pendingRestore?"استعادة ":"تثبيت ")+a.name);
       const rotor=el("span","v7-rotor");
-      const front=el("span","v7-face v7-front","تثبيت");
+      const front=el("span","v7-face v7-front",a.pendingRestore?"استعادة":"تثبيت");
       const rear=el("span","v7-face v7-rear");
       rear.append(ico("open"),el("span",null,"فتح"));rotor.append(front,rear);flip.append(rotor);
       flip.onclick=async e=>{
@@ -349,26 +354,26 @@ export function renderV7Addons({
           if(onOpenNativeSource)openNative(a);else showDetails(a,"native",parent);
           return;
         }
-        flip.disabled=true;
-        const installLifecycle=lifecycle;
-        try{
-          await installNative(a);
-          if(!alive||installLifecycle!==lifecycle)return;
-          a.installed=true;
-          const cached=extensions.get(a._store.id+":"+a._url)?.items.find(x=>x.pkg===a.pkg);
-          if(cached)cached.installed=true;
-          if(installedMetadata.has(a._store.id)){
-            const saved=installedMetadata.get(a._store.id);
-            if(!saved.some(x=>x.pkg===a.pkg))saved.push({...a,repo:a._url,installed:true});
-          }
-          installedCount.textContent=String(Number(installedCount.textContent)+1);
-          flip.classList.add("installed");
-          flip.setAttribute("aria-label","فتح "+a.name);
-          later(()=>{if(row.isConnected)slot.classList.add("visible");},300);
-          stateLabel.classList.add("visible");
-          later(sourcesChanged,400);
-        }catch(err){notify(a.name+": "+fmtErr(err));}finally{flip.disabled=false;}
+        try{await installNative(a);}
+        catch(err){if(alive)notify(a.name+": "+fmtErr(err));}
       };
+      const updateRow=(fresh,pending=false)=>{
+        if(fresh){
+          Object.assign(a,fresh);
+          const nextLogo=logo(a,parent);logoBox.disposeLogo?.();logoBox.replaceWith(nextLogo);logoBox=nextLogo;
+          info.querySelector(".v7-meta").textContent=sourceMeta(a);
+          const nextStatus=status(a);stateLabel.replaceChildren(...nextStatus.childNodes);stateLabel.dataset.state=nextStatus.dataset.state;stateLabel.title=nextStatus.title;
+          flip.classList.toggle("installed",!!(a.installed||a.builtin));
+          flip.setAttribute("aria-label",(a.installed||a.builtin?"فتح ":"تثبيت ")+a.name);
+          stateLabel.classList.toggle("visible",!!(a.installed||a.builtin));
+          later(()=>{if(row.isConnected)slot.classList.toggle("visible",!!(a.installed||a.builtin));},300);
+        }
+        flip.disabled=pending;
+      };
+      const rowKey=nativeKey(a,a._store);
+      if(!nativeRows.has(rowKey))nativeRows.set(rowKey,new Set());
+      nativeRows.get(rowKey).add({row,store:a._store,url:a._url,update:updateRow});
+      updateRow(null,installs.has(rowKey));
       actions.append(slot,flip);
       }
     }
@@ -424,7 +429,7 @@ export function renderV7Addons({
     meta.append(fam," · "+(Number.isFinite(count)&&count>0?count+" إضافة":"مستودع"));
     info.append(el("div","v7-name",r.data.name),meta);
     row.append(info);
-    const browse=()=>{opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);};
+    const browse=()=>{restoreScroll=false;opened=r;type="الكل";search.value="";currentSearch="";draw();loadExtensions(r);};
     const go=btn("استعراض","v7-simple-btn v7-go",browse);
     go.setAttribute("aria-label","استعراض "+r.data.name);
     go.prepend(ico("chevron"));row.append(go);
@@ -432,7 +437,7 @@ export function renderV7Addons({
     row.onclick=e=>{if(!e.target.closest("button"))browse();};
     if(r.group.api?.remove){
       const remove=btn("","v7-trash",()=>{
-        showDialog("إزالة المستودع؟",r.group.family==="cloudstream"?"سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة.":"ستُزال «"+r.data.name+"» وإضافاته المثبتة أيضًا. تأكد قبل المتابعة.");
+        showDialog("إزالة المستودع؟","سيُزال رابط المستودع؛ إضافاته المثبتة وجلساتها تبقى محفوظة. يمكنك حذف كل إضافة من تبويب المثبتة.");
         const actions=el("div","v7-confirm-actions"),result=el("p","v7-notice");result.setAttribute("role","status");
         const cancel=btn("رجوع","v7-btn",()=>closeModal());
         const confirm=btn("إزالة","v7-btn danger",async()=>{
@@ -446,7 +451,7 @@ export function renderV7Addons({
     }
     return row;
   }
-  function switchTab(t){tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";notify("");draw();}
+  function switchTab(t){restoreScroll=false;tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";notify("");draw();}
   function toggleMenu(){
     menuOpen=!menuOpen;filterMenu.hidden=!menuOpen;
   }
@@ -456,7 +461,7 @@ export function renderV7Addons({
     filterButton.firstChild.textContent=type==="الكل"?"كل الأنواع":type;
     filterMenu.replaceChildren(...names.map(name=>{
       const b=btn(name,name===type?"active":"",()=>{
-        type=name;menuOpen=false;filterMenu.hidden=true;draw();
+        restoreScroll=false;type=name;menuOpen=false;filterMenu.hidden=true;draw();
       });
       return b;
     }));
@@ -467,43 +472,75 @@ export function renderV7Addons({
       return !currentSearch || (String(a.name)+" "+sourceMeta(a)).toLocaleLowerCase().includes(currentSearch);
     });
   }
+  function nativePackage(item){
+    if(item?.pkg||item?.packageName)return String(item.pkg||item.packageName);
+    const id=String(item?.sourceId||item?.sourceIds?.[0]||"");
+    if(id.startsWith("addon|cs3|"))return id.split("|")[2]||"";
+    return id.includes("|")?"":id.split("#")[0].split("@")[0];
+  }
+  function nativeFamily(store){return store?.family||((store?.id==="ready"||store?.id==="manga")?"manga":store?.id);}
+  function nativeKey(item,store){return nativeFamily(store)+":"+nativePackage(item);}
+  function isInstalledMetadata(item){return item?.installed!==false&&item?.installed!==null&&!item?.pendingRestore;}
+  function localMetadata(item,store){
+    const pkg=nativePackage(item);
+    // The ready catalogue and Mihon share APK identities. Anime and CloudStream do not.
+    for(const candidate of [store,...stores.filter(s=>s!==store&&nativeFamily(s)===nativeFamily(store))]){
+      const found=installedMetadata.get(candidate.id)?.find(x=>nativePackage(x)===pkg&&isInstalledMetadata(x));
+      if(found)return found;
+    }
+    return null;
+  }
   function nativeRecord(item,store,url){
-    const local=installedMetadata.get(store.id)?.find(x=>x.pkg===item.pkg);
-    const record={...item,...local,kind:store.kind,_store:store,_url:url};
+    const local=localMetadata(item,store);
+    const record={...item,...local,pkg:nativePackage(item),kind:store.kind,_store:store,_url:url||local?.repo};
     if(installedMetadata.has(store.id)){
-      record.installed=local?(local.version||true):false;
+      record.installed=local?(local.installed||local.version||true):false;
       if(!local)record.update=false;
     }
-    if(local){record.iconUrl=local.iconUrl||item.iconUrl;record.content=local.content||item.content;}
+    if(local){record.iconUrl=safeIcon(local.iconUrl)||safeIcon(item.iconUrl);record.content=local.content||item.content;record.pendingRestore=false;}
     return record;
+  }
+  function repositoryItems(repo){
+    const indexed=extensions.get(repo.key)?.items||[];
+    const pending=(pendingMetadata.get(repo.group.id)||[]).filter(item=>!item.repo||item.repo===repo.data.url);
+    return [...indexed,...pending.filter(item=>!indexed.some(x=>nativePackage(x)===nativePackage(item)))];
+  }
+  function managerRecords(){
+    const managedCloudStream=new Set((installedMetadata.get('cloudstream')||[]).filter(isInstalledMetadata).map(nativePackage));
+    const managedBy=item=>{
+      // CloudStream ownership is proven by its own package store above. Its
+      // canonical sources must never disappear because Aniyomi is available.
+      if(String(item.sourceId||'').startsWith('addon|cs3|'))return false;
+      const types=item.contentTypes||[];
+      return stores.some(g=>
+        (g.id==='anime'?types.some(t=>['anime','movie','series'].includes(t)):g.kind==='manga'&&types.includes('manga'))&&
+        (item.pkg||(installedMetadata.get(g.id)||[]).some(local=>nativePackage(local)===nativePackage(item)||(local.sourceIds||[]).includes(item.sourceId))));
+    };
+    const allRemote=(registry.list?.()||[]).filter(item=>
+      (!String(item.sourceId||'').startsWith('addon|cs3|') || !managedCloudStream.has(nativePackage(item))) &&
+      !(String(item.key||'').startsWith('core|') && managedBy(item)));
+    const nativeByPackage=new Map();
+    for(const x of extensions.values())for(const ext of x.items){
+      const record=nativeRecord(ext,x.store,x.url),key=nativeKey(record,x.store),have=nativeByPackage.get(key);
+      if(!have||(!have.installed&&record.installed)||(have._url==="vantara:ready-sources"&&record._url!=="vantara:ready-sources"))nativeByPackage.set(key,record);
+    }
+    for(const store of stores)for(const item of installedMetadata.get(store.id)||[]){
+      const key=nativeKey(item,store);
+      if(!nativeByPackage.has(key))nativeByPackage.set(key,nativeRecord(item,store,item.repo));
+    }
+    const installedNative=[...nativeByPackage.values()].filter(x=>x.installed||x.builtin||x.update);
+    return {allRemote,installedNative};
+  }
+  function updateCounts(){
+    const records=managerRecords();
+    repoCount.textContent=String(repos.length+records.allRemote.filter(a=>!a.bundled).length+siteRows.length);
+    installedCount.textContent=String(records.allRemote.length+records.installedNative.length+siteRows.length);
+    return records;
   }
   function draw(){
     if(!alive)return;
-    const managedCloudStream=new Set((installedMetadata.get('cloudstream')||[]).map(item=>item.pkg));
-    // إضافات الجهاز (حزم Mihon، والمدمجة سابقًا بعد فصلها) تُدار من متاجرها هنا كإضافات عادية: تثبيت وحذف
-    // وإعادة تثبيت. سطرها في سجل المصادر العام (core|، «مدمج») مسار القارئ لفتحها فقط، فلا يُعرض في المدير.
-    const managedBy=item=>stores.some(g=>(item.contentTypes||[]).includes(g.kind));
-    const allRemote=(registry.list?.()||[]).filter(item=>
-      (!String(item.sourceId||'').startsWith('addon|cs3|') || !managedCloudStream.has(item.pkg)) &&
-      !(item.pkg && String(item.key||'').startsWith('core|') && managedBy(item)));
-    const nativeByPackage=new Map();
-    for(const x of extensions.values())for(const ext of x.items)nativeByPackage.set(x.store.id+":"+ext.pkg,nativeRecord(ext,x.store,x.url));
-    for(const store of stores)for(const item of installedMetadata.get(store.id)||[]){
-      const key=store.id+":"+item.pkg;
-      if(!nativeByPackage.has(key))nativeByPackage.set(key,nativeRecord(item,store,item.repo));
-    }
-    const allNative=[...nativeByPackage.values()];
-    // الحزمة نفسها قد تُعلنها «مصادر جاهزة» ومستودعها الأصلي (Keiyoushi) معًا: مصدر واحد بمعرّف واحد على
-    // الجهاز، فيُعرض مرة واحدة. يُفضَّل سطر المستودع الأصلي لأنه يحمل الحذف وإعادة التثبيت منه.
-    const installedByPkg=new Map();
-    for(const x of allNative.filter(x=>x.installed || x.update || x.builtin)){
-      const have=installedByPkg.get(x.pkg);
-      if(!have||(have._url==="vantara:ready-sources"&&x._url!=="vantara:ready-sources"))installedByPkg.set(x.pkg,x);
-    }
-    const installedNative=[...installedByPkg.values()];
+    const {allRemote,installedNative}=updateCounts();
     const direct=allRemote.filter(a=>!a.bundled);
-    repoCount.textContent=String(repos.length+direct.length+siteRows.length);
-    installedCount.textContent=String(allRemote.length+installedNative.length+siteRows.length);
     repoTab.classList.toggle("active",tab==="repos");
     installedTab.classList.toggle("active",tab==="installed");
     verificationTab.classList.toggle("active",tab==="verification");
@@ -511,10 +548,11 @@ export function renderV7Addons({
     const challenged=installedRecords.filter(a=>sourceChallenges(a).length);
     const unknown=pendingVerification.filter(item=>!challenged.some(a=>sourceChallenges(a).some(x=>x.host===item.host)));
     verificationCount.textContent=String(challenged.length+unknown.length);
+    nativeRows.clear();disposeLogos(body);
     body.replaceChildren();
     body.setAttribute("aria-busy",String(loading));
     filterWrap.hidden=tab==="repos"&&!opened&&!direct.length&&!siteRows.length;
-    fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?(extensions.get(opened.key)?.items||[]).map(item=>nativeRecord(item,opened.group,opened.data.url)):[...direct,...siteRows.map(x=>({kind:"manga",name:x.label})),...repos.map(r=>({kind:r.group.kind,name:r.data.name}))]));
+    fillKinds(tab==="verification"?challenged:tab==="installed"?[...allRemote,...installedNative,...siteRows.map(x=>({kind:"manga",name:x.label}))]:(opened?repositoryItems(opened).map(item=>nativeRecord(item,opened.group,opened.data.url)):[...direct,...siteRows.map(x=>({kind:"manga",name:x.label})),...repos.map(r=>({kind:r.group.kind,name:r.data.name}))]));
     if(tab==="repos"){
       if(opened){
         body.append(section(opened.data.name,opened.group.family==="cloudstream"?"CloudStream":opened.group.kind==="anime"?"Aniyomi":"Mihon"));
@@ -525,8 +563,9 @@ export function renderV7Addons({
           const retryRepo=opened;
           body.append(el("p","v7-notice",failure),btn("إعادة المحاولة","v7-simple-btn",()=>void loadExtensions(retryRepo,{force:true})));
         }
-        if(!ext){if(!failure)body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
-        const records=filtered(ext.items.filter(x=>!x.nsfw).map(item=>nativeRecord(item,opened.group,opened.data.url)));
+        const items=repositoryItems(opened);
+        if(!ext&&!items.length){if(!failure)body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
+        const records=filtered(items.filter(x=>!x.nsfw).map(item=>nativeRecord(item,opened.group,opened.data.url)));
         for(const item of records)list.append(sourceRow(item,"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
@@ -577,13 +616,15 @@ export function renderV7Addons({
       if(!sites?.list)return;
       try{
         const rows=await sites.list();
-        if(alive&&run===generation){siteRows=rows||[];draw();}
+        if(alive&&run===generation){siteRows=rows||[];if(tab==="repos"&&opened)updateCounts();else draw();}
       }catch(err){if(alive&&run===generation)notify("تعذر تحديث مواقع المانجا: "+fmtErr(err));}
     })();
     try{
       const settled=await Promise.allSettled(stores.map(async group=>{
+        const revision=metadataRevision.get(group.id)||0;
         const res=await group.api.list();
-        if(alive&&run===generation&&Array.isArray(res?.installed))installedMetadata.set(group.id,res.installed);
+        if(alive&&run===generation&&revision===(metadataRevision.get(group.id)||0)&&Array.isArray(res?.installed))installedMetadata.set(group.id,res.installed.map(x=>({...x})));
+        if(alive&&run===generation&&revision===(metadataRevision.get(group.id)||0)&&Array.isArray(res?.pending))pendingMetadata.set(group.id,res.pending.map(x=>({...x})));
         return (res?.repos||[]).map(data=>({group,data,key:group.id+":"+data.url}));
       }));
       if(!alive||run!==generation)return;
@@ -600,7 +641,8 @@ export function renderV7Addons({
       await Promise.all(repos.map(r=>loadExtensions(r,{force:true,run})));
       await sitesTask;
     }catch(err){if(alive&&run===generation)notify(fmtErr(err));}
-    finally{if(alive&&run===generation){loading=false;draw();
+    finally{if(alive&&run===generation){loading=false;body.setAttribute("aria-busy","false");updateCounts();
+      if(tab==="repos"&&!opened&&!body.querySelector(".v7-row"))draw();
       if(restoreScroll){restoreScroll=false;root.scrollTop=Number(initialState.scrollTop)||0;
         if(Number.isFinite(initialState.scrollY)&&typeof window?.scrollTo==="function")window.scrollTo({top:initialState.scrollY,behavior:"instant"});}
     }}
@@ -614,13 +656,13 @@ export function renderV7Addons({
         try{
           const items=await job.repo.group.api.extensions(job.repo.data.url);
           if(alive&&job.run===generation){
-            extensions.set(job.repo.key,{store:job.repo.group,url:job.repo.data.url,items:items||[]});indexCache.set(job.repo.key,extensions.get(job.repo.key));
+            extensions.set(job.repo.key,{store:job.repo.group,url:job.repo.data.url,items:(items||[]).map(x=>({...x}))});
             extensionErrors.delete(job.repo.key);
           }
         }catch(err){
           if(alive&&job.run===generation){extensionErrors.set(job.repo.key,fmtErr(err));notify(fmtErr(err));}
         }finally{
-          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);draw();drainRequests();}
+          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);if(tab!=="repos"||opened?.key===job.repo.key)draw();else updateCounts();drainRequests();}
           job.resolve();
         }
       })();
@@ -629,20 +671,21 @@ export function renderV7Addons({
   function loadExtensions(r,{force=false,run=generation}={}){
     if(!alive||run!==generation)return Promise.resolve();
     if(requests.has(r.key))return requests.get(r.key);
-    if(!force&&(extensions.has(r.key)||extensionErrors.has(r.key))){draw();return Promise.resolve();}
+    if(!force&&(extensions.has(r.key)||extensionErrors.has(r.key)))return Promise.resolve();
     extensionErrors.delete(r.key);
     let resolve;
     const promise=new Promise(done=>{resolve=done;});
     requests.set(r.key,promise);queue.push({repo:r,run,resolve});
     draw();drainRequests();return promise;
   }
+  let releaseDiagnosticUi = () => {};
   function cancelDiagnostic(){
     if(diagnosticController){diagnosticController.abort();diagnosticController=null;busy=false;}
   }
-  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;cancelDiagnostic();layer.hidden=true;dialog.replaceChildren();}
+  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=true;disposeLogos(dialog);dialog.replaceChildren();}
   function showDialog(title,description){
     if(!alive)return;
-    cancelDiagnostic();layer.hidden=false;dialog.replaceChildren();
+    releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=false;disposeLogos(dialog);dialog.replaceChildren();
     dialog.append(el("h3",null,title));
     if(description)dialog.append(el("p",null,description));
   }
@@ -654,7 +697,7 @@ export function renderV7Addons({
   function renderDiagnostics(a,container,actions){
     const results=el("div","v7-checks");results.setAttribute("aria-live","polite");
     const check=btn("فحص الإضافة","v7-btn",async()=>{
-      if(busy)return;busy=true;check.disabled=true;results.textContent="جارٍ فحص الإضافة…";
+      if(busy||!diagnosticsUi.visible())return;busy=true;check.disabled=true;results.textContent="جارٍ فحص الإضافة…";
       const controller=new AbortController();diagnosticController=controller;
       try{
         const result=await onCheck(a,{signal:controller.signal});
@@ -674,7 +717,12 @@ export function renderV7Addons({
         const detail=dialog.querySelector(".v7-evidence-detail");if(detail)detail.textContent=installedState(a).detail;draw();
       }catch(err){if(alive&&!controller.signal.aborted&&dialog.contains(results))results.replaceChildren(el("p","v7-notice",fmtErr(err)));}
       finally{if(diagnosticController===controller){diagnosticController=null;busy=false;}check.disabled=false;}
-    });actions.append(check);container.append(results);
+    });
+    const paint = () => {
+      if (diagnosticsUi.visible()) { actions.append(check); container.append(results); }
+      else { cancelDiagnostic(); check.remove(); results.remove(); }
+    };
+    releaseDiagnosticUi = diagnosticsUi.subscribe(paint); paint();
   }
   function showDetails(a,mode,parent){
     showDialog(a.name,a.description||"");
@@ -749,22 +797,23 @@ export function renderV7Addons({
       if(wrongFamily){
         dialog.append(el("p","v7-notice",a._store?.kind==="anime"?"هذه إضافة مانجا؛ ثبّتها من مستودع مانجا.":"هذه إضافة أنمي؛ ثبّتها من مستودع أنمي."));
       }else if(!a.installed&&!a.builtin&&!a.update){
-        acts.append(btn("تثبيت","v7-btn primary",async()=>{
+        acts.append(btn(a.pendingRestore?"استعادة":"تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
-          try{await installNative(a);closeModal(true);sourcesChanged();await refresh();}
+          try{await installNative(a);closeModal(true);}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
+        if(a.pendingRestore&&!a.builtin)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
         if(a._store?.kind==="anime"){
           acts.append(btn("ثبّت في السينما","v7-btn",async()=>{
             if(busy)return;busy=true;
-            try{await a._store.api.install(a._url,a.pkg,"cinema");closeModal(true);sourcesChanged();await refresh();}
+            try{await installNative(a,"cinema");closeModal(true);}
             catch(err){notify(fmtErr(err));}finally{busy=false;}
           }));
         }
       }else if(!wrongFamily){
         if(a.update)acts.append(btn("تحديث","v7-btn primary",async()=>{
           if(busy)return;busy=true;
-          try{await installNative(a);closeModal(true);sourcesChanged();await refresh();}
+          try{await installNative(a);closeModal(true);}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
         acts.append(btn("فتح في VANTARA","v7-btn primary",()=>openNative(a)));
@@ -794,17 +843,47 @@ export function renderV7Addons({
     if(onOpenNativeSource){invoke(onOpenNativeSource,a);return;}
     notify("هذا المصدر مثبت في المحرك الأصلي. افتحه من قسم الأنمي أو المانجا في VANTARA.");
   }
-  async function installNative(a){
+  function paintNativeRows(key,fresh,pending){
+    for(const entry of nativeRows.get(key)||[])entry.update(fresh?nativeRecord(fresh,entry.store||fresh._store,entry.url||fresh._url):null,pending);
+  }
+  function installNative(a,target){
     const api=a._store?.api;
-    if(!api)throw Error("تعذر تحديد محرك الإضافة.");
-    // Preserve native distinction: Aniyomi can target anime/cinema; manga uses its own engine.
-    await api.install(a._url,a.pkg,a._store.kind==="anime"?(a.content==="cinema"?"cinema":"anime"):undefined);
+    if(!api)return Promise.reject(Error("تعذر تحديد محرك الإضافة."));
+    const key=nativeKey(a,a._store);
+    if(installs.has(key))return installs.get(key);
+    const installLifecycle=lifecycle,store=a._store;
+    const operation=(async()=>{
+      // Resolution alone is not installation evidence: read the durable native store.
+      await api.install(a._url,a.pkg,target??(store.kind==="anime"?(a.content==="cinema"?"cinema":"anime"):undefined));
+      if(!alive||installLifecycle!==lifecycle)return;
+      const state=await api.list();
+      if(!alive||installLifecycle!==lifecycle)return;
+      let confirmed;
+      if(Array.isArray(state?.installed))confirmed=state.installed.find(x=>nativePackage(x)===nativePackage(a)&&isInstalledMetadata(x));
+      else if(api.extensions){
+        const records=await api.extensions(a._url);
+        confirmed=records?.find(x=>nativePackage(x)===nativePackage(a)&&(x.installed||x.builtin));
+      }
+      if(!alive||installLifecycle!==lifecycle)return;
+      if(!confirmed)throw Error("لم يؤكد المحرك حفظ الإضافة على الجهاز؛ أعد المحاولة.");
+      const saved=installedMetadata.get(store.id)||[],pkg=nativePackage(a);
+      const fresh={...a,...confirmed,pkg,repo:confirmed.repo||a._url,installed:confirmed.installed||confirmed.version||true,update:false,pendingRestore:false,content:confirmed.content||target||a.content};
+      installedMetadata.set(store.id,[...saved.filter(x=>nativePackage(x)!==pkg),fresh]);
+      pendingMetadata.set(store.id,(pendingMetadata.get(store.id)||[]).filter(x=>nativePackage(x)!==pkg));
+      metadataRevision.set(store.id,(metadataRevision.get(store.id)||0)+1);
+      paintNativeRows(key,fresh,false);updateCounts();
+      later(()=>sourcesChanged({preserveAddonsView:true,reason:"native-install",pkg,family:nativeFamily(store)}),400);
+      return fresh;
+    })();
+    installs.set(key,operation);paintNativeRows(key,null,true);
+    operation.finally(()=>{if(installs.get(key)===operation){installs.delete(key);if(alive&&installLifecycle===lifecycle)paintNativeRows(key,null,false);}}).catch(()=>{});
+    return operation;
   }
   function askDelete(a,mode){
-    showDialog("حذف المصدر؟","هل تريد حذف «"+a.name+"» من الإضافات المثبتة؟");
+    showDialog(a.pendingRestore?"إزالة اختيار المصدر؟":"حذف المصدر؟",a.pendingRestore?"سيُزال اختيار «"+a.name+"» من حسابك؛ مكتبتك وتقدمك يبقيان محفوظين.":"هل تريد حذف «"+a.name+"» من الإضافات المثبتة؟");
     const actions=el("div","v7-confirm-actions");
     const cancel=btn("رجوع","v7-btn",()=>closeModal());
-    const yes=btn("حذف","v7-btn danger",async()=>{
+    const yes=btn(a.pendingRestore?"إزالة الاختيار":"حذف","v7-btn danger",async()=>{
       if(busy)return;busy=true;yes.disabled=true;
       try{
         if(mode==="remote")await registry.remove(a.key);
@@ -866,7 +945,7 @@ export function renderV7Addons({
         return;
       }
       // Standalone manga websites use the actual site bridge, not the executable APK repo engines.
-      if(!/\.json$/i.test(parsed.pathname) && sites?.add){
+      if(!/\.(?:json|pb)$/i.test(parsed.pathname) && sites?.add){
         const site=await sites.add(uri);
         note.textContent="أُضيف الموقع: "+(site?.label||parsed.hostname);
         closeModal(true);await refresh();sourcesChanged();return;
@@ -956,10 +1035,21 @@ export function renderV7Addons({
   }
   root.back=navigateBack;
   root.snapshot=()=>({tab,openedKey:opened?.key||restoreKey||null,search:search.value,type,scrollTop:root.scrollTop||0,scrollY:window?.scrollY||0});
-  let removePulse=pulse?.onChange?.(()=>{if(alive)draw();})||(()=>{});
-  root.close=()=>{cancelDiagnostic();alive=false;removePulse();removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
-  root.reload=()=>{alive=true;removePulse();removePulse=pulse?.onChange?.(()=>{if(alive)draw();})||(()=>{});removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
-  search.oninput=()=>{currentSearch=search.value.trim().toLocaleLowerCase();draw();};
+  function refreshStatuses(){
+    if(!alive)return;
+    updateCounts();
+    // Background source health must not replace focused install controls or restart icons.
+    for(const row of body.querySelectorAll(".v7-row")){
+      const a=row.addonRecord,slot=row.querySelector(".v7-status-slot"),label=slot?.querySelector(".v7-status");
+      if(!a||!label)continue;
+      const next=status(a);label.replaceChildren(...next.childNodes);label.dataset.state=next.dataset.state;label.title=next.title;
+      slot.querySelector(".v7-why")?.remove();const reason=why(a);if(reason)slot.append(reason);
+    }
+  }
+  let removePulse=pulse?.onChange?.(refreshStatuses)||(()=>{});
+  root.close=()=>{releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();disposeLogos(root);alive=false;nativeRows.clear();installs.clear();removePulse();removeVerification();generation++;lifecycle++;resetRequests();for(const id of timers)clearTimeout(id);timers.clear();layer.hidden=true;dialog.replaceChildren();};
+  root.reload=()=>{alive=true;removePulse();removePulse=pulse?.onChange?.(refreshStatuses)||(()=>{});removeVerification();removeVerification=verification?.subscribe?.(receiveVerification)||(()=>{});void refresh();};
+  search.oninput=()=>{restoreScroll=false;currentSearch=search.value.trim().toLocaleLowerCase();draw();};
   void refresh();draw();
   return root;
 }

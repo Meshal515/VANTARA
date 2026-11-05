@@ -38,11 +38,11 @@ class EpisodeResolver(
     fun revokeRuntimeEpisodes() { episodeCache.keys.removeAll { it.startsWith("addon|cs3|") } }
 
     suspend fun episodes(copy: Copy): List<SourceEpisode> {
-        val runtime=copy.sourceId.startsWith("addon|cs3|")
-        val runtimeAdapter=if(runtime)adapterOf(copy.sourceId) ?: return emptyList() else null
+        // Every source family can be updated or removed under the same ID.
+        val runtimeAdapter=adapterOf(copy.sourceId) ?: return emptyList()
         val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}"
-        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS && (!runtime || it.runtimeAdapter===runtimeAdapter) }?.let { return it.episodes }
-        val adapter = runtimeAdapter ?: adapterOf(copy.sourceId) ?: return emptyList()
+        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS && it.runtimeAdapter===runtimeAdapter }?.let { return it.episodes }
+        val adapter = runtimeAdapter
         val season = copy.anime.requestedSeason
         val selected = if (season != null && season > 0 && copy.anime.hasSeasons) {
             adapter.seasons(copy.anime).firstOrNull {
@@ -51,7 +51,7 @@ class EpisodeResolver(
             } ?: return emptyList()
         } else copy.anime
         val list = adapter.episodes(selected)
-        if(runtime && adapterOf(copy.sourceId)!==adapter)return emptyList()
+        if(adapterOf(copy.sourceId)!==adapter)return emptyList()
         // قائمة فارغة قد تكون محلّلًا تغيّر موقعه أو تحديًا عابرًا، لا «عمل بلا حلقات»:
         // لا تُخبّأ فتحجب المحاولة التالية عشر دقائق
         if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list, runtimeAdapter)
@@ -63,7 +63,7 @@ class EpisodeResolver(
         // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم
         if (number < 0f) episodes.firstOrNull()
         else episodes.firstOrNull { abs(it.number - number) < 0.01f }
-            ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
+            ?: episodes.firstOrNull { (it.number < 0f || !it.number.isFinite()) && Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
     /**
      * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة

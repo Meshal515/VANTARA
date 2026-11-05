@@ -5,6 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { observeWebViewTargets, assertLiveShellWebView, isAppShellTarget } from '../repository-compat/webview-lifecycle.mjs';
 
 const phase = process.argv[2];
 if (!['baseline', 'candidate', 'restart'].includes(phase)) throw new Error('Expected baseline/candidate/restart phase');
@@ -18,11 +19,11 @@ let pages;
 for (let n = 0; n < 90; n++) {
   try {
     pages = await (await fetch('http://127.0.0.1:9223/json')).json();
-    if (pages.some(p => p.type === 'page' && p.url.startsWith('https://localhost'))) break;
+    if (pages.some(isAppShellTarget)) break;
   } catch {}
   await delay(1000);
 }
-const page = pages?.find(p => p.type === 'page' && p.url.startsWith('https://localhost'));
+const page = pages?.find(isAppShellTarget);
 if (!page) throw new Error('The APK did not expose its local WebView');
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
@@ -67,7 +68,8 @@ mkdirSync(out, { recursive: true });
 await command('Runtime.enable');
 await command('Page.enable');
 const proof = { phase, package: pkg, pid, passed: false, authenticationTest: false, sourcePlaybackTest: false };
-function assertNoAutomaticVerification(iteration) {
+let observedSecondaryTargets = new Map();
+async function assertNoAutomaticVerification(iteration) {
   const activities = adb('shell', 'dumpsys', 'activity', 'activities');
   const resumed = activities.split('\n').filter(line => /mResumedActivity|topResumedActivity/.test(line));
   if (!resumed.some(line => line.includes(`${pkg}/com.vantara.app.MainActivity`))) {
@@ -80,8 +82,24 @@ function assertNoAutomaticVerification(iteration) {
     const memory = adb('shell', 'dumpsys', 'meminfo', pkg);
     writeFileSync(`${out}/memory-cycle-${iteration}.txt`, memory);
     const webviews = memory.match(/WebViews:\s*(\d+)/);
-    if (!webviews || Number(webviews[1]) !== 1) throw new Error(`Expected only the shell WebView; found ${webviews?.[1] ?? 'unknown'}`);
-    proof.maxObservedWebViews = Math.max(proof.maxObservedWebViews || 0, Number(webviews[1]));
+    const javaWebViewObjects = webviews ? Number(webviews[1]) : null;
+    // A heap/object diagnostic does not prove whether the original shell is
+    // alive. Require its original target AND fresh JS on the original socket.
+    const response = await fetch('http://127.0.0.1:9223/json');
+    if (!response.ok) throw new Error(`WebView target inspection failed: HTTP ${response.status}`);
+    const targets = await response.json();
+    const probe = await evaluate(`({url:location.href,readyState:document.readyState,
+      home:!!document.querySelector('#root .v35 #home.active'),
+      utility:!!document.querySelector('#root .v35 #utility.active'),
+      fixture:typeof window.__debugProofShell?.handleBack==='function'})`);
+    const live = assertLiveShellWebView({pages:targets,expectedTargetId:page.id,probe});
+    const observed = observeWebViewTargets(targets, observedSecondaryTargets, Date.now(), 45_000, page.id);
+    observedSecondaryTargets = observed.seen;
+    proof.browserSamples ??= [];
+    const sample = { iteration, javaWebViewObjects, ...live, ...observed.sample };
+    proof.browserSamples.push(sample);
+    console.log('Debug live WebView proof:', JSON.stringify(sample));
+    if (javaWebViewObjects !== null) proof.maxObservedWebViews = Math.max(proof.maxObservedWebViews || 0, javaWebViewObjects);
   }
 }
 try {
@@ -185,7 +203,7 @@ try {
       return true;
     })()`);
     await waitFor("document.querySelector('.v35 #home.active')", 'shipped Home renderer');
-    assertNoAutomaticVerification(0);
+    await assertNoAutomaticVerification(0);
     for (let iteration = 1; iteration <= 30; iteration++) {
       await evaluate(`(()=>{document.querySelector('[data-act="openDrawer"]').click();const b=[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات');if(!b)throw new Error('Missing Addons navigation');b.click();return true})()`);
       await waitFor("document.querySelector('#utility.active .v7-addon')", `Addons renderer cycle ${iteration}`);
@@ -196,9 +214,14 @@ try {
       await waitFor("document.querySelector('#home.active') && !document.querySelector('#utility.active')", `Home return cycle ${iteration}`);
       await delay(150);
       if (adb('shell', 'pidof', pkg) !== pid) throw new Error(`APK process restarted during cycle ${iteration}`);
-      assertNoAutomaticVerification(iteration);
+      await assertNoAutomaticVerification(iteration);
       proof.cycles = iteration;
     }
+    // Recheck after temporary network WebViews have had their bounded fetch
+    // deadline. A stuck live target fails; a destroyed Java object awaiting
+    // garbage collection does not.
+    await delay(25000);
+    await assertNoAutomaticVerification(40);
     proof.navigationFixture = 'shipped Home/Addons shell; local anonymous sync; real native bridges';
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
@@ -232,6 +255,7 @@ try {
   throw error;
 } finally {
   proof.cdpExceptions = errors;
+  console.log('Debug WebView phase summary:', JSON.stringify({phase,passed:proof.passed,cycles:proof.cycles ?? 0,retention:proof.retention,browserSamples:proof.browserSamples,failure:proof.failure?.slice(0,1200)}));
   try {
     const screenshot = await command('Page.captureScreenshot', { format: 'png' });
     writeFileSync(`${out}/${phase}.png`, Buffer.from(screenshot.data, 'base64'));

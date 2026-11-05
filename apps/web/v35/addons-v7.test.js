@@ -1,10 +1,12 @@
+import { beforeEach } from 'vitest';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { renderV7Addons } from './addons-v7.js';
 import { createSourcePulse } from '../addons/source-pulse.js';
 import { SHELL_HTML } from './markup.js';
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const tick = async () => { for(let i=0;i<8;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
 const setup = () => {
   const {document,window}=parseHTML('<html><body></body></html>');
@@ -193,7 +195,7 @@ it('requires confirmation before deleting an installed source', async()=>{
 
 it('keeps installed state when switching tabs immediately after native installation', async()=>{
   setup();const changed=vi.fn(async()=>{});
-  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{}};
+  let saved=false;const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}],installed:saved?[{name:'Fresh Native',pkg:'fresh.pkg',version:'1'}]:[]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{saved=true;}};
   const view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed});await tick();browse(view);await tick();
   view.querySelector('.v7-flip').click();await tick();installedTab(view).click();
   expect(view.querySelector('.v7-body').textContent).toContain('Fresh Native');
@@ -249,7 +251,7 @@ it('does not offer removal of a bundled native manga extension', async()=>{
 
 it('reveals delete at 300ms and reports rejected source refresh at 400ms without an unhandled rejection', async()=>{
   const d=setup(),changed=vi.fn(async()=>{throw Error('source refresh failed');});
-  const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{}};
+  let saved=false;const api={list:async()=>({repos:[{name:'Saved Repo',url:'https://repo.example/index.json'}],installed:saved?[{name:'Fresh Native',pkg:'fresh.pkg',version:'1'}]:[]}),extensions:async()=>[{name:'Fresh Native',pkg:'fresh.pkg'}],install:async()=>{saved=true;}};
   const view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed});d.body.append(view);await tick();browse(view);await tick();
   vi.useFakeTimers();view.querySelector('.v7-flip').click();await vi.advanceTimersByTimeAsync(0);
   const slot=view.querySelector('.v7-trash-holder');expect(slot.classList.contains('visible')).toBe(false);
@@ -547,6 +549,22 @@ it('removes a saved native repository only after explicitly warning about its in
  expect(view.querySelector('.v7-body').textContent).not.toContain('Saved Repo');view.close();
 });
 
+it.each([
+ 'https://github.com/keiyoushi/extensions/raw/repo/index.pb',
+ 'https://github.com/yuzono/manga-repo/raw/repo/index.pb',
+])('routes the owner manga index %s to the repository engine instead of a manga website',async url=>{
+ const d=setup();let registered=false;
+ const api={list:async()=>({repos:registered?[{url,name:'External manga repo'}]:[]}),extensions:async()=>[],
+  add:vi.fn(async()=>{registered=true;return {repo:{name:'External manga repo'}};})};
+ const sites={list:async()=>[],add:vi.fn()};
+ const view=renderV7Addons({registry:registry(),repositories:api,sites});d.body.append(view);await tick();
+ view.querySelector('.v7-plus').click();view.querySelector('.v7-add-input').value=url;
+ const add=[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='أضف');
+ add.click();await tick();add.click();await tick();
+ expect(api.add).toHaveBeenCalledWith(url);expect(sites.add).not.toHaveBeenCalled();
+ expect(view.querySelector('.v7-body').textContent).toContain('External manga repo');view.close();
+});
+
 it('keeps repository-removal errors in the confirmation and preserves the saved repository',async()=>{
  const d=setup(),remove=vi.fn(async()=>{throw Error('تعذرت إزالة المستودع');});
  const api={list:async()=>({repos:[{url:'https://repo.example/saved',name:'Saved Repo'}]}),extensions:async()=>[],remove};
@@ -579,4 +597,143 @@ it('a separated former built-in is one ordinary extension with delete, never a s
  expect(rows).toHaveLength(1);
  expect(rows[0].querySelector('.v7-trash')).not.toBeNull();
  view.close();
+});
+
+it('confirms native installation from durable metadata and repaints only that row including its APK icon',async()=>{
+ const d=setup(),job=deferred(),url='https://durable.example/index.json',png='data:image/png;base64,iVBORw0KGgo=';let installed=[];
+ const api={list:async()=>({repos:[{url,name:'Durable Repo'}],installed}),extensions:async()=>[{pkg:'durable.pkg',name:'Manhatok'},{pkg:'other.pkg',name:'Manha Other'}],install:async()=>{await job.promise;installed=[{pkg:'durable.pkg',name:'Manhatok',version:'1.0',repo:url,iconUrl:png}];}};
+ const changed=vi.fn(),open=vi.fn(),view=renderV7Addons({registry:registry(),repositories:api,onSourcesChanged:changed,onOpenNativeSource:open});d.body.append(view);await tick();browse(view);await tick();
+ const search=view.querySelector('[data-addon-search]');search.value='Manha';search.oninput();view.scrollTop=180;
+ const row=view.querySelector('.v7-row'),other=view.querySelectorAll('.v7-row')[1],flip=row.querySelector('.v7-flip');flip.focus();flip.click();await tick();
+ expect(flip.classList.contains('installed')).toBe(false);expect(other.querySelector('.v7-flip').disabled).toBe(false);
+ job.resolve();await tick();
+ expect(view.querySelector('.v7-row')).toBe(row);expect(view.querySelectorAll('.v7-row')[1]).toBe(other);expect(search.value).toBe('Manha');expect(view.scrollTop).toBe(180);
+ expect(row.querySelector('.v7-flip')).toBe(flip);expect(flip.classList.contains('installed')).toBe(true);expect(row.querySelector('img').src).toBe(png);
+ expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');expect(open).not.toHaveBeenCalled();
+ await new Promise(resolve=>setTimeout(resolve,420));expect(changed).toHaveBeenCalledWith(expect.objectContaining({preserveAddonsView:true,reason:'native-install',pkg:'durable.pkg'}));view.close();
+});
+
+it('does not label a resolved but unconfirmed native install as installed',async()=>{
+ const d=setup(),url='https://unconfirmed.example/index.json';
+ const api={list:async()=>({repos:[{url,name:'Unconfirmed Repo'}],installed:[]}),extensions:async()=>[{pkg:'unconfirmed.pkg',name:'Unconfirmed'}],install:async()=>({ok:true})};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();browse(view);await tick();view.querySelector('.v7-flip').click();await tick();
+ expect(view.querySelector('.v7-flip').classList.contains('installed')).toBe(false);expect(installedTab(view).querySelector('.v7-count').textContent).toBe('0');expect(view.querySelector('.v7-diagnostic').textContent).not.toBe('');view.close();
+});
+
+it('deduplicates an in-flight package install across search redraws while other packages stay interactive',async()=>{
+ const d=setup(),job=deferred(),url='https://dedup.example/index.json';let installed=[];
+ const api={list:async()=>({repos:[{url,name:'Dedup Repo'}],installed}),extensions:async()=>[{pkg:'dedup.pkg',name:'Dedup One'},{pkg:'other.pkg',name:'Dedup Two'}],install:vi.fn(async()=>{await job.promise;installed=[{pkg:'dedup.pkg',name:'Dedup One',repo:url,version:'1'}];})};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();browse(view);await tick();view.querySelector('.v7-flip').click();
+ const search=view.querySelector('[data-addon-search]');search.value='Dedup';search.oninput();view.querySelector('.v7-flip').click();await tick();
+ expect(api.install).toHaveBeenCalledOnce();expect(view.querySelectorAll('.v7-flip')[1].disabled).toBe(false);job.resolve();await tick();expect(view.querySelector('.v7-flip').classList.contains('installed')).toBe(true);expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');view.close();
+});
+
+it('keeps packages from different native families distinct even when their package labels match',async()=>{
+ setup();const record={pkg:'same.pkg',name:'Same Package',version:'1'};
+ const manga={list:async()=>({repos:[],installed:[record]}),extensions:async()=>[]},cloudstream={list:async()=>({repos:[],installed:[{...record,protocol:'cloudstream'}]}),extensions:async()=>[]};
+ const view=renderV7Addons({registry:registry(),repositories:manga,cloudstreamRepositories:cloudstream});await tick();installedTab(view).click();expect(installedTab(view).querySelector('.v7-count').textContent).toBe('2');expect(view.querySelectorAll('.v7-body .v7-row')).toHaveLength(2);view.close();
+});
+
+it('does not expose cached installed packages to another store instance while discovery is pending',async()=>{
+ setup();const url='https://profile-cache.example/index.json',list=deferred();
+ const first=renderV7Addons({registry:registry(),repositories:{list:async()=>({repos:[{url,name:'Profile Repo'}]}),extensions:async()=>[{pkg:'private.pkg',name:'Private installed package',installed:true}]}});await tick();first.close();
+ const second=renderV7Addons({registry:registry(),repositories:{list:()=>list.promise,extensions:async()=>[]}});installedTab(second).click();expect(second.querySelector('.v7-body').textContent).not.toContain('Private installed package');list.resolve({repos:[],installed:[]});await tick();second.close();
+});
+
+it('matches installed packageName metadata and keeps the repository icon when local icon metadata is unsafe',async()=>{
+ setup();const url='https://identity.example/index.json';
+ const api={list:async()=>({repos:[{url,name:'Identity Repo'}],installed:[{packageName:'identity.pkg',name:'Identity',version:'1',iconUrl:'javascript:unsafe'}]}),extensions:async()=>[{pkg:'identity.pkg',name:'Identity',iconUrl:'https://identity.example/real.png'}]};
+ const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();expect(view.querySelector('.v7-flip.installed')).toBeTruthy();expect(view.querySelector('.v7-row img').src).toBe('https://identity.example/real.png');view.close();
+});
+
+it('keeps an open repository row when unrelated discovery and source pulse finish during installation',async()=>{
+ const d=setup(),index=deferred(),job=deferred(),url='https://background.example/one.json';let installed=[],changed;
+ const api={list:async()=>({repos:[{url,name:'One'},{url:'https://background.example/two.json',name:'Two'}],installed}),extensions:async requested=>requested===url?[{pkg:'background.pkg',name:'Background Source'}]:index.promise,install:async()=>{await job.promise;installed=[{pkg:'background.pkg',name:'Background Source',version:'1'}];}};
+ const view=renderV7Addons({registry:registry(),repositories:api,pulse:{onChange:fn=>{changed=fn;return ()=>{};}}});d.body.append(view);await tick();browse(view);await tick();const row=view.querySelector('.v7-row');view.scrollTop=240;row.querySelector('.v7-flip').click();
+ index.resolve([]);await tick();expect(view.scrollTop).toBe(240);expect(view.querySelector('.v7-row')).toBe(row);changed();expect(view.querySelector('.v7-row')).toBe(row);job.resolve();await tick();expect(view.querySelector('.v7-row')).toBe(row);expect(row.querySelector('.v7-flip.installed')).toBeTruthy();view.close();
+});
+
+it('cancels removed logo callbacks so a late failed image cannot keep fetching fallbacks',async()=>{
+ const d=setup(),url='https://abort-icon.example/index.json';
+ const api={list:async()=>({repos:[{url,name:'Logo Repo'}],installed:[]}),extensions:async()=>[{pkg:'abort.icon',name:'Abort Icon',iconUrl:'https://abort-icon.example/icon.png'}]};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();browse(view);await tick();const oldLogo=view.querySelector('.v7-row .v7-logo'),oldImage=oldLogo.querySelector('img'),lateError=oldImage.onerror;
+ const search=view.querySelector('[data-addon-search]');search.value='does not match';search.oninput();lateError();expect(oldLogo.querySelectorAll('img')).toHaveLength(1);expect(oldImage.onerror).toBeNull();view.close();
+});
+
+it('tries a package icon from a protobuf repository before the repository branding',async()=>{
+ setup();const url='https://pb-icons.example/repo/index.pb';
+ const api={list:async()=>({repos:[{url,name:'PB Repo',iconUrl:'https://pb-icons.example/repo-logo.png'}],installed:[]}),extensions:async()=>[{pkg:'pb.icon',name:'PB Icon'}]};
+ const view=renderV7Addons({registry:registry(),repositories:api});await tick();browse(view);await tick();expect(view.querySelector('.v7-row img').src).toBe('https://pb-icons.example/repo/icon/pb.icon.png');view.close();
+});
+
+it('counts a native multisource APK once when canonical records only carry source IDs',async()=>{
+ setup();const pkg='org.native.multisource';
+ const core=[{key:`core|${pkg}#1`,sourceId:`${pkg}#1`,name:'First provider',bundled:true,contentTypes:['manga']},{key:`core|${pkg}#2`,sourceId:`${pkg}#2`,name:'Second provider',bundled:true,contentTypes:['manga']}];
+ const api={list:async()=>({repos:[],installed:[{sourceId:`${pkg}#1`,sourceIds:[`${pkg}#1`,`${pkg}#2`],name:'Multi Package',version:'1'}]}),extensions:async()=>[]};
+ const view=renderV7Addons({registry:registry(core),repositories:api});await tick();installedTab(view).click();expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');expect(view.querySelectorAll('.v7-body .v7-row')).toHaveLength(1);view.close();
+});
+
+it('finishes initial empty discovery without leaving the repository loader visible',async()=>{
+ setup();const view=renderV7Addons({registry:registry(),repositories:{list:async()=>({repos:[],installed:[]}),extensions:async()=>[]}});await tick();expect(view.querySelector('.v7-body').textContent).toContain('ابدأ بإضافة مصدر لك');expect(view.querySelector('.v7-body').textContent).not.toContain('جارٍ تحميل');view.close();
+});
+
+it('restores a pending selected package in place without counting its missing APK as installed',async()=>{
+ const d=setup(),url='vantara:ready-sources',pkg='org.pending.restore';let installed=[];
+ const pending={pkg,name:'Pending Source',selected:true,pendingRestore:true,installed:null,repo:url};
+ const api={list:async()=>({repos:[{url,name:'Ready Choices'}],installed,pending:installed.length?[]:[pending]}),extensions:async()=>[pending],install:async()=>{installed=[{pkg,name:'Pending Source',version:'1',repo:url}];},uninstall:vi.fn()};
+ const view=renderV7Addons({registry:registry(),readySources:api});d.body.append(view);await tick();browse(view);await tick();const row=view.querySelector('.v7-row');
+ expect(installedTab(view).querySelector('.v7-count').textContent).toBe('0');expect(row.querySelector('.v7-front').textContent).toBe('استعادة');expect(row.querySelector('.v7-trash-holder').classList.contains('visible')).toBe(true);expect(row.textContent).toContain('بانتظار الاستعادة');
+ row.querySelector('.v7-flip').click();await tick();expect(view.querySelector('.v7-row')).toBe(row);expect(row.querySelector('.v7-flip.installed')).toBeTruthy();expect(row.textContent).not.toContain('بانتظار الاستعادة');expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');view.close();
+});
+
+it('keeps an offline pending restore choice reviewable and lets its owner explicitly remove the choice',async()=>{
+ const d=setup(),url='vantara:ready-sources',pkg='org.pending.offline';let selected=true;
+ const api={list:async()=>({repos:[{url,name:'Ready Choices'}],installed:[],pending:selected?[{pkg,name:'Offline Choice',selected:true,pendingRestore:true,installed:null,repo:url}]:[]}),extensions:async()=>{throw Error('offline index');},install:vi.fn(),uninstall:vi.fn(async()=>{selected=false;})};
+ const view=renderV7Addons({registry:registry(),readySources:api});d.body.append(view);await tick();browse(view);await tick();const row=view.querySelector('.v7-row');expect(row).toBeTruthy();expect(row.querySelector('.v7-front').textContent).toBe('استعادة');expect(installedTab(view).querySelector('.v7-count').textContent).toBe('0');
+ row.querySelector('.v7-trash').click();expect(view.querySelector('.v7-dialog').textContent).toContain('اختيار');expect(api.uninstall).not.toHaveBeenCalled();view.querySelector('.v7-confirm-actions .danger').click();await tick();expect(api.uninstall).toHaveBeenCalledWith(pkg);expect(api.install).not.toHaveBeenCalled();expect(view.querySelector('.v7-body').textContent).not.toContain('Offline Choice');view.close();
+});
+
+
+it('counts native cinema packages once when their canonical movie/series source appears after reload', async () => {
+  const document = setup();
+  const manga = { pkg: 'eu.kanade.tachiyomi.extension.ar.manhatok', name: 'Manhatok', version: '1' };
+  const anime = { pkg: 'eu.kanade.tachiyomi.animeextension.ar.asia2tv', name: 'asia2tv', version: '1', content: 'cinema' };
+  const cloud = { pkg: 'cs3_witcher', name: 'AnimeWitcher', version: 1, installed: true, protocol: 'cloudstream' };
+  const items = [
+    { key: 'core|manga', sourceId: manga.pkg+'#1', pkg: manga.pkg, name: manga.name, bundled: true, user: true, contentTypes: ['manga'] },
+    { key: 'core|cloud', sourceId: 'addon|cs3|cs3_witcher|provider|ulocal', pkg: cloud.pkg, name: cloud.name, bundled: true, user: true, contentTypes: ['anime'] },
+  ];
+  const api = record => ({ list: async () => ({ repos: [], installed: [record] }), extensions: async () => [] });
+  const view = renderV7Addons({ registry: registry(items), repositories: api(manga), animeRepositories: api(anime), cloudstreamRepositories: api(cloud) });
+  document.body.append(view); await tick();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('3');
+  items.push({ key: 'core|user-asia', sourceId: 'user-'+anime.pkg, pkg: anime.pkg, name: 'Asia2TV', bundled: true, user: true, contentTypes: ['movie', 'series'] });
+  installedTab(view).click();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('3');
+  expect(view.querySelectorAll('.v7-body .v7-row')).toHaveLength(3);
+  expect([...view.querySelectorAll('.v7-name')].map(node => node.textContent)).toEqual(expect.arrayContaining(['Manhatok', 'asia2tv', 'AnimeWitcher']));
+  view.close();
+});
+
+it('keeps a canonical CloudStream source visible when only the independent Aniyomi store is available', async () => {
+  const document = setup(), sourceId = 'addon|cs3|cs3_actual|provider|ulocal';
+  const canonical = { key: 'core|'+sourceId, sourceId, pkg: 'cs3_actual', name: 'Actual CloudStream source', bundled: true, user: true, contentTypes: ['anime'] };
+  const animeRepositories = { list: async () => ({ repos: [], installed: [] }), extensions: async () => [] };
+  const view = renderV7Addons({ registry: registry([canonical]), animeRepositories });
+  document.body.append(view); await tick(); installedTab(view).click();
+  expect(installedTab(view).querySelector('.v7-count').textContent).toBe('1');
+  expect(view.querySelector('.v7-name')?.textContent).toBe('Actual CloudStream source');
+  view.close();
+});
+
+beforeEach(() => { vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(true); });
+
+it('omits diagnostic tools while retaining installed addon actions when the shared gate is off', async () => {
+  setup(); vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(false);
+  const onCheck = vi.fn();
+  const view = renderV7Addons({ registry: registry([{ key: 'hidden-check', name: 'Check' }]), onCheck });
+  await tick(); installedTab(view).click(); view.querySelector('.v7-row').click();
+  expect([...view.querySelectorAll('button')].some(b => b.textContent === 'فحص الإضافة')).toBe(false);
+  expect(view.querySelector('.v7-checks')).toBeNull();
+  expect(onCheck).not.toHaveBeenCalled(); view.close();
 });
