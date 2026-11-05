@@ -55,14 +55,18 @@ object AnimeHostRouter : Interceptor {
         lateinit var route: Route
         route = Route(
             sourceId,
-            DomainInterceptor(plan) { domain ->
-                // الدومين الجديد المقبول يرث الحماية والقياس فورًا
-                val host = bareHost(domain)
-                routes[host] = route
-                hiddenOnly += host
-                dohFirst += host
-                health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
-            },
+            DomainInterceptor(
+                plan,
+                onDomain = { domain ->
+                    // الدومين الجديد المقبول يرث الحماية والقياس فورًا
+                    val host = bareHost(domain)
+                    routes[host] = route
+                    hiddenOnly += host
+                    dohFirst += host
+                    health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
+                },
+                onForeign = { e -> runCatching { android.util.Log.w("AnimeEngine", "FOREIGN_REDIRECT_PASSED:${e.from}->${e.to}") } },
+            ),
         )
         val hosts = plan.knownHosts()
         byId.put(sourceId, route)?.let { old ->
