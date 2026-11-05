@@ -1,0 +1,164 @@
+name: VANTARA source certification (30 works per source, report only, no publish)
+
+# كل مصدر على محاكي مستقل: 10 أعمال مشهورة و10 متوسطة و10 نادرة من كتالوجه، كل سيرفر «جاهز»
+# يُفتح في المشغّل الأصلي حتى أول إطار. لا نشر ولا تغيير على Debug/Stable.
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'kind:name:content, comma-separated (kind = cs3 | aniyomi)'
+        required: false
+        default: 'cs3:AnimeWitcher:anime,cs3:AnimeRift:anime,cs3:Anime4up:anime,cs3:Witanime:anime,cs3:Anime3rb:anime,cs3:Animerco:anime,cs3:Dima toon:anime,aniyomi:witanime:anime,aniyomi:okanime:anime,aniyomi:anime4up:anime,aniyomi:animerco:anime,aniyomi:animelek:anime,aniyomi:animeblkom:anime,aniyomi:animeiat:anime,aniyomi:arabanime:anime,cs3:Faselhd:cinema,cs3:Egydead:cinema,cs3:Akwam:cinema,cs3:Mycima:cinema,cs3:WeCima:cinema'
+      per_tier:
+        description: Works per popularity tier
+        required: false
+        default: '10'
+      servers:
+        description: Ready servers opened in the player per work
+        required: false
+        default: '3'
+      seconds:
+        description: Seconds of playback measured per server
+        required: false
+        default: '10'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-certification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          SOURCES: ${{ inputs.sources }}
+        run: |
+          node -e '
+            const list = process.env.SOURCES.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+              const [kind, name, content] = s.split(":").map((x) => x.trim());
+              if (!["cs3", "aniyomi"].includes(kind) || !name || !["anime", "cinema"].includes(content)) throw new Error("bad source: " + s);
+              return { kind, name, content };
+            });
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: list }) + "\n");
+          '
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Pinned provider fixtures used by the androidTest assets directory
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Build the actual Debug app with the runtime and its instrumentation
+        run: |
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+          mkdir -p apks
+          cp android/app/build/outputs/apk/debug/app-debug.apk apks/
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certification-apks
+          path: apks/
+          retention-days: 1
+
+  certify:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.kind }} ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: certification-apks
+          path: apks
+      - name: KVM and a real virtual audio clock
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
+          vantara_audio="$RUNNER_TEMP/vantara-cert-audio"
+          mkdir -p "$vantara_audio"
+          chmod 700 "$vantara_audio"
+          pulseaudio -n --daemonize=yes --use-pid-file=no --exit-idle-time=-1 \
+            --load="module-native-protocol-unix socket=$vantara_audio/native" \
+            --load="module-null-sink sink_name=vantara_cert rate=48000 channels=2"
+          echo "PULSE_SERVER=unix:$vantara_audio/native" >> "$GITHUB_ENV"
+      - name: Certify on a fresh emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          CERT_KIND: ${{ matrix.kind }}
+          CERT_NAME: ${{ matrix.name }}
+          CERT_CONTENT: ${{ matrix.content }}
+          CERT_PER_TIER: ${{ inputs.per_tier }}
+          CERT_SERVERS: ${{ inputs.servers }}
+          CERT_SECONDS: ${{ inputs.seconds }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          # SwiftShader GLES crashes in host RenderThread during playback; ANGLE (swangle) does not.
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
+          script: bash tools/repository-compat/run_source_certification.sh
+      - name: Source summary
+        if: always()
+        run: node tools/repository-compat/summarize_certification.mjs . >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cert-${{ matrix.kind }}-${{ strategy.job-index }}
+          path: cert-*/
+          retention-days: 7
+          if-no-files-found: warn
+
+  report:
+    needs: [certify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cert-*
+          path: all
+      - name: Certification table
+        run: |
+          node tools/repository-compat/summarize_certification.mjs all > certification.md
+          cat certification.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certification-report
+          path: |
+            certification.md
+            all/
+          retention-days: 14
