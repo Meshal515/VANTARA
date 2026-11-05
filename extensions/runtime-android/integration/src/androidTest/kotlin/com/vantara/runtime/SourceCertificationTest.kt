@@ -59,9 +59,15 @@ class SourceCertificationTest {
      * Who threw it: the first frame outside platform/library code, as a package prefix. An extension's own frame
      * (eu.kanade.tachiyomi.animeextension…) proves the fault is the extension's; com.vantara/dev.vantara is ours.
      */
-    private fun thrower(error: Throwable): String? =
-        error.stackTrace.firstOrNull { !libraryFrames.containsMatchIn(it.className) }?.className
-            ?.split('.')?.let { parts -> parts.take(if (parts.size > 5) 6 else parts.size - 1).joinToString(".") }
+    private fun thrower(error: Throwable): String? {
+        val frame = error.stackTrace.firstOrNull { !libraryFrames.containsMatchIn(it.className) } ?: return null
+        // Decisive, not by name: extension classes (often R8-renamed, package-less) exist only in the extension's
+        // own class loader. A class the app's loader cannot resolve was thrown by the extension.
+        val app = InstrumentationRegistry.getInstrumentation().targetContext.classLoader
+        val inApp = runCatching { Class.forName(frame.className, false, app) }.isSuccess
+        val owner = if (inApp && frame.className.matches(Regex("^(com|dev)\\.vantara\\..*"))) "vantara" else if (inApp) "library" else "extension"
+        return "$owner:${frame.className.take(80)}"
+    }
 
     private fun reason(error: Throwable): String {
         val chain = generateSequence(error) { it.cause }.take(6).toList()

@@ -3,7 +3,7 @@
 # جولة 11 من الفحص السريع (addon_preflight.mjs): كل إضافة موقعها يرد أو انتقل، والمانجا كلها.
 # خارجها: مواقع Cloudflare من مراكز البيانات (تُعتمد على جهاز المالك)، والمتوقفة، ونسختا Aniyomi المتقادمتان
 # (anime4up وwitanime) ونسختاهما في CloudStream داخلها.
-# set per_tier=2 servers=2 seconds=8 round=11b
+# set per_tier=2 servers=2 seconds=8 round=11c
 manga:all:manga
 cs3:AnimeRift:anime
 cs3:AnimeWitcher:anime
