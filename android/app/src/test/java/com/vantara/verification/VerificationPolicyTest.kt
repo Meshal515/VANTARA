@@ -12,6 +12,20 @@ class VerificationPolicyTest {
         }
     }
 
+    @Test fun challengeMayMoveWithinTheSameSiteOnly() {
+        fun e(host: String) = VerificationPolicy.endpoint("https://$host/")!!
+        assertTrue(VerificationPolicy.sameSite(e("www.okanime.xyz"), e("ww3.okanime.xyz")))
+        assertTrue(VerificationPolicy.sameSite(e("example.com"), e("www.example.com")))
+        assertTrue(VerificationPolicy.sameSite(e("zeta.site.co.uk"), e("eva.site.co.uk")))
+        assertFalse("A different site is never the challenged site", VerificationPolicy.sameSite(e("witanime.cyou"), e("witanime.you")))
+        assertFalse(VerificationPolicy.sameSite(e("site.co.uk"), e("other.co.uk")))
+        assertFalse(VerificationPolicy.sameSite(e("site.com.sa"), e("other.com.sa")))
+        // Without OkHttp's public-suffix list (JVM tests), the fallback alone decides the same way.
+        assertEquals("okanime.xyz", VerificationPolicy.registrableFallback("ww3.okanime.xyz"))
+        assertEquals("site.co.uk", VerificationPolicy.registrableFallback("zeta.site.co.uk"))
+        assertNull("A bare public suffix is never a site", VerificationPolicy.registrableFallback("co.uk"))
+    }
+
     @Test fun clearanceImportCannotInjectAttributesOrOtherCookies() {
         assertEquals("abc-123_.$", VerificationPolicy.clearance("other=value; cf_clearance=abc-123_.$; session=secret"))
         assertNull(VerificationPolicy.clearance("session=secret"))

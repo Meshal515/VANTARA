@@ -1,5 +1,6 @@
 package com.vantara.verification
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.net.InetAddress
 import java.net.URI
 import java.util.UUID
@@ -18,6 +19,32 @@ object VerificationPolicy {
         if (listOf("localhost", "local", "internal", "lan", "home", "test", "invalid", "onion").any { host == it || host.endsWith(".$it") }) return null
         Endpoint(host, "https://$host")
     }.getOrNull()
+
+    /**
+     * Same registrable domain (public-suffix aware): a challenge page may hop between a site's own subdomains
+     * (www → ww3) or apex and www. Another site is never the same site, and an unknown suffix is never shared.
+     */
+    fun sameSite(a: Endpoint, b: Endpoint): Boolean {
+        if (a.host == b.host) return true
+        val left = registrable(a.host) ?: return false
+        return left == registrable(b.host)
+    }
+    /** The public-suffix list when OkHttp has it (on the device), else [registrableFallback]. */
+    private fun registrable(host: String): String? =
+        runCatching { "https://$host/".toHttpUrl().topPrivateDomain() }.getOrNull() ?: registrableFallback(host)
+    /**
+     * Conservative without the list: the last two labels, or three under a two-letter country code whose second
+     * level is a generic public one (example.co.uk). A bare public suffix is never a site.
+     */
+    internal fun registrableFallback(host: String): String? {
+        val labels = host.lowercase().split('.')
+        if (labels.size < 2) return null
+        val tld = labels.last()
+        val second = labels[labels.size - 2]
+        val keep = if (tld.length == 2 && second in GENERIC_SECOND_LEVEL) 3 else 2
+        return if (labels.size < keep) null else labels.takeLast(keep).joinToString(".")
+    }
+    private val GENERIC_SECOND_LEVEL = setOf("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nic", "sch")
 
     /** Called from a worker only, before navigating or serving a browser request. */
     fun publicDns(host: String): Boolean = runCatching {
