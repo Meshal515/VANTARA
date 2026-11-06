@@ -555,8 +555,32 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const still = () => reduced();
 
   // ── المؤشر ───────────────────────────────────────────────
+  /**
+   * مركز الحبر المرسوم في الأيقونة لا مركز صندوقها: البيت مثلًا رسمه أدنى من مركز مربعه. يُحسب بوحدات
+   * التخطيط (لا يتأثر بتحويلات المبدّل المفتوح)، مع إزاحة المحاذاة البصرية لكل أيقونة (--ox/--oy/--os).
+   */
+  const inkOffset = (nav) => {
+    const svg = nav.querySelector?.('svg');
+    const bb = svg?.getBBox?.();
+    const vb = svg?.viewBox?.baseVal;
+    if (!bb || !vb?.width || !svg.clientWidth) return [0, 0];
+    const cs = getComputedStyle(svg);
+    const os = parseFloat(cs.getPropertyValue('--os')) || 1;
+    const k = (svg.clientWidth / vb.width) * os;
+    return [
+      (bb.x + bb.width / 2 - (vb.x + vb.width / 2)) * k + (parseFloat(cs.getPropertyValue('--ox')) || 0),
+      (bb.y + bb.height / 2 - (vb.y + vb.height / 2)) * k + (parseFloat(cs.getPropertyValue('--oy')) || 0),
+    ];
+  };
   const slotCenter = (nav) => {
-    if (nav.offsetWidth) return nav.offsetLeft + nav.offsetWidth / 2;
+    // بدقة كسرية (offsetLeft يقرّب لعدد صحيح فتنزاح الحلقة نصف بكسل)، وبإلغاء تحجيم الجسم أثناء فتح المبدّل
+    const body = nav.parentElement;
+    if (nav.offsetWidth && body?.offsetWidth) {
+      const b = body.getBoundingClientRect();
+      const r = nav.getBoundingClientRect();
+      const k = b.width / body.offsetWidth || 1;
+      return (r.left - b.left + r.width / 2) / k + inkOffset(nav)[0];
+    }
     const cap = nav.closest('.dock-cap');
     const c = cap.getBoundingClientRect();
     const r = nav.getBoundingClientRect();
@@ -649,6 +673,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       return;
     }
     const x1 = slotCenter(nav);
+    indOf(toCap).style.top = `calc(50% - 20px + ${inkOffset(nav)[1].toFixed(2)}px)`;
     if (!fromCap || !stateOf(fromCap).shown) {
       for (const c of caps) if (c !== toCap) (indOf(c).style.opacity = '0'), (stateOf(c).shown = false);
       return showInd(toCap, x1);
