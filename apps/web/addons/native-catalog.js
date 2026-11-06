@@ -99,11 +99,16 @@ export async function createNativeCatalog(record, {
   const choices = [...new Map(matches.map(row => [row.id, row])).values()];
   if (!choices.length || (sourceId && !choices.some(row => row.id === sourceId)))
     return incompatible('SOURCE_NOT_DECLARED', 'لم يعلن المحرك معرّف مصدر يطابق حزمة الإضافة المثبتة.');
-  if (!sourceId && choices.length > 1) return {
-    status: 'select-source',
-    sources: choices.map(row => ({ sourceId: row.id, name: row.label ?? row.name ?? row.id, pkg, content: manga ? 'manga' : row.content, enabled: row.enabled !== false })),
-  };
-  const selected = choices.find(row => row.id === sourceId) ?? choices[0];
+  const alternatives = choices.map(row => ({ sourceId: row.id, name: row.label ?? row.name ?? row.id, pkg, content: manga ? 'manga' : row.content, enabled: row.enabled !== false }));
+  // «فتح» يفتح المصدر مباشرة: المعرّف المحفوظ للإضافة، ثم المصدر العربي المفعّل، ثم أول مفعّل.
+  // كانت الإضافة متعددة المصادر تُظهر قائمة اختيار بدل المصدر؛ البقية تبقى في alternatives للتبديل من داخله.
+  const arabic = row => String(row.lang ?? '').toLowerCase() === 'ar' || /[\u0600-\u06FF]/.test(String(row.label ?? row.name ?? ''));
+  const enabled = choices.filter(row => row.enabled !== false);
+  const selected = choices.find(row => row.id === sourceId)
+    ?? enabled.find(row => explicit.has(row.id))
+    ?? enabled.find(arabic)
+    ?? enabled[0]
+    ?? choices[0];
   if (selected.enabled === false)
     return incompatible('NATIVE_SOURCE_DISABLED', typeof selected.disabledReason==='string' && selected.disabledReason.trim()
       ? selected.disabledReason.slice(0,300) : 'هذا المصدر معطّل في المحرك الأصلي.');
@@ -190,5 +195,5 @@ export async function createNativeCatalog(record, {
     protocol: 'native', enabled: true, bundled: false, user: true, contentTypes: types, capabilities,
     compatibility: { apk: true, apkCapabilities: capabilities, pwa: false, desktop: false },
   };
-  return { status: 'ready', addon, adapter, source: adapter, sourceId: id };
+  return { status: 'ready', addon, adapter, source: adapter, sourceId: id, alternatives };
 }
