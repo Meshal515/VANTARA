@@ -1,6 +1,7 @@
 # قائمة اعتماد المصادر (source-certification.yml): سطر لكل مصدر بالشكل kind:name:content
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة) أو manga (all أو أسماء بفواصل)
 # جولة 16 مركّزة: الرابط ليس لمرة واحدة (جولة 15)؛ يُطلب الآن كما يطلبه المشغّل (OkHttpDataSource بلا Range) وبوكيل متصفح.
-# set per_tier=2 servers=2 seconds=8 round=16
+# set per_tier=2 servers=2 seconds=8 round=16b
 cs3:Eshek:cinema
 cs3:LodyNet:cinema
+manga:Manga Million:manga

@@ -23,7 +23,7 @@ if [[ "$CERT_KIND" == "manga" ]]; then
   # CERT_NAME «all» = كل الحزم، وإلا أسماء مفصولة بفواصل.
   only=()
   [[ "$CERT_NAME" != "all" ]] && only=(-e vantaraOnly "$CERT_NAME")
-  timeout 9000 adb shell am instrument -r -w \
+  timeout 9000 adb shell am instrument --user 0 -r -w \
     -e class com.vantara.runtime.MangaLiveSweepTest \
     -e vantaraMangaSweep true "${only[@]}" \
     "$runner" > "$out/instrumentation.txt" 2>&1 || status=$?
@@ -33,7 +33,7 @@ if [[ "$CERT_KIND" == "manga" ]]; then
   tail -n 20 "$out/instrumentation.txt"
   exit 0
 fi
-timeout 9000 adb shell am instrument -r -w \
+timeout 9000 adb shell am instrument --user 0 -r -w \
   -e class com.vantara.runtime.SourceCertificationTest \
   -e vantaraCertify true \
   -e vantaraCertKind "$CERT_KIND" \
@@ -45,7 +45,7 @@ timeout 9000 adb shell am instrument -r -w \
   "$runner" > "$out/instrumentation.txt" 2>&1 || status=$?
 if grep -q "Invalid userId" "$out/instrumentation.txt"; then
   sleep 15
-  timeout 9000 adb shell am instrument -r -w \
+  timeout 9000 adb shell am instrument --user 0 -r -w \
     -e class com.vantara.runtime.SourceCertificationTest \
     -e vantaraCertify true \
     -e vantaraCertKind "$CERT_KIND" \
