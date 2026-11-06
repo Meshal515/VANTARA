@@ -101,7 +101,7 @@ it('resolves the real manga package source and preserves memo through catalogue,
 
 it('requires explicit selection when a package exposes multiple native source IDs',async()=>{
  const plugin=mangaPlugin({sources:async()=>({sources:[{id:'one',pkg:mangaRecord.pkg,label:'First'},{id:'two',pkg:mangaRecord.pkg,label:'Second'}]})});
- const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});expect(result.status).toBe('select-source');expect(result.sources.map(x=>x.sourceId)).toEqual(['one','two']);
+ const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});expect(result.status).toBe('ready');expect(result.sourceId).toBe('one');expect(result.alternatives.map(x=>x.sourceId)).toEqual(['one','two']);
  expect((await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin},sourceId:'two'})).addon.sourceId).toBe('two');
  expect((await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin},sourceId:'unrelated'})).status).toBe('incompatible');
 });
@@ -161,4 +161,16 @@ it('renders the explicitly selected latest screen using real native page results
  const view=renderSourceMode({...out,state:{tab:'home',page:1,query:''}});document.body.append(view);await new Promise(r=>setTimeout(r,0));
  expect(view.querySelector('.up-title').textContent).toBe('Real Native 1');view.querySelector('.addon-source-more').click();await new Promise(r=>setTimeout(r,0));
  expect([...view.querySelectorAll('.up-title')].map(x=>x.textContent)).toEqual(['Real Native 1','Real Native 2']);expect(view.querySelector('.addon-source-more').hidden).toBe(true);view.close();
+});
+
+it('«فتح» يفتح المصدر العربي المفعّل مباشرة في إضافة متعددة المصادر، لا قائمة اختيار', async () => {
+  const plugin=mangaPlugin({sources:async()=>({sources:[
+    {id:'en',pkg:mangaRecord.pkg,label:'Source (EN)',lang:'en'},
+    {id:'ar-off',pkg:mangaRecord.pkg,label:'مصدر معطّل',lang:'ar',enabled:false},
+    {id:'ar',pkg:mangaRecord.pkg,label:'المصدر العربي',lang:'ar'},
+  ]})});
+  const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});
+  expect(result.status).toBe('ready');
+  expect(result.sourceId).toBe('ar');
+  expect(result.alternatives).toHaveLength(3);
 });
