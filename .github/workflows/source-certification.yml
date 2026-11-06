@@ -64,19 +64,13 @@ jobs:
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: list }) + "\n");
           '
 
-  certify:
-    # حصة ملفات Actions ممتلئة: كل وظيفة تبني لنفسها، والنتائج في السجل وملخص الوظيفة، بلا رفع ملفات
-    needs: [plan]
+  build:
+    # يُبنى التطبيق وفحصه مرة واحدة ويُشارك: عشرون بناء متزامنًا كان يكرر 5 دقائق في كل وظيفة ويتعثر في تنزيل NDK
     runs-on: ubuntu-latest
-    timeout-minutes: 175
+    timeout-minutes: 45
     env:
       ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
       VANTARA_RUNTIME_DEBUG: 'true'
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: ${{ matrix.kind }} ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -97,7 +91,6 @@ jobs:
       - name: Build the actual Debug app with the runtime and its instrumentation
         run: |
           npx cap sync android
-          # تنزيل NDK/SDK قد يتعثر حين تبني عشرون وظيفة معًا: ثلاث محاولات قبل الحكم بالفشل
           for attempt in 1 2 3; do
             bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon && break
             [ "$attempt" = 3 ] && exit 1
@@ -106,6 +99,30 @@ jobs:
           mkdir -p apks
           cp android/app/build/outputs/apk/debug/app-debug.apk apks/
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cert-apks
+          path: apks/
+          retention-days: 2
+
+  certify:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 175
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.kind }} ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: cert-apks
+          path: apks/
       # بعد Gradle يبقى قرص المشغّل قرابة 6GB والمحاكي يطلب أكثر فلا يقلع: نحرر ونحدّ قرصه كما في بوابات Debug
       - name: Reserve disk before emulator SDK download
         run: bash tools/repository-compat/prepare_emulator_disk.sh 14
