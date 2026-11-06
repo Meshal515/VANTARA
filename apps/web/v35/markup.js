@@ -69,7 +69,7 @@ export const SHELL_HTML = `<div class="app">
       <div class="header-end">${iconButton('search', 'بحث', { act: 'openSearch' })}${bell()}</div>
     </header>
 
-    <div class="home-view" id="mangaHome">
+    <div class="home-view" id="mangaHome" data-home="manga">
     <section class="hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
       <div class="hero-track" id="heroTrack"></div>
       <div class="hero-dots" id="heroDots"></div>
@@ -83,8 +83,8 @@ export const SHELL_HTML = `<div class="app">
     </nav>
     <main id="homeSections"></main>
     </div>
-    <div class="home-view anime-home" id="animeHome" hidden></div>
-    <div class="home-view cinema-home" id="cinemaHome" hidden></div>
+    <div class="home-view anime-home" id="animeHome" data-home="anime" hidden></div>
+    <div class="home-view cinema-home" id="cinemaHome" data-home="cinema" hidden></div>
   </section>
 
   <section class="page anime-page" id="anime"></section>

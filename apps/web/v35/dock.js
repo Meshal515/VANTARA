@@ -322,8 +322,18 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
    * ويُستعاد للصفحة إن رجع للقسم نفسه.
    */
   let savedScroll = 0;
+  // موضع الصفحة بدقة كسرية: offsetTop يقرّب لعدد صحيح، والترويسة بالمساحة الآمنة كسرية (بكسل أو اثنان)
+  // ويُقاس من أسفل الترويسة لا من موضع الصفحة الحالية: هامش أول عنصر في صفحة (6px في المانجا) يتسرّب
+  // خارجها في التدفق العادي، فموضع صفحة لا يصلح لغيرها؛ والحشوة تبقي هامش كل صفحة داخلها هي
+  const topOf = (v) => {
+    const header = host.querySelector?.(':scope > .header');
+    const h = host.getBoundingClientRect?.();
+    const r = (header ?? v).getBoundingClientRect?.();
+    if (!r || !h || !(r.height || r.top || h.top)) return v.offsetTop || 0;
+    return (header ? r.bottom : r.top) - h.top;
+  };
   const enterLayering = () => {
-    const top = views[section].offsetTop || 0;
+    const top = topOf(views[section]);
     const scrollY = globalThis.scrollY || 0;
     savedScroll = scrollY;
     host.style.minHeight = `${globalThis.innerHeight || 0}px`;
@@ -332,7 +342,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     offsets = {};
     if (scrollY > 0) {
       globalThis.scrollTo?.({ top: 0, behavior: 'instant' });
-      views[section].scrollTop = Math.max(0, scrollY - top);
+      views[section].scrollTop = scrollY; // الحشوة بارتفاع الترويسة: المحتوى في موضعه نفسه على الشاشة
     }
   };
 
@@ -426,7 +436,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       if (cover || standby) return;
       standby = true;
       host.classList.add('layer-ready');
-      host.style.setProperty('--layer-top', `${views[section].offsetTop || 0}px`);
+      host.style.setProperty('--layer-top', `${topOf(views[section])}px`);
       // تبقى hidden في نظر بقية الكود (البانر لا يدور، والتحميل لا يظن أنها ظاهرة)؛ CSS يخطّطها
       for (const [id, v] of Object.entries(views)) {
         if (id === section) continue;

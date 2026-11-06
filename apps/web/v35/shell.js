@@ -5379,6 +5379,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(s.id, [root, document.documentElement]);
+    // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
+    for (const [section, home] of Object.entries(HOMES)) { const view = q(home); if (view) applyAppearance(section, [view]); }
     // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
     let toneTag = document.getElementById('look-tones');
     if (!toneTag) {

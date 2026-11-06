@@ -14,7 +14,8 @@
 /* ───────────── متغيّرات الأقسام ───────────── */
 
 .v35[data-section='anime'],
-html[data-section='anime'] {
+html[data-section='anime'],
+.v35 [data-home='anime'] {
   --bg: #05070d;
   --bg-raised: #080b14;
   --surface-1: #0d111b;
@@ -35,7 +36,8 @@ html[data-section='anime'] {
   caret-color: #8fb8ff;
 }
 .v35[data-section='cinema'],
-html[data-section='cinema'] {
+html[data-section='cinema'],
+.v35 [data-home='cinema'] {
   --bg: #0a0707;
   --bg-raised: #0f0b0b;
   --surface-1: #141010;
@@ -62,10 +64,15 @@ html[data-section='cinema'] {
 }
 
 /* ما يخصّ قسمًا يختفي في غيره */
-.v35:not([data-section='anime']) .anime-only,
-.v35:not([data-section='cinema']) .cinema-only,
-.v35[data-section='anime'] .manga-only,
-.v35[data-section='cinema'] .manga-only {
+/* داخل صفحة قسم يحكم القسمُ نفسه لا القسمُ الحالي: الصفحة الداخلة في الانتقال تبقى بأبعادها
+ * ولا تأخذ قواعد غيرها ولا لجزء من الثانية */
+.v35:not([data-section='anime']) .anime-only:not([data-home] *),
+.v35:not([data-section='cinema']) .cinema-only:not([data-home] *),
+.v35[data-section='anime'] .manga-only:not([data-home] *),
+.v35[data-section='cinema'] .manga-only:not([data-home] *),
+.v35 [data-home]:not([data-home='anime']) .anime-only,
+.v35 [data-home]:not([data-home='cinema']) .cinema-only,
+.v35 [data-home]:not([data-home='manga']) .manga-only {
   display: none !important;
 }
 

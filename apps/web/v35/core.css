@@ -1021,6 +1021,29 @@ html,
   display: none;
 }
 
+/* ── هوية كل صفحة قسم على الصفحة نفسها: صفحة المانجا بألوان المانجا ولو كان التطبيق كله في قسم
+ * آخر (أثناء الانتقال). ألوان الأنمي والسينما في anime.css بالمحدِّد نفسه، واختيار المستخدم مضمّن
+ * على كل صفحة (applySection). ── */
+.v35 [data-home='manga'] {
+  --bg: #08070c;
+  --bg-raised: #0c0b12;
+  --surface-1: #121019;
+  --surface-2: #18161f;
+  --surface-3: #211e2b;
+  --line: rgba(255, 255, 255, 0.065);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --text-2: #bab6c6;
+  --text-3: #85809a;
+  --text-4: #57536a;
+  --accent: #8f5cff;
+  --accent-press: #7a47f0;
+  --accent-text: #bba2ff;
+  --accent-soft: rgba(143, 92, 255, 0.14);
+  --accent-line: rgba(143, 92, 255, 0.4);
+  accent-color: #8f5cff;
+  caret-color: #bba2ff;
+}
+
 /* ── طبقات الأقسام أثناء الانتقال (dock.js: createLayers) ── */
 .v35 #home.layering {
   position: relative;
@@ -1029,8 +1052,12 @@ html,
 .v35 #home.layering > .home-view:not([hidden]) {
   position: absolute;
   inset-inline: 0;
-  top: var(--layer-top, 0px);
-  height: calc(100vh - var(--layer-top, 0px));
+  /* من أعلى الصفحة نفسها، والمحتوى في مكانه الطبيعي بحشوة بارتفاع الترويسة: بانر السينما
+   * الممتد تحت الترويسة (هامش سالب) يبقى في موضعه أثناء الحركة ولا يقفز عند نهايتها */
+  top: 0;
+  padding-top: var(--layer-top, 0px);
+  box-sizing: border-box;
+  height: 100vh;
   overflow: hidden; /* طبقة بحجم الشاشة: صورة صغيرة يحرّكها المركّب بلا إعادة رسم */
   contain: layout paint;
   background: var(--bg);
@@ -1045,10 +1072,15 @@ html,
 .v35 #home > .home-view.layer-standby[hidden] {
   display: block !important;
 }
+.v35 #home.layering > .header {
+  z-index: 40; /* الترويسة فوق الطبقات المتحركة */
+}
 .v35 #home > .home-view.layer-standby {
   position: absolute;
   inset-inline: 0;
-  top: var(--layer-top, 0px);
+  top: 0;
+  padding-top: var(--layer-top, 0px);
+  box-sizing: border-box;
   visibility: hidden;
   pointer-events: none;
   transform: translate3d(-100%, 0, 0);
