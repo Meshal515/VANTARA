@@ -97,3 +97,9 @@ test('سبب المشغّل يحسم الانتقال: مهلة أول إطار 
   assert.equal(at({ playerReason: 'engine watchdog: FIRST_VIDEO_FRAME_TIMEOUT', httpFailure: '403 media x ts' }), 'vantara');
   assert.equal(at({ playerReason: 'source error 403' }), 'vantara');
 });
+
+test('خادم يرفض رابطًا جديدًا من أول طلب بعميل التشغيل = الموقع؛ ويقبله ثم يرفض المشغّل = فانتارا', () => {
+  const at = (singleUse) => failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'ERROR_CODE_IO_BAD_HTTP_STATUS', httpFailure: '403 manifest h m3u8', singleUse }] }])[0].owner;
+  assert.equal(at('fresh:refused again:refused player:403 playerBrowserUA:403 headers:Referer+User-Agent'), 'site');
+  assert.equal(at('fresh:ok again:ok player:ok playerBrowserUA:ok headers:Referer'), 'vantara');
+});

@@ -13,6 +13,9 @@ adb logcat -c || true
 adb install -r "$app" || exit 1
 adb install -r -t "$tests" || exit 1
 status=0
+# adb shell joins its arguments into one remote command line: a value with a space («Manga Million», «Dima toon»,
+# «Asia2tv 2») split into two arguments, and am answered with its usage text or «Invalid userId -2» (rounds 11, 16).
+rq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 # Right after boot the emulator's user may not be running yet: «Error: Invalid userId -2» (round 11, two jobs).
 for i in $(seq 1 30); do
   [[ "$(adb shell am get-current-user 2>/dev/null | tr -d '\r')" == "0" ]] && adb shell pm path android >/dev/null 2>&1 && break
@@ -22,7 +25,7 @@ if [[ "$CERT_KIND" == "manga" ]]; then
   # مانجا: رحلة MangaLiveSweepTest لكل حزمة (المدمجة وعربية Keiyoushi) حتى صورة صفحة فعلية.
   # CERT_NAME «all» = كل الحزم، وإلا أسماء مفصولة بفواصل.
   only=()
-  [[ "$CERT_NAME" != "all" ]] && only=(-e vantaraOnly "$CERT_NAME")
+  [[ "$CERT_NAME" != "all" ]] && only=(-e vantaraOnly "$(rq "$CERT_NAME")")
   timeout 9000 adb shell am instrument --user 0 -r -w \
     -e class com.vantara.runtime.MangaLiveSweepTest \
     -e vantaraMangaSweep true "${only[@]}" \
@@ -49,7 +52,7 @@ if grep -q "Invalid userId" "$out/instrumentation.txt"; then
     -e class com.vantara.runtime.SourceCertificationTest \
     -e vantaraCertify true \
     -e vantaraCertKind "$CERT_KIND" \
-    -e vantaraCertName "$CERT_NAME" \
+    -e vantaraCertName "$(rq "$CERT_NAME")" \
     -e vantaraCertContent "$CERT_CONTENT" \
     -e vantaraCertPerTier "${CERT_PER_TIER:-10}" \
     -e vantaraCertServers "${CERT_SERVERS:-3}" \
