@@ -1,10 +1,6 @@
 # قائمة اعتماد المصادر (source-certification.yml): سطر لكل مصدر بالشكل kind:name:content
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة) أو manga (all أو أسماء بفواصل)
-# جولة 15 مركّزة: هل يستهلك الفحص روابط Eshek/LodyNet (403 على القائمة نفسها)؟ وإصلاح ProtoBuf لـ Manga Million،
-# وAkwam وAnimeRift للتأكد من عدم التراجع. القائمة الكاملة تعود في الجولة التالية.
-# set per_tier=2 servers=2 seconds=8 round=15
+# جولة 16 مركّزة: الرابط ليس لمرة واحدة (جولة 15)؛ يُطلب الآن كما يطلبه المشغّل (OkHttpDataSource بلا Range) وبوكيل متصفح.
+# set per_tier=2 servers=2 seconds=8 round=16
 cs3:Eshek:cinema
 cs3:LodyNet:cinema
-cs3:Akwam:cinema
-cs3:AnimeRift:anime
-manga:Manga Million:manga
