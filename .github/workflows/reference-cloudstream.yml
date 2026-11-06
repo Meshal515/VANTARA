@@ -29,8 +29,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Deterministic checks of the link checker
-        run: python3 -I tools/reference/cloudstream/test_probe_links.py -v
+      - name: Deterministic checks of the link checker and the comparator
+        run: |
+          python3 -I tools/reference/cloudstream/test_probe_links.py -v
+          python3 -I tools/reference/cloudstream/test_compare.py -v
 
   build:
     needs: checks
@@ -119,8 +121,10 @@ jobs:
           echo "episodes=$(python3 -I -c 'import json;print(json.load(open("run.json"))["episodes"])')" >> "$GITHUB_OUTPUT"
       - name: Reserve disk before emulator SDK download
         run: bash tools/repository-compat/prepare_emulator_disk.sh 14
-      - name: KVM
-        run: sudo chmod 666 /dev/kvm
+      - name: KVM and ffmpeg (links are decode-checked live, during the run)
+        run: |
+          sudo chmod 666 /dev/kvm
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg >/dev/null || { sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null; }
       - name: Reference run on a fresh emulator (clean network)
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
@@ -142,7 +146,6 @@ jobs:
       - name: Decode check (ffprobe) and summary
         if: always()
         run: |
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg >/dev/null || { sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null; }
           cp run.json reference-out/ 2>/dev/null || true
           python3 -I tools/reference/cloudstream/probe_links.py reference-out | tee -a "$GITHUB_STEP_SUMMARY"
           tail -n 20 reference-out/instrument.txt 2>/dev/null || true
@@ -152,3 +155,96 @@ jobs:
           name: reference-run
           path: reference-out/
           retention-days: 2
+
+  # VANTARA's side: the actual Debug app with the runtime and its instrumentation (as source-certification builds it).
+  vantara-build:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - run: pnpm install --frozen-lockfile
+      - name: Pinned provider fixtures used by the androidTest assets directory
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Build the actual Debug app with the runtime and its instrumentation
+        run: |
+          npx cap sync android
+          for attempt in 1 2 3; do
+            bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "build attempt $attempt failed; retrying after a pause"; sleep $((attempt * 30))
+          done
+          mkdir -p vantara-apks
+          cp android/app/build/outputs/apk/debug/app-debug.apk vantara-apks/
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk vantara-apks/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vantara-apks
+          path: vantara-apks/
+          retention-days: 2
+
+  # Same .cs3 (hash-checked), same episodes, same checker: verdict per server (PASS / VANTARA_FAULT / …).
+  compare:
+    needs: [run, vantara-build]
+    if: always() && needs.run.result == 'success' && needs.vantara-build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-run
+          path: reference-out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: vantara-apks
+          path: vantara-apks/
+      - name: Reference episodes for VANTARA (same data, same package hash)
+        run: python3 -I tools/reference/cloudstream/compare.py plan reference-out tools/repository-compat/certification-sources.txt > ref-episodes.json && python3 -I -c 'import json;d=json.load(open("ref-episodes.json"));print([(p["name"],len(p["episodes"])) for p in d["plugins"]])'
+      - name: Reserve disk before emulator SDK download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+      - name: KVM and ffmpeg (links are decode-checked live, during the run)
+        run: |
+          sudo chmod 666 /dev/kvm
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg >/dev/null || { sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null; }
+      - name: VANTARA on a fresh emulator (clean network)
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6G
+          disable-animations: true
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
+          script: bash tools/reference/cloudstream/run_vantara_compare.sh
+      - name: Verdict per server
+        if: always()
+        run: python3 -I tools/reference/cloudstream/compare.py judge reference-out vantara-out | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-comparison
+          path: |
+            vantara-out/
+            ref-episodes.json
+          retention-days: 2
+

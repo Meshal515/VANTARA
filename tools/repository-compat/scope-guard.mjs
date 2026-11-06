@@ -198,7 +198,9 @@ seams.add('android/app/src/main/kotlin/com/vantara/anime/stream/MagnetLinks.kt')
 seams.add('android/app/src/test/java/com/vantara/anime/MagnetLinksTest.kt');
 // Measurement plan phase 0: original CloudStream as an isolated CI-only reference (never in the app).
 seams.add('.github/workflows/reference-cloudstream.yml');
-for (const f of ['ReferenceProbe.kt', 'ReferenceRunTest.kt', 'patch.py', 'plan.txt', 'probe_links.py', 'run_reference.sh', 'test_probe_links.py']) seams.add(`tools/reference/cloudstream/${f}`);
+for (const f of ['ReferenceProbe.kt', 'ReferenceRunTest.kt', 'patch.py', 'plan.txt', 'probe_links.py', 'run_reference.sh', 'test_probe_links.py', 'compare.py', 'test_compare.py', 'run_vantara_compare.sh']) seams.add(`tools/reference/cloudstream/${f}`);
+// Phase 1 (small): VANTARA's side of the comparison, same .cs3 and episodes as the reference (androidTest only).
+seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/ReferenceCompareTest.kt');
 // Additive nullable Route.type so the sheet renders any adapter's torrent tickets as torrent rows.
 seams.add('android/app/src/main/kotlin/com/vantara/anime/stream/Routes.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');

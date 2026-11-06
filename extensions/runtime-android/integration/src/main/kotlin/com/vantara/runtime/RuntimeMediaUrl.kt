@@ -2,12 +2,10 @@ package com.vantara.runtime
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
-/** CloudStream compatibility only: keep the existing player's HTTPS/public-host policy intact.
- * No cleartext fallback, credential stripping, alternate port or relaxed TLS validation.
+/**
+ * A CloudStream link exactly as the original engine plays it. It used to be upgraded http→https:443 to fit the
+ * player's TLS-only policy, which broke real http-only servers (reference round 1: Akwam http://…downet.net).
+ * Owner policy (Nov 6): no refusal or rewrite just for plain http or a port; credentials and private/local addresses
+ * stay refused, by addonMediaUrl (NativeAddonMediaNetwork.kt) and the media client's public-address DNS.
  */
-internal fun runtimeMediaUrl(value: String): String {
-    val url=value.toHttpUrl()
-    return if(url.scheme=="http" && url.port==80 && url.username.isEmpty() && url.password.isEmpty())
-        url.newBuilder().scheme("https").port(443).build().toString()
-    else url.toString()
-}
+internal fun runtimeMediaUrl(value: String): String = value.toHttpUrl().toString()

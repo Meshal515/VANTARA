@@ -2153,6 +2153,7 @@ export function createAnime(deps) {
         sheet: state.sheetFor?.id === m.id ? state.sheetFor.sheet : null, nameOf: (id) => sourceName(id) ?? id });
       const fullText = () => JSON.stringify(discoveryDiagnostics(m.id), null, 2);
       const refresh = () => { output.textContent = full ? fullText() : summary(); };
+      void refreshSourceNames().then(refresh);
       const copy = (text) => copyText(text).then((ok) => toast(ok ? 'نُسخ' : 'تعذّر النسخ — حدّد النص يدويًا'));
       refresh();
       const toggle = button('aw-link', 'إظهار الكامل', () => { full = !full; toggle.textContent = full ? 'إظهار الملخص' : 'إظهار الكامل'; refresh(); });
@@ -2222,9 +2223,11 @@ export function createAnime(deps) {
   const SOURCE_NAMES = {};
   // نسخ الإضافات تحمل اسم الإضافة في `title`؛ وإلا يُستخرج من مضيفها (torrentio ← Torrentio)
   const sourceName = (id) => sourceLabel(id, { names: SOURCE_NAMES, title: state.work?.copies?.find((c) => c.sourceId === id)?.title ?? null });
-  void engine.sources().then((list) => {
+  // مصادر CloudStream تُسجَّل بعد الإقلاع: تُحدَّث الأسماء عند فتح الورقة والتشخيص، وإلا ظهرت «Cs3» أو عنوان العمل
+  const refreshSourceNames = () => engine.sources().then((list) => {
     for (const s of list ?? []) SOURCE_NAMES[s.id] = s.name;
   }).catch(() => {});
+  void refreshSourceNames();
 
   // ───────────── التشغيل: ورقة السيرفرات ثم المشغّل الأصلي ─────────────
 
@@ -2404,6 +2407,7 @@ export function createAnime(deps) {
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
     state.sheetFor = { id: m.id, sheet }; // ورقة هذا العمل حيّة أو آخر حالة لها، لملخص التشخيص
+    void refreshSourceNames();
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;

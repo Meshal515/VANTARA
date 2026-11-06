@@ -7,11 +7,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RuntimeSourceAdapterTest {
-    @Test fun publicHttpMediaIsUpgradedToTlsBeforeSharedMediaAdmission()=runBlocking {
+    /** Played as the original engine plays it: an http-only server is not rewritten to https (it would not answer). */
+    @Test fun publicHttpMediaKeepsItsSchemeLikeTheOriginalEngine()=runBlocking {
         val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://media.example/video.mp4","quality":720,"headers":{"Referer":"https://source.example/watch"}}]}""") }
         val candidates=adapter.candidates(SourceEpisode(id,"episode","Episode",1f))
         assertEquals(1,candidates.size)
-        assertEquals("https://media.example/video.mp4",candidates.single().url)
+        assertEquals("http://media.example/video.mp4",candidates.single().url)
         assertEquals("https://source.example/watch",candidates.single().headers["Referer"])
     }
     @Test fun extractedRuntimeCandidatesReportRoutesSoNativePreparationCanProbeThem()=runBlocking {
@@ -32,9 +33,28 @@ class RuntimeSourceAdapterTest {
         assertEquals(candidate.id,prep.best()?.id)
         assertEquals("https://source.example/watch",candidate.headers["Referer"])
     }
-    @Test fun httpCredentialsAndNonstandardPortsNeverBecomePermittedMedia()=runBlocking {
-        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://user:secret@media.example/video.mp4"},{"url":"http://media.example:8080/video.mp4"},{"url":"http://127.0.0.1/private.mp4"}]}""") }
-        assertTrue(adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).isEmpty())
+    /**
+     * Protections stay: credentials in a link and local/private addresses never become media.
+     * Owner policy (Nov 6): no refusal just for plain http or a non-443 port; the original CloudStream plays them and
+     * reference round 1 shows real servers there (Akwam http://…downet.net, mp4upload https://…:183).
+     */
+    @Test fun credentialsAndPrivateAddressesNeverBecomeMediaButPublicHttpAndPortsDo()=runBlocking {
+        val refused=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://user:secret@media.example/video.mp4"},{"url":"http://127.0.0.1/private.mp4"},{"url":"http://192.168.1.4/lan.mp4"},{"url":"http://nas.local/v.mp4"}]}""") }
+        assertTrue(refused.candidates(SourceEpisode(id,"episode","Episode",1f)).isEmpty())
+        val admitted=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"http://media.example/video.mp4"},{"url":"https://media.example:183/video.mp4"}]}""") }
+        assertEquals(listOf("http://media.example/video.mp4","https://media.example:183/video.mp4"),admitted.candidates(SourceEpisode(id,"episode","Episode",1f)).map { it.url }.sorted())
+    }
+    /** The media policy itself, on every request of the media client too (redirects included). */
+    @Test fun mediaPolicyKeepsProtectionsAndLeavesStremioUntouched() {
+        for (bad in listOf("http://user:pass@cdn.example/v.mp4", "http://localhost/v.mp4", "http://nas.local/v.mp4", "http://192.168.1.10/v.mp4",
+                "http://127.0.0.1:8080/v.mp4", "http://10.0.0.5/v.mp4", "http://[::1]/v.mp4", "ftp://cdn.example/v.mp4")) {
+            assertTrue(bad, runCatching { com.vantara.addons.addonMediaUrl(bad, plain = true) }.isFailure)
+        }
+        assertEquals("93.184.216.34", com.vantara.addons.addonMediaUrl("http://93.184.216.34:8080/v.mp4", plain = true).host)
+        assertEquals(183, com.vantara.addons.addonMediaUrl("https://a3.mp4upload.com:183/d/x.mp4", plain = true).port)
+        // Remote Stremio addons keep https:443 exactly as before
+        assertTrue(runCatching { com.vantara.addons.addonMediaUrl("http://cdn.example/v.mp4", plain = false) }.isFailure)
+        assertTrue(runCatching { com.vantara.addons.addonMediaUrl("https://cdn.example:183/v.mp4", plain = false) }.isFailure)
     }
     @Test fun revokedRuntimeSourceCannotReturnPreviouslyCachedEpisodes()=runBlocking {
         val dir=kotlin.io.path.createTempDirectory("runtime-episodes-").toFile()

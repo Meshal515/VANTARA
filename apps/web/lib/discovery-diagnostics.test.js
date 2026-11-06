@@ -57,3 +57,15 @@ it('summarizes one line per source and the server sheet, short enough to copy fr
 it('explains an empty record instead of returning nothing', () => {
   expect(summarizeDiscovery(undefined)).toContain('فعّل «إظهار التشخيصات»');
 });
+
+it('a source returning its whole catalogue for any query is one line, not a flood that drops older evidence', () => {
+  setDiscoveryDebug(true);
+  const t = beginDiscovery({ workId: 9, title: 'Black Lagoon' });
+  for (let page = 1; page <= 60; page += 1) t.record('candidates', { sourceId: 'okanime', page, accepted: [], rejected: { title: 24 }, examples: [{ title: '[Oshi no Ko]', reason: 'title' }] });
+  t.record('candidates', { sourceId: 'cs3-rift', page: 1, accepted: ['Black Lagoon'], rejected: { sequel: 1 } });
+  const row = discoveryDiagnostics(9)[0];
+  expect(row.droppedEvents).toBe(0);
+  const text = summarizeDiscovery(row, { nameOf: (id) => ({ okanime: 'Okanime', 'cs3-rift': 'AnimeRift' })[id] ?? id });
+  expect(text).toContain('- Okanime: رُفض 1440 (title×1440) مثل «[Oshi no Ko]»');
+  expect(text).toContain('- AnimeRift: قُبل 1 («Black Lagoon») · رُفض 1 (sequel)');
+});

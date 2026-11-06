@@ -391,9 +391,15 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
         const { done } = searchStream(query, 'anime', (hit) => {
           trace.record('source_page', { query, sourceId: hit.sourceId, page: hit.page, hasNext: hit.hasNext, stop: hit.stop,
             received: hit.items?.length ?? 0, error: hit.error, diagnostic: hit.diagnostic, skipped: hit.skipped });
-          if (isDiscoveryDebug()) for (const copy of hit.items ?? []) {
-            const judgment = judgeAnimeCopy(copy, titles, criteria);
-            trace.record(judgment.ok ? 'candidate_accepted' : 'candidate_rejected', { sourceId: copy.sourceId, title: copy.title, ...judgment });
+          // سطر واحد لكل مصدر وصفحة: المقبول بعناوينه، والمرفوض بعدد كل سبب وثلاثة أمثلة. سطر لكل نتيجة كان
+          // يملأ السجل (200 حدث) ويُسقط أحداثًا أقدم أهم منه (مصدر يعيد كتالوجه كله لأي بحث)
+          if (isDiscoveryDebug() && hit.items?.length) {
+            const judged = hit.items.map((copy) => ({ copy, j: judgeAnimeCopy(copy, titles, criteria) }));
+            const rejected = judged.filter((x) => !x.j.ok);
+            trace.record('candidates', { sourceId: hit.sourceId, query, page: hit.page,
+              accepted: judged.filter((x) => x.j.ok).map((x) => x.copy.title).slice(0, 8),
+              rejected: rejected.reduce((m, x) => ({ ...m, [x.j.reason ?? '?']: (m[x.j.reason ?? '?'] ?? 0) + 1 }), {}),
+              examples: rejected.slice(0, 3).map((x) => ({ title: x.copy.title, reason: x.j.reason, score: Math.round((x.j.score ?? 0) * 100) / 100 })) });
           }
           if (hit.error || hit.skipped) uncertain = true;
           items.push(...(hit.items ?? []));

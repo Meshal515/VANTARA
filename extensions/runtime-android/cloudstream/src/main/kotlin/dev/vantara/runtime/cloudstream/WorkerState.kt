@@ -36,6 +36,10 @@ object WorkerState {
             embeds.add(buildMap{put("url",url);put("host",key);referer?.takeIf{it.isNotBlank()&&it.length<=2048}?.let{put("referer",it)}})
     }
     fun takeMissingEmbeds():List<Map<String,String>> =embeds.toList().also{embeds.clear()}
+    /** Video link → the server page (embed) whose extractor produced it; links the provider made itself are absent. */
+    private val linkEmbeds=java.util.concurrent.ConcurrentHashMap<String,String>()
+    fun linkFrom(link:String,embed:String){ if(linkEmbeds.size<512&&link.length<=4096&&embed.length<=2048)linkEmbeds.putIfAbsent(link,embed) }
+    fun takeLinkEmbeds():Map<String,String> =HashMap(linkEmbeds).also{linkEmbeds.clear()}
     fun takeMissingExtractors():List<String> =missing.toList().sorted().also{missing.clear()}
     fun takeMissingSamples():Map<String,String> =samples.toSortedMap().also{samples.clear()}
     fun install(context:Context?,saved:Map<String,String> = emptyMap(),cookies:Map<String,Map<String,String>> = emptyMap()) {

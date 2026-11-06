@@ -613,7 +613,7 @@ class AnimeEngine(context: Context) {
                     // Up to three bounded calls for HLS: playlist, first variant, first segment (StreamProbe).
                     val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS * 3 + 1_000) {
                         try {
-                            val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient
+                            val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers, plainMedia = c.sourceId.startsWith(RUNTIME_SOURCE_PREFIX)) else probeClient
                             com.vantara.anime.stream.StreamProbe.checkCancellable(client, c)
                         } catch (cancelled: CancellationException) {
                             throw cancelled

@@ -32,6 +32,9 @@ import java.security.MessageDigest
 @RunWith(AndroidJUnit4::class)
 class ReferenceRunTest {
     private val now = { System.currentTimeMillis() }
+    /** Each episode is written the moment it finishes, so the host checks its links within seconds (they expire). */
+    private var episodeSink: (JSONObject) -> Unit = {}
+    private var episodeCount = 0
 
     @Test
     fun run() = runBlocking {
@@ -56,6 +59,7 @@ class ReferenceRunTest {
                 val loaded = PluginManager.loadPlugin(context, file, PluginData(name, url, true, file.absolutePath, 1))
                 report.put("loaded", loaded)
                 val providers = APIHolder.allProviders.filter { it !in before || it.sourcePlugin == file.absolutePath }
+                episodeSink = { row -> File(out, "$name.ep${++episodeCount}.json").writeText(row.toString()) }
                 report.put("providers", JSONArray(providers.map { runProvider(it, works, episodes) }))
             } catch (t: Throwable) {
                 report.put("error", describe(t))
@@ -131,6 +135,7 @@ class ReferenceRunTest {
         }
         row.put("linksMs", now() - t0).put("returned", result.getOrNull()).put("error", result.exceptionOrNull()?.let(::describe))
         row.put("embeds", JSONArray(synchronized(embeds) { embeds.values.toList() })).put("direct", direct)
+        runCatching { episodeSink(row) }
         return row
     }
 

@@ -49,6 +49,31 @@ class ProbeLinksTest(unittest.TestCase):
         self.assertIn("| X | نعم | 1/1 | 1 | 2 | 1 | 2 | 1 | 1 | 0 |", text)
         self.assertIn("c.test · no video frame × 1", text)
 
+    def test_failure_reason_never_contains_the_link(self):
+        verdict = p.probe(self.link, run=lambda *a, **k: Result("", 1, "https://cdn.test/v.m3u8?token=secret: Server returned 403 Forbidden"))
+        self.assertNotIn("cdn.test", verdict["reason"])
+        self.assertNotIn("secret", verdict["reason"])
+        self.assertIn("403 Forbidden", verdict["reason"])
+
+    def test_live_check_is_used_and_late_ones_are_marked(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            ep = {"embeds": [{"embed": "https://a.test/e", "links": [dict(self.link)]}], "direct": [dict(self.link, url="https://c.test/x.mp4")]}
+            (root / "X.json").write_text(json.dumps({"plugin": "X", "loaded": True, "providers": [{"works": [{"episodes": [ep]}]}]}))
+            (root / "X.ep1.json.probed.json").write_text(json.dumps({self.link["url"]: {"ok": True, "reason": None}}))
+            original, calls = p.probe, []
+            p.probe = lambda link, run=None: calls.append(link["url"]) or {"ok": False, "reason": "late"}
+            try:
+                sys.argv = ["probe_links.py", str(root)]
+                p.main()
+            finally:
+                p.probe = original
+            out = json.loads((root / "verdicts.json").read_text())[0]["providers"][0]["works"][0]["episodes"][0]
+            self.assertEqual(out["embeds"][0]["links"][0]["probe"], {"ok": True, "reason": None})
+            self.assertTrue(out["direct"][0]["probe"]["late"])
+            self.assertEqual(calls, ["https://c.test/x.mp4"])
+
 
 if __name__ == "__main__":
     unittest.main()

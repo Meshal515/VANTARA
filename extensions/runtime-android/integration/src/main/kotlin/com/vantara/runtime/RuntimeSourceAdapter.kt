@@ -111,6 +111,7 @@ class RuntimeSourceAdapter(
     override suspend fun candidates(episode: SourceEpisode,now: Long,trace: ResolveTrace?,enough: Int): List<Candidate> {
         require(episode.sourceId==id)
         val answer=execute("videoLinks",input("data" to JsonPrimitive(episode.url)))
+        RuntimeLinkObserver.onAnswer?.let { runCatching { it(id,episode.url,answer) } }
         val links=answer.getValue("items").jsonArray
         // سيرفرات الفيديو قد يحجبها المزوّد كما يحجب المواقع: DoH أولًا وتجزئة SNI للمشغّل كما في Aniyomi (Embeds)
         for(raw in links) runCatching { java.net.URI(raw.jsonObject.text("url")).host }.getOrNull()?.takeIf { it.isNotBlank() }
@@ -127,7 +128,8 @@ class RuntimeSourceAdapter(
             }
         })
         // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.
-        val candidates=NativeAddonCandidates.parse("cs3-${now}",id,name,streams,now)
+        // CloudStream links as the original engine plays them: http and any port allowed (addonMediaUrl (NativeAddonMediaNetwork.kt))
+        val candidates=RuntimeCandidates.parse("cs3-${now}",id,name,streams,now)
         // Native preparation schedules media probes from route reports. Returning
         // a list alone only adopts the links, leaving probe-gated sessions unusable.
         candidates.groupBy { it.server }.forEach { (server,links) ->
@@ -167,7 +169,7 @@ class RuntimeSourceAdapter(
                             put("type",mediaType("",st.url))
                         }
                     })
-                    val found=NativeAddonCandidates.parse("cs3e-$now",id,name,json,now)
+                    val found=RuntimeCandidates.parse("cs3e-$now",id,name,json,now)
                     trace?.route(RouteReport(id,key,server,found.mapNotNull { it.quality }.maxOrNull(),
                         found.firstOrNull()?.variant ?: com.vantara.anime.stream.Variant.SUB,
                         if(found.isEmpty())RouteState.UNAVAILABLE else RouteState.READY,found,
@@ -184,4 +186,12 @@ class RuntimeSourceAdapter(
         const val EMBED_PARALLEL=4
         const val EMBED_TIMEOUT_MS=25_000L
     }
+}
+
+/**
+ * Measurement only (VANTARA's comparison with the original CloudStream, androidTest): the worker's raw answer for each
+ * episode the adapter resolves, including which server each link came from (linkEmbeds). Always null in the app.
+ */
+object RuntimeLinkObserver {
+    @Volatile var onAnswer: ((sourceId: String, data: String, answer: JsonObject) -> Unit)? = null
 }

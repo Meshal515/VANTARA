@@ -863,7 +863,8 @@ class PlayerActivity : Activity() {
 
     /** Shared by playback and external subtitle selection, including local downloaded subtitle files. */
     private fun playbackDataSourceFactory(c: Candidate): androidx.media3.datasource.DataSource.Factory {
-        val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers) else network.client
+        val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers,
+            plainMedia = c.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else network.client
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
         val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
         // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)

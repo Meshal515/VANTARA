@@ -44,24 +44,26 @@ suspend fun newExtractorLink(source:String,name:String,url:String,type:Extractor
  * throwing when nothing handles the host, so a provider's remaining servers still run.
  */
 suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleFile)->Unit,callback:(ExtractorLink)->Unit):Boolean {
+    // Which server each link came from (VANTARA's measurement compares server by server with the original engine)
+    val delivered:(ExtractorLink)->Unit={ link->dev.vantara.runtime.cloudstream.WorkerState.linkFrom(link.url,url);callback(link) }
     val parsed=runCatching{URI(url)}.getOrNull()?:return false
     if(!(parsed.scheme.equals("https",true)||parsed.scheme.equals("http",true))||parsed.rawUserInfo!=null||parsed.host==null)return false
     val host=parsed.host
     // Like the original getSafeUrl: one server's extractor failing must not stop the provider's other servers.
     ExtractorRegistry.find(host)?.let { e->
-        try { e.getUrl(url,referer,subtitleCallback,callback);return true }
+        try { e.getUrl(url,referer,subtitleCallback,delivered);return true }
         catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
         catch(_:Throwable){dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer);return false}
     }
     dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(host)?.let { e->
-        val resolved=try{e.extract(url,referer,subtitleCallback,callback)}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Throwable){false}
+        val resolved=try{e.extract(url,referer,subtitleCallback,delivered)}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Throwable){false}
         if(resolved)return true
         dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer);return false
     }
     val path=parsed.path?.lowercase().orEmpty()
     if(!dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.isSharingPage(host)&&(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")||path.endsWith(".mkv")||path.endsWith(".webm"))){
         val type=if(path.endsWith(".m3u8"))ExtractorLinkType.M3U8 else if(path.endsWith(".mpd"))ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
-        callback(newExtractorLink(host,host,url,type){this.referer=referer.orEmpty()});return true
+        delivered(newExtractorLink(host,host,url,type){this.referer=referer.orEmpty()});return true
     }
     dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer)
     return false

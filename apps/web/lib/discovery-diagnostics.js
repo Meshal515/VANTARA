@@ -76,12 +76,17 @@ export function summarizeDiscovery(trace, { sheet = null, nameOf = (id) => id } 
         if (e.error) s.errors.push(errText(e.error));
       } else if (e.stage === 'candidate_accepted') s.ok.push(e.title);
       else if (e.stage === 'candidate_rejected') s.rejected.push(e.reason ?? '?');
+      else if (e.stage === 'candidates') {
+        s.ok.push(...(e.accepted ?? []));
+        for (const [reason, n] of Object.entries(e.rejected ?? {})) for (let i = 0; i < n; i += 1) s.rejected.push(reason);
+        if (!s.examples && e.examples?.length) s.examples = e.examples;
+      }
     }
     if (sources.size) lines.push('المصادر:');
     for (const [id, s] of sources) {
-      const parts = [s.skipped ? 'متخطّى' : `ردّ ${s.received} نتيجة في ${s.pages} صفحة`];
+      const parts = [s.skipped ? 'متخطّى' : s.pages ? `ردّ ${s.received} نتيجة في ${s.pages} صفحة` : null].filter(Boolean);
       if (s.ok.length) parts.push(`قُبل ${s.ok.length} («${[...new Set(s.ok)].slice(0, 2).join('»، «')}»)`);
-      if (s.rejected.length) parts.push(`رُفض ${s.rejected.length} (${tally(s.rejected)})`);
+      if (s.rejected.length) parts.push(`رُفض ${s.rejected.length} (${tally(s.rejected)})${!s.ok.length && s.examples ? ` مثل «${s.examples.map((x) => x.title).join('»، «').slice(0, 120)}»` : ''}`);
       if (s.errors.length) parts.push(`خطأ: ${tally(s.errors)}`);
       lines.push(`- ${nameOf(id)}: ${parts.join(' · ')}`);
     }

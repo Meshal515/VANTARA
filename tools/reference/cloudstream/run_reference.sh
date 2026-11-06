@@ -16,8 +16,20 @@ set +e
 timeout 5400 adb shell am instrument -w -r \
   -e class com.lagradost.cloudstream3.ReferenceRunTest \
   -e plugins "$REF_PLUGINS" -e works "$REF_WORKS" -e episodes "$REF_EPISODES" \
-  "$target" | tee "$out/instrument.txt"
-echo "instrument_exit=${PIPESTATUS[0]}" >> "$out/instrument.txt"
+  "$target" > "$out/instrument.txt" 2>&1 &
+runner=$!
+# Links expire: each episode file is pulled and decode-checked as soon as it appears (plan: within 20 s).
+remote="/sdcard/Android/data/$app/files/reference"
+while kill -0 "$runner" 2>/dev/null; do
+  for f in $(adb shell ls "$remote" 2>/dev/null | tr -d '\r' | grep '\.ep[0-9]*\.json$'); do
+    [ -f "$out/$f" ] && continue
+    adb pull "$remote/$f" "$out/$f" >/dev/null 2>&1 && python3 -I tools/reference/cloudstream/probe_links.py --episode "$out/$f" &
+  done
+  sleep 3
+done
+wait "$runner"; echo "instrument_exit=$?" >> "$out/instrument.txt"
+cat "$out/instrument.txt"
+wait # every live decode check finishes before the summary reads them
 set -e
 adb pull "/sdcard/Android/data/$app/files/reference/." "$out/" || echo "nothing to pull (no plugin finished)"
 adb logcat -d -s VANTARA_REF:* PluginManager:* System.out:* > "$out/logcat.txt" || true
