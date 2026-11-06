@@ -47,7 +47,7 @@
   --tap: 44px;
   --nav-h: 56px;
   /* الشريط العائم: ارتفاعه وبعده عن الحافة، وما تحجزه الصفحات تحته */
-  --dock-gap: 18px;
+  --dock-gap: 20px;
   --dock-side: 12px;
   --dock-space: calc(var(--nav-h) + var(--dock-gap) + var(--safe-bottom));
   /* لون الهوية الموحّد للشريط والمبدّل والشعار (لا لون لكل قسم هنا) */
@@ -471,7 +471,7 @@ html,
 }
 /* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
 .v35.native-android .dock {
-  background: #15131d;
+  background: rgba(24, 22, 31, 0.96);
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -708,79 +708,83 @@ html,
 }
 
 /* ───────────────────────── الشريط العائم ─────────────────────────
- * كبسولة تطفو فوق المحتوى: الرئيسية واكتشف يمينًا، مكتبتي والاجتماع يسارًا،
- * ومبدّل الأقسام في قلبها. نصفاه متساويان دائمًا فيبقى المبدّل في المنتصف،
- * والوجهة المختارة تتسع داخل نصفها لتكشف اسمها. الهندسة المتحركة في dock.js. */
+ * كبسولة مدمجة بعرض محتواها تطفو في منتصف أسفل الشاشة بمسافة واضحة من الجوانب:
+ * الرئيسية واكتشف يمينًا، مكتبتي والاجتماع يسارًا، ومبدّل الأقسام في قلبها.
+ * نصفاها بعرض ثابت متساوٍ فيبقى المبدّل في المنتصف، والمختارة حبّة فيها الأيقونة
+ * فوق اسمها. الهندسة المتحركة في dock.js. */
 
 .v35 .dock {
+  --dock-item: 46px;
+  --dock-active: 66px;
   position: fixed;
   z-index: 50;
   left: 50%;
   bottom: calc(var(--dock-gap) + var(--safe-bottom));
   transform: translateX(-50%);
   box-sizing: border-box;
-  width: min(calc(100% - 2 * var(--dock-side)), 480px);
+  width: auto;
+  max-width: calc(100% - 2 * var(--dock-side));
   height: var(--nav-h);
   padding: 0 5px;
   display: flex;
   align-items: center;
   border-radius: 28px;
-  background: linear-gradient(180deg, rgba(29, 26, 40, 0.84), rgba(16, 14, 23, 0.9));
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* سطح أفتح بوضوح من الصفحة، وحد رفيع، وظل واسع ناعم تحته: منفصل عن المحتوى */
+  background: rgba(30, 28, 39, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 1px 2px rgba(0, 0, 0, 0.45),
-    0 12px 30px rgba(0, 0, 0, 0.5),
-    0 28px 60px -24px rgba(0, 0, 0, 0.7);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  backdrop-filter: blur(18px) saturate(1.6);
-  container: dock / inline-size;
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    0 14px 36px rgba(0, 0, 0, 0.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
   -webkit-tap-highlight-color: transparent;
 }
 .v35 .dock[hidden] {
   display: none;
 }
 .v35 .dock-half {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: none;
+  width: calc(var(--dock-item) + var(--dock-active) + 4px);
   height: 100%;
   display: flex;
   align-items: center;
+  justify-content: space-evenly;
   transform-origin: 50% 50%;
 }
 .v35 .dock-half[inert] {
   pointer-events: none;
 }
 
-/* ── الوجهة: أيقونة خطية، والمختارة حبّة بلون الهوية فيها اسمها ── */
+/* ── الوجهة: أيقونة خطية؛ المختارة حبّة هادئة فيها الأيقونة واسمها تحتها ── */
 .v35 .dock .nav {
   position: relative;
-  flex: 1 1 0;
-  min-width: 44px;
+  flex: none;
+  width: var(--dock-item);
   height: 48px;
   padding: 0;
   border: 0;
   background: none;
   display: grid;
   place-items: center;
-  color: var(--text-3);
+  color: rgba(255, 255, 255, 0.46);
   font: inherit;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition:
+    width 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.2s ease;
 }
-/* المختارة بعرض محتواها (يكبر مع ظهور اسمها)، والأخرى تأخذ ما بقي من نصفها */
 .v35 .dock .nav.active {
-  flex: 0 0 auto;
-  color: var(--id-text);
+  width: var(--dock-active);
+  color: var(--text-1);
 }
 .v35 .dock .nav-pill {
   box-sizing: border-box;
-  width: auto;
-  max-width: 100%;
-  height: 44px;
-  padding: 0 11px;
-  border-radius: 22px;
-  display: inline-flex;
+  width: 100%;
+  height: 46px;
+  padding: 0;
+  border-radius: 23px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 0;
@@ -788,16 +792,12 @@ html,
   background: transparent;
   transition:
     background-color 0.3s ease,
-    box-shadow 0.3s ease,
-    gap 0.42s cubic-bezier(0.16, 1, 0.3, 1),
-    padding 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    gap 0.38s cubic-bezier(0.16, 1, 0.3, 1),
     transform 0.16s ease;
 }
 .v35 .dock .nav.active .nav-pill {
-  gap: 6px;
-  padding: 0 12px 0 11px;
-  background: var(--id-soft);
-  box-shadow: inset 0 0 0 1px rgba(143, 92, 255, 0.24);
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.09);
 }
 .v35 .dock .nav:active .nav-pill {
   transform: scale(0.93);
@@ -806,27 +806,30 @@ html,
   flex: none;
   width: 22px;
   height: 22px;
+  transition: width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v35 .dock .nav.active .icon {
+  width: 20px;
+  height: 20px;
   stroke-width: 2;
 }
 .v35 .dock .nav-label {
-  max-width: 0;
+  max-height: 0;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 12px;
-  line-height: 1;
+  font-size: 10.5px;
+  line-height: 12px;
   font-weight: 650;
   letter-spacing: 0;
   opacity: 0;
-  transform: translateX(-4px);
+  transform: translateY(3px);
   transition:
-    max-width 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    max-height 0.38s cubic-bezier(0.16, 1, 0.3, 1),
     opacity 0.16s ease,
-    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v35 .dock .nav.active .nav-label {
-  max-width: 84px;
+  max-height: 12px;
   opacity: 1;
   transform: none;
   transition-delay: 0s, 0.1s, 0.06s;
@@ -835,28 +838,14 @@ html,
   content: none;
 }
 .v35 .dock .nav .notify-dot {
-  top: 10px;
-  inset-inline-end: calc(50% - 16px);
-}
-/* شاشات أضيق من 320 داخل الشريط: الأيقونات وحدها، والاسم لقارئ الشاشة */
-@container dock (max-width: 300px) {
-  .v35 .dock .nav.active {
-    flex: 1 1 0;
-  }
-  .v35 .dock .nav.active .nav-label {
-    max-width: 0;
-    opacity: 0;
-  }
-  .v35 .dock .nav.active .nav-pill {
-    gap: 0;
-    padding: 0 11px;
-  }
+  top: 8px;
+  inset-inline-end: 10px;
 }
 
 /* ── المبدّل: بئر دائري فيه ثلاثة مربعات، القسم الحالي معبّأ ── */
 .v35 .dock-switch {
   position: relative;
-  flex: 0 0 52px;
+  flex: 0 0 50px;
   height: 48px;
   padding: 0;
   border: 0;
@@ -880,8 +869,7 @@ html,
   height: 40px;
   margin: -20px 0 0 -24px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.035);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: transparent;
   transition:
     background-color 0.2s ease,
     transform 0.16s ease;
@@ -908,7 +896,7 @@ html,
   height: 10px;
   padding: 0;
   margin: 0;
-  border: 2px solid rgba(255, 255, 255, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 3px;
   background: transparent;
   color: var(--text-1);
@@ -927,20 +915,15 @@ html,
 .v35 .dock-opt.current {
   background: var(--id);
   border-color: var(--id);
-  box-shadow: 0 0 10px rgba(143, 92, 255, 0.55);
 }
 .v35 .dock.open .dock-opt {
   border-width: 1px;
-  border-color: var(--id-line);
-  background: var(--id-soft);
-  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.05);
 }
 .v35 .dock.open .dock-opt.current {
   border-color: transparent;
-  background: linear-gradient(180deg, #9a6bff, #7f4cf2);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 8px 22px -6px rgba(143, 92, 255, 0.65);
+  background: #7a52e0;
 }
 .v35 .dock.open .dock-opt:active {
   filter: brightness(1.12);
@@ -964,10 +947,10 @@ html,
 .v35 .dock-opt-label small {
   font-size: 10.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.5);
 }
 .v35 .dock-opt.current .dock-opt-label small {
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 /* التركيز من لوحة المفاتيح ظاهر دائمًا */
@@ -977,7 +960,7 @@ html,
 }
 .v35 .dock .nav:focus-visible .nav-pill,
 .v35 .dock-switch:focus-visible::after {
-  outline: 2px solid var(--id-text);
+  outline: 2px solid rgba(255, 255, 255, 0.7);
   outline-offset: 2px;
 }
 .v35 .dock-opt:focus-visible {
