@@ -5324,6 +5324,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
     applySection(id);
     renderSection(id);
   }
+  // لوحة المفاتيح تقصّر نافذة WebView فيصعد كل ما هو مثبت بالأسفل. الشريط يبقى في مكانه من الشاشة
+  // الكاملة: يُزاح للأسفل بقدر ما قصُرت (فتغطيه اللوحة). الارتفاع الكامل يُحفظ لكل عرض (الدوران يغيّره).
+  {
+    let full = { w: 0, h: 0 };
+    const pin = () => {
+      const w = globalThis.innerWidth || 0;
+      const h = globalThis.innerHeight || 0;
+      if (w !== full.w || h > full.h) full = { w, h };
+      // لمس + حقل كتابة مركّز = لوحة مفاتيح؛ تصغير نافذة على الكمبيوتر لا يُخفي الشريط
+      const el = document.activeElement;
+      const typing = globalThis.matchMedia?.('(pointer: coarse)').matches && el?.matches?.('input, textarea, [contenteditable="true"]');
+      const shift = typing && full.h - h > 80 ? full.h - h : 0;
+      q('bottomNav')?.style.setProperty('--kb-shift', `${shift}px`);
+    };
+    globalThis.addEventListener?.('resize', pin, { passive: true });
+    root.addEventListener('focusin', pin);
+    root.addEventListener('focusout', () => setTimeout(pin, 0));
+    pin();
+  }
   let standbyTimer = 0;
   const sleepSoon = (ms) => {
     clearTimeout(standbyTimer);

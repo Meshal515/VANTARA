@@ -747,6 +747,10 @@ html,
 .v35 .dock[hidden] {
   display: none;
 }
+/* لوحة المفاتيح تقصّر الشاشة: الشريط مثبّت في مكانه أسفل الشاشة الكاملة (تحت اللوحة) لا يصعد فوقها */
+.v35 .dock {
+  translate: 0 var(--kb-shift, 0px);
+}
 .v35 .dock-cap {
   position: relative;
   flex: 1 1 0;
