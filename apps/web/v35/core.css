@@ -45,7 +45,11 @@
   --r-lg: 16px;
   --r-xl: 22px;
   --tap: 44px;
-  --nav-h: 64px;
+  --nav-h: 60px;
+  /* الشريط العائم: ارتفاعه وبعده عن الحافة، وما تحجزه الصفحات تحته */
+  --dock-gap: 20px;
+  --dock-side: 12px;
+  --dock-space: calc(var(--nav-h) + var(--dock-gap) + var(--safe-bottom));
   --top-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -229,7 +233,7 @@ html,
   position: relative;
   overflow-x: clip;
   background: var(--bg);
-  padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 12px);
+  padding-bottom: calc(var(--dock-space) + 16px);
 }
 .v35 .page {
   display: none;
@@ -385,174 +389,29 @@ html,
   direction: ltr;
 }
 
-/* مبدّل الأقسام: VANTARA وتحته اسم القسم بلونه؛ الضغط يُنزل لوحة الأقسام */
-.v35 .brand-switch {
-  pointer-events: auto;
+/* الشعار: VANTARA وتحته اسم القسم، في المنتصف بصريًا. لم يعد زرًا: التبديل في الشريط.
+ * التباعد بين الحروف يترك فراغًا بعد آخر حرف، فيُسحب بمقداره ليتوسّط فعلًا. */
+.v35 .brand-lockup {
   display: grid;
   justify-items: center;
-  gap: 3px;
-  padding: 4px 14px;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+  gap: 5px;
   direction: ltr;
-  -webkit-tap-highlight-color: transparent;
 }
-.v35 .brand-switch:active .brand {
-  opacity: 0.7;
+.v35 .brand-lockup .brand {
+  margin-right: -3px;
 }
 .v35 .brand-section {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: grid;
   font-size: 9.5px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: 3.5px;
   color: var(--accent-text);
+  margin-right: -3.5px;
 }
-.v35 .brand-caret {
-  display: inline-flex;
-  opacity: 0.8;
-  transform: rotate(-90deg);
-  transition: transform 0.25s ease;
-}
-.v35 .brand-caret .icon {
-  width: 10px;
-  height: 10px;
-  stroke-width: 2.6;
-}
-.v35 .brand-switch[aria-expanded='true'] .brand-caret {
-  transform: rotate(90deg);
-}
-
-.v35 .section-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 39;
-  background: rgba(4, 4, 8, 0.55);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 0.22s ease;
-}
-.v35 .section-scrim.open {
-  opacity: 1;
-}
-.v35 .section-menu {
-  position: absolute;
-  top: calc(var(--top-h) + var(--safe-top) + 2px);
-  inset-inline: 0;
-  margin-inline: auto;
-  z-index: 40;
-  width: min(248px, calc(100vw - 32px));
-  display: grid;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  backdrop-filter: blur(24px) saturate(1.4);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 20px 50px rgba(0, 0, 0, 0.55);
-  transform-origin: top center;
-  opacity: 0;
-}
-.v35 .section-menu.open {
-  opacity: 1;
-}
-/* display:grid كان يتجاوز [hidden] في UA stylesheet؛ يمنع قائمة شفافة
-   من البقاء فوق شريط الأزرار مع أنها تبدو مغلقة. */
-.v35 .section-menu[hidden] {
-  display: none;
-}
-.v35 .section-scrim:not(.open) {
-  pointer-events: none;
-}
-.v35 .section-item {
-  --tone: #8f5cff;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 16px;
-  background: transparent;
-  color: var(--text-1);
-  font: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 0.16s ease;
-}
-.v35 .section-item::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 22%, transparent), color-mix(in srgb, var(--tone) 6%, transparent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.v35 .section-item[aria-checked='true']::before {
-  opacity: 1;
-}
-.v35 .section-item:active {
-  transform: scale(0.97);
-}
-.v35 .section-item--anime {
-  --tone: #3b82f6;
-}
-.v35 .section-item--cinema {
-  --tone: #e0303a;
-}
-.v35 .section-lockup {
-  position: relative;
-  display: grid;
-  justify-items: end;
-  gap: 3px;
-  direction: ltr;
-  line-height: 1;
-}
-.v35 .section-kicker {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 3px;
-  margin-inline-end: -3px;
-  color: rgba(255, 255, 255, 0.45);
-}
-.v35 .section-word {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  margin-inline-end: -4px; /* يلغي تباعد آخر حرف لتتحاذى الكلمتان */
-  color: color-mix(in srgb, var(--tone) 62%, #fff);
-}
-.v35 .section-sub {
-  position: relative;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-}
-.v35 .section-item[aria-disabled='true'] .section-word {
-  color: color-mix(in srgb, var(--tone) 35%, rgba(255, 255, 255, 0.3));
-}
-.v35 .section-item[aria-disabled='true'] .section-kicker,
-.v35 .section-item[aria-disabled='true'] .section-sub {
-  color: rgba(255, 255, 255, 0.28);
-}
-@media (prefers-reduced-motion: reduce) {
-  .v35 .section-menu,
-  .v35 .section-scrim,
-  .v35 .brand-caret {
-    transition: none;
-  }
+.v35 .brand-word {
+  grid-area: 1 / 1;
+  justify-self: center;
 }
 
 /* ترويسة الصفحات الفرعية: رجوع في البداية (يمين)، العنوان، أفعال في النهاية */
@@ -602,9 +461,13 @@ html,
 .v35.native-android .detail-glow i {
   filter: none !important;
 }
-.v35.native-android .page-top,
-.v35.native-android .bottom-nav {
+.v35.native-android .page-top {
   background: var(--bg);
+}
+/* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
+.v35.native-android .dock {
+  background: #0a0a0d;
+  background: color-mix(in srgb, var(--accent) 3%, #09090c);
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -840,81 +703,387 @@ html,
   color: var(--text-3);
 }
 
-/* ───────────────────────── التنقّل السفلي ─────────────────────────
- * مؤشّر حبّة خلف الأيقونة المختارة (لغة أندرويد الحديثة) بدل خطٍ رفيع فوقها:
- * يُرى بطرف العين، ولا يحتاج لون النص كله ليقول «أنت هنا». */
+/* ───────────────────────── الشريط العائم ─────────────────────────
+ * كبسولة مدمجة بعرض محتواها تطفو في منتصف أسفل الشاشة بمسافة واضحة من الجوانب:
+ * الرئيسية واكتشف يمينًا، مكتبتي والاجتماع يسارًا، ومبدّل الأقسام في قلبها.
+ * نصفاها بعرض ثابت متساوٍ فيبقى المبدّل في المنتصف، والمختارة حبّة فيها الأيقونة
+ * فوق اسمها. الهندسة المتحركة في dock.js. */
 
-.v35 .bottom-nav {
+.v35 .dock {
+  --dock-slot: 56px;
   position: fixed;
   z-index: 50;
-  bottom: 0;
   left: 50%;
+  bottom: calc(var(--dock-gap) + var(--safe-bottom));
   transform: translateX(-50%);
-  width: min(100%, 520px);
-  height: calc(var(--nav-h) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  border-top: 1px solid var(--line);
+  box-sizing: border-box;
+  width: auto;
+  max-width: calc(100% - 2 * var(--dock-side));
+  height: var(--nav-h);
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  border-radius: 28px;
+  /* سطح محايد داكن أفتح من الصفحة، وفيه انعكاس خفيف فقط من لون القسم (المصمّم أو
+   * ما اختاره المستخدم)؛ حد رفيع وظل واسع ناعم تحته: منفصل عن المحتوى */
+  /* مسطّح وخفيف: سطح واحد بلا حواف مضيئة ولا تدرّج، وظل ناعم واحد يكفي ليطفو */
+  background: #0a0a0d;
+  background: color-mix(in srgb, var(--accent) 3%, #09090c);
+  border: 0;
+  transition: background-color 0.4s ease;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none; /* السحب الأفقي للحبّة لا يصير تمريرًا */
+  user-select: none;
 }
-.v35 .nav {
+.v35 .dock[hidden] {
+  display: none;
+}
+.v35 .dock-half {
+  flex: none;
+  width: calc(2 * var(--dock-slot) + 4px);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  transform-origin: 50% 50%;
+}
+.v35 .dock-half[inert] {
+  pointer-events: none;
+}
+
+/* ── الوجهات: خانات ثابتة لا يتغير مقاسها ولا ترتيبها. الأيقونة تتحرك داخل خانتها فقط،
+ * والاسم في مكان محجوز تحتها: لا تخطيط ولا قفز. الاختيار دائرة واحدة تتنقل (dock-ind). ── */
+.v35 .dock .nav {
   position: relative;
+  z-index: 1;
+  flex: none;
+  width: var(--dock-slot);
+  height: 100%;
+  padding: 0;
   border: 0;
   background: none;
-  color: var(--text-3);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 11.5px;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.52);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.22s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.v35 .nav-pill {
-  width: 56px;
-  height: 30px;
-  border-radius: 99px;
-  display: grid;
-  place-items: center;
-  transition: background var(--dur) var(--ease);
+.v35 .dock .nav.active {
+  color: #fff;
 }
-.v35 .nav .icon {
-  width: 23px;
-  height: 23px;
+.v35 .dock .nav-pill {
+  position: absolute;
+  inset: 0;
+  display: block;
 }
-.v35 .nav.active {
-  color: var(--text-1);
+.v35 .dock .nav .icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  stroke-width: 1.85;
+  /* الرجوع: هبوط هادئ بلا ارتداد */
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-/* ───────────────────────── التنقّل ─────────────────────────
- * علامة التحديد مشتركة: شرطة بلون القسم فوق الأيقونة، بلا خلفية حولها. */
+.v35 .dock .nav.active .icon {
+  stroke-width: 2;
+  /* الارتفاع: نابض خفيف يتجاوز قليلًا ويستقر */
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.94));
+  transition: transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.v35 .dock .nav:active .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(calc(var(--os, 1) * 0.88));
+  transition-duration: 0.12s;
+}
+.v35 .dock .nav.active:active .icon {
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.86));
+}
+/* محاذاة بصرية لا رياضية: كل أيقونة بكتلتها. السقف يرفع مركز البيت فيُنزَل قليلًا،
+ * والدائرة الكاملة في البوصلة أثقل فتُصغَّر، والشخصان أعرض فيُصغَّران قليلًا. */
+.v35 .dock .nav[data-page='home'] .icon { --oy: 0.5px; }
+.v35 .dock .nav[data-page='discover'] .icon { --os: 0.93; }
+.v35 .dock .nav[data-page='library'] .icon { --oy: 0.5px; --os: 0.98; }
+.v35 .dock .nav[data-page='majlis'] .icon { --os: 0.95; --ox: 0.5px; }
+.v35 .dock .nav-label {
+  position: absolute;
+  inset-inline: -4px;
+  bottom: 4px;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: #fff;
+  opacity: 0;
+  transform: translate3d(0, 3px, 0);
+  transition:
+    opacity 0.14s ease,
+    transform 0.2s ease;
+}
+.v35 .dock .nav.active .nav-label {
+  opacity: 0.92;
+  transform: none;
+  transition:
+    opacity 0.2s ease 0.08s,
+    transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s;
+}
+.v35 .dock .nav::before,
+.v35 .dock .nav-pill::before,
+.v35 .dock .nav-pill::after {
+  content: none;
+}
+.v35 .dock .nav .notify-dot {
+  top: 10px;
+  inset-inline-end: 12px;
+}
 
-.v35 .nav.active .nav-pill {
-  background: none;
-  color: var(--text-1);
+/* ── الحبّة الزجاجية: لون القسم أعمق من الثيم، وحافة ضوء رفيعة كالزجاج السائل لا وهج.
+ * تتحرك بفيزياء نابض (dock.js) وتتمطّط بسرعتها، وتمر تحت المبدّل والمربعات فوقها. ── */
+.v35 .dock-ind {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
-.v35 .nav::before {
+.v35 .dock-ind .ind-blob {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 44px;
+  height: 42px;
+  border-radius: 21px;
+  background: color-mix(in srgb, var(--accent) 60%, #0b0a10);
+  background-image: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.13), transparent 60%);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  will-change: transform;
+  transform-origin: 50% 50%;
+}
+/* أثناء السحب: الأيقونة تحت الحبّة هي التي ترتفع، لا المختارة السابقة */
+.v35 .dock.scrubbing .nav.active:not(.near) .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+}
+.v35 .dock.scrubbing .nav.active:not(.near) .nav-label {
+  opacity: 0;
+}
+.v35 .dock.scrubbing .nav.near {
+  color: #fff;
+}
+.v35 .dock.scrubbing .nav.near .icon {
+  stroke-width: 2;
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.94));
+  transition: transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.v35 .dock.scrubbing .nav.near .nav-label {
+  opacity: 0.92;
+  transform: none;
+}
+
+/* ── المبدّل: ثلاثة مربعات، القسم الحالي أبيض ثابت في كل الأقسام والألوان ── */
+.v35 .dock-switch {
+  position: relative;
+  flex: 0 0 50px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  z-index: 2; /* المربعات فوق الحبّة حين تمر تحتها */
+  cursor: pointer;
+  touch-action: none;
+}
+/* منطقة السحب الممتدة: أبعد من الزر قليلًا دون أن تأخذ لمس الجيران */
+.v35 .dock-switch::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 50%;
-  width: 22px;
-  height: 2px;
-  margin-left: -11px;
-  background: var(--accent);
-  transform: scaleX(0);
-  transition: transform var(--dur) var(--ease-out);
+  inset: -10px -4px;
 }
-.v35 .nav.active::before {
-  transform: scaleX(1);
+.v35 .dock-switch:active .dock-sq {
+  transform: scale(0.9);
+}
+.v35 .dock-sq {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  transition: transform 0.16s ease;
+}
+.v35 .dock-sq.current {
+  background: #fff;
+  border-color: #fff;
 }
 
-.v35 .nav .notify-dot {
-  top: 7px;
-  inset-inline-end: calc(50% - 22px);
+/* الأزرار بمقاسها المفتوح دائمًا (يضعه dock.js)، ومغلقةً تُصغَّر إلى مربعها وتختفي */
+.v35 .dock-options {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.v35 .dock-options {
+  z-index: 3; /* الأزرار المفتوحة فوق كل شيء، والمبدّل نفسه تحتها */
+}
+.v35 .dock.open .dock-options {
+  pointer-events: auto;
+}
+.v35 .dock.open .dock-switch {
+  pointer-events: none;
+}
+.v35 .dock-opt,
+.v35 .dock-opt-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  opacity: 0;
+}
+.v35 .dock-opt {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  transform-origin: 0 0;
+  font: inherit;
+  cursor: pointer;
+  will-change: transform, opacity;
+}
+.v35 .dock-opt.current {
+  background: var(--accent);
+}
+.v35 .dock-opt:active {
+  filter: brightness(1.15);
+}
+.v35 .dock-opt-label {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-1);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.v35 .dock-opt-label b {
+  font-size: 11.5px;
+  font-weight: 760;
+  letter-spacing: 2.4px;
+  margin-right: -2.4px;
+}
+.v35 .dock-opt-label small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+.v35 .dock-opt-label.current {
+  color: var(--on-accent, #fff);
+}
+.v35 .dock-opt-label.current small {
+  color: currentColor;
+  opacity: 0.75;
+}
+
+/* التركيز من لوحة المفاتيح ظاهر دائمًا */
+.v35 .dock .nav:focus-visible,
+.v35 .dock-switch:focus-visible {
+  outline: none;
+}
+.v35 .dock .nav:focus-visible .nav-pill,
+.v35 .dock-switch:focus-visible .dock-sq.current {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+.v35 .dock-opt:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* الستارة: تغطي الشاشة كلها والترويسة معها، والشريط فوقها */
+.v35 .dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(4, 3, 8, 0.45);
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.v35 .dock-scrim[hidden] {
+  display: none;
+}
+
+/* ── طبقات الأقسام أثناء الانتقال (dock.js: createLayers) ── */
+.v35 #home.layering {
+  position: relative;
+  overflow-x: clip;
+}
+.v35 #home.layering > .home-view:not([hidden]) {
+  position: absolute;
+  inset-inline: 0;
+  top: var(--layer-top, 0px);
+  min-height: calc(100vh - var(--layer-top, 0px));
+  background: var(--bg);
+  pointer-events: none;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+/* مجهّزة قبل الاختيار: مبنية ومرسومة التخطيط لكن غير مرئية ولا تلمس */
+.v35 #home.layer-ready {
+  position: relative;
+}
+.v35 #home > .home-view.layer-standby {
+  position: absolute;
+  inset-inline: 0;
+  top: var(--layer-top, 0px);
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(-100%, 0, 0);
+}
+.v35 .layer-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.v35 .layer-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -28px;
+  width: 28px;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0));
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .dock .nav,
+  .v35 .dock .nav-pill,
+  .v35 .dock .nav-pill::before,
+  .v35 .dock .nav-pill::after,
+  .v35 .dock .nav .icon,
+  .v35 .dock .nav-label,
+  .v35 .dock-opt {
+    transition-duration: 0.01s !important;
+    transition-delay: 0s !important;
+  }
 }
 
 /* ───────────────────────── صفحة العمل ─────────────────────────
@@ -2150,7 +2319,7 @@ html,
   position: fixed;
   z-index: 200;
   left: 50%;
-  bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+  bottom: calc(var(--dock-space) + 12px);
   max-width: calc(100% - 32px);
   transform: translate(-50%, 8px);
   opacity: 0;
@@ -2181,9 +2350,12 @@ html,
     border-radius: 28px;
     box-shadow: 0 0 0 1px var(--line), 0 35px 100px rgba(0, 0, 0, 0.45);
   }
-  .v35 .bottom-nav {
+  .v35 .bottom-nav:not(.dock) {
     bottom: 24px;
     border-radius: 0 0 28px 28px;
+  }
+  .v35 .dock {
+    bottom: calc(24px + var(--dock-gap) + var(--safe-bottom));
   }
 }
 

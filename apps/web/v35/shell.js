@@ -62,7 +62,8 @@ import { momentRange, momentStart, repositories as animeRepositories, withPhaseD
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
-import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
+import { heroSlideIn, pageIn } from './motion.js';
+import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -4213,12 +4214,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else if (push && from !== id) state.stack.push(from);
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
+    if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
+    if (id !== 'home') layers?.finish();
+    dockCtl?.repaint();
     root.querySelectorAll('.nav').forEach((n) => {
       const on = n.dataset.page === id;
       n.classList.toggle('active', on);
       if (on) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
+    dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
     q('detailTop').classList.remove('scrolled');
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
@@ -5259,54 +5264,119 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
-  // ألغِ فتحًا مؤجَّلًا عند الإغلاق كي لا تعود طبقة كاملة لابتلاع اللمس.
-  let sectionOpenFrame = 0;
-  function setSectionsOpen(open) {
-    const menu = q('sectionMenu');
-    const scrim = q('sectionScrim');
-    const button = q('brandSwitch');
-    if (!menu || !button) return;
-    if (sectionOpenFrame) {
-      cancelAnimationFrame(sectionOpenFrame);
-      sectionOpenFrame = 0;
+  // المبدّل في قلب الشريط العائم، والانتقال طبقات (dock.js). يُنشآن عند أول استعمال
+  // لأن رئيسيات الأقسام تُبنى بعد القشرة.
+  //
+  // السلاسة أولًا: الحركة تُسلَّم للمركّب قبل أي عمل ثقيل، والأقسام تُجهَّز (تُبنى وتُخطَّط
+  // وهي مخفية) لحظة فتح المبدّل أو لمسه، وتحديث محتوى القسم يجري بعد انتهاء الحركة.
+  let dockCtl = null;
+  let layers = null;
+  const sectionViews = () => ({ manga: q('mangaHome'), anime: q('animeHome'), cinema: q('cinemaHome') });
+  const sectionLayers = () =>
+    (layers ??= createLayers({
+      views: sectionViews(),
+      host: q('home'),
+      current: root.dataset.section ?? 'manga',
+      label: createCrossfade(q('brandSection')),
+      wordOf: (id) => SECTIONS[id]?.word ?? id.toUpperCase(),
+      onSettle: (shown, from) => {
+        // سحب أُلغي: الهوية ترجع للقسم الظاهر
+        if (root.dataset.section !== shown) applySection(shown);
+        if (shown !== from) idle(() => renderSection(shown));
+      },
+    }));
+  // بعد أن يُسلَّم الإطار الأول للمركّب: هنا يجري العمل الثقيل دون أن يؤخر بدء الحركة
+  const afterFirstFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
+  const idle = (fn) => (globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 60));
+  /** ارسم رئيسية القسم بمحتواها (تحديث «آخر المشاهدات» وما شابه). */
+  function renderSection(id) {
+    warmed.add(id);
+    if (id === 'anime') anime.show();
+    else if (id === 'cinema') cinema.show();
+    else {
+      for (const snapshot of homeSnapshots.values()) snapshot.refresh();
+      refreshFriendsHero();
+      renderHome();
+      restartHero();
     }
-    button.setAttribute('aria-expanded', String(open));
-    if (open) {
-      menu.style.removeProperty('pointer-events');
-      scrim.style.removeProperty('pointer-events');
-      for (const layer of [menu, scrim]) layer.hidden = false;
-      sectionOpenFrame = requestAnimationFrame(() => {
-        sectionOpenFrame = 0;
-        if (!sectionsOpen()) return;
-        menu.classList.add('open');
-        scrim.classList.add('open');
-        menuIn(menu, [...menu.querySelectorAll('.section-item')]);
-      });
-      return;
-    }
-    // تعتيم الطبقة لا يعطّل hit testing: أوقف اللمس فورًا لا بعد 240ms.
-    menu.style.pointerEvents = 'none';
-    scrim.style.pointerEvents = 'none';
-    scrim.classList.remove('open');
-    setTimeout(() => {
-      if (!scrim.classList.contains('open')) scrim.hidden = true;
-    }, 240);
-    menuOut(menu, () => {
-      if (sectionsOpen()) return;
-      menu.classList.remove('open');
-      menu.hidden = true;
-    });
   }
-  const sectionsOpen = () => q('brandSwitch')?.getAttribute('aria-expanded') === 'true';
+  /** أقسام رُسمت مرة: لا تحتاج رسمًا قبل الانتقال إليها، فمحتواها باقٍ في مكانه. */
+  const warmed = new Set();
+  /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
+  function prepareSections() {
+    if (currentPage() !== 'home') return;
+    sectionLayers().prepare();
+    for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
+  }
+  /** ادخل قسمًا: الحركة أولًا، ثم الهوية بعد الإطار الأول، والمحتوى إن لم يُرسم قط. */
+  function beginSection(id, run) {
+    const motion = sectionLayers(); // قبل تغيير القسم: الطبقات تبدأ مما كان ظاهرًا
+    const fresh = !warmed.has(id);
+    if (fresh) renderSection(id); // أول زيارة: المحتوى يجب أن يدخل مع طبقته
+    run(motion);
+    afterFirstFrame(() => applySection(id, { keepLabel: true }));
+  }
+  /** خارج الرئيسية: لا حركة طبقات، القسم والصفحة مباشرة. */
+  function enterSection(id) {
+    applySection(id);
+    renderSection(id);
+  }
+  let standbyTimer = 0;
+  const dock = () =>
+    (dockCtl ??= createDock({
+      bar: q('bottomNav'),
+      scrim: q('dockScrim'),
+      current: root.dataset.section ?? 'manga',
+      onPrepare: () => {
+        clearTimeout(standbyTimer);
+        prepareSections();
+      },
+      onClose: () => {
+        // أُغلق بلا اختيار: الأقسام المجهّزة ترجع لنومها بعد هدوء الحركة
+        clearTimeout(standbyTimer);
+        standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 600);
+      },
+      onNavigate: (page) => navTo(page),
+      onDragStart: (to) => {
+        if (currentPage() !== 'home' || !SECTIONS[to]?.ready) return;
+        beginSection(to, (motion) => motion.drag(to, 0));
+      },
+      onDrag: (to, p) => {
+        if (currentPage() === 'home' && layers?.moving) layers.drag(to, p);
+      },
+      onDragEnd: (to, commit) => {
+        if (!to) {
+          // لمسة بلا سحب: تُفتح المبدّل غالبًا؛ وإلا تنام الأقسام بعد قليل
+          clearTimeout(standbyTimer);
+          standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 1500);
+          return;
+        }
+        if (currentPage() !== 'home') {
+          if (commit) pickSection(null, { dataset: { arg: to } });
+          return;
+        }
+        if (!layers?.moving) return;
+        if (commit) writeSection(to);
+        layers.release(commit);
+      },
+    }));
+  function setSectionsOpen(open) {
+    if (open) dock().open();
+    else dock().close();
+  }
+  const sectionsOpen = () => dockCtl?.isOpen() ?? false;
 
   /** يلبس التطبيق هوية القسم: المتغيّرات، اسم القسم تحت الشعار، ولون شريط النظام. */
-  function applySection(id) {
+  function applySection(id, { keepLabel = false } = {}) {
     const s = SECTIONS[id] ?? SECTIONS.manga;
     root.dataset.section = s.id;
+    dockCtl?.setSection(s.id);
+    // تغيير من خارج المبدّل (فتح عمل من إضافة) يُعلم الطبقات؛ دخول القسم بالمبدّل يحرّكها هي
+    if (!keepLabel) layers?.sync(s.id);
     // نوافذ خارج جذر التطبيق (التنبيهات، الأوراق المعلّقة على body) ترث لون القسم من <html>
     document.documentElement.dataset.section = s.id;
-    q('brandSectionName').textContent = s.word;
-    for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
+    // أثناء الانتقال يتبدّل الاسم مع الحركة (createCrossfade)، لا قبلها
+    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(s.id, [root, document.documentElement]);
     // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
@@ -5327,29 +5397,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
       return;
     }
-    setSectionsOpen(false);
-    if (root.dataset.section === id) return;
+    if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
-    const from = q(HOMES[root.dataset.section] ?? 'mangaHome');
-    const to = q(HOMES[id]);
-    const enter = () => {
-      if (id === 'anime') anime.show();
-      else if (id === 'cinema') cinema.show();
-      else { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); restartHero(); }
-    };
     if (currentPage() !== 'home') {
-      applySection(id);
+      setSectionsOpen(false);
+      layers?.finish();
       showHome(id);
       showPage('home');
-      enter();
+      enterSection(id);
       return;
     }
-    swapViews(from, to, {
-      onSwap: () => {
-        applySection(id);
-        enter();
-      },
-    });
+    // الطبقات تبدأ أولًا، والشريط يُغلق معها لا قبلها
+    beginSection(id, (motion) => motion.go(id));
+    setSectionsOpen(false);
+    haptic();
   }
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
   /** رئيسية القسم وحدها ظاهرة. */
@@ -5360,7 +5421,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
 
   const actions = {
-    toggleSections: () => setSectionsOpen(!sectionsOpen()),
+    toggleSections: () => dock().consumeDrag() || dock().toggle(),
     toggleRail,
     railLogo,
     pickSection,
@@ -5835,6 +5896,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const startSection = readSection();
   applySection(startSection);
   showHome(startSection);
+  dock().activate(currentPage());
+  warmed.add(startSection);
   if (startSection === 'anime') anime.show();
   if (startSection === 'cinema') cinema.show();
 

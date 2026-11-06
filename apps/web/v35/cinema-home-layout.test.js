@@ -104,23 +104,20 @@ describe('ترويسات السينما على الجوال: لمس ثابت ر�
 });
 
 describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبتلع اللمس', () => {
-  const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
-  it('يلغي إطار الفتح المؤجل عند الإغلاق ويمنع إعادة فتح الستار بعده', () => {
-    expect(shell).toContain('cancelAnimationFrame(sectionOpenFrame)');
-    expect(shell).toContain('if (!sectionsOpen()) return;');
-  });
-  it('يعطّل التقاط اللمس على الستار والقائمة فور بدء الإغلاق', () => {
-    expect(shell).toContain("scrim.style.pointerEvents = 'none'");
-    expect(shell).toContain("menu.style.pointerEvents = 'none'");
+  const dock = readFileSync(new URL('./dock.js', import.meta.url), 'utf8');
+  it('الستار يتوقف عن اللمس فور بدء الإغلاق، والأزرار الأربعة معطّلة ما دام مفتوحًا', () => {
+    expect(dock).toContain("scrim.style.pointerEvents = to ? '' : 'none'");
+    expect(dock).toContain("for (const h of halves) h.toggleAttribute('inert', open)");
   });
 });
 
 describe('لا قوائم شفافة تعترض أزرار الترويسة', () => {
   const coreCss = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
-  it('يحترم hidden رغم display:grid في قائمة الأقسام', () => {
-    expect(coreCss).toMatch(/\.v35 \.section-menu\[hidden\]\s*\{\s*display:\s*none/);
+  it('يحترم hidden رغم display:flex في الشريط والستار', () => {
+    expect(coreCss).toMatch(/\.v35 \.dock-scrim\[hidden\]\s*\{\s*display:\s*none/);
+    expect(coreCss).toMatch(/\.v35 \.dock\[hidden\]\s*\{\s*display:\s*none/);
   });
-  it('لا يستقبل الستار المغلق اللمس أثناء انتقال الشفافية', () => {
-    expect(coreCss).toMatch(/\.v35 \.section-scrim:not\(\.open\)\s*\{\s*pointer-events:\s*none/);
+  it('أزرار الأقسام لا تستقبل اللمس والمبدّل مغلق', () => {
+    expect(coreCss).toMatch(/\.v35 \.dock-options\s*\{[^}]*pointer-events:\s*none/);
   });
 });
