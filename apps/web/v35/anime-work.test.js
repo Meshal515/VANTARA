@@ -74,6 +74,11 @@ it('Debug exposes recorded discovery evidence from the actual work page', async 
   await anime.openAnime({ id: DETAIL.id, title: 'The Apothecary Diaries' });
   await settle();
   root.querySelector('.aw-discovery-debug').click();
+  // الملخص أولًا: سطر المصدر وسبب الرفض، قصير يُنسخ من الجوال
+  expect(sheet.querySelector('pre').textContent).toContain('رُفض 1 (sequel)');
+  expect([...sheet.querySelectorAll('button')].map((b) => b.textContent)).toEqual(expect.arrayContaining(['نسخ الملخص', 'نسخ الكامل']));
+  // والكامل كما كان عند الطلب
+  [...sheet.querySelectorAll('button')].find((b) => b.textContent === 'إظهار الكامل').click();
   expect(sheet.textContent).toContain('candidate_rejected');
   expect(sheet.textContent).toContain('sequel');
   expect(sheet.textContent).toContain('example');

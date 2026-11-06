@@ -1,0 +1,154 @@
+name: VANTARA reference engine (original CloudStream, pinned, CI only, report only)
+
+# Measurement plan (docs/addons/MEASUREMENT_PLAN_20261106.ar.md), component A, phase 0: the original
+# CloudStream app built from source at a pinned commit runs the same published .cs3 files VANTARA runs,
+# on a clean emulator and network, and records every server (embed) and link with CloudStream's own
+# extractors. Nothing here enters the VANTARA app (CloudStream's GPL stays in CI). No publish, no Debug change.
+on:
+  push:
+    branches: [feat/addons-v7-native-manager-20261027]
+    paths:
+      - 'tools/reference/cloudstream/**'
+      - '.github/workflows/reference-cloudstream.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-cloudstream-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CLOUDSTREAM_REPO: https://github.com/recloudstream/cloudstream
+  CLOUDSTREAM_COMMIT: 6e0c1faaa5268a7bf38779f2a52bf936e86a21c8
+  PLUGINS_REPO: https://github.com/Abodabodd/re-3arabi
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deterministic checks of the link checker
+        run: python3 -I tools/reference/cloudstream/test_probe_links.py -v
+
+  build:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # CloudStream builds with a Java 17 toolchain (jvmToolchain(17)); Gradle itself runs on 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Pinned CloudStream source with the observation hook and reference test
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none "$CLOUDSTREAM_REPO" cs
+          git -C cs checkout --detach "$CLOUDSTREAM_COMMIT"
+          python3 -I tools/reference/cloudstream/patch.py cs
+          git -C cs diff --stat
+      - name: Build the reference app and its instrumentation
+        working-directory: cs
+        run: |
+          for attempt in 1 2 3; do
+            ./gradlew --no-daemon -Porg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64 :app:assembleStableDebug :app:assembleStableDebugAndroidTest && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "build attempt $attempt failed; retrying after a pause"; sleep $((attempt * 30))
+          done
+      - name: Collect APKs
+        run: |
+          set -euo pipefail
+          mkdir -p ref-apks
+          cp "$(find cs/app/build/outputs/apk/stable/debug -name '*.apk' | head -1)" ref-apks/app.apk
+          cp "$(find cs/app/build/outputs/apk/androidTest -name '*.apk' | head -1)" ref-apks/test.apk
+          sha256sum ref-apks/*.apk | tee ref-apks/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference-apks
+          path: ref-apks/
+          retention-days: 2
+
+  run:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-apks
+          path: ref-apks/
+      - name: Pin the plan (plugins commit, .cs3 hashes) in run.json
+        id: plan
+        run: |
+          set -euo pipefail
+          commit=$(git ls-remote "$PLUGINS_REPO" refs/heads/builds | cut -f1)
+          [ ${#commit} = 40 ] || { echo "cannot resolve plugins builds commit"; exit 1; }
+          python3 -I - "$commit" <<'PY' > run.json
+          import hashlib, json, os, sys, urllib.request
+          commit = sys.argv[1]
+          base = f"https://raw.githubusercontent.com/Abodabodd/re-3arabi/{commit}/"
+          lines = open("tools/reference/cloudstream/plan.txt", encoding="utf-8").read().splitlines()
+          settings = dict(kv.split("=") for kv in next((l[6:] for l in lines if l.startswith("# set ")), "").split())
+          names = [l.strip() for l in lines if l.strip() and not l.startswith("#")]
+          index = json.load(urllib.request.urlopen(base + "plugins.json", timeout=30))
+          plugins = []
+          for name in names:
+              entry = next((p for p in index if p.get("name") == name), None)
+              if entry is None:
+                  plugins.append({"name": name, "error": "not in plugins.json"}); continue
+              url = base + entry["url"].rsplit("/", 1)[1]
+              blob = urllib.request.urlopen(url, timeout=60).read()
+              plugins.append({"name": name, "internalName": entry.get("internalName"), "version": entry.get("version"),
+                              "url": url, "sha256": hashlib.sha256(blob).hexdigest(), "bytes": len(blob)})
+          print(json.dumps({"cloudstreamCommit": os.environ["CLOUDSTREAM_COMMIT"], "pluginsCommit": commit,
+                            "works": int(settings.get("works", 3)), "episodes": int(settings.get("episodes", 2)),
+                            "round": settings.get("round"), "plugins": plugins}, indent=1))
+          PY
+          cat run.json
+          echo "plugins=$(python3 -I -c 'import json;print(",".join(p["name"].replace(" ","_")+"="+p["url"] for p in json.load(open("run.json"))["plugins"] if "url" in p))')" >> "$GITHUB_OUTPUT"
+          echo "works=$(python3 -I -c 'import json;print(json.load(open("run.json"))["works"])')" >> "$GITHUB_OUTPUT"
+          echo "episodes=$(python3 -I -c 'import json;print(json.load(open("run.json"))["episodes"])')" >> "$GITHUB_OUTPUT"
+      - name: Reserve disk before emulator SDK download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+      - name: KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Reference run on a fresh emulator (clean network)
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          REF_PLUGINS: ${{ steps.plan.outputs.plugins }}
+          REF_WORKS: ${{ steps.plan.outputs.works }}
+          REF_EPISODES: ${{ steps.plan.outputs.episodes }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6G
+          disable-animations: true
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
+          script: bash tools/reference/cloudstream/run_reference.sh
+      - name: Decode check (ffprobe) and summary
+        if: always()
+        run: |
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg >/dev/null || { sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null; }
+          cp run.json reference-out/ 2>/dev/null || true
+          python3 -I tools/reference/cloudstream/probe_links.py reference-out | tee -a "$GITHUB_STEP_SUMMARY"
+          tail -n 20 reference-out/instrument.txt 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-run
+          path: reference-out/
+          retention-days: 2

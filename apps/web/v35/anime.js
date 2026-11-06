@@ -37,7 +37,7 @@ import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
-import { beginDiscovery, discoveryDiagnostics } from '../lib/discovery-diagnostics.js';
+import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
 const isMovie = m => m?.format === 'MOVIE';
 const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
@@ -2124,6 +2124,20 @@ export function createAnime(deps) {
     else if (!diagnosticsUi.visible()) { const host = q('animeSources'); if (host) { host.hidden = true; host.replaceChildren(); } }
   });
 
+  /** نسخ نص طويل في WebView: Clipboard API، وإن رُفض فتحديد نص مخفي ونسخه. */
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
+    try {
+      const area = Object.assign(document.createElement('textarea'), { value: text });
+      area.style.cssText = 'position:fixed;opacity:0;inset:0';
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      return ok;
+    } catch { return false; }
+  }
+
   function discoveryButton(m) {
     if (!diagnosticsUi.visible()) return null;
     return button('aw-link aw-discovery-debug', 'تشخيص الاكتشاف', () => deps.openSheet(body => {
@@ -2131,12 +2145,23 @@ export function createAnime(deps) {
       body.dataset.diagnosticSheet = '';
       const title = el('h3', null, 'تشخيص الاكتشاف — Debug');
       const output = el('pre');
-      output.dir = 'ltr';
+      output.dir = 'auto';
       output.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;user-select:text';
-      const refresh = () => { output.textContent = JSON.stringify(discoveryDiagnostics(m.id), null, 2); };
+      // الملخص أولًا (سطر لكل مصدر + ورقة السيرفرات) لأن الكامل أطول من أن يُنسخ من الجوال
+      let full = false;
+      const summary = () => summarizeDiscovery(discoveryDiagnostics(m.id).at(-1), {
+        sheet: state.sheetFor?.id === m.id ? state.sheetFor.sheet : null, nameOf: (id) => sourceName(id) ?? id });
+      const fullText = () => JSON.stringify(discoveryDiagnostics(m.id), null, 2);
+      const refresh = () => { output.textContent = full ? fullText() : summary(); };
+      const copy = (text) => copyText(text).then((ok) => toast(ok ? 'نُسخ' : 'تعذّر النسخ — حدّد النص يدويًا'));
       refresh();
-      body.append(title, el('p', null, 'الاستعلامات والصفحات وقرارات المطابقة وسلسلة الخطأ الأصلية. السجل محلي ومحدود.'),
-        button('aw-link', 'تحديث السجل', refresh), output);
+      const toggle = button('aw-link', 'إظهار الكامل', () => { full = !full; toggle.textContent = full ? 'إظهار الملخص' : 'إظهار الكامل'; refresh(); });
+      const actions = el('div');
+      actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin:8px 0';
+      actions.append(button('aw-link', 'نسخ الملخص', () => copy(summary())), button('aw-link', 'نسخ الكامل', () => copy(fullText())),
+        button('aw-link', 'تحديث', refresh), toggle);
+      body.append(title, el('p', null, 'سطر لكل مصدر: هل سُئل، وماذا ردّ، وماذا قُبل ولماذا رُفض، ثم ورقة السيرفرات. السجل محلي ومحدود.'),
+        actions, output);
     }, { tone: 'anime' }));
   }
 
@@ -2378,6 +2403,7 @@ export function createAnime(deps) {
     const prefer = preferredCode(m.id);
     const previousServer = workingServer(m.id);
     const sheet = { session: null, routes: [], retryAt: 0, done: false, closed: false, launched: false, busy: false, work: null, touched: false };
+    state.sheetFor = { id: m.id, sheet }; // ورقة هذا العمل حيّة أو آخر حالة لها، لملخص التشخيص
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;

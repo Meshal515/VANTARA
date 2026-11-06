@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { beginDiscovery, discoveryDiagnostics, setDiscoveryDebug } from './discovery-diagnostics.js';
+import { beginDiscovery, discoveryDiagnostics, setDiscoveryDebug, summarizeDiscovery } from './discovery-diagnostics.js';
 
 afterEach(() => setDiscoveryDebug(false));
 it('records the rejected edition and the nested original failure without URL credentials', () => {
@@ -28,4 +28,32 @@ it('keeps the deepest cause when a failure crossed many bridge wrappers', () => 
   for (let n = 0; n < 8; n++) error = new Error(`wrapper ${n}`, { cause: error });
   const trace = beginDiscovery({ workId: 14 }); trace.record('search_failed', { error });
   expect(discoveryDiagnostics(14)[0].events[0].error.rootCause).toMatchObject({ code: 'ENOTFOUND', message: 'original DNS failure' });
+});
+
+it('summarizes one line per source and the server sheet, short enough to copy from a phone', () => {
+  setDiscoveryDebug(true);
+  const t = beginDiscovery({ workId: 7, title: 'Black Lagoon', format: 'TV', entry: 'general_card' });
+  t.record('query_started', { query: 'Black Lagoon' });
+  t.record('source_page', { sourceId: 'arabanime', received: 4, page: 1 });
+  t.record('candidate_accepted', { sourceId: 'arabanime', title: 'Black Lagoon' });
+  t.record('candidate_rejected', { sourceId: 'arabanime', title: 'Black Lagoon OVA', reason: 'sequel' });
+  t.record('source_page', { sourceId: 'witanime', received: 0, page: 1, error: 'HTTP 403' });
+  t.record('source_page', { sourceId: 'animerift', received: 0, skipped: true });
+  t.record('discovery_complete', { sources: ['arabanime'], uncertain: true });
+  const sheet = { done: true, copies: [{ sourceId: 'arabanime' }, { sourceId: 'animerift' }],
+    routes: [{ sourceId: 'arabanime', state: 'READY' }, { sourceId: 'arabanime', state: 'UNAVAILABLE', reason: 'لم يرد خلال 25 ثانية' },
+      { sourceId: 'arabanime', state: 'UNAVAILABLE', reason: 'لم يرد خلال 25 ثانية' }] };
+  const text = summarizeDiscovery(discoveryDiagnostics(7)[0], { sheet, nameOf: (id) => id.toUpperCase() });
+  expect(text).toContain('- ARABANIME: ردّ 4 نتيجة في 1 صفحة · قُبل 1 («Black Lagoon») · رُفض 1 (sequel)');
+  expect(text).toContain('- WITANIME: ردّ 0 نتيجة في 1 صفحة · خطأ: HTTP 403');
+  expect(text).toContain('- ANIMERIFT: متخطّى');
+  expect(text).toContain('النتيجة: ARABANIME · غير مؤكدة');
+  expect(text).toContain('ورقة السيرفرات (اكتملت): 1/3 جاهز');
+  expect(text).toContain('- ARABANIME: جاهز 1/3 · UNAVAILABLE لم يرد خلال 25 ثانية×2');
+  expect(text).toContain('نسخ بلا أي سيرفر في الورقة: ANIMERIFT');
+  expect(text.split('\n').length).toBeLessThan(20);
+});
+
+it('explains an empty record instead of returning nothing', () => {
+  expect(summarizeDiscovery(undefined)).toContain('فعّل «إظهار التشخيصات»');
 });
