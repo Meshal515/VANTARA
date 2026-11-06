@@ -336,7 +336,19 @@ class SourceCertificationTest {
                 val cand = route.candidates.firstNotNullOfOrNull { prep.candidate(it) } ?: return@mapNotNull null
                 buildJsonObject {
                     put("server", route.server.take(40)); put("host", cand.host.take(60)); put("quality", route.quality ?: -1)
-                    play(session, cand, seconds).forEach { (k, v) -> put(k, v) }
+                    val result = play(session, cand, seconds)
+                    result.forEach { (k, v) -> put(k, v) }
+                    // The player was refused the very manifest the probe had opened: resolve fresh links and fetch one
+                    // twice with the playback client. 200 then 403 = a single-use link that the probe itself consumed.
+                    if (result["httpFailure"]?.jsonPrimitive?.contentOrNull?.startsWith("403 manifest") == true) {
+                        put("singleUse", runCatching {
+                            val fresh = withTimeout(40_000) { adapter.candidates(episode) }.firstOrNull { it.server == cand.server } ?: return@runCatching "NO_FRESH_LINK"
+                            val client = com.vantara.addons.nativeAddonMediaClient(http, fresh.url, fresh.headers)
+                            val first = com.vantara.anime.stream.StreamProbe.check(client, fresh)
+                            val second = com.vantara.anime.stream.StreamProbe.check(client, fresh)
+                            "fresh:${if (first) "ok" else "refused"} again:${if (second) "ok" else "refused"}"
+                        }.getOrElse { "CHECK_FAILED:" + reason(it) })
+                    }
                 }
             }
             put("played", JsonArray(plays))
