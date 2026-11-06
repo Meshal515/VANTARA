@@ -165,6 +165,8 @@ seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/van
 seams.add('extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt');
 seams.add('extensions/runtime-android/integration/src/test/kotlin/com/vantara/runtime/RuntimeRecoveryGateTest.kt');
 seams.add('tools/repository-compat/scope-guard.mjs');
+// Test-only manifest: match VANTARA app largeHeap on Android 10 IPC stress tests; runtime engine remains protected.
+seams.add('extensions/runtime-android/harness/src/main/AndroidManifest.xml');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
 seams.add('android/app/src/test/java/com/vantara/plugins/BoundedRepositoryBodyTest.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/bridge/AniyomiUpdateGate.kt');

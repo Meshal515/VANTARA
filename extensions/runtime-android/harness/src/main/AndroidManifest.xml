@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="VANTARA Runtime Lab" android:allowBackup="false" android:supportsRtl="true" />
+    <!-- Mirror the real Android app heap budget for concurrent 4 MiB IPC frame tests. -->
+    <application android:label="VANTARA Runtime Lab" android:allowBackup="false" android:largeHeap="true" android:supportsRtl="true" />
 </manifest>
