@@ -1808,3 +1808,19 @@
   font-size: 11px;
   color: var(--text-3);
 }
+
+/* تبديل الأقسام: كبسولات أزرار السينما ومقاساتها تتشكّل مع انزلاق الصفحة لا دفعة واحدة في أول إطار */
+.v35 #home > .header .header-end,
+.v35 #home > .header .header-start .icon-btn,
+.v35 #home > .header .header-end .icon-btn,
+.v35 #home > .header .icon-btn .icon {
+  transition: background-color 0.4s ease, width 0.4s ease, height 0.4s ease, padding 0.4s ease, gap 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 #home > .header .header-end,
+  .v35 #home > .header .icon-btn,
+  .v35 #home > .header .icon-btn .icon { transition: none; }
+}
+html[data-motion='off'] .v35 #home > .header .header-end,
+html[data-motion='off'] .v35 #home > .header .icon-btn,
+html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none; }
