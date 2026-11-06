@@ -135,6 +135,9 @@ const MANGA_STEPS = ['download', 'load', 'popular', 'latest', 'series', 'pages',
 // «غير مدعوم» نقص في محرك فانتارا نفسه، فيُعدّ عليه كعطله
 const MANGA_OWNER = { site: 'site', extension: 'addon', vantara: 'vantara', unsupported: 'vantara' };
 
+// ميزة WebView أحدث من جهاز الاختبار (ProComic: Chromium 146+) نقص في بيئة الجهاز، لا في فانتارا
+const mangaOwner = (v) => (/Chromium \d+|WebView/i.test(v.detail ?? '') && v.owner === 'unsupported') ? 'env' : MANGA_OWNER[v.owner] ?? 'unknown';
+
 /** رحلة مصدر مانجا واحد: أين وقفت ومن يملك وقوفها. نجاحها = صورة صفحة حقيقية. */
 export function mangaRows(records) {
   const rows = [];
@@ -143,7 +146,7 @@ export function mangaRows(records) {
     const top = fail(r);
     if (top || !r.sources?.length) {
       const [step, v] = top ?? ['load', { code: 'NO_SOURCES', owner: 'extension' }];
-      rows.push({ name: r.extension, origin: r.origin, source: '—', ok: false, step, code: v.code, owner: MANGA_OWNER[v.owner] ?? 'unknown' });
+      rows.push({ name: r.extension, origin: r.origin, source: '—', ok: false, step, code: v.code, owner: mangaOwner(v) });
       continue;
     }
     for (const s of r.sources) {
@@ -152,7 +155,7 @@ export function mangaRows(records) {
       const real = f && !(f[0] === 'popular' && s.latest?.result === 'PASS') ? f : (f?.[0] === 'popular' ? fail({ ...s, popular: undefined }) : f);
       const ok = s.image?.result === 'PASS';
       const why = real ?? (ok ? null : [s.chapters === 0 ? 'series' : 'pages', { code: s.chapters === 0 ? 'NO_CHAPTERS' : 'NO_PAGES', owner: 'extension' }]);
-      rows.push({ name: r.extension, origin: r.origin, source: s.name, ok, step: why?.[0], code: why?.[1].code, owner: why ? MANGA_OWNER[why[1].owner] ?? 'unknown' : null });
+      rows.push({ name: r.extension, origin: r.origin, source: s.name, ok, step: why?.[0], code: why?.[1].code, owner: why ? mangaOwner(why[1]) : null });
     }
   }
   return rows;
@@ -162,7 +165,7 @@ export function mangaTable(records) {
   const rows = mangaRows(records);
   if (!rows.length) return '';
   const lines = ['### المانجا: من تحميل الحزمة حتى صورة صفحة حقيقية', '', '| الإضافة | المصدر | الأصل | النتيجة | وقف عند | الرمز | المالك |', '|---|---|---|---|---|---|---|'];
-  const label = { vantara: '**فانتارا**', addon: 'الإضافة', site: 'الموقع', unknown: 'غير مصنّف' };
+  const label = { vantara: '**فانتارا**', addon: 'الإضافة', site: 'الموقع', env: 'بيئة الجهاز (WebView)', unknown: 'غير مصنّف' };
   for (const r of rows.sort((a, b) => Number(a.ok) - Number(b.ok) || a.name.localeCompare(b.name))) {
     lines.push(`| ${r.name} | ${r.source} | ${r.origin ?? ''} | ${r.ok ? 'يعمل' : 'لا يعمل'} | ${r.step ?? '—'} | ${r.code ?? '—'} | ${r.owner ? label[r.owner] : '—'} |`);
   }

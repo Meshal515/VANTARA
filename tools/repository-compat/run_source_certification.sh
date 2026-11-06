@@ -40,7 +40,7 @@ timeout 9000 adb shell am instrument --user 0 -r -w \
   -e class com.vantara.runtime.SourceCertificationTest \
   -e vantaraCertify true \
   -e vantaraCertKind "$CERT_KIND" \
-  -e vantaraCertName "$CERT_NAME" \
+  -e vantaraCertName "$(rq "$CERT_NAME")" \
   -e vantaraCertContent "$CERT_CONTENT" \
   -e vantaraCertPerTier "${CERT_PER_TIER:-10}" \
   -e vantaraCertServers "${CERT_SERVERS:-3}" \
