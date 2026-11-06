@@ -114,19 +114,17 @@ describe('layer model', () => {
     expect(v.manga.hidden).toBe(true);
   });
 
-  it('reduced motion is a quick fade without movement', () => {
+  it('reduced motion switches sections instantly: no fade, no waiting', () => {
     globalThis.matchMedia = () => ({ matches: true });
     const v = views();
     const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
-    layers.go('cinema');
-    tick(48);
-    expect(v.cinema.style.transform).not.toContain('%'); // بلا حركة أفقية
-    expect(Number(v.cinema.style.opacity)).toBeGreaterThan(0);
-    expect(Number(v.cinema.style.opacity)).toBeLessThan(1);
-    tick(T.reduced + 32);
+    layers.go('cinema'); // بلا أي tick
     expect(layers.section).toBe('cinema');
+    expect(layers.moving).toBe(false);
+    expect(v.cinema.hidden).toBe(false);
+    expect(v.manga.hidden).toBe(true);
+    expect(v.cinema.style.opacity).toBe('');
   });
-
   it('a released drag below the threshold snaps back to the section it started from', () => {
     const v = views();
     const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'anime' });
@@ -251,36 +249,136 @@ describe('switcher geometry', () => {
   });
 });
 
-describe('switcher', () => {
-  const mount = () => {
-    document.body.innerHTML = `<div id="scrim" hidden></div><nav class="dock" id="bar"><div class="dock-half"><button class="nav">a</button></div><button class="dock-switch" aria-expanded="false"></button><div class="dock-half"><button class="nav">b</button></div><div class="dock-options" inert aria-hidden="true">${ORDER.map((id) => `<button class="dock-opt" data-arg="${id}" tabindex="-1"></button>`).join('')}</div></nav>`;
-    return createDock({ bar: document.getElementById('bar'), scrim: document.getElementById('scrim'), current: 'anime' });
+describe('split floating navigation', () => {
+  // ثلاث كبسولات بعرض 336: اليمنى 224–336 (الرئيسية واكتشف)، الوسطى، اليسرى 0–112
+  const rect = (left, width, top = 700, height = 58) => () => ({ left, width, top, height, right: left + width, bottom: top + height, x: left, y: top });
+  const mount = (current = 'anime') => {
+    const navBtn = (page) => `<button class="nav" data-page="${page}"></button>`;
+    const opt = (id) => `<button class="dock-opt" data-arg="${id}" tabindex="-1" inert aria-hidden="true"></button>`;
+    document.body.innerHTML = `<div id="scrim" hidden></div><nav class="dock" id="bar">` +
+      `<div class="dock-cap dock-cap--nav" id="capR"><div class="cap-body"><span class="cap-ind"></span>${navBtn('home')}${navBtn('discover')}</div>${opt('manga')}</div>` +
+      `<div class="dock-cap dock-cap--switch"><button class="dock-switch" aria-expanded="false"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq" data-arg="cinema"></span></button>${opt('anime')}</div>` +
+      `<div class="dock-cap dock-cap--nav" id="capL"><div class="cap-body"><span class="cap-ind"></span>${navBtn('library')}${navBtn('majlis')}</div>${opt('cinema')}</div></nav>`;
+    const $ = (s) => document.querySelector(s);
+    $('#bar').getBoundingClientRect = rect(0, 336);
+    $('#capR').getBoundingClientRect = rect(224, 112);
+    $('#capL').getBoundingClientRect = rect(0, 112);
+    $('[data-page="home"]').getBoundingClientRect = rect(280, 56);
+    $('[data-page="discover"]').getBoundingClientRect = rect(224, 56);
+    $('[data-page="library"]').getBoundingClientRect = rect(56, 56);
+    $('[data-page="majlis"]').getBoundingClientRect = rect(0, 56);
+    const calls = [];
+    for (const ind of document.querySelectorAll('.cap-ind')) ind.animate = (keys, opts) => (calls.push({ ind, keys, opts }), { cancel() {} });
+    const dock = createDock({ bar: $('#bar'), scrim: $('#scrim'), current });
+    return { dock, calls, $, indR: $('#capR .cap-ind'), indL: $('#capL .cap-ind') };
   };
-  it('opens with aria-expanded, disables the four buttons, and marks the current section', () => {
-    const dock = mount();
-    const sw = document.querySelector('.dock-switch');
-    expect(sw.getAttribute('aria-label')).toContain('أنمي');
-    dock.open();
-    expect(sw.getAttribute('aria-expanded')).toBe('true');
-    expect([...document.querySelectorAll('.dock-half')].every((h) => h.hasAttribute('inert'))).toBe(true);
-    expect(document.querySelector('.dock-options').hasAttribute('inert')).toBe(false);
-    expect(document.getElementById('scrim').hidden).toBe(false);
-    expect(document.querySelector('[data-arg="anime"]').getAttribute('aria-checked')).toBe('true');
-    expect(document.querySelector('[data-arg="anime"]').getAttribute('tabindex')).toBe('0');
-    tick(T.open + 20);
-    dock.close();
-    expect(document.getElementById('scrim').style.pointerEvents).toBe('none'); // فورًا، قبل التلاشي
-    tick(T.close + 20);
-    expect(sw.getAttribute('aria-expanded')).toBe('false');
-    expect(document.getElementById('scrim').hidden).toBe(true);
-    expect(document.querySelector('.dock-options').hasAttribute('inert')).toBe(true);
-    expect(document.querySelector('.dock-half').hasAttribute('inert')).toBe(false);
+  const xOfInd = (el) => Number(/translate3d\((-?[\d.]+)px/.exec(el.style.transform)?.[1]) + 20;
+
+  it('inside one capsule the circle slides as one piece from the old button to the new one', () => {
+    const { dock, calls, indR, indL } = mount();
+    dock.activate('home');
+    expect(xOfInd(indR)).toBeCloseTo(84);
+    expect(indR.style.opacity).toBe('1');
+    expect(indL.style.opacity).toBe('0');
+    calls.length = 0;
+    dock.activate('discover');
+    expect(calls).toHaveLength(1); // حركة واحدة: انزلاق، لا اختفاء وظهور
+    expect(calls[0].ind).toBe(indR);
+    const xs = calls[0].keys.map((k) => Number(/translate3d\((-?[\d.]+)px/.exec(k.transform)[1]) + 20);
+    expect(xs[0]).toBeCloseTo(84);
+    expect(xs[xs.length - 1]).toBeCloseTo(28);
+    expect(Math.min(...xs)).toBeGreaterThan(28 - 8); // لا يغادر كبسولته ولا يرتد كثيرًا
+    expect(xOfInd(indR)).toBeCloseTo(28);
   });
+
+  it('between capsules the old circle shrinks in place and the new one grows in place, overlapping in time', () => {
+    const { dock, calls, indR, indL } = mount();
+    dock.activate('discover');
+    calls.length = 0;
+    dock.activate('majlis');
+    const shrink = calls.find((c) => c.ind === indR);
+    const grow = calls.find((c) => c.ind === indL);
+    expect(shrink.keys.at(-1).opacity).toBe(0);
+    expect(shrink.keys.at(-1).transform).toContain('scale(0.4');
+    expect(grow.keys[0].opacity).toBe(0);
+    expect(grow.keys.at(-1).opacity).toBe(1);
+    // كل دائرة في مكانها: لا مسار بين الكبسولتين
+    for (const k of shrink.keys) expect(Number(/translate3d\((-?[\d.]+)px/.exec(k.transform)[1]) + 20).toBeCloseTo(28);
+    for (const k of grow.keys) expect(Number(/translate3d\((-?[\d.]+)px/.exec(k.transform)[1]) + 20).toBeCloseTo(28);
+    // الكبر يبدأ قبل نهاية الانكماش: حركة واحدة منتقلة
+    expect(grow.opts.delay).toBeLessThan(shrink.opts.duration);
+    expect(indR.style.opacity).toBe('0');
+    expect(indL.style.opacity).toBe('1');
+  });
+
+  it('opening the switcher turns the three capsules into sections, layers opening outward from the middle', () => {
+    const { dock, $ } = mount();
+    dock.open();
+    tick(60); // منتصف الحركة (بلا Web Animations: بالمؤقت)
+    const tx = (id) => Number(/translate3d\((-?[\d.]+)%/.exec($(`.dock-opt[data-arg="${id}"]`).style.transform)?.[1] ?? 0);
+    expect(tx('manga')).toBeLessThan(0); // مانجا تأتي من اليسار نحو اليمين
+    expect(tx('cinema')).toBeGreaterThan(0); // سينما من اليمين نحو اليسار
+    expect($('.dock-opt[data-arg="anime"]').style.transform).toContain('scale'); // أنمي تحل محل المربعات
+    tick(600);
+    expect(tx('manga')).toBeCloseTo(0);
+    expect($('.dock-switch').getAttribute('aria-expanded')).toBe('true');
+    expect([...document.querySelectorAll('.cap-body')].every((b) => b.hasAttribute('inert'))).toBe(true);
+    expect($('.dock-opt[data-arg="anime"]').hasAttribute('inert')).toBe(false);
+    expect($('.dock-opt[data-arg="anime"]').classList.contains('current')).toBe(true);
+    expect($('.dock-opt[data-arg="anime"]').getAttribute('tabindex')).toBe('0');
+    dock.close();
+    expect($('#scrim').style.pointerEvents).toBe('none'); // الإغلاق يوقف لمس الستار فورًا
+    tick(600);
+    expect($('#scrim').hidden).toBe(true);
+    expect($('.cap-body').hasAttribute('inert')).toBe(false);
+    expect($('.dock-opt[data-arg="manga"]').hasAttribute('inert')).toBe(true);
+    expect($('.dock-opt[data-arg="manga"]').style.transform).toBe('');
+    expect($('#bar').hasAttribute('inert')).toBe(false); // الشريط نفسه لا يتعطل بعد الإغلاق أبدًا
+    expect($('.dock-switch').hasAttribute('inert')).toBe(false);
+  });
+
+  it('with animation off everything changes instantly: no motion, no waiting', () => {
+    globalThis.matchMedia = () => ({ matches: true });
+    const { dock, calls, $, indR, indL } = mount();
+    dock.activate('home');
+    dock.activate('discover');
+    dock.activate('library');
+    expect(calls).toHaveLength(0);
+    expect(indR.style.opacity).toBe('0');
+    expect(indL.style.opacity).toBe('1');
+    expect(xOfInd(indL)).toBeCloseTo(84);
+    dock.open(); // بلا أي tick
+    expect(Number($('#scrim').style.opacity)).toBe(1);
+    expect(Number($('.dock-opt[data-arg="manga"]').style.opacity)).toBe(1);
+    dock.close();
+    expect($('#scrim').hidden).toBe(true);
+  });
+
+  it('the app setting turns animation off as well as the system one', () => {
+    document.documentElement.dataset.motion = 'off';
+    try {
+      const { dock, calls } = mount();
+      dock.activate('home');
+      dock.activate('discover');
+      expect(calls).toHaveLength(0);
+    } finally { delete document.documentElement.dataset.motion; }
+  });
+
+  it('rapid taps follow the last choice without stacking motions', () => {
+    const { dock, indR, indL } = mount();
+    dock.activate('home');
+    for (const p of ['discover', 'majlis', 'library', 'home', 'majlis']) dock.activate(p);
+    expect(indL.style.opacity).toBe('1');
+    expect(indR.style.opacity).toBe('0');
+    expect(xOfInd(indL)).toBeCloseTo(28);
+  });
+
   it('a new section updates the marks without opening', () => {
-    const dock = mount();
+    const { dock, $ } = mount();
     dock.setSection('cinema');
-    expect(document.querySelector('[data-arg="cinema"]').classList.contains('current')).toBe(true);
-    expect(document.querySelector('[data-arg="anime"]').classList.contains('current')).toBe(false);
+    expect($('.dock-opt[data-arg="cinema"]').classList.contains('current')).toBe(true);
+    expect($('.dock-sq[data-arg="cinema"]').classList.contains('current')).toBe(true);
+    expect($('.dock-switch').getAttribute('aria-label')).toContain('سينما');
     expect(dock.isOpen()).toBe(false);
   });
 });

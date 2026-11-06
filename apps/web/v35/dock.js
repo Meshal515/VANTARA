@@ -209,7 +209,13 @@ export function haptic(kind = 'light') {
   }
 }
 
-const isReduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+/**
+ * إيقاف الحركة: إعداد النظام «تقليل الحركة»، أو إعداد التطبيق (<html data-motion="off">).
+ * يعني انتقالًا فوريًا نظيفًا بلا أي مدة، لا حركة أخف ولا انتظارًا يعوّضها.
+ */
+export const isReduced = () =>
+  globalThis.document?.documentElement?.dataset?.motion === 'off' ||
+  (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', travel: 'cubic-bezier(0.32, 0.72, 0, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;
@@ -415,7 +421,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       },
       e0: from,
       e1: to,
-      duration: r ? (timing.reduced ?? T.reduced) * span : duration * Math.max(0.35, span),
+      duration: r ? 0 : duration * Math.max(0.35, span), // إيقاف الحركة: فوري تمامًا
       ease: r ? linear : ease,
       easing: r ? cssEase.linear : easing,
       done: () => {
@@ -525,197 +531,224 @@ export function createCrossfade(slot) {
 }
 
 /**
- * المبدّل: يفتح المربعات الثلاثة إلى أزرار بعرض الشريط، ويُغلق بالمس خارجًا أو على
- * القسم الحالي أو Esc أو رجوع أندرويد. السحب الأفقي عليه ينقل للقسم المجاور.
- * الأزرار بمقاسها المفتوح دائمًا، وتُصغَّر بـ transform إلى مكان المربعات: الحركة كلها
- * transform وopacity على المركّب، بلا تغيير مقاس أو تخطيط في أي إطار.
+ * الشريط المقسوم: ثلاث كبسولات عائمة مستقلة متساوية.
+ *   اليمنى: الرئيسية واكتشف · الوسطى: مبدّل الأقسام · اليسرى: مكتبتي والأصدقاء.
+ *
+ * المؤشر دائرة داخل كل كبسولة تنقّل، لا يغادرها ولا يمر فوق المبدّل أبدًا:
+ *   - داخل الكبسولة: تنزلق بنابض (springPath) وتتمطّط بسرعتها، وتُسحب بالإصبع.
+ *   - بين الكبسولتين: تنكمش القديمة وتتلاشى في مكانها، والجديدة تكبر في مكانها، والكبر
+ *     يبدأ قبل نهاية الانكماش فتُقرأ حركة واحدة منتقلة لا اختفاءً ثم ظهورًا.
+ * المبدّل: الكبسولات نفسها تتحول إلى المانجا والأنمي والسينما، طبقات تنفتح من المنتصف
+ * للخارج: «مانجا» تنزلق من اليسار إلى اليمين، و«سينما» من اليمين إلى اليسار، و«أنمي»
+ * تحل محل المربعات في مكانها. كل الحركة transform وopacity على المركّب.
+ * ومن أوقف الحركة: كل شيء فوري، بلا أي مدة.
  */
 export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStart, onDrag, onDragEnd, onNavigate, reduced = isReduced }) {
   const sw = bar.querySelector('.dock-switch');
-  const halves = [...bar.querySelectorAll('.dock-half')];
-  const options = bar.querySelector('.dock-options');
-  const opts = [...options.querySelectorAll('.dock-opt')];
-  const labels = [...options.querySelectorAll('.dock-opt-label')];
+  const caps = [...bar.querySelectorAll('.dock-cap--nav')];
+  const opts = [...bar.querySelectorAll('.dock-opt')];
   const squares = [...sw.querySelectorAll('.dock-sq')];
-  let p = 0, motion = null, open = false, section = current, dragged = false, geo = null;
-  // الحبّة الزجاجية: عنصر واحد بفيزياء نابض، يمر تحت المبدّل والمربعات فوقه
-  const ind = bar.querySelector('.dock-ind');
-  const blob = ind?.querySelector('.ind-blob');
-  const IND = 44; // عرض الحبّة (الارتفاع 42)
-  let indX = null, indPage = null, indAnim = null, indPath = null, indStart = 0, indGuard = 0, pendingV = 0;
+  const navs = [...bar.querySelectorAll('.dock-cap--nav .nav')];
+  const capOf = (page) => caps.find((c) => c.querySelector(`.nav[data-page="${page}"]`)) ?? null;
+  const indOf = (cap) => cap?.querySelector('.cap-ind') ?? null;
+  let open = false, section = current, dragged = false, activePage = null;
+  let layerAnims = [];
+  const indState = new Map(); // cap → { x, anims, path, start }
 
-  const geometry = () => {
-    // الأزرار مطلقة داخل صندوق الحشو: بلا الحد
-    const box = bar.getBoundingClientRect();
-    const s = sw.getBoundingClientRect();
-    return { w: bar.clientWidth || box.width, h: bar.clientHeight || box.height, cx: s.left - box.left - (bar.clientLeft || 0) + s.width / 2 };
+  const anim = (el, keys, opts) => (typeof el?.animate === 'function' ? el.animate(keys, opts) : null);
+  const still = () => reduced();
+
+  // ── المؤشر ───────────────────────────────────────────────
+  const slotCenter = (nav) => {
+    const cap = nav.closest('.dock-cap');
+    const c = cap.getBoundingClientRect();
+    const r = nav.getBoundingClientRect();
+    return r.left - c.left - (cap.clientLeft || 0) + r.width / 2;
   };
-  /** ضع الأزرار والأسماء بمقاسها المفتوح مرة واحدة؛ الإطارات بعدها transform فقط. */
-  const layout = () => {
-    const g = geometry();
-    const full = optionRects(g.w, g.h, g.cx, 1);
-    const compact = optionRects(g.w, g.h, g.cx, 0);
-    geo = { full, compact };
-    full.forEach((r, i) => {
-      for (const el of [opts[i], labels[i]]) {
-        if (!el) continue;
-        el.style.left = `${r.left.toFixed(2)}px`;
-        el.style.top = `${r.top.toFixed(2)}px`;
-        el.style.width = `${r.width.toFixed(2)}px`;
-        el.style.height = `${r.height.toFixed(2)}px`;
+  const IND = 40;
+  const indTransform = (x, v = 0, s = 1, maxSx = Infinity) => {
+    let { sx, sy } = stretchOf(v);
+    if (sx > maxSx) (sx = Math.max(1, maxSx)), (sy = 1 / Math.sqrt(sx));
+    return `translate3d(${(x - IND / 2).toFixed(2)}px,0,0) scale(${(sx * s).toFixed(4)},${(sy * s).toFixed(4)})`;
+  };
+  const stateOf = (cap) => {
+    if (!indState.has(cap)) indState.set(cap, { x: null, anims: [], path: null, start: 0, shown: false });
+    return indState.get(cap);
+  };
+  /** أوقف حركة مؤشر كبسولة حيث هو الآن؛ يعيد موضعه وسرعته. */
+  const haltInd = (cap) => {
+    const st = stateOf(cap);
+    let now = null;
+    if (st.path) now = sampleAt(st.path, clockNow() - st.start);
+    for (const a of st.anims) a.cancel?.();
+    st.anims = [];
+    st.path = null;
+    if (now) {
+      st.x = now.x;
+      indOf(cap).style.transform = indTransform(now.x, now.v);
+    }
+    return now;
+  };
+  const showInd = (cap, x, { scale = 1, opacity = 1 } = {}) => {
+    const ind = indOf(cap);
+    const st = stateOf(cap);
+    st.x = x;
+    st.shown = opacity > 0;
+    ind.style.transform = indTransform(x, 0, scale);
+    ind.style.opacity = String(opacity);
+  };
+  /** انزلاق داخل الكبسولة بنابض، يكمل من الموضع والسرعة الحاليين. */
+  const slide = (cap, x1, v0 = 0) => {
+    const st = stateOf(cap);
+    const now = haltInd(cap);
+    const x0 = now?.x ?? st.x ?? x1;
+    const v = now?.v ?? v0;
+    showInd(cap, x1);
+    if (still() || (Math.abs(x1 - x0) < 0.5 && Math.abs(v) < 0.01)) return;
+    const path = springPath(x0, v, x1, { omega: 0.024, zeta: 0.82 });
+    const total = path[path.length - 1].t;
+    const a = anim(indOf(cap), path.map((p) => ({ offset: p.t / total, transform: indTransform(p.x, p.v) })), { duration: total, easing: 'linear' });
+    if (a) {
+      st.anims = [a];
+      st.path = path;
+      st.start = clockNow();
+      a.onfinish = () => { st.anims = []; st.path = null; };
+    }
+  };
+  /** بين الكبسولتين: انكماش هنا وكبر هناك، متداخلان في الزمن. */
+  const hop = (fromCap, toCap, x1) => {
+    const from = stateOf(fromCap);
+    haltInd(fromCap);
+    haltInd(toCap);
+    const fx = from.x;
+    // الحالة النهائية مضمّنة أولًا؛ الحركة فوقها فلا يبقى شيء معلّق إن توقفت
+    showInd(fromCap, fx ?? 0, { opacity: 0, scale: 0.4 });
+    showInd(toCap, x1);
+    if (still() || fx == null) return;
+    const a1 = anim(indOf(fromCap), [
+      { transform: indTransform(fx), opacity: 1 },
+      { transform: indTransform(fx, 0, 0.4), opacity: 0 },
+    ], { duration: 200, easing: 'cubic-bezier(0.4, 0, 1, 1)' });
+    const a2 = anim(indOf(toCap), [
+      { transform: indTransform(x1, 0, 0.4), opacity: 0 },
+      { transform: indTransform(x1, 0, 1.04), opacity: 1, offset: 0.72 },
+      { transform: indTransform(x1), opacity: 1 },
+    ], { duration: 320, delay: 80, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'backwards' });
+    if (a1) stateOf(fromCap).anims = [a1];
+    if (a2) stateOf(toCap).anims = [a2];
+  };
+  const moveIndicator = (page) => {
+    const nav = navs.find((n) => n.dataset.page === page);
+    const toCap = nav ? capOf(page) : null;
+    const fromCap = activePage ? capOf(activePage) : null;
+    activePage = nav ? page : null;
+    if (!toCap) {
+      // صفحة بلا زر (الإعدادات): لا مؤشر في أي كبسولة
+      for (const c of caps) {
+        haltInd(c);
+        indOf(c).style.opacity = '0';
+        stateOf(c).shown = false;
       }
-    });
-  };
-  const frameAt = (k) => {
-    if (!geo) layout();
-    const out = new Map();
-    const e = clamp(k);
-    geo.full.forEach((f, i) => {
-      const c = geo.compact[i];
-      const left = c.left + (f.left - c.left) * e;
-      const top = c.top + (f.top - c.top) * e;
-      const w = c.width + (f.width - c.width) * e;
-      const h = c.height + (f.height - c.height) * e;
-      out.set(opts[i], {
-        transform: `translate3d(${(left - f.left).toFixed(2)}px,${(top - f.top).toFixed(2)}px,0) scale(${(w / f.width).toFixed(4)},${(h / f.height).toFixed(4)})`,
-        opacity: clamp(e * 4).toFixed(3),
-      });
-      const l = clamp((e - 0.55) / 0.45);
-      if (labels[i]) out.set(labels[i], { opacity: l.toFixed(3), transform: `translate3d(0,${((1 - l) * 4).toFixed(2)}px,0)` });
-    });
-    for (const s of squares) out.set(s, { opacity: (1 - clamp(e * 4)).toFixed(3) });
-    for (const h of halves) out.set(h, { opacity: (1 - e).toFixed(3), transform: `scale(${(1 - 0.15 * e).toFixed(4)})` });
-    if (ind && indPage) out.set(ind, { opacity: (1 - e).toFixed(3) });
-    out.set(scrim, { opacity: e.toFixed(3) });
-    return out;
-  };
-  const navCenter = (page) => {
-    const n = bar.querySelector(`.nav[data-page="${page}"]`);
-    if (!n) return null;
-    const b = bar.getBoundingClientRect();
-    const r = n.getBoundingClientRect();
-    return r.left - b.left - (bar.clientLeft || 0) + r.width / 2;
-  };
-  const blobStyle = (x, v) => {
-    const { sx, sy } = stretchOf(v);
-    return `translate3d(${(x - IND / 2).toFixed(2)}px,0,0) scale(${sx.toFixed(4)},${sy.toFixed(4)})`;
-  };
-  const placeBlob = (x, v = 0) => {
-    indX = x;
-    blob.style.transform = blobStyle(x, v);
-  };
-  /** أوقف الحبّة حيث هي الآن؛ يعيد موضعها وسرعتها لتكمل منهما. */
-  const haltBlob = () => {
-    if (!indAnim) return null;
-    const st = sampleAt(indPath, clockNow() - indStart);
-    indAnim.cancel?.();
-    clearTimeout(indGuard);
-    indAnim = null;
-    placeBlob(st.x, st.v);
-    return st;
-  };
-  /** انقل الحبّة إلى وجهة بالنابض: الإطارات تُحسب مسبقًا وتُسلَّم للمركّب. */
-  const moveIndicator = (page, { animate: anim = true } = {}) => {
-    if (!blob) return;
-    const x1 = navCenter(page);
-    if (x1 == null) {
-      ind.style.opacity = '0';
-      indPage = null;
       return;
     }
-    ind.style.opacity = '';
-    indPage = page;
-    const st = haltBlob();
-    const x0 = st?.x ?? indX ?? x1;
-    const v0 = st?.v ?? pendingV;
-    pendingV = 0;
-    if (!anim || reduced() || typeof blob.animate !== 'function' || (Math.abs(x1 - x0) < 0.5 && Math.abs(v0) < 0.01)) return placeBlob(x1);
-    const path = springPath(x0, v0, x1);
-    const total = path[path.length - 1].t;
-    placeBlob(x1); // الحالة النهائية مضمّنة؛ الحركة فوقها
-    indPath = path;
-    indStart = clockNow();
-    indAnim = blob.animate(path.map((p) => ({ offset: p.t / total, transform: blobStyle(p.x, p.v) })), { duration: total, easing: 'linear' });
-    const done = () => {
-      clearTimeout(indGuard);
-      indAnim = null;
-    };
-    indAnim.onfinish = done;
-    indGuard = setTimeout(done, total + 150);
-  };
-  const clearInline = () => {
-    if (ind && indPage) ind.style.opacity = '';
-    for (const el of [...opts, ...labels, ...squares, ...halves]) {
-      el.style.transform = '';
-      el.style.opacity = '';
+    const x1 = slotCenter(nav);
+    if (!fromCap || !stateOf(fromCap).shown) {
+      for (const c of caps) if (c !== toCap) (indOf(c).style.opacity = '0'), (stateOf(c).shown = false);
+      return showInd(toCap, x1);
     }
+    if (fromCap === toCap) slide(toCap, x1, pendingV);
+    else hop(fromCap, toCap, x1);
+    pendingV = 0;
   };
+  let pendingV = 0;
+
+  // ── المبدّل: الكبسولات تتحول إلى الأقسام ─────────────────
   const mark = () => {
     for (const o of opts) {
       const on = o.dataset.arg === section;
       o.setAttribute('aria-checked', String(on));
       o.classList.toggle('current', on);
     }
-    for (const el of [...labels, ...squares]) el.classList.toggle('current', el.dataset.arg === section);
+    for (const s of squares) s.classList.toggle('current', s.dataset.arg === section);
     bar.dataset.section = section;
     const word = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[section] ?? section;
     sw.setAttribute('aria-label', `القسم الحالي: ${word}. بدّل القسم`);
   };
-
-  const animate = (to) => {
-    const from = motion ? motion.halt() : p;
-    motion = null;
-    if (!geo || from === 0) layout();
-    // الإغلاق يوقف لمس الستار فورًا لا بعد انتهاء تلاشيه: لمسة ثانية لا تعيد الفتح
-    scrim.style.pointerEvents = to ? '' : 'none';
+  /** إطار المبدّل عند تقدّم e (0 مغلق، 1 مفتوح)؛ اتجاه كل طبقة من المنتصف للخارج. */
+  const switchFrame = (e) => {
+    const out = new Map();
+    for (const o of opts) {
+      const dir = { manga: -1, anime: 0, cinema: 1 }[o.dataset.arg] ?? 0; // -1 تأتي من اليسار
+      const x = dir === 0 ? 0 : dir * (1 - e) * 100;
+      out.set(o, dir === 0
+        ? { opacity: e.toFixed(3), transform: `scale(${(0.92 + 0.08 * e).toFixed(4)})` }
+        : { opacity: Math.min(1, e * 1.6).toFixed(3), transform: `translate3d(${x.toFixed(2)}%,0,0)` });
+    }
+    for (const c of caps) out.set(c.querySelector('.cap-body'), { opacity: (1 - e).toFixed(3), transform: `scale(${(1 - 0.06 * e).toFixed(4)})` });
+    out.set(sw, { opacity: (1 - e).toFixed(3), transform: `scale(${(1 - 0.2 * e).toFixed(4)})` });
+    out.set(scrim, { opacity: e.toFixed(3) });
+    return out;
+  };
+  let switchP = 0, switchMotion = null;
+  const animateSwitch = (to) => {
+    const from = switchMotion ? switchMotion.halt() : switchP;
+    switchMotion = null;
+    scrim.style.pointerEvents = to ? '' : 'none'; // الإغلاق يوقف لمس الستار فورًا
     if (to) {
       scrim.hidden = false;
       bar.classList.add('open');
     }
+    const done = () => {
+      switchMotion = null;
+      switchP = to;
+      if (!to) {
+        scrim.hidden = true;
+        scrim.style.opacity = '';
+        bar.classList.remove('open');
+        for (const el of [...opts, sw, ...caps.map((c) => c.querySelector('.cap-body'))]) {
+          el.style.transform = '';
+          el.style.opacity = '';
+        }
+      }
+    };
     const span = Math.abs(to - from);
-    const r = reduced();
     const m = drive({
-      frameAt: (k) => ((p = k), frameAt(k)),
+      frameAt: (k) => ((switchP = k), switchFrame(k)),
       e0: from,
       e1: to,
-      duration: (r ? T.reduced : to ? T.open : T.close) * span,
-      ease: r ? linear : to ? easeOut : easeInOut,
-      easing: r ? cssEase.linear : to ? cssEase.out : cssEase.inOut,
-      done: () => {
-        motion = null;
-        p = to;
-        if (!to) {
-          scrim.hidden = true;
-          scrim.style.opacity = '';
-          bar.classList.remove('open');
-          clearInline();
-        }
-      },
+      duration: still() ? 0 : (to ? 340 : 260) * span,
+      ease: to ? easeOut : easeInOut,
+      easing: to ? 'cubic-bezier(0.22, 1, 0.36, 1)' : 'cubic-bezier(0.4, 0, 0.2, 1)',
+      done,
     });
-    if (m.live) motion = m;
+    if (m.live) switchMotion = m;
   };
-
   const setOpen = (next, { focus = true, instant = false } = {}) => {
     if (next === open) return;
     open = next;
     sw.setAttribute('aria-expanded', String(open));
-    options.toggleAttribute('inert', !open);
-    options.setAttribute('aria-hidden', String(!open));
-    for (const h of halves) h.toggleAttribute('inert', open);
-    for (const o of opts) o.setAttribute('tabindex', open && o.dataset.arg === section ? '0' : '-1');
+    for (const o of opts) {
+      o.toggleAttribute('inert', !open);
+      o.setAttribute('aria-hidden', String(!open));
+      o.setAttribute('tabindex', open && o.dataset.arg === section ? '0' : '-1');
+    }
+    for (const c of caps) c.querySelector('.cap-body')?.toggleAttribute('inert', open);
     if (open) {
       haptic();
       onPrepare?.();
     }
-    animate(open ? 1 : 0);
-    // الشريط يختفي مع صفحة فرعية: لا حركة إغلاق لشيء لا يُرى، والستار يزول فورًا
-    if (instant) motion?.finish();
+    animateSwitch(open ? 1 : 0);
+    if (instant) switchMotion?.finish();
     if (!open) onClose?.();
-    if (focus) (open ? opts.find((o) => o.dataset.arg === section) : sw)?.focus?.({ preventScroll: true });
+    // التركيز ينتقل للقسم الحالي فقط لمن يستعمل لوحة المفاتيح؛ اللمس لا يُظهر إطار تركيز
+    if (focus && viaKeys) (open ? opts.find((o) => o.dataset.arg === section) : sw)?.focus?.({ preventScroll: true });
   };
+  let viaKeys = false;
+  globalThis.document?.addEventListener?.('keydown', () => (viaKeys = true), true);
+  globalThis.document?.addEventListener?.('pointerdown', () => (viaKeys = false), true);
 
-  // لوحة المفاتيح داخل الأزرار المفتوحة: الأسهم بين الأقسام (يمين = السابق في RTL)
-  options.addEventListener('keydown', (e) => {
+  // لوحة المفاتيح بين الأقسام المفتوحة (يمين = السابق في RTL)
+  bar.addEventListener('keydown', (e) => {
     const i = opts.indexOf(document.activeElement);
     if (i < 0) return;
     const step = { ArrowLeft: 1, ArrowRight: -1, ArrowDown: 1, ArrowUp: -1 }[e.key];
@@ -730,23 +763,12 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     opts[j].focus();
   });
 
-  // ── اسحب الحبّة بإصبعك على الشريط: تتبعه وتتمطّط بسرعته، والأيقونة تحتها ترتفع،
-  // وعند الإفلات تطير بسرعة الإفلات وتستقر على أقرب وجهة. لمسة بلا سحب = نقرة عادية.
-  const navs = [...bar.querySelectorAll('.dock-half .nav')];
+  // ── سحب الدائرة داخل كبسولتها فقط ─────────────────────────
   let scrub = null, scrubbed = false;
-  const nearestNav = (x) => {
-    let best = null, d = Infinity;
-    for (const n of navs) {
-      const c = navCenter(n.dataset.page);
-      if (c != null && Math.abs(c - x) < d) (d = Math.abs(c - x)), (best = n);
-    }
-    return best;
-  };
-  const localX = (e) => e.clientX - bar.getBoundingClientRect().left - (bar.clientLeft || 0);
-  for (const h of halves) {
-    h.addEventListener('pointerdown', (e) => {
-      if (open || e.button > 0 || !indPage) return;
-      scrub = { id: e.pointerId, x: e.clientX, on: false, track: [] };
+  for (const cap of caps) {
+    cap.addEventListener('pointerdown', (e) => {
+      if (open || e.button > 0 || !activePage || capOf(activePage) !== cap) return;
+      scrub = { cap, id: e.pointerId, x: e.clientX, on: false, track: [] };
       scrubbed = false;
     });
   }
@@ -756,21 +778,29 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       if (Math.abs(e.clientX - scrub.x) < 8) return;
       scrub.on = scrubbed = true;
       bar.setPointerCapture?.(e.pointerId);
-      haltBlob();
+      haltInd(scrub.cap);
       bar.classList.add('scrubbing');
     }
-    const lo = navCenter(navs[navs.length - 1].dataset.page), hi = navCenter(navs[0].dataset.page);
-    const raw = localX(e);
-    // خارج الطرفين مقاومة مطاطية بدل التوقف الحاد
-    const x = raw < Math.min(lo, hi) ? Math.min(lo, hi) - (Math.min(lo, hi) - raw) * 0.25 : raw > Math.max(lo, hi) ? Math.max(lo, hi) + (raw - Math.max(lo, hi)) * 0.25 : raw;
+    const cap = scrub.cap;
+    const slots = [...cap.querySelectorAll('.nav')];
+    const centers = slots.map(slotCenter);
+    const lo = Math.min(...centers), hi = Math.max(...centers);
+    const capW = cap.getBoundingClientRect().width;
+    const edge = IND / 2 + 3; // الدائرة كاملة داخل كبسولتها دائمًا
+    const raw = e.clientX - cap.getBoundingClientRect().left - (cap.clientLeft || 0);
+    // مقاومة مطاطية خفيفة بعد آخر زر، ولا تتجاوز حافة الكبسولة
+    const rub = raw < lo ? lo - Math.min(10, (lo - raw) * 0.25) : raw > hi ? hi + Math.min(10, (raw - hi) * 0.25) : raw;
+    const x = Math.min(capW - edge, Math.max(edge, rub));
     scrub.track.push([e.timeStamp, x]);
     if (scrub.track.length > 5) scrub.track.shift();
     const [t0, x0] = scrub.track[0];
-    const v = e.timeStamp > t0 ? (x - x0) / (e.timeStamp - t0) : 0;
-    scrub.v = v;
-    placeBlob(x, v);
-    const near = nearestNav(x);
-    for (const n of navs) n.classList.toggle('near', n === near);
+    scrub.v = e.timeStamp > t0 ? (x - x0) / (e.timeStamp - t0) : 0;
+    stateOf(cap).x = x;
+    // التمطّط يصغر قرب الحافة كي لا تتجاوزها الدائرة
+    const room = (2 * Math.min(x, capW - x) - 6) / IND;
+    indOf(cap).style.transform = indTransform(x, scrub.v, 1, room);
+    const near = slots.reduce((a, b) => (Math.abs(slotCenter(b) - x) < Math.abs(slotCenter(a) - x) ? b : a));
+    for (const n of slots) n.classList.toggle('near', n === near);
   });
   const endScrub = (e) => {
     if (!scrub || e.pointerId !== scrub.id) return;
@@ -778,20 +808,18 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     scrub = null;
     if (!s.on) return;
     bar.classList.remove('scrubbing');
-    for (const n of navs) n.classList.remove('near');
-    // الإفلات بسرعة يرمي الحبّة: الوجهة من حيث ستستقر لا من حيث أُفلتت
-    // السحب العادي يستقر حيث تركته؛ الرمية السريعة فقط تُسقط الحبّة أبعد بقدر سرعتها
+    const slots = [...s.cap.querySelectorAll('.nav')];
+    for (const n of slots) n.classList.remove('near');
     const v = s.v ?? 0;
-    const aim = (indX ?? 0) + (Math.abs(v) > 1.1 ? v * 55 : 0);
-    const target = nearestNav(aim) ?? nearestNav(indX ?? 0);
-    pendingV = Math.max(-3, Math.min(3, s.v ?? 0));
+    const x = (stateOf(s.cap).x ?? 0) + (Math.abs(v) > 1.1 ? v * 40 : 0);
+    const target = slots.reduce((a, b) => (Math.abs(slotCenter(b) - x) < Math.abs(slotCenter(a) - x) ? b : a));
+    pendingV = Math.max(-3, Math.min(3, v));
     haptic();
-    if (target?.dataset.page === indPage) moveIndicator(indPage);
+    if (target.dataset.page === activePage) slide(s.cap, slotCenter(target), pendingV), (pendingV = 0);
     else onNavigate?.(target.dataset.page);
   };
   bar.addEventListener('pointerup', endScrub);
   bar.addEventListener('pointercancel', endScrub);
-  // النقرة التي تلي سحبًا لا تفتح الزر الذي بدأ منه
   bar.addEventListener('click', (e) => {
     if (!scrubbed) return;
     scrubbed = false;
@@ -799,13 +827,13 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     e.preventDefault();
   }, true);
 
-  // السحب الأفقي على المبدّل (منطقته الممتدة): الصفحة تتبع الإصبع
+  // ── السحب الأفقي على المبدّل: القسم المجاور، والصفحة تتبع الإصبع ──
   let drag = null;
   sw.addEventListener('pointerdown', (e) => {
     if (open || e.button > 0) return;
     drag = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, to: null, track: [] };
     dragged = false;
-    onPrepare?.(); // اللمس وحده يكفي لتجهيز الأقسام قبل أن يبدأ السحب
+    onPrepare?.();
   });
   sw.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -822,11 +850,11 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     }
     drag.track.push([e.timeStamp, dx]);
     if (drag.track.length > 6) drag.track.shift();
-    const width = globalThis.innerWidth || bar.getBoundingClientRect().width || 360;
+    const width = globalThis.innerWidth || 360;
     drag.progress = clamp((dx * drag.dir) / (width * 0.9));
     onDrag?.(drag.to, drag.progress);
   });
-  const end = (e) => {
+  const endDrag = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
     drag = null;
@@ -838,16 +866,15 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     if (commit) haptic();
     onDragEnd?.(d.to, commit);
   };
-  sw.addEventListener('pointerup', end);
-  sw.addEventListener('pointercancel', end);
+  sw.addEventListener('pointerup', endDrag);
+  sw.addEventListener('pointercancel', endDrag);
 
   globalThis.addEventListener?.('resize', () => {
-    geo = null;
-    indX = null;
-    if (indPage) moveIndicator(indPage, { animate: false });
-    if (open && !motion) {
-      layout();
-      for (const [el, style] of frameAt(1)) for (const [k, v] of Object.entries(style)) el.style[k] = v;
+    if (activePage) {
+      const nav = navs.find((n) => n.dataset.page === activePage);
+      const cap = capOf(activePage);
+      haltInd(cap);
+      showInd(cap, slotCenter(nav));
     }
   });
   mark();
@@ -857,7 +884,6 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     toggle: () => setOpen(!open),
     open: () => setOpen(true),
     close: (o) => setOpen(false, o),
-    /** النقرة بعد سحب ليست فتحًا للمبدّل. */
     consumeDrag() {
       const was = dragged;
       dragged = false;
@@ -867,19 +893,24 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       section = id;
       mark();
     },
-    /** الوجهة المختارة تغيّرت: الدائرة تتحرك إليها (أو تختفي لصفحة بلا زر). */
+    /** الوجهة المختارة تغيّرت: المؤشر ينزلق داخل الكبسولة أو ينتقل بينها انكماشًا وكبرًا. */
     activate(page) {
       const visible = !bar.hidden && bar.getBoundingClientRect().width > 0;
       if (!visible) {
-        indPage = bar.querySelector(`.nav[data-page="${page}"]`) ? page : null;
-        indX = null; // يُقاس عند الظهور
+        activePage = navs.some((n) => n.dataset.page === page) ? page : null;
+        for (const c of caps) stateOf(c).shown = false; // يُوضع بلا حركة عند الظهور
         return;
       }
-      moveIndicator(page, { animate: indX != null && indPage != null });
+      moveIndicator(page);
     },
     repaint() {
-      if (!motion) geo = null;
-      if (indPage && indX == null) moveIndicator(indPage, { animate: false });
+      if (!activePage) return;
+      const cap = capOf(activePage);
+      if (!stateOf(cap).shown) {
+        const page = activePage;
+        activePage = null;
+        moveIndicator(page);
+      }
     },
   };
 }

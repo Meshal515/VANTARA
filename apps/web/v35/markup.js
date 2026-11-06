@@ -50,13 +50,11 @@ const navItem = (page, icon, label) =>
   `<span class="nav-pill">${glyph(icon)}<span class="nav-label">${label}</span></span></button>`;
 
 /**
- * زرّ قسم في المبدّل واسمه منفصلان: الزر يُصغَّر بـ transform إلى مكان مربعه فلا يُشوَّه
- * الاسم معه، والاسم يظهر فوقه بعد 55% من الفتح (الهندسة في dock.js).
+ * قسم في المبدّل: طبقة تملأ كبسولتها وتنزلق فوق أزرارها عند الفتح (الحركة في dock.js).
  */
 const dockOption = (id, word, label) =>
-  `<button class="dock-opt" type="button" role="radio" aria-checked="false" tabindex="-1" data-act="pickSection" data-arg="${id}" aria-label="${label}"></button>`;
-const dockLabel = (id, word, label) =>
-  `<span class="dock-opt-label" data-arg="${id}" aria-hidden="true"><b dir="ltr">${word}</b><small>${label}</small></span>`;
+  `<button class="dock-opt" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" inert data-act="pickSection" data-arg="${id}" aria-label="${label}">` +
+  `<span class="dock-opt-label"><b dir="ltr">${word}</b><small>${label}</small></span></button>`;
 
 export const SHELL_HTML = `<div class="app">
   <section class="page active" id="home">
@@ -260,13 +258,17 @@ export const SHELL_HTML = `<div class="app">
 
   <div class="dock-scrim" id="dockScrim" data-act="toggleSections" hidden></div>
   <nav class="bottom-nav dock" id="bottomNav" aria-label="التنقّل الرئيسي">
-    <span class="dock-ind" aria-hidden="true"><i class="ind-blob"></i></span>
-    <div class="dock-half">${navItem('home', 'home', 'الرئيسية')}${navItem('discover', 'compass', 'اكتشف')}</div>
-    <button class="dock-switch" id="sectionSwitch" type="button" data-act="toggleSections" aria-expanded="false" aria-controls="sectionOptions" aria-label="بدّل القسم"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq" data-arg="cinema"></span></button>
-    <div class="dock-half">${navItem('library', 'library', 'مكتبتي')}${navItem('majlis', 'users', 'الأصدقاء')}</div>
-    <div class="dock-options" id="sectionOptions" role="radiogroup" aria-label="أقسام VANTARA" aria-hidden="true" inert>
-      ${dockOption('manga', 'MANGA', 'مانجا')}${dockOption('anime', 'ANIME', 'أنمي')}${dockOption('cinema', 'CINEMA', 'سينما')}
-      ${dockLabel('manga', 'MANGA', 'مانجا')}${dockLabel('anime', 'ANIME', 'أنمي')}${dockLabel('cinema', 'CINEMA', 'سينما')}
+    <div class="dock-cap dock-cap--nav">
+      <div class="cap-body"><span class="cap-ind" aria-hidden="true"></span>${navItem('home', 'home', 'الرئيسية')}${navItem('discover', 'compass', 'اكتشف')}</div>
+      ${dockOption('manga', 'MANGA', 'مانجا')}
+    </div>
+    <div class="dock-cap dock-cap--switch">
+      <button class="dock-switch" id="sectionSwitch" type="button" data-act="toggleSections" aria-expanded="false" aria-label="بدّل القسم"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq" data-arg="cinema"></span></button>
+      ${dockOption('anime', 'ANIME', 'أنمي')}
+    </div>
+    <div class="dock-cap dock-cap--nav">
+      <div class="cap-body"><span class="cap-ind" aria-hidden="true"></span>${navItem('library', 'library', 'مكتبتي')}${navItem('majlis', 'users', 'الأصدقاء')}</div>
+      ${dockOption('cinema', 'CINEMA', 'سينما')}
     </div>
   </nav>
 </div>

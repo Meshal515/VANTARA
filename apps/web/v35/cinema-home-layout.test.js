@@ -107,7 +107,7 @@ describe('مبدّل الأقسام: إغلاق الطبقة قبل أن تبت�
   const dock = readFileSync(new URL('./dock.js', import.meta.url), 'utf8');
   it('الستار يتوقف عن اللمس فور بدء الإغلاق، والأزرار الأربعة معطّلة ما دام مفتوحًا', () => {
     expect(dock).toContain("scrim.style.pointerEvents = to ? '' : 'none'");
-    expect(dock).toContain("for (const h of halves) h.toggleAttribute('inert', open)");
+    expect(dock).toContain("for (const c of caps) c.querySelector('.cap-body')?.toggleAttribute('inert', open)");
   });
 });
 
@@ -118,6 +118,6 @@ describe('لا قوائم شفافة تعترض أزرار الترويسة', ()
     expect(coreCss).toMatch(/\.v35 \.dock\[hidden\]\s*\{\s*display:\s*none/);
   });
   it('أزرار الأقسام لا تستقبل اللمس والمبدّل مغلق', () => {
-    expect(coreCss).toMatch(/\.v35 \.dock-options\s*\{[^}]*pointer-events:\s*none/);
+    expect(coreCss).toMatch(/\.v35 \.dock-opt\s*\{[^}]*pointer-events:\s*none/);
   });
 });
