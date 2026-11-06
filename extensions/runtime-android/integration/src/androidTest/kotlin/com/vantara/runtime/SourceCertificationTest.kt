@@ -346,7 +346,15 @@ class SourceCertificationTest {
                             val client = com.vantara.addons.nativeAddonMediaClient(http, fresh.url, fresh.headers)
                             val first = com.vantara.anime.stream.StreamProbe.check(client, fresh)
                             val second = com.vantara.anime.stream.StreamProbe.check(client, fresh)
-                            "fresh:${if (first) "ok" else "refused"} again:${if (second) "ok" else "refused"}"
+                            // Then exactly as the player's data source asks (MediaCache.factory: OkHttpDataSource with the
+                            // candidate headers), as is and with a browser User-Agent as CloudStream's player sends.
+                            fun asPlayer(ua: String?): String = runCatching {
+                                val factory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client).setDefaultRequestProperties(fresh.headers)
+                                if (ua != null) factory.setUserAgent(ua)
+                                val source = factory.createDataSource()
+                                try { source.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(fresh.url))); "ok" } finally { source.close() }
+                            }.getOrElse { e -> (e as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode?.toString() ?: e.javaClass.simpleName }
+                            "fresh:${if (first) "ok" else "refused"} again:${if (second) "ok" else "refused"} player:${asPlayer(null)} playerBrowserUA:${asPlayer(BROWSER_UA)} headers:${fresh.headers.keys.sorted().joinToString("+")}"
                         }.getOrElse { "CHECK_FAILED:" + reason(it) })
                     }
                 }
