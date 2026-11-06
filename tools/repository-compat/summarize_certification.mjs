@@ -84,7 +84,9 @@ export function failures(source, works = []) {
       // أول إطار ظهر ثم لم يُفك غيره في نافذة القياس، بلا خطأ ولا انتقال: الفك البرمجي على المحاكي (1080p) نفسه
       if (p.code === 'NO_FRAMES' && p.ttffMs > 0 && !p.playerError) { out.push({ code: 'FALSE_READY:NO_FRAMES', owner: 'slow' }); continue; }
       // انتقل المشغّل عند ميزانية البدء بلا خطأ تشغيل: أول مقطع بطيء (المحاكي يفك برمجيًا)، يُعرض منفصلًا لا عطلًا
-      const slow = p.code === 'SWITCHED_BEFORE_FRAME' && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500;
+      // سبب المشغّل نفسه يحسم: مهلة أول إطار/البدء بلا خطأ شبكة ولا رد HTTP مرفوض = بطء بداية (فك برمجي/خادم بطيء)
+      const watchdog = /FIRST_VIDEO_FRAME_TIMEOUT|STARTUP_TIMEOUT|FIRST_AUDIO_OUTPUT_TIMEOUT/.test(p.playerReason ?? '') && !p.httpFailure && !p.playerError;
+      const slow = watchdog || (p.code === 'SWITCHED_BEFORE_FRAME' && !p.playerReason && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500);
       out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: slow ? 'slow' : 'vantara' });
     }
   }
