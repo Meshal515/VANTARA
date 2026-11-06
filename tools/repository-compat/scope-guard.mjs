@@ -191,6 +191,8 @@ seams.add('.github/workflows/video-compat-cohort.yml');
 seams.add('.github/workflows/runtime-android.yml');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPolicy.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeVersionPolicyTest.kt');
+// Regression coverage for general search: cooling CloudStream sources remain searchable after healthy sources.
+seams.add('android/app/src/test/java/com/vantara/anime/SearchOrderTest.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');
 // Owner's Nov 1 screenshots: optional legacy manga catalogue and direct protobuf repository URLs.
 seams.add('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
