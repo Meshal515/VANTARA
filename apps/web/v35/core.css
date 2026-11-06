@@ -45,7 +45,16 @@
   --r-lg: 16px;
   --r-xl: 22px;
   --tap: 44px;
-  --nav-h: 64px;
+  --nav-h: 56px;
+  /* الشريط العائم: ارتفاعه وبعده عن الحافة، وما تحجزه الصفحات تحته */
+  --dock-gap: 18px;
+  --dock-side: 12px;
+  --dock-space: calc(var(--nav-h) + var(--dock-gap) + var(--safe-bottom));
+  /* لون الهوية الموحّد للشريط والمبدّل والشعار (لا لون لكل قسم هنا) */
+  --id: #8f5cff;
+  --id-text: #bba2ff;
+  --id-soft: rgba(143, 92, 255, 0.14);
+  --id-line: rgba(143, 92, 255, 0.4);
   --top-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -229,7 +238,7 @@ html,
   position: relative;
   overflow-x: clip;
   background: var(--bg);
-  padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 12px);
+  padding-bottom: calc(var(--dock-space) + 16px);
 }
 .v35 .page {
   display: none;
@@ -385,174 +394,29 @@ html,
   direction: ltr;
 }
 
-/* مبدّل الأقسام: VANTARA وتحته اسم القسم بلونه؛ الضغط يُنزل لوحة الأقسام */
-.v35 .brand-switch {
-  pointer-events: auto;
+/* الشعار: VANTARA وتحته اسم القسم، في المنتصف بصريًا. لم يعد زرًا: التبديل في الشريط.
+ * التباعد بين الحروف يترك فراغًا بعد آخر حرف، فيُسحب بمقداره ليتوسّط فعلًا. */
+.v35 .brand-lockup {
   display: grid;
   justify-items: center;
-  gap: 3px;
-  padding: 4px 14px;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+  gap: 5px;
   direction: ltr;
-  -webkit-tap-highlight-color: transparent;
 }
-.v35 .brand-switch:active .brand {
-  opacity: 0.7;
+.v35 .brand-lockup .brand {
+  margin-right: -3px;
 }
 .v35 .brand-section {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: grid;
   font-size: 9.5px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: 3.5px;
-  color: var(--accent-text);
+  color: var(--id-text);
+  margin-right: -3.5px;
 }
-.v35 .brand-caret {
-  display: inline-flex;
-  opacity: 0.8;
-  transform: rotate(-90deg);
-  transition: transform 0.25s ease;
-}
-.v35 .brand-caret .icon {
-  width: 10px;
-  height: 10px;
-  stroke-width: 2.6;
-}
-.v35 .brand-switch[aria-expanded='true'] .brand-caret {
-  transform: rotate(90deg);
-}
-
-.v35 .section-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 39;
-  background: rgba(4, 4, 8, 0.55);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 0.22s ease;
-}
-.v35 .section-scrim.open {
-  opacity: 1;
-}
-.v35 .section-menu {
-  position: absolute;
-  top: calc(var(--top-h) + var(--safe-top) + 2px);
-  inset-inline: 0;
-  margin-inline: auto;
-  z-index: 40;
-  width: min(248px, calc(100vw - 32px));
-  display: grid;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  backdrop-filter: blur(24px) saturate(1.4);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 20px 50px rgba(0, 0, 0, 0.55);
-  transform-origin: top center;
-  opacity: 0;
-}
-.v35 .section-menu.open {
-  opacity: 1;
-}
-/* display:grid كان يتجاوز [hidden] في UA stylesheet؛ يمنع قائمة شفافة
-   من البقاء فوق شريط الأزرار مع أنها تبدو مغلقة. */
-.v35 .section-menu[hidden] {
-  display: none;
-}
-.v35 .section-scrim:not(.open) {
-  pointer-events: none;
-}
-.v35 .section-item {
-  --tone: #8f5cff;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 16px;
-  background: transparent;
-  color: var(--text-1);
-  font: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 0.16s ease;
-}
-.v35 .section-item::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 22%, transparent), color-mix(in srgb, var(--tone) 6%, transparent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.v35 .section-item[aria-checked='true']::before {
-  opacity: 1;
-}
-.v35 .section-item:active {
-  transform: scale(0.97);
-}
-.v35 .section-item--anime {
-  --tone: #3b82f6;
-}
-.v35 .section-item--cinema {
-  --tone: #e0303a;
-}
-.v35 .section-lockup {
-  position: relative;
-  display: grid;
-  justify-items: end;
-  gap: 3px;
-  direction: ltr;
-  line-height: 1;
-}
-.v35 .section-kicker {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 3px;
-  margin-inline-end: -3px;
-  color: rgba(255, 255, 255, 0.45);
-}
-.v35 .section-word {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  margin-inline-end: -4px; /* يلغي تباعد آخر حرف لتتحاذى الكلمتان */
-  color: color-mix(in srgb, var(--tone) 62%, #fff);
-}
-.v35 .section-sub {
-  position: relative;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-}
-.v35 .section-item[aria-disabled='true'] .section-word {
-  color: color-mix(in srgb, var(--tone) 35%, rgba(255, 255, 255, 0.3));
-}
-.v35 .section-item[aria-disabled='true'] .section-kicker,
-.v35 .section-item[aria-disabled='true'] .section-sub {
-  color: rgba(255, 255, 255, 0.28);
-}
-@media (prefers-reduced-motion: reduce) {
-  .v35 .section-menu,
-  .v35 .section-scrim,
-  .v35 .brand-caret {
-    transition: none;
-  }
+.v35 .brand-word {
+  grid-area: 1 / 1;
+  justify-self: center;
 }
 
 /* ترويسة الصفحات الفرعية: رجوع في البداية (يمين)، العنوان، أفعال في النهاية */
@@ -602,9 +466,12 @@ html,
 .v35.native-android .detail-glow i {
   filter: none !important;
 }
-.v35.native-android .page-top,
-.v35.native-android .bottom-nav {
+.v35.native-android .page-top {
   background: var(--bg);
+}
+/* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
+.v35.native-android .dock {
+  background: #15131d;
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -840,81 +707,338 @@ html,
   color: var(--text-3);
 }
 
-/* ───────────────────────── التنقّل السفلي ─────────────────────────
- * مؤشّر حبّة خلف الأيقونة المختارة (لغة أندرويد الحديثة) بدل خطٍ رفيع فوقها:
- * يُرى بطرف العين، ولا يحتاج لون النص كله ليقول «أنت هنا». */
+/* ───────────────────────── الشريط العائم ─────────────────────────
+ * كبسولة تطفو فوق المحتوى: الرئيسية واكتشف يمينًا، مكتبتي والاجتماع يسارًا،
+ * ومبدّل الأقسام في قلبها. نصفاه متساويان دائمًا فيبقى المبدّل في المنتصف،
+ * والوجهة المختارة تتسع داخل نصفها لتكشف اسمها. الهندسة المتحركة في dock.js. */
 
-.v35 .bottom-nav {
+.v35 .dock {
   position: fixed;
   z-index: 50;
-  bottom: 0;
   left: 50%;
+  bottom: calc(var(--dock-gap) + var(--safe-bottom));
   transform: translateX(-50%);
-  width: min(100%, 520px);
-  height: calc(var(--nav-h) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  border-top: 1px solid var(--line);
-}
-.v35 .nav {
-  position: relative;
-  border: 0;
-  background: none;
-  color: var(--text-3);
+  box-sizing: border-box;
+  width: min(calc(100% - 2 * var(--dock-side)), 480px);
+  height: var(--nav-h);
+  padding: 0 5px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 11.5px;
-  font-weight: 600;
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(29, 26, 40, 0.84), rgba(16, 14, 23, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 12px 30px rgba(0, 0, 0, 0.5),
+    0 28px 60px -24px rgba(0, 0, 0, 0.7);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  container: dock / inline-size;
   -webkit-tap-highlight-color: transparent;
 }
-.v35 .nav-pill {
-  width: 56px;
-  height: 30px;
-  border-radius: 99px;
+.v35 .dock[hidden] {
+  display: none;
+}
+.v35 .dock-half {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  transform-origin: 50% 50%;
+}
+.v35 .dock-half[inert] {
+  pointer-events: none;
+}
+
+/* ── الوجهة: أيقونة خطية، والمختارة حبّة بلون الهوية فيها اسمها ── */
+.v35 .dock .nav {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 44px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  background: none;
   display: grid;
   place-items: center;
-  transition: background var(--dur) var(--ease);
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.2s ease;
 }
-.v35 .nav .icon {
-  width: 23px;
-  height: 23px;
+/* المختارة بعرض محتواها (يكبر مع ظهور اسمها)، والأخرى تأخذ ما بقي من نصفها */
+.v35 .dock .nav.active {
+  flex: 0 0 auto;
+  color: var(--id-text);
 }
-.v35 .nav.active {
-  color: var(--text-1);
+.v35 .dock .nav-pill {
+  box-sizing: border-box;
+  width: auto;
+  max-width: 100%;
+  height: 44px;
+  padding: 0 11px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  overflow: hidden;
+  background: transparent;
+  transition:
+    background-color 0.3s ease,
+    box-shadow 0.3s ease,
+    gap 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    padding 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.16s ease;
 }
-/* ───────────────────────── التنقّل ─────────────────────────
- * علامة التحديد مشتركة: شرطة بلون القسم فوق الأيقونة، بلا خلفية حولها. */
+.v35 .dock .nav.active .nav-pill {
+  gap: 6px;
+  padding: 0 12px 0 11px;
+  background: var(--id-soft);
+  box-shadow: inset 0 0 0 1px rgba(143, 92, 255, 0.24);
+}
+.v35 .dock .nav:active .nav-pill {
+  transform: scale(0.93);
+}
+.v35 .dock .nav .icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+.v35 .dock .nav.active .icon {
+  stroke-width: 2;
+}
+.v35 .dock .nav-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 650;
+  letter-spacing: 0;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    max-width 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.16s ease,
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.v35 .dock .nav.active .nav-label {
+  max-width: 84px;
+  opacity: 1;
+  transform: none;
+  transition-delay: 0s, 0.1s, 0.06s;
+}
+.v35 .dock .nav::before {
+  content: none;
+}
+.v35 .dock .nav .notify-dot {
+  top: 10px;
+  inset-inline-end: calc(50% - 16px);
+}
+/* شاشات أضيق من 320 داخل الشريط: الأيقونات وحدها، والاسم لقارئ الشاشة */
+@container dock (max-width: 300px) {
+  .v35 .dock .nav.active {
+    flex: 1 1 0;
+  }
+  .v35 .dock .nav.active .nav-label {
+    max-width: 0;
+    opacity: 0;
+  }
+  .v35 .dock .nav.active .nav-pill {
+    gap: 0;
+    padding: 0 11px;
+  }
+}
 
-.v35 .nav.active .nav-pill {
+/* ── المبدّل: بئر دائري فيه ثلاثة مربعات، القسم الحالي معبّأ ── */
+.v35 .dock-switch {
+  position: relative;
+  flex: 0 0 52px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
   background: none;
-  color: var(--text-1);
+  cursor: pointer;
+  touch-action: pan-y;
 }
-.v35 .nav::before {
+/* منطقة السحب الممتدة: أبعد من الزر قليلًا دون أن تأخذ لمس الجيران */
+.v35 .dock-switch::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 50%;
-  width: 22px;
-  height: 2px;
-  margin-left: -11px;
-  background: var(--accent);
-  transform: scaleX(0);
-  transition: transform var(--dur) var(--ease-out);
+  inset: -10px -4px;
 }
-.v35 .nav.active::before {
-  transform: scaleX(1);
+.v35 .dock-switch::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 40px;
+  margin: -20px 0 0 -24px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition:
+    background-color 0.2s ease,
+    transform 0.16s ease;
+}
+.v35 .dock-switch:active::after {
+  background: rgba(255, 255, 255, 0.07);
+  transform: scale(0.94);
 }
 
-.v35 .nav .notify-dot {
-  top: 7px;
-  inset-inline-end: calc(50% - 22px);
+.v35 .dock-options {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.v35 .dock.open .dock-options {
+  pointer-events: auto;
+}
+.v35 .dock-opt {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  margin: 0;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-1);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font: inherit;
+  cursor: pointer;
+  will-change: transform;
+  transition:
+    background-color 0.26s ease,
+    border-color 0.26s ease,
+    border-width 0.26s ease,
+    box-shadow 0.26s ease;
+}
+.v35 .dock-opt.current {
+  background: var(--id);
+  border-color: var(--id);
+  box-shadow: 0 0 10px rgba(143, 92, 255, 0.55);
+}
+.v35 .dock.open .dock-opt {
+  border-width: 1px;
+  border-color: var(--id-line);
+  background: var(--id-soft);
+  box-shadow: none;
+}
+.v35 .dock.open .dock-opt.current {
+  border-color: transparent;
+  background: linear-gradient(180deg, #9a6bff, #7f4cf2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 8px 22px -6px rgba(143, 92, 255, 0.65);
+}
+.v35 .dock.open .dock-opt:active {
+  filter: brightness(1.12);
+}
+.v35 .dock-opt-label {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: var(--label, 0);
+  transform: translateY(calc((1 - var(--label, 0)) * 4px));
+}
+.v35 .dock-opt-label b {
+  font-size: 11.5px;
+  font-weight: 760;
+  letter-spacing: 2.4px;
+  margin-right: -2.4px;
+}
+.v35 .dock-opt-label small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+}
+.v35 .dock-opt.current .dock-opt-label small {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* التركيز من لوحة المفاتيح ظاهر دائمًا */
+.v35 .dock .nav:focus-visible,
+.v35 .dock-switch:focus-visible {
+  outline: none;
+}
+.v35 .dock .nav:focus-visible .nav-pill,
+.v35 .dock-switch:focus-visible::after {
+  outline: 2px solid var(--id-text);
+  outline-offset: 2px;
+}
+.v35 .dock-opt:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* الستارة: تغطي الشاشة كلها والترويسة معها، والشريط فوقها */
+.v35 .dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(4, 3, 8, 0.45);
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.v35 .dock-scrim[hidden] {
+  display: none;
+}
+
+/* ── طبقات الأقسام أثناء الانتقال (dock.js: createLayers) ── */
+.v35 #home.layering {
+  position: relative;
+  overflow-x: clip;
+}
+.v35 #home.layering > .home-view:not([hidden]) {
+  position: absolute;
+  inset-inline: 0;
+  top: var(--layer-top, 0px);
+  min-height: calc(100vh - var(--layer-top, 0px));
+  background: var(--bg);
+  pointer-events: none;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.v35 .layer-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.v35 .layer-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -28px;
+  width: 28px;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0));
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .dock .nav,
+  .v35 .dock .nav-pill,
+  .v35 .dock .nav-label,
+  .v35 .dock-opt {
+    transition-duration: 0.01s !important;
+    transition-delay: 0s !important;
+  }
 }
 
 /* ───────────────────────── صفحة العمل ─────────────────────────
@@ -2150,7 +2274,7 @@ html,
   position: fixed;
   z-index: 200;
   left: 50%;
-  bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+  bottom: calc(var(--dock-space) + 12px);
   max-width: calc(100% - 32px);
   transform: translate(-50%, 8px);
   opacity: 0;
@@ -2181,9 +2305,12 @@ html,
     border-radius: 28px;
     box-shadow: 0 0 0 1px var(--line), 0 35px 100px rgba(0, 0, 0, 0.45);
   }
-  .v35 .bottom-nav {
+  .v35 .bottom-nav:not(.dock) {
     bottom: 24px;
     border-radius: 0 0 28px 28px;
+  }
+  .v35 .dock {
+    bottom: calc(24px + var(--dock-gap) + var(--safe-bottom));
   }
 }
 
