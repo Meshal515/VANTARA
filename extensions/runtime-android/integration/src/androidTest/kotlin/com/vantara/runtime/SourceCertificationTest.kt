@@ -80,6 +80,16 @@ class SourceCertificationTest {
 
     private fun emit(obj: JsonObject) = Log.i("VANTARA_CERT", obj.toString())
 
+    private suspend fun <T> environmentRetry(block: suspend () -> T): T {
+        repeat(2) { attempt ->
+            try { return block() } catch (e: Throwable) {
+                if (reason(e).let { r -> listOf("DNS_FAILED", "TRANSPORT_FAILED", "UnknownHostException").none { it in r } }) throw e
+                delay(5_000L * (attempt + 1))
+            }
+        }
+        return block()
+    }
+
     private val http by lazy {
         uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client.newBuilder()
             .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS).build()
@@ -197,6 +207,15 @@ class SourceCertificationTest {
             val playerField = PlayerActivity::class.java.getDeclaredField("player").apply { isAccessible = true }
             val currentField = PlayerActivity::class.java.getDeclaredField("current").apply { isAccessible = true }
             fun player() = playerField.get(act) as ExoPlayer
+            // The player's own failure reason (engine watchdog: FIRST_VIDEO_FRAME_TIMEOUT, STARTUP_TIMEOUT…) lives in its
+            // diagnostics log, which a new server attempt resets; read it every tick so the switch keeps its cause.
+            val diagField = runCatching { PlayerActivity::class.java.getDeclaredField("diag").apply { isAccessible = true } }.getOrNull()
+            fun playerReasons(): List<String> = runCatching {
+                val d = diagField?.get(act) ?: return emptyList()
+                val events = d.javaClass.getDeclaredField("events").apply { isAccessible = true }.get(d) as Iterable<*>
+                synchronized(d) { events.map { it.toString() } }.filter { "خطأ" in it }.map { it.substringAfter("خطأ: ").take(120) }
+            }.getOrDefault(emptyList())
+            var lastReasons = emptyList<String>()
             onMain { player().volume = 0f }
             // The player clears its error when it moves to the next server; keep the first one it raised here.
             val firstError = AtomicReference<String?>(null)
@@ -222,6 +241,7 @@ class SourceCertificationTest {
                 error = onMain { player().playerError?.errorCodeName } ?: firstError.get()
                 if (error != null) break
                 // The player left this server on its own: when, and with which error, says who failed.
+                playerReasons().takeIf { it.isNotEmpty() }?.let { lastReasons = it }
                 if (onMain { (currentField.get(act) as? Candidate)?.id }.let { it != null && it != chosen.id }) { switchedAt = SystemClock.elapsedRealtime() - started; break }
                 if (onMain { (player().videoDecoderCounters?.renderedOutputBufferCount ?: 0) > 0 }) { ttff = SystemClock.elapsedRealtime() - started; break }
                 Thread.sleep(100)
@@ -233,6 +253,7 @@ class SourceCertificationTest {
                 if (switchedAt >= 0) put("switchedAtMs", switchedAt)
                 firstError.get()?.let { put("playerError", it) }
                 httpFailure.get()?.let { put("httpFailure", it) }
+                if (lastReasons.isNotEmpty()) put("playerReason", lastReasons.last())
                 // No player error and a switch at the startup budget: a slow first segment, not a broken route.
                 put("startupBudgetMs", com.vantara.anime.player.PlaybackBudgets.startupMs(chosen.url))
             }
@@ -357,9 +378,11 @@ class SourceCertificationTest {
                     h.setProfile("cert-" + UUID.randomUUID())
                     val repo = args.getString("vantaraCertRepo") ?: arb
                     stage = "repository"
-                    h.addRepository(repo)
+                    // The emulator's DNS can miss GitHub right after boot (DNS_FAILED, round 13): the repository is
+                    // test setup, not the source under certification, so it is retried before judging anything.
+                    environmentRetry { h.addRepository(repo) }
                     stage = "index"
-                    val row = h.extensions(repo).map { it.jsonObject }.firstOrNull {
+                    val row = environmentRetry { h.extensions(repo) }.map { it.jsonObject }.firstOrNull {
                         (it["name"]?.jsonPrimitive?.contentOrNull ?: "").equals(name, ignoreCase = true)
                     } ?: error("PLUGIN_NOT_IN_REPOSITORY")
                     stage = "install"

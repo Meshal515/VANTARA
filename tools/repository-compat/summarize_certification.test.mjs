@@ -90,3 +90,10 @@ test('عمل بلا سيرفر جاهز يُعدّ بسببه، والتشغيل
   assert.equal(why('رابط غير قابل للتشغيل (blob)'), 'vantara');
   assert.equal(why('الإضافة: IOException: x'), 'addon');
 });
+
+test('سبب المشغّل يحسم الانتقال: مهلة أول إطار بلا رد مرفوض بطء، ورد HTTP مرفوض عطل', () => {
+  const at = (p) => failures({ worksTested: 1 }, [{ played: [{ verdict: 'FALSE_READY', code: 'SWITCHED_BEFORE_FRAME', switchedAtMs: 13192, startupBudgetMs: 15000, ...p }] }])[0].owner;
+  assert.equal(at({ playerReason: 'engine watchdog: FIRST_VIDEO_FRAME_TIMEOUT; READY=5000 frame=0' }), 'slow');
+  assert.equal(at({ playerReason: 'engine watchdog: FIRST_VIDEO_FRAME_TIMEOUT', httpFailure: '403 media x ts' }), 'vantara');
+  assert.equal(at({ playerReason: 'source error 403' }), 'vantara');
+});
