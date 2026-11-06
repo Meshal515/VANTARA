@@ -142,6 +142,12 @@ const certificationSeams = [
   'apps/web/v35/server-sheet.css',
   'apps/web/v35/server-sheet.test.js',
   'apps/web/v35/cinema-releases.test.js',
+  // شبكة محجوبة (جوال المالك في السعودية): DoH أولًا وتجزئة SNI لمواقع إضافات CloudStream وسيرفرات فيديوها
+  // كما في مسار المصادر المدمجة؛ عميل الوسائط يغيّر سلوكه للمضيفات المعلَّمة فقط (ستريميو كما هو).
+  'android/app/src/main/kotlin/com/vantara/addons/NativeAddonMediaNetwork.kt',
+  'android/app/src/main/kotlin/com/vantara/anime/net/AnimeDns.kt',
+  'android/app/src/main/kotlin/com/vantara/anime/net/SniFragment.kt',
+  'android/app/src/test/java/com/vantara/anime/net/CensoredNetworkTest.kt',
 ];
 for (const path of certificationSeams) seams.add(path);
 // الشريط العائم ومبدّل الأقسام وانتقال الطبقات (موافقة المالك على النشر في Debug)؛ للجوال فقط

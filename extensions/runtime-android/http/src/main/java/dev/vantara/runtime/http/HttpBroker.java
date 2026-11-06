@@ -60,6 +60,14 @@ public final class HttpBroker {
     private record Challenge(String family,String pkg,String source,String session,String origin) {}
     private static final class Host {int active;long retryAt;}
     private final OkHttpClient client;
+    /**
+     * The same isolated client over a socket factory that splits the TLS ClientHello (SNI) into two writes.
+     * ISP filters that inspect only the first packet reset the handshake on a blocked site's name; Aniyomi's path
+     * (AnimeHostRouter) already retried such resets this way, CloudStream's broker did not: every CloudStream source
+     * behind such a filter failed on the owner's phone (PROVIDER_FAILED) while the datacenter emulator passed.
+     */
+    private final OkHttpClient fragmentClient;
+    private final Set<String> fragmentHosts=ConcurrentHashMap.newKeySet();
     private final Vaults vaults;
     private final Clock clock;
     private final LinkedHashMap<String,Host> hosts=new LinkedHashMap<>();
@@ -74,7 +82,8 @@ public final class HttpBroker {
     private final int perHost;
 
     public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock) {this(base,resolver,addresses,vaults,clock,DEFAULT_PER_HOST);}
-    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost) {
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost) {this(base,resolver,addresses,vaults,clock,perHost,null);}
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost,javax.net.SocketFactory fragmenting) {
         if(perHost<1||perHost>16)throw new IllegalArgumentException("Invalid per-host limit");this.perHost=perHost;
         this.vaults=Objects.requireNonNull(vaults);this.clock=Objects.requireNonNull(clock);
         Objects.requireNonNull(resolver);Objects.requireNonNull(addresses);
@@ -94,6 +103,15 @@ public final class HttpBroker {
             .connectTimeout(10,TimeUnit.SECONDS).readTimeout(15,TimeUnit.SECONDS).callTimeout(20,TimeUnit.SECONDS);
         isolated.interceptors().clear();isolated.networkInterceptors().clear();
         client=isolated.build();
+        fragmentClient=fragmenting==null?null:client.newBuilder().socketFactory(fragmenting).build();
+    }
+    private static final java.util.regex.Pattern RESET=java.util.regex.Pattern.compile("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|terminated the handshake|peer shut down|EOF",java.util.regex.Pattern.CASE_INSENSITIVE);
+    /** A handshake cut by the network (a filter's injected reset), not a genuine TLS or certificate failure. */
+    static boolean looksLikeNetworkReset(IOException e) {
+        for(Throwable c=e;c!=null;c=c.getCause()) if(c instanceof java.security.cert.CertificateException||c instanceof javax.net.ssl.SSLPeerUnverifiedException) return false;
+        for(Throwable c=e;c!=null;c=c.getCause())
+            if((c instanceof SocketException||c instanceof javax.net.ssl.SSLException||c instanceof EOFException)&&c.getMessage()!=null&&RESET.matcher(c.getMessage()).find()) return true;
+        return false;
     }
     public Session open(Scope scope) {return new Session(Objects.requireNonNull(scope),Objects.requireNonNull(vaults.forScope(scope)));}
     /** Request URLs may be plain HTTP: several video hosts still are. Origin grants stay HTTPS-only. */
@@ -132,12 +150,21 @@ public final class HttpBroker {
                 }
                 state=new Host();hosts.put(name,state);
             }
-            if(state.active>=perHost)throw new Failure("HOST_BUSY");
+            // A provider asking for more pages of one site at once than its slots waits its turn, as the engine
+            // slots do (ENGINE_BUSY after 15 s) and as CloudStream's own OkHttp dispatcher queues: refusing the 7th
+            // concurrent request at once broke providers that fetch their servers' links in parallel.
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(state.active>=perHost){
+                long left=deadline-System.nanoTime();
+                if(left<=0)throw new Failure("HOST_BUSY");
+                try{hosts.wait(Math.max(1,TimeUnit.NANOSECONDS.toMillis(left)));}
+                catch(InterruptedException e){Thread.currentThread().interrupt();throw new Failure("HOST_BUSY");}
+            }
             if(state.retryAt>clock.millis())throw new Failure("HOST_COOLDOWN",state.retryAt);
             state.active++;return state;
         }
     }
-    private void release(Host host){synchronized(hosts){host.active--;}}
+    private void release(Host host){synchronized(hosts){host.active--;hosts.notifyAll();}}
     private void cooldown(Host host,long delay){synchronized(hosts){host.retryAt=Math.max(host.retryAt,saturatingAdd(clock.millis(),delay));}}
     private static long saturatingAdd(long a,long b){return b>Long.MAX_VALUE-a?Long.MAX_VALUE:a+b;}
     private long retryAfter(Response response){
@@ -202,9 +229,11 @@ public final class HttpBroker {
                         }
                         RequestBody payload=(method.equals("POST")||method.equals("PUT"))?RequestBody.create(body==null?new byte[0]:body,MediaType.parse(headers.get("Content-Type")==null?"application/octet-stream":headers.get("Content-Type"))):null;
                         Request request=new Request.Builder().url(url).headers(sent.build()).method(method,payload).build();
-                        Call call=client.newCall(request);
-                        synchronized(active){if(closed.get())throw new Failure("SESSION_CLOSED");active.add(call);}
-                        try(Response response=call.execute()) {
+                        final String hostKey=url.host();
+                        final boolean split=fragmentClient!=null&&fragmentHosts.contains(hostKey);
+                        final Call[] call={(split?fragmentClient:client).newCall(request)};
+                        synchronized(active){if(closed.get())throw new Failure("SESSION_CLOSED");active.add(call[0]);}
+                        try(Response response=openWithFallback(request,hostKey,call,split)) {
                             if(closed.get())throw new Failure("SESSION_CLOSED");
                             cookies.save(url,Cookie.parseAll(url,response.headers()));
                             if("challenge".equalsIgnoreCase(response.header("cf-mitigated"))){
@@ -249,11 +278,32 @@ public final class HttpBroker {
                             if(e instanceof Failure)throw e;
                             for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof DeniedDns)throw new Failure(((DeniedDns)cause).code);
                             Failure failure=new Failure("TRANSPORT_FAILED");failure.initCause(e);throw failure;
-                        } finally {synchronized(active){active.remove(call);}}
+                        } finally {synchronized(active){active.remove(call[0]);}}
                     } finally {release(host);}
                 }
                 throw new Failure("REDIRECT_LIMIT");
             } finally {total.release();}
+        }
+        /**
+         * Once per host: a handshake reset by the network is retried with the split ClientHello, and the host is
+         * remembered so its later requests go straight that way (as AnimeHostRouter does for Aniyomi sources).
+         */
+        private Response openWithFallback(Request request,String hostKey,Call[] call,boolean split) throws IOException {
+            // Whether THIS attempt was split, not whether the host is marked now: parallel first requests are all
+            // reset at once, and each gets its own split retry (a race otherwise failed them). A split attempt reset
+            // again (its halves coalesced on a busy device or path) is tried once more; anything else is final.
+            int splitTries=split?1:0;
+            while(true) {
+                try {
+                    Response response=call[0].execute();
+                    if(splitTries>0)fragmentHosts.add(hostKey);
+                    return response;
+                } catch(IOException reset) {
+                    if(closed.get()||reset instanceof Failure||fragmentClient==null||splitTries>=2||!looksLikeNetworkReset(reset))throw reset;
+                    splitTries++;
+                    synchronized(active){active.remove(call[0]);if(closed.get())throw new Failure("SESSION_CLOSED");call[0]=fragmentClient.newCall(request);active.add(call[0]);}
+                }
+            }
         }
         @Override public void close(){if(closed.compareAndSet(false,true))synchronized(active){for(Call call:active)call.cancel();}}
     }

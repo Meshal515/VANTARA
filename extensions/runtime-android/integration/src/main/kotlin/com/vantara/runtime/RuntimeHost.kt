@@ -38,8 +38,11 @@ class RuntimeHost(
     // نفس محلّل أسماء محرك الأنمي: النظام أولًا، وDNS مشفّر حين يحجب مزوّد الإنترنت الاسم أو يحوّله
     // لصفحة حجب. كان Dns.SYSTEM وحده فتسقط مصادر عربية محجوبة بالاسم فقط ويُطلب لها VPN بلا داعٍ.
     // فحص العناوين العامة في الوسيط باقٍ كما هو على ما يعيده هذا المحلّل.
-    private val broker: HttpBroker = HttpBroker(OkHttpClient(), engine.dns, PublicAddresses(),
-        vaults, Clock.systemUTC()),
+    // وتجزئة ClientHello عند قطع الحجب، كما في مسار Aniyomi (AnimeHostRouter): بدونها كل مصدر CloudStream
+    // خلف فلتر مزوّد يفشل على جوال المستخدم (PROVIDER_FAILED) وينجح في محاكي مركز البيانات.
+    // DoH أولًا لكل مضيف (مواقع الإضافات وسيرفرات فيديوها)، كما تُحل مضيفات المصادر المدمجة في الستيبل.
+    private val broker: HttpBroker = HttpBroker(OkHttpClient(), engine.dns.dohFirst, PublicAddresses(),
+        vaults, Clock.systemUTC(), HttpBroker.DEFAULT_PER_HOST, com.vantara.anime.net.SniFragmentingSocketFactory()),
     private val sourceTransport: (AndroidRuntimeClient.Scope,HttpBroker)->AndroidRuntimeClient.HostHttpTransport = { scope,http -> BrokerHostTransport(scope,http) },
     /** حل صامت لتحدي Cloudflare غير التفاعلي (url، User-Agent) ← cf_clearance أو null. null = لا حل صامت. */
     private val silentClearance: ((String,String)->String?)? = null,

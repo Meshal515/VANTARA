@@ -21,6 +21,8 @@ import javax.net.SocketFactory
 object SniFragment {
     /** يكفي أن يقع القسم الأول قبل أي بيانات مفيدة؛ لا حاجة لمعرفة مكان SNI بدقة. */
     const val SPLIT_OFFSET = 5
+    /** فاصل بين نصفي ClientHello (مرة لكل اتصال جديد). */
+    const val SPLIT_PAUSE_MS = 2L
 }
 
 /** مصنع مقابس OkHttp يستخدمه فقط لطلبات المقبس الخام (بلا وسيطة)؛ التوثيق في [SniFragment]. */
@@ -72,6 +74,9 @@ internal class SniFragmentingOutputStream(private val out: OutputStream) : Outpu
             if (len > SniFragment.SPLIT_OFFSET + 1) {
                 out.write(b, off, SniFragment.SPLIT_OFFSET)
                 out.flush()
+                // كتابتان متتاليتان جدًا قد يدمجهما المكدّس (GSO) أو وسيط في الطريق في حزمة واحدة فتعود
+                // الحزمة الأولى حاملةً الاسم؛ مهلة قصيرة مرة واحدة لكل اتصال تُخرجهما حزمتين فعلًا.
+                runCatching { Thread.sleep(SniFragment.SPLIT_PAUSE_MS) }
                 out.write(b, off + SniFragment.SPLIT_OFFSET, len - SniFragment.SPLIT_OFFSET)
                 out.flush()
                 return

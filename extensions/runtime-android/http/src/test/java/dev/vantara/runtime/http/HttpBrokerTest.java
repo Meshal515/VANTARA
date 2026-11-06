@@ -42,6 +42,48 @@ public class HttpBrokerTest {
     HttpBroker.Input input(String url){return new HttpBroker.Input(url,"GET",new Headers.Builder().build(),null,true);}
     String body(HttpBroker.Output r){return new String(r.body(),java.nio.charset.StandardCharsets.UTF_8);}
     String failure(HttpBroker.Session session,HttpBroker.Input input) throws Exception {try{session.execute(input);fail("Expected failure");return "";}catch(HttpBroker.Failure e){return e.code;}}
+    @Test public void aHandshakeResetByTheNetworkIsRetriedOnceWithTheSplitClientHelloAndRemembered() throws Exception {
+        HeldCertificate cert=new HeldCertificate.Builder().addSubjectAlternativeName("one.vantara.example").build();
+        HandshakeCertificates serverTls=new HandshakeCertificates.Builder().heldCertificate(cert).build();
+        HandshakeCertificates clientTls=new HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate()).build();
+        MockWebServer blocked=new MockWebServer();blocked.useHttps(serverTls.sslSocketFactory(),false);blocked.start();
+        try {
+            // The filter cuts the first handshake (as an ISP does on a blocked name); the split one gets through.
+            blocked.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+            blocked.enqueue(new MockResponse().setBody("first"));
+            blocked.enqueue(new MockResponse().setBody("second"));
+            AtomicInteger split=new AtomicInteger();
+            javax.net.SocketFactory fragmenting=new javax.net.SocketFactory(){
+                public Socket createSocket(){split.incrementAndGet();return new Socket();}
+                public Socket createSocket(String h,int p) throws IOException{split.incrementAndGet();return new Socket(h,p);}
+                public Socket createSocket(String h,int p,InetAddress l,int lp) throws IOException{split.incrementAndGet();return new Socket(h,p,l,lp);}
+                public Socket createSocket(InetAddress h,int p) throws IOException{split.incrementAndGet();return new Socket(h,p);}
+                public Socket createSocket(InetAddress h,int p,InetAddress l,int lp) throws IOException{split.incrementAndGet();return new Socket(h,p,l,lp);}
+            };
+            OkHttpClient client=new OkHttpClient.Builder().sslSocketFactory(clientTls.sslSocketFactory(),clientTls.trustManager()).build();
+            HttpBroker filtered=new HttpBroker(client,host->Arrays.asList(InetAddress.getByName("127.0.0.1")),InetAddress::isLoopbackAddress,
+                scope->vaults.computeIfAbsent("f/"+scope.sourceId(),key->new Vault()),clock,HttpBroker.DEFAULT_PER_HOST,fragmenting);
+            String origin="https://one.vantara.example:"+blocked.getPort();
+            HttpBroker.Scope scope=new HttpBroker.Scope("cloudstream","test.package","source","s",new HashSet<>(Collections.singletonList(origin)));
+            try(HttpBroker.Session session=filtered.open(scope)) {
+                assertEquals("first",body(session.execute(input(origin+"/a"))));
+                assertTrue("the retry went over the split ClientHello",split.get()>0);
+                int afterRetry=split.get();
+                client.connectionPool().evictAll(); // اتصال جديد: يجب أن يمر بالتجزئة مباشرة بلا قطع أولًا
+                assertEquals("second",body(session.execute(input(origin+"/b"))));
+                assertEquals("no reset needed a second time",3,blocked.getRequestCount());
+                assertTrue("the host is remembered: later requests go straight that way",split.get()>afterRetry);
+            }
+        } finally {blocked.shutdown();}
+    }
+    @Test public void aRealCertificateProblemIsNotMistakenForAFilterReset() {
+        IOException certificate=new javax.net.ssl.SSLHandshakeException("Connection reset");
+        certificate.initCause(new java.security.cert.CertificateException("untrusted"));
+        assertFalse(HttpBroker.looksLikeNetworkReset(certificate));
+        assertTrue(HttpBroker.looksLikeNetworkReset(new SocketException("Connection reset")));
+        assertTrue(HttpBroker.looksLikeNetworkReset(new IOException("wrapped",new EOFException("unexpected end of stream"))));
+        assertFalse(HttpBroker.looksLikeNetworkReset(new SocketTimeoutException("timeout")));
+    }
     @Test public void getAndPostPreserveStatusHeadersAndBody() throws Exception {
         first.enqueue(new MockResponse().setResponseCode(201).addHeader("X-Result","real").setBody("مرحبا"));
         try(HttpBroker.Session session=broker.open(scope("A"))) {
@@ -162,13 +204,16 @@ public class HttpBrokerTest {
             if(calls.getAndIncrement()==0){entered.countDown();try{release.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new UnknownHostException("interrupted");}}
             return Arrays.asList(InetAddress.getByName("127.0.0.1"));
         },InetAddress::isLoopbackAddress,scope->new Vault(),clock,1);
-        ExecutorService pool=Executors.newSingleThreadExecutor();
+        ExecutorService pool=Executors.newFixedThreadPool(2);
         try(HttpBroker.Session a=broker.open(scope("A"));HttpBroker.Session b=broker.open(scope("B"))) {
             Future<String> running=pool.submit(()->failure(a,input(one+"/blocked-dns")));
             assertTrue(entered.await(2,TimeUnit.SECONDS));a.close();
-            assertEquals("HOST_BUSY",failure(b,input(one+"/still-physical")));
+            // The cancelled request still holds the host's slot until its physical DNS returns: B waits its turn.
+            first.enqueue(new MockResponse().setBody("released"));
+            Future<String> waiting=pool.submit(()->body(b.execute(input(one+"/after-release"))));
+            try{waiting.get(400,TimeUnit.MILLISECONDS);fail("the slot was freed before the physical call returned");}catch(TimeoutException expected){}
             release.countDown();assertEquals("SESSION_CLOSED",running.get(3,TimeUnit.SECONDS));
-            first.enqueue(new MockResponse().setBody("released"));assertEquals("released",body(b.execute(input(one+"/after-release"))));
+            assertEquals("released",waiting.get(5,TimeUnit.SECONDS));
         } finally {release.countDown();pool.shutdownNow();}
     }
     @Test public void serverErrorsAreResponsesAndDoNotCoolTheHost() throws Exception {

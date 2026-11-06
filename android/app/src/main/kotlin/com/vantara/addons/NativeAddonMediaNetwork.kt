@@ -35,5 +35,23 @@ fun nativeAddonMediaClient(base: OkHttpClient, mediaUrl: String? = null, headers
         RemoteAddonClient.publicUrl(chain.request().url.toString())
         chain.proceed(scopedAddonRequest(chain.request(), origin, headers.keys))
     }
-    return builder.build()
+    val plain = builder.build()
+    // Media hosts a source engine marked (CloudStream/Aniyomi video servers, AnimeHostRouter.markVideoHost) may sit
+    // behind an ISP filter that resets the TLS handshake on their name, as their sites do. Those hosts get the same
+    // one-time retry with a split ClientHello as the site requests. Unmarked hosts (Stremio addons) are unchanged.
+    val fragmenting = plain.newBuilder().socketFactory(com.vantara.anime.net.SniFragmentingSocketFactory()).build()
+    return plain.newBuilder().addInterceptor { chain ->
+        val request = chain.request()
+        val host = request.url.host.lowercase()
+        if (!com.vantara.anime.net.AnimeHostRouter.prefersDoh(host)) return@addInterceptor chain.proceed(request)
+        if (host in fragmentedMediaHosts) return@addInterceptor fragmenting.newCall(request).execute()
+        try { chain.proceed(request) }
+        catch (e: java.io.IOException) {
+            if (chain.call().isCanceled() || !com.vantara.anime.net.AnimeHostRouter.looksLikeSniReset(e)) throw e
+            fragmenting.newCall(request).execute().also { fragmentedMediaHosts += host }
+        }
+    }.build()
 }
+
+/** Media hosts whose handshake needed the split ClientHello once: their later requests go straight that way. */
+private val fragmentedMediaHosts: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()

@@ -102,6 +102,9 @@ class RuntimeSourceAdapter(
     override suspend fun candidates(episode: SourceEpisode,now: Long,trace: ResolveTrace?,enough: Int): List<Candidate> {
         require(episode.sourceId==id)
         val links=execute("videoLinks",input("data" to JsonPrimitive(episode.url))).getValue("items").jsonArray
+        // سيرفرات الفيديو قد يحجبها المزوّد كما يحجب المواقع: DoH أولًا وتجزئة SNI للمشغّل كما في Aniyomi (Embeds)
+        for(raw in links) runCatching { java.net.URI(raw.jsonObject.text("url")).host }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?.let { com.vantara.anime.net.AnimeHostRouter.markVideoHost(it) }
         val streams=JsonArray(links.map { raw ->
             val link=raw.jsonObject
             val headers=(link["headers"] as? JsonObject).orEmpty().toMutableMap()

@@ -158,7 +158,7 @@ object AnimeHostRouter : Interceptor {
             }
         }
 
-    private val RESET = Regex("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|EOF", RegexOption.IGNORE_CASE)
+    private val RESET = Regex("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|terminated the handshake|peer shut down|EOF", RegexOption.IGNORE_CASE)
 
     /** أقصى انتظار داخل الطلب لدور المصدر أو لـ`Retry-After`؛ أطول منه يُرمى بسببه. */
     private const val MAX_WAIT_MS = 20_000L
