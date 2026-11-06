@@ -596,14 +596,20 @@
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
+  /* الأيقونات في مكانها نفسه في الأقسام الثلاثة (فرق 0px مقيس): الكبسولة خلفها فقط، لا تحشوها ولا تزيحها،
+     وتلاصق حافة الشاشة بهامش 6px من الجهتين بدل حشوة الترويسة */
   .v35[data-section='cinema'] #home > .header .header-end {
-    gap: 2px;
-    padding-inline: 6px;
+    gap: 0;
+    padding-inline: 0;
+    margin-inline-end: -6px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-start {
+    margin-inline-start: -6px;
   }
   .v35[data-section='cinema'] #home > .header .header-end .icon-btn,
   .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
   }
   .v35[data-section='cinema'] #home > .header .icon-btn .icon {
     width: 22px;
