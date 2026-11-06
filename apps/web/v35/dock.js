@@ -12,7 +12,7 @@
 
 export const ORDER = ['manga', 'anime', 'cinema'];
 // خفيف لا ثقيل: إزاحة وتعتيم قليلان، بلا ظل حافة، ومدد أقصر (رأي المالك: «ثقيل و3D»)
-export const T = { open: 240, close: 200, enter: 300, exit: 260, reduced: 120 };
+export const T = { open: 240, close: 200, enter: 300, exit: 260, travel: 380, reduced: 120 };
 export const SHIFT = 8;
 export const DIM = 0.18;
 
@@ -48,6 +48,8 @@ export function bezier(x1, y1, x2, y2) {
 }
 export const easeOut = bezier(0.16, 1, 0.3, 1);
 export const easeInOut = bezier(0.4, 0, 0.2, 1);
+/** انتقال الدائرة: انطلاقة حيّة وهبوط طويل ناعم بلا ارتداد. */
+export const easeTravel = bezier(0.32, 0.72, 0, 1);
 const linear = (x) => x;
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const rank = (id) => ORDER.indexOf(id);
@@ -127,6 +129,44 @@ export function optionRects(width, height, centerX, p) {
   });
 }
 
+/**
+ * فيزياء الحبّة الزجاجية: نابض بكتلة وسرعة (لا منحنى ثابت). يبدأ من موضع وسرعة
+ * حاليين — فالضغطة الجديدة في منتصف الحركة تكمل من حيث الحبّة وبسرعتها — ويستقر
+ * عند الهدف بتجاوز صغير. الوحدات px وms. يعيد عيّنات {t,x,v} كل 8ms حتى الاستقرار.
+ */
+export function springPath(x0, v0, x1, { omega = 0.019, zeta = 0.78, step = 8, max = 1000 } = {}) {
+  const out = [{ t: 0, x: x0, v: v0 }];
+  let x = x0, v = v0, t = 0;
+  const sub = 4, dt = step / sub;
+  while (t < max) {
+    for (let i = 0; i < sub; i++) {
+      const a = -2 * zeta * omega * v - omega * omega * (x - x1);
+      v += a * dt;
+      x += v * dt;
+    }
+    t += step;
+    out.push({ t, x, v });
+    if (Math.abs(x - x1) < 0.15 && Math.abs(v) < 0.004) break;
+  }
+  out[out.length - 1] = { t, x: x1, v: 0 };
+  return out;
+}
+/** موضع وسرعة الحبّة في مسار عند زمن مضى. */
+export function sampleAt(path, t) {
+  if (t <= 0) return path[0];
+  const last = path[path.length - 1];
+  if (t >= last.t) return last;
+  const i = path.findIndex((s) => s.t >= t);
+  const a = path[i - 1], b = path[i];
+  const k = (t - a.t) / (b.t - a.t);
+  return { t, x: a.x + (b.x - a.x) * k, v: a.v + (b.v - a.v) * k };
+}
+/** تمطّط الحبّة باتجاه حركتها بقدر سرعتها، وتنضغط عموديًا بالقدر نفسه تقريبًا (حجم ثابت). */
+export function stretchOf(v) {
+  const sx = 1 + Math.min(0.42, Math.abs(v) * 0.17);
+  return { sx, sy: 1 / Math.sqrt(sx) };
+}
+
 /** مؤقت واحد قابل للإلغاء، يكمل نفسه بمهلة احتياطية. */
 export function tween({ duration, ease = linear, update, done, raf = globalThis.requestAnimationFrame?.bind(globalThis), now = () => globalThis.performance?.now?.() ?? Date.now(), timer = globalThis.setTimeout?.bind(globalThis), clear = globalThis.clearTimeout?.bind(globalThis) }) {
   let live = true;
@@ -170,7 +210,7 @@ export function haptic(kind = 'light') {
 }
 
 const isReduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
+const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', travel: 'cubic-bezier(0.32, 0.72, 0, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;
 
@@ -181,7 +221,7 @@ const SAMPLES = 7;
  * وحيث لا تتوفر (اختبارات) تُرسم بالمؤقت. التقدّم الحالي يُحسب بالزمن والمنحنى نفسيهما،
  * فالمقاطعة تبدأ من الموضع الفعلي بلا قراءة من الشاشة.
  */
-function drive({ frameAt, e0 = 0, e1 = 1, duration, ease = easeOut, easing = cssEase.out, done }) {
+function drive({ frameAt, e0 = 0, e1 = 1, duration, ease = easeOut, easing = cssEase.out, done, samples = SAMPLES }) {
   const els = [...frameAt(e0).keys()];
   const waapi = els.length > 0 && els.every((el) => typeof el.animate === 'function');
   const t0 = clockNow();
@@ -206,9 +246,9 @@ function drive({ frameAt, e0 = 0, e1 = 1, duration, ease = easeOut, easing = css
   if (duration <= 0) {
     finish();
   } else if (waapi) {
-    const frames = Array.from({ length: SAMPLES }, (_, i) => frameAt(e0 + ((e1 - e0) * i) / (SAMPLES - 1)));
+    const frames = Array.from({ length: samples }, (_, i) => frameAt(e0 + ((e1 - e0) * i) / (samples - 1)));
     for (const el of els) {
-      const keys = frames.map((f, i) => ({ ...f.get(el), offset: i / (SAMPLES - 1) }));
+      const keys = frames.map((f, i) => ({ ...f.get(el), offset: i / (samples - 1) }));
       const same = keys.every((k) => Object.keys(k).every((p) => p === 'offset' || k[p] === keys[0][p]));
       if (same) {
         apply(new Map([[el, frames[0].get(el)]]));
@@ -490,7 +530,7 @@ export function createCrossfade(slot) {
  * الأزرار بمقاسها المفتوح دائمًا، وتُصغَّر بـ transform إلى مكان المربعات: الحركة كلها
  * transform وopacity على المركّب، بلا تغيير مقاس أو تخطيط في أي إطار.
  */
-export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStart, onDrag, onDragEnd, reduced = isReduced }) {
+export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStart, onDrag, onDragEnd, onNavigate, reduced = isReduced }) {
   const sw = bar.querySelector('.dock-switch');
   const halves = [...bar.querySelectorAll('.dock-half')];
   const options = bar.querySelector('.dock-options');
@@ -498,6 +538,11 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const labels = [...options.querySelectorAll('.dock-opt-label')];
   const squares = [...sw.querySelectorAll('.dock-sq')];
   let p = 0, motion = null, open = false, section = current, dragged = false, geo = null;
+  // الحبّة الزجاجية: عنصر واحد بفيزياء نابض، يمر تحت المبدّل والمربعات فوقه
+  const ind = bar.querySelector('.dock-ind');
+  const blob = ind?.querySelector('.ind-blob');
+  const IND = 44; // عرض الحبّة (الارتفاع 42)
+  let indX = null, indPage = null, indAnim = null, indPath = null, indStart = 0, indGuard = 0, pendingV = 0;
 
   const geometry = () => {
     // الأزرار مطلقة داخل صندوق الحشو: بلا الحد
@@ -540,10 +585,66 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     });
     for (const s of squares) out.set(s, { opacity: (1 - clamp(e * 4)).toFixed(3) });
     for (const h of halves) out.set(h, { opacity: (1 - e).toFixed(3), transform: `scale(${(1 - 0.15 * e).toFixed(4)})` });
+    if (ind && indPage) out.set(ind, { opacity: (1 - e).toFixed(3) });
     out.set(scrim, { opacity: e.toFixed(3) });
     return out;
   };
+  const navCenter = (page) => {
+    const n = bar.querySelector(`.nav[data-page="${page}"]`);
+    if (!n) return null;
+    const b = bar.getBoundingClientRect();
+    const r = n.getBoundingClientRect();
+    return r.left - b.left - (bar.clientLeft || 0) + r.width / 2;
+  };
+  const blobStyle = (x, v) => {
+    const { sx, sy } = stretchOf(v);
+    return `translate3d(${(x - IND / 2).toFixed(2)}px,0,0) scale(${sx.toFixed(4)},${sy.toFixed(4)})`;
+  };
+  const placeBlob = (x, v = 0) => {
+    indX = x;
+    blob.style.transform = blobStyle(x, v);
+  };
+  /** أوقف الحبّة حيث هي الآن؛ يعيد موضعها وسرعتها لتكمل منهما. */
+  const haltBlob = () => {
+    if (!indAnim) return null;
+    const st = sampleAt(indPath, clockNow() - indStart);
+    indAnim.cancel?.();
+    clearTimeout(indGuard);
+    indAnim = null;
+    placeBlob(st.x, st.v);
+    return st;
+  };
+  /** انقل الحبّة إلى وجهة بالنابض: الإطارات تُحسب مسبقًا وتُسلَّم للمركّب. */
+  const moveIndicator = (page, { animate: anim = true } = {}) => {
+    if (!blob) return;
+    const x1 = navCenter(page);
+    if (x1 == null) {
+      ind.style.opacity = '0';
+      indPage = null;
+      return;
+    }
+    ind.style.opacity = '';
+    indPage = page;
+    const st = haltBlob();
+    const x0 = st?.x ?? indX ?? x1;
+    const v0 = st?.v ?? pendingV;
+    pendingV = 0;
+    if (!anim || reduced() || typeof blob.animate !== 'function' || (Math.abs(x1 - x0) < 0.5 && Math.abs(v0) < 0.01)) return placeBlob(x1);
+    const path = springPath(x0, v0, x1);
+    const total = path[path.length - 1].t;
+    placeBlob(x1); // الحالة النهائية مضمّنة؛ الحركة فوقها
+    indPath = path;
+    indStart = clockNow();
+    indAnim = blob.animate(path.map((p) => ({ offset: p.t / total, transform: blobStyle(p.x, p.v) })), { duration: total, easing: 'linear' });
+    const done = () => {
+      clearTimeout(indGuard);
+      indAnim = null;
+    };
+    indAnim.onfinish = done;
+    indGuard = setTimeout(done, total + 150);
+  };
   const clearInline = () => {
+    if (ind && indPage) ind.style.opacity = '';
     for (const el of [...opts, ...labels, ...squares, ...halves]) {
       el.style.transform = '';
       el.style.opacity = '';
@@ -629,6 +730,75 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     opts[j].focus();
   });
 
+  // ── اسحب الحبّة بإصبعك على الشريط: تتبعه وتتمطّط بسرعته، والأيقونة تحتها ترتفع،
+  // وعند الإفلات تطير بسرعة الإفلات وتستقر على أقرب وجهة. لمسة بلا سحب = نقرة عادية.
+  const navs = [...bar.querySelectorAll('.dock-half .nav')];
+  let scrub = null, scrubbed = false;
+  const nearestNav = (x) => {
+    let best = null, d = Infinity;
+    for (const n of navs) {
+      const c = navCenter(n.dataset.page);
+      if (c != null && Math.abs(c - x) < d) (d = Math.abs(c - x)), (best = n);
+    }
+    return best;
+  };
+  const localX = (e) => e.clientX - bar.getBoundingClientRect().left - (bar.clientLeft || 0);
+  for (const h of halves) {
+    h.addEventListener('pointerdown', (e) => {
+      if (open || e.button > 0 || !indPage) return;
+      scrub = { id: e.pointerId, x: e.clientX, on: false, track: [] };
+      scrubbed = false;
+    });
+  }
+  bar.addEventListener('pointermove', (e) => {
+    if (!scrub || e.pointerId !== scrub.id) return;
+    if (!scrub.on) {
+      if (Math.abs(e.clientX - scrub.x) < 8) return;
+      scrub.on = scrubbed = true;
+      bar.setPointerCapture?.(e.pointerId);
+      haltBlob();
+      bar.classList.add('scrubbing');
+    }
+    const lo = navCenter(navs[navs.length - 1].dataset.page), hi = navCenter(navs[0].dataset.page);
+    const raw = localX(e);
+    // خارج الطرفين مقاومة مطاطية بدل التوقف الحاد
+    const x = raw < Math.min(lo, hi) ? Math.min(lo, hi) - (Math.min(lo, hi) - raw) * 0.25 : raw > Math.max(lo, hi) ? Math.max(lo, hi) + (raw - Math.max(lo, hi)) * 0.25 : raw;
+    scrub.track.push([e.timeStamp, x]);
+    if (scrub.track.length > 5) scrub.track.shift();
+    const [t0, x0] = scrub.track[0];
+    const v = e.timeStamp > t0 ? (x - x0) / (e.timeStamp - t0) : 0;
+    scrub.v = v;
+    placeBlob(x, v);
+    const near = nearestNav(x);
+    for (const n of navs) n.classList.toggle('near', n === near);
+  });
+  const endScrub = (e) => {
+    if (!scrub || e.pointerId !== scrub.id) return;
+    const s = scrub;
+    scrub = null;
+    if (!s.on) return;
+    bar.classList.remove('scrubbing');
+    for (const n of navs) n.classList.remove('near');
+    // الإفلات بسرعة يرمي الحبّة: الوجهة من حيث ستستقر لا من حيث أُفلتت
+    // السحب العادي يستقر حيث تركته؛ الرمية السريعة فقط تُسقط الحبّة أبعد بقدر سرعتها
+    const v = s.v ?? 0;
+    const aim = (indX ?? 0) + (Math.abs(v) > 1.1 ? v * 55 : 0);
+    const target = nearestNav(aim) ?? nearestNav(indX ?? 0);
+    pendingV = Math.max(-3, Math.min(3, s.v ?? 0));
+    haptic();
+    if (target?.dataset.page === indPage) moveIndicator(indPage);
+    else onNavigate?.(target.dataset.page);
+  };
+  bar.addEventListener('pointerup', endScrub);
+  bar.addEventListener('pointercancel', endScrub);
+  // النقرة التي تلي سحبًا لا تفتح الزر الذي بدأ منه
+  bar.addEventListener('click', (e) => {
+    if (!scrubbed) return;
+    scrubbed = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+
   // السحب الأفقي على المبدّل (منطقته الممتدة): الصفحة تتبع الإصبع
   let drag = null;
   sw.addEventListener('pointerdown', (e) => {
@@ -673,6 +843,8 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
 
   globalThis.addEventListener?.('resize', () => {
     geo = null;
+    indX = null;
+    if (indPage) moveIndicator(indPage, { animate: false });
     if (open && !motion) {
       layout();
       for (const [el, style] of frameAt(1)) for (const [k, v] of Object.entries(style)) el.style[k] = v;
@@ -695,8 +867,19 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       section = id;
       mark();
     },
+    /** الوجهة المختارة تغيّرت: الدائرة تتحرك إليها (أو تختفي لصفحة بلا زر). */
+    activate(page) {
+      const visible = !bar.hidden && bar.getBoundingClientRect().width > 0;
+      if (!visible) {
+        indPage = bar.querySelector(`.nav[data-page="${page}"]`) ? page : null;
+        indX = null; // يُقاس عند الظهور
+        return;
+      }
+      moveIndicator(page, { animate: indX != null && indPage != null });
+    },
     repaint() {
       if (!motion) geo = null;
+      if (indPage && indX == null) moveIndicator(indPage, { animate: false });
     },
   };
 }

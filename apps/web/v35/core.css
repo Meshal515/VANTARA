@@ -45,7 +45,7 @@
   --r-lg: 16px;
   --r-xl: 22px;
   --tap: 44px;
-  --nav-h: 56px;
+  --nav-h: 60px;
   /* الشريط العائم: ارتفاعه وبعده عن الحافة، وما تحجزه الصفحات تحته */
   --dock-gap: 20px;
   --dock-side: 12px;
@@ -466,8 +466,8 @@ html,
 }
 /* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
 .v35.native-android .dock {
-  background: rgba(20, 19, 25, 0.98);
-  background: color-mix(in srgb, var(--accent) 4%, rgba(20, 19, 25, 0.98));
+  background: #0a0a0d;
+  background: color-mix(in srgb, var(--accent) 3%, #09090c);
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -710,7 +710,7 @@ html,
  * فوق اسمها. الهندسة المتحركة في dock.js. */
 
 .v35 .dock {
-  --dock-slot: 58px;
+  --dock-slot: 56px;
   position: fixed;
   z-index: 50;
   left: 50%;
@@ -727,14 +727,16 @@ html,
   /* سطح محايد داكن أفتح من الصفحة، وفيه انعكاس خفيف فقط من لون القسم (المصمّم أو
    * ما اختاره المستخدم)؛ حد رفيع وظل واسع ناعم تحته: منفصل عن المحتوى */
   /* مسطّح وخفيف: سطح واحد بلا حواف مضيئة ولا تدرّج، وظل ناعم واحد يكفي ليطفو */
-  background: rgba(20, 19, 25, 0.96);
-  background: color-mix(in srgb, var(--accent) 4%, rgba(20, 19, 25, 0.96));
+  background: #0a0a0d;
+  background: color-mix(in srgb, var(--accent) 3%, #09090c);
   border: 0;
   transition: background-color 0.4s ease;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
   backdrop-filter: blur(20px) saturate(1.6);
   -webkit-tap-highlight-color: transparent;
+  touch-action: none; /* السحب الأفقي للحبّة لا يصير تمريرًا */
+  user-select: none;
 }
 .v35 .dock[hidden] {
   display: none;
@@ -752,76 +754,30 @@ html,
   pointer-events: none;
 }
 
-/* ── الوجهة: خانة ثابتة المقاس لا تتغير أبدًا؛ المختارة حبّة تظهر خلفها والأيقونة
- * تصعد ليظهر اسمها تحتها. كل الحركة transform وopacity: تجري على المركّب بلا تخطيط ── */
+/* ── الوجهات: خانات ثابتة لا يتغير مقاسها ولا ترتيبها. الأيقونة تتحرك داخل خانتها فقط،
+ * والاسم في مكان محجوز تحتها: لا تخطيط ولا قفز. الاختيار دائرة واحدة تتنقل (dock-ind). ── */
 .v35 .dock .nav {
   position: relative;
+  z-index: 1;
   flex: none;
   width: var(--dock-slot);
-  height: 48px;
+  height: 100%;
   padding: 0;
   border: 0;
   background: none;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.52);
   font: inherit;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition: color 0.22s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 .v35 .dock .nav.active {
-  color: var(--on-accent, #fff);
+  color: #fff;
 }
 .v35 .dock .nav-pill {
   position: absolute;
-  inset: 1px 2px;
-  display: block;
-  border-radius: 23px;
-  transition: transform 0.16s ease;
-}
-/* كل وجهة في بئر دائري داكن؛ المختارة حبّة بلون القسم (المصمّم أو ما اختاره المستخدم)
- * تكبر من مكان البئر. طبقتان تتلاشيان وتتمددان: transform وopacity فقط */
-.v35 .dock .nav-pill::after {
-  content: none;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 42px;
-  height: 42px;
-  margin: -21px 0 0 -21px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.045);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  transition:
-    opacity 0.2s ease,
-    transform 0.36s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.v35 .dock .nav.active .nav-pill::after {
-  opacity: 0;
-  transform: scale(1.15);
-}
-.v35 .dock .nav-pill::before {
-  content: '';
-  position: absolute;
   inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  background: var(--accent);
-  opacity: 0;
-  transform: scale(0.72, 0.9);
-  transition:
-    opacity 0.22s ease,
-    transform 0.38s cubic-bezier(0.16, 1, 0.3, 1),
-    background-color 0.4s ease;
-}
-.v35 .dock .nav.active .nav-pill::before {
-  opacity: 1;
-  transform: none;
-}
-.v35 .dock .nav .icon,
-.v35 .dock .nav-label {
-  z-index: 1;
-}
-.v35 .dock .nav:active .nav-pill {
-  transform: scale(0.93);
+  display: block;
 }
 .v35 .dock .nav .icon {
   position: absolute;
@@ -830,40 +786,106 @@ html,
   width: 22px;
   height: 22px;
   margin: -11px 0 0 -11px;
-  transform: translate3d(0, 0, 0);
-  transition: transform 0.36s cubic-bezier(0.16, 1, 0.3, 1);
+  stroke-width: 1.85;
+  /* الرجوع: هبوط هادئ بلا ارتداد */
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .v35 .dock .nav.active .icon {
   stroke-width: 2;
-  transform: translate3d(0, -7px, 0) scale(0.9);
+  /* الارتفاع: نابض خفيف يتجاوز قليلًا ويستقر */
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.94));
+  transition: transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
+.v35 .dock .nav:active .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(calc(var(--os, 1) * 0.88));
+  transition-duration: 0.12s;
+}
+.v35 .dock .nav.active:active .icon {
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.86));
+}
+/* محاذاة بصرية لا رياضية: كل أيقونة بكتلتها. السقف يرفع مركز البيت فيُنزَل قليلًا،
+ * والدائرة الكاملة في البوصلة أثقل فتُصغَّر، والشخصان أعرض فيُصغَّران قليلًا. */
+.v35 .dock .nav[data-page='home'] .icon { --oy: 0.5px; }
+.v35 .dock .nav[data-page='discover'] .icon { --os: 0.93; }
+.v35 .dock .nav[data-page='library'] .icon { --oy: 0.5px; --os: 0.98; }
+.v35 .dock .nav[data-page='majlis'] .icon { --os: 0.95; --ox: 0.5px; }
 .v35 .dock .nav-label {
   position: absolute;
-  inset-inline: 0;
-  bottom: 6px;
+  inset-inline: -4px;
+  bottom: 4px;
   text-align: center;
   white-space: nowrap;
-  font-size: 10.5px;
-  line-height: 12px;
+  font-size: 10px;
+  line-height: 11px;
   font-weight: 650;
   letter-spacing: 0;
+  color: #fff;
   opacity: 0;
-  transform: translate3d(0, 4px, 0);
+  transform: translate3d(0, 3px, 0);
   transition:
-    opacity 0.16s ease,
-    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 0.14s ease,
+    transform 0.2s ease;
 }
 .v35 .dock .nav.active .nav-label {
-  opacity: 1;
+  opacity: 0.92;
   transform: none;
-  transition-delay: 0.08s, 0.04s;
+  transition:
+    opacity 0.2s ease 0.08s,
+    transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s;
 }
-.v35 .dock .nav::before {
+.v35 .dock .nav::before,
+.v35 .dock .nav-pill::before,
+.v35 .dock .nav-pill::after {
   content: none;
 }
 .v35 .dock .nav .notify-dot {
-  top: 8px;
-  inset-inline-end: 10px;
+  top: 10px;
+  inset-inline-end: 12px;
+}
+
+/* ── الحبّة الزجاجية: لون القسم أعمق من الثيم، وحافة ضوء رفيعة كالزجاج السائل لا وهج.
+ * تتحرك بفيزياء نابض (dock.js) وتتمطّط بسرعتها، وتمر تحت المبدّل والمربعات فوقها. ── */
+.v35 .dock-ind {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.v35 .dock-ind .ind-blob {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 44px;
+  height: 42px;
+  border-radius: 21px;
+  background: color-mix(in srgb, var(--accent) 60%, #0b0a10);
+  background-image: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.13), transparent 60%);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  will-change: transform;
+  transform-origin: 50% 50%;
+}
+/* أثناء السحب: الأيقونة تحت الحبّة هي التي ترتفع، لا المختارة السابقة */
+.v35 .dock.scrubbing .nav.active:not(.near) .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+}
+.v35 .dock.scrubbing .nav.active:not(.near) .nav-label {
+  opacity: 0;
+}
+.v35 .dock.scrubbing .nav.near {
+  color: #fff;
+}
+.v35 .dock.scrubbing .nav.near .icon {
+  stroke-width: 2;
+  transform: translate3d(var(--ox, 0px), calc(var(--oy, 0px) - 7px), 0) scale(calc(var(--os, 1) * 0.94));
+  transition: transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.v35 .dock.scrubbing .nav.near .nav-label {
+  opacity: 0.92;
+  transform: none;
 }
 
 /* ── المبدّل: ثلاثة مربعات، القسم الحالي أبيض ثابت في كل الأقسام والألوان ── */
@@ -879,8 +901,9 @@ html,
   align-items: center;
   justify-content: center;
   gap: 5px;
+  z-index: 2; /* المربعات فوق الحبّة حين تمر تحتها */
   cursor: pointer;
-  touch-action: pan-y;
+  touch-action: none;
 }
 /* منطقة السحب الممتدة: أبعد من الزر قليلًا دون أن تأخذ لمس الجيران */
 .v35 .dock-switch::before {
@@ -911,8 +934,14 @@ html,
   inset: 0;
   pointer-events: none;
 }
+.v35 .dock-options {
+  z-index: 3; /* الأزرار المفتوحة فوق كل شيء، والمبدّل نفسه تحتها */
+}
 .v35 .dock.open .dock-options {
   pointer-events: auto;
+}
+.v35 .dock.open .dock-switch {
+  pointer-events: none;
 }
 .v35 .dock-opt,
 .v35 .dock-opt-label {

@@ -260,6 +260,7 @@ export const SHELL_HTML = `<div class="app">
 
   <div class="dock-scrim" id="dockScrim" data-act="toggleSections" hidden></div>
   <nav class="bottom-nav dock" id="bottomNav" aria-label="التنقّل الرئيسي">
+    <span class="dock-ind" aria-hidden="true"><i class="ind-blob"></i></span>
     <div class="dock-half">${navItem('home', 'home', 'الرئيسية')}${navItem('discover', 'compass', 'اكتشف')}</div>
     <button class="dock-switch" id="sectionSwitch" type="button" data-act="toggleSections" aria-expanded="false" aria-controls="sectionOptions" aria-label="بدّل القسم"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq" data-arg="cinema"></span></button>
     <div class="dock-half">${navItem('library', 'library', 'مكتبتي')}${navItem('majlis', 'users', 'الأصدقاء')}</div>

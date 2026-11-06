@@ -4223,6 +4223,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (on) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
+    dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
     q('detailTop').classList.remove('scrolled');
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
@@ -5335,6 +5336,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         clearTimeout(standbyTimer);
         standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 600);
       },
+      onNavigate: (page) => navTo(page),
       onDragStart: (to) => {
         if (currentPage() !== 'home' || !SECTIONS[to]?.ready) return;
         beginSection(to, (motion) => motion.drag(to, 0));
@@ -5894,7 +5896,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const startSection = readSection();
   applySection(startSection);
   showHome(startSection);
-  dock();
+  dock().activate(currentPage());
   warmed.add(startSection);
   if (startSection === 'anime') anime.show();
   if (startSection === 'cinema') cinema.show();

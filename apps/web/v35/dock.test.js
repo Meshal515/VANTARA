@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { DIM, ORDER, SHIFT, T, adjacent, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, optionRects, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, optionRects, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -190,6 +190,43 @@ describe('smoothness: compositor-only motion', () => {
     expect(v.cinema.classList.contains('layer-standby')).toBe(false);
     tick(600);
     expect(layers.section).toBe('cinema');
+  });
+});
+
+describe('glass bead physics', () => {
+  it('settles exactly on the target with only a small overshoot, in well under half a second', () => {
+    const path = springPath(300, 0, 40);
+    const end = path[path.length - 1];
+    expect(end.x).toBe(40);
+    expect(end.v).toBe(0);
+    expect(end.t).toBeLessThan(560);
+    const overshoot = Math.max(0, ...path.map((p) => 40 - p.x));
+    expect(overshoot).toBeGreaterThan(0); // حيّة: تتجاوز قليلًا وترجع
+    expect(overshoot).toBeLessThan(8); // بلا اهتزاز مبالغ فيه
+  });
+  it('a new tap mid-flight continues from the current position and speed (no jump, no stop)', () => {
+    const first = springPath(300, 0, 40);
+    const mid = sampleAt(first, 90);
+    expect(mid.x).toBeLessThan(300);
+    expect(mid.x).toBeGreaterThan(40);
+    expect(mid.v).toBeLessThan(0); // متجهة يسارًا
+    const second = springPath(mid.x, mid.v, 240);
+    expect(second[0].x).toBe(mid.x);
+    expect(second[0].v).toBe(mid.v); // السرعة نفسها: الانعطاف ناعم
+    expect(second[second.length - 1].x).toBe(240);
+  });
+  it('a throw carries its release velocity', () => {
+    const still = springPath(100, 0, 200);
+    const thrown = springPath(100, 2, 200);
+    expect(sampleAt(thrown, 40).x).toBeGreaterThan(sampleAt(still, 40).x);
+  });
+  it('stretches along its motion with its speed and keeps its volume', () => {
+    expect(stretchOf(0)).toEqual({ sx: 1, sy: 1 });
+    const fast = stretchOf(2);
+    expect(fast.sx).toBeGreaterThan(1.2);
+    expect(fast.sx).toBeLessThanOrEqual(1.42);
+    expect(fast.sx * fast.sy * fast.sy).toBeCloseTo(1); // sx·sy² ثابت تقريبًا
+    expect(stretchOf(-2)).toEqual(fast);
   });
 });
 
