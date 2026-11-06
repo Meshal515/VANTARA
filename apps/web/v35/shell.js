@@ -63,7 +63,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, pageIn } from './motion.js';
-import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
+import { createCrossfade, createDock, createLayers, exitPage, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -5422,11 +5422,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
     if (currentPage() !== 'home') {
+      const leave = root.querySelector('.page.active');
+      const y = window.scrollY;
       setSectionsOpen(false);
       layers?.finish();
       showHome(id);
       showPage('home');
       enterSection(id);
+      exitPage(leave, y); // الانتقال نفسه: الصفحة المغادرة تنزلق كاشفةً القسم الجديد
+      haptic();
       return;
     }
     // الطبقات تبدأ أولًا، والشريط يُغلق معها لا قبلها

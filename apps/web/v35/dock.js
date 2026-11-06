@@ -196,6 +196,23 @@ export function haptic(kind = 'light') {
 export const isReduced = () =>
   globalThis.document?.documentElement?.dataset?.motion === 'off' ||
   (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+/**
+ * تبديل القسم من صفحة غير الرئيسية (اكتشف، مكتبتي، الأصدقاء): الصفحة المغادرة تُثبَّت بحجم الشاشة وفي موضع
+ * قارئها، ثم تنزلق بعيدًا بمدة الطبقات ومنحناها كاشفةً رئيسية القسم الجديد في مكانها. الطبقة المتحركة بحجم الشاشة
+ * لا بطول الصفحة. تقليل الحركة: فوري.
+ */
+export function exitPage(leave, scrollY = 0, { duration = T.exit } = {}) {
+  if (!leave?.animate || isReduced()) return null;
+  leave.classList.add('page-leaving');
+  leave.scrollTop = scrollY;
+  const anim = leave.animate([{ transform: 'translate3d(0,0,0)' }, { transform: 'translate3d(-100%,0,0)' }],
+    { duration, easing: cssEase.swap, fill: 'forwards' });
+  const done = () => { leave.classList.remove('page-leaving'); leave.scrollTop = 0; anim.cancel(); };
+  anim.onfinish = done;
+  anim.oncancel = () => leave.classList.remove('page-leaving');
+  return anim;
+}
+
 const cssEase = { swap: 'cubic-bezier(0.32, 0, 0.24, 1)', out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;

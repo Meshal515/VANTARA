@@ -242,6 +242,19 @@ html,
 .v35 .page.active {
   display: block;
 }
+/* صفحة تغادر أثناء تبديل القسم (exitPage): بحجم الشاشة فوق الرئيسية وتحت الشريط، لا تُلمس */
+.v35 .page.page-leaving {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  pointer-events: none;
+  contain: layout paint;
+  will-change: transform;
+}
 @media (prefers-reduced-motion: reduce) {
   .v35 *,
   .v35 *::before,
