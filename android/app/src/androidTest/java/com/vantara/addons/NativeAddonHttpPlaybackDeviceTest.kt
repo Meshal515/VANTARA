@@ -80,7 +80,7 @@ class NativeAddonHttpPlaybackDeviceTest {
                     p.addListener(object : Player.Listener {
                         override fun onRenderedFirstFrame() { firstFrame.countDown() }
                         override fun onCues(cueGroup: CueGroup) {
-                            if (cueGroup.cues.any { it.text.toString().contains("Hello, welcome to the video!") }) cue.countDown()
+                            if (cueGroup.cues.any { it.text.toString().contains("VANTARA_NATIVE_SUBTITLE_PROOF") }) cue.countDown()
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) { failure.set(error); firstFrame.countDown(); cue.countDown(); sought.countDown(); progressed.countDown() }
                     })
