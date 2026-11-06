@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { ORDER, T, adjacent, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, optionRects, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, optionRects, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -47,16 +47,18 @@ describe('layer model', () => {
     }
   });
 
-  it('going up: the new layer enters from the left, the current one shifts 22% right and dims to 55%', () => {
+  it('going up: the new layer enters from the left, the current one shifts a little right and dims lightly', () => {
     const half = layerFrame({ manga: 1, anime: 0.5 });
     expect(half.anime.x).toBeCloseTo(-50);
-    expect(half.manga.x).toBeCloseTo(11);
-    expect(half.manga.dim).toBeCloseTo(0.275);
-    expect(half.anime.edge).toBe(1);
+    expect(half.manga.x).toBeCloseTo(SHIFT / 2);
+    expect(half.manga.dim).toBeCloseTo(DIM / 2);
+    expect(half.anime.edge).toBe(0); // بلا ظل حافة: لا إحساس بطبقتين
     const done = layerFrame({ manga: 1, anime: 1 });
     expect(done.anime.x).toBe(0);
-    expect(done.manga.x).toBeCloseTo(22);
-    expect(done.manga.dim).toBeCloseTo(0.55);
+    expect(done.manga.x).toBeCloseTo(SHIFT);
+    expect(done.manga.dim).toBeCloseTo(DIM);
+    expect(SHIFT).toBeLessThanOrEqual(10);
+    expect(DIM).toBeLessThanOrEqual(0.2);
     expect(done.anime.edge).toBe(0);
     expect(done.anime.z).toBeGreaterThan(done.manga.z);
   });

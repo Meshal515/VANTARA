@@ -11,9 +11,10 @@
  */
 
 export const ORDER = ['manga', 'anime', 'cinema'];
-export const T = { open: 260, close: 220, enter: 380, exit: 320, reduced: 120 };
-export const SHIFT = 22;
-export const DIM = 0.55;
+// خفيف لا ثقيل: إزاحة وتعتيم قليلان، بلا ظل حافة، ومدد أقصر (رأي المالك: «ثقيل و3D»)
+export const T = { open: 240, close: 200, enter: 300, exit: 260, reduced: 120 };
+export const SHIFT = 8;
+export const DIM = 0.18;
 
 /** منحنى cubic-bezier كدالة زمن ← تقدّم (حل نيوتن ثم تنصيف عند الحاجة). */
 export function bezier(x1, y1, x2, y2) {
@@ -75,7 +76,7 @@ export function layerFrame(cover) {
     out[id] = {
       x: -(1 - c) * 100 + SHIFT * above,
       dim: DIM * above,
-      edge: c > 0 && c < 1 ? Math.min(1, (1 - c) * 8) : 0,
+      edge: 0,
       z: i + 1,
     };
   });
