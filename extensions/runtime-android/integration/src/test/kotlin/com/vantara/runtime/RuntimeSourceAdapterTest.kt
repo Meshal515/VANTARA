@@ -57,6 +57,13 @@ class RuntimeSourceAdapterTest {
     private val id="addon|cs3|cs3_0123456789abcdef0123456789abcdef|provider"
     private val work=SourceAnime(id,"https://source.example/work","العمل")
     private fun objectOf(value: String)=RuntimeJson.parse(value).jsonObject
+    @Test fun linksWithoutAnAgentPlayWithTheBrowserAgentTheProviderUsedAsCloudStreamsPlayerDoes()=runBlocking {
+        val browser="Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile Safari/537.36"
+        val adapter=RuntimeSourceAdapter(id,"Source",browser) { _,_->objectOf("""{"items":[{"url":"https://media.example/a.mp4","referer":"https://source.example/"},{"url":"https://media.example/b.mp4","headers":{"user-agent":"Provider/1.0"}}]}""") }
+        val byUrl=adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).associateBy { it.url }
+        assertEquals(browser,byUrl.getValue("https://media.example/a.mp4").headers["User-Agent"])
+        assertEquals("A provider's own agent is kept","Provider/1.0",byUrl.getValue("https://media.example/b.mp4").headers.entries.first { it.key.equals("User-Agent",true) }.value)
+    }
     @Test fun detailsThenEpisodesCostsOneProviderLoadLikeCloudStream()=runBlocking {
         val calls=mutableListOf<String>()
         val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->

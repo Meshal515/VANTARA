@@ -21,6 +21,12 @@ internal fun mediaType(declared:String,url:String):String = when(declared) {
 class RuntimeSourceAdapter(
     override val id: String,
     override val name: String,
+    /**
+     * The browser User-Agent the provider's own requests carried. CloudStream's player sends one with every link;
+     * VANTARA's sent OkHttp's default when the link named none, and hosts such as mixdrop answered 403 to the very
+     * URL that played with a browser agent (source certification round 17).
+     */
+    private val userAgent: String? = null,
     private val execute: suspend (String,JsonObject)->JsonObject,
 ) : AnimeAdapter {
     private fun input(vararg rows: Pair<String,JsonElement>)=JsonObject(mapOf(*rows))
@@ -97,6 +103,7 @@ class RuntimeSourceAdapter(
             val link=raw.jsonObject
             val headers=(link["headers"] as? JsonObject).orEmpty().toMutableMap()
             if(link.text("referer").isNotBlank())headers.putIfAbsent("Referer",JsonPrimitive(link.text("referer")))
+            if(userAgent!=null && headers.keys.none { it.equals("User-Agent",true) })headers["User-Agent"]=JsonPrimitive(userAgent)
             buildJsonObject {
                 put("url",runCatching { runtimeMediaUrl(link.text("url")) }.getOrDefault(link.text("url")));put("name",link.text("name"));put("title",link.text("name"))
                 put("quality",link["quality"] ?: JsonNull);put("headers",JsonObject(headers))

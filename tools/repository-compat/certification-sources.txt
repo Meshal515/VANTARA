@@ -1,36 +1,10 @@
 # قائمة اعتماد المصادر (source-certification.yml): سطر لكل مصدر بالشكل kind:name:content
 # kind = cs3 (CloudStream، الاسم كما في المستودع) أو aniyomi (لاحقة الحزمة) أو manga (all أو أسماء بفواصل)
-# جولة 12 (ومنذ 11) من الفحص السريع (addon_preflight.mjs): كل إضافة موقعها يرد أو انتقل، والمانجا كلها.
-# خارجها: مواقع Cloudflare من مراكز البيانات (تُعتمد على جهاز المالك)، والمتوقفة، ونسختا Aniyomi المتقادمتان
-# (anime4up وwitanime) ونسختاهما في CloudStream داخلها.
-# set per_tier=2 servers=2 seconds=8 round=17
-manga:all:manga
-cs3:AnimeRift:anime
-cs3:AnimeWitcher:anime
-cs3:Anime4up:anime
-cs3:Witanime:anime
-cs3:Brstej:anime
-cs3:Dima toon:anime
-cs3:Elif:anime
-cs3:Cimalight:anime
-cs3:Egydead:anime
-cs3:Mycima:anime
-cs3:OscarTv:anime
-cs3:Akwam:cinema
-cs3:3isk:cinema
-cs3:Alooytv:cinema
-cs3:Asia2tv 2:cinema
-cs3:CimaClub:cinema
-cs3:Cimatn:cinema
-cs3:Eshek:cinema
-cs3:Krmzy:cinema
+# جولة 18 مركّزة: وكيل المتصفح مع روابط CloudStream (LodyNet/mixdrop: 403 بلا وكيل، يعمل بوكيل متصفح)، واقتباس
+# الأسماء ذات المسافات (Dima toon وAsia2tv 2 لم يُختبرا قط)، وAkwam وAnimeRift لعدم التراجع.
+# set per_tier=2 servers=2 seconds=8 round=18
 cs3:LodyNet:cinema
-cs3:Shahid4u:cinema
-cs3:Tuniflix:cinema
-cs3:TuniflexBlog:cinema
-cs3:VIU:cinema
-aniyomi:okanime:anime
-aniyomi:arabseed:cinema
-aniyomi:egydead:cinema
-aniyomi:cimaleek:cinema
-aniyomi:asia2tv:cinema
+cs3:Dima toon:anime
+cs3:Asia2tv 2:cinema
+cs3:Akwam:cinema
+cs3:AnimeRift:anime
