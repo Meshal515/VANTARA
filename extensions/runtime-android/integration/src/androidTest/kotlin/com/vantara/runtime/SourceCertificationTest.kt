@@ -195,7 +195,8 @@ class SourceCertificationTest {
     }
 
     /** يفتح السيرفر في المشغّل الأصلي ويقيس: أول إطار، تقدّم الوقت، المفكوك والساقط، الخطأ، والانتقال. */
-    private fun play(engineSession: String, chosen: Candidate, seconds: Int): JsonObject {
+    private fun play(engineSession: String, first: Candidate, seconds: Int): JsonObject {
+        var chosen = first
         val ins = InstrumentationRegistry.getInstrumentation()
         var activity: PlayerActivity? = null
         val started = SystemClock.elapsedRealtime()
@@ -236,13 +237,21 @@ class SourceCertificationTest {
             var ttff = -1L
             var error: String? = null
             var switchedAt = -1L
+            var switchedTo: String? = null
             // Up to 45s: the player's own budgets decide (slow emulator first frames reached 22s), not this loop.
             while (SystemClock.elapsedRealtime() - started < 45_000) {
                 error = onMain { player().playerError?.errorCodeName } ?: firstError.get()
                 if (error != null) break
                 // The player left this server on its own: when, and with which error, says who failed.
                 playerReasons().takeIf { it.isNotEmpty() }?.let { lastReasons = it }
-                if (onMain { (currentField.get(act) as? Candidate)?.id }.let { it != null && it != chosen.id }) { switchedAt = SystemClock.elapsedRealtime() - started; break }
+                val now = onMain { currentField.get(act) as? Candidate }
+                if (now != null && now.id != chosen.id) {
+                    switchedAt = SystemClock.elapsedRealtime() - started
+                    // Another rendition of the same server is the player adapting, not the route failing.
+                    switchedTo = if (now.server == chosen.server && now.host == chosen.host) "same-server:${now.quality ?: -1}" else "other:${now.host.take(40)}"
+                    if (now.server == chosen.server && now.host == chosen.host) { chosen = now; switchedAt = -1; switchedTo = null; continue }
+                    break
+                }
                 if (onMain { (player().videoDecoderCounters?.renderedOutputBufferCount ?: 0) > 0 }) { ttff = SystemClock.elapsedRealtime() - started; break }
                 Thread.sleep(100)
             }
@@ -251,6 +260,7 @@ class SourceCertificationTest {
                 put("verdict", "FALSE_READY"); put("code", error ?: if (switched) "SWITCHED_BEFORE_FRAME" else "NO_FIRST_FRAME")
                 put("waitedMs", SystemClock.elapsedRealtime() - started)
                 if (switchedAt >= 0) put("switchedAtMs", switchedAt)
+                switchedTo?.let { put("switchedTo", it) }
                 firstError.get()?.let { put("playerError", it) }
                 httpFailure.get()?.let { put("httpFailure", it) }
                 if (lastReasons.isNotEmpty()) put("playerReason", lastReasons.last())

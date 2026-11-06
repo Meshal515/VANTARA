@@ -84,6 +84,8 @@ export function failures(source, works = []) {
       // أول إطار ظهر ثم لم يُفك غيره في نافذة القياس، بلا خطأ ولا انتقال: الفك البرمجي على المحاكي (1080p) نفسه
       if (p.code === 'NO_FRAMES' && p.ttffMs > 0 && !p.playerError) { out.push({ code: 'FALSE_READY:NO_FRAMES', owner: 'slow' }); continue; }
       // انتقل المشغّل عند ميزانية البدء بلا خطأ تشغيل: أول مقطع بطيء (المحاكي يفك برمجيًا)، يُعرض منفصلًا لا عطلًا
+      // الخادم رفض رابطًا جديدًا من أول طلب بعميل التشغيل نفسه: رفض الموقع (حدّ طلبات/حجب)، لا وعد كاذب من فانتارا
+      if (/fresh:refused/.test(p.singleUse ?? '') && /player:40[13]/.test(p.singleUse ?? '')) { out.push({ code: 'SITE_REFUSES_MEDIA', owner: 'site' }); continue; }
       // سبب المشغّل نفسه يحسم: مهلة أول إطار/البدء بلا خطأ شبكة ولا رد HTTP مرفوض = بطء بداية (فك برمجي/خادم بطيء)
       const watchdog = /FIRST_VIDEO_FRAME_TIMEOUT|STARTUP_TIMEOUT|FIRST_AUDIO_OUTPUT_TIMEOUT/.test(p.playerReason ?? '') && !p.httpFailure && !p.playerError;
       const slow = watchdog || (p.code === 'SWITCHED_BEFORE_FRAME' && !p.playerReason && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500);
