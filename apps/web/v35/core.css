@@ -873,6 +873,8 @@ html,
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
+  /* تبديل القسم يلوّن الدائرة بسلاسة مع سطح الكبسولة، لا قفزة لون */
+  transition: background-color 0.4s ease;
 }
 
 /* ── المبدّل: ثلاثة مربعات أكبر قليلًا، والحالي أبيض ثابت وأعرض ── */
@@ -933,6 +935,7 @@ html,
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
+  transition: background-color 0.4s ease;
 }
 .v35 .dock.open .dock-opt {
   pointer-events: auto;
