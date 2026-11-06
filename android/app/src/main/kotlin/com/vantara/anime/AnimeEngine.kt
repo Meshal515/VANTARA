@@ -211,7 +211,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** سيرفرات الفيديو المضمّنة، والمتصفح المخفي لما لا نستخرجه مباشرة. */
-    private val embeds by lazy {
+    internal val embeds by lazy { // ويستعمله محرك CloudStream لسيرفرات بلا مستخرج (RuntimeHost)
         EmbedResolver(
             sourceClient,
             WebViewSniffer(appContext, network::defaultUserAgentProvider),

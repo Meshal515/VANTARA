@@ -22,11 +22,20 @@ object WorkerState {
     /** Hosts a provider handed to loadExtractor that no extractor handles; reported with the operation's result. */
     // One embed link per unhandled host: diagnostic evidence for writing and testing that host's extractor.
     private val samples=java.util.concurrent.ConcurrentHashMap<String,String>()
-    fun missingExtractor(host:String,url:String?=null){
+    /**
+     * Every server page no extractor here handles, with the page that linked it. The host resolves them with
+     * VANTARA's own embed resolver (named extractors, the generic player reader and the hidden WebView): the
+     * same mechanism the built-in sources play with, instead of dropping the server as "no video link".
+     */
+    private val embeds=java.util.concurrent.ConcurrentLinkedQueue<Map<String,String>>()
+    fun missingExtractor(host:String,url:String?=null,referer:String?=null){
         val key=host.lowercase(java.util.Locale.ROOT).removePrefix("www.")
         if(missing.size<64)missing.add(key)
         if(url!=null&&url.length<=512&&samples.size<64)samples.putIfAbsent(key,url)
+        if(url!=null&&url.length<=2048&&embeds.size<48&&embeds.none{it["url"]==url})
+            embeds.add(buildMap{put("url",url);put("host",key);referer?.takeIf{it.isNotBlank()&&it.length<=2048}?.let{put("referer",it)}})
     }
+    fun takeMissingEmbeds():List<Map<String,String>> =embeds.toList().also{embeds.clear()}
     fun takeMissingExtractors():List<String> =missing.toList().sorted().also{missing.clear()}
     fun takeMissingSamples():Map<String,String> =samples.toSortedMap().also{samples.clear()}
     fun install(context:Context?,saved:Map<String,String> = emptyMap(),cookies:Map<String,Map<String,String>> = emptyMap()) {

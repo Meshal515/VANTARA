@@ -64,6 +64,36 @@ class RuntimeSourceAdapterTest {
         assertEquals(browser,byUrl.getValue("https://media.example/a.mp4").headers["User-Agent"])
         assertEquals("A provider's own agent is kept","Provider/1.0",byUrl.getValue("https://media.example/b.mp4").headers.entries.first { it.key.equals("User-Agent",true) }.value)
     }
+    @Test fun serversNoRuntimeExtractorHandlesArePlayedThroughVantarasOwnResolver()=runBlocking {
+        // The provider found the episode's server page (share-host style), but the runtime has no extractor for it.
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""<html><script>var player={file:"https://media.example/stream/master.m3u8"};</script></html>"""))
+            server.start()
+            val embed=server.url("/embed/abc").toString()
+            val resolver=com.vantara.anime.hosts.EmbedResolver(okhttp3.OkHttpClient())
+            val adapter=RuntimeSourceAdapter(id,"Source",null,resolver) { _,_->
+                objectOf("""{"items":[],"missingExtractors":["uqload.example"],"missingEmbeds":[{"url":"$embed","host":"uqload.example","referer":"https://source.example/ep1"}]}""")
+            }
+            val reports=mutableListOf<com.vantara.anime.stream.RouteReport>()
+            val found=adapter.candidates(SourceEpisode(id,"episode","Episode",1f),trace=ResolveTrace { reports+=it })
+            assertEquals("https://media.example/stream/master.m3u8",found.single().url)
+            assertEquals("the server sheet sees it resolving, then ready",listOf(com.vantara.anime.stream.RouteState.RESOLVING,com.vantara.anime.stream.RouteState.READY),reports.map { it.state })
+            assertEquals("the page that linked it is sent as the server expects","https://source.example/ep1",server.takeRequest().getHeader("Referer"))
+        }
+    }
+    @Test fun aServerVantaraCannotResolveEitherIsReportedWithItsReason()=runBlocking {
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("<html>nothing playable</html>"))
+            server.start()
+            val adapter=RuntimeSourceAdapter(id,"Source",null,com.vantara.anime.hosts.EmbedResolver(okhttp3.OkHttpClient())) { _,_->
+                objectOf("""{"items":[],"missingEmbeds":[{"url":"${server.url("/e")}","host":"dead.example"}]}""")
+            }
+            val reports=mutableListOf<com.vantara.anime.stream.RouteReport>()
+            assertTrue(adapter.candidates(SourceEpisode(id,"episode","Episode",1f),trace=ResolveTrace { reports+=it }).isEmpty())
+            assertEquals(com.vantara.anime.stream.RouteState.UNAVAILABLE,reports.last().state)
+            assertTrue(reports.last().reason!!.contains("dead.example"))
+        }
+    }
     @Test fun detailsThenEpisodesCostsOneProviderLoadLikeCloudStream()=runBlocking {
         val calls=mutableListOf<String>()
         val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->

@@ -6,6 +6,9 @@ import com.vantara.anime.stream.RouteReport
 import com.vantara.anime.stream.RouteState
 import com.vantara.addons.NativeAddonCandidates
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.withPermit
 
 /** Only maps public results to existing VANTARA contracts; it never extracts source HTML. */
 /** CloudStream's INFERRED links name no type; the URL decides, as in the original player. */
@@ -27,6 +30,12 @@ class RuntimeSourceAdapter(
      * URL that played with a browser agent (source certification round 17).
      */
     private val userAgent: String? = null,
+    /**
+     * VANTARA's own embed resolver (named extractors, the generic player reader, the hidden WebView): it resolves
+     * the servers no extractor in the CloudStream runtime handles. That runtime ships a handful of extractors where
+     * CloudStream ships over a hundred, so most Arabic providers' servers came back as "no video link".
+     */
+    private val embeds: com.vantara.anime.hosts.EmbedResolver? = null,
     private val execute: suspend (String,JsonObject)->JsonObject,
 ) : AnimeAdapter {
     private fun input(vararg rows: Pair<String,JsonElement>)=JsonObject(mapOf(*rows))
@@ -101,7 +110,8 @@ class RuntimeSourceAdapter(
     }
     override suspend fun candidates(episode: SourceEpisode,now: Long,trace: ResolveTrace?,enough: Int): List<Candidate> {
         require(episode.sourceId==id)
-        val links=execute("videoLinks",input("data" to JsonPrimitive(episode.url))).getValue("items").jsonArray
+        val answer=execute("videoLinks",input("data" to JsonPrimitive(episode.url)))
+        val links=answer.getValue("items").jsonArray
         // سيرفرات الفيديو قد يحجبها المزوّد كما يحجب المواقع: DoH أولًا وتجزئة SNI للمشغّل كما في Aniyomi (Embeds)
         for(raw in links) runCatching { java.net.URI(raw.jsonObject.text("url")).host }.getOrNull()?.takeIf { it.isNotBlank() }
             ?.let { com.vantara.anime.net.AnimeHostRouter.markVideoHost(it) }
@@ -124,7 +134,54 @@ class RuntimeSourceAdapter(
             trace?.route(RouteReport(id,"x"+Integer.toHexString(server.hashCode()),server,
                 links.mapNotNull { it.quality }.maxOrNull(),links.first().variant,RouteState.READY,links))
         }
-        return candidates
+        return candidates+viaVantara(answer["missingEmbeds"] as? JsonArray,now,trace)
     }
-    private companion object { const val RECENT_MS=120_000L }
+
+    /** Servers the runtime could not extract, resolved by VANTARA's mechanism; each reported the moment it is ready. */
+    private suspend fun viaVantara(missing: JsonArray?,now: Long,trace: ResolveTrace?): List<Candidate> {
+        val resolver=embeds ?: return emptyList()
+        val pages=missing.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
+            val url=e.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            Triple(url,e.text("referer").ifBlank { null },e.text("host").ifBlank { runCatching { java.net.URI(url).host }.getOrNull().orEmpty() })
+        }.distinctBy { it.first }.take(MAX_EMBEDS)
+        if(pages.isEmpty())return emptyList()
+        val gate=kotlinx.coroutines.sync.Semaphore(EMBED_PARALLEL)
+        return kotlinx.coroutines.coroutineScope {
+            pages.map { (url,referer,host) ->
+                async {
+                    val key="e"+Integer.toHexString(url.hashCode())
+                    val server=host.removePrefix("www.").substringBefore('.').ifBlank { host }
+                    trace?.route(RouteReport(id,key,server,null,com.vantara.anime.stream.Variant.SUB,RouteState.RESOLVING))
+                    com.vantara.anime.net.AnimeHostRouter.markVideoHost(host)
+                    val streams=gate.withPermit {
+                        kotlinx.coroutines.withTimeoutOrNull(EMBED_TIMEOUT_MS) { runCatching { resolver.resolve(url,referer) }.getOrNull() }
+                    }.orEmpty()
+                    val json=JsonArray(streams.map { st ->
+                        com.vantara.anime.net.AnimeHostRouter.markVideoHost(runCatching { java.net.URI(st.url).host }.getOrNull().orEmpty())
+                        val headers=st.headers.toMutableMap()
+                        if(userAgent!=null && headers.keys.none { it.equals("User-Agent",true) })headers["User-Agent"]=userAgent
+                        buildJsonObject {
+                            put("url",st.url);put("name",server);put("title",st.label.ifBlank { server })
+                            put("quality",st.quality?.let { JsonPrimitive(it) } ?: JsonNull)
+                            put("headers",JsonObject(headers.mapValues { JsonPrimitive(it.value) }))
+                            put("type",mediaType("",st.url))
+                        }
+                    })
+                    val found=NativeAddonCandidates.parse("cs3e-$now",id,name,json,now)
+                    trace?.route(RouteReport(id,key,server,found.mapNotNull { it.quality }.maxOrNull(),
+                        found.firstOrNull()?.variant ?: com.vantara.anime.stream.Variant.SUB,
+                        if(found.isEmpty())RouteState.UNAVAILABLE else RouteState.READY,found,
+                        if(found.isEmpty())"لم يُستخرج رابط من $host" else null))
+                    found
+                }
+            }.awaitAll().flatten()
+        }
+    }
+    private companion object {
+        const val RECENT_MS=120_000L
+        /** Servers per episode handed to VANTARA's resolver, how many at once, and each one's ceiling. */
+        const val MAX_EMBEDS=24
+        const val EMBED_PARALLEL=4
+        const val EMBED_TIMEOUT_MS=25_000L
+    }
 }

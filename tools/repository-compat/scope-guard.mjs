@@ -148,6 +148,11 @@ const certificationSeams = [
   'android/app/src/main/kotlin/com/vantara/anime/net/AnimeDns.kt',
   'android/app/src/main/kotlin/com/vantara/anime/net/SniFragment.kt',
   'android/app/src/test/java/com/vantara/anime/net/CensoredNetworkTest.kt',
+  // سيرفرات بلا مستخرج في عامل CloudStream تُحل بآلية فانتارا نفسها (EmbedResolver: مستخرجات، قارئ عام،
+  // متصفح مخفي) بدل «لا رابط فيديو»: العامل يعيدها كاملة بمراجعها، والمحوّل يحلّها في التطبيق.
+  'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/CloudStreamProvider.kt',
+  'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/WorkerState.kt',
+  'extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt',
 ];
 for (const path of certificationSeams) seams.add(path);
 // الشريط العائم ومبدّل الأقسام وانتقال الطبقات (موافقة المالك على النشر في Debug)؛ للجوال فقط

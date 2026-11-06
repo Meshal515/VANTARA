@@ -425,7 +425,7 @@ class RuntimeHost(
                     val entry=SourceEntry(id,name,source.text("lang").ifBlank { "und" },enabled=enabled,content=content,domains=Domains(origin.toString()),advisory=advisory)
                     val call:suspend (String,JsonObject)->JsonObject={ operation,input -> invoke(o,installed,source,id,operation,input) }
                     invokers[id]=call
-                    val adapter=RuntimeSourceAdapter(id,name,userAgent,call)
+                    val adapter=RuntimeSourceAdapter(id,name,userAgent,engine.embeds,call)
                     packageBindings.add(RuntimeSourceBinding(entry,adapter,installed.packageId(),installed.version().toString(),metadata.text("repoName"),metadata.text("repoUrl"),metadata.text("iconUrl").ifBlank { null }))
                 }
                 require(bindings.size+packageBindings.size<=128) { "RUNTIME_SOURCE_LIMIT" };bindings.addAll(packageBindings)

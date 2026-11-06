@@ -74,12 +74,12 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             }
             "videoLinks"->{
                 val data=input.path("data").asText("");require(data.isNotBlank())
-                WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()
+                WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples();WorkerState.takeMissingEmbeds()
                 val collected=LinkCollector.collect(LINKS_BUDGET_MS){sub,cb->source.loadLinks(data,false,sub,cb)}
                 val missing=WorkerState.takeMissingExtractors()
                 // An empty answer still says which media hosts lacked an extractor; that is the actionable part.
                 if(collected.links.isEmpty()&&missing.isEmpty())throw collected.failure ?: IOException(if(collected.complete)"NO_VIDEO_LINKS" else "OPERATION_TIMEOUT")
-                mapOf("items" to collected.links,"subtitles" to collected.subtitles,"missingExtractors" to missing,"missingSamples" to WorkerState.takeMissingSamples(),"complete" to collected.complete)
+                mapOf("items" to collected.links,"subtitles" to collected.subtitles,"missingExtractors" to missing,"missingSamples" to WorkerState.takeMissingSamples(),"missingEmbeds" to WorkerState.takeMissingEmbeds(),"complete" to collected.complete)
             }
             else->throw UnsupportedOperationException(operation)
         }
