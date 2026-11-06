@@ -436,7 +436,6 @@ class RuntimeHost(
         val origins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),
             synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
         val learned=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val started=System.nanoTime()
         var rejected:RuntimeFailure?=null
         val initial=try { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) } }
         catch(failure:RuntimeFailure) { rejected=failure;null }
@@ -448,9 +447,10 @@ class RuntimeHost(
         }
         run {
             // A permission sync replay, once, only after an attested settings
-            // migration, within one load plus one operation budget.
-            val remaining=OPERATION_BUDGET_MS+10_000L-java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
-            if(remaining<=0)throw IllegalStateException("OPERATION_TIMEOUT")
+            // migration. It gets its own budget of one load plus one operation (30 + 30 s, the
+            // worker's own limits): the first attempt may already have used both legitimately,
+            // and a budget counted from its start left the replay none (code review, 6 Nov).
+            val remaining=REPLAY_BUDGET_MS
             val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
             try { withTimeout(remaining) { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } } }
             catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
@@ -613,6 +613,8 @@ class RuntimeHost(
          * The bound still stops a hung provider.
          */
         private const val OPERATION_BUDGET_MS=30_000L
+        /** One provider load (AndroidRuntimeClient.loadProfile: 30 s) plus one operation. */
+        private const val REPLAY_BUDGET_MS=30_000L+OPERATION_BUDGET_MS
         fun digest(value: String)=digest(value.toByteArray())
         fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         fun packageId(repository: String,internalName: String)="cs3_"+digest(repository+"\u0000"+internalName).take(32)

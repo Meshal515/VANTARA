@@ -53,7 +53,7 @@ const navItem = (page, icon, label) =>
  * قسم في المبدّل: طبقة تملأ كبسولتها وتنزلق فوق أزرارها عند الفتح (الحركة في dock.js).
  */
 const dockOption = (id, word, label) =>
-  `<button class="dock-opt" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" inert data-act="pickSection" data-arg="${id}" aria-label="${label}">` +
+  `<button class="dock-opt" id="secOpt-${id}" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" inert data-act="pickSection" data-arg="${id}" aria-label="${label}">` +
   `<span class="dock-opt-label"><b dir="ltr">${word}</b><small>${label}</small></span></button>`;
 
 export const SHELL_HTML = `<div class="app">
@@ -258,6 +258,7 @@ export const SHELL_HTML = `<div class="app">
 
   <div class="dock-scrim" id="dockScrim" data-act="toggleSections" hidden></div>
   <nav class="bottom-nav dock" id="bottomNav" aria-label="التنقّل الرئيسي">
+    <div class="dock-group" role="radiogroup" aria-label="أقسام VANTARA" aria-owns="secOpt-manga secOpt-anime secOpt-cinema"></div>
     <div class="dock-cap dock-cap--nav">
       <div class="cap-body"><span class="cap-ind" aria-hidden="true"></span>${navItem('home', 'home', 'الرئيسية')}${navItem('discover', 'compass', 'اكتشف')}</div>
       ${dockOption('manga', 'MANGA', 'مانجا')}

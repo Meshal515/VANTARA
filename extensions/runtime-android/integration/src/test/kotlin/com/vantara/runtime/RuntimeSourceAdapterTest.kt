@@ -81,6 +81,18 @@ class RuntimeSourceAdapterTest {
         assertEquals(listOf("film-links"),movie.episodes(work).map { it.url })
         assertEquals(listOf("details"),calls)
     }
+    @Test fun aRefreshAfterTheFirstEpisodesListAsksTheProviderAgain()=runBlocking {
+        val calls=mutableListOf<String>()
+        val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->
+            calls+=operation
+            if(operation=="details") objectOf("""{"item":{"name":"Work","url":"https://source.example/work","episodes":[{"data":"one","episode":1}]}}""")
+            else objectOf("""{"items":[{"data":"one","episode":1},{"data":"two","episode":2}]}""")
+        }
+        adapter.details(work)
+        assertEquals(1,adapter.episodes(work).size)
+        assertEquals("a newly published episode appears on refresh",2,adapter.episodes(work).size)
+        assertEquals(listOf("details","episodes"),calls)
+    }
     @Test fun episodesWithoutRecentDetailsStillAskTheProvider()=runBlocking {
         val calls=mutableListOf<String>()
         val adapter=RuntimeSourceAdapter(id,"Source") { operation,_->calls+=operation;objectOf("""{"items":[{"data":"one","episode":1}]}""") }

@@ -919,8 +919,13 @@ class AnimeEngine(context: Context) {
         const val PREPARE_TIMEOUT_MS = 90_000L
         /** البحث المتدفق: لا ينتظر أحدٌ هذه المهل، فهي سقف للمصدر وحده لا للشاشة. */
         const val STREAM_SEARCH_TIMEOUT_MS = 12_000L
-        /** CloudStream sources: one isolated-worker start plus the site, as in [RuntimeHost]'s operation budget. */
-        const val RUNTIME_SEARCH_TIMEOUT_MS = 30_000L
+        /**
+         * CloudStream sources: the whole path, not the operation alone: a cold isolated-worker start, the provider
+         * load (≤30 s) and the search operation (≤30 s). 30 s matched only the operation and cut a cold, slow
+         * device off mid-load, recording the timeout against the source (code review, 6 Nov). Search streams, so
+         * no screen waits on this ceiling.
+         */
+        const val RUNTIME_SEARCH_TIMEOUT_MS = 60_000L
         const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
         const val STREAM_LOAD_TIMEOUT_MS = 25_000L
         /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */

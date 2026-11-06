@@ -41,13 +41,18 @@ class VerificationActivity : Activity() {
     private var completed = false
     private var resumed = false
     private var navigations = 0
+    /** Same-site host the challenge moved to (e.g. www → ww3); its host-only cf_clearance counts too. */
+    private var landed: String? = null
+    private fun clearanceNow(origin: String): String? =
+        VerificationPolicy.clearance(selectedCookies?.getCookie("$origin/"))
+            ?: landed?.takeIf { it != origin }?.let { VerificationPolicy.clearance(selectedCookies?.getCookie("$it/")) }
     private var deadline = 0L
     private val timeout = Runnable { complete("failed", "timeout") }
     private val poll = object : Runnable {
         override fun run() {
             if (completed || !resumed) return
             val current = endpoint ?: return
-            val clearance = VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin + "/"))
+            val clearance = clearanceNow(current.origin)
             if (clearance != null && clearance != initialClearance) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
@@ -107,7 +112,7 @@ class VerificationActivity : Activity() {
             setOnClickListener {
                 // A previously valid cookie may be unchanged. Only an explicit
                 // click may submit it; the host still replays and validates the source request.
-                val value=VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin+"/"))
+                val value=clearanceNow(current.origin)
                 if(value!=null)complete("verified",null,value)
             }
         })
@@ -158,6 +163,7 @@ class VerificationActivity : Activity() {
                 override fun onPageStarted(view: WebView, url: String?, icon: android.graphics.Bitmap?) {
                     val target = VerificationPolicy.endpoint(url.orEmpty())
                     if (target == null || !VerificationPolicy.sameSite(current, target)) complete("failed", "navigation_blocked")
+                    else if (target.host != current.host) landed = target.origin
                 }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     handler.cancel(); complete("failed", "tls_error")

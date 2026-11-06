@@ -141,6 +141,9 @@ internal fun pageTitle(html: String?): String? =
  *     جديدًا مقبولًا صار هو النشط (ويُبلَّغ [onDomain] لتسجيله في الصحة)،
  *     وإن كان غريبًا مرّت الصفحة للإضافة كما في Aniyomi دون أن يصير نشطًا، وبُلّغ [onForeign].
  */
+/** Set on a response that arrived from an unproven foreign host (the page reaches the extension as in Aniyomi). */
+const val FOREIGN_HOST_HEADER = "X-Vantara-Foreign-Host"
+
 class DomainInterceptor(
     private val plan: DomainPlan,
     private val onDomain: (String) -> Unit = {},
@@ -185,7 +188,8 @@ class DomainInterceptor(
                 // extension's own parser, which is the site's fault, not VANTARA's. What stays VANTARA's is the
                 // routing: an unproven host never becomes this source's active domain.
                 onForeign(ForeignRedirectException(request.url.host, finalUrl.host, pageTitle(html)))
-                response
+                // Marked so the router does not record a parked page as this source being healthy.
+                response.newBuilder().header(FOREIGN_HOST_HEADER, finalUrl.host).build()
             }
             DomainPolicy.Verdict.SAME -> response
             else -> {

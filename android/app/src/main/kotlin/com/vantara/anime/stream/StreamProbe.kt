@@ -27,7 +27,11 @@ object StreamProbe {
         var first = client.newCall(request(c, range = true)).execute().use { inspect(c, it, range = true) }
         if (first.result == Result.RETRY_WITHOUT_RANGE) first = client.newCall(request(c, range = false)).execute().use { inspect(c, it, range = false) }
         if (first.result != Result.ACCEPT) return false
-        return hlsPlayable(c, first) { url, limit, playlist -> client.newCall(follow(c, url, limit)).execute().use { fetched(it, limit, playlist) } }
+        return hlsPlayable(c, first) { url, limit, playlist ->
+            val ranged = client.newCall(follow(c, url, limit, range = true)).execute().use { ranged(it, limit, playlist) }
+            if (ranged !== RANGE_REFUSED) ranged
+            else client.newCall(follow(c, url, limit, range = false)).execute().use { fetched(it, limit, playlist) }
+        }
     }
 
     /** Cancellation cancels the physical call, including a read stalled after response headers. */
@@ -41,10 +45,18 @@ object StreamProbe {
     /** One hop of the HLS walk: [playlist] reads text, otherwise the segment's leading bytes. Null = unreachable. */
     private class Hop(val url: String, val text: String?, val bytes: ByteArray?)
 
-    private fun follow(c: Candidate, url: String, limit: Long): Request = Request.Builder().url(url).apply {
+    private fun follow(c: Candidate, url: String, limit: Long, range: Boolean = true): Request = Request.Builder().url(url).apply {
         for ((key, value) in c.headers) runCatching { header(key, value) }
-        header("Range", "bytes=0-${limit - 1}")
+        if (range) header("Range", "bytes=0-${limit - 1}")
     }.build()
+
+    /**
+     * A server that refuses byte ranges (416 / 501) on a variant or segment still plays without one, as the
+     * first request already allows (RETRY_WITHOUT_RANGE). Its refusal is not evidence against the stream.
+     */
+    private val RANGE_REFUSED = Hop("", null, null)
+    private fun ranged(response: Response, limit: Long, playlist: Boolean): Hop? =
+        if (response.code == 416 || response.code == 501) RANGE_REFUSED else fetched(response, limit, playlist)
 
     private fun fetched(response: Response, limit: Long, playlist: Boolean): Hop? {
         if (response.code !in 200..299) return null
@@ -71,7 +83,8 @@ object StreamProbe {
         val gif = text.startsWith("GIF8")
         if (png || jpeg || gif) return false
         if (encrypted) return true // AES-128 ciphertext has no signature; reachable 2xx bytes are the evidence
-        val ts = head[0] == 0x47.toByte() && (head.size < 189 || head[188] == 0x47.toByte())
+        // As the player's TS extractor sniffs: a sync byte within the first packet, repeated one packet later.
+        val ts = (0 until minOf(188, head.size)).any { i -> head[i] == 0x47.toByte() && (i + 188 >= head.size || head[i + 188] == 0x47.toByte()) }
         val box = head.size >= 8 && String(head, 4, 4, Charsets.ISO_8859_1) in setOf("ftyp", "styp", "moof", "sidx", "emsg", "prft", "moov")
         val id3 = text.startsWith("ID3")
         val adts = head.size >= 2 && head[0] == 0xFF.toByte() && (head[1].toInt() and 0xF0) == 0xF0
@@ -111,7 +124,10 @@ object StreamProbe {
             val need = missing ?: return verdict
             if (need == pending) return verdict // already fetched as unreachable
             pending = need
-            hops[need.first] = fetchCancellable(client, follow(c, need.first, need.second.first)) { fetched(it, need.second.first, need.second.second) }
+            val (url, spec) = need
+            val first = fetchCancellable(client, follow(c, url, spec.first, range = true)) { ranged(it, spec.first, spec.second) }
+            hops[url] = if (first !== RANGE_REFUSED) first
+                else fetchCancellable(client, follow(c, url, spec.first, range = false)) { fetched(it, spec.first, spec.second) }
         }
     }
 

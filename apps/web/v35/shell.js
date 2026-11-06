@@ -3709,7 +3709,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
       b.onclick = () => {
         closeDrawer();
-        pickSection(null, b);
+        selectSection(b.dataset.arg);
       };
       sections.append(b);
     }
@@ -5282,7 +5282,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       onSettle: (shown, from) => {
         // سحب أُلغي: الهوية ترجع للقسم الظاهر
         if (root.dataset.section !== shown) applySection(shown);
-        if (shown !== from) idle(() => renderSection(shown));
+        // لا إعادة رسم بعد التبديل: القسم جاهز بمحتواه، وتحديث بياناته يصل من مساراته (المزامنة)
       },
     }));
   // بعد أن يُسلَّم الإطار الأول للمركّب: هنا يجري العمل الثقيل دون أن يؤخر بدء الحركة
@@ -5314,7 +5314,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const fresh = !warmed.has(id);
     if (fresh) renderSection(id); // أول زيارة: المحتوى يجب أن يدخل مع طبقته
     run(motion);
-    afterFirstFrame(() => applySection(id, { keepLabel: true }));
+    // الهوية بعد الإطار الأول، وفقط إن بقيت الحركة متجهة لهذا القسم (سحب أُلغي قبلها لا يلبّسه هويته)
+    afterFirstFrame(() => {
+      if (motion.moving ? motion.target === id : motion.section === id) applySection(id, { keepLabel: true });
+    });
   }
   /** خارج الرئيسية: لا حركة طبقات، القسم والصفحة مباشرة. */
   function enterSection(id) {
@@ -5322,6 +5325,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     renderSection(id);
   }
   let standbyTimer = 0;
+  const sleepSoon = (ms) => {
+    clearTimeout(standbyTimer);
+    standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, ms);
+  };
   const dock = () =>
     (dockCtl ??= createDock({
       bar: q('bottomNav'),
@@ -5331,11 +5338,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         clearTimeout(standbyTimer);
         prepareSections();
       },
-      onClose: () => {
-        // أُغلق بلا اختيار: الأقسام المجهّزة ترجع لنومها بعد هدوء الحركة
-        clearTimeout(standbyTimer);
-        standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 600);
-      },
+      // أُغلق بلا اختيار: الأقسام المجهّزة ترجع لنومها بعد هدوء الحركة
+      onClose: () => sleepSoon(600),
       onNavigate: (page) => navTo(page),
       onDragStart: (to) => {
         if (currentPage() !== 'home' || !SECTIONS[to]?.ready) return;
@@ -5345,14 +5349,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (currentPage() === 'home' && layers?.moving) layers.drag(to, p);
       },
       onDragEnd: (to, commit) => {
-        if (!to) {
-          // لمسة بلا سحب: تُفتح المبدّل غالبًا؛ وإلا تنام الأقسام بعد قليل
-          clearTimeout(standbyTimer);
-          standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 1500);
-          return;
-        }
+        // لمسة بلا سحب: تفتح المبدّل غالبًا؛ وإلا تنام الأقسام بعد قليل
+        if (!to) return sleepSoon(1500);
         if (currentPage() !== 'home') {
-          if (commit) pickSection(null, { dataset: { arg: to } });
+          if (commit) selectSection(to);
           return;
         }
         if (!layers?.moving) return;
@@ -5391,8 +5391,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     document.documentElement.style.background = black ?? (accentOf(s.id) ? 'var(--bg)' : s.theme);
     paintRail();
   }
-  function pickSection(_e, t) {
-    const id = t.dataset.arg;
+  const pickSection = (_e, t) => selectSection(t.dataset.arg);
+  /** اختر قسمًا (المبدّل أو الدرج أو السحب): الطبقات في الرئيسية، ومباشرة من غيرها. */
+  function selectSection(id) {
     if (!SECTIONS[id]?.ready) {
       toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
       return;
@@ -5898,6 +5899,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   showHome(startSection);
   dock().activate(currentPage());
   warmed.add(startSection);
+  // الأقسام الثلاثة جاهزة قبل أول تبديل: تُرسم مرة في وقت فراغ بعد الإقلاع، ثم التبديل حركة طبقة فقط
+  setTimeout(() => idle(() => { for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id)) renderSection(id); }), 2500);
   if (startSection === 'anime') anime.show();
   if (startSection === 'cinema') cinema.show();
 

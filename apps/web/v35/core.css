@@ -389,6 +389,21 @@ html,
   direction: ltr;
 }
 
+/* هوية صفحة الإضافة (source-home.js) ما زالت بصنف brand-switch: تبقى بلا زر ولا تبديل */
+.v35 .brand-switch {
+  pointer-events: auto;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 4px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  direction: ltr;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* الشعار: VANTARA وتحته اسم القسم، في المنتصف بصريًا. لم يعد زرًا: التبديل في الشريط.
  * التباعد بين الحروف يترك فراغًا بعد آخر حرف، فيُسحب بمقداره ليتوسّط فعلًا. */
 .v35 .brand-lockup {
@@ -723,6 +738,12 @@ html,
   touch-action: none; /* سحب الدائرة لا يصير تمريرًا للصفحة */
   user-select: none;
 }
+.v35 .dock-group {
+  position: absolute; /* مجموعة الأقسام لقارئ الشاشة فقط؛ لا مكان لها في صف الكبسولات */
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
 .v35 .dock[hidden] {
   display: none;
 }
@@ -1009,7 +1030,9 @@ html,
   position: absolute;
   inset-inline: 0;
   top: var(--layer-top, 0px);
-  min-height: calc(100vh - var(--layer-top, 0px));
+  height: calc(100vh - var(--layer-top, 0px));
+  overflow: hidden; /* طبقة بحجم الشاشة: صورة صغيرة يحرّكها المركّب بلا إعادة رسم */
+  contain: layout paint;
   background: var(--bg);
   pointer-events: none;
   will-change: transform;
@@ -1018,6 +1041,9 @@ html,
 /* مجهّزة قبل الاختيار: مبنية ومرسومة التخطيط لكن غير مرئية ولا تلمس */
 .v35 #home.layer-ready {
   position: relative;
+}
+.v35 #home > .home-view.layer-standby[hidden] {
+  display: block !important;
 }
 .v35 #home > .home-view.layer-standby {
   position: absolute;
@@ -1032,16 +1058,6 @@ html,
   inset: 0;
   z-index: 60;
   background: #000;
-  opacity: 0;
-  pointer-events: none;
-}
-.v35 .layer-edge {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -28px;
-  width: 28px;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0));
   opacity: 0;
   pointer-events: none;
 }

@@ -11,8 +11,11 @@
  */
 
 export const ORDER = ['manga', 'anime', 'cinema'];
+/** اسم القسم بالعربية لقارئ الشاشة (sections.js محمي بحارس النطاق، فلا يُضاف إليه). */
+const AR_NAMES = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' };
 // خفيف لا ثقيل: إزاحة وتعتيم قليلان، بلا ظل حافة، ومدد أقصر (رأي المالك: «ثقيل و3D»)
-export const T = { open: 240, close: 200, enter: 300, exit: 260, travel: 380, reduced: 120 };
+// الأقسام: 420 صعودًا و380 نزولًا (رأي المالك: أسرع من أن تُرى)
+export const T = { open: 240, close: 200, enter: 420, exit: 380, travel: 380, reduced: 120 };
 export const SHIFT = 8;
 export const DIM = 0.18;
 
@@ -48,8 +51,6 @@ export function bezier(x1, y1, x2, y2) {
 }
 export const easeOut = bezier(0.16, 1, 0.3, 1);
 export const easeInOut = bezier(0.4, 0, 0.2, 1);
-/** انتقال الدائرة: انطلاقة حيّة وهبوط طويل ناعم بلا ارتداد. */
-export const easeTravel = bezier(0.32, 0.72, 0, 1);
 const linear = (x) => x;
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const rank = (id) => ORDER.indexOf(id);
@@ -78,7 +79,6 @@ export function layerFrame(cover) {
     out[id] = {
       x: -(1 - c) * 100 + SHIFT * above,
       dim: DIM * above,
-      edge: 0,
       z: i + 1,
     };
   });
@@ -106,28 +106,6 @@ export function settledSection(cover) {
   return ORDER.filter((id) => (cover[id] ?? 0) >= 1).pop() ?? ORDER.find((id) => id in cover);
 }
 
-/** هندسة المبدّل: مربعات 10px في المنتصف، وثلاثة أزرار بعرض الشريط عند الفتح (من اليمين). */
-export function optionRects(width, height, centerX, p) {
-  const e = clamp(p);
-  // الشريط 56: الأزرار 44 بهامش 6 من كل جهة (مقاس الشريط المرجعي)
-  const sq = 10, gap = 5, pad = 6, between = 6, tall = 44;
-  const pw = (width - 2 * pad - 2 * between) / 3;
-  return ORDER.map((id, i) => {
-    const compactLeft = centerX + (1 - i) * (sq + gap) - sq / 2;
-    const openLeft = width - pad - pw - i * (pw + between);
-    const w = sq + (pw - sq) * e;
-    const h = sq + (tall - sq) * e;
-    return {
-      id,
-      left: compactLeft + (openLeft - compactLeft) * e,
-      top: (height - h) / 2,
-      width: w,
-      height: h,
-      radius: 3 + (tall / 2 - 3) * e,
-      label: clamp((e - 0.55) / 0.45),
-    };
-  });
-}
 
 /**
  * فيزياء الحبّة الزجاجية: نابض بكتلة وسرعة (لا منحنى ثابت). يبدأ من موضع وسرعة
@@ -216,7 +194,7 @@ export function haptic(kind = 'light') {
 export const isReduced = () =>
   globalThis.document?.documentElement?.dataset?.motion === 'off' ||
   (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', travel: 'cubic-bezier(0.32, 0.72, 0, 1)', linear: 'linear' };
+const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;
 
@@ -296,7 +274,6 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   const fade = label ?? null;
 
   const dimOf = (v) => v.querySelector(':scope > .layer-dim');
-  const edgeOf = (v) => v.querySelector(':scope > .layer-edge');
 
   /** خصائص كل عنصر عند تقدّم e من start إلى goal. */
   const frameAt = (e) => {
@@ -312,8 +289,6 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
         out.set(views[id], { transform: `translate3d(${f.x.toFixed(3)}%,${offsets[id] ?? 0}px,0)`, opacity: '1' });
         const dim = dimOf(views[id]);
         if (dim) out.set(dim, { opacity: f.dim.toFixed(3) });
-        const edge = edgeOf(views[id]);
-        if (edge) out.set(edge, { opacity: f.edge.toFixed(3) });
       }
     }
     if (fade) for (const [el, s] of fade.frame(wordOf(words.from), wordOf(words.to), e)) out.set(el, s);
@@ -333,10 +308,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       const dim = document.createElement('div');
       dim.className = 'layer-dim';
       dim.setAttribute('aria-hidden', 'true');
-      const edge = document.createElement('div');
-      edge.className = 'layer-edge';
-      edge.setAttribute('aria-hidden', 'true');
-      v.append(dim, edge);
+      v.append(dim);
     }
   };
   const order = () => {
@@ -344,25 +316,30 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     ids.forEach((id, i) => (views[id].style.zIndex = String(i + 1)));
   };
 
+  /**
+   * الطبقات بارتفاع الشاشة لا بطول الصفحة: طبقة بآلاف البكسلات يرسمها كرت الشاشة صورة ضخمة
+   * لكل إطار (إطار واحد في الثانية على الجهاز). موضع القارئ يُحفظ داخل طبقته (scrollTop)،
+   * ويُستعاد للصفحة إن رجع للقسم نفسه.
+   */
+  let savedScroll = 0;
   const enterLayering = () => {
     const top = views[section].offsetTop || 0;
     const scrollY = globalThis.scrollY || 0;
-    host.style.minHeight = `${Math.max(host.offsetHeight || 0, globalThis.innerHeight || 0)}px`;
+    savedScroll = scrollY;
+    host.style.minHeight = `${globalThis.innerHeight || 0}px`;
     host.style.setProperty('--layer-top', `${top}px`);
     host.classList.add('layering');
-    offsets = scrollY > 0 ? { [section]: -scrollY } : {};
-    if (scrollY > 0) globalThis.scrollTo?.({ top: 0, behavior: 'instant' });
+    offsets = {};
+    if (scrollY > 0) {
+      globalThis.scrollTo?.({ top: 0, behavior: 'instant' });
+      views[section].scrollTop = Math.max(0, scrollY - top);
+    }
   };
 
   const dropStandby = () => {
     if (!standby) return;
     standby = false;
-    for (const [id, v] of Object.entries(views)) {
-      if (v.classList.contains('layer-standby')) {
-        v.classList.remove('layer-standby');
-        if (id !== section) v.hidden = true;
-      }
-    }
+    for (const v of Object.values(views)) v.classList.remove('layer-standby');
     if (!cover) host.classList.remove('layer-ready');
   };
 
@@ -371,10 +348,11 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     for (const [id, v] of Object.entries(views)) {
       v.hidden = id !== shown;
       v.classList.remove('layer-standby');
+      v.scrollTop = 0;
       v.style.transform = '';
       v.style.zIndex = '';
       v.style.opacity = '';
-      v.querySelectorAll(':scope > .layer-dim, :scope > .layer-edge').forEach((n) => n.remove());
+      v.querySelectorAll(':scope > .layer-dim').forEach((n) => n.remove());
     }
     standby = false;
     host.classList.remove('layering', 'layer-ready');
@@ -385,6 +363,9 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     cover = start = goal = motion = words = null;
     offsets = {};
     fade?.rest(wordOf(shown));
+    // رجع للقسم نفسه (سحب أُلغي أو اختيار عُكس): يعود القارئ لموضعه
+    if (shown === from && savedScroll > 0) globalThis.scrollTo?.({ top: savedScroll, behavior: 'instant' });
+    savedScroll = 0;
     onSettle?.(shown, from);
   };
 
@@ -435,6 +416,8 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   return {
     get section() { return section; },
     get moving() { return Boolean(cover); },
+    /** القسم الذي تتجه إليه الحركة الجارية (أو null). */
+    get target() { return words?.to ?? null; },
     /**
      * جهّز الأقسام الأخرى قبل الاختيار (عند فتح المبدّل أو لمسه): تُبنى وتُرسم وهي مخفية
      * خارج الشاشة، فلا يدفع الانتقال كلفة أول رسم في إطاره الأول.
@@ -444,10 +427,10 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       standby = true;
       host.classList.add('layer-ready');
       host.style.setProperty('--layer-top', `${views[section].offsetTop || 0}px`);
+      // تبقى hidden في نظر بقية الكود (البانر لا يدور، والتحميل لا يظن أنها ظاهرة)؛ CSS يخطّطها
       for (const [id, v] of Object.entries(views)) {
         if (id === section) continue;
         v.classList.add('layer-standby');
-        v.hidden = false;
       }
     },
     /** لم يُختر شيء: أعِد الأقسام المجهّزة لنومها. */
@@ -552,7 +535,6 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const capOf = (page) => caps.find((c) => c.querySelector(`.nav[data-page="${page}"]`)) ?? null;
   const indOf = (cap) => cap?.querySelector('.cap-ind') ?? null;
   let open = false, section = current, dragged = false, activePage = null;
-  let layerAnims = [];
   const indState = new Map(); // cap → { x, anims, path, start }
 
   const anim = (el, keys, opts) => (typeof el?.animate === 'function' ? el.animate(keys, opts) : null);
@@ -671,8 +653,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     }
     for (const s of squares) s.classList.toggle('current', s.dataset.arg === section);
     bar.dataset.section = section;
-    const word = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[section] ?? section;
-    sw.setAttribute('aria-label', `القسم الحالي: ${word}. بدّل القسم`);
+    sw.setAttribute('aria-label', `القسم الحالي: ${AR_NAMES[section] ?? section}. بدّل القسم`);
   };
   /** إطار المبدّل عند تقدّم e (0 مغلق، 1 مفتوح)؛ اتجاه كل طبقة من المنتصف للخارج. */
   const switchFrame = (e) => {
@@ -810,6 +791,13 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     bar.classList.remove('scrubbing');
     const slots = [...s.cap.querySelectorAll('.nav')];
     for (const n of slots) n.classList.remove('near');
+    if (e.type === 'pointercancel') {
+      // إيماءة قطعها النظام: لا تنقّل، والدائرة ترجع لمكانها، ولا تُبتلع اللمسة التالية
+      scrubbed = false;
+      const nav = navs.find((n) => n.dataset.page === activePage);
+      if (nav) slide(s.cap, slotCenter(nav));
+      return;
+    }
     const v = s.v ?? 0;
     const x = (stateOf(s.cap).x ?? 0) + (Math.abs(v) > 1.1 ? v * 40 : 0);
     const target = slots.reduce((a, b) => (Math.abs(slotCenter(b) - x) < Math.abs(slotCenter(a) - x) ? b : a));
@@ -859,6 +847,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     const d = drag;
     drag = null;
     if (!d.to) return onDragEnd?.(null, false);
+    if (e.type === 'pointercancel') dragged = false; // لا نقرة تتبعها: لا تُبتلع اللمسة التالية
     const [t0, x0] = d.track[0] ?? [d.t, 0];
     const [t1, x1] = d.track[d.track.length - 1] ?? [e.timeStamp, 0];
     const v = t1 > t0 ? ((x1 - x0) * d.dir) / (t1 - t0) : 0;

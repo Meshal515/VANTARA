@@ -112,6 +112,19 @@ class StreamProbeTest {
         }
     }
 
+    @Test fun aSegmentServerThatRefusesRangesIsAskedAgainWithoutOneAsThePlayerWould() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:6.0,\nseg0.ts\n"))
+            server.enqueue(MockResponse().setResponseCode(416))
+            server.enqueue(MockResponse().setBody(Buffer().write(ts)))
+            assertTrue(runBlocking { StreamProbe.checkCancellable(OkHttpClient(), candidate(server.url("/m.m3u8").toString(), Container.HLS)) })
+            server.takeRequest()
+            assertEquals("bytes=0-1023", server.takeRequest().getHeader("Range"))
+            assertNull("the retry carries no Range", server.takeRequest().getHeader("Range"))
+        }
+    }
+
     @Test fun hlsWithoutFollowableUrisKeepsThePlaylistVerdict() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXT-X-VERSION:3\n")); server.start()
@@ -125,6 +138,9 @@ class StreamProbeTest {
         assertTrue(StreamProbe.segmentLooksPlayable(byteArrayOf(0, 0, 0, 24) + "styp".toByteArray(), false))
         assertTrue(StreamProbe.segmentLooksPlayable("ID3\u0004".toByteArray(), false))
         assertFalse(StreamProbe.segmentLooksPlayable("{\"error\":1}".toByteArray(), false))
+        // The player's TS extractor finds the sync byte anywhere in the first packet
+        assertTrue("TS after a few padding bytes", StreamProbe.segmentLooksPlayable(byteArrayOf(0, 0, 0) + ts, false))
+        assertFalse("no repeated sync one packet later", StreamProbe.segmentLooksPlayable(byteArrayOf(0x47) + ByteArray(400) { 1 }, false))
         assertFalse(StreamProbe.segmentLooksPlayable(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0), true))
         assertEquals("https://cdn.example/a/b/seg.ts", StreamProbe.firstUri("#EXTM3U\n#EXTINF:4,\nseg.ts", "https://cdn.example/a/b/index.m3u8", "#EXTINF"))
     }

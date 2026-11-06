@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, optionRects, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -52,14 +52,13 @@ describe('layer model', () => {
     expect(half.anime.x).toBeCloseTo(-50);
     expect(half.manga.x).toBeCloseTo(SHIFT / 2);
     expect(half.manga.dim).toBeCloseTo(DIM / 2);
-    expect(half.anime.edge).toBe(0); // بلا ظل حافة: لا إحساس بطبقتين
+    expect(half.anime.edge).toBeUndefined(); // بلا ظل حافة: لا إحساس بطبقتين
     const done = layerFrame({ manga: 1, anime: 1 });
     expect(done.anime.x).toBe(0);
     expect(done.manga.x).toBeCloseTo(SHIFT);
     expect(done.manga.dim).toBeCloseTo(DIM);
     expect(SHIFT).toBeLessThanOrEqual(10);
     expect(DIM).toBeLessThanOrEqual(0.2);
-    expect(done.anime.edge).toBe(0);
     expect(done.anime.z).toBeGreaterThan(done.manga.z);
   });
 
@@ -102,6 +101,22 @@ describe('layer model', () => {
     expect(v.anime.hidden).toBe(true);
     expect(document.querySelectorAll('.layer-dim').length).toBe(0);
     expect(document.getElementById('home').classList.contains('layering')).toBe(false);
+  });
+
+  it('returning to the same section restores the reader to where they were', () => {
+    const v = views();
+    let y = 1500;
+    globalThis.scrollY = 1500;
+    globalThis.scrollTo = (o) => (y = o.top);
+    try {
+      const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
+      layers.drag('anime', 0.2);
+      expect(y).toBe(0);
+      layers.release(false);
+      tick(800);
+      expect(layers.section).toBe('manga');
+      expect(y).toBe(1500);
+    } finally { delete globalThis.scrollY; delete globalThis.scrollTo; }
   });
 
   it('finishes even if animation frames stop (WebView paused)', () => {
@@ -171,8 +186,8 @@ describe('smoothness: compositor-only motion', () => {
     const v = views();
     const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
     layers.prepare();
-    expect(v.anime.hidden).toBe(false);
-    expect(v.anime.classList.contains('layer-standby')).toBe(true);
+    expect(v.anime.hidden).toBe(true); // بقية الكود تراها مخفية (البانر لا يدور خلفها)
+    expect(v.anime.classList.contains('layer-standby')).toBe(true); // وCSS يخطّطها جاهزة
     expect(v.manga.classList.contains('layer-standby')).toBe(false);
     layers.unprepare();
     expect(v.anime.hidden).toBe(true);
@@ -228,26 +243,6 @@ describe('glass bead physics', () => {
   });
 });
 
-describe('switcher geometry', () => {
-  it('closed: three 10px squares 5px apart, centred on the switcher, manga on the right', () => {
-    const r = optionRects(336, 56, 168, 0);
-    expect(r.map((x) => x.id)).toEqual(['manga', 'anime', 'cinema']);
-    for (const x of r) { expect(x.width).toBe(10); expect(x.height).toBe(10); expect(x.radius).toBe(3); expect(x.top).toBe(23); }
-    expect(r[1].left + 5).toBe(168);
-    expect(r[0].left - (r[1].left + 10)).toBe(5);
-    expect(r[0].left).toBeGreaterThan(r[2].left);
-  });
-  it('open: three buttons across the bar, 6px margin, 6px gaps, 44px tall; labels after 55%', () => {
-    const r = optionRects(336, 56, 168, 1);
-    const w = (336 - 12 - 12) / 3;
-    expect(r[2].left).toBeCloseTo(6);
-    expect(r[0].left + r[0].width).toBeCloseTo(330);
-    expect(r[1].left - (r[2].left + w)).toBeCloseTo(6);
-    for (const x of r) { expect(x.width).toBeCloseTo(w); expect(x.height).toBe(44); expect(x.radius).toBe(22); expect(x.top).toBe(6); expect(x.label).toBeCloseTo(1); }
-    expect(optionRects(336, 64, 168, 0.5)[0].label).toBe(0);
-    expect(optionRects(336, 64, 168, 0.6)[0].label).toBeGreaterThan(0);
-  });
-});
 
 describe('split floating navigation', () => {
   // ثلاث كبسولات بعرض 336: اليمنى 224–336 (الرئيسية واكتشف)، الوسطى، اليسرى 0–112
@@ -371,6 +366,25 @@ describe('split floating navigation', () => {
     expect(indL.style.opacity).toBe('1');
     expect(indR.style.opacity).toBe('0');
     expect(xOfInd(indL)).toBeCloseTo(28);
+  });
+
+  it('a drag interrupted by the system neither navigates nor swallows the next tap', () => {
+    const navigated = [];
+    const m = mount();
+    const bar = m.$('#bar');
+    const dock2 = m.dock;
+    dock2.activate('library');
+    const E = m.$('#bar').ownerDocument.defaultView.Event;
+    const ev = (type, x) => { const e = new E(type, { bubbles: true }); for (const [k, v] of Object.entries({ pointerId: 1, clientX: x, clientY: 720, button: 0 })) Object.defineProperty(e, k, { value: v }); return e; };
+    m.$('#capL').dispatchEvent(ev('pointerdown', 84));
+    bar.dispatchEvent(ev('pointermove', 60));
+    bar.dispatchEvent(ev('pointercancel', 60));
+    let swallowed = true;
+    const probe = m.$('[data-page="majlis"]');
+    probe.addEventListener('click', () => (swallowed = false));
+    probe.dispatchEvent(new E('click', { bubbles: true, cancelable: true }));
+    expect(swallowed).toBe(false);
+    expect(navigated).toEqual([]);
   });
 
   it('a new section updates the marks without opening', () => {

@@ -215,6 +215,9 @@ object AnimeHostRouter : Interceptor {
             }
             val ms = (System.nanoTime() - started) / 1_000_000
             when {
+                // صفحة من دومين أجنبي غير مثبت: تصل للإضافة (كما في Aniyomi)، لكنها ليست دليل صحة
+                // المصدر ولا دليل عطله؛ الإضافة تحكم عليها، ولا يُحجب مصدر انتقل فعلًا
+                response.header(FOREIGN_HOST_HEADER) != null -> Unit
                 response.isSuccessful -> health?.ok(key, ms, route.domains.activeBase())
                 response.code == 404 -> Unit // صفحة غير موجودة ليست عطل مصدر
                 else -> health?.fail(key, "HTTP ${response.code} على $path")
