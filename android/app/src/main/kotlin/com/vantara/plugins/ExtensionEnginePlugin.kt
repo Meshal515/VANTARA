@@ -1341,11 +1341,21 @@ private class EngineModule(private val app: Application) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
         addSingleton<Application>(app)
         addSingletonFactory { NetworkHelper(app) }
-        addSingletonFactory {
-            Json {
-                ignoreUnknownKeys = true
-                explicitNulls = false
-            }
+        registerExtensionFormats()
+    }
+}
+
+/**
+ * The serialization formats Mihon/Aniyomi's AppModule hands to extensions. Extensions that speak protobuf APIs take
+ * ProtoBuf from Injekt in a static initializer; without it that class fails once and every later use is
+ * NoClassDefFoundError (Manga Million, Keiyoushi 1.6.3, source certification rounds 11–13).
+ */
+internal fun InjektRegistrar.registerExtensionFormats() {
+    addSingletonFactory {
+        Json {
+            ignoreUnknownKeys = true
+            explicitNulls = false
         }
     }
+    addSingletonFactory<kotlinx.serialization.protobuf.ProtoBuf> { kotlinx.serialization.protobuf.ProtoBuf }
 }
