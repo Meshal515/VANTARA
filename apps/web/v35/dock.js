@@ -196,49 +196,6 @@ export function haptic(kind = 'light') {
 export const isReduced = () =>
   globalThis.document?.documentElement?.dataset?.motion === 'off' ||
   (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-/**
- * تبديل القسم من صفحة غير الرئيسية (اكتشف، مكتبتي، الأصدقاء): الصفحة المغادرة تُثبَّت بحجم الشاشة وفي موضع
- * قارئها، ثم تنزلق بعيدًا بمدة الطبقات ومنحناها كاشفةً رئيسية القسم الجديد في مكانها. الطبقة المتحركة بحجم الشاشة
- * لا بطول الصفحة. تقليل الحركة: فوري.
- */
-// صفحات اكتشف/مكتبتي/الأصدقاء تكشف رئيسية القسم الجديد من تحتها: محرّك الطبقات نفسه
-// (drive + easeSwap) يحرك الصفحة المغادرة فقط إلى اليمين، بلا تحريك رئيسية ثانية.
-const pageExits = new WeakMap();
-export function exitPage(leave, scrollY = 0, { duration = T.exit } = {}) {
-  if (!leave || isReduced()) return null;
-  pageExits.get(leave)?.finish();
-  const previous = {
-    scrollTop: leave.scrollTop,
-    transform: leave.style.transform,
-    backgroundColor: leave.style.backgroundColor,
-  };
-  // الصفحة كانت تُمرّر عبر window. قبل تغيير الصفحة والهوية ثبّتها في موضع القارئ
-  // حتى لا تقفز إلى أول القائمة حين يعيد showPage نافذة WebView إلى الأعلى.
-  const css = globalThis.getComputedStyle?.(leave);
-  const appBg = globalThis.getComputedStyle?.(leave.closest('.app'))?.backgroundColor;
-  const color = css?.backgroundColor && css.backgroundColor !== 'rgba(0, 0, 0, 0)'
-    ? css.backgroundColor : appBg;
-  if (color && color !== 'rgba(0, 0, 0, 0)') leave.style.backgroundColor = color;
-  leave.classList.add('page-leaving');
-  leave.scrollTop = Math.max(0, scrollY);
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    leave.classList.remove('page-leaving');
-    leave.style.transform = previous.transform;
-    leave.style.backgroundColor = previous.backgroundColor;
-    leave.scrollTop = previous.scrollTop;
-    pageExits.delete(leave);
-  };
-  const motion = drive({
-    frameAt: (e) => new Map([[leave, { transform: `translate3d(${(100 * e).toFixed(3)}%,0,0)` }]]),
-    duration, ease: easeSwap, easing: cssEase.swap, done: cleanup,
-  });
-  if (motion.live) pageExits.set(leave, motion);
-  return motion;
-}
-
 const cssEase = { swap: 'cubic-bezier(0.32, 0, 0.24, 1)', out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;
@@ -316,6 +273,8 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   let start = null, goal = null, motion = null, words = null;
   let offsets = {};
   let standby = false;
+  let pageViews = null, restorePage = null, queued = null, pageDrag = null;
+  const viewOf = (id) => (pageViews ?? views)[id];
   const fade = label ?? null;
 
   const dimOf = (v) => v.querySelector(':scope > .layer-dim');
@@ -327,12 +286,12 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     for (const id of Object.keys(goal)) now[id] = start[id] + (goal[id] - start[id]) * e;
     if (reduced()) {
       for (const id of Object.keys(now)) {
-        out.set(views[id], { transform: `translate3d(0,${offsets[id] ?? 0}px,0)`, opacity: id === words.to ? String(e) : '1' });
+        out.set(viewOf(id), { transform: `translate3d(0,${offsets[id] ?? 0}px,0)`, opacity: id === words.to ? String(e) : '1' });
       }
     } else {
       for (const [id, f] of Object.entries(layerFrame(now))) {
-        out.set(views[id], { transform: `translate3d(${f.x.toFixed(3)}%,${offsets[id] ?? 0}px,0)`, opacity: '1' });
-        const dim = dimOf(views[id]);
+        out.set(viewOf(id), { transform: `translate3d(${f.x.toFixed(3)}%,${offsets[id] ?? 0}px,0)`, opacity: '1' });
+        const dim = dimOf(viewOf(id));
         if (dim) out.set(dim, { opacity: f.dim.toFixed(3) });
       }
     }
@@ -346,7 +305,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   };
 
   const mount = (id) => {
-    const v = views[id];
+    const v = viewOf(id);
     v.classList.remove('layer-standby');
     v.hidden = false;
     if (!dimOf(v)) {
@@ -358,7 +317,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   };
   const order = () => {
     const ids = ORDER.filter((id) => id in cover);
-    ids.forEach((id, i) => (views[id].style.zIndex = String(i + 1)));
+    ids.forEach((id, i) => (viewOf(id).style.zIndex = String(i + 1)));
   };
 
   /**
@@ -379,6 +338,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     return (header ? r.bottom : r.top) - h.top;
   };
   const enterLayering = () => {
+    if (pageViews) return;
     const top = topOf(views[section]);
     const scrollY = globalThis.scrollY || 0;
     savedScroll = scrollY;
@@ -411,6 +371,8 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       v.style.opacity = '';
       v.querySelectorAll(':scope > .layer-dim').forEach((n) => n.remove());
     }
+    restorePage?.();
+    restorePage = pageViews = null;
     standby = false;
     host.classList.remove('layering', 'layer-ready');
     host.style.removeProperty('min-height');
@@ -425,6 +387,9 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     if (back > 0) globalThis.scrollTo?.({ top: back, behavior: 'instant' });
     savedScroll = 0;
     onSettle?.(shown, from);
+    const next = queued;
+    queued = null;
+    if (next && next !== shown) api.go(next);
   };
 
   /** ثبّت هدفًا جديدًا من الموضع الحالي (توقف الحركة الجارية حيث هي). */
@@ -471,9 +436,9 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     if (m.live) motion = m;
   };
 
-  return {
+  const api = {
     get section() { return section; },
-    get moving() { return Boolean(cover); },
+    get moving() { return Boolean(cover || pageDrag); },
     /** القسم الذي تتجه إليه الحركة الجارية (أو null). */
     get target() { return words?.to ?? null; },
     /**
@@ -494,20 +459,54 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     /** لم يُختر شيء: أعِد الأقسام المجهّزة لنومها. */
     unprepare: () => dropStandby(),
     /** انتقل إلى قسم؛ مقاطعة الحركة الجارية تكمل من موضعها. */
-    go(to) {
+    go(to, { outgoing = null, scrollY = 0 } = {}) {
       if (!views[to]) return;
+      pageDrag = null;
+      // The same layer model owns this transition. Rapid choices keep only
+      // the latest destination; never snap the outgoing document away.
+      if (pageViews) { queued = to; return; }
+      if (outgoing && to !== section && !reduced()) {
+        const previous = { style: outgoing.getAttribute('style'), home: outgoing.getAttribute('data-home'), scroll: outgoing.scrollTop };
+        const css = globalThis.getComputedStyle?.(outgoing);
+        if (css) {
+          for (const name of css) if (name.startsWith('--')) outgoing.style.setProperty(name, css.getPropertyValue(name));
+          const color = css.backgroundColor === 'rgba(0, 0, 0, 0)'
+            ? globalThis.getComputedStyle(outgoing.closest('.app')).backgroundColor : css.backgroundColor;
+          outgoing.style.backgroundColor = color;
+        }
+        outgoing.dataset.home = section; // its content keeps the old section identity
+        outgoing.classList.add('page-leaving');
+        host.classList.add('section-page-layer');
+        outgoing.scrollTop = Math.max(0, scrollY);
+        pageViews = { [section]: outgoing, [to]: host };
+        restorePage = () => {
+          for (const node of [outgoing, host]) {
+            node.querySelectorAll(':scope > .layer-dim').forEach(n => n.remove());
+            node.style.transform = ''; node.style.zIndex = ''; node.style.opacity = '';
+          }
+          outgoing.classList.remove('page-leaving');
+          host.classList.remove('section-page-layer');
+          host.scrollTop = 0;
+          if (previous.style === null) outgoing.removeAttribute('style'); else outgoing.setAttribute('style', previous.style);
+          if (previous.home === null) delete outgoing.dataset.home; else outgoing.dataset.home = previous.home;
+          outgoing.scrollTop = previous.scroll;
+        };
+      }
       if (!cover && to === section) return dropStandby();
+      if (pageViews) mount(section);
       const topBefore = cover ? Math.max(...Object.keys(cover).map(rank)) : rank(section);
       aim(to);
       const up = rank(to) > topBefore || (rank(to) === topBefore && start[to] < 1);
       const delta = Math.max(...Object.keys(goal).map((id) => Math.abs(goal[id] - start[id])));
-      if (scrolls[to] != null) views[to].scrollTop = scrolls[to]; // القسم يدخل بموضع قارئه
+      if (pageViews) host.scrollTop = scrolls[to] ?? 0;
+      else if (scrolls[to] != null) views[to].scrollTop = scrolls[to]; // القسم يدخل بموضع قارئه
       run((up ? timing.enter ?? T.enter : timing.exit ?? T.exit) * Math.max(delta, 0.35), easeSwap, cssEase.swap);
       dropStandby();
     },
     /** سحب بالإصبع: يثبّت الهدف ثم يتبع التقدّم 0..1. */
     drag(to, p) {
       if (!views[to]) return;
+      if (pageViews || pageDrag) { pageDrag = to; return; }
       if (!words || words.to !== to || motion) aim(to);
       const e = clamp(p);
       words.e = e;
@@ -515,6 +514,11 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     },
     /** إفلات: يكمل للهدف، أو يرجع بلطف لما كان. */
     release(commit) {
+      if (pageDrag) {
+        const to = pageDrag; pageDrag = null;
+        if (commit) api.go(to);
+        return;
+      }
       if (!words) return dropStandby();
       const e = words.e;
       run(commit ? T.enter : T.exit, easeSwap, cssEase.swap, e, commit ? 1 : 0);
@@ -525,11 +529,13 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     },
     /** أنهِ فورًا (اختبارات، أو مغادرة الصفحة). */
     finish() {
+      queued = pageDrag = null;
       if (motion) motion.finish();
       else if (cover) settle();
       dropStandby();
     },
   };
+  return api;
 }
 
 /**

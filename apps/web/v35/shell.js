@@ -63,7 +63,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, pageIn } from './motion.js';
-import { createCrossfade, createDock, createLayers, exitPage, haptic } from './dock.js';
+import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -4198,14 +4198,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       window.scrollTo({ top, behavior: 'instant' });
     }, wait);
   }
-  function showPage(id, { push = true } = {}) {
+  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
       state.socialTab = 'notifications';
       id = 'majlis';
     }
     const from = currentPage();
-    if (from !== id) scrollOf.set(from, window.scrollY);
+    if (from !== id) scrollOf.set(from, sourceScroll);
     if(from === "utility" && id !== "utility"){sourceView?.pause?.();addonNavigation.cancel();}
     if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
     // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
@@ -4236,7 +4236,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
-    if (id === 'home' && root.dataset.section === 'manga') {
+    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch) {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
     }
@@ -5413,8 +5413,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintRail();
   }
   const pickSection = (_e, t) => selectSection(t.dataset.arg);
-  let pageExit = null;
-  /** اختر قسمًا (المبدّل أو الدرج أو السحب): الطبقات في الرئيسية، ومباشرة من غيرها. */
+  /** اختر قسمًا: الصفحة الظاهرة هي الطبقة الحالية، والوجهة دائمًا رئيسية القسم. */
   function selectSection(id) {
     if (!SECTIONS[id]?.ready) {
       toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
@@ -5422,16 +5421,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
-    if (pageExit?.live) pageExit.finish(); // ضغطة جديدة لا تتراكب مع خروج سابق
     if (currentPage() !== 'home') {
       const leave = root.querySelector('.page.active');
       const y = window.scrollY;
       setSectionsOpen(false);
       layers?.finish();
-      pageExit = exitPage(leave, y); // ثبّت الصفحة القديمة أولًا، قبل تغيير الرئيسية والتمرير
+      beginSection(id, motion => motion.go(id, { outgoing: leave, scrollY: y }));
       showHome(id);
-      showPage('home');
-      enterSection(id); // الرئيسية الجديدة مكشوفة خلف الصفحة المغادرة، بلا حركة ثانية
+      showPage('home', { sectionSwitch: true, sourceScroll: y });
       haptic();
       return;
     }

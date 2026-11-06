@@ -705,11 +705,13 @@
 /* ───────────────────────── البحث والاكتشاف ─────────────────────────
  * التصنيفات كلمات في إطار شعري لا حبوب ملوّنة، والرائج جدول مرقّم بلا صندوق. */
 
-.v35[data-section='manga'] .search-head h2 {
+.v35[data-section='manga'] .search-head h2:not([data-home] *),
+.v35 [data-home='manga'] .search-head h2 {
   font-size: 19px;
   font-weight: 800;
 }
-.v35[data-section='manga'] .search-genre {
+.v35[data-section='manga'] .search-genre:not([data-home] *),
+.v35 [data-home='manga'] .search-genre {
   min-height: 38px;
   padding: 0 14px;
   border-radius: var(--m-r);
@@ -718,36 +720,45 @@
   color: var(--text-1);
   font-weight: 650;
 }
-.v35[data-section='manga'] .search-genre:active {
+.v35[data-section='manga'] .search-genre:active:not([data-home] *),
+.v35 [data-home='manga'] .search-genre:active {
   background: var(--surface-2);
 }
-.v35[data-section='manga'] .search-chip {
+.v35[data-section='manga'] .search-chip:not([data-home] *),
+.v35 [data-home='manga'] .search-chip {
   border-radius: var(--m-r);
 }
-.v35[data-section='manga'] .search-trend {
+.v35[data-section='manga'] .search-trend:not([data-home] *),
+.v35 [data-home='manga'] .search-trend {
   border-radius: 0;
   background: none;
   box-shadow: none;
   border-top: 1px solid var(--line-strong);
 }
-.v35[data-section='manga'] .search-trend-row {
+.v35[data-section='manga'] .search-trend-row:not([data-home] *),
+.v35 [data-home='manga'] .search-trend-row {
   padding-inline: 0;
 }
-.v35[data-section='manga'] .search-trend-row + .search-trend-row::before {
+.v35[data-section='manga'] .search-trend-row + .search-trend-row:not([data-home] *)::before,
+.v35 [data-home='manga'] .search-trend-row + .search-trend-row::before {
   inset-inline: 0;
 }
-.v35[data-section='manga'] .search-trend-rank {
+.v35[data-section='manga'] .search-trend-rank:not([data-home] *),
+.v35 [data-home='manga'] .search-trend-rank {
   width: 30px;
   font-size: 20px;
   color: var(--text-3);
 }
-.v35[data-section='manga'] .search-trend-row:nth-child(-n + 3) .search-trend-rank {
+.v35[data-section='manga'] .search-trend-row:nth-child(-n + 3) .search-trend-rank:not([data-home] *),
+.v35 [data-home='manga'] .search-trend-row:nth-child(-n + 3) .search-trend-rank {
   color: var(--paper);
 }
-.v35[data-section='manga'] .search-trend-cover {
+.v35[data-section='manga'] .search-trend-cover:not([data-home] *),
+.v35 [data-home='manga'] .search-trend-cover {
   border-radius: 3px;
 }
-.v35[data-section='manga'] .search-input {
+.v35[data-section='manga'] .search-input:not([data-home] *),
+.v35 [data-home='manga'] .search-input {
   border-radius: 6px;
 }
 

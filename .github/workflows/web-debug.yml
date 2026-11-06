@@ -56,6 +56,14 @@ jobs:
             --playwright-module "$RUNNER_TEMP/fast-ui/node_modules/playwright/index.mjs" \
             --chromium "$(command -v google-chrome || command -v chromium)"
 
+      - name: Section layer parity and first-frame scroll in the actual shell
+        env:
+          VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/fast-ui/node_modules/playwright/index.mjs
+          VANTARA_UI_EVIDENCE: ${{ runner.temp }}/section-motion-proof
+        run: |
+          export VANTARA_CHROMIUM="$(command -v google-chrome || command -v chromium)"
+          node tools/repository-compat/section-motion-ui.mjs "$GITHUB_WORKSPACE"
+
   deploy:
     needs: [fast-checks]
     # Preserve the existing web-engine/manual-ref behavior when this Debug-only gate is skipped.

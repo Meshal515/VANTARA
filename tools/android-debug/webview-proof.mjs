@@ -7,6 +7,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { observeWebViewTargets, assertLiveShellWebView, isAppShellTarget } from '../repository-compat/webview-lifecycle.mjs';
 
+import { sectionMotionProof } from '../repository-compat/section-motion-proof.mjs';
+
 const phase = process.argv[2];
 if (!['baseline', 'candidate', 'restart'].includes(phase)) throw new Error('Expected baseline/candidate/restart phase');
 const out = process.env.DEBUG_EVIDENCE || 'android-debug-evidence';
@@ -225,6 +227,11 @@ try {
     proof.navigationFixture = 'shipped Home/Addons shell; local anonymous sync; real native bridges';
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
+    proof.sectionMotion = await sectionMotionProof(evaluate, async name => {
+      const shot = await command('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(`${out}/${name}.png`, Buffer.from(shot.data, 'base64'));
+    });
+    console.log('Debug real WebView section motion:', JSON.stringify(proof.sectionMotion));
     // تشخيص فتح عمل أنمي على WebView الحقيقي (لا يُفشل البناء: يعتمد على شبكة AniList). المالك يلمس
     // غلافًا فلا تفتح صفحة العمل على الجهاز بينما تفتح في المتصفح؛ هذا يسجّل ما يحدث فعلًا هنا.
     try {

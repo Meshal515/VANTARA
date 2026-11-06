@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, exitPage, easeInOut, easeOut, easeSwap, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, easeSwap, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -176,38 +176,78 @@ describe('layer model', () => {
   });
 });
 
-describe('subpage → section home uses the section-motion engine', () => {
-  it('reveals the destination home by moving only the old page to the right, without a jump', () => {
-    const leave = document.createElement('section');
-    leave.className = 'page active';
-    leave.scrollTop = 16;
-    document.body.append(leave);
-    const calls = [];
-    leave.animate = (keys, opts) => {
-      calls.push({ keys, opts });
-      return { cancel() {}, set onfinish(fn) { this.done = fn; } };
-    };
-    const motion = exitPage(leave, 640);
-    expect(leave.classList.contains('page-leaving')).toBe(true);
-    expect(leave.scrollTop).toBe(640);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].opts.duration).toBe(T.exit);
-    expect(calls[0].opts.easing).toBe('cubic-bezier(0.32, 0, 0.24, 1)');
-    expect(calls[0].keys[0].transform).toBe('translate3d(0.000%,0,0)');
-    expect(calls[0].keys.at(-1).transform).toBe('translate3d(100.000%,0,0)');
-    motion.finish();
-    expect(leave.classList.contains('page-leaving')).toBe(false);
-    expect(leave.style.transform).toBe('');
-    expect(leave.scrollTop).toBe(16);
-  });
-  it('reducing motion skips the overlay completely', () => {
-    const leave = document.createElement('section');
-    document.body.append(leave);
-    document.documentElement.dataset.motion = 'off';
-    try {
-      expect(exitPage(leave, 700)).toBeNull();
+describe('subpages are the current layer in the existing section transition', () => {
+  for (const from of ORDER) for (const to of ORDER.filter(id => id !== from)) {
+    it(`${from} subpage → ${to} has exactly the Home layer frames`, () => {
+      const v = views(), host = document.getElementById('home');
+      const leave = document.createElement('section');
+      leave.className = 'page active'; leave.scrollTop = 16;
+      document.body.append(leave);
+      const controller = createLayers({ views: v, host, current: from });
+      controller.go(to, { outgoing: leave, scrollY: 640 });
+      expect(leave.classList.contains('page-leaving')).toBe(true);
+      expect(leave.dataset.home).toBe(from);
+      expect(leave.scrollTop).toBe(640);
+      tick(160);
+      const up = ORDER.indexOf(to) > ORDER.indexOf(from);
+      const e = easeSwap(160 / T.enter);
+      const expected = layerFrame({ [from]: 1 - (up ? 0 : e), [to]: up ? e : 1 });
+      expect(xOf(leave)).toBeCloseTo(expected[from].x, 2);
+      expect(xOf(host)).toBeCloseTo(expected[to].x, 2);
+      expect(leave.style.zIndex).toBe(String(expected[from].z));
+      expect(host.style.zIndex).toBe(String(expected[to].z));
+      tick(800);
+      expect(controller.section).toBe(to);
       expect(leave.classList.contains('page-leaving')).toBe(false);
-    } finally { delete document.documentElement.dataset.motion; }
+      expect(leave.scrollTop).toBe(16);
+      expect(leave.dataset.home).toBeUndefined();
+      expect(host.style.transform).toBe('');
+    });
+  }
+  it('coalesces rapid choices during the outgoing page without snapping it away', () => {
+    const v = views(), host = document.getElementById('home');
+    const leave = document.createElement('section'); document.body.append(leave);
+    const controller = createLayers({views:v, host, current:'manga'});
+    controller.go('cinema', {outgoing:leave}); tick(96);
+    const before = xOf(leave);
+    controller.go('anime'); controller.go('manga');
+    expect(xOf(leave)).toBe(before);
+    expect(leave.classList.contains('page-leaving')).toBe(true);
+    tick(1600);
+    expect(controller.section).toBe('manga');
+    expect(document.querySelector('.page-leaving')).toBeNull();
+  });
+  it('a third-section drag during departure waits for release and never dereferences a missing layer', () => {
+    const v=views(), host=document.getElementById('home'), leave=document.createElement('section');
+    document.body.append(leave);
+    const controller=createLayers({views:v,host,current:'manga'});
+    controller.go('anime',{outgoing:leave}); tick(80);
+    expect(()=>controller.drag('cinema',0.4)).not.toThrow();
+    tick(800); // transition can finish while the finger is still down
+    expect(controller.moving).toBe(true);
+    controller.release(true);tick(800);
+    expect(controller.section).toBe('cinema');
+    expect(v.cinema.hidden).toBe(false);
+    expect(document.querySelector('.page-leaving')).toBeNull();
+  });
+  it('canceling a drag or leaving the page discards deferred section choices', () => {
+    const v=views(), host=document.getElementById('home'), leave=document.createElement('section');
+    document.body.append(leave);
+    const controller=createLayers({views:v,host,current:'manga'});
+    controller.go('anime',{outgoing:leave}); tick(80);
+    controller.drag('cinema',0.4);controller.release(false);
+    controller.go('cinema');controller.finish();tick(1200);
+    expect(controller.section).toBe('anime');expect(controller.moving).toBe(false);
+  });
+  it('reduced motion settles immediately and leaves no viewport or scroll overrides', () => {
+    const v=views(), host=document.getElementById('home'), leave=document.createElement('section');
+    document.body.append(leave);
+    const controller=createLayers({views:v,host,current:'anime',reduced:()=>true});
+    controller.go('cinema',{outgoing:leave,scrollY:600});
+    expect(controller.section).toBe('cinema');
+    expect(controller.moving).toBe(false);
+    expect(leave.classList.contains('page-leaving')).toBe(false);
+    expect(host.classList.contains('section-page-layer')).toBe(false);
   });
 });
 
