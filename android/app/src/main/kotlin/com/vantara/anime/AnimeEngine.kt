@@ -333,7 +333,10 @@ class AnimeEngine(context: Context) {
         val now = System.currentTimeMillis()
         val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content }
         val ordered = health.rank(all, { it.priority }) { HealthStore.sourceKey(it.id) }
-        val (cold, live) = ordered.partition { coolingDown(it.id, now) }
+        // التبريد بعد فشل متتالٍ (مهلة، خطأ شبكة) لا يُسقط المصدر من بحث فتحه المستخدم بنفسه: يُسأل بعد
+        // السليمة فلا يؤخرها. مصادر CloudStream أكثر ما يتعثر هنا (عامل معزول يُشغَّل لكل طلب)، فكانت تغيب عن
+        // ورقة السيرفرات العامة حتى ساعة وهي تعمل من صفحتها. الذي يُتخطّى فقط: موقع حجبنا صراحةً (blocked).
+        val (cold, live) = searchOrder(ordered, { coolingDown(it.id, now) }) { health.get(HealthStore.sourceKey(it.id))?.blocked != null }
         for (s in cold) {
             onHit(SourceHit(s.id, emptyList(), 0, health.get(HealthStore.sourceKey(s.id))?.lastError ?: "في التبريد", skipped = true, needsHuman = needsHuman(s.id)))
         }
@@ -927,6 +930,16 @@ class AnimeEngine(context: Context) {
          */
         const val RUNTIME_SEARCH_TIMEOUT_MS = 60_000L
         const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
+
+        /**
+         * ترتيب البحث العام: (المتخطّى، المسؤول). السليمة أولًا ثم المبرَّدة بعد فشل متتالٍ؛ المتخطّى فقط ما حجبه
+         * موقعه صراحةً. الترتيب داخل كل مجموعة كما أعطته الصحة.
+         */
+        fun <T> searchOrder(ordered: List<T>, cooling: (T) -> Boolean, blocked: (T) -> Boolean): Pair<List<T>, List<T>> {
+            val (cool, healthy) = ordered.partition(cooling)
+            val (skip, retry) = cool.partition(blocked)
+            return skip to healthy + retry
+        }
         const val STREAM_LOAD_TIMEOUT_MS = 25_000L
         /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */
         const val BLOCKED_RETRY_MS = 30 * 60_000L
