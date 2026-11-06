@@ -50,11 +50,6 @@
   --dock-gap: 20px;
   --dock-side: 12px;
   --dock-space: calc(var(--nav-h) + var(--dock-gap) + var(--safe-bottom));
-  /* لون الهوية الموحّد للشريط والمبدّل والشعار (لا لون لكل قسم هنا) */
-  --id: #8f5cff;
-  --id-text: #bba2ff;
-  --id-soft: rgba(143, 92, 255, 0.14);
-  --id-line: rgba(143, 92, 255, 0.4);
   --top-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -411,7 +406,7 @@ html,
   line-height: 1;
   font-weight: 700;
   letter-spacing: 3.5px;
-  color: var(--id-text);
+  color: var(--accent-text);
   margin-right: -3.5px;
 }
 .v35 .brand-word {
@@ -471,7 +466,8 @@ html,
 }
 /* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
 .v35.native-android .dock {
-  background: rgba(24, 22, 31, 0.96);
+  background: rgba(11, 10, 14, 0.98);
+  background: color-mix(in srgb, var(--accent) 5%, rgba(11, 10, 14, 0.98));
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -714,8 +710,7 @@ html,
  * فوق اسمها. الهندسة المتحركة في dock.js. */
 
 .v35 .dock {
-  --dock-item: 46px;
-  --dock-active: 66px;
+  --dock-slot: 58px;
   position: fixed;
   z-index: 50;
   left: 50%;
@@ -729,12 +724,16 @@ html,
   display: flex;
   align-items: center;
   border-radius: 28px;
-  /* سطح أفتح بوضوح من الصفحة، وحد رفيع، وظل واسع ناعم تحته: منفصل عن المحتوى */
-  background: rgba(30, 28, 39, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* سطح محايد داكن أفتح من الصفحة، وفيه انعكاس خفيف فقط من لون القسم (المصمّم أو
+   * ما اختاره المستخدم)؛ حد رفيع وظل واسع ناعم تحته: منفصل عن المحتوى */
+  background: rgba(10, 9, 13, 0.94);
+  background: color-mix(in srgb, var(--accent) 5%, rgba(9, 8, 12, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background-color 0.4s ease;
   box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.4),
-    0 14px 36px rgba(0, 0, 0, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 4px 10px rgba(0, 0, 0, 0.45),
+    0 22px 48px -6px rgba(0, 0, 0, 0.7);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
   backdrop-filter: blur(20px) saturate(1.6);
   -webkit-tap-highlight-color: transparent;
@@ -744,7 +743,7 @@ html,
 }
 .v35 .dock-half {
   flex: none;
-  width: calc(var(--dock-item) + var(--dock-active) + 4px);
+  width: calc(2 * var(--dock-slot) + 4px);
   height: 100%;
   display: flex;
   align-items: center;
@@ -755,84 +754,113 @@ html,
   pointer-events: none;
 }
 
-/* ── الوجهة: أيقونة خطية؛ المختارة حبّة هادئة فيها الأيقونة واسمها تحتها ── */
+/* ── الوجهة: خانة ثابتة المقاس لا تتغير أبدًا؛ المختارة حبّة تظهر خلفها والأيقونة
+ * تصعد ليظهر اسمها تحتها. كل الحركة transform وopacity: تجري على المركّب بلا تخطيط ── */
 .v35 .dock .nav {
   position: relative;
   flex: none;
-  width: var(--dock-item);
+  width: var(--dock-slot);
   height: 48px;
   padding: 0;
   border: 0;
   background: none;
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.46);
+  color: rgba(255, 255, 255, 0.62);
   font: inherit;
   cursor: pointer;
-  transition:
-    width 0.38s cubic-bezier(0.16, 1, 0.3, 1),
-    color 0.2s ease;
+  transition: color 0.2s ease;
 }
 .v35 .dock .nav.active {
-  width: var(--dock-active);
-  color: var(--text-1);
+  color: var(--on-accent, #fff);
 }
 .v35 .dock .nav-pill {
-  box-sizing: border-box;
-  width: 100%;
-  height: 46px;
-  padding: 0;
+  position: absolute;
+  inset: 1px 2px;
+  display: block;
   border-radius: 23px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  overflow: hidden;
-  background: transparent;
-  transition:
-    background-color 0.3s ease,
-    gap 0.38s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.16s ease;
+  transition: transform 0.16s ease;
 }
-.v35 .dock .nav.active .nav-pill {
-  gap: 3px;
-  background: rgba(255, 255, 255, 0.09);
+/* كل وجهة في بئر دائري داكن؛ المختارة حبّة بلون القسم (المصمّم أو ما اختاره المستخدم)
+ * تكبر من مكان البئر. طبقتان تتلاشيان وتتمددان: transform وopacity فقط */
+.v35 .dock .nav-pill::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42px;
+  height: 42px;
+  margin: -21px 0 0 -21px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition:
+    opacity 0.2s ease,
+    transform 0.36s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.v35 .dock .nav.active .nav-pill::after {
+  opacity: 0;
+  transform: scale(1.15);
+}
+.v35 .dock .nav-pill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  opacity: 0;
+  transform: scale(0.72, 0.9);
+  transition:
+    opacity 0.22s ease,
+    transform 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.4s ease;
+}
+.v35 .dock .nav.active .nav-pill::before {
+  opacity: 1;
+  transform: none;
+}
+.v35 .dock .nav .icon,
+.v35 .dock .nav-label {
+  z-index: 1;
 }
 .v35 .dock .nav:active .nav-pill {
   transform: scale(0.93);
 }
 .v35 .dock .nav .icon {
-  flex: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
   width: 22px;
   height: 22px;
-  transition: width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: -11px 0 0 -11px;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.36s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v35 .dock .nav.active .icon {
-  width: 20px;
-  height: 20px;
   stroke-width: 2;
+  transform: translate3d(0, -7px, 0) scale(0.9);
 }
 .v35 .dock .nav-label {
-  max-height: 0;
-  overflow: hidden;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 6px;
+  text-align: center;
   white-space: nowrap;
   font-size: 10.5px;
   line-height: 12px;
   font-weight: 650;
   letter-spacing: 0;
   opacity: 0;
-  transform: translateY(3px);
+  transform: translate3d(0, 4px, 0);
   transition:
-    max-height 0.38s cubic-bezier(0.16, 1, 0.3, 1),
     opacity 0.16s ease,
-    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v35 .dock .nav.active .nav-label {
-  max-height: 12px;
   opacity: 1;
   transform: none;
-  transition-delay: 0s, 0.1s, 0.06s;
+  transition-delay: 0.08s, 0.04s;
 }
 .v35 .dock .nav::before {
   content: none;
@@ -842,7 +870,7 @@ html,
   inset-inline-end: 10px;
 }
 
-/* ── المبدّل: بئر دائري فيه ثلاثة مربعات، القسم الحالي معبّأ ── */
+/* ── المبدّل: ثلاثة مربعات، القسم الحالي أبيض ثابت في كل الأقسام والألوان ── */
 .v35 .dock-switch {
   position: relative;
   flex: 0 0 50px;
@@ -851,6 +879,10 @@ html,
   border: 0;
   border-radius: 24px;
   background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   cursor: pointer;
   touch-action: pan-y;
 }
@@ -860,25 +892,24 @@ html,
   position: absolute;
   inset: -10px -4px;
 }
-.v35 .dock-switch::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 48px;
-  height: 40px;
-  margin: -20px 0 0 -24px;
-  border-radius: 20px;
-  background: transparent;
-  transition:
-    background-color 0.2s ease,
-    transform 0.16s ease;
+.v35 .dock-switch:active .dock-sq {
+  transform: scale(0.9);
 }
-.v35 .dock-switch:active::after {
-  background: rgba(255, 255, 255, 0.07);
-  transform: scale(0.94);
+.v35 .dock-sq {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  transition: transform 0.16s ease;
+}
+.v35 .dock-sq.current {
+  background: #fff;
+  border-color: #fff;
 }
 
+/* الأزرار بمقاسها المفتوح دائمًا (يضعه dock.js)، ومغلقةً تُصغَّر إلى مربعها وتختفي */
 .v35 .dock-options {
   position: absolute;
   inset: 0;
@@ -887,56 +918,45 @@ html,
 .v35 .dock.open .dock-options {
   pointer-events: auto;
 }
-.v35 .dock-opt {
+.v35 .dock-opt,
+.v35 .dock-opt-label {
   position: absolute;
   left: 0;
   top: 0;
   box-sizing: border-box;
+  opacity: 0;
+}
+.v35 .dock-opt {
   width: 10px;
   height: 10px;
   padding: 0;
   margin: 0;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-1);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  transform-origin: 0 0;
   font: inherit;
   cursor: pointer;
-  will-change: transform;
-  transition:
-    background-color 0.26s ease,
-    border-color 0.26s ease,
-    border-width 0.26s ease,
-    box-shadow 0.26s ease;
+  will-change: transform, opacity;
 }
 .v35 .dock-opt.current {
-  background: var(--id);
-  border-color: var(--id);
-}
-.v35 .dock.open .dock-opt {
-  border-width: 1px;
-  border-color: rgba(255, 255, 255, 0.07);
-  background: rgba(255, 255, 255, 0.05);
-}
-.v35 .dock.open .dock-opt.current {
   border-color: transparent;
-  background: #7a52e0;
+  background: var(--accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent));
 }
-.v35 .dock.open .dock-opt:active {
-  filter: brightness(1.12);
+.v35 .dock-opt:active {
+  filter: brightness(1.15);
 }
 .v35 .dock-opt-label {
   display: grid;
+  place-content: center;
   justify-items: center;
   gap: 4px;
   line-height: 1;
   white-space: nowrap;
+  color: var(--text-1);
   pointer-events: none;
-  opacity: var(--label, 0);
-  transform: translateY(calc((1 - var(--label, 0)) * 4px));
+  will-change: transform, opacity;
 }
 .v35 .dock-opt-label b {
   font-size: 11.5px;
@@ -949,8 +969,12 @@ html,
   font-weight: 600;
   color: rgba(255, 255, 255, 0.5);
 }
-.v35 .dock-opt.current .dock-opt-label small {
-  color: rgba(255, 255, 255, 0.75);
+.v35 .dock-opt-label.current {
+  color: var(--on-accent, #fff);
+}
+.v35 .dock-opt-label.current small {
+  color: currentColor;
+  opacity: 0.75;
 }
 
 /* التركيز من لوحة المفاتيح ظاهر دائمًا */
@@ -959,7 +983,7 @@ html,
   outline: none;
 }
 .v35 .dock .nav:focus-visible .nav-pill,
-.v35 .dock-switch:focus-visible::after {
+.v35 .dock-switch:focus-visible .dock-sq.current {
   outline: 2px solid rgba(255, 255, 255, 0.7);
   outline-offset: 2px;
 }
@@ -996,6 +1020,18 @@ html,
   will-change: transform;
   backface-visibility: hidden;
 }
+/* مجهّزة قبل الاختيار: مبنية ومرسومة التخطيط لكن غير مرئية ولا تلمس */
+.v35 #home.layer-ready {
+  position: relative;
+}
+.v35 #home > .home-view.layer-standby {
+  position: absolute;
+  inset-inline: 0;
+  top: var(--layer-top, 0px);
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(-100%, 0, 0);
+}
 .v35 .layer-dim {
   position: absolute;
   inset: 0;
@@ -1017,6 +1053,9 @@ html,
 @media (prefers-reduced-motion: reduce) {
   .v35 .dock .nav,
   .v35 .dock .nav-pill,
+  .v35 .dock .nav-pill::before,
+  .v35 .dock .nav-pill::after,
+  .v35 .dock .nav .icon,
   .v35 .dock .nav-label,
   .v35 .dock-opt {
     transition-duration: 0.01s !important;

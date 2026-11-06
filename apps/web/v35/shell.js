@@ -4214,7 +4214,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else if (push && from !== id) state.stack.push(from);
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
-    if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false });
+    if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
     if (id !== 'home') layers?.finish();
     dockCtl?.repaint();
     root.querySelectorAll('.nav').forEach((n) => {
@@ -5265,24 +5265,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
   // المبدّل في قلب الشريط العائم، والانتقال طبقات (dock.js). يُنشآن عند أول استعمال
   // لأن رئيسيات الأقسام تُبنى بعد القشرة.
+  //
+  // السلاسة أولًا: الحركة تُسلَّم للمركّب قبل أي عمل ثقيل، والأقسام تُجهَّز (تُبنى وتُخطَّط
+  // وهي مخفية) لحظة فتح المبدّل أو لمسه، وتحديث محتوى القسم يجري بعد انتهاء الحركة.
   let dockCtl = null;
   let layers = null;
-  let brandFade = null;
   const sectionViews = () => ({ manga: q('mangaHome'), anime: q('animeHome'), cinema: q('cinemaHome') });
   const sectionLayers = () =>
     (layers ??= createLayers({
       views: sectionViews(),
       host: q('home'),
       current: root.dataset.section ?? 'manga',
-      onProgress: ({ from, to, e }) => (brandFade ??= createCrossfade(q('brandSection'))).set(SECTIONS[from]?.word ?? '', SECTIONS[to]?.word ?? '', e),
-      onSettle: (shown) => {
+      label: createCrossfade(q('brandSection')),
+      wordOf: (id) => SECTIONS[id]?.word ?? id.toUpperCase(),
+      onSettle: (shown, from) => {
         // سحب أُلغي: الهوية ترجع للقسم الظاهر
         if (root.dataset.section !== shown) applySection(shown);
+        if (shown !== from) idle(() => renderSection(shown));
       },
     }));
-  /** ابدأ دخول قسم: الهوية والمحتوى قبل الحركة، فإن توقف مؤقت الرسوم يبقى القسم سليمًا. */
-  function enterSection(id) {
-    applySection(id, { keepLabel: true });
+  // بعد أن يُسلَّم الإطار الأول للمركّب: هنا يجري العمل الثقيل دون أن يؤخر بدء الحركة
+  const afterFirstFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
+  const idle = (fn) => (globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 60));
+  /** ارسم رئيسية القسم بمحتواها (تحديث «آخر المشاهدات» وما شابه). */
+  function renderSection(id) {
+    warmed.add(id);
     if (id === 'anime') anime.show();
     else if (id === 'cinema') cinema.show();
     else {
@@ -5292,21 +5299,56 @@ export function mountV35(deps, { page = 'home' } = {}) {
       restartHero();
     }
   }
+  /** أقسام رُسمت مرة: لا تحتاج رسمًا قبل الانتقال إليها، فمحتواها باقٍ في مكانه. */
+  const warmed = new Set();
+  /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
+  function prepareSections() {
+    if (currentPage() !== 'home') return;
+    sectionLayers().prepare();
+    for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
+  }
+  /** ادخل قسمًا: الحركة أولًا، ثم الهوية بعد الإطار الأول، والمحتوى إن لم يُرسم قط. */
+  function beginSection(id, run) {
+    const motion = sectionLayers(); // قبل تغيير القسم: الطبقات تبدأ مما كان ظاهرًا
+    const fresh = !warmed.has(id);
+    if (fresh) renderSection(id); // أول زيارة: المحتوى يجب أن يدخل مع طبقته
+    run(motion);
+    afterFirstFrame(() => applySection(id, { keepLabel: true }));
+  }
+  /** خارج الرئيسية: لا حركة طبقات، القسم والصفحة مباشرة. */
+  function enterSection(id) {
+    applySection(id);
+    renderSection(id);
+  }
+  let standbyTimer = 0;
   const dock = () =>
     (dockCtl ??= createDock({
       bar: q('bottomNav'),
       scrim: q('dockScrim'),
       current: root.dataset.section ?? 'manga',
+      onPrepare: () => {
+        clearTimeout(standbyTimer);
+        prepareSections();
+      },
+      onClose: () => {
+        // أُغلق بلا اختيار: الأقسام المجهّزة ترجع لنومها بعد هدوء الحركة
+        clearTimeout(standbyTimer);
+        standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 600);
+      },
       onDragStart: (to) => {
         if (currentPage() !== 'home' || !SECTIONS[to]?.ready) return;
-        const motion = sectionLayers();
-        enterSection(to);
-        motion.drag(to, 0);
+        beginSection(to, (motion) => motion.drag(to, 0));
       },
       onDrag: (to, p) => {
         if (currentPage() === 'home' && layers?.moving) layers.drag(to, p);
       },
       onDragEnd: (to, commit) => {
+        if (!to) {
+          // لمسة بلا سحب: تُفتح المبدّل غالبًا؛ وإلا تنام الأقسام بعد قليل
+          clearTimeout(standbyTimer);
+          standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, 1500);
+          return;
+        }
         if (currentPage() !== 'home') {
           if (commit) pickSection(null, { dataset: { arg: to } });
           return;
@@ -5353,22 +5395,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
       return;
     }
-    // الشريط يُغلق مع الانتقال لا قبله؛ لمس القسم الحالي يُغلقه فقط
-    setSectionsOpen(false);
-    if (!layers?.moving && root.dataset.section === id) return;
+    if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
     if (currentPage() !== 'home') {
+      setSectionsOpen(false);
       layers?.finish();
-      applySection(id);
       showHome(id);
       showPage('home');
       enterSection(id);
       return;
     }
+    // الطبقات تبدأ أولًا، والشريط يُغلق معها لا قبلها
+    beginSection(id, (motion) => motion.go(id));
+    setSectionsOpen(false);
     haptic();
-    const motion = sectionLayers(); // قبل تغيير القسم: الطبقات تبدأ مما كان ظاهرًا
-    enterSection(id);
-    motion.go(id);
   }
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
   /** رئيسية القسم وحدها ظاهرة. */
@@ -5855,6 +5895,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   applySection(startSection);
   showHome(startSection);
   dock();
+  warmed.add(startSection);
   if (startSection === 'anime') anime.show();
   if (startSection === 'cinema') cinema.show();
 

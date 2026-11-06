@@ -118,7 +118,7 @@ describe('layer model', () => {
     const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
     layers.go('cinema');
     tick(48);
-    expect(v.cinema.style.transform).toBe('');
+    expect(v.cinema.style.transform).not.toContain('%'); // بلا حركة أفقية
     expect(Number(v.cinema.style.opacity)).toBeGreaterThan(0);
     expect(Number(v.cinema.style.opacity)).toBeLessThan(1);
     tick(T.reduced + 32);
@@ -135,6 +135,59 @@ describe('layer model', () => {
     tick(600);
     expect(layers.section).toBe('anime');
     expect(v.cinema.hidden).toBe(true);
+  });
+});
+
+describe('smoothness: compositor-only motion', () => {
+  const capture = (els) => {
+    const calls = [];
+    for (const el of els) el.animate = (keys, opts) => { calls.push({ el, keys, opts }); return { cancel() {}, set onfinish(f) { this.f = f; } }; };
+    return calls;
+  };
+  it('section layers hand transform/opacity keyframes to the compositor, nothing that needs layout', () => {
+    const v = views();
+    const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
+    layers.prepare(); // ينشئ لا شيء متحركًا
+    // عناصر التعتيم والظل تُنشأ عند التركيب: اعترض animate على النموذج كله
+    const calls = [];
+    const proto = Object.getPrototypeOf(v.manga);
+    proto.animate = function (keys, opts) { calls.push({ el: this, keys, opts }); return { cancel() {}, set onfinish(f) {} }; };
+    try {
+      layers.go('anime');
+      expect(calls.length).toBeGreaterThan(0);
+      for (const c of calls) {
+        for (const k of c.keys) for (const prop of Object.keys(k)) expect(['transform', 'opacity', 'offset']).toContain(prop);
+        expect(c.opts.fill).toBe('both');
+        expect(c.opts.easing).toMatch(/cubic-bezier/);
+      }
+      expect(calls.some((c) => c.el === v.anime)).toBe(true);
+      expect(calls.some((c) => c.el === v.manga)).toBe(true);
+      expect(calls.some((c) => c.el === v.cinema)).toBe(false); // القفز لا يلمس غير الطرفين
+      tick(T.enter + 200); // المهلة الاحتياطية تنهي الحركة إن لم يصل onfinish
+      expect(layers.section).toBe('anime');
+    } finally { delete proto.animate; }
+  });
+  it('opening the switcher prepares the other sections laid out but invisible, and closing without a choice releases them', () => {
+    const v = views();
+    const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
+    layers.prepare();
+    expect(v.anime.hidden).toBe(false);
+    expect(v.anime.classList.contains('layer-standby')).toBe(true);
+    expect(v.manga.classList.contains('layer-standby')).toBe(false);
+    layers.unprepare();
+    expect(v.anime.hidden).toBe(true);
+    expect(v.anime.classList.contains('layer-standby')).toBe(false);
+    expect(document.getElementById('home').classList.contains('layer-ready')).toBe(false);
+  });
+  it('a prepared section enters without leaving the others standing by', () => {
+    const v = views();
+    const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
+    layers.prepare();
+    layers.go('cinema');
+    expect(v.anime.hidden).toBe(true);
+    expect(v.cinema.classList.contains('layer-standby')).toBe(false);
+    tick(600);
+    expect(layers.section).toBe('cinema');
   });
 });
 

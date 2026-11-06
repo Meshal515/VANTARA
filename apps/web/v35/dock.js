@@ -169,48 +169,120 @@ export function haptic(kind = 'light') {
 }
 
 const isReduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
+const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
+const SAMPLES = 7;
 
 /**
- * طبقات الأقسام فوق رئيسياتها. `views` رئيسية كل قسم، و`host` الصفحة التي تحويها.
- * `onProgress({from,to,e})` يُبلّغ كل إطار (لتبديل اسم القسم تحت الشعار معه).
+ * محرّك حركة واحد بلغة الإطارات: `frameAt(e)` يعيد لكل عنصر خصائصه (transform وopacity فقط)
+ * عند تقدّم e. حيث تتوفر Web Animations تُبنى الحركة إطارات مفتاحية تُسلَّم للمركّب (GPU):
+ * تجري بمعدّل الشاشة (120Hz) ولا تتأثر بانشغال الخيط الرئيسي برسم قسم أو صفحة.
+ * وحيث لا تتوفر (اختبارات) تُرسم بالمؤقت. التقدّم الحالي يُحسب بالزمن والمنحنى نفسيهما،
+ * فالمقاطعة تبدأ من الموضع الفعلي بلا قراءة من الشاشة.
  */
-export function createLayers({ views, host, current, onProgress, onSettle, reduced = isReduced, timing = {} }) {
+function drive({ frameAt, e0 = 0, e1 = 1, duration, ease = easeOut, easing = cssEase.out, done }) {
+  const els = [...frameAt(e0).keys()];
+  const waapi = els.length > 0 && els.every((el) => typeof el.animate === 'function');
+  const t0 = clockNow();
+  let live = true, anims = [], fallback = null, guard = null;
+  const at = () => e0 + (e1 - e0) * ease(clamp(duration > 0 ? (clockNow() - t0) / duration : 1));
+  const apply = (frame) => {
+    for (const [el, style] of frame) for (const [k, v] of Object.entries(style)) el.style[k] = v;
+  };
+  const stop = (e) => {
+    apply(frameAt(e)); // الخاصية المضمّنة أولًا ثم إلغاء الحركة: لا وميض بينهما
+    for (const a of anims) a.cancel();
+    anims = [];
+    fallback?.cancel();
+    clearTimeout(guard);
+  };
+  const finish = () => {
+    if (!live) return;
+    live = false;
+    stop(e1);
+    done?.();
+  };
+  if (duration <= 0) {
+    finish();
+  } else if (waapi) {
+    const frames = Array.from({ length: SAMPLES }, (_, i) => frameAt(e0 + ((e1 - e0) * i) / (SAMPLES - 1)));
+    for (const el of els) {
+      const keys = frames.map((f, i) => ({ ...f.get(el), offset: i / (SAMPLES - 1) }));
+      const same = keys.every((k) => Object.keys(k).every((p) => p === 'offset' || k[p] === keys[0][p]));
+      if (same) {
+        apply(new Map([[el, frames[0].get(el)]]));
+        continue;
+      }
+      anims.push(el.animate(keys, { duration, easing, fill: 'both' }));
+    }
+    if (anims.length) anims[0].onfinish = finish;
+    guard = setTimeout(finish, duration + 150); // إن توقف المؤقت في WebView لا تبقى حركة معلّقة
+    if (!anims.length) finish();
+  } else {
+    fallback = tween({ duration, ease, update: (k) => live && apply(frameAt(e0 + (e1 - e0) * k)), done: finish });
+  }
+  return {
+    /** أوقف الآن وثبّت الموضع الحالي؛ يعيد التقدّم الذي وصلته. */
+    halt() {
+      if (!live) return e1;
+      live = false;
+      const e = at();
+      stop(e);
+      return e;
+    },
+    finish,
+    get progress() { return live ? at() : e1; },
+    get live() { return live; },
+  };
+}
+
+/**
+ * طبقات الأقسام فوق رئيسياتها. `views` رئيسية كل قسم، و`host` الصفحة التي تحويها،
+ * و`label` خانة اسم القسم تحت الشعار (يتبدّل مع الحركة)، و`wordOf(id)` نصه.
+ */
+export function createLayers({ views, host, current, label, wordOf = (id) => id.toUpperCase(), onSettle, reduced = isReduced, timing = {} }) {
   let section = current;
   let cover = null; // null = لا انتقال جارٍ
-  let start = null, goal = null, motion = null, label = null;
+  let start = null, goal = null, motion = null, words = null;
   let offsets = {};
+  let standby = false;
+  const fade = label ?? null;
 
-  const paint = (e) => {
+  const dimOf = (v) => v.querySelector(':scope > .layer-dim');
+  const edgeOf = (v) => v.querySelector(':scope > .layer-edge');
+
+  /** خصائص كل عنصر عند تقدّم e من start إلى goal. */
+  const frameAt = (e) => {
+    const out = new Map();
     const now = {};
     for (const id of Object.keys(goal)) now[id] = start[id] + (goal[id] - start[id]) * e;
-    cover = now;
     if (reduced()) {
       for (const id of Object.keys(now)) {
-        const v = views[id];
-        v.style.transform = offsets[id] ? `translate3d(0,${offsets[id]}px,0)` : '';
-        v.style.zIndex = id === label.to ? '3' : '1';
-        v.style.opacity = id === label.to ? String(e) : '1';
+        out.set(views[id], { transform: `translate3d(0,${offsets[id] ?? 0}px,0)`, opacity: id === words.to ? String(e) : '1' });
       }
     } else {
-      const frame = layerFrame(now);
-      for (const [id, f] of Object.entries(frame)) {
-        const v = views[id];
-        v.style.transform = `translate3d(${f.x.toFixed(3)}%,${offsets[id] ?? 0}px,0)`;
-        v.style.zIndex = String(f.z);
-        v.style.opacity = '';
-        const dim = v.querySelector(':scope > .layer-dim');
-        if (dim) dim.style.opacity = f.dim.toFixed(3);
-        const edge = v.querySelector(':scope > .layer-edge');
-        if (edge) edge.style.opacity = f.edge.toFixed(3);
+      for (const [id, f] of Object.entries(layerFrame(now))) {
+        out.set(views[id], { transform: `translate3d(${f.x.toFixed(3)}%,${offsets[id] ?? 0}px,0)`, opacity: '1' });
+        const dim = dimOf(views[id]);
+        if (dim) out.set(dim, { opacity: f.dim.toFixed(3) });
+        const edge = edgeOf(views[id]);
+        if (edge) out.set(edge, { opacity: f.edge.toFixed(3) });
       }
     }
-    onProgress?.({ from: label.from, to: label.to, e });
+    if (fade) for (const [el, s] of fade.frame(wordOf(words.from), wordOf(words.to), e)) out.set(el, s);
+    return out;
+  };
+  const coverAt = (e) => {
+    const now = {};
+    for (const id of Object.keys(goal)) now[id] = start[id] + (goal[id] - start[id]) * e;
+    return now;
   };
 
   const mount = (id) => {
     const v = views[id];
+    v.classList.remove('layer-standby');
     v.hidden = false;
-    if (!v.querySelector(':scope > .layer-dim')) {
+    if (!dimOf(v)) {
       const dim = document.createElement('div');
       dim.className = 'layer-dim';
       dim.setAttribute('aria-hidden', 'true');
@@ -219,6 +291,10 @@ export function createLayers({ views, host, current, onProgress, onSettle, reduc
       edge.setAttribute('aria-hidden', 'true');
       v.append(dim, edge);
     }
+  };
+  const order = () => {
+    const ids = ORDER.filter((id) => id in cover);
+    ids.forEach((id, i) => (views[id].style.zIndex = String(i + 1)));
   };
 
   const enterLayering = () => {
@@ -231,87 +307,130 @@ export function createLayers({ views, host, current, onProgress, onSettle, reduc
     if (scrollY > 0) globalThis.scrollTo?.({ top: 0, behavior: 'instant' });
   };
 
+  const dropStandby = () => {
+    if (!standby) return;
+    standby = false;
+    for (const [id, v] of Object.entries(views)) {
+      if (v.classList.contains('layer-standby')) {
+        v.classList.remove('layer-standby');
+        if (id !== section) v.hidden = true;
+      }
+    }
+    if (!cover) host.classList.remove('layer-ready');
+  };
+
   const settle = () => {
     const shown = settledSection(cover);
     for (const [id, v] of Object.entries(views)) {
       v.hidden = id !== shown;
+      v.classList.remove('layer-standby');
       v.style.transform = '';
       v.style.zIndex = '';
       v.style.opacity = '';
       v.querySelectorAll(':scope > .layer-dim, :scope > .layer-edge').forEach((n) => n.remove());
     }
-    host.classList.remove('layering');
+    standby = false;
+    host.classList.remove('layering', 'layer-ready');
     host.style.removeProperty('min-height');
     host.style.removeProperty('--layer-top');
     const from = section;
     section = shown;
-    cover = start = goal = motion = label = null;
+    cover = start = goal = motion = words = null;
     offsets = {};
-    onProgress?.({ from: shown, to: shown, e: 1 });
+    fade?.rest(wordOf(shown));
     onSettle?.(shown, from);
   };
 
-  /** ابدأ (أو أعِد توجيه) انتقالًا نحو `to` بلا مؤقت؛ يُرجع اللقطة الجديدة. */
+  /** ثبّت هدفًا جديدًا من الموضع الحالي (توقف الحركة الجارية حيث هي). */
   const aim = (to) => {
-    motion?.cancel();
+    let shownWord = section;
+    if (motion) {
+      const e = motion.halt();
+      cover = coverAt(e);
+      shownWord = e >= 0.5 ? words.to : words.from;
+    } else if (words) {
+      shownWord = words.e >= 0.5 ? words.to : words.from;
+    }
     motion = null;
     if (!cover) {
       enterLayering();
       cover = { [section]: 1 };
     }
-    // اسم القسم: من الأوضح ظهورًا الآن إلى الهدف
-    const shownWord = label ? (label.e >= 0.5 ? label.to : label.from) : section;
-    label = { from: shownWord, to, e: 0 };
+    words = { from: shownWord, to, e: 0 };
     cover = admit(cover, to);
     mount(to);
+    order();
     start = { ...cover };
     goal = targetCover(cover, to);
   };
 
-  const run = (duration, ease, from = 0, to = 1, done = settle) => {
+  const run = (duration, ease, easing, from = 0, to = 1) => {
     const span = Math.abs(to - from);
-    const ms = reduced() ? (timing.reduced ?? T.reduced) * span : duration * Math.max(0.35, span);
-    motion = tween({
-      duration: ms,
-      ease: reduced() ? linear : ease,
-      update: (k) => {
-        const e = from + (to - from) * k;
-        if (label) label.e = e;
-        paint(e);
+    const r = reduced();
+    const m = drive({
+      frameAt: (e) => {
+        if (words) words.e = e;
+        return frameAt(e);
       },
-      done,
+      e0: from,
+      e1: to,
+      duration: r ? (timing.reduced ?? T.reduced) * span : duration * Math.max(0.35, span),
+      ease: r ? linear : ease,
+      easing: r ? cssEase.linear : easing,
+      done: () => {
+        cover = coverAt(to);
+        settle();
+      },
     });
+    if (m.live) motion = m;
   };
 
   return {
     get section() { return section; },
     get moving() { return Boolean(cover); },
+    /**
+     * جهّز الأقسام الأخرى قبل الاختيار (عند فتح المبدّل أو لمسه): تُبنى وتُرسم وهي مخفية
+     * خارج الشاشة، فلا يدفع الانتقال كلفة أول رسم في إطاره الأول.
+     */
+    prepare() {
+      if (cover || standby) return;
+      standby = true;
+      host.classList.add('layer-ready');
+      host.style.setProperty('--layer-top', `${views[section].offsetTop || 0}px`);
+      for (const [id, v] of Object.entries(views)) {
+        if (id === section) continue;
+        v.classList.add('layer-standby');
+        v.hidden = false;
+      }
+    },
+    /** لم يُختر شيء: أعِد الأقسام المجهّزة لنومها. */
+    unprepare: () => dropStandby(),
     /** انتقل إلى قسم؛ مقاطعة الحركة الجارية تكمل من موضعها. */
     go(to) {
       if (!views[to]) return;
-      if (!cover && to === section) return;
+      if (!cover && to === section) return dropStandby();
       const topBefore = cover ? Math.max(...Object.keys(cover).map(rank)) : rank(section);
       aim(to);
       const up = rank(to) > topBefore || (rank(to) === topBefore && start[to] < 1);
-      const plan = up ? { duration: timing.enter ?? T.enter, ease: easeOut } : { duration: timing.exit ?? T.exit, ease: easeInOut };
       const delta = Math.max(...Object.keys(goal).map((id) => Math.abs(goal[id] - start[id])));
-      run(plan.duration * Math.max(delta, 0.35), plan.ease);
+      if (up) run((timing.enter ?? T.enter) * Math.max(delta, 0.35), easeOut, cssEase.out);
+      else run((timing.exit ?? T.exit) * Math.max(delta, 0.35), easeInOut, cssEase.inOut);
+      dropStandby();
     },
     /** سحب بالإصبع: يثبّت الهدف ثم يتبع التقدّم 0..1. */
     drag(to, p) {
       if (!views[to]) return;
-      if (!label || label.to !== to) aim(to);
-      motion?.cancel();
-      motion = null;
-      label.e = clamp(p);
-      paint(clamp(p));
+      if (!words || words.to !== to || motion) aim(to);
+      const e = clamp(p);
+      words.e = e;
+      for (const [el, style] of frameAt(e)) for (const [k, v] of Object.entries(style)) el.style[k] = v;
     },
     /** إفلات: يكمل للهدف، أو يرجع بلطف لما كان. */
     release(commit) {
-      if (!label) return;
-      const e = label.e;
-      if (commit) run(goal[label.to] > start[label.to] ? T.enter : T.exit, easeOut, e, 1);
-      else run(T.exit, easeOut, e, 0);
+      if (!words) return dropStandby();
+      const e = words.e;
+      if (commit) run(T.enter, easeOut, cssEase.out, e, 1);
+      else run(T.exit, easeOut, cssEase.out, e, 0);
     },
     /** قسم تغيّر من خارج المبدّل (فتح عمل من إضافة): لا حركة، فقط الحالة. */
     sync(id) {
@@ -321,13 +440,14 @@ export function createLayers({ views, host, current, onProgress, onSettle, reduc
     finish() {
       if (motion) motion.finish();
       else if (cover) settle();
+      dropStandby();
     },
   };
 }
 
 /**
  * اسم القسم تحت الشعار: الحالي يتلاشى في نصف الحركة الأول صاعدًا 4px،
- * والجديد يظهر في النصف الثاني من 4px تحت مكانه.
+ * والجديد يظهر في النصف الثاني من 4px تحت مكانه. يعطي خصائص الإطار لـ createLayers.
  */
 export function createCrossfade(slot) {
   const make = () => {
@@ -341,23 +461,24 @@ export function createCrossfade(slot) {
   b.style.opacity = '0';
   slot.append(b);
   return {
-    set(fromText, toText, e) {
-      if (e >= 1 || fromText === toText) {
-        a.textContent = toText;
-        a.style.opacity = '';
-        a.style.transform = '';
-        b.style.opacity = '0';
-        b.style.transform = '';
-        return;
-      }
+    /** خصائص الكلمتين عند e (للحركة المركّبة). */
+    frame(fromText, toText, e) {
+      if (a.textContent !== fromText) a.textContent = fromText;
+      if (b.textContent !== toText) b.textContent = toText;
       const out = clamp(e * 2);
       const inn = clamp(e * 2 - 1);
-      a.textContent = fromText;
-      b.textContent = toText;
-      a.style.opacity = String(1 - out);
-      a.style.transform = `translateY(${(-4 * out).toFixed(2)}px)`;
-      b.style.opacity = String(inn);
-      b.style.transform = `translateY(${(4 * (1 - inn)).toFixed(2)}px)`;
+      return new Map([
+        [a, { opacity: String(1 - out), transform: `translateY(${(-4 * out).toFixed(2)}px)` }],
+        [b, { opacity: String(inn), transform: `translateY(${(4 * (1 - inn)).toFixed(2)}px)` }],
+      ]);
+    },
+    /** الحالة الساكنة: كلمة واحدة في مكانها. */
+    rest(text) {
+      a.textContent = text;
+      a.style.opacity = '';
+      a.style.transform = '';
+      b.style.opacity = '0';
+      b.style.transform = '';
     },
   };
 }
@@ -365,13 +486,17 @@ export function createCrossfade(slot) {
 /**
  * المبدّل: يفتح المربعات الثلاثة إلى أزرار بعرض الشريط، ويُغلق بالمس خارجًا أو على
  * القسم الحالي أو Esc أو رجوع أندرويد. السحب الأفقي عليه ينقل للقسم المجاور.
+ * الأزرار بمقاسها المفتوح دائمًا، وتُصغَّر بـ transform إلى مكان المربعات: الحركة كلها
+ * transform وopacity على المركّب، بلا تغيير مقاس أو تخطيط في أي إطار.
  */
-export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd, reduced = isReduced }) {
+export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStart, onDrag, onDragEnd, reduced = isReduced }) {
   const sw = bar.querySelector('.dock-switch');
   const halves = [...bar.querySelectorAll('.dock-half')];
   const options = bar.querySelector('.dock-options');
   const opts = [...options.querySelectorAll('.dock-opt')];
-  let p = 0, motion = null, open = false, section = current, dragged = false;
+  const labels = [...options.querySelectorAll('.dock-opt-label')];
+  const squares = [...sw.querySelectorAll('.dock-sq')];
+  let p = 0, motion = null, open = false, section = current, dragged = false, geo = null;
 
   const geometry = () => {
     // الأزرار مطلقة داخل صندوق الحشو: بلا الحد
@@ -379,24 +504,49 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
     const s = sw.getBoundingClientRect();
     return { w: bar.clientWidth || box.width, h: bar.clientHeight || box.height, cx: s.left - box.left - (bar.clientLeft || 0) + s.width / 2 };
   };
-  const paint = (k) => {
-    p = k;
+  /** ضع الأزرار والأسماء بمقاسها المفتوح مرة واحدة؛ الإطارات بعدها transform فقط. */
+  const layout = () => {
     const g = geometry();
-    const rects = optionRects(g.w, g.h, g.cx, k);
-    rects.forEach((r, i) => {
-      const o = opts[i];
-      o.style.transform = `translate3d(${r.left.toFixed(2)}px,${r.top.toFixed(2)}px,0)`;
-      o.style.width = `${r.width.toFixed(2)}px`;
-      o.style.height = `${r.height.toFixed(2)}px`;
-      o.style.borderRadius = `${r.radius.toFixed(2)}px`;
-      o.style.setProperty('--label', r.label.toFixed(3));
+    const full = optionRects(g.w, g.h, g.cx, 1);
+    const compact = optionRects(g.w, g.h, g.cx, 0);
+    geo = { full, compact };
+    full.forEach((r, i) => {
+      for (const el of [opts[i], labels[i]]) {
+        if (!el) continue;
+        el.style.left = `${r.left.toFixed(2)}px`;
+        el.style.top = `${r.top.toFixed(2)}px`;
+        el.style.width = `${r.width.toFixed(2)}px`;
+        el.style.height = `${r.height.toFixed(2)}px`;
+      }
     });
-    for (const h of halves) {
-      h.style.opacity = String(1 - k);
-      h.style.transform = `scale(${(1 - 0.15 * k).toFixed(4)})`;
+  };
+  const frameAt = (k) => {
+    if (!geo) layout();
+    const out = new Map();
+    const e = clamp(k);
+    geo.full.forEach((f, i) => {
+      const c = geo.compact[i];
+      const left = c.left + (f.left - c.left) * e;
+      const top = c.top + (f.top - c.top) * e;
+      const w = c.width + (f.width - c.width) * e;
+      const h = c.height + (f.height - c.height) * e;
+      out.set(opts[i], {
+        transform: `translate3d(${(left - f.left).toFixed(2)}px,${(top - f.top).toFixed(2)}px,0) scale(${(w / f.width).toFixed(4)},${(h / f.height).toFixed(4)})`,
+        opacity: clamp(e * 4).toFixed(3),
+      });
+      const l = clamp((e - 0.55) / 0.45);
+      if (labels[i]) out.set(labels[i], { opacity: l.toFixed(3), transform: `translate3d(0,${((1 - l) * 4).toFixed(2)}px,0)` });
+    });
+    for (const s of squares) out.set(s, { opacity: (1 - clamp(e * 4)).toFixed(3) });
+    for (const h of halves) out.set(h, { opacity: (1 - e).toFixed(3), transform: `scale(${(1 - 0.15 * e).toFixed(4)})` });
+    out.set(scrim, { opacity: e.toFixed(3) });
+    return out;
+  };
+  const clearInline = () => {
+    for (const el of [...opts, ...labels, ...squares, ...halves]) {
+      el.style.transform = '';
+      el.style.opacity = '';
     }
-    sw.style.opacity = k > 0 ? '0' : '';
-    scrim.style.opacity = String(k);
   };
   const mark = () => {
     for (const o of opts) {
@@ -404,48 +554,46 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
       o.setAttribute('aria-checked', String(on));
       o.classList.toggle('current', on);
     }
+    for (const el of [...labels, ...squares]) el.classList.toggle('current', el.dataset.arg === section);
     bar.dataset.section = section;
     const word = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[section] ?? section;
     sw.setAttribute('aria-label', `القسم الحالي: ${word}. بدّل القسم`);
   };
 
   const animate = (to) => {
-    motion?.cancel();
-    const from = p;
-    const dur = to ? T.open : T.close;
-    const span = Math.abs(to - from);
+    const from = motion ? motion.halt() : p;
+    motion = null;
+    if (!geo || from === 0) layout();
     // الإغلاق يوقف لمس الستار فورًا لا بعد انتهاء تلاشيه: لمسة ثانية لا تعيد الفتح
     scrim.style.pointerEvents = to ? '' : 'none';
     if (to) {
       scrim.hidden = false;
       bar.classList.add('open');
     }
-    motion = tween({
-      duration: reduced() ? T.reduced * span : dur * span,
-      ease: reduced() ? linear : to ? easeOut : easeInOut,
-      update: (k) => paint(from + (to - from) * k),
+    const span = Math.abs(to - from);
+    const r = reduced();
+    const m = drive({
+      frameAt: (k) => ((p = k), frameAt(k)),
+      e0: from,
+      e1: to,
+      duration: (r ? T.reduced : to ? T.open : T.close) * span,
+      ease: r ? linear : to ? easeOut : easeInOut,
+      easing: r ? cssEase.linear : to ? cssEase.out : cssEase.inOut,
       done: () => {
         motion = null;
+        p = to;
         if (!to) {
           scrim.hidden = true;
+          scrim.style.opacity = '';
           bar.classList.remove('open');
-          for (const o of opts) o.removeAttribute('style');
-          for (const h of halves) h.removeAttribute('style');
-          sw.style.opacity = '';
-          paintClosed();
+          clearInline();
         }
       },
     });
-  };
-  // المغلق يرسم المربعات بلا مؤقت (ومع كل تغيير مقاس)
-  const paintClosed = () => {
-    if (open || motion) return;
-    paint(0);
-    for (const h of halves) h.removeAttribute('style');
-    sw.style.opacity = '';
+    if (m.live) motion = m;
   };
 
-  const setOpen = (next, { focus = true } = {}) => {
+  const setOpen = (next, { focus = true, instant = false } = {}) => {
     if (next === open) return;
     open = next;
     sw.setAttribute('aria-expanded', String(open));
@@ -453,8 +601,14 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
     options.setAttribute('aria-hidden', String(!open));
     for (const h of halves) h.toggleAttribute('inert', open);
     for (const o of opts) o.setAttribute('tabindex', open && o.dataset.arg === section ? '0' : '-1');
-    if (open) haptic();
+    if (open) {
+      haptic();
+      onPrepare?.();
+    }
     animate(open ? 1 : 0);
+    // الشريط يختفي مع صفحة فرعية: لا حركة إغلاق لشيء لا يُرى، والستار يزول فورًا
+    if (instant) motion?.finish();
+    if (!open) onClose?.();
     if (focus) (open ? opts.find((o) => o.dataset.arg === section) : sw)?.focus?.({ preventScroll: true });
   };
 
@@ -467,10 +621,7 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
     if (step) j = (i + step + opts.length) % opts.length;
     else if (e.key === 'Home') j = 0;
     else if (e.key === 'End') j = opts.length - 1;
-    else if (e.key === 'Tab') {
-      e.preventDefault();
-      j = (i + (e.shiftKey ? -1 : 1) + opts.length) % opts.length;
-    }
+    else if (e.key === 'Tab') j = (i + (e.shiftKey ? -1 : 1) + opts.length) % opts.length;
     if (j == null) return;
     e.preventDefault();
     opts.forEach((o, k) => o.setAttribute('tabindex', k === j ? '0' : '-1'));
@@ -483,6 +634,7 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
     if (open || e.button > 0) return;
     drag = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, to: null, track: [] };
     dragged = false;
+    onPrepare?.(); // اللمس وحده يكفي لتجهيز الأقسام قبل أن يبدأ السحب
   });
   sw.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -507,7 +659,7 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
     drag = null;
-    if (!d.to) return;
+    if (!d.to) return onDragEnd?.(null, false);
     const [t0, x0] = d.track[0] ?? [d.t, 0];
     const [t1, x1] = d.track[d.track.length - 1] ?? [e.timeStamp, 0];
     const v = t1 > t0 ? ((x1 - x0) * d.dir) / (t1 - t0) : 0;
@@ -518,9 +670,14 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
   sw.addEventListener('pointerup', end);
   sw.addEventListener('pointercancel', end);
 
-  globalThis.addEventListener?.('resize', paintClosed);
+  globalThis.addEventListener?.('resize', () => {
+    geo = null;
+    if (open && !motion) {
+      layout();
+      for (const [el, style] of frameAt(1)) for (const [k, v] of Object.entries(style)) el.style[k] = v;
+    }
+  });
   mark();
-  paintClosed();
 
   return {
     isOpen: () => open,
@@ -537,6 +694,8 @@ export function createDock({ bar, scrim, current, onDragStart, onDrag, onDragEnd
       section = id;
       mark();
     },
-    repaint: paintClosed,
+    repaint() {
+      if (!motion) geo = null;
+    },
   };
 }
