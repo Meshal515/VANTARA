@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { available, clock, configure, groupRoutes, judgeAnimeCopy, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute, withPhaseDeadline } from './anime-engine.js';
+import * as engine from './anime-engine.js';
 
 describe('canonical anime identity', () => {
   it.each([
@@ -249,5 +250,29 @@ describe('prepare stage timeouts', () => {
     await expect(withPhaseDeadline(new Promise(() => {}), 10, 'BRIDGE_STAGE_TIMEOUT')).rejects.toMatchObject({
       code: 'BRIDGE_STAGE_TIMEOUT',
     });
+  });
+});
+
+describe('seasonAliases: موسم لاحق باسم فرعي يُطابق ترقيم المواقع', () => {
+  const s1 = { id: 1, format: 'TV', title: 'Tougen Anki', romaji: 'Tougen Anki', relations: [] };
+  const s2 = { id: 2, format: 'TV', title: 'Tougen Anki: Nikko Kegon no Taki-hen', romaji: 'Tougen Anki: Nikkou Kegon no Taki-hen',
+    relations: [{ id: 1, format: 'TV', relation: 'الجزء السابق' }, { id: 9, format: 'MOVIE', relation: 'الجزء السابق' }] };
+  const detail = (id) => Promise.resolve({ 1: s1 }[id] ?? null);
+
+  it('follows the TV prequel chain to number the season and keeps season 1 out of matching', async () => {
+    const a = await engine.seasonAliases(s2, detail);
+    expect(a.titles).toEqual(['Tougen Anki Season 2']);
+    expect(a.queries).toEqual(['Tougen Anki']);
+    const titles = [s2.title, s2.romaji, ...a.titles];
+    for (const t of ['Tougen Anki Season 2', 'Tougen Anki 2nd Season', 'Tougen Anki الموسم الثاني', 'tougen anki: nikko kegon no taki-hen'])
+      expect(engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' }).ok, t).toBe(true);
+    for (const t of ['Tougen Anki', 'Tougen Anki Season 3'])
+      expect(engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' }).ok, t).toBe(false);
+  });
+
+  it('gives nothing when the chain cannot be confirmed or the title already carries its number', async () => {
+    expect(await engine.seasonAliases({ ...s2, id: 3 }, () => Promise.reject(new Error('offline')))).toEqual({ titles: [], queries: [] });
+    expect(await engine.seasonAliases({ ...s2, id: 4, title: 'Jujutsu Kaisen Season 2', romaji: 'Jujutsu Kaisen 2nd Season' }, detail)).toEqual({ titles: [], queries: [] });
+    expect(await engine.seasonAliases(s1, detail)).toEqual({ titles: [], queries: [] });
   });
 });

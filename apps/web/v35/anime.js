@@ -2065,6 +2065,10 @@ export function createAnime(deps) {
     const trace = state.workTrace;
     trace.record('discovery_started');
     const titles = [m.title, m.romaji, m.native, ...(m.synonyms ?? [])];
+    // موسم لاحق باسم فرعي: المواقع ترقّمه؛ نضيف «الاسم الأصلي Season N» للمطابقة واسم الموسم الأول للبحث
+    const aliases = m._sourceCopy ? Promise.resolve({ titles: [], queries: [] })
+      : Promise.race([engine.seasonAliases(m, fetchAnimeDetail), new Promise(r => setTimeout(() => r({ titles: [], queries: [] }), 5000))]).catch(() => ({ titles: [], queries: [] }));
+    const search = (onWork) => aliases.then(a => { if (a.titles.length) trace.record('season_aliases', a); return engine.findWorkStream([...titles, ...a.titles], onWork, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace, queries: a.queries }); });
     const generation = ++state.workGeneration;
     const current = () => token === state.detailToken && sameWork(m) && generation === state.workGeneration;
     const adopt = (work) => {
@@ -2083,7 +2087,7 @@ export function createAnime(deps) {
       state.work = remembered;
       paintSources(m, 'found');
       // تحديث صامت: مصدر جديد أو رابط تغيّر يدخل للفتحة القادمة بلا انتظار الآن
-      void engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).then((fresh) => fresh && adopt(fresh)).catch(error => trace.record('core_search_failed', { error }));
+      void search(adopt).then((fresh) => fresh && adopt(fresh)).catch(error => trace.record('core_search_failed', { error }));
       void engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => copies.length && adopt({ title: m.title, copies })).catch(error => trace.record('addon_search_failed', { error }));
       return remembered;
     }
@@ -2091,7 +2095,7 @@ export function createAnime(deps) {
     const pending = (async () => {
       try {
         let sourceError = null;
-        const core = engine.findWorkStream(titles, adopt, { year: m.year ?? null, format: m.format ?? null, signal: controller.signal, diagnostic: trace }).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
+        const core = search(adopt).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
         const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { trace.record('addon_copies', { sources: copies.map(c => c.sourceId) }); if (copies.length) adopt({ title: m.title, copies }); return copies; }).catch(error => { trace.record('addon_search_failed', { error }); throw error; });
         const work = await engine.firstAvailableCopies(core, addons);
         if (!work?.copies?.length && sourceError) throw sourceError;

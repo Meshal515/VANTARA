@@ -245,6 +245,34 @@ export async function extend(session, copies) {
   return (await plugin.extend({ session, copies }).catch(() => null))?.added ?? 0;
 }
 
+/**
+ * أسماء الموسم كما تكتبها المواقع: AniList يسمّي موسمًا لاحقًا باسم فرعي («Tougen Anki: Nikko Kegon no Taki-hen»)،
+ * والمواقع العربية ترقّمه («Tougen Anki Season 2» / «الموسم الثاني»). نتتبع سلسلة «الجزء السابق» التلفزيونية
+ * حتى الموسم الأول، فنعرف اسمه الأصلي ورقم هذا الموسم. لا تخمين: سلسلة انقطع جلبها لا تعطي شيئًا.
+ */
+const SERIES_FORMATS = new Set(['TV', 'TV_SHORT', 'ONA']);
+const seasonAliasCache = new Map();
+const NO_ALIASES = Object.freeze({ titles: [], queries: [] });
+/** ← {titles: أسماء للمطابقة «X Season N»، queries: اسم الموسم الأول للبحث فقط (لا يُطابَق به فيُقبل الموسم الأول)}. */
+export async function seasonAliases(m, fetchDetail, { maxHops = 8 } = {}) {
+  if (!m?.id || !SERIES_FORMATS.has(m.format)) return NO_ALIASES;
+  if ([m.title, m.romaji].some(t => animeTitle(t ?? '').season != null)) return NO_ALIASES; // الرقم في اسمه أصلًا
+  if (seasonAliasCache.has(m.id)) return seasonAliasCache.get(m.id);
+  const prequelOf = (w) => (w?.relations ?? []).find(r => r.relation === 'الجزء السابق' && SERIES_FORMATS.has(r.format));
+  let root = m;
+  let n = 1;
+  for (let p = prequelOf(m); p; p = prequelOf(root)) {
+    if (n > maxHops) return NO_ALIASES;
+    root = await fetchDetail(p.id).catch(() => null);
+    if (!root) return NO_ALIASES; // سلسلة ناقصة: الرقم غير مؤكد
+    n += 1;
+  }
+  const names = [...new Set([root.title, root.romaji].filter(Boolean).map(t => animeTitle(t).season == null ? t : null).filter(Boolean))];
+  const out = n > 1 ? { titles: names.map(t => `${t} Season ${n}`), queries: names } : NO_ALIASES;
+  seasonAliasCache.set(m.id, out);
+  return out;
+}
+
 /** أفضل عمل يطابق عناوين أنمي AniList (إنجليزي/روماجي/أصلي). */
 export async function findWork(titles) {
   const tried = new Set();
@@ -352,7 +380,7 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
     let uncertain = false;
     const items = [];
     const tried = new Set();
-    const queries = titles.filter(Boolean).map((t) => String(t).replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter((q) => q && !tried.has(q.toLowerCase()) && tried.add(q.toLowerCase()));
+    const queries = [...titles, ...(criteria.queries ?? [])].filter(Boolean).map((t) => String(t).replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter((q) => q && !tried.has(q.toLowerCase()) && tried.add(q.toLowerCase()));
     // English and romaji must not wait behind each other's slow sources.
     // Matching still uses the complete canonical titles and season/year guards.
     const worker = async () => {
