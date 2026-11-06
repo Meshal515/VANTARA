@@ -889,8 +889,9 @@ html,
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 58%, #0b0a10);
-  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
+  /* حلقة شفافة بلون القسم: بلا تعبئة ولا لمعة */
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff);
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
@@ -962,7 +963,8 @@ html,
   pointer-events: auto;
 }
 .v35 .dock-opt.current {
-  background: color-mix(in srgb, var(--accent) 58%, #0b0a10);
+  background: color-mix(in srgb, var(--accent) 10%, #17161c);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff);
 }
 .v35 .dock-opt:active {
   filter: brightness(1.12);

@@ -709,8 +709,8 @@ export function createCinema(deps) {
       else bars[i].style.transform = 'scaleX(1)';
     };
     const next = (step) => {
-      if (!box.isConnected || document.hidden || deps.currentPage() !== 'home' || q('cinemaHome').hidden) {
-        // خارج الشاشة: لا تقليب في الخلفية، نعيد المحاولة لاحقًا
+      if (!box.isConnected || document.hidden || deps.currentPage() !== 'home' || q('cinemaHome').hidden || q('home')?.classList.contains('layering')) {
+        // خارج الشاشة أو أثناء تبديل الأقسام (حركة واحدة على الشاشة): لا تقليب في الخلفية، نعيد المحاولة لاحقًا
         state.hero.tween = progressFill(bars[state.hero.index], HERO_SECONDS, () => next(step));
         return;
       }

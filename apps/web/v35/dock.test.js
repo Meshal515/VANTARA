@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, easeSwap, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -42,7 +42,8 @@ describe('layer model', () => {
       const plan = layerPlan(from, to);
       expect(plan.up, `${from}→${to}`).toBe(up);
       expect(plan.duration).toBe(up ? T.enter : T.exit);
-      expect(plan.ease).toBe(up ? easeOut : easeInOut);
+      expect(plan.ease).toBe(easeSwap); // الذهاب والرجوع: المدة والمنحنى نفسهما
+      expect(T.enter).toBe(T.exit);
       expect(plan.shown).toEqual([from, to]);
     }
   });
@@ -101,6 +102,28 @@ describe('layer model', () => {
     expect(v.anime.hidden).toBe(true);
     expect(document.querySelectorAll('.layer-dim').length).toBe(0);
     expect(document.getElementById('home').classList.contains('layering')).toBe(false);
+  });
+
+  it('each section keeps its own reading position across switches', () => {
+    const v = views();
+    let y = 0;
+    globalThis.scrollTo = (o) => (y = o.top, globalThis.scrollY = o.top);
+    try {
+      const layers = createLayers({ views: v, host: document.getElementById('home'), current: 'manga' });
+      globalThis.scrollY = 900;
+      layers.go('anime');
+      tick(800);
+      expect(layers.section).toBe('anime');
+      expect(y).toBe(0); // الأنمي لم يُقرأ بعد: من أعلاه
+      globalThis.scrollY = 400;
+      layers.go('manga');
+      expect(v.manga.scrollTop).toBe(900); // يدخل بموضعه أثناء الحركة لا بعدها
+      tick(800);
+      expect(y).toBe(900);
+      layers.go('anime');
+      tick(800);
+      expect(y).toBe(400);
+    } finally { delete globalThis.scrollY; delete globalThis.scrollTo; }
   });
 
   it('returning to the same section restores the reader to where they were', () => {

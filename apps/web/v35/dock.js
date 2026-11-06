@@ -15,7 +15,7 @@ export const ORDER = ['manga', 'anime', 'cinema'];
 const AR_NAMES = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' };
 // خفيف لا ثقيل: إزاحة وتعتيم قليلان، بلا ظل حافة، ومدد أقصر (رأي المالك: «ثقيل و3D»)
 // الأقسام: 420 صعودًا و380 نزولًا (رأي المالك: أسرع من أن تُرى)
-export const T = { open: 240, close: 200, enter: 420, exit: 380, travel: 380, reduced: 120 };
+export const T = { open: 240, close: 200, enter: 430, exit: 430, travel: 380, reduced: 120 };
 export const SHIFT = 8;
 export const DIM = 0.18;
 
@@ -51,6 +51,8 @@ export function bezier(x1, y1, x2, y2) {
 }
 export const easeOut = bezier(0.16, 1, 0.3, 1);
 export const easeInOut = bezier(0.4, 0, 0.2, 1);
+/** الذهاب والرجوع بمنحنى واحد متناظر وتسارع خفيف: الحركة نفسها بالعكس. */
+export const easeSwap = bezier(0.32, 0, 0.24, 1);
 const linear = (x) => x;
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const rank = (id) => ORDER.indexOf(id);
@@ -63,7 +65,7 @@ export function adjacent(id, step) {
 /** حركة الانتقال بين قسمين: الاتجاه ومدته ومنحناه، ومن يظهر فيه فقط. */
 export function layerPlan(from, to) {
   const up = rank(to) > rank(from);
-  return { up, duration: up ? T.enter : T.exit, ease: up ? easeOut : easeInOut, shown: [from, to] };
+  return { up, duration: T.enter, ease: easeSwap, shown: [from, to] };
 }
 
 /**
@@ -194,7 +196,7 @@ export function haptic(kind = 'light') {
 export const isReduced = () =>
   globalThis.document?.documentElement?.dataset?.motion === 'off' ||
   (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-const cssEase = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
+const cssEase = { swap: 'cubic-bezier(0.32, 0, 0.24, 1)', out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };
 const clockNow = () => globalThis.performance?.now?.() ?? Date.now();
 const SAMPLES = 7;
 
@@ -322,6 +324,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
    * ويُستعاد للصفحة إن رجع للقسم نفسه.
    */
   let savedScroll = 0;
+  const scrolls = {}; // موضع القارئ في كل قسم
   // موضع الصفحة بدقة كسرية: offsetTop يقرّب لعدد صحيح، والترويسة بالمساحة الآمنة كسرية (بكسل أو اثنان)
   // ويُقاس من أسفل الترويسة لا من موضع الصفحة الحالية: هامش أول عنصر في صفحة (6px في المانجا) يتسرّب
   // خارجها في التدفق العادي، فموضع صفحة لا يصلح لغيرها؛ والحشوة تبقي هامش كل صفحة داخلها هي
@@ -336,6 +339,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     const top = topOf(views[section]);
     const scrollY = globalThis.scrollY || 0;
     savedScroll = scrollY;
+    scrolls[section] = scrollY;
     host.style.minHeight = `${globalThis.innerHeight || 0}px`;
     host.style.setProperty('--layer-top', `${top}px`);
     host.classList.add('layering');
@@ -374,7 +378,8 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     offsets = {};
     fade?.rest(wordOf(shown));
     // رجع للقسم نفسه (سحب أُلغي أو اختيار عُكس): يعود القارئ لموضعه
-    if (shown === from && savedScroll > 0) globalThis.scrollTo?.({ top: savedScroll, behavior: 'instant' });
+    const back = shown === from ? savedScroll : scrolls[shown] ?? 0;
+    if (back > 0) globalThis.scrollTo?.({ top: back, behavior: 'instant' });
     savedScroll = 0;
     onSettle?.(shown, from);
   };
@@ -453,8 +458,8 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       aim(to);
       const up = rank(to) > topBefore || (rank(to) === topBefore && start[to] < 1);
       const delta = Math.max(...Object.keys(goal).map((id) => Math.abs(goal[id] - start[id])));
-      if (up) run((timing.enter ?? T.enter) * Math.max(delta, 0.35), easeOut, cssEase.out);
-      else run((timing.exit ?? T.exit) * Math.max(delta, 0.35), easeInOut, cssEase.inOut);
+      if (scrolls[to] != null) views[to].scrollTop = scrolls[to]; // القسم يدخل بموضع قارئه
+      run((up ? timing.enter ?? T.enter : timing.exit ?? T.exit) * Math.max(delta, 0.35), easeSwap, cssEase.swap);
       dropStandby();
     },
     /** سحب بالإصبع: يثبّت الهدف ثم يتبع التقدّم 0..1. */
@@ -469,8 +474,7 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     release(commit) {
       if (!words) return dropStandby();
       const e = words.e;
-      if (commit) run(T.enter, easeOut, cssEase.out, e, 1);
-      else run(T.exit, easeOut, cssEase.out, e, 0);
+      run(commit ? T.enter : T.exit, easeSwap, cssEase.swap, e, commit ? 1 : 0);
     },
     /** قسم تغيّر من خارج المبدّل (فتح عمل من إضافة): لا حركة، فقط الحالة. */
     sync(id) {
@@ -552,6 +556,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
 
   // ── المؤشر ───────────────────────────────────────────────
   const slotCenter = (nav) => {
+    if (nav.offsetWidth) return nav.offsetLeft + nav.offsetWidth / 2;
     const cap = nav.closest('.dock-cap');
     const c = cap.getBoundingClientRect();
     const r = nav.getBoundingClientRect();
