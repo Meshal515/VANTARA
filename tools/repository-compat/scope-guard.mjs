@@ -193,6 +193,11 @@ seams.add('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPoli
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeVersionPolicyTest.kt');
 // Regression coverage for general search: cooling CloudStream sources remain searchable after healthy sources.
 seams.add('android/app/src/test/java/com/vantara/anime/SearchOrderTest.kt');
+// Aniyomi torrent extensions (Torrentio Anime) return magnet links: native tickets via the torrent engine's public API.
+seams.add('android/app/src/main/kotlin/com/vantara/anime/stream/MagnetLinks.kt');
+seams.add('android/app/src/test/java/com/vantara/anime/MagnetLinksTest.kt');
+// Additive nullable Route.type so the sheet renders any adapter's torrent tickets as torrent rows.
+seams.add('android/app/src/main/kotlin/com/vantara/anime/stream/Routes.kt');
 seams.add('android/app/src/androidTest/java/com/vantara/anime/InstalledVideoRestartDeviceTest.kt');
 // Owner's Nov 1 screenshots: optional legacy manga catalogue and direct protobuf repository URLs.
 seams.add('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');

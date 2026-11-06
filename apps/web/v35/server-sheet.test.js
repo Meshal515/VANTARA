@@ -294,3 +294,13 @@ it('غير المتاح مطويّ تحت الجاهز ويقول سببه في 
   expect(why.textContent).not.toBe('');
   expect(why.textContent).not.toBe('غير متاح');
 });
+
+it('an Aniyomi torrent route (Torrentio Anime magnet → native ticket) is a torrent row, not a direct Arabic one', () => {
+  const route = { sourceId: 'torrentio-anime', sourceName: 'Torrentio Anime', server: 'Torrentio Anime', type: 'torrent', quality: 1080,
+    label: '1080p\nBlack Lagoon - 01 [1080p].mkv\n👤 39 💾 1.7 GB ⚙️ NyaaSi', variant: 'SUB' };
+  const d = describeRoute(route, { directLang: 'مترجم عربي', sourceName: () => 'Torrentio Anime' });
+  expect(d.torrent).toBe(true);
+  expect(d.info.seeders).toBe(39);
+  expect(d.host).toContain('NyaaSi');
+  expect(d.langs.map((l) => l.t)).not.toContain('مترجم عربي');
+});

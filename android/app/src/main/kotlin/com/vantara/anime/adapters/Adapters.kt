@@ -380,16 +380,18 @@ class ExtensionAdapter(
     }
 
     private fun toCandidate(hoster: Hoster, video: Video, episode: SourceEpisode, now: Long): Candidate? {
-        val url = video.videoUrl.takeIf { it.startsWith("http") } ?: return null
+        // magnet من إضافات التورنت (Torrentio Anime): يصير تذكرة في محرك التورنت عند التجهيز (MagnetLinks)
+        val url = video.videoUrl.takeIf { it.startsWith("http") || com.vantara.anime.stream.MagnetLinks.isMagnet(it) } ?: return null
+        val magnet = com.vantara.anime.stream.MagnetLinks.isMagnet(url)
         val serverName = hoster.hosterName.takeUnless { it == Hoster.NO_HOSTER_LIST || it.isBlank() } ?: video.videoTitle
-        val headers = (video.headers ?: (source as? AnimeHttpSource)?.headers)
+        val headers = if (magnet) emptyMap() else (video.headers ?: (source as? AnimeHttpSource)?.headers)
             ?.let { h -> h.names().associateWith { h[it].orEmpty() } }.orEmpty()
         return Candidate(
             id = "$id|${episode.url}|${url.hashCode()}",
             sourceId = id,
             sourceName = name,
             server = serverName,
-            host = StreamClassifier.host(url),
+            host = if (magnet) "torrent" else StreamClassifier.host(url),
             url = url,
             headers = headers,
             quality = video.resolution ?: StreamClassifier.quality(video.videoTitle, serverName),

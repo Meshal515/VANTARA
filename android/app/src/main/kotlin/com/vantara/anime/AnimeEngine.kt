@@ -436,7 +436,9 @@ class AnimeEngine(context: Context) {
 
     /** يبني جلسة تشغيل للحلقة من كل النسخ؛ المشغّل يطلب «التالي» عند العطل. */
     suspend fun openSession(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): List<Candidate> {
+        // جلسة قديمة بلا تجهيز يملك تذاكر التورنت: روابط magnet لا تدخلها (كما كانت قبل دعمها في التجهيز)
         val list = resolver.candidates(copies.map { EpisodeResolver.Copy(it.sourceId, it) }, number, prefs)
+            .filterNot { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }
         sessions[sessionId] = PlaybackSession(list, health)
         sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
         return list
@@ -454,7 +456,7 @@ class AnimeEngine(context: Context) {
         return resolver.candidates(
             req.copies.map { EpisodeResolver.Copy(it.sourceId, it) }, req.number, req.prefs,
             exhaustive = true,
-        )
+        ).filterNot { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }
     }
 
     private val prepared = ConcurrentHashMap<String, com.vantara.anime.stream.PreparedEpisode>()
@@ -663,18 +665,24 @@ class AnimeEngine(context: Context) {
                                 val ep = resolver.pick(list, prep.number) ?: return@withTimeout trace("no-episode", "wanted=${prep.number}")
                                 val a = adapter(copy.sourceId) ?: return@withTimeout trace("no-adapter")
                                 val scope = this
-                                val trace = com.vantara.anime.adapters.ResolveTrace { r ->
+                                val tickets = TorrentTickets(prep)
+                                val trace = com.vantara.anime.adapters.ResolveTrace { raw ->
+                                    val r = tickets.report(raw)
+                                    for (c in r.candidates) if (c.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(c.id)
                                     prep.report(r)
-                                    // أول رابط جاهز يُفحص فورًا بالتوازي، والسيرفرات الباقية تكمل
-                                    if (prep.probe && r.state == com.vantara.anime.stream.RouteState.READY && r.candidates.isNotEmpty()) {
-                                        scope.launch { probeRoute(prep, r) }
+                                    // أول رابط جاهز يُفحص فورًا بالتوازي، والسيرفرات الباقية تكمل. تذكرة التورنت لا تُفحص بطلب HTTP
+                                    val http = r.candidates.filterNot { it.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME) }
+                                    if (prep.probe && r.state == com.vantara.anime.stream.RouteState.READY && http.isNotEmpty()) {
+                                        scope.launch { probeRoute(prep, r.copy(candidates = http)) }
                                     }
                                 }
                                 val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
                                 else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
                                 trace("links", "count=${links.size}")
-                                prep.adopt(copy.sourceId, links)
+                                prep.adopt(copy.sourceId, links.mapNotNull(tickets::candidate).onEach {
+                                    if (it.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(it.id)
+                                })
                             }
                         }.onFailure {
                             trace(if (it is TimeoutCancellationException) "timeout" else "error", "${it.javaClass.simpleName}: ${it.message?.take(160)}")
@@ -686,6 +694,32 @@ class AnimeEngine(context: Context) {
                 prep.finish()
                 health.flush()
             }
+        }
+    }
+
+    /**
+     * روابط magnet من محوّل (إضافة Aniyomi) تصير تذاكر يملكها التجهيز، مرة واحدة لكل رابط، بواجهة محرك التورنت
+     * العامة كما تُسجَّل تورنتات Stremio. رابط لا يُفهم يُسقط ويُذكر سببه بدل «غير قابل للتشغيل».
+     */
+    private inner class TorrentTickets(private val prep: com.vantara.anime.stream.PreparedEpisode) {
+        private val done = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<Candidate>>()
+        fun candidate(c: Candidate): Candidate? {
+            if (!com.vantara.anime.stream.MagnetLinks.isMagnet(c.url)) return c
+            return done.computeIfAbsent(c.id) { java.util.Optional.ofNullable(register(c)) }.orElse(null)
+        }
+        private fun register(c: Candidate): Candidate? {
+            val request = com.vantara.anime.stream.MagnetLinks.request(c.url) ?: return null
+            val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
+            val uri = runCatching { engine.register(request) }.getOrNull() ?: return null
+            if (!prep.ownTorrentTicket(uri.toString())) { engine.release(uri); return null }
+            return c.copy(url = uri.toString(), host = "torrent", headers = emptyMap())
+        }
+        fun report(r: com.vantara.anime.stream.RouteReport): com.vantara.anime.stream.RouteReport {
+            if (r.candidates.none { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }) return r
+            val kept = r.candidates.mapNotNull(::candidate)
+            return if (kept.isEmpty() && r.state == com.vantara.anime.stream.RouteState.READY)
+                r.copy(state = com.vantara.anime.stream.RouteState.UNAVAILABLE, candidates = emptyList(), reason = "رابط تورنت غير صالح")
+            else r.copy(candidates = kept)
         }
     }
 

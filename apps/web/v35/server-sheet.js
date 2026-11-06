@@ -72,7 +72,8 @@ const QUALITY_PREF = { 1080: 5, 2160: 4, 1440: 4, 720: 3, 480: 1 };
 /** ما يحتاجه الصف ليُرسم: الاسم والنوع والجودة واللغة والصحة. */
 export function describe(r, ctx = {}) {
   const torrent = isTorrentRoute(r);
-  const info = isAddonRoute(r) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+  // وصف التورنت (البذور والحجم والموقع) من وسمه، لأي تورنت: إضافة Stremio أو إضافة Aniyomi (Torrentio Anime)
+  const info = (isAddonRoute(r) || torrent) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
   const q = bucket(r.quality ?? info?.quality);
   const name = torrent
     ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة')

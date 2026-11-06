@@ -117,6 +117,7 @@ class PreparedEpisode(
                 probeMs = old?.probeMs,
                 sourceName = r.candidates.firstOrNull()?.sourceName ?: old?.sourceName,
                 label = r.candidates.firstOrNull()?.label?.takeIf { it.isNotBlank() } ?: old?.label,
+                type = if (r.candidates.isNotEmpty() && r.candidates.all { it.url.startsWith(MagnetLinks.TICKET_SCHEME) }) "torrent" else old?.type,
             )
             byId[rid] = route
         }
