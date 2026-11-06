@@ -201,16 +201,42 @@ export const isReduced = () =>
  * قارئها، ثم تنزلق بعيدًا بمدة الطبقات ومنحناها كاشفةً رئيسية القسم الجديد في مكانها. الطبقة المتحركة بحجم الشاشة
  * لا بطول الصفحة. تقليل الحركة: فوري.
  */
+// صفحات اكتشف/مكتبتي/الأصدقاء تكشف رئيسية القسم الجديد من تحتها: محرّك الطبقات نفسه
+// (drive + easeSwap) يحرك الصفحة المغادرة فقط إلى اليمين، بلا تحريك رئيسية ثانية.
+const pageExits = new WeakMap();
 export function exitPage(leave, scrollY = 0, { duration = T.exit } = {}) {
-  if (!leave?.animate || isReduced()) return null;
+  if (!leave || isReduced()) return null;
+  pageExits.get(leave)?.finish();
+  const previous = {
+    scrollTop: leave.scrollTop,
+    transform: leave.style.transform,
+    backgroundColor: leave.style.backgroundColor,
+  };
+  // الصفحة كانت تُمرّر عبر window. قبل تغيير الصفحة والهوية ثبّتها في موضع القارئ
+  // حتى لا تقفز إلى أول القائمة حين يعيد showPage نافذة WebView إلى الأعلى.
+  const css = globalThis.getComputedStyle?.(leave);
+  const appBg = globalThis.getComputedStyle?.(leave.closest('.app'))?.backgroundColor;
+  const color = css?.backgroundColor && css.backgroundColor !== 'rgba(0, 0, 0, 0)'
+    ? css.backgroundColor : appBg;
+  if (color && color !== 'rgba(0, 0, 0, 0)') leave.style.backgroundColor = color;
   leave.classList.add('page-leaving');
-  leave.scrollTop = scrollY;
-  const anim = leave.animate([{ transform: 'translate3d(0,0,0)' }, { transform: 'translate3d(-100%,0,0)' }],
-    { duration, easing: cssEase.swap, fill: 'forwards' });
-  const done = () => { leave.classList.remove('page-leaving'); leave.scrollTop = 0; anim.cancel(); };
-  anim.onfinish = done;
-  anim.oncancel = () => leave.classList.remove('page-leaving');
-  return anim;
+  leave.scrollTop = Math.max(0, scrollY);
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    leave.classList.remove('page-leaving');
+    leave.style.transform = previous.transform;
+    leave.style.backgroundColor = previous.backgroundColor;
+    leave.scrollTop = previous.scrollTop;
+    pageExits.delete(leave);
+  };
+  const motion = drive({
+    frameAt: (e) => new Map([[leave, { transform: `translate3d(${(100 * e).toFixed(3)}%,0,0)` }]]),
+    duration, ease: easeSwap, easing: cssEase.swap, done: cleanup,
+  });
+  if (motion.live) pageExits.set(leave, motion);
+  return motion;
 }
 
 const cssEase = { swap: 'cubic-bezier(0.32, 0, 0.24, 1)', out: 'cubic-bezier(0.16, 1, 0.3, 1)', inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', linear: 'linear' };

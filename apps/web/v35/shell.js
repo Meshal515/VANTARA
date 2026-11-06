@@ -5413,6 +5413,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintRail();
   }
   const pickSection = (_e, t) => selectSection(t.dataset.arg);
+  let pageExit = null;
   /** اختر قسمًا (المبدّل أو الدرج أو السحب): الطبقات في الرئيسية، ومباشرة من غيرها. */
   function selectSection(id) {
     if (!SECTIONS[id]?.ready) {
@@ -5421,15 +5422,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
+    if (pageExit?.live) pageExit.finish(); // ضغطة جديدة لا تتراكب مع خروج سابق
     if (currentPage() !== 'home') {
       const leave = root.querySelector('.page.active');
       const y = window.scrollY;
       setSectionsOpen(false);
       layers?.finish();
+      pageExit = exitPage(leave, y); // ثبّت الصفحة القديمة أولًا، قبل تغيير الرئيسية والتمرير
       showHome(id);
       showPage('home');
-      enterSection(id);
-      exitPage(leave, y); // الانتقال نفسه: الصفحة المغادرة تنزلق كاشفةً القسم الجديد
+      enterSection(id); // الرئيسية الجديدة مكشوفة خلف الصفحة المغادرة، بلا حركة ثانية
       haptic();
       return;
     }

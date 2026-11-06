@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
-import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, easeInOut, easeOut, easeSwap, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
+import { DIM, ORDER, SHIFT, T, adjacent, sampleAt, springPath, stretchOf, admit, createDock, createLayers, exitPage, easeInOut, easeOut, easeSwap, layerFrame, layerPlan, settledSection, targetCover } from './dock.js';
 
 // ساعة يدوية لـ rAF والمؤقتات: كل إطار تقدّمه الاختبارات بنفسها
 let clock, frames, timers;
@@ -173,6 +173,41 @@ describe('layer model', () => {
     tick(600);
     expect(layers.section).toBe('anime');
     expect(v.cinema.hidden).toBe(true);
+  });
+});
+
+describe('subpage → section home uses the section-motion engine', () => {
+  it('reveals the destination home by moving only the old page to the right, without a jump', () => {
+    const leave = document.createElement('section');
+    leave.className = 'page active';
+    leave.scrollTop = 16;
+    document.body.append(leave);
+    const calls = [];
+    leave.animate = (keys, opts) => {
+      calls.push({ keys, opts });
+      return { cancel() {}, set onfinish(fn) { this.done = fn; } };
+    };
+    const motion = exitPage(leave, 640);
+    expect(leave.classList.contains('page-leaving')).toBe(true);
+    expect(leave.scrollTop).toBe(640);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.duration).toBe(T.exit);
+    expect(calls[0].opts.easing).toBe('cubic-bezier(0.32, 0, 0.24, 1)');
+    expect(calls[0].keys[0].transform).toBe('translate3d(0.000%,0,0)');
+    expect(calls[0].keys.at(-1).transform).toBe('translate3d(100.000%,0,0)');
+    motion.finish();
+    expect(leave.classList.contains('page-leaving')).toBe(false);
+    expect(leave.style.transform).toBe('');
+    expect(leave.scrollTop).toBe(16);
+  });
+  it('reducing motion skips the overlay completely', () => {
+    const leave = document.createElement('section');
+    document.body.append(leave);
+    document.documentElement.dataset.motion = 'off';
+    try {
+      expect(exitPage(leave, 700)).toBeNull();
+      expect(leave.classList.contains('page-leaving')).toBe(false);
+    } finally { delete document.documentElement.dataset.motion; }
   });
 });
 
