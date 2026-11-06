@@ -560,6 +560,12 @@
   .v35 .cn-hero-alt {
     margin-top: 0;
   }
+  /* تبديل الأقسام: الطبقات تُحشى بارتفاع الترويسة لأنها تشغل مكانًا في الأنمي والمانجا. صفحة السينما تبدأ من
+     أعلى الشاشة تحت ترويستها الثابتة، فطبقتها بلا حشوة، وإلا نزل البانر بارتفاع الترويسة ثم قفز عند الاستقرار */
+  .v35 #home.layering > #cinemaHome:has(> .cn-hero-alt),
+  .v35 #home > #cinemaHome.layer-standby:has(> .cn-hero-alt) {
+    padding-top: 0;
+  }
   /* زر الرجوع ثابت مستقل عن طبقة الصورة المتحركة. لا نترك حاويته
      pointer-events:none ثم نطلب من الأبناء إصلاح اللمس داخل WebView. */
   .v35 #cinema.active .cn-detail-bar {
