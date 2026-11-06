@@ -115,6 +115,45 @@ for (const path of animeDetailSeams) seams.add(path);
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
+// اعتماد المصادر حتى «أعطال فانتارا = صفر» (6 نوفمبر 2026، موافقة المالك على النشر في Debug):
+// تحقق Cloudflare على المضيف المتحدّي، وانتقال دومين Aniyomi، وProtoBuf للإضافات، ونظام الاعتماد
+// وأدواته ووثائقه، و«فتح» يفتح المصدر مباشرة، وسبب عدم التوفر في سطر السيرفر؛ كلها باختباراتها.
+// لا تورنت ولا Stremio ولا مشغّل. التفاصيل: docs/addons/HANDOFF_ENGINE_20261106.ar.md
+const certificationSeams = [
+  'android/app/src/main/kotlin/com/vantara/anime/net/AnimeHostRouter.kt',
+  'android/app/src/main/kotlin/com/vantara/anime/net/Domains.kt',
+  'android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt',
+  'android/app/src/main/kotlin/com/vantara/verification/VerificationPolicy.kt',
+  'android/app/src/test/java/com/vantara/verification/VerificationPolicyTest.kt',
+  'android/app/src/test/java/com/vantara/anime/net/DomainInterceptorTest.kt',
+  'android/app/src/test/java/com/vantara/plugins/ExtensionInjektTest.kt',
+  'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/SourceCertificationTest.kt',
+  '.github/workflows/source-certification.yml',
+  'tools/repository-compat/addon_preflight.mjs',
+  'tools/repository-compat/certification-sources.txt',
+  'tools/repository-compat/run_source_certification.sh',
+  'tools/repository-compat/summarize_certification.mjs',
+  'tools/repository-compat/summarize_certification.test.mjs',
+  'docs/addons/ENGINE_COMPAT_20261105.ar.md',
+  'docs/addons/HANDOFF_CERTIFICATION_20261105.ar.md',
+  'docs/addons/HANDOFF_ENGINE_20261106.ar.md',
+  'apps/web/addons/native-catalog.js',
+  'apps/web/addons/native-catalog.test.js',
+  'apps/web/v35/server-sheet.css',
+  'apps/web/v35/server-sheet.test.js',
+  'apps/web/v35/cinema-releases.test.js',
+];
+for (const path of certificationSeams) seams.add(path);
+// الشريط العائم ومبدّل الأقسام وانتقال الطبقات (موافقة المالك على النشر في Debug)؛ للجوال فقط
+const floatingNavSeams = [
+  'apps/web/v35/dock.js',
+  'apps/web/v35/dock.test.js',
+  'apps/web/v35/core.css',
+  'apps/web/v35/markup.js',
+  'apps/web/v35/wide.css',
+  'apps/web/v35/cinema-home-layout.test.js',
+];
+for (const path of floatingNavSeams) seams.add(path);
 seams.add('extensions/runtime-android/http/src/test/java/dev/vantara/runtime/http/HttpBrokerTest.java');
 seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/RuntimePostPromotionRecoveryDeviceTest.kt');
 seams.add('extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt');
