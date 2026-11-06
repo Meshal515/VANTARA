@@ -200,8 +200,19 @@ class SourceCertificationTest {
             onMain { player().volume = 0f }
             // The player clears its error when it moves to the next server; keep the first one it raised here.
             val firstError = AtomicReference<String?>(null)
+            // The HTTP answer behind a bad-status error: which request (playlist the probe already opened, or a later
+            // segment) and which code. It separates a link consumed/expired after the probe from a broken route.
+            val httpFailure = AtomicReference<String?>(null)
             onMain { player().addListener(object : androidx.media3.common.Player.Listener {
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) { firstError.compareAndSet(null, error.errorCodeName) }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    firstError.compareAndSet(null, error.errorCodeName)
+                    val bad = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                    if (bad != null) {
+                        val uri = bad.dataSpec.uri
+                        val same = uri.toString().substringBefore('?') == chosen.url.substringBefore('?')
+                        httpFailure.compareAndSet(null, "${bad.responseCode} ${if (same) "manifest" else "media"} ${uri.host?.take(40)} ${uri.lastPathSegment?.substringAfterLast('.')?.take(6) ?: ""}")
+                    }
+                }
             }) }
             var ttff = -1L
             var error: String? = null
@@ -221,6 +232,7 @@ class SourceCertificationTest {
                 put("waitedMs", SystemClock.elapsedRealtime() - started)
                 if (switchedAt >= 0) put("switchedAtMs", switchedAt)
                 firstError.get()?.let { put("playerError", it) }
+                httpFailure.get()?.let { put("httpFailure", it) }
                 // No player error and a switch at the startup budget: a slow first segment, not a broken route.
                 put("startupBudgetMs", com.vantara.anime.player.PlaybackBudgets.startupMs(chosen.url))
             }

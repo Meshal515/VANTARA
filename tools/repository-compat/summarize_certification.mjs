@@ -81,6 +81,8 @@ export function failures(source, works = []) {
       if (p.verdict !== 'FALSE_READY') continue;
       // أول إطار ظهر والوقت تقدّم بلا خطأ ولا انتقال، أبطأ من الحد: فك برمجي على المحاكي (1080p)، لا سيرفر يكذب
       if (p.code === 'CLOCK_STALLED' && p.ttffMs > 0 && p.decoded > 0 && p.advancedMs > 0) { out.push({ code: 'FALSE_READY:CLOCK_STALLED', owner: 'slow' }); continue; }
+      // أول إطار ظهر ثم لم يُفك غيره في نافذة القياس، بلا خطأ ولا انتقال: الفك البرمجي على المحاكي (1080p) نفسه
+      if (p.code === 'NO_FRAMES' && p.ttffMs > 0 && !p.playerError) { out.push({ code: 'FALSE_READY:NO_FRAMES', owner: 'slow' }); continue; }
       // انتقل المشغّل عند ميزانية البدء بلا خطأ تشغيل: أول مقطع بطيء (المحاكي يفك برمجيًا)، يُعرض منفصلًا لا عطلًا
       const slow = p.code === 'SWITCHED_BEFORE_FRAME' && p.switchedAtMs >= (p.startupBudgetMs ?? 15000) - 1500;
       out.push({ code: `FALSE_READY:${p.code ?? ''}`, owner: slow ? 'slow' : 'vantara' });
