@@ -1349,12 +1349,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (amb.dataset.key === key) return;
     amb.dataset.key = key;
     const layer = el('div', 'mg-amb-layer');
-    void mountImage(layer, w);
     amb.append(layer);
-    requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.add('in')));
-    // الطبقة السابقة تبقى تحت الجديدة حتى يكتمل تلوّنها ثم تُحذف: الألوان تنسجم لا تُستبدل
-    const old = [...amb.children].slice(0, -1);
-    setTimeout(() => old.forEach((n) => n.remove()), 1100);
+    // لا تظهر الطبقة قبل صورتها: كانت مكانها الفاتح يظهر أولًا ثم يغمق حين تصل الصورة.
+    // الطبقات معتمة داخل حاوية بشفافية ثابتة، فالتبديل انتقال ألوان بالغمق نفسه لا إضاءة ثم إطفاء.
+    const show = () => {
+      if (!layer.isConnected || amb.dataset.key !== key) return;
+      requestAnimationFrame(() => layer.classList.add('in'));
+      const old = [...amb.children].filter((n) => n !== layer);
+      setTimeout(() => old.forEach((n) => n.remove()), 1000);
+    };
+    void mountImage(layer, w).then((url) => {
+      const img = layer.querySelector(':scope > img');
+      if (!url || !img) return layer.remove();
+      if (img.complete && img.naturalWidth) show();
+      else img.decode?.().then(show, () => layer.remove()) ?? img.addEventListener('load', show, { once: true });
+    }, () => layer.remove());
   }
   function renderHero() {
     const items = state.heroItems;

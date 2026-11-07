@@ -799,13 +799,16 @@
   -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
 }
+.v35 .mg-amb { opacity: 0.45; }
 .v35 .mg-amb-layer {
   position: absolute;
   inset: 0;
   opacity: 0;
+  background: var(--bg);
   transition: opacity 0.95s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.v35 .mg-amb-layer.in { opacity: 0.45; }
+.v35 .mg-amb-layer.in { opacity: 1; }
+.v35 .mg-amb-layer > :not(img) { display: none; }
 .v35 .mg-copy > * { transition: opacity 0.14s ease-out; }
 .v35 .mg-copy.mg-swapping > * { opacity: 0; }
 .v35 .mg-copy:not(.mg-swapping) > * { animation: mg-copy-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
