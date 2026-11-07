@@ -522,7 +522,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // البطاقة تقول أين وقفت: «الفصل 47» من سجلّك نفسه
   // «222» وحده لا يقول شيئًا: رقم الفصل يُقرأ «الفصل 222»، والاسم الحرفي يبقى كما هو
   const chapterLabelAr = (label) => (label != null && /^\d+(\.\d+)?$/.test(String(label).trim()) ? `الفصل ${String(label).trim()}` : label ?? null);
-  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label) }));
+  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label), _viewAt: v.viewed_at ?? null }));
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -812,12 +812,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     frame.append(p);
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
-    const recentLabel = latestLabel(work) || null;
-    const m = el('div', 'work-meta', meta ?? recentLabel ?? '');
+    const m = el('div', 'work-meta');
+    setMeta(m, meta ?? latestLabel(work));
     const facts = el('div', 'work-facts');
     facts.append(score);
     void mountImage(p, work);
     a.append(frame, t, m, facts);
+    if (work._viewAt) a.append(el('div', 'work-when', `آخر قراءة ${agoAr(work._viewAt)}`));
     onLongPress(a, () => openCardActions(a._work));
     void nearViewport(a).then(async () => {
       if (!a.isConnected) return;
@@ -844,7 +845,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** «الفصل 401 · قبل ساعتين»: الوقت من ذاكرة VANTARA حين يكون الحدث منها. */
   function latestLabel(work) {
     const recent = work._latestChapter;
-    if (!recent) return work._viewLabel ?? '';
+    if (!recent) return work._viewLabel ?? (work.genres || []).slice(0, 2).map(genreAr).join('، ');
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
     // عدة فصول نزلت للعمل: بطاقة واحدة ورقم خفيف بعددها
@@ -852,12 +853,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const when = work._updatePublishedAt > 0 ? agoAr(work._updateAt) : `رُصد ${agoAr(work._updateAt)}`;
     return work._updateAt ? `${label}${more} · ${when}` : label + more;
   }
+  /** «الفصل 121 · قبل ساعة»: جزآن، فيصفّهما كل قسم كما صُمّم (سطر واحد أو الفصل يمينًا والوقت يسارًا). */
+  function setMeta(node, label) {
+    const text = String(label ?? '');
+    if (node.dataset.label === text) return;
+    node.dataset.label = text;
+    const i = text.indexOf(' · ');
+    if (i < 0) { node.textContent = text; return; }
+    node.replaceChildren(el('span', 'work-meta-main', text.slice(0, i)), el('span', 'work-meta-when', text.slice(i + 3)));
+  }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
       node._work = work;
-      const label = latestLabel(work);
       const meta = node.querySelector('.work-meta');
-      if (meta && meta.textContent !== label) meta.textContent = label;
+      if (meta) setMeta(meta, latestLabel(work));
     });
   }
   const renderStrip = (target, items) => reconcileCards(target, items.slice(0, Number(target.dataset.limit) || 14));
@@ -1090,7 +1099,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
     // عمل مكتمل من خارج أعلى الترتيب: لا يكرر أول ما في «الأكثر قراءة»
-    const finished = state.home.trending.slice(3).find((w) => w.status === 'FINISHED' && w.coverImage?.large);
+    const later = state.home.trending.slice(3).filter((w) => w.status === 'FINISHED' && w.coverImage?.large);
+    const finished = later.find((w) => w.wideBanner) ?? later[0];
     if (finished) specs.push(['مكتمل، اقرأه دفعة واحدة', 'pick', finished]);
     if (state.home.trending.length) specs.push(['الأكثر قراءة', 'trending', state.home.trending]);
     if (state.home.updates?.length) specs.push(['آخر التحديثات', 'recent', state.home.updates]);
@@ -1123,25 +1133,36 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** بطاقة «مكتمل»: عمل واحد يُقرأ دفعة واحدة، بضوء من غلافه نفسه وفعل واحد. */
   function pickBlock(existing, title, w) {
     if (existing?.dataset.workId === String(w.id)) return existing;
-    const s = el('section', 'section mg-pick');
+    const s = el('section', `section mg-pick${w.wideBanner ? ' mg-pick--wide' : ''}`);
     s.dataset.kind = 'pick';
     s.dataset.workId = String(w.id);
-    const amb = el('div', 'mg-pick-amb');
-    amb.setAttribute('aria-hidden', 'true');
-    void mountImage(amb, w);
-    const cover = el('div', 'mg-pick-cover');
-    void mountImage(cover, w);
+    const art = el('div', 'mg-pick-art');
+    art.setAttribute('aria-hidden', 'true');
+    if (w.wideBanner) {
+      const img = new Image();
+      img.alt = '';
+      img.decoding = 'async';
+      img.loading = 'lazy';
+      img.src = w.wideBanner;
+      art.append(img);
+    } else void mountImage(art, w);
     const copy = el('div', 'mg-pick-copy');
     const name = el('h3', null, titleOf(w));
     name.dir = 'auto';
-    const facts = (w.genres || []).slice(0, 2).map(genreAr).join('، ');
-    const b = el('button', 'btn btn-primary', 'افتح العمل');
+    const facts = [w.chapters ? countLabel(w.chapters, 'chapter') : null, (w.genres || []).slice(0, 2).map(genreAr).join('، ')].filter(Boolean).join(' · ');
+    const b = el('button', 'btn btn-primary', 'ابدأ القراءة');
     b.type = 'button';
-    b.onclick = (e) => { e.stopPropagation(); void openWork(w); };
+    b.onclick = (e) => { e.stopPropagation(); void openWork(w, { autoRead: true }); };
     copy.append(el('small', null, title), name);
     if (facts) copy.append(el('p', null, facts));
     copy.append(b);
-    s.append(amb, cover, copy);
+    s.append(art);
+    if (!w.wideBanner) {
+      const cover = el('div', 'mg-pick-cover');
+      void mountImage(cover, w);
+      s.append(cover);
+    }
+    s.append(copy);
     s.onclick = () => void openWork(w);
     return s;
   }
@@ -1255,11 +1276,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ─── بانر المانجا: معرض الأغلفة ───
   // الغلاف المختار في الوسط بحجمه، والسابق يمينًا والتالي يسارًا (اتجاه القراءة)، وخلفها ضوء من
   // ألوان الغلاف نفسه. الضبابية تُخفي صغر أغلفة المصادر بدل أن تفضحها. السحب يمينًا يجلب التالي.
-  const heroLastChapter = (w) => {
-    const v = viewRows().find((r) => r.series_ref === String(w.id));
-    const n = Number(v?.chapter_label);
-    return Number.isFinite(n) && n >= 0 ? n : null;
-  };
   function heroCoverNode(w, i) {
     const c = el('button', 'mg-cover');
     c.type = 'button';
@@ -1279,17 +1295,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const name = el('h3', 'hero-name', titleOf(w));
     name.dir = 'auto';
     const acts = el('div', 'mg-acts');
-    const last = heroLastChapter(w);
-    const primary = el('button', 'btn btn-primary', last !== null ? `تابع الفصل ${last}` : 'افتح العمل');
-    primary.type = 'button';
-    primary.onclick = () => void openWork(w, last !== null ? { readNumber: last } : {});
-    acts.append(primary);
-    if (last !== null) {
-      const more = el('button', 'btn btn-secondary', 'التفاصيل');
-      more.type = 'button';
-      more.onclick = () => void openWork(w);
-      acts.append(more);
-    }
+    const read = el('button', 'btn btn-primary', 'اقرأ الآن');
+    read.type = 'button';
+    read.onclick = () => void openWork(w, { autoRead: true });
+    const more = el('button', 'btn btn-secondary', 'التفاصيل');
+    more.type = 'button';
+    more.onclick = () => void openWork(w);
+    acts.append(read, more);
     const lines = [kicker ? el('div', 'hero-kicker', kicker) : null, name, acts].filter(Boolean);
     for (const line of lines) line.dataset.line = '';
     copy.replaceChildren(...lines);
@@ -1435,7 +1447,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1512,6 +1524,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       tryWanted(full, settled);
+      // «اقرأ الآن» من الرئيسية: ما يفعله زر القراءة هنا تمامًا (تابع من حيث وقفت، أو ابدأ)، مرة واحدة
+      if (autoRead && state.nextRow && currentPage() === 'detail') { autoRead = false; readNow(); }
       if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {

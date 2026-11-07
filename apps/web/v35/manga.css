@@ -777,25 +777,27 @@
   }
 }
 
-/* ═════════════════ رئيسية المانجا: المعرض (تصميم 2026-11) ═════════════════
- * الهرمية بالمسافة والمحاذاة لا بالخطوط والصناديق. الغلاف المختار في الوسط، والضوء خلفه من
- * ألوانه هو (مضبّب، فصغر غلاف المصدر لا يُفضح). كل ما يتحرك هنا transform/opacity فقط. */
+/* ═════════════════ رئيسية المانجا: المعرض (التصميم المعتمد 2026-11) ═════════════════
+ * القيم هنا قيم النموذج الذي اعتمده المالك كما هي. الهرمية بالمسافة لا بالخطوط. الغلاف المختار في
+ * الوسط والضوء خلفه من ألوانه، يمتد تحت الهيدر. كل ما يتحرك transform/opacity فقط. */
 
-.v35 .mg-hero {
+/* الهيدر فوق ضوء البانر: شفاف وفي طبقة أعلى، والبانر يبدأ من أعلى الشاشة تحته */
+.v35[data-section='manga'] #home > .header { position: relative; z-index: 4; }
+.v35 #mangaHome .mg-hero {
   position: relative;
-  padding-top: 4px;
+  margin-top: calc(-1 * (var(--top-h) + var(--safe-top)));
+  padding-top: calc(var(--top-h) + var(--safe-top) + 8px);
   overflow: hidden;
   isolation: isolate;
 }
 .v35 .mg-amb {
   position: absolute;
-  inset: -64px -40px auto;
+  inset: 0 -30px auto;
   height: 520px;
   z-index: -1;
   pointer-events: none;
-  /* الضوء يتلاشى إلى الخلفية، لا حافة تُرى تحت البانر */
-  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 96%);
-  mask-image: linear-gradient(to bottom, #000 35%, transparent 96%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
 }
 .v35 .mg-amb-layer {
   position: absolute;
@@ -803,84 +805,64 @@
   opacity: 0;
   transition: opacity 0.5s var(--ease-out);
 }
-.v35 .mg-amb-layer.in { opacity: 0.42; }
+.v35 .mg-amb-layer.in { opacity: 0.45; }
 .v35 .mg-amb-layer img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   filter: blur(44px) saturate(1.2);
-  transform: scale(1.15);
 }
 .v35 .mg-amb::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, var(--bg) 8%, transparent 72%);
+  background: linear-gradient(to top, var(--bg), transparent 70%);
 }
 .v35 .mg-stage {
   position: relative;
-  height: 316px;
+  height: 330px;
   touch-action: pan-y;
 }
 .v35 .mg-cover {
   --x: 0px;
   --s: 1;
   position: absolute;
-  top: 12px;
+  top: 50%;
   left: 50%;
-  width: 196px;
-  margin-left: -98px;
-  aspect-ratio: 0.7;
+  width: 206px;
+  aspect-ratio: 2 / 3;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--surface-2);
-  box-shadow: 0 22px 40px -16px rgba(0, 0, 0, 0.85);
-  transform: translateX(var(--x)) scale(var(--s));
-  transform-origin: 50% 60%;
+  box-shadow: 0 20px 40px -14px rgba(0, 0, 0, 0.85);
+  transform: translate(-50%, -50%) translateX(var(--x)) scale(var(--s));
   transition: transform 0.46s var(--ease-out), opacity 0.46s var(--ease-out);
   cursor: pointer;
 }
-.v35 .mg-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
+.v35 .mg-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .v35 .mg-cover[data-pos='0'] { z-index: 3; }
-.v35 .mg-cover[data-pos='1'] { --x: -124px; --s: 0.76; opacity: 0.5; z-index: 2; }
-.v35 .mg-cover[data-pos='-1'] { --x: 124px; --s: 0.76; opacity: 0.5; z-index: 2; }
-.v35 .mg-cover[data-pos='2'],
-.v35 .mg-cover[data-pos='-2'],
-.v35 .mg-cover[data-pos='3'],
-.v35 .mg-cover[data-pos='-3'] { opacity: 0; pointer-events: none; z-index: 1; }
-.v35 .mg-cover[data-pos='2'], .v35 .mg-cover[data-pos='3'] { --x: -210px; --s: 0.6; }
-.v35 .mg-cover[data-pos='-2'], .v35 .mg-cover[data-pos='-3'] { --x: 210px; --s: 0.6; }
+.v35 .mg-cover[data-pos='1'] { --x: -128px; --s: 0.57; opacity: 0.55; z-index: 2; }
+.v35 .mg-cover[data-pos='-1'] { --x: 128px; --s: 0.57; opacity: 0.55; z-index: 2; }
+.v35 .mg-cover[data-pos='2'], .v35 .mg-cover[data-pos='3'] { --x: -210px; --s: 0.58; opacity: 0; pointer-events: none; z-index: 1; }
+.v35 .mg-cover[data-pos='-2'], .v35 .mg-cover[data-pos='-3'] { --x: 210px; --s: 0.58; opacity: 0; pointer-events: none; z-index: 1; }
 .v35 .mg-stage.mg-still .mg-cover,
 .v35 .mg-hero.dragging .mg-cover { transition: none; }
 .v35 .mg-cover-skeleton {
   position: absolute;
-  top: 12px;
+  top: 50%;
   left: 50%;
-  width: 196px;
-  margin-left: -98px;
-  aspect-ratio: 0.7;
-  border-radius: 10px;
+  width: 206px;
+  aspect-ratio: 2 / 3;
+  border-radius: 12px;
+  transform: translate(-50%, -50%);
 }
-.v35 .mg-copy {
-  padding: 18px var(--gutter) 0;
-  text-align: center;
-}
-.v35 .mg-copy .hero-kicker {
-  font-size: 12.5px;
-  color: var(--text-2);
-  font-weight: 500;
-}
+.v35 .mg-copy { position: relative; padding: 16px var(--gutter) 0; text-align: center; }
+.v35 .mg-copy .hero-kicker { font-size: 13px; color: var(--text-2); font-weight: 500; }
 .v35 .mg-hero .mg-copy .hero-name {
-  /* wide.css يحدّ عرض .hero-name القديم (18ch): المعرض يتوسّط بعرضه كله */
   max-width: none;
-  margin-top: 5px;
+  margin-top: 6px;
   font-size: 22px;
   font-weight: 800;
   line-height: 1.3;
@@ -891,82 +873,122 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.v35 .mg-acts {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 14px;
-}
-.v35 .mg-acts .btn { min-height: 44px; border-radius: 22px; padding: 0 20px; }
-.v35 .mg-hero .hero-dots {
-  position: static;
-  justify-content: center;
-  margin-top: 16px;
-  direction: rtl;
-}
+.v35 .mg-acts { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+.v35 .mg-acts .btn { min-height: 44px; height: 44px; border-radius: 22px; padding: 0 20px; font-size: 14.5px; font-weight: 800; }
+.v35 .mg-acts .btn-secondary { background: rgba(255, 255, 255, 0.1); border: 0; color: #fff; }
+.v35 .mg-hero .hero-dots { display: none; }
 .v35 .mg-hero--empty .mg-stage { height: 120px; }
 
-/* ─── تصفّح: أربعة أبواب بلا أرقام ولا خطوط، الأغلفة المكدّسة والاسم والسطر الحي ─── */
-.v35 .mg-browse { padding: 32px var(--gutter) 0; }
-.v35 .mg-browse .section-head { margin-bottom: 14px; }
-.v35 .mg-browse h2 { font-size: 22px; font-weight: 800; line-height: 1.2; }
-.v35 #mangaHome .shortcuts {
-  margin: 0;
-  border: 0;
-  gap: 10px;
-}
-.v35 #mangaHome .shortcut {
-  min-height: 84px;
-  padding: 12px 14px;
-  border: 0;
-  border-radius: var(--r-lg);
-  background: var(--surface-1);
-  gap: 10px;
-}
+/* عناوين الأقسام كما في النموذج */
+.v35 #mangaHome .section-head h2,
+.v35 .mg-browse h2 { font-size: 19px; font-weight: 800; line-height: 1.2; }
+.v35 #mangaHome #homeSections .section { padding-top: 34px; }
+.v35 #mangaHome #homeSections .section-head { margin-bottom: 12px; }
+
+/* ─── تصفّح: بطاقة فيها مروحة أغلفة في طرفها والاسم في أسفلها ─── */
+.v35 .mg-browse { padding: 34px var(--gutter) 0; }
+.v35 .mg-browse .section-head { margin-bottom: 12px; }
+.v35 #mangaHome .shortcuts { margin: 0; border: 0; gap: 10px; }
+.v35 #mangaHome .shortcut,
 .v35 #mangaHome .shortcut:nth-child(odd),
-.v35 #mangaHome .shortcut:nth-child(even) { padding-inline: 12px; border-inline-end: 0; }
-.v35 #mangaHome .shortcut-art { width: 42px; height: 56px; }
-.v35 #mangaHome .shortcut-cover { width: 34px; border-radius: 5px; }
-.v35 #mangaHome .shortcut-label { font-size: 14.5px; }
-.v35 #mangaHome .shortcut-sub { font-size: 11.5px; }
+.v35 #mangaHome .shortcut:nth-child(even) {
+  position: relative;
+  min-height: 88px;
+  align-items: flex-end;
+  padding: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.v35 #mangaHome .shortcut-art {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  width: 64px;
+  height: 46px;
+}
+.v35 #mangaHome .shortcut-cover {
+  top: 0;
+  width: 30px;
+  border-radius: 5px;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+  opacity: 1;
+}
+.v35 #mangaHome .shortcut-cover:nth-child(1) { left: 0; inset-inline-start: auto; transform: rotate(-8deg); z-index: 1; }
+.v35 #mangaHome .shortcut-cover:nth-child(2) { left: 15px; inset-inline-start: auto; transform: translateY(-4px); z-index: 2; top: 0; }
+.v35 #mangaHome .shortcut-cover:nth-child(3) { left: 30px; inset-inline-start: auto; transform: rotate(8deg); z-index: 3; top: 0; }
+.v35 #mangaHome .shortcut-text { position: relative; z-index: 4; max-width: 100%; gap: 1px; }
+.v35 #mangaHome .shortcut-label { font-size: 15px; font-weight: 800; }
+.v35 #mangaHome .shortcut-sub { font-size: 11.5px; font-weight: 500; }
 .v35 #mangaHome .shortcut > .icon { display: none; }
 
-/* ─── أقسام الرئيسية ─── */
-.v35 #mangaHome #homeSections .section { padding-top: 36px; }
-/* تابع القراءة: الفصل بلون القسم، بلا «تابع القراءة» المكرر مع عنوان القسم */
-.v35 #mangaHome .card-strip--resume { grid-auto-columns: min(82%, 340px); gap: 12px; }
+/* ─── تابع القراءة: الغلاف، الاسم، الفصل بلون القسم، ومتى قرأت ─── */
+.v35 #mangaHome .card-strip--resume { grid-auto-columns: 82%; gap: 12px; }
 .v35 #mangaHome .card-strip--resume .work-card {
   grid-template-columns: 70px minmax(0, 1fr);
-  border-radius: var(--r-lg);
+  grid-template-rows: auto auto 1fr;
+  column-gap: 12px;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--surface-1);
   box-shadow: none;
 }
 .v35 #mangaHome .card-strip--resume .work-card::after { content: none; }
-.v35 #mangaHome .card-strip--resume .work-title { font-size: 15px; line-height: 1.35; }
-.v35 #mangaHome .card-strip--resume .work-meta { color: var(--accent-text); font-weight: 700; font-size: 12.5px; }
-.v35 #mangaHome .card-strip--resume .poster { border-radius: 8px; }
-/* الأكثر قراءة: المسافة تفصل الصفوف، لا الخطوط */
-.v35 #mangaHome .card-strip--chart { gap: 10px 22px; }
-.v35 #mangaHome .card-strip--chart .work-card { border-bottom: 0; padding: 4px 0; }
-.v35 #mangaHome .card-strip--chart .work-card::before { content: counter(rank); font-size: 16px; color: var(--accent-text); text-align: center; }
-.v35 #mangaHome .card-strip--chart .work-card:nth-child(-n + 3)::before { color: var(--accent-text); }
-.v35 #mangaHome .card-strip--chart .poster { border-radius: 8px; }
-/* آخر التحديثات (آخر الصفحة): صفوف، الغلاف والاسم والفصل الجديد بنقطة ووقته */
-.v35 #mangaHome .card-strip--grid {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+.v35 #mangaHome .card-strip--resume .poster { border-radius: 10px; aspect-ratio: 2 / 3; }
+.v35 #mangaHome .card-strip--resume .work-title { margin-top: 2px; font-size: 15px; font-weight: 700; line-height: 1.35; }
+.v35 #mangaHome .card-strip--resume .work-meta { margin-top: 4px; color: var(--accent-text); font-weight: 700; font-size: 12.5px; }
+.v35 #mangaHome .card-strip--resume .work-when { grid-column: 2; align-self: end; font-size: 11.5px; color: var(--text-3); }
+
+/* ─── الأكثر قراءة: رقم، غلاف، اسم وتصنيفه. ثلاثة صفوف تُسحب ─── */
+.v35 #mangaHome .card-strip--chart { grid-auto-columns: 84%; gap: 12px 14px; }
+.v35 #mangaHome .card-strip--chart .work-card {
+  grid-template-columns: 16px 56px minmax(0, 1fr);
+  grid-template-rows: 1fr auto auto 1fr;
+  column-gap: 12px;
+  padding: 0;
+  border-bottom: 0;
 }
+.v35 #mangaHome .card-strip--chart .work-card::before {
+  content: counter(rank);
+  grid-row: 1 / -1;
+  font-size: 15px;
+  color: var(--accent-text);
+  text-align: center;
+  direction: rtl;
+}
+.v35 #mangaHome .card-strip--chart .work-card:nth-child(-n + 3)::before { color: var(--accent-text); }
+.v35 #mangaHome .card-strip--chart .work-card-frame { grid-row: 1 / -1; }
+.v35 #mangaHome .card-strip--chart .poster { border-radius: 8px; aspect-ratio: 2 / 3; }
+.v35 #mangaHome .card-strip--chart .work-title { grid-row: 2; margin-top: 0; min-height: 0; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 #mangaHome .card-strip--chart .work-meta { grid-row: 3; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.v35 #mangaHome .card-strip--chart .work-facts { display: none; }
+
+/* ─── آخر التحديثات (آخر الصفحة): الفصل الجديد يمينًا بنقطة، ووقته يسارًا، وخط تحت كل عمل ─── */
+.v35 #mangaHome .card-strip--grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .v35 #mangaHome .card-strip--grid .work-card {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   grid-template-rows: auto auto 1fr;
   column-gap: 12px;
-  align-items: start;
 }
 .v35 #mangaHome .card-strip--grid .work-card-frame { grid-row: 1 / -1; }
-.v35 #mangaHome .card-strip--grid .poster { border-radius: 8px; }
-.v35 #mangaHome .card-strip--grid .work-title { margin-top: 4px; min-height: 0; font-size: 14.5px; font-weight: 700; }
-.v35 #mangaHome .card-strip--grid .work-meta { margin-top: 6px; font-size: 12.5px; color: var(--text-1); }
-.v35 #mangaHome .card-strip--grid .work-meta:not(:empty)::before {
+.v35 #mangaHome .card-strip--grid .poster { border-radius: 9px; aspect-ratio: 2 / 3; }
+.v35 #mangaHome .card-strip--grid .work-title,
+.v35 #mangaHome .card-strip--grid .work-meta { grid-column: 2; }
+.v35 #mangaHome .card-strip--grid .work-title { margin-top: 0; min-height: 0; font-size: 14.5px; font-weight: 700; }
+.v35 #mangaHome .card-strip--grid .work-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--text-1);
+  align-self: start;
+}
+.v35 #mangaHome .card-strip--grid .work-meta-main::before {
   content: '';
   display: inline-block;
   width: 6px;
@@ -976,59 +998,78 @@
   margin-inline-end: 7px;
   vertical-align: middle;
 }
-/* مكتمل: عمل واحد بضوء غلافه، والغلاف بحجمه، وفعل واحد */
+.v35 #mangaHome .card-strip--grid .work-meta-when { color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
+.v35 #mangaHome .card-strip--grid .work-facts { display: none; }
+/* في غير «آخر التحديثات» الجزآن سطر واحد بنقطة بينهما */
+.v35 .work-meta-when::before { content: ' · '; }
+.v35 #mangaHome .card-strip--grid .work-meta-when::before { content: none; }
+
+/* ─── مكتمل: صورة العمل العريضة والكلام في طرفها المظلم ─── */
 .v35 #mangaHome .mg-pick {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 36px var(--gutter) 0;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 34px var(--gutter) 0;
   padding: 18px !important;
+  min-height: 200px;
   border-radius: 18px;
   overflow: hidden;
   isolation: isolate;
   cursor: pointer;
   background: var(--surface-1);
 }
-.v35 .mg-pick-amb { position: absolute; inset: 0; z-index: -1; opacity: 0.5; }
-.v35 .mg-pick-amb img { width: 100%; height: 100%; object-fit: cover; filter: blur(30px) saturate(1.2); transform: scale(1.3); }
-.v35 .mg-pick-amb::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to left, rgba(8, 7, 12, 0.35), rgba(8, 7, 12, 0.85)); }
-.v35 .mg-pick-cover { flex: 0 0 108px; aspect-ratio: 0.7; border-radius: 8px; overflow: hidden; box-shadow: 0 14px 28px -12px rgba(0, 0, 0, 0.9); }
+.v35 .mg-pick-art { position: absolute; inset: 0; z-index: -1; }
+.v35 .mg-pick-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .mg-pick-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to left, rgba(8, 7, 12, 0.95) 35%, rgba(8, 7, 12, 0.2)); }
+.v35 .mg-pick:not(.mg-pick--wide) .mg-pick-art img { filter: blur(30px) saturate(1.2); transform: scale(1.3); opacity: 0.6; }
+.v35 .mg-pick-cover { flex: 0 0 104px; aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden; box-shadow: 0 14px 28px -12px rgba(0, 0, 0, 0.9); order: 2; }
 .v35 .mg-pick-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.v35 .mg-pick-copy { min-width: 0; }
+.v35 .mg-pick-copy { min-width: 0; max-width: 64%; }
 .v35 .mg-pick-copy small { color: var(--accent-text); font-weight: 700; font-size: 12px; }
-.v35 .mg-pick-copy h3 { font-size: 19px; font-weight: 800; line-height: 1.3; margin-top: 4px; unicode-bidi: plaintext; text-align: start; }
-.v35 .mg-pick-copy p { font-size: 12.5px; color: var(--text-2); margin-top: 4px; }
-.v35 .mg-pick-copy .btn { margin-top: 12px; min-height: 38px; border-radius: 19px; }
-/* العناوين اللاتينية في واجهة عربية: تُقطع من آخرها */
+.v35 .mg-pick-copy h3 { font-size: 20px; font-weight: 800; line-height: 1.3; margin-top: 4px; unicode-bidi: plaintext; text-align: start; }
+.v35 .mg-pick-copy p { font-size: 12.5px; color: var(--text-2); margin-top: 6px; }
+.v35 .mg-pick-copy .btn { margin-top: 12px; height: 38px; min-height: 38px; border-radius: 19px; padding: 0 18px; }
 .v35 #mangaHome .work-title { unicode-bidi: plaintext; text-align: start; }
 
-/* ─── الشاشات الأكبر: البطاقة بمقاس ثابت ناضج لا نسبة تصغّرها ─── */
+/* ─── الآيباد والكمبيوتر: قيم النموذج للشاشات الأكبر ─── */
 @media (min-width: 700px) {
-  .v35 .mg-stage { height: 400px; }
-  .v35 .mg-cover, .v35 .mg-cover-skeleton { width: 252px; margin-left: -126px; }
-  .v35 .mg-cover[data-pos='1'] { --x: -176px; --s: 0.78; }
-  .v35 .mg-cover[data-pos='-1'] { --x: 176px; --s: 0.78; }
+  .v35 .mg-stage { height: 420px; }
+  .v35 .mg-cover, .v35 .mg-cover-skeleton { width: 262px; }
+  .v35 .mg-cover[data-pos='1'] { --x: -180px; --s: 0.58; }
+  .v35 .mg-cover[data-pos='-1'] { --x: 180px; --s: 0.58; }
   .v35 .mg-amb { height: 640px; }
   .v35 .mg-hero .mg-copy .hero-name { font-size: 28px; }
+  .v35 #mangaHome .section-head h2, .v35 .mg-browse h2 { font-size: 22px; }
+  .v35 #mangaHome #homeSections .section, .v35 .mg-browse { padding-top: 44px; }
   .v35 #mangaHome .shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  .v35 #mangaHome .shortcut { min-height: 100px; }
+  .v35 #mangaHome .shortcut,
+  .v35 #mangaHome .shortcut:nth-child(odd),
+  .v35 #mangaHome .shortcut:nth-child(even) { min-height: 104px; align-items: center; gap: 30px; padding: 0 18px; }
+  .v35 #mangaHome .shortcut-art { position: relative; top: auto; left: auto; order: 2; width: 92px; height: 68px; }
+  .v35 #mangaHome .shortcut-art { width: 92px; }
+  .v35 #mangaHome .shortcut-cover { width: 42px; }
+  .v35 #mangaHome .shortcut-cover:nth-child(2) { left: 22px; }
+  .v35 #mangaHome .shortcut-cover:nth-child(3) { left: 44px; }
+  .v35 #mangaHome .shortcut-text { max-width: none; }
+  .v35 #mangaHome .shortcut-text { max-width: none; flex: 1; }
   .v35 #mangaHome .card-strip--resume { grid-auto-columns: 380px; }
-  .v35 #mangaHome .card-strip--chart { grid-auto-columns: 360px; }
-  .v35 #mangaHome .card-strip--grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 36px; }
-  .v35 #mangaHome .mg-pick { padding: 22px !important; }
-  .v35 .mg-pick-cover { flex-basis: 140px; }
+  .v35 #mangaHome .card-strip--chart { grid-auto-columns: 360px; gap: 16px 28px; }
+  .v35 #mangaHome .card-strip--grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 40px; }
+  .v35 #mangaHome .mg-pick { min-height: 260px; }
   .v35 .mg-pick-copy h3 { font-size: 24px; }
 }
 @media (min-width: 1100px) {
-  .v35 .mg-stage { height: 440px; }
-  .v35 .mg-cover, .v35 .mg-cover-skeleton { width: 280px; margin-left: -140px; }
-  .v35 .mg-cover[data-pos='1'] { --x: -212px; --s: 0.78; }
-  .v35 .mg-cover[data-pos='-1'] { --x: 212px; --s: 0.78; }
-  .v35 .mg-cover[data-pos='2'] { --x: -392px; --s: 0.62; opacity: 0.28; pointer-events: auto; }
-  .v35 .mg-cover[data-pos='-2'] { --x: 392px; --s: 0.62; opacity: 0.28; pointer-events: auto; }
+  .v35 .mg-stage { height: 460px; }
+  .v35 .mg-cover, .v35 .mg-cover-skeleton { width: 290px; }
+  .v35 .mg-cover[data-pos='1'] { --x: -215px; --s: 0.58; }
+  .v35 .mg-cover[data-pos='-1'] { --x: 215px; --s: 0.58; }
+  .v35 .mg-cover[data-pos='2'] { --x: -400px; --s: 0.46; opacity: 0.3; pointer-events: auto; }
+  .v35 .mg-cover[data-pos='-2'] { --x: 400px; --s: 0.46; opacity: 0.3; pointer-events: auto; }
   .v35 #mangaHome .card-strip--resume { grid-auto-columns: 420px; }
   .v35 #mangaHome .card-strip--grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v35 #mangaHome .mg-pick { min-height: 300px; }
+  .v35 .mg-pick-copy { max-width: 44%; }
 }
 /* ارتفاع تحت الماوس: للمؤشرات القادرة على التحويم فقط، ولا حركة مع «تقليل الحركة» */
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
@@ -1038,6 +1079,8 @@
     transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1);
   }
   .v35 #mangaHome .work-card:hover .poster { transform: translateY(-6px); box-shadow: 0 18px 32px -14px rgba(0, 0, 0, 0.85); }
+  .v35 #mangaHome .card-strip--resume .work-card:hover { transform: translateY(-4px); }
+  .v35 #mangaHome .card-strip--resume .work-card:hover .poster { transform: none; box-shadow: none; }
   .v35 #mangaHome .shortcut:hover,
   .v35 #mangaHome .mg-pick:hover { transform: translateY(-4px); box-shadow: 0 18px 32px -16px rgba(0, 0, 0, 0.85); }
   .v35 .mg-cover:not([data-pos='0']):hover { opacity: 0.75; }

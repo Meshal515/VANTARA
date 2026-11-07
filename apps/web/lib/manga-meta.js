@@ -12,7 +12,7 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
       signal: controller.signal,
       body: JSON.stringify({ query: `query ($page: Int) { Page(page: $page, perPage: 24) { pageInfo { hasNextPage }
         media(type: MANGA, sort: POPULARITY_DESC, isAdult: false) { id title { english romaji native } synonyms
-          coverImage { extraLarge large } genres popularity averageScore status chapters isAdult } } }`, variables: { page } }),
+          coverImage { extraLarge large } bannerImage genres popularity averageScore status chapters isAdult } } }`, variables: { page } }),
     });
     if (!response.ok) throw new Error(`anilist_${response.status}`);
     const data = (await response.json())?.data?.Page;
@@ -22,7 +22,7 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
       const key = normalizeTitle(title);
       return {
         id: `ext:${key}`, title: { english: title, romaji: m.title?.romaji, native: m.title?.native }, synonyms: m.synonyms ?? [],
-        coverImage: m.coverImage, bannerImage: m.coverImage?.large, genres: m.genres ?? [], status: m.status,
+        coverImage: m.coverImage, bannerImage: m.coverImage?.large, wideBanner: m.bannerImage ?? null, genres: m.genres ?? [], status: m.status,
         popularity: m.popularity, averageScore: m.averageScore, chapters: m.chapters, staff: { edges: [] },
         _metaId: m.id, _work: { key, title, thumbnailUrl: m.coverImage?.large ?? null, editions: [] },
       };
