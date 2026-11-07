@@ -1,0 +1,143 @@
+index,category,skill,source_repo,use_case_ar,priority,repo_url
+0,التصميم وUX,frontend-design,anthropics/skills,إنشاء واجهات ذات هوية بصرية مقصودة بدل التصميم النمطي,A,https://github.com/anthropics/skills
+1,التصميم وUX,web-design-guidelines,vercel-labs/agent-skills,تدقيق واجهات الويب والإتاحة والـ UX والأداء,A,https://github.com/vercel-labs/agent-skills
+2,التصميم وUX,ui-ux-pro-max,nextlevelbuilder/ui-ux-pro-max-skill,البحث عن أنماط التصميم والخطوط والألوان والتخطيطات,A,https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+3,التصميم وUX,impeccable: critique,pbakaus/impeccable,نقد تصميم قائم مع مشاكل UX مرتبة,A,https://github.com/pbakaus/impeccable
+4,التصميم وUX,impeccable: audit,pbakaus/impeccable,تدقيق واجهة تقني يشمل الإتاحة والملاءمة,A,https://github.com/pbakaus/impeccable
+5,التصميم وUX,impeccable: polish,pbakaus/impeccable,جولة صقل قبل التسليم,A,https://github.com/pbakaus/impeccable
+6,التصميم وUX,impeccable: layout,pbakaus/impeccable,تحسين الأحجام والهرمية والتباعد,A,https://github.com/pbakaus/impeccable
+7,التصميم وUX,impeccable: animate,pbakaus/impeccable,تحسين انتقالات وحركات الواجهة,A,https://github.com/pbakaus/impeccable
+8,التصميم وUX,impeccable: adapt,pbakaus/impeccable,معالجة أحجام الشاشات المختلفة,A,https://github.com/pbakaus/impeccable
+9,التصميم وUX,impeccable: harden,pbakaus/impeccable,معالجة حالات الخطأ والترجمة والتجاوز,A,https://github.com/pbakaus/impeccable
+10,التصميم وUX,impeccable: optimize,pbakaus/impeccable,تحسين عرض وتحميل الواجهة,A,https://github.com/pbakaus/impeccable
+11,التصميم وUX,impeccable: document,pbakaus/impeccable,توثيق نظام التصميم في DESIGN.md,B,https://github.com/pbakaus/impeccable
+12,التصميم وUX,impeccable: live,pbakaus/impeccable,التعديل المرئي في متصفح فعلي,B,https://github.com/pbakaus/impeccable
+13,التصميم وUX,better-interface,jakubkrehel/skills,مراجعة شاملة للواجهة بترتيب إصلاحات,A,https://github.com/jakubkrehel/skills
+14,التصميم وUX,better-ui,jakubkrehel/skills,تحسين الأسطح والأيقونات والظلال وردود الفعل,A,https://github.com/jakubkrehel/skills
+15,التصميم وUX,better-layout,jakubkrehel/skills,تجميع العناصر والمحاذاة ودعم RTL,A,https://github.com/jakubkrehel/skills
+16,التصميم وUX,better-typography,jakubkrehel/skills,الخطوط والتفاف النص والتدرج البصري,A,https://github.com/jakubkrehel/skills
+17,التصميم وUX,better-colors,jakubkrehel/skills,لوحات الألوان والتباين والتوكنات,A,https://github.com/jakubkrehel/skills
+18,التصميم وUX,better-accessibility,jakubkrehel/skills,الإتاحة ولوحة المفاتيح والتحكم بالحركة,B,https://github.com/jakubkrehel/skills
+19,التصميم وUX,better-writing,jakubkrehel/skills,النصوص والأخطاء والحالات الفارغة,B,https://github.com/jakubkrehel/skills
+20,التصميم وUX,interface-review,jakubkrehel/skills,مراجعة تغيرات التصميم في Pull Request,B,https://github.com/jakubkrehel/skills
+21,التصميم وUX,break,jakubkrehel/skills,اختبار مكون في ظروف وحالات متعددة,A,https://github.com/jakubkrehel/skills
+22,التصميم وUX,state-machine,jakubkrehel/skills,عرض جميع حالات مكون بصريًا,A,https://github.com/jakubkrehel/skills
+23,التصميم وUX,variant,jakubkrehel/skills,إنشاء بدائل واجهة قابلة للمقارنة,B,https://github.com/jakubkrehel/skills
+24,التصميم وUX,build-design,jakubkrehel/skills,تحويل تصميم Figma أو صورة إلى واجهة,B,https://github.com/jakubkrehel/skills
+25,التصميم وUX,explain-interface,jakubkrehel/skills,تفكيك بناء واجهة أو حركة موجودة,B,https://github.com/jakubkrehel/skills
+26,الحركة والانتقالات,emil-design-eng,emilkowalski/skills,قواعد تصميم هندسي وخاصة الحركة,A,https://github.com/emilkowalski/skills
+27,الحركة والانتقالات,animate,emilkowalski/skills,بناء الحركة بالتوقيت والمنحنيات الصحيحة,A,https://github.com/emilkowalski/skills
+28,الحركة والانتقالات,review-animations,emilkowalski/skills,مراجعة تنفيذ الحركات واكتشاف الضعف,A,https://github.com/emilkowalski/skills
+29,الحركة والانتقالات,improve-animations,emilkowalski/skills,تدقيق حركات المشروع ووضع خطة إصلاح,A,https://github.com/emilkowalski/skills
+30,الحركة والانتقالات,find-animation-opportunities,emilkowalski/skills,تحديد مواضع الحركة المفيدة فقط,B,https://github.com/emilkowalski/skills
+31,الحركة والانتقالات,remove-animations,emilkowalski/skills,حذف الانتقالات المرهقة أو غير الضرورية,A,https://github.com/emilkowalski/skills
+32,الحركة والانتقالات,choreograph,emilkowalski/skills,تنسيق تسلسل حركة عدة عناصر,A,https://github.com/emilkowalski/skills
+33,الحركة والانتقالات,animation-performance,emilkowalski/skills,تشخيص الحركات التي تسقط الإطارات,A,https://github.com/emilkowalski/skills
+34,الحركة والانتقالات,animation-vocabulary,emilkowalski/skills,تسمية تأثير الحركة بدقة,B,https://github.com/emilkowalski/skills
+35,الحركة والانتقالات,mobile-native,emilkowalski/skills,تحسين الإحساس الأصلي لتجربة الويب على الهاتف,A,https://github.com/emilkowalski/skills
+36,الحركة والانتقالات,prototype,emilkowalski/skills,استعراض نماذج حركة/واجهة متعددة,B,https://github.com/emilkowalski/skills
+37,الحركة والانتقالات,vercel-react-view-transitions,vercel-labs/agent-skills,انتقالات React وshared elements بين الشاشات,A,https://github.com/vercel-labs/agent-skills
+38,هندسة البرمجيات,vercel-react-best-practices,vercel-labs/agent-skills,تحسين React وتأخير الشبكة وإعادة العرض وحجم الحزمة,A,https://github.com/vercel-labs/agent-skills
+39,هندسة البرمجيات,vercel-composition-patterns,vercel-labs/agent-skills,تصميم تركيب المكونات وتجنب props معقدة,B,https://github.com/vercel-labs/agent-skills
+40,هندسة البرمجيات,vercel-react-native-skills,vercel-labs/agent-skills,تحسين React Native فقط إذا استُخدم في المشروع,C,https://github.com/vercel-labs/agent-skills
+41,هندسة البرمجيات,systematic-debugging,obra/superpowers,تحقيق السبب الجذري قبل أي إصلاح,A,https://github.com/obra/superpowers
+42,هندسة البرمجيات,verification-before-completion,obra/superpowers,إثبات التنفيذ وعدم الاكتفاء بتقرير الوكيل,A,https://github.com/obra/superpowers
+43,هندسة البرمجيات,test-driven-development,obra/superpowers,اختبار يفشل ثم إصلاح ثم ينجح,A,https://github.com/obra/superpowers
+44,هندسة البرمجيات,brainstorming,obra/superpowers,تحديد متطلبات المهمة قبل التنفيذ,B,https://github.com/obra/superpowers
+45,هندسة البرمجيات,writing-plans,obra/superpowers,تخطيط خطوات التطوير والاعتمادات,A,https://github.com/obra/superpowers
+46,هندسة البرمجيات,executing-plans,obra/superpowers,تنفيذ بخطوات ونقاط مراجعة,A,https://github.com/obra/superpowers
+47,هندسة البرمجيات,dispatching-parallel-agents,obra/superpowers,تقسيم العمل على وكلاء متوازيين,B,https://github.com/obra/superpowers
+48,هندسة البرمجيات,requesting-code-review,obra/superpowers,طلب مراجعة شاملة للكود,A,https://github.com/obra/superpowers
+49,هندسة البرمجيات,receiving-code-review,obra/superpowers,التعامل الصحيح مع ملاحظات المراجعة,B,https://github.com/obra/superpowers
+50,هندسة البرمجيات,using-git-worktrees,obra/superpowers,تجارب مستقلة دون خلط تغييرات الفروع,A,https://github.com/obra/superpowers
+51,هندسة البرمجيات,subagent-driven-development,obra/superpowers,تنفيذ ثم مراجعة المواصفات والجودة,B,https://github.com/obra/superpowers
+52,هندسة البرمجيات,finishing-a-development-branch,obra/superpowers,إنهاء فرع عمل مع التحقق من الاختبارات,B,https://github.com/obra/superpowers
+53,هندسة البرمجيات,diagnosing-bugs,mattpocock/skills,إنتاج إعادة توليد فاشلة حاسمة ثم تشخيص,A,https://github.com/mattpocock/skills
+54,هندسة البرمجيات,improve-codebase-architecture,mattpocock/skills,اكتشاف الوحدات المتشابكة واقتراح حدود اختبار,A,https://github.com/mattpocock/skills
+55,هندسة البرمجيات,codebase-design,mattpocock/skills,تحسين تصميم الوحدة وواجهات اتصالها,A,https://github.com/mattpocock/skills
+56,هندسة البرمجيات,domain-modeling,mattpocock/skills,توحيد مصطلحات وكيانات مجال التطبيق,B,https://github.com/mattpocock/skills
+57,هندسة البرمجيات,tdd,mattpocock/skills,بناء السلوك اعتمادًا على الاختبارات,A,https://github.com/mattpocock/skills
+58,هندسة البرمجيات,prototype,mattpocock/skills,نموذج مؤقت لحسم قرار تقني أو بصري,A,https://github.com/mattpocock/skills
+59,هندسة البرمجيات,triage,mattpocock/skills,فرز تقارير الأعطال قبل التشخيص العميق,B,https://github.com/mattpocock/skills
+60,هندسة البرمجيات,research,mattpocock/skills,بحث تقني بمراجع أولية داخل المستودع,B,https://github.com/mattpocock/skills
+61,هندسة البرمجيات,code-review,getsentry/skills,مراجعة منهجية للكود وفق أساليب Sentry,B,https://github.com/getsentry/skills
+62,هندسة البرمجيات,code-simplifier,getsentry/skills,تبسيط الكود دون تغيير السلوك,B,https://github.com/getsentry/skills
+63,هندسة البرمجيات,agents-md,getsentry/skills,صياغة تعليمات المشروع AGENTS.md / CLAUDE.md,A,https://github.com/getsentry/skills
+64,أندرويد وكوتلن,jetpack-compose-performance,android/skills,تحسين Compose وتقليل recompositions وjank,A,https://github.com/android/skills
+65,أندرويد وكوتلن,android-profiler,android/skills,تحليل traces والذاكرة واختناقات التشغيل,A,https://github.com/android/skills
+66,أندرويد وكوتلن,testing-setup,android/skills,وضع استراتيجية اختبار أندرويد,A,https://github.com/android/skills
+67,أندرويد وكوتلن,r8-analyzer,android/skills,فحص إعدادات R8 والتحسينات,B,https://github.com/android/skills
+68,أندرويد وكوتلن,ANR audit (official Android skill),android/skills,تحليل تجمد واجهة أندرويد وتقارير ANR,A,https://github.com/android/skills
+69,أندرويد وكوتلن,adaptive UI (official Android skill),android/skills,تكييف الشاشات حسب حجم الجهاز,B,https://github.com/android/skills
+70,أندرويد وكوتلن,edge-to-edge (official Android skill),android/skills,تصحيح النظام والحدود ومناطق الأمان,B,https://github.com/android/skills
+71,أندرويد وكوتلن,Intent security (official Android skill),android/skills,مراجعة أمان Intent والمكونات المصدرة,B,https://github.com/android/skills
+72,أندرويد وكوتلن,kotlin-tooling-agp9-migration,Kotlin/kotlin-agent-skills,مساعدة متخصصة في ترقية أدوات بناء أندرويد,C,https://github.com/Kotlin/kotlin-agent-skills
+73,أندرويد وكوتلن,Compose performance pack,skydoves/compose-performance-skills,مرجع إضافي لتتبع recomposition والذاكرة والقوائم,A,https://github.com/skydoves/compose-performance-skills
+74,أندرويد وكوتلن,Compose UI testing pack,skydoves/android-testing-skills,اختبارات UI وتفاعل وعرض ووصول,A,https://github.com/skydoves/android-testing-skills
+75,أندرويد وكوتلن,ADB testing pack,skydoves/android-testing-skills,التحكم في الأجهزة والتسجيل وتشغيل السيناريوهات,A,https://github.com/skydoves/android-testing-skills
+76,أندرويد وكوتلن,JVM/Coroutines testing pack,skydoves/android-testing-skills,اختبار Flow وCoroutine وواجهات الوحدات,A,https://github.com/skydoves/android-testing-skills
+77,أندرويد وكوتلن,Instrumentation testing pack,skydoves/android-testing-skills,اختبارات تشغيل حقيقية على الأجهزة,A,https://github.com/skydoves/android-testing-skills
+78,Media3 وتشغيل الفيديو,streaming-media-architecture,sunnat629/android-media-pack,ملكية المشغل والسياسات والتحميل المسبق,A,https://github.com/sunnat629/android-media-pack
+79,Media3 وتشغيل الفيديو,migrate-exoplayer-to-media3,sunnat629/android-media-pack,ترحيل ExoPlayer القديم,C,https://github.com/sunnat629/android-media-pack
+80,Media3 وتشغيل الفيديو,migrate-xml-ui-to-compose,sunnat629/android-media-pack,ترحيل واجهات المشغل إلى Compose,C,https://github.com/sunnat629/android-media-pack
+81,Media3 وتشغيل الفيديو,media3-background-playback-service,sunnat629/android-media-pack,تشغيل الخلفية والتحكم عبر MediaSession,B,https://github.com/sunnat629/android-media-pack
+82,Media3 وتشغيل الفيديو,media3-lifecycle-state,sunnat629/android-media-pack,دورة حياة المشغل واستعادة الحالة,A,https://github.com/sunnat629/android-media-pack
+83,Media3 وتشغيل الفيديو,media3-compose-ui-material3,sunnat629/android-media-pack,واجهة تحكم مشغل Compose,B,https://github.com/sunnat629/android-media-pack
+84,Media3 وتشغيل الفيديو,media3-adaptive-compose-ui,sunnat629/android-media-pack,توافق المشغل مع أحجام الشاشات,B,https://github.com/sunnat629/android-media-pack
+85,Media3 وتشغيل الفيديو,media3-view-ui-player,sunnat629/android-media-pack,PlayerView والتكامل مع XML/Compose,B,https://github.com/sunnat629/android-media-pack
+86,Media3 وتشغيل الفيديو,media3-tv-leanback-ui,sunnat629/android-media-pack,دعم التلفزيون وD-pad,C,https://github.com/sunnat629/android-media-pack
+87,Media3 وتشغيل الفيديو,media3-android-auto-media-surface,sunnat629/android-media-pack,دعم Android Auto,C,https://github.com/sunnat629/android-media-pack
+88,Media3 وتشغيل الفيديو,media3-xr-media-surface,sunnat629/android-media-pack,دعم Android XR,C,https://github.com/sunnat629/android-media-pack
+89,Media3 وتشغيل الفيديو,media3-video-playback,sunnat629/android-media-pack,أول إطار ونسبة العرض وHDR وPiP,A,https://github.com/sunnat629/android-media-pack
+90,Media3 وتشغيل الفيديو,media3-audio-playback,sunnat629/android-media-pack,تركيز الصوت والجلسة والتعامل مع السماعات,B,https://github.com/sunnat629/android-media-pack
+91,Media3 وتشغيل الفيديو,media3-vod-playback,sunnat629/android-media-pack,الاستئناف وقوائم التشغيل والفصول,A,https://github.com/sunnat629/android-media-pack
+92,Media3 وتشغيل الفيديو,media3-rtsp-playback,sunnat629/android-media-pack,مصادر RTSP,C,https://github.com/sunnat629/android-media-pack
+93,Media3 وتشغيل الفيديو,media3-smoothstreaming-playback,sunnat629/android-media-pack,بث SmoothStreaming,C,https://github.com/sunnat629/android-media-pack
+94,Media3 وتشغيل الفيديو,media3-midi-playback,sunnat629/android-media-pack,صيغ MIDI,C,https://github.com/sunnat629/android-media-pack
+95,Media3 وتشغيل الفيديو,media3-hls-dash-adaptive-streaming,sunnat629/android-media-pack,HLS/DASH والترجمة والتخزين المؤقت,A,https://github.com/sunnat629/android-media-pack
+96,Media3 وتشغيل الفيديو,media3-live-streaming,sunnat629/android-media-pack,البث المباشر والانقطاع وإعادة الاتصال,B,https://github.com/sunnat629/android-media-pack
+97,Media3 وتشغيل الفيديو,media3-live-only-streaming,sunnat629/android-media-pack,البث المباشر بلا تقديم أو رجوع,C,https://github.com/sunnat629/android-media-pack
+98,Media3 وتشغيل الفيديو,media3-datasources-networking,sunnat629/android-media-pack,الشبكة والرؤوس والـ cache وDataSource,A,https://github.com/sunnat629/android-media-pack
+99,Media3 وتشغيل الفيديو,media3-bandwidth-abr,sunnat629/android-media-pack,سرعة الشبكة والتكيّف وسياسات buffer,A,https://github.com/sunnat629/android-media-pack
+100,Media3 وتشغيل الفيديو,media3-cast-integration,sunnat629/android-media-pack,تسليم البث إلى Cast,C,https://github.com/sunnat629/android-media-pack
+101,Media3 وتشغيل الفيديو,media3-workmanager-offline-ops,sunnat629/android-media-pack,مهام التنزيل المحلية وإعادات المحاولة,B,https://github.com/sunnat629/android-media-pack
+102,Media3 وتشغيل الفيديو,media3-drm-widevine-setup,sunnat629/android-media-pack,إعداد DRM عندما يكون مطلوبًا,C,https://github.com/sunnat629/android-media-pack
+103,Media3 وتشغيل الفيديو,media3-ads-ima,sunnat629/android-media-pack,إعلانات IMA,C,https://github.com/sunnat629/android-media-pack
+104,Media3 وتشغيل الفيديو,media3-analytics-telemetry,sunnat629/android-media-pack,قياس TTFF وrebuffer والأخطاء,A,https://github.com/sunnat629/android-media-pack
+105,Media3 وتشغيل الفيديو,media3-inspector-metadata-thumbnails,sunnat629/android-media-pack,فحص الوسائط واستخراج الصور المصغرة,B,https://github.com/sunnat629/android-media-pack
+106,Media3 وتشغيل الفيديو,media3-transformer-editing,sunnat629/android-media-pack,تحويل وقص ملفات الفيديو,C,https://github.com/sunnat629/android-media-pack
+107,Media3 وتشغيل الفيديو,media3-video-effects-lottie-muxer,sunnat629/android-media-pack,المؤثرات وتغليف الفيديو,C,https://github.com/sunnat629/android-media-pack
+108,Media3 وتشغيل الفيديو,media3-test-utils-robolectric,sunnat629/android-media-pack,اختبار واجهة Media3 بحالات وهمية,A,https://github.com/sunnat629/android-media-pack
+109,اختبارات المتصفح,playwright-cli,microsoft/playwright-cli,اختبارات فعلية للمتصفح وتسجيل التتبع والفيديو,A,https://github.com/microsoft/playwright-cli
+110,اختبارات المتصفح,agent-browser,vercel-labs/agent-browser,توجيه متصفح وكيل بقراءة الحالة ولقطات الإثبات,A,https://github.com/vercel-labs/agent-browser
+111,اختبارات المتصفح,chrome-devtools-mcp [MCP/CLI],ChromeDevTools/chrome-devtools-mcp,تحليل network/console/performance في Chrome,A,https://github.com/ChromeDevTools/chrome-devtools-mcp
+112,اختبارات المتصفح,qa,garrytan/gstack,اختبار السيناريوهات وإصلاح المشكلات المتحققة,A,https://github.com/garrytan/gstack
+113,اختبارات المتصفح,qa-only,garrytan/gstack,اختبار شامل دون تغيير كود المنتج,A,https://github.com/garrytan/gstack
+114,اختبارات المتصفح,investigate,garrytan/gstack,تشخيص مبني على الأدلة,A,https://github.com/garrytan/gstack
+115,اختبارات المتصفح,design-review,garrytan/gstack,تدقيق واجهة بالصور قبل وبعد,A,https://github.com/garrytan/gstack
+116,اختبارات المتصفح,review,garrytan/gstack,مراجعة شاملة لفرع العمل,A,https://github.com/garrytan/gstack
+117,اختبارات المتصفح,test-audit,garrytan/gstack,مراجعة جودة ومردود الاختبارات,B,https://github.com/garrytan/gstack
+118,اختبارات المتصفح,plan-eng-review,garrytan/gstack,مراجعة خطة الهندسة قبل البناء,B,https://github.com/garrytan/gstack
+119,اختبارات المتصفح,ship,garrytan/gstack,بوابة تحقق وتوثيق قبل الدمج,B,https://github.com/garrytan/gstack
+120,اختبارات المتصفح,cso,garrytan/gstack,تدقيق أمان بحسب نموذج التطبيق,B,https://github.com/garrytan/gstack
+121,أمان وسلامة التبعيات,static-analysis,trailofbits/skills,تحليل الشيفرة بأدوات CodeQL وSemgrep,A,https://github.com/trailofbits/skills
+122,أمان وسلامة التبعيات,differential-review,trailofbits/skills,تدقيق أمني للتغيرات بمقارنة Git,A,https://github.com/trailofbits/skills
+123,أمان وسلامة التبعيات,fp-check,trailofbits/skills,التحقق من بلاغات الثغرات الكاذبة,A,https://github.com/trailofbits/skills
+124,أمان وسلامة التبعيات,insecure-defaults,trailofbits/skills,فحص الإعدادات الافتراضية الخطرة,A,https://github.com/trailofbits/skills
+125,أمان وسلامة التبعيات,sharp-edges,trailofbits/skills,اكتشاف واجهات برمجية قابلة لسوء الاستخدام,B,https://github.com/trailofbits/skills
+126,أمان وسلامة التبعيات,supply-chain-risk-auditor,trailofbits/skills,تدقيق مخاطر تبعيات الطرف الثالث,A,https://github.com/trailofbits/skills
+127,أمان وسلامة التبعيات,testing-handbook-skills,trailofbits/skills,أساليب fuzzing وcoverage والتحليل,B,https://github.com/trailofbits/skills
+128,أمان وسلامة التبعيات,agentic-actions-auditor,trailofbits/skills,تدقيق أمان GitHub Actions الخاصة بالوكلاء,A,https://github.com/trailofbits/skills
+129,الرصد والأخطاء,sentry-instrument,getsentry/sentry-for-ai,إعداد تسجيل الأعطال والأداء والتتبعات,B,https://github.com/getsentry/sentry-for-ai
+130,الرصد والأخطاء,sentry-debug-issue,getsentry/sentry-for-ai,تحليل بلاغات التشغيل من Sentry,B,https://github.com/getsentry/sentry-for-ai
+131,الرصد والأخطاء,sentry-create-alert,getsentry/sentry-for-ai,تنبيه للأعطال الحرجة,C,https://github.com/getsentry/sentry-for-ai
+132,الخدمات والنشر,cloudflare,cloudflare/skills,اختيار خدمة Cloudflare المطلوبة,B,https://github.com/cloudflare/skills
+133,الخدمات والنشر,frameworks-on-cloudflare,cloudflare/skills,نشر أطر الويب والتكامل الصحيح,B,https://github.com/cloudflare/skills
+134,الخدمات والنشر,workers-best-practices,cloudflare/skills,فحص جودة Workers,B,https://github.com/cloudflare/skills
+135,الخدمات والنشر,workers-development,cloudflare/skills,تشخيص Workers والسجلات محليًا,B,https://github.com/cloudflare/skills
+136,الخدمات والنشر,workers-profiling,cloudflare/skills,فحص CPU والذاكرة في Workers,B,https://github.com/cloudflare/skills
+137,الخدمات والنشر,web-perf,cloudflare/skills,قياس أداء الموقع وCore Web Vitals,A,https://github.com/cloudflare/skills
+138,الخدمات والنشر,wrangler,cloudflare/skills,إدارة نشر Workers ومواردها,B,https://github.com/cloudflare/skills
+139,الخدمات والنشر,cloudflare-app-bootstrap,cloudflare/skills,تشغيل المشروع وتهيئة البيانات والأسرار,B,https://github.com/cloudflare/skills
+140,الخدمات والنشر,durable-objects,cloudflare/skills,المزامنة والحالة المشتركة عبر WebSockets,B,https://github.com/cloudflare/skills
+141,الخدمات والنشر,turnstile-spin,cloudflare/skills,تحديات التحقق من الزيارات والروبوتات,C,https://github.com/cloudflare/skills
