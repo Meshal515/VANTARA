@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-07",
+  "note": "Pinned MIT/Apache original skill packages; no scripts executed",
+  "sources": [
+    {
+      "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sha": "0da327f37b436c173ce51177678b65ca92e6f3f7",
+      "license": "MIT",
+      "roots": [
+        ".claude/skills/ui-ux-pro-max"
+      ],
+      "patterns": [
+        ".claude/skills/ui-ux-pro-max/SKILL.md"
+      ]
+    },
+    {
+      "repo": "jakubkrehel/skills",
+      "sha": "f41f027797f77cb1594a5c718aeee3e6a7fe99ba",
+      "license": "MIT",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "emilkowalski/skills",
+      "sha": "c8a79627b59d72d764d6ab6f2c87c09a48169833",
+      "license": "MIT",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "obra/superpowers",
+      "sha": "22f0b463e7a5e579904dd6211a520321035526f7",
+      "license": "MIT",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "mattpocock/skills",
+      "sha": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+      "license": "MIT",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "garrytan/gstack",
+      "sha": "9b491bb9be44cb7914a188cf66fb2a567b2994ba",
+      "license": "MIT",
+      "roots": [
+        "qa",
+        "qa-only",
+        "design-review",
+        "review",
+        "test-audit",
+        "plan-eng-review",
+        "ship",
+        "cso"
+      ],
+      "patterns": [
+        "qa/SKILL.md",
+        "qa-only/SKILL.md",
+        "design-review/SKILL.md",
+        "review/SKILL.md",
+        "test-audit/SKILL.md",
+        "plan-eng-review/SKILL.md",
+        "ship/SKILL.md",
+        "cso/SKILL.md"
+      ]
+    },
+    {
+      "repo": "getsentry/sentry-for-ai",
+      "sha": "c198c986a526c7f4f35d11bf79a5f7b036c122ad",
+      "license": "MIT",
+      "roots": [
+        "src/skills"
+      ],
+      "patterns": [
+        "src/skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "pbakaus/impeccable",
+      "sha": "687bc381bc9091bf252c0a05303640561014a425",
+      "license": "Apache-2.0",
+      "roots": [
+        ".claude/skills/impeccable"
+      ],
+      "patterns": [
+        ".claude/skills/impeccable/SKILL.md"
+      ]
+    },
+    {
+      "repo": "getsentry/skills",
+      "sha": "e94f22214528d69899d09c627b3315ddc3544816",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "android/skills",
+      "sha": "bf68e2d66a992a1e6aeb7e9263293cc23fcbf475",
+      "license": "Apache-2.0",
+      "roots": [
+        "build-system",
+        "camera",
+        "cars",
+        "device-ai",
+        "devtools",
+        "identity",
+        "jetpack-compose",
+        "media",
+        "navigation",
+        "performance",
+        "play",
+        "profilers",
+        "security",
+        "system",
+        "testing",
+        "tv",
+        "wear",
+        "xr"
+      ],
+      "patterns": [
+        "**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "Kotlin/kotlin-agent-skills",
+      "sha": "087f5689c1934135ed58718cdf524525e452b7e9",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "skydoves/compose-performance-skills",
+      "sha": "1b32f81724c0d71fe9ef093ca44697f559fdab6e",
+      "license": "Apache-2.0",
+      "roots": [
+        "audit",
+        "build",
+        "hot-reload",
+        "lists",
+        "measurement",
+        "modifiers",
+        "recomposition",
+        "side-effects",
+        "stability"
+      ],
+      "patterns": [
+        "**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "skydoves/android-testing-skills",
+      "sha": "8665ed59643c90eb1056a256a6ddec161aa1cfa1",
+      "license": "Apache-2.0",
+      "roots": [
+        "adb",
+        "compose",
+        "fundamentals",
+        "instrumentation",
+        "jvm-tests",
+        "kotlin",
+        "platform"
+      ],
+      "patterns": [
+        "**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "sunnat629/android-media-pack",
+      "sha": "1d74b4953d21ee31a3acf61eff68972e100c2ac3",
+      "license": "Apache-2.0",
+      "roots": [
+        ".skills/media"
+      ],
+      "patterns": [
+        ".skills/media/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-cli",
+      "sha": "4bc00fb7fa5b4329f2fb53ac4743a066c2c664e8",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills/playwright-cli"
+      ],
+      "patterns": [
+        "skills/playwright-cli/SKILL.md"
+      ]
+    },
+    {
+      "repo": "vercel-labs/agent-browser",
+      "sha": "d44f6989bf5e9a9a1c6dd6d97175f8c33b138eca",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills/agent-browser"
+      ],
+      "patterns": [
+        "skills/agent-browser/SKILL.md"
+      ]
+    },
+    {
+      "repo": "ChromeDevTools/chrome-devtools-mcp",
+      "sha": "0b37364dc0a88a804c6d73d3335e776adc7f33c4",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "cloudflare/skills",
+      "sha": "6eb6c781aa9b6438e0c7307bd102788a75fe1a6d",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills"
+      ],
+      "patterns": [
+        "skills/**/SKILL.md"
+      ]
+    },
+    {
+      "repo": "anthropics/skills",
+      "sha": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
+      "license": "Apache-2.0",
+      "roots": [
+        "skills/frontend-design"
+      ],
+      "patterns": [
+        "skills/frontend-design/SKILL.md"
+      ],
+      "license_file": "skills/frontend-design/LICENSE.txt"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "sha": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62",
+      "license": "skill-MIT",
+      "roots": [
+        "skills/composition-patterns",
+        "skills/react-best-practices",
+        "skills/react-native-skills",
+        "skills/react-view-transitions"
+      ],
+      "patterns": [
+        "skills/composition-patterns/SKILL.md",
+        "skills/react-best-practices/SKILL.md",
+        "skills/react-native-skills/SKILL.md",
+        "skills/react-view-transitions/SKILL.md"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "repo": "trailofbits/skills",
+      "reason": "CC-BY-SA-4.0"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "skill": "web-design-guidelines",
+      "reason": "No explicit skill license"
+    }
+  ]
+}

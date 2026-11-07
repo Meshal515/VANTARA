@@ -1,0 +1,57 @@
+name: Install upstream agent skills (MIT and Apache)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/vendor-agent-skills.yml
+      - .claude/vendor/manifest.json
+      - tools/vendor_agent_skills.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vantara-agent-skills
+  cancel-in-progress: false
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Validate importer syntax
+        run: python3 -m py_compile tools/vendor_agent_skills.py
+      - name: Import original pinned skills without executing third-party code
+        run: python3 tools/vendor_agent_skills.py
+      - name: Validate packages and licenses
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path(".claude/vendor/installation-report.json").read_text())
+          assert report["upstream_skill_count"] >= 200
+          for item in report["repositories"]:
+              assert Path(".claude/vendor/sources", item["repo"]).is_dir()
+              assert item["skill_count"] > 0
+          print("Verified", report["upstream_skill_count"], "skill packages")
+          PY
+      - name: Commit skill files to GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .claude/vendor .claude/skills
+          if git diff --cached --quiet; then
+            echo "All original skills already installed."
+            exit 0
+          fi
+          git commit -m "chore(claude): vendor complete pinned MIT and Apache skills"
+          git push origin HEAD:main
