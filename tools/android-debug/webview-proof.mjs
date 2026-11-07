@@ -227,7 +227,17 @@ try {
     proof.navigationFixture = 'shipped Home/Addons shell; local anonymous sync; real native bridges';
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
-    proof.sectionMotion = await sectionMotionProof(evaluate, async name => {
+    // Diagnostic trace (CDP timeout three runs in a row inside this proof): which call hangs, and when.
+    proof.sectionTrace = [];
+    const begun = Date.now();
+    const traced = async (expression) => {
+      const step = { at: Date.now() - begun, expr: expression.replace(/\s+/g, ' ').slice(0, 140) };
+      proof.sectionTrace.push(step); if (proof.sectionTrace.length > 400) proof.sectionTrace.shift();
+      const value = await evaluate(expression);
+      step.ms = Date.now() - begun - step.at;
+      return value;
+    };
+    proof.sectionMotion = await sectionMotionProof(traced, async name => {
       const shot = await command('Page.captureScreenshot', { format: 'png' });
       writeFileSync(`${out}/${name}.png`, Buffer.from(shot.data, 'base64'));
     });
@@ -259,6 +269,11 @@ try {
   proof.passed = true;
 } catch (error) {
   proof.failure = String(error?.stack || error);
+  // Is the device alive at the moment of failure? (a dead emulator also produces CDP timeouts)
+  try { proof.deviceAtFailure = execFileSync('adb', ['get-state'], { encoding: 'utf8', timeout: 10000 }).trim(); }
+  catch (e) { proof.deviceAtFailure = 'unreachable: ' + String(e.stderr || e.message).slice(0, 200); }
+  const last = (proof.sectionTrace ?? []).slice(-6);
+  console.log('Debug WebView failure context:', JSON.stringify({ device: proof.deviceAtFailure, lastSectionCalls: last }));
   throw error;
 } finally {
   proof.cdpExceptions = errors;
