@@ -1100,3 +1100,6 @@ html[data-motion='off'] .v35 #mangaHome .mg-pick { transition: none !important; 
   .v35 .mg-copy > * { animation: none !important; }
 }
 html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transition: none !important; }
+@media (min-width: 1024px) {
+  .v35 #mangaHome .mg-hero { margin-top: calc(-76px - var(--safe-top)); padding-top: calc(84px + var(--safe-top)); }
+}

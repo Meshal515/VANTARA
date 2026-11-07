@@ -37,6 +37,7 @@ import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
+import { createAnimeToday } from './anime-today.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
 const isMovie = m => m?.format === 'MOVIE';
@@ -339,73 +340,6 @@ export function createAnime(deps) {
     return new Date(`${key}T12:00:00Z`).toLocaleDateString('ar', { weekday: 'long', timeZone: 'UTC' });
   }
 
-  function slot(m) {
-    const now = Date.now();
-    const aired = m.airingAt <= now;
-    const c = el('button', `an-slot${aired ? ' aired' : ''}`);
-    c.type = 'button';
-    c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
-    tint(c, m.color);
-    const art = el('span', 'an-slot-art');
-    art.append(image(m.banner ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' }));
-    const line = el('span', 'an-slot-line');
-    line.append(el('b', 'an-slot-time', clock12(m.airingAt)), el('span', null, unitLabel(m, m.episode)));
-    const t = el('span', 'an-slot-title', m.title);
-    t.dir = 'auto';
-    const when = el('span', 'an-slot-when', aired ? `نزلت ${relativeAr(m.airingAt)}` : relativeAr(m.airingAt));
-    c.append(art, line, t, when);
-    c.onclick = () => void openAnime(m, aired ? { episode: m.episode } : {});
-    return c;
-  }
-
-  function airSchedule(week) {
-    const today = meccaDay(Date.now());
-    const days = new Map();
-    for (const m of week) {
-      const k = meccaDay(m.airingAt);
-      if (!days.has(k)) days.set(k, []);
-      days.get(k).push(m);
-    }
-    const keys = [...days.keys()].filter((k) => k >= meccaDay(Date.now() - 86_400_000)).sort();
-    if (!keys.length) return null;
-    const s = el('section', 'an-rail an-air');
-    s.dataset.reveal = '';
-    const head = el('div', 'an-rail-head');
-    const titles = el('div', 'an-rail-titles');
-    titles.append(el('h2', null, 'جدول البث'), el('span', 'an-rail-sub', 'بتوقيت مكة'));
-    head.append(titles);
-    // كل ما نزل بترتيبه في «آخر التحديثات» (نفس سلوك الأقسام الثلاثة)
-    if (deps.openUpdates) head.append(button('an-more', `<span>الكل</span>${glyph('chevron', { size: 16 })}`, () => deps.openUpdates('anime')));
-    const tabs = el('nav', 'an-days');
-    tabs.setAttribute('role', 'tablist');
-    const strip = el('div', 'an-strip an-air-strip');
-    let current = keys.includes(today) ? today : keys[0];
-    const show = (k, { scroll = true } = {}) => {
-      current = k;
-      for (const b of tabs.children) {
-        const on = b.dataset.day === k;
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-selected', String(on));
-      }
-      const list = days.get(k) ?? [];
-      strip.replaceChildren(...list.map(slot));
-      stripIn([...strip.children].slice(0, 4));
-      // اليوم يبدأ عند «الآن»: آخر ما نزل، وبعده القادم
-      const now = Date.now();
-      const at = Math.max(0, list.findIndex((m) => m.airingAt > now) - 1);
-      if (scroll) requestAnimationFrame(() => centerInStrip(strip, strip.children[k === today ? at : 0], 'start'));
-    };
-    for (const k of keys) {
-      const b = button(`an-day${k === current ? ' active' : ''}`, dayLabel(k, today), () => show(k));
-      b.dataset.day = k;
-      b.setAttribute('role', 'tab');
-      tabs.append(b);
-    }
-    s.append(head, tabs, strip);
-    show(current, { scroll: true });
-    return s;
-  }
-
   // ───────────── الرئيسية ─────────────
 
   const watching = () => {
@@ -430,19 +364,24 @@ export function createAnime(deps) {
 
   const HOME_HISTORY = 10;
 
+  let todayKit = null;
+  const today = () => (todayKit ??= createAnimeToday({ el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip }));
+
   function renderHome(data) {
     const blocks = el('div', 'an-home');
-    const air = data.week?.length ? airSchedule(data.week) : null;
-    if (air) blocks.append(air);
-    else if (data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending' }) }));
+    // التصميم المعتمد: البنر من جدول اليوم، ثم تابع المشاهدة، ثم جدول الأسبوع (anime-today.js)
+    const hero = data.week?.length ? today().todayHero(data.week) : null;
+    if (hero) blocks.append(hero);
+    const air = data.week?.length ? today().schedule(data.week) : null;
+    if (!air && data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending' }) }));
     const cont = watching();
-    // نفس بطاقة «آخر المشاهدات» في مكتبتي، مصغّرة في شريط، لآخر 10 أعمال: الباقي في «الكل»
-    if (cont.length) blocks.append(rail('آخر المشاهدات', { cls: 'an-rail--history', items: cont.slice(0, HOME_HISTORY), card: historyCard, more: () => openLibrary('history') }));
+    if (cont.length) blocks.append(rail('تابع المشاهدة', { cls: 'an-rail--history ah-cw-rail', items: cont.slice(0, HOME_HISTORY), card: (w) => today().continueCard(w), more: () => openLibrary('history') }));
+    if (air) blocks.append(air);
     // «حلقات جديدة» صارت داخل جدول البث (أمس واليوم)؛ تبقى شريطًا فقط لمحفوظ قديم بلا جدول
     if (!air && data.latest?.length) blocks.append(rail('حلقات جديدة', { sub: 'نزلت هذا الأسبوع', cls: 'an-rail--wide', items: data.latest.slice(0, 16), card: episodeCard, more: deps.openUpdates ? () => deps.openUpdates('anime') : undefined }));
     if (data.season?.length) {
       const top = data.season.slice(0, 10);
-      blocks.append(rail('Top 10', { sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }), more: () => openCollection({ kind: 'season' }) }));
+      blocks.append(rail('الأفضل هذا الموسم', { sub: `موسم ${data.seasonName}`, cls: 'an-rail--top', items: top, card: (m) => posterCard(m, { rank: top.indexOf(m) + 1 }), more: () => openCollection({ kind: 'season' }) }));
     }
     blocks.append(genreRail());
     if (data.trending?.length) blocks.append(rail('رائج هذا الأسبوع', { items: data.trending, card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending', title: 'رائج هذا الأسبوع' }) }));
