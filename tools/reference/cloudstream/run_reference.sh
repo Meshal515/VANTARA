@@ -34,3 +34,5 @@ set -e
 adb pull "/sdcard/Android/data/$app/files/reference/." "$out/" || echo "nothing to pull (no plugin finished)"
 adb logcat -d -s VANTARA_REF:* PluginManager:* System.out:* > "$out/logcat.txt" || true
 ls -la "$out"
+# am instrument exits 0 even when the test fails: the result line decides.
+if ! grep -q '^OK (1 test)' "$out/instrument.txt"; then echo "::error::reference test did not pass (see instrument.txt)"; exit 1; fi

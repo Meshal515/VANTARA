@@ -25,7 +25,8 @@ import java.util.UUID
  * VANTARA's embed resolver + media policy). Each episode is written the moment it finishes, in the reference's own
  * shape (embeds with links, direct links), so one checker (ffprobe on the host) judges both engines.
  *
- * Opt-in: -e vantaraRefCompare true. Input: <external files>/ref-episodes.json
+ * Opt-in: -e vantaraRefCompare true. Input: /data/local/tmp/ref-episodes.json, read with the test's shell permission
+ * (a file adb pushes into the app's own folder is not the app's: EACCES on Android 15, round of Nov 6)
  *   {"repo": "...", "plugins": [{"name","content","sha256","episodes":[{"data","label"}]}]}
  * Output: <external files>/reference-vantara/<name>.vep<N>.json and <name>.vantara.json.
  */
@@ -43,6 +44,12 @@ class ReferenceCompareTest {
         put("type", c.container.name); put("quality", c.quality ?: 0); put("at", now)
     }
 
+    private fun readShellFile(path: String): String {
+        val pipe = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("cat $path")
+        return android.os.ParcelFileDescriptor.AutoCloseInputStream(pipe).use { it.readBytes().toString(Charsets.UTF_8) }
+            .also { require(it.isNotBlank()) { "REFERENCE_EPISODES_MISSING $path" } }
+    }
+
     private suspend fun <T> retry(block: suspend () -> T): T {
         repeat(2) { runCatching { return block() }; delay(5_000) }
         return block()
@@ -57,7 +64,7 @@ class ReferenceCompareTest {
         androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
         val root = context.getExternalFilesDir(null)!!
         val out = File(root, "reference-vantara").apply { mkdirs() }
-        val plan = Json.parseToJsonElement(File(root, "ref-episodes.json").readText()).jsonObject
+        val plan = Json.parseToJsonElement(readShellFile("/data/local/tmp/ref-episodes.json")).jsonObject
         val repo = plan["repo"]?.jsonPrimitive?.contentOrNull ?: ARB
         val host = RuntimeHost(context, engine, BROWSER_UA,
             silentClearance = { url, agent ->

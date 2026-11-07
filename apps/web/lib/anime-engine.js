@@ -303,7 +303,25 @@ const YEAR = /(?:^|\D)((?:19|20)\d{2})(?!\d)/;
 // وسم صيغة/نسخة بين قوسين ليس من الاسم: «Jujutsu Kaisen (TV)» = «Jujutsu Kaisen»
 const FORMAT_TAG = /\s*[([]\s*(?:tv|dub|dubbed|sub|subbed|uncensored|مترجم|مدبلج)\s*[)\]]\s*/giu;
 
+/**
+ * عنوان النسخة كما تكتبه المواقع يحمل ضجيجًا ليس من اسم العمل: «مشاهدة انمي» في أوله، ورقم الحلقة وما بعده
+ * («الحلقة 5 مترجمة اون لاين»، «Episode 05 English Subbed»، «第5話»)، ووسوم اللغة والجودة. يُزال من عنوان
+ * المصدر وحده؛ رقم الموسم والجزء و«فيلم» تبقى، فالمطابقة بالموسم لا تتساهل.
+ */
+const SITE_VERB = /^\s*(?:مشاهدة|تحميل|شاهد)\s+/u;
+const SITE_KIND = /^\s*(?:انمي|أنمي|إنمي)\s+/u;
+const EPISODE_TAIL = /(?:^|[\s\-–|:])\s*(?:الحلقة|حلقة|episode|ep\.?)\s*\d+(?:\.\d+)?(?=\s|$|[^\d]).*$/iu;
+const EPISODE_JA = /\s*第\s*\d+\s*[話话].*$/u;
+const NOISE = /(?:^|\s)(?:مترجمة|مترجم|مدبلجة|مدبلج|اون\s*لاين|أون\s*لاين|online|english\s+subbed|english\s+dubbed|subbed|dubbed|raw|كاملة|كامل|hd|fhd|1080p|720p|480p|360p)(?=\s|$)/giu;
+export function sourceTitle(raw) {
+  const text = String(raw ?? '');
+  const cleaned = text.replace(SITE_VERB, '').replace(SITE_KIND, '').replace(EPISODE_JA, '').replace(EPISODE_TAIL, '')
+    .replace(NOISE, ' ').replace(/[\s\-–|:]+$/u, '').replace(/\s+/g, ' ').trim();
+  return cleaned || text;
+}
+
 export function judgeAnimeCopy(c, titles, { year = null, format = null } = {}) {
+  c = { ...c, title: sourceTitle(c?.title) };
   const wanted = titles.filter(Boolean).map(fold);
   const title = fold(String(c.title ?? '').replace(FORMAT_TAG, ' '));
   const y = Number(YEAR.exec(String(c.title ?? ''))?.[1] ?? NaN);
@@ -354,14 +372,17 @@ export function pickCopies(items, titles, criteria = {}) {
   }
   // كل مصدر طابق العمل يشارك بأفضل نسخه، لا من كتب الاسم حرفيًا فقط: «Solo Leveling (Ore dake Level Up na Ken)»
   // في مصدر و«ore dake level up na ken» في آخر عمل واحد، وكان الأول يُسقط فتنقص السيرفرات (فحص المحاكي)
+  const series = (c) => sourceTitle(c.title) === String(c.title ?? '').trim();
   const covered = new Set(copies.map((c) => c.sourceId));
-  for (const x of [...judged].sort((a, b) => b.j.score - a.j.score)) {
+  for (const x of [...judged].sort((a, b) => b.j.score - a.j.score || Number(series(b.c)) - Number(series(a.c)))) {
     if (covered.has(x.c.sourceId)) continue;
     covered.add(x.c.sourceId);
     copies.push(x.c);
   }
-  // نسخة واحدة لكل مصدر: الأولى (أسرع رد) هي المرجّحة
-  const one = [...new Map(copies.map((c) => [c.sourceId, c])).values()];
+  // نسخة واحدة لكل مصدر: صفحة العمل نفسه (عنوان بلا رقم حلقة) قبل صفحات الحلقات، ثم الأولى (أسرع رد).
+  // كانت Map تُبقي الأخيرة لا الأولى، فمصدر يعيد نتائجه حلقةً حلقة يدخل بصفحة حلقة اعتباطية
+  const one = [];
+  for (const c of [...copies.filter(series), ...copies.filter((c) => !series(c))]) if (!one.some((x) => x.sourceId === c.sourceId)) one.push(c);
   return { key: fold(one[0].title), title: one[0].title, thumbnail: one.find((c) => c.thumbnail)?.thumbnail ?? null, copies: one };
 }
 

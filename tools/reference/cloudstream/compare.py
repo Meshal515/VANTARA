@@ -169,6 +169,11 @@ def main():
         rows = judge(ref, van)
         (van_dir / "comparison.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
         print(summarize(rows, van))
+        # A comparison that did not run is not a result: NOT_RUN or NOT_COMPARABLE fails the job (plan: must be 0).
+        missing = [r for r in rows if r["verdict"] in ("NOT_RUN", "NOT_COMPARABLE")]
+        if missing or not rows:
+            print("\n::error::%d of %d cases were not run or not comparable" % (len(missing), len(rows)))
+            sys.exit(1)
 
 
 if __name__ == "__main__":

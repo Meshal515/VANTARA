@@ -47,6 +47,18 @@ class CompareTest(unittest.TestCase):
         self.assertIn("| Akwam | 0 | 1 |", text)
         self.assertIn("s1.example · http:80 × 1", text)
 
+    def test_a_comparison_that_did_not_run_fails_the_job(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "verdicts.json").write_text(json.dumps([{"plugin": "Akwam", "providers": [{"works": [{"title": "W", "episodes": [
+                {"data": "d1", "embeds": [], "direct": [link("http://s1.example/v.mp4", True)]}]}]}]}]))
+            (root / "van").mkdir()
+            sys.argv = ["compare.py", "judge", str(root), str(root / "van")]
+            with self.assertRaises(SystemExit) as stop:
+                c.main()
+            self.assertEqual(stop.exception.code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -493,6 +493,7 @@ export function createServerSheet(body, o) {
   listen(scroll, 'scrollend', handBack, { passive: true });
   // لمسة خارج قائمة المصدر تغلقها
   listen(body, 'click', () => {
+    addonOpen = false;
     const w = body.querySelector('.ss-addon.open');
     body.querySelectorAll('.ss-addon-menu').forEach((m) => m.remove());
     if (!w) return;
@@ -501,6 +502,9 @@ export function createServerSheet(body, o) {
   });
 
   const filter = { q: 'all', v: null, a: 'all' };
+  // قائمة المصدر مفتوحة؟ السيرفرات تصل تباعًا وكل وصول يعيد رسم المرشّحات، فكانت القائمة تُغلق
+  // بعد فتحها مباشرة. تبقى مفتوحة (ومكان تمريرها) ويُضاف إليها كل مصدر يصل.
+  let addonOpen = false;
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
@@ -721,6 +725,7 @@ export function createServerSheet(body, o) {
     const names = [...new Set(live.map((r) => view(r).name))];
     if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
     const parts = [];
+    let reopen = null;
     if (qs.length > 1) parts.push(tabs([['all', 'الكل'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q, (k) => { filter.q = k; update(last); }, 'الجودة'));
     // اللغة زرّان يُلغى المختار منهما بلمسة ثانية
     if (dub && sub) parts.push(tabs([['SUB', 'مترجم'], ['DUB', 'مدبلج']], filter.v, (k) => { filter.v = filter.v === k ? null : k; update(last); }, 'اللغة'));
@@ -742,15 +747,15 @@ export function createServerSheet(body, o) {
         opt.append(el('i', 'ss-addon-dot'), label);
         opt.onclick = (e) => {
           e.stopPropagation();
+          addonOpen = false;
           filter.a = value;
           update(last);
         };
         menu.append(opt);
       }
       // القائمة خارج صف المرشّحات (يُمرَّر أفقيًا فيقصّ ما ينزل منه)، تحت الزر مباشرة
-      toggle.onclick = (e) => {
-        e.stopPropagation();
-        const open = menu.hidden;
+      const setOpen = (open) => {
+        addonOpen = open;
         body.querySelectorAll('.ss-addon-menu').forEach((m) => { if (m !== menu) m.remove(); });
         if (open) {
           const a = toggle.getBoundingClientRect?.();
@@ -765,11 +770,18 @@ export function createServerSheet(body, o) {
         toggle.setAttribute('aria-expanded', String(open));
         wrap.classList.toggle('open', open);
       };
+      toggle.onclick = (e) => {
+        e.stopPropagation();
+        setOpen(menu.hidden);
+      };
       wrap.append(toggle);
       parts.push(wrap);
-    }
+      reopen = addonOpen ? () => { setOpen(true); menu.scrollTop = keptScroll; } : null;
+    } else addonOpen = false;
+    const keptScroll = body.querySelector('.ss-addon-menu')?.scrollTop ?? 0;
     body.querySelectorAll('.ss-addon-menu').forEach((m) => m.remove());
     filters.replaceChildren(...parts);
+    reopen?.();
     filters.hidden = !parts.length;
     // سطر أعرض من الشاشة: يذوب طرفه إشارةً إلى أنه يُمرَّر، بدل قصّ كلمة في منتصفها
     frame(() => filters.classList.toggle('ss-filters--more', filters.scrollWidth > filters.clientWidth + 1));

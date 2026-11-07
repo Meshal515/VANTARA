@@ -343,7 +343,11 @@ class AnimeEngine(context: Context) {
         val gate = Semaphore(concurrency.coerceAtLeast(1))
         coroutineScope {
             for (s in live) launch {
-                gate.withPermit {
+                // A source holds one of the parallel slots for the normal budget only. Past it, it keeps searching
+                // outside the gate up to its ceiling and its pages still reach the sheet as they answer: the source
+                // page searches the same source with no cap, and cancelling it here at 12 s made sources that work
+                // there vanish from the general card (diagnostic: WIT ANIME, AnimeLek «لم يرد خلال 12 ثانية»).
+                SearchSlots.hold(gate, timeoutMs) {
                     val t0 = System.nanoTime()
                     val elapsed = { (System.nanoTime() - t0) / 1_000_000 }
                     // A completed null lookup is different from a timed-out load.
@@ -352,14 +356,14 @@ class AnimeEngine(context: Context) {
                     if (a == null) {
                         val reason = if (loading == null) "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية" else loadErrors[s.id] ?: "لا يوجد محوّل متاح للمصدر في حالته الحالية"
                         onHit(SourceHit(s.id, emptyList(), elapsed(), reason, stop = "load_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[s.id] ?: if (loading == null) "LOAD_TIMEOUT" else "SOURCE_ADAPTER_UNAVAILABLE" else null))
-                        return@withPermit
+                        return@hold
                     }
                     val key = HealthStore.sourceKey(s.id)
                     var pageNumber = 0
                     // A CloudStream source starts an isolated worker per request before the site is even asked;
                     // 12s cut it off (and recorded the timeout against the source) on a cold or busy device.
                     // Its hits still reach the sheet the moment each page answers.
-                    val budget = if (s.id.startsWith(RUNTIME_SOURCE_PREFIX)) maxOf(timeoutMs, RUNTIME_SEARCH_TIMEOUT_MS) else timeoutMs
+                    val budget = if (s.id.startsWith(RUNTIME_SOURCE_PREFIX)) maxOf(timeoutMs, RUNTIME_SEARCH_TIMEOUT_MS) else maxOf(timeoutMs, SLOW_SOURCE_SEARCH_MS)
                     val hit: SourceHit? = try {
                         withTimeout(budget) {
                             SearchPages.walk(a, query) { page ->
@@ -963,6 +967,12 @@ class AnimeEngine(context: Context) {
          * no screen waits on this ceiling.
          */
         const val RUNTIME_SEARCH_TIMEOUT_MS = 60_000L
+        /**
+         * Ceiling for a slow Aniyomi source in the general search. It no longer holds a parallel slot past
+         * [STREAM_SEARCH_TIMEOUT_MS] (so it delays nobody) and the search streams, so this only decides how late a
+         * slow source may still join the sheet; beyond it the source is reported and counted as a timeout.
+         */
+        const val SLOW_SOURCE_SEARCH_MS = 45_000L
         const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
 
         /**

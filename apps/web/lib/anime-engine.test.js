@@ -276,3 +276,36 @@ describe('seasonAliases: موسم لاحق باسم فرعي يُطابق ترق
     expect(await engine.seasonAliases(s1, detail)).toEqual({ titles: [], queries: [] });
   });
 });
+
+describe('source titles carry episode numbers and site noise (AniList 204650, cs3 diagnostic)', () => {
+  const titles = ['TOUGEN ANKI: Nikko Kegon Falls Arc', 'Tougen Anki: Nikko・Kegon no Taki-hen', '桃源暗鬼 日光・華厳の滝編', 'TOUGEN ANKI Season 2', 'Tougen Anki Season 2'];
+  const judge = (t) => engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' });
+  it.each([
+    'انمي Tougen Anki الموسم الثاني الحلقة 5 مترجمة اون لاين',
+    'Tougen Anki الموسم الثاني الحلقة 5',
+    'Tougen Anki 2nd Season Episode 5',
+    'Tougen Anki Season 2 - Episode 05 English Subbed',
+    'مشاهدة انمي Tougen Anki الموسم 2 الحلقة 12 مترجمة',
+    '桃源暗鬼 日光・華厳の滝編 第5話',
+  ])('accepts the right season: %s', (t) => expect(judge(t).ok).toBe(true));
+  it.each([
+    'انمي Tougen Anki الحلقة 5 مترجمة',
+    'انمي Tougen Anki الموسم الثالث الحلقة 1',
+    'Tougen Anki Movie',
+    'انمي Kimetsu no Yaiba الموسم الثاني الحلقة 5 مترجمة',
+  ])('still refuses another season or another work: %s', (t) => expect(judge(t).ok).toBe(false));
+});
+
+it('one copy per source: the series page before episode pages, then the first reply', () => {
+  const titles = ['Tougen Anki Season 2'];
+  const items = [
+    { sourceId: 'cs3', url: '/ep5', title: 'انمي Tougen Anki الموسم الثاني الحلقة 5 مترجمة' },
+    { sourceId: 'cs3', url: '/ep4', title: 'انمي Tougen Anki الموسم الثاني الحلقة 4 مترجمة' },
+    { sourceId: 'cs3', url: '/series', title: 'Tougen Anki الموسم الثاني' },
+    { sourceId: 'rift', url: '/a', title: 'Tougen Anki Season 2' },
+  ];
+  const work = engine.pickCopies(items, titles, { format: 'TV' });
+  expect(work.copies.map((c) => `${c.sourceId}${c.url}`).sort()).toEqual(['cs3/series', 'rift/a']);
+  const onlyEpisodes = engine.pickCopies(items.slice(0, 2), titles, { format: 'TV' });
+  expect(onlyEpisodes.copies.map((c) => c.url)).toEqual(['/ep5']);
+});

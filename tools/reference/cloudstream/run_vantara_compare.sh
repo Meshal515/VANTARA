@@ -9,8 +9,8 @@ adb install -r -g vantara-apks/app-debug.apk
 adb install -r -t vantara-apks/app-debug-androidTest.apk
 app=com.vantara.app.debug
 remote="/sdcard/Android/data/$app/files"
-adb shell mkdir -p "$remote/reference-vantara"
-adb push ref-episodes.json "$remote/ref-episodes.json"
+# Readable by the test through its shell permission; the app creates its own output folder (never the shell).
+adb push ref-episodes.json /data/local/tmp/ref-episodes.json
 set +e
 timeout 5400 adb shell am instrument --user 0 -r -w \
   -e class com.vantara.runtime.ReferenceCompareTest -e vantaraRefCompare true \
@@ -29,3 +29,5 @@ set -e
 adb pull "$remote/reference-vantara/." "$out/" || true
 adb logcat -d -s VantaraRuntime:* VantaraPrepare:* TestRunner:* AndroidRuntime:E > "$out/logcat.txt" || true
 tail -n 20 "$out/instrument.txt"
+# am instrument exits 0 even when the test fails: the result line decides, so a broken comparison is never green.
+if ! grep -q '^OK (1 test)' "$out/instrument.txt"; then echo "::error::VANTARA comparison test did not pass (see instrument.txt)"; exit 1; fi

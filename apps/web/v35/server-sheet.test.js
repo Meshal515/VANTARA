@@ -304,3 +304,19 @@ it('an Aniyomi torrent route (Torrentio Anime magnet → native ticket) is a tor
   expect(d.host).toContain('NyaaSi');
   expect(d.langs.map((l) => l.t)).not.toContain('مترجم عربي');
 });
+
+it('قائمة المصدر المفتوحة تبقى مفتوحة حين يصل سيرفر جديد، ويظهر مصدره فيها', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  const r = (id, name) => ({ id, sourceId: id, sourceName: name, state: 'READY', quality: 1080, runtimeReady: true, probed: true });
+  ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime')], settled: false, status: { text: '2' } });
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime'), r('c', 'AnimeRift')], settled: false, status: { text: '3' } });
+  const menu = body.querySelector('.ss-addon-menu');
+  expect(menu && !menu.hidden).toBe(true);
+  expect([...menu.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'ArabAnime', 'AnimeRift']);
+  expect(body.querySelector('.ss-addon-btn').getAttribute('aria-expanded')).toBe('true');
+  // اختيار مصدر يغلقها كالعادة
+  menu.querySelector('[data-value="AnimeRift"]').onclick({ stopPropagation() {} });
+  expect(body.querySelector('.ss-addon-menu')).toBeNull();
+});
