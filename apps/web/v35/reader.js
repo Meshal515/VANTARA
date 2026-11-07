@@ -43,6 +43,8 @@ import { readingPosition, readingTop } from './reader-scroll.js';
 import { clampPan, zoomAround } from './reader-zoom.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { createStallRecorder } from './reader-stalls.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -144,6 +146,7 @@ export function openSmartReader(deps, ctx) {
       <button class="rd-titles rd-titles--chapters" type="button" data-act="chapters" aria-label="الفصول" aria-haspopup="dialog"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></button>
       <span class="rd-together" id="rdTogether" hidden></span>
       <button class="rd-tl-btn" type="button" data-act="translate" id="rdTlBtn" hidden aria-pressed="false">${glyph('translateAr', { size: 20 })}<span>ترجمة</span></button>
+      <button class="rd-tl-btn" type="button" data-act="stalls" id="rdStalls" hidden><span>وقفات 0</span></button>
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
     </header>
@@ -174,6 +177,8 @@ export function openSmartReader(deps, ctx) {
   let followAnchor = null;
   let pendingFollow = null;
   let loadingChapter = null;
+  /** مسجّل الوقفات (reader-stalls.js): Debug مع «إظهار التشخيص» فقط، وإلا null. */
+  let stallRecorder = null;
   let scrollReportFrame = 0;
   let scrollReportTimer = null;
   let lastScrollReport = -Infinity;
@@ -635,6 +640,7 @@ export function openSmartReader(deps, ctx) {
       flushProgress();
     }
     state.seg = seg;
+    stallRecorder?.note('chapter', `دخول ${chapterLabel(seg.row)}`);
     tickActive();
     announce(seg.row);
     tl.focus(seg, seg.current, segs);
@@ -665,6 +671,7 @@ export function openSmartReader(deps, ctx) {
         seg.next = nseg;
         segs.splice(segs.indexOf(seg) + 1, 0, nseg);
         seg.el.after(nseg.el);
+        stallRecorder?.note('append', `${chapterLabel(used)} (${pages.length} صفحة)`);
         for (const s of nseg.slots) observer?.observe(s.frame);
         const count = plan.pageList ? Math.min(pages.length, plan.images) : 0;
         for (let i = 0; i < count; i++) void loadSlot(nseg, i, PRIORITY.NEXT_CHAPTER);
@@ -745,8 +752,10 @@ export function openSmartReader(deps, ctx) {
     const row = seg.row;
     const token = state.token;
     try {
+      const asked = performance.now();
       const src = await scheduler.request(imageKey(row, index), { sourceId: row.sourceId, page: slot.page }, priority);
       if (token !== state.token) return;
+      slot.waitMs = performance.now() - asked;
       await placeImage(slot, src);
       tl.onImage(seg, index);
     } catch (error) {
@@ -850,6 +859,7 @@ export function openSmartReader(deps, ctx) {
     img.alt = '';
     img.draggable = false;
     img.src = src;
+    const decodeFrom = performance.now();
     try {
       await img.decode();
     } catch {
@@ -860,6 +870,7 @@ export function openSmartReader(deps, ctx) {
         img.onerror = () => reject(new Error('الصورة تالفة'));
       });
     }
+    const decodeMs = performance.now() - decodeFrom;
     await holdReadingPlace(slot.frame, () => {
       if (img.naturalWidth && img.naturalHeight) {
         slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
@@ -867,6 +878,12 @@ export function openSmartReader(deps, ctx) {
       slot.frame.classList.remove('rd-page--error');
       slot.frame.replaceChildren(img);
     });
+    if (stallRecorder) {
+      const index = Number(slot.frame.dataset.index);
+      const here = String(state.seg?.id) === slot.frame.dataset.seg;
+      const away = here ? index - (state.current ?? 0) : null;
+      stallRecorder.note('img', `p${index + 1} (${away === null ? 'فصل آخر' : `${away >= 0 ? '+' : ''}${away} من موضعك`}) ${img.naturalWidth}×${img.naturalHeight} انتظار ${Math.round(slot.waitMs ?? 0)}ms فكّ ${Math.round(decodeMs)}ms`);
+    }
     tickActive();
     slot.loaded = true;
     reportScroll();
@@ -1695,6 +1712,29 @@ export function openSmartReader(deps, ctx) {
     });
   }
 
+  // ───────────────────────── وقفات التمرير (Debug، «إظهار التشخيص» فقط) ─────────────────────────
+  // يقيس على جهازك ما يحدث لحظة الوقفة (reader-stalls.js). بلا التشخيص لا يُنشأ ولا يكلّف شيئًا.
+  void diagnosticsUi.initialize().then(() => {
+    if (exited || !diagnosticsUi.visible()) return;
+    stallRecorder = createStallRecorder({ scroll, page: () => ({ index: state.current ?? 0, total: state.pages?.length ?? 0 }) });
+    const badge = q('rdStalls');
+    badge.hidden = false;
+    stallRecorder.onStall((n) => { badge.querySelector('span').textContent = `وقفات ${n}`; });
+  }).catch(() => {});
+  function openStalls() {
+    if (!stallRecorder) return;
+    const text = stallRecorder.report();
+    openSheet((body) => {
+      body.append(el('h3', null, 'وقفات التمرير'));
+      const pre = el('pre', 'rd-stalls-report', text);
+      pre.dir = 'rtl';
+      body.append(pre);
+      body.append(sheetItem('copy', 'انسخ التقرير', () => {
+        void navigator.clipboard?.writeText(text).then(() => toast('نُسخ التقرير'), () => toast('حدّد النص وانسخه'));
+      }));
+    });
+  }
+
   // ───────────────────────── الأفعال والرجوع ─────────────────────────
 
   const actions = {
@@ -1705,6 +1745,7 @@ export function openSmartReader(deps, ctx) {
     frameNext: () => openFrameSend(),
     menu: () => openMenu(),
     translate: () => openTranslateChoice(),
+    stalls: () => openStalls(),
     prevChapter: () => {
       const { prev } = nav();
       if (!prev) return;
@@ -1787,6 +1828,7 @@ export function openSmartReader(deps, ctx) {
   function destroy() {
     if (activeTimer != null) clearInterval(activeTimer);
     clearTimeout(settleTimer);
+    stallRecorder?.stop();
     try { stopNativeLifecycle(); } catch {}
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     state.token++; // pending chapter requests cannot paint a closed reader

@@ -641,3 +641,16 @@
 .v35 .rd-tl-btn[hidden] { display: none; }
 /* الشريط السفلي ظاهر: الزر فوقه لا تحته */
 /* زر الترجمة العائم جزءٌ من الشريط: يظهر معه ويختفي معه، لا فوق الصفحة وأنت تقرأ */
+
+/* تقرير وقفات التمرير (Debug، «إظهار التشخيص»): نص يُحدَّد ويُنسخ */
+.v35 .rd-stalls-report {
+  max-height: 55vh;
+  overflow: auto;
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  font-size: var(--fs-caption, 11.5px);
+  line-height: 1.5;
+  color: var(--text-2);
+  user-select: text;
+  -webkit-user-select: text;
+}
