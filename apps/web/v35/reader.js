@@ -40,7 +40,7 @@ import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
 import { createFollower } from '../lib/together/follow.js';
 import { readingPosition, readingTop } from './reader-scroll.js';
-import { clampPan, zoomAround } from './reader-zoom.js';
+import { clampPan, clampSides, isDoubleTap, zoomAround } from './reader-zoom.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
@@ -1235,6 +1235,8 @@ export function openSmartReader(deps, ctx) {
     zoom.scale = 1;
     zoom.pinch = null;
     zoom.pan = null;
+    zoom.tap = null;
+    zoom.lastTap = null;
     return true;
   }
   function paintZoom() {
@@ -1274,8 +1276,11 @@ export function openSmartReader(deps, ctx) {
   zoomEl.addEventListener(
     'touchstart',
     (e) => {
-      if (e.touches.length === 2) { zoom.pinch = { d: dist(e.touches), mid: midOf(e.touches) }; zoom.pan = null; }
-      else if (e.touches.length === 1) zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+      if (e.touches.length === 2) { zoom.pinch = { d: dist(e.touches), mid: midOf(e.touches) }; zoom.pan = null; zoom.tap = null; }
+      else if (e.touches.length === 1) {
+        zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+        zoom.tap = { x: e.touches[0].clientX, y: e.touches[0].clientY, at: performance.now() };
+      }
     },
     { passive: true },
   );
@@ -1286,9 +1291,11 @@ export function openSmartReader(deps, ctx) {
       const d = dist(e.touches);
       const mid = midOf(e.touches);
       Object.assign(zoom, zoomAround({ base: zoom.base, scale: zoom.scale, t: zoom.t, from: zoom.pinch.mid, to: mid, ratio: d / zoom.pinch.d }));
+      zoom.t = clampSides({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view });
       zoom.pinch = { d, mid };
       paintZoom();
     } else if (e.touches.length === 1 && zoom.pan && zoom.scale > 1) {
+      if (zoom.tap && Math.hypot(e.touches[0].clientX - zoom.tap.x, e.touches[0].clientY - zoom.tap.y) > 10) zoom.tap = null;
       const p = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
       zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: { x: zoom.t.x + p.x - zoom.pan.x, y: zoom.t.y + p.y - zoom.pan.y }, view: zoom.view });
       zoom.pan = p;
@@ -1303,6 +1310,13 @@ export function openSmartReader(deps, ctx) {
     } else if (e.touches.length === 0) {
       zoom.pinch = null;
       zoom.pan = null;
+      // نقرتان على الصفحة المكبّرة ترجعانك للقراءة، أيًّا كان ما كبّرها (نقرتان أو إصبعان)
+      const tap = zoom.tap && performance.now() - zoom.tap.at < 250 ? zoom.tap : null;
+      zoom.tap = null;
+      if (tap) {
+        if (isDoubleTap(zoom.lastTap, tap)) { zoom.lastTap = null; closeZoom(); return; }
+        zoom.lastTap = tap;
+      }
       // الإفلات قرب الحجم الطبيعي يرجعك للقراءة
       if (zoom.scale < 1.08) closeZoom();
       else { zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view }); paintZoom(); }
