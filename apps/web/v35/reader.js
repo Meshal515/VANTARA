@@ -817,12 +817,29 @@ export function openSmartReader(deps, ctx) {
    * حيث لا تثبيت أصلي يعوّض القارئ الفرق بنفسه لصفحةٍ كلها فوق موضعك؛ وحيث يوجد لا يضاعفه.
    */
   const nativeAnchoring = globalThis.CSS?.supports?.('overflow-anchor', 'auto') ?? false;
+  // والتعويض لا يُكتب والإصبع أو الزخم يحرّك الصفحة: كتابة scrollTop أثناءهما توقف زخم سفاري وتقفز الصفحة
+  // («يمشي سلس ثم يوقف جزء من الثانية ويكمل بقفزة»). صفحة فوقك اكتملت وأنت تمرّر تبقى بمقاسها المؤقت
+  // حتى يهدأ التمرير، ثم توضع بالتعويض نفسه وأنت ثابت فلا ترى شيئًا.
+  const SCROLL_SETTLE_MS = 160;
+  let scrollMoving = false;
+  let fingerDown = false;
+  let settleTimer = null;
+  const heldAbove = [];
+  function scrollActivity() {
+    scrollMoving = true;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      scrollMoving = false;
+      if (!fingerDown) for (const held of heldAbove.splice(0)) held.resolve(holdReadingPlace(held.frame, held.change));
+    }, SCROLL_SETTLE_MS);
+  }
   function holdReadingPlace(frame, change) {
     if (nativeAnchoring || settings.mode === 'paged') return change();
     const top = scroll.getBoundingClientRect().top;
     const before = frame.getBoundingClientRect();
+    if (before.bottom > top + 1) return change(); // في الشاشة أو تحتها: لا يزيح ما تقرؤه
+    if (scrollMoving || fingerDown) return new Promise((resolve) => heldAbove.push({ frame, change, resolve }));
     change();
-    if (before.bottom > top + 1) return; // في الشاشة أو تحتها: لا يزيح ما تقرؤه
     const delta = frame.getBoundingClientRect().height - before.height;
     if (Math.abs(delta) > 0.5) scroll.scrollTop += delta;
   }
@@ -843,7 +860,7 @@ export function openSmartReader(deps, ctx) {
         img.onerror = () => reject(new Error('الصورة تالفة'));
       });
     }
-    holdReadingPlace(slot.frame, () => {
+    await holdReadingPlace(slot.frame, () => {
       if (img.naturalWidth && img.naturalHeight) {
         slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
       }
@@ -1109,7 +1126,16 @@ export function openSmartReader(deps, ctx) {
     },
   });
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
-  scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
+  scroll.addEventListener('scroll', () => {
+    taps.scrolled(performance.now());
+    if (!nativeAnchoring) scrollActivity();
+  }, { passive: true });
+  if (!nativeAnchoring) {
+    scroll.addEventListener('touchstart', () => { fingerDown = true; }, { passive: true });
+    const lift = (e) => { if (!e.touches?.length) { fingerDown = false; scrollActivity(); } };
+    scroll.addEventListener('touchend', lift, { passive: true });
+    scroll.addEventListener('touchcancel', lift, { passive: true });
+  }
   scroll.addEventListener('scroll', () => {
     if (!tg || !state.seg || !hub?.session?.room.isHost || scrollReportFrame || scrollReportTimer != null) return;
     const delay = Math.max(0, 80 - (performance.now() - lastScrollReport));
@@ -1760,6 +1786,7 @@ export function openSmartReader(deps, ctx) {
   }
   function destroy() {
     if (activeTimer != null) clearInterval(activeTimer);
+    clearTimeout(settleTimer);
     try { stopNativeLifecycle(); } catch {}
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     state.token++; // pending chapter requests cannot paint a closed reader
