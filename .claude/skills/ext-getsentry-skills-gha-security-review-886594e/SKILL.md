@@ -1,0 +1,9 @@
+---
+name: ext-getsentry-skills-gha-security-review-886594e
+description: "Original upstream gha-security-review skill from getsentry/skills for related product engineering and design tasks."
+---
+# Upstream skill: gha-security-review
+
+Open and read the complete original SKILL.md at .claude/vendor/sources/getsentry/skills/skills/gha-security-review/SKILL.md before carrying out the task. Resolve all resource links relative to its original location. VANTARA CLAUDE.md and owner instructions take precedence. Source scripts, external downloads, telemetry, deployment and CLIs must not be executed without review and approval.
+
+Source: https://github.com/getsentry/skills/blob/e94f22214528d69899d09c627b3315ddc3544816/skills/gha-security-review/SKILL.md
