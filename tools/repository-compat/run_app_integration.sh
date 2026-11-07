@@ -32,7 +32,14 @@ for scale in window_animation_scale transition_animation_scale animator_duration
 adb shell am force-stop com.vantara.app.debug
 adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs baseline
+# Device log streamed to disk for the whole candidate phase: a renderer/GPU stall there took the emulator down
+# before the exit trap could read its log. Chromium, WebView, graphics and memory killer lines survive the crash.
+mkdir -p "$DEBUG_EVIDENCE"
+adb logcat -c || true
+adb logcat -v threadtime '*:W' chromium:V VantaraRuntime:V ActivityManager:I lmkd:V > "$DEBUG_EVIDENCE/candidate-device-log.txt" 2>&1 &
+device_log=$!
 node tools/android-debug/webview-proof.mjs candidate
+kill "$device_log" 2>/dev/null || true
 adb shell am force-stop com.vantara.app.debug
 adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs restart
