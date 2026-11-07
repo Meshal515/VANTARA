@@ -54,7 +54,9 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
         });
         for (const a of animations) a.currentTime = 0;
         const syncMs = performance.now() - t0;
-        return {record:{beforeY:before.y,afterY:after.y,sameText:before.text===after.text,
+        // Identity freeze at the identity update itself, in the same task (style recalculation is synchronous).
+        const frozenAtSwitch = JSON.stringify(styles())===JSON.stringify(window.__sectionProofStyles);
+        return {frozenAtSwitch, record:{beforeY:before.y,afterY:after.y,sameText:before.text===after.text,
           sameNodes:oldChildren.every(n=>n.parentNode===old), animations:animations.length,
           from:'${from}',to:'${to}',page:'${page}'},frames,syncMs};
       })()`);
@@ -65,12 +67,16 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
       // Identity freeze, measured as before in its own call: waiting for frames inside the measuring task hung the
       // device WebView (CDP timeout), while this separate two-frame check is the one that already ran there.
       if (page !== 'home') {
-        const frozen = await evaluate(`(async()=>{
+        if (!measured.frozenAtSwitch) throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
+        // A couple of frames later, while the page is still leaving. On a slow device WebView those two frames took
+        // 607 ms, past dock.js's safety timer (430 + 150 ms): the switch had ended and the page had rightly taken its
+        // own identity back, which read as a change. A finished, hidden page is not held to the frozen identity.
+        const later = await evaluate(`(async()=>{
           await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
           const actual=[window.__sectionProofSentinel.querySelector('h2'),window.__sectionProofSentinel.querySelector('button')].map(n=>{const c=getComputedStyle(n);return [c.fontSize,c.fontWeight,c.padding,c.borderRadius,c.color]});
-          return JSON.stringify(actual)===JSON.stringify(window.__sectionProofStyles);
+          return {leaving:window.__sectionProofOld.classList.contains('page-leaving'),same:JSON.stringify(actual)===JSON.stringify(window.__sectionProofStyles)};
         })()`);
-        if(!frozen)throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
+        if (later.leaving && !later.same) throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
       }
       if (from === 'manga' && to === 'cinema' && page === 'discover') for (const time of [0, 160, 420]) {
         // Evidence only (screenshots need their own calls); the verdict above used the in-task measurements.
