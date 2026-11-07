@@ -127,6 +127,32 @@ it('joins late ordinary sources to an addon-first picker without autoplay', asyn
   expect(state.open).not.toHaveBeenCalled();cleanup?.();
 });
 
+it('the first core match reaches an addon-first picker even when no later source grows it', async () => {
+  // findWorkStream resolves its first match and reports only later growth through onWork, so when Torrentio
+  // answered first the first CloudStream/Aniyomi copies never reached the sheet unless another source followed.
+  vi.useFakeTimers();
+  let finish;
+  state.find.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  state.addons.mockResolvedValueOnce([{sourceId:'addon|kitsu',url:'kitsu:13',id:'kitsu:13',identity:{kind:'anime',format:'TV',externalIds:{kitsu:'13'},episode:1}}]);
+  const { window, document } = parseHTML('<html><body><main></main></body></html>');
+  vi.stubGlobal('window', window); vi.stubGlobal('document', document);
+  vi.stubGlobal('Image', function () { return document.createElement('img'); });
+  vi.stubGlobal('requestAnimationFrame', (fn) => setTimeout(fn, 0));
+  const persisted = new Map();
+  vi.stubGlobal('localStorage', { getItem: key => persisted.get(key) ?? null, setItem: (key, value) => persisted.set(key, value) });
+  let cleanup; const body = document.querySelector('main');
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+  const anime=createAnime({root:body,q:()=>null,el,toast(){},genreAr:s=>s,openSheet:fn=>{cleanup=fn(body);},closeSheet(){},currentPage:()=> 'anime'});
+  anime.play({id:22,title:'Black Lagoon',format:'TV',episodes:12},1);
+  await vi.advanceTimersByTimeAsync(0);
+  state.extend.mockClear();
+  const core={copies:[{sourceId:'addon|cs3|anime4up',url:'/black-lagoon'}]};finish(core);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([core.copies[0]]));
+  expect(JSON.parse(persisted.get('vantara.anime.found.v2'))[22].work.copies.map(c => c.sourceId).sort()).toEqual(['addon|cs3|anime4up', 'addon|kitsu']);
+  cleanup?.();
+});
+
 it.each([
   { localDone: false, accountSeen: true, expected: 0, label: 'replays from zero when the account marks the episode seen' },
   { localDone: true, accountSeen: false, expected: 60000, label: 'resumes saved progress when the account clears a local seen flag' },

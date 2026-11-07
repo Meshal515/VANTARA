@@ -2095,7 +2095,9 @@ export function createAnime(deps) {
     const pending = (async () => {
       try {
         let sourceError = null;
-        const core = search(adopt).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
+        // The first match only resolves (later growth comes through onWork): when the addons win the race below it
+        // was never adopted, so CloudStream/Aniyomi copies were missing from a Torrentio-first sheet.
+        const core = search(adopt).then(work => { if (work?.copies?.length) adopt(work); return work; }).catch(error => { trace.record('core_search_failed', { error }); sourceError = error; return null; });
         const addons = engine.withAddonCopies([], animeAddonIdentity(m)).then(copies => { trace.record('addon_copies', { sources: copies.map(c => c.sourceId) }); if (copies.length) adopt({ title: m.title, copies }); return copies; }).catch(error => { trace.record('addon_search_failed', { error }); throw error; });
         const work = await engine.firstAvailableCopies(core, addons);
         if (!work?.copies?.length && sourceError) throw sourceError;
