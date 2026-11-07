@@ -25,6 +25,10 @@ mkdir -p "$DEBUG_EVIDENCE"
 # Gradle UTP removes its test installation during teardown. Install the exact
 # candidate APK again before starting the separate real-WebView acceptance phase.
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+# The emulator starts with animations disabled (stable instrumentation). WebView reports that as the system
+# «reduce motion» setting, under which section switches are instant, so the WebView phase restores the animation
+# scales a real phone has before measuring the animated transitions. The instant path keeps its own proof.
+for scale in window_animation_scale transition_animation_scale animator_duration_scale; do adb shell settings put global "$scale" 1; done
 adb shell am force-stop com.vantara.app.debug
 adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
 node tools/android-debug/webview-proof.mjs baseline

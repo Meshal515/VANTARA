@@ -36,6 +36,9 @@ launch() {
   echo 'App process did not start'; return 1
 }
 adb install -r "$previous" | tee "$out/install-previous.txt"
+# Animations on, as on a real phone: an emulator started with them disabled reports «reduce motion» to WebView,
+# and the candidate phase measures the animated section transitions (section-motion-proof.mjs).
+for scale in window_animation_scale transition_animation_scale animator_duration_scale; do adb shell settings put global "$scale" 1; done
 launch
 node tools/android-debug/webview-proof.mjs baseline
 adb shell run-as "$package" mkdir -p files

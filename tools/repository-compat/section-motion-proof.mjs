@@ -3,6 +3,12 @@
  */
 export async function sectionMotionProof(evaluate, capture = async () => {}) {
   const proof = { cases: [], passed: false };
+  // The animated cases need animations on. With the system «reduce motion» setting (an emulator started with
+  // animations disabled reports it to WebView) VANTARA correctly switches instantly, and the measurements below
+  // would read that as a scroll jump. Say so instead of misreporting; the instant path is proven at the end.
+  if (await evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`)) {
+    throw new Error('System reduced motion is on: enable animations before measuring animated section transitions');
+  }
   const order = ['manga', 'anime', 'cinema'];
   const wait = async () => {
     for (let n = 0; n < 100; n++) {
