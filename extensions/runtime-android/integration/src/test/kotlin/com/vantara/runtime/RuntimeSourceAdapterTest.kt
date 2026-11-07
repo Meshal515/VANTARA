@@ -15,6 +15,21 @@ class RuntimeSourceAdapterTest {
         assertEquals("http://media.example/video.mp4",candidates.single().url)
         assertEquals("https://source.example/watch",candidates.single().headers["Referer"])
     }
+    /** Reference run (AnimeRift, hitwithanime/veldox 1080p): the provider attaches transport headers the original
+     *  player ignores. They are dropped, never the link with them (it vanished from the sheet before). */
+    @Test fun transportHeadersFromTheProviderAreDroppedNotTheLink()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"https://videos.cdn.example/1/ar_sub/1080p/v1/master.mp4","name":"CR2 [ar_sub] - 1080P","quality":1080,"type":"VIDEO",
+            "headers":{"User-Agent":"libmpv","Accept":"*/*","Range":"bytes=0-","Connection":"close","Icy-MetaData":"1","Host":"videos.cdn.example"}}]}""") }
+        val c=adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).single()
+        assertEquals("https://videos.cdn.example/1/ar_sub/1080p/v1/master.mp4",c.url)
+        assertEquals("libmpv",c.headers["User-Agent"]); assertEquals("1",c.headers["Icy-MetaData"])
+        assertTrue(c.headers.keys.none { it.lowercase() in setOf("host","connection","range") })
+    }
+    @Test fun aHeaderThatCouldInjectIsDroppedAndTheLinkKept()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"https://media.example/v.mp4","headers":{"X-Bad":"a\r\nX-Injected: 1","Bad Name":"x","Referer":"https://source.example/"}}]}""") }
+        val c=adapter.candidates(SourceEpisode(id,"episode","Episode",1f)).single()
+        assertEquals(mapOf("Referer" to "https://source.example/"),c.headers.filterKeys { it!="User-Agent" })
+    }
     @Test fun extractedRuntimeCandidatesReportRoutesSoNativePreparationCanProbeThem()=runBlocking {
         val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"url":"https://media.example/master.m3u8","name":"CDN","quality":720,"type":"M3U8","referer":"https://source.example/watch"}]}""") }
         val health=com.vantara.anime.health.HealthStore(null)

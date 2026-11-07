@@ -82,10 +82,14 @@ class ReferenceCompareTest {
                 put("plugin", name)
                 runCatching {
                     val row = index.firstOrNull { (it["name"]?.jsonPrimitive?.contentOrNull ?: "").equals(name, true) } ?: error("PLUGIN_NOT_IN_REPOSITORY")
-                    val declared = row["sha256"]?.jsonPrimitive?.contentOrNull?.lowercase()
-                    put("declaredSha256", declared ?: "")
+                    // CloudStream repositories publish no package hash, so the package VANTARA installs is hashed here
+                    // from the same address the install reads, and compared with the reference's pinned package.
                     // Same input or no verdict: a different package build is NOT_COMPARABLE, never a VANTARA fault.
-                    put("comparable", declared != null && declared == p["sha256"]?.jsonPrimitive?.contentOrNull?.lowercase())
+                    val packageUrl = row["url"]?.jsonPrimitive?.contentOrNull ?: error("PACKAGE_URL_MISSING")
+                    val observed = java.security.MessageDigest.getInstance("SHA-256").digest(retry { java.net.URL(packageUrl).readBytes() })
+                        .joinToString("") { "%02x".format(it) }
+                    put("installedSha256", observed)
+                    put("comparable", observed == p["sha256"]?.jsonPrimitive?.contentOrNull?.lowercase())
                     val installed = retry { host.install(repo, row.getValue("pkg").jsonPrimitive.content, p["content"]?.jsonPrimitive?.contentOrNull ?: "anime") }
                     val id = installed["sourceIds"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content ?: error("NO_SOURCE_REGISTERED")
                     put("sourceId", id)
@@ -104,7 +108,10 @@ class ReferenceCompareTest {
                         }
                         RuntimeLinkObserver.onAnswer = null
                         val now = System.currentTimeMillis()
-                        val got = result.getOrDefault(emptyList())
+                        // What reached the sheet: the call's result plus every route reported on the way. A slow server
+                        // resolved by VANTARA can keep the call open past its budget while the provider's links were
+                        // already delivered; counting only the return value marked those links as dropped.
+                        val got = result.getOrDefault(emptyList()) + reports.flatMap { it.candidates }
                         val byUrl = got.associateBy { normal(it.url) }
                         val a = answer
                         val linkEmbeds = (a?.get("linkEmbeds") as? JsonObject).orEmpty().mapValues { it.value.jsonPrimitive.content }

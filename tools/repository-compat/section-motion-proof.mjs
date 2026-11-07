@@ -23,48 +23,54 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
       await evaluate(`document.querySelector('[data-act="navTo"][data-arg="home"]').click()`);
       await pick(from); await wait();
       if (page !== 'home') await evaluate(`document.querySelector('[data-act="navTo"][data-arg="${page}"]').click()`);
-      const record = await evaluate(`(() => {
+      // Click, pause and every measurement happen in ONE JavaScript task: dock.js finishes a transition with a safety
+      // timer (duration + 150 ms) that pausing the animations does not stop. Reading frames over separate CDP calls let
+      // a slow emulator WebView finish the switch first, so the device measured settled layers, not the motion.
+      const measured = await evaluate(`(async () => {
         const old = document.querySelector('#${page}');
         // A tall local sentinel makes preservation of the reading position measurable.
         const sentinel = document.createElement('div'); sentinel.dataset.motionSentinel = 'true';
         sentinel.style.cssText = 'height:1600px;padding-top:180px';
         sentinel.innerHTML = '<div class=search-head><h2>موضع القارئ</h2></div><button class=search-genre>تصنيف</button>'; old.append(sentinel);
         const styles = () => [sentinel.querySelector('h2'),sentinel.querySelector('button')].map(n=>{const c=getComputedStyle(n);return [c.fontSize,c.fontWeight,c.padding,c.borderRadius,c.color]});
-        window.__sectionProofStyles = styles();
+        const before0 = styles();
         window.scrollTo({top:'${page}'==='home'?0:120,behavior:'instant'});
         const before = {y:sentinel.getBoundingClientRect().y,text:old.textContent};
         const oldChildren = [...old.children];
+        const t0 = performance.now();
         document.querySelector('#secOpt-${to}').click();
         const animations = document.getAnimations().filter(a => a.effect?.getTiming().duration === 430);
         for (const a of animations) {a.pause();a.currentTime=0;}
         window.__sectionProofAnimations = animations;
         window.__sectionProofOld = old; window.__sectionProofSentinel = sentinel;
         const after = {y:sentinel.getBoundingClientRect().y,text:old.textContent};
-        return {beforeY:before.y,afterY:after.y,sameText:before.text===after.text,
+        const home = document.querySelector('#home');
+        const current = '${page}'==='home'?document.querySelector('#${from}Home'):old;
+        const target = '${page}'==='home'?document.querySelector('#${to}Home'):home;
+        const x = n => new DOMMatrixReadOnly(getComputedStyle(n).transform).m41;
+        const frames = [0, 160, 420].map(time => {
+          for (const a of animations) a.currentTime = time;
+          return {time,oldX:x(current),newX:x(target),oldZ:+getComputedStyle(current).zIndex||0,newZ:+getComputedStyle(target).zIndex||0,width:home.getBoundingClientRect().width};
+        });
+        for (const a of animations) a.currentTime = 0;
+        const syncMs = performance.now() - t0;
+        // Identity freeze: the outgoing page keeps its section styles a couple of frames into the transition.
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        const frozen = JSON.stringify(styles())===JSON.stringify(before0);
+        const live = animations.length > 0 && animations.every(a => a.playState === 'paused');
+        return {record:{beforeY:before.y,afterY:after.y,sameText:before.text===after.text,
           sameNodes:oldChildren.every(n=>n.parentNode===old), animations:animations.length,
-          from:'${from}',to:'${to}',page:'${page}'};
+          from:'${from}',to:'${to}',page:'${page}'},frames,frozen,live,syncMs};
       })()`);
+      const {record, frames} = measured;
+      if (!record.animations) throw new Error('No section transition was measured: '+JSON.stringify(record));
       if (page !== 'home' && (!record.sameNodes || !record.sameText)) throw new Error('Outgoing page was rebuilt: '+JSON.stringify(record));
       if (page !== 'home' && Math.abs(record.beforeY-record.afterY)>1) throw new Error('First frame scroll jump: '+JSON.stringify(record));
-      if (page !== 'home') {
-        const frozen = await evaluate(`(async()=>{
-          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-          const actual=[window.__sectionProofSentinel.querySelector('h2'),window.__sectionProofSentinel.querySelector('button')].map(n=>{const c=getComputedStyle(n);return [c.fontSize,c.fontWeight,c.padding,c.borderRadius,c.color]});
-          return JSON.stringify(actual)===JSON.stringify(window.__sectionProofStyles);
-        })()`);
-        if(!frozen)throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
-      }
-      const frames = [];
-      for (const time of [0, 160, 420]) {
-        frames.push(await evaluate(`(() => {
-          for(const a of window.__sectionProofAnimations) a.currentTime=${time};
-          const old=window.__sectionProofOld, home=document.querySelector('#home');
-          const current='${page}'==='home'?document.querySelector('#${from}Home'):old;
-          const target='${page}'==='home'?document.querySelector('#${to}Home'):home;
-          const x=n=>new DOMMatrixReadOnly(getComputedStyle(n).transform).m41;
-          return {time:${time},oldX:x(current),newX:x(target),oldZ:+getComputedStyle(current).zIndex||0,newZ:+getComputedStyle(target).zIndex||0,width:home.getBoundingClientRect().width};
-        })()`));
-        if (from === 'manga' && to === 'cinema' && page === 'discover') await capture(`section-${page}-${from}-${to}-${time}`);
+      if (page !== 'home' && !measured.frozen) throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
+      if (from === 'manga' && to === 'cinema' && page === 'discover') for (const time of [0, 160, 420]) {
+        // Evidence only (screenshots need their own calls); the verdict above used the in-task measurements.
+        await evaluate(`(() => {for(const a of window.__sectionProofAnimations) a.currentTime=${time};})()`);
+        await capture(`section-${page}-${from}-${to}-${time}`);
       }
       // Compare each subpage against Home, using actual compositor matrices at identical times.
       if (page === 'home') proof.reference = frames;
@@ -72,7 +78,12 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
         for (const key of ['oldX','newX']) if (Math.abs(frames[i][key]-proof.reference[i][key])>1) {
           throw new Error('Subpage differs from Home '+key+': '+JSON.stringify({record,frames,reference:proof.reference}));
         }
-        if ((frames[i].newZ>frames[i].oldZ)!==(order.indexOf(to)>order.indexOf(from))) throw new Error('Wrong section stacking order');
+        if ((frames[i].newZ>frames[i].oldZ)!==(order.indexOf(to)>order.indexOf(from))) {
+          // Same condition; the failure now names its case and the measured layers so a device-only failure is diagnosable.
+          const layers = await evaluate(`(() => {const z=n=>n&&{z:getComputedStyle(n).zIndex,inline:n.style.zIndex,position:getComputedStyle(n).position,cls:n.className};
+            return {old:z(window.__sectionProofOld),home:z(document.querySelector('#home')),animations:(window.__sectionProofAnimations||[]).length,ua:navigator.userAgent.match(/Chrome\\/[0-9.]+/)?.[0]};})()`);
+          throw new Error('Wrong section stacking order: '+JSON.stringify({record,frame:i,frames,layers}));
+        }
       }
       await evaluate(`(() => {for(const a of window.__sectionProofAnimations)a.finish();window.__sectionProofSentinel.remove();})()`);
       await wait();

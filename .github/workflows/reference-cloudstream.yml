@@ -10,6 +10,9 @@ on:
     paths:
       - 'tools/reference/cloudstream/**'
       - '.github/workflows/reference-cloudstream.yml'
+      # VANTARA's side of the comparison and the link parser it measures
+      - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/ReferenceCompareTest.kt'
+      - 'extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeCandidates.kt'
 
 permissions:
   contents: read
