@@ -42,7 +42,7 @@ const subTop = (title, { id, back = 'goBack', end = '' } = {}) =>
 const shortcut = (no, label, act, arg) =>
   `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''} data-index="${arg ?? act}">` +
   `<span class="shortcut-art" aria-hidden="true"></span>` +
-  `<span class="shortcut-text"><i class="shortcut-no">${no}</i><span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
+  `<span class="shortcut-text">${no ? `<i class="shortcut-no">${no}</i>` : ''}<span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
   `${glyph('chevron', { size: 16 })}</button>`;
 
 const navItem = (page, icon, label) =>
@@ -70,17 +70,22 @@ export const SHELL_HTML = `<div class="app">
     </header>
 
     <div class="home-view" id="mangaHome" data-home="manga">
-    <section class="hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
-      <div class="hero-track" id="heroTrack"></div>
+    <section class="mg-hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
+      <div class="mg-amb" id="heroAmb" aria-hidden="true"></div>
+      <div class="mg-stage" id="heroTrack"></div>
+      <div class="mg-copy" id="heroCopy" aria-live="polite"></div>
       <div class="hero-dots" id="heroDots"></div>
     </section>
 
-    <nav class="shortcuts" aria-label="فهرس المانجا">
-      ${shortcut('01', 'آخر التحديثات', 'openCollection', 'recent')}
-      ${shortcut('02', 'الرائج', 'openCollection', 'trending')}
-      ${shortcut('03', 'التصنيفات', 'openCategories')}
-      ${shortcut('04', 'كل الأعمال', 'openCollection', 'catalogue')}
-    </nav>
+    <section class="mg-browse" aria-labelledby="mgBrowseTitle">
+      <div class="section-head"><div class="section-titles"><h2 id="mgBrowseTitle">تصفّح</h2></div></div>
+      <nav class="shortcuts" aria-label="فهرس المانجا">
+        ${shortcut('', 'آخر التحديثات', 'openCollection', 'recent')}
+        ${shortcut('', 'الرائج', 'openCollection', 'trending')}
+        ${shortcut('', 'التصنيفات', 'openCategories')}
+        ${shortcut('', 'كل الأعمال', 'openCollection', 'catalogue')}
+      </nav>
+    </section>
     <main id="homeSections"></main>
     </div>
     <div class="home-view anime-home" id="animeHome" data-home="anime" hidden></div>

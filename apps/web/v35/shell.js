@@ -520,7 +520,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync.enqueue('view.remove', { seriesRef: ref });
   }
   // البطاقة تقول أين وقفت: «الفصل 47» من سجلّك نفسه
-  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: v.chapter_label ?? null }));
+  // «222» وحده لا يقول شيئًا: رقم الفصل يُقرأ «الفصل 222»، والاسم الحرفي يبقى كما هو
+  const chapterLabelAr = (label) => (label != null && /^\d+(\.\d+)?$/.test(String(label).trim()) ? `الفصل ${String(label).trim()}` : label ?? null);
+  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label) }));
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -931,12 +933,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - الباقي: أغلفة طولية.
    */
   const HOME_LAYOUT = {
-    history: { kicker: 'CONTINUE', layout: 'resume', limit: 12 },
-    libraryReading: { kicker: 'FOLLOWING', layout: 'covers', limit: 14 },
-    friends: { kicker: 'FRIENDS', layout: 'covers', limit: 14 },
-    trending: { kicker: 'CHARTS', layout: 'chart', limit: 12 },
-    recent: { kicker: 'LATEST', layout: 'grid', limit: 9 },
-    sourcesNow: { kicker: 'FRESH', layout: 'grid', limit: 9 },
+    history: { kicker: '', layout: 'resume', limit: 12 },
+    libraryReading: { kicker: '', layout: 'covers', limit: 14 },
+    friends: { kicker: '', layout: 'covers', limit: 14 },
+    trending: { kicker: '', layout: 'chart', limit: 12 },
+    recent: { kicker: '', layout: 'grid', limit: 9 },
+    sourcesNow: { kicker: '', layout: 'grid', limit: 9 },
   };
   function sectionBlock(title, kind, items, layoutKind = kind) {
     const spec = HOME_LAYOUT[layoutKind] ?? { kicker: '', layout: 'covers', limit: 14 };
@@ -1082,18 +1084,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintIndex();
     const specs = [];
     const history = historyWorks();
-    if (history.length) specs.push(['آخر المشاهدات', 'history', history.slice(0, 20)]);
+    if (history.length) specs.push(['تابع القراءة', 'history', history.slice(0, 20)]);
     const reading = libraryWorks('reading');
     if (reading.length) specs.push(['أعمال تتابعها', 'libraryReading', reading]);
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
-    if (state.home.trending.length) specs.push(['الأكثر شهرة عالميًا', 'trending', state.home.trending]);
+    // عمل مكتمل من خارج أعلى الترتيب: لا يكرر أول ما في «الأكثر قراءة»
+    const finished = state.home.trending.slice(3).find((w) => w.status === 'FINISHED' && w.coverImage?.large);
+    if (finished) specs.push(['مكتمل، اقرأه دفعة واحدة', 'pick', finished]);
+    if (state.home.trending.length) specs.push(['الأكثر قراءة', 'trending', state.home.trending]);
     if (state.home.updates?.length) specs.push(['آخر التحديثات', 'recent', state.home.updates]);
     else if (state.home.recent.length) specs.push(['في المصادر الآن', 'sourcesNow', state.home.recent]);
     if (!specs.length) return;
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
     const blocks = specs.map(([title, kind, items]) => {
+      if (kind === 'pick') return pickBlock(old.get('pick'), title, items);
       const snapshot = homeSnapshot(kind, items);
       const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, snapshot, kind);
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), snapshot);
@@ -1108,12 +1114,36 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (refresh) { refresh.hidden = !pending; refresh.textContent = `${pending} أعمال جديدة`; }
       return section;
     });
-    const previousOrder = [...old.values()].filter(s => blocks.includes(s));
-    const stableBlocks = [...previousOrder, ...blocks.filter(s => !previousOrder.includes(s))];
-    stableBlocks.forEach((block, i) => {
+    // ترتيب الأقسام ثابت كما صُمّم (آخر التحديثات في الأخير)، لا بترتيب وصول بياناتها
+    blocks.forEach((block, i) => {
       if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
     });
     for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
+  }
+  /** بطاقة «مكتمل»: عمل واحد يُقرأ دفعة واحدة، بضوء من غلافه نفسه وفعل واحد. */
+  function pickBlock(existing, title, w) {
+    if (existing?.dataset.workId === String(w.id)) return existing;
+    const s = el('section', 'section mg-pick');
+    s.dataset.kind = 'pick';
+    s.dataset.workId = String(w.id);
+    const amb = el('div', 'mg-pick-amb');
+    amb.setAttribute('aria-hidden', 'true');
+    void mountImage(amb, w);
+    const cover = el('div', 'mg-pick-cover');
+    void mountImage(cover, w);
+    const copy = el('div', 'mg-pick-copy');
+    const name = el('h3', null, titleOf(w));
+    name.dir = 'auto';
+    const facts = (w.genres || []).slice(0, 2).map(genreAr).join('، ');
+    const b = el('button', 'btn btn-primary', 'افتح العمل');
+    b.type = 'button';
+    b.onclick = (e) => { e.stopPropagation(); void openWork(w); };
+    copy.append(el('small', null, title), name);
+    if (facts) copy.append(el('p', null, facts));
+    copy.append(b);
+    s.append(amb, cover, copy);
+    s.onclick = () => void openWork(w);
+    return s;
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
@@ -1222,45 +1252,70 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * المقابلة برقم الصفحة كمجلة. لا ضباب ولا توهّج: أغلفة المصادر صغيرة، فتُعرض
    * بحجمها الصادق لا مكبّرة مشوّشة.
    */
-  function heroSlide(w, i = 0, total = 1) {
-    const s = el('div', 'hero-slide');
-    s.setAttribute('role', 'group');
-    s.setAttribute('aria-label', titleOf(w));
-    const poster = el('div', 'hero-poster');
-    void mountImage(poster, w);
-    const copy = el('div', 'hero-copy');
-    const folio = el('div', 'hero-folio');
-    folio.dir = 'ltr';
-    folio.append(el('b', null, String(i + 1).padStart(2, '0')), el('span', null, `/ ${String(total).padStart(2, '0')}`));
-    const editions = w._work?.editions ?? [];
-    const kicker = (w.genres || []).slice(0, 2).map(genreAr).join(' · ');
+  // ─── بانر المانجا: معرض الأغلفة ───
+  // الغلاف المختار في الوسط بحجمه، والسابق يمينًا والتالي يسارًا (اتجاه القراءة)، وخلفها ضوء من
+  // ألوان الغلاف نفسه. الضبابية تُخفي صغر أغلفة المصادر بدل أن تفضحها. السحب يمينًا يجلب التالي.
+  const heroLastChapter = (w) => {
+    const v = viewRows().find((r) => r.series_ref === String(w.id));
+    const n = Number(v?.chapter_label);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  function heroCoverNode(w, i) {
+    const c = el('button', 'mg-cover');
+    c.type = 'button';
+    c.dataset.i = String(i);
+    c.setAttribute('aria-label', titleOf(w));
+    void mountImage(c, w);
+    c.onclick = () => {
+      if (Math.abs(state.heroDeltaX) >= 8) return;
+      if (Number(c.dataset.pos) === 0) void openWork(w);
+      else heroGoLogical(i);
+    };
+    return c;
+  }
+  function paintHeroCopy(w, animate) {
+    const copy = q('heroCopy');
+    const kicker = [(w.genres || []).slice(0, 2).map(genreAr).join('، '), STATUS_AR[w.status]].filter(Boolean).join(' · ');
     const name = el('h3', 'hero-name', titleOf(w));
     name.dir = 'auto';
-    const facts = [STATUS_AR[w.status], editions.length > 1 ? countLabel(editions.length, 'source') : editions[0]?.label].filter(Boolean).join(' · ');
-    const cue = el('span', 'hero-cue');
-    cue.innerHTML = `<span>اقرأ</span>${glyph('chevron', { size: 14 })}`;
-    copy.append(folio);
-    if (kicker) copy.append(el('div', 'hero-kicker', kicker));
-    copy.append(name);
-    if (facts) copy.append(el('div', 'hero-facts', facts));
-    copy.append(cue);
-    // السطور تصعد بهدوء مع كل صفحة (motion.heroSlideIn)
-    for (const line of copy.children) line.dataset.line = '';
-    s.append(poster, copy);
-    s.onclick = () => {
-      if (Math.abs(state.heroDeltaX) < 8) void openWork(w);
-    };
-    return s;
+    const acts = el('div', 'mg-acts');
+    const last = heroLastChapter(w);
+    const primary = el('button', 'btn btn-primary', last !== null ? `تابع الفصل ${last}` : 'افتح العمل');
+    primary.type = 'button';
+    primary.onclick = () => void openWork(w, last !== null ? { readNumber: last } : {});
+    acts.append(primary);
+    if (last !== null) {
+      const more = el('button', 'btn btn-secondary', 'التفاصيل');
+      more.type = 'button';
+      more.onclick = () => void openWork(w);
+      acts.append(more);
+    }
+    const lines = [kicker ? el('div', 'hero-kicker', kicker) : null, name, acts].filter(Boolean);
+    for (const line of lines) line.dataset.line = '';
+    copy.replaceChildren(...lines);
+    if (animate) heroSlideIn(copy);
+  }
+  function paintHeroAmbient(w) {
+    const amb = q('heroAmb');
+    const key = String(w.id);
+    if (amb.dataset.key === key) return;
+    amb.dataset.key = key;
+    const layer = el('div', 'mg-amb-layer');
+    void mountImage(layer, w);
+    amb.append(layer);
+    requestAnimationFrame(() => layer.classList.add('in'));
+    // الطبقة السابقة تتلاشى تحت الجديدة ثم تُحذف: تبديل الضوء بلا ومضة
+    const old = [...amb.children].slice(0, -1);
+    setTimeout(() => old.forEach((n) => n.remove()), 520);
   }
   function renderHero() {
     const items = state.heroItems;
     if (!items.length) return renderHeroFallback();
-    const physical = [items[items.length - 1], ...items, items[0]];
-    const logical = [items.length - 1, ...items.keys(), 0];
-    q('heroTrack').replaceChildren(...physical.map((w, k) => heroSlide(w, logical[k], items.length)));
+    q('hero').classList.remove('mg-hero--empty');
+    q('heroTrack').replaceChildren(...items.map((w, i) => heroCoverNode(w, i)));
     q('heroDots').replaceChildren(
       ...items.map((_, i) => {
-        const d = el('button', `hero-dot${i === 0 ? ' active' : ''}`);
+        const d = el('button', 'hero-dot');
         d.type = 'button';
         d.setAttribute('aria-label', `العمل ${i + 1} من ${items.length}`);
         d.onclick = (e) => {
@@ -1270,73 +1325,59 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return d;
       }),
     );
-    state.heroPhysicalIndex = 1;
+    state.heroIndex = Math.min(state.heroIndex ?? 0, items.length - 1);
     heroPosition(false);
     bindHero();
     restartHero();
   }
   function renderHeroSkeleton() {
-    q('heroTrack').replaceChildren(el('div', 'skeleton'));
+    q('heroTrack').replaceChildren(el('div', 'skeleton mg-cover-skeleton'));
+    q('heroCopy').replaceChildren();
     q('heroDots').replaceChildren();
   }
   function renderHeroFallback() {
     state.heroItems = [];
-    const s = el('div', 'hero-slide hero-slide--empty');
-    const copy = el('div', 'hero-copy');
-    copy.append(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
-    s.append(copy);
-    q('heroTrack').replaceChildren(s);
-    q('heroTrack').style.transform = 'none';
+    q('hero').classList.add('mg-hero--empty');
+    q('heroTrack').replaceChildren();
+    q('heroAmb').replaceChildren();
+    delete q('heroAmb').dataset.key;
+    const copy = q('heroCopy');
+    copy.replaceChildren(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
     q('heroDots').replaceChildren();
   }
-  function logicalIndex() {
-    const n = state.heroItems.length;
-    if (!n) return 0;
-    if (state.heroPhysicalIndex === 0) return n - 1;
-    if (state.heroPhysicalIndex === n + 1) return 0;
-    return state.heroPhysicalIndex - 1;
-  }
+  /** يضع كل غلاف في مكانه حول المختار: 0 الوسط، 1 التالي (يسار)، -1 السابق (يمين)، ±2 على الشاشة العريضة. */
   function heroPosition(anim = true) {
-    const tr = q('heroTrack');
-    tr.style.transition = anim ? 'transform .38s var(--ease-out)' : 'none';
-    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
-    const li = logicalIndex();
-    root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
-    if (anim) heroSlideIn(tr.children[state.heroPhysicalIndex]);
-    // الالتفاف لا يعتمد على transitionend وحده: صفحةٌ مخفية أو تطبيق في الخلفية
-    // لا يطلقه، فكان العدّاد يتجاوز النسخ ويعرض بانرًا فارغًا
-    clearTimeout(state.heroWrapTimer);
-    if (anim) state.heroWrapTimer = setTimeout(heroWrap, 450);
-    else heroWrap();
-  }
-  /** من النسخة الطرفية إلى الأصل بلا حركة. آمنة مهما تكرّرت. */
-  function heroWrap() {
-    const n = state.heroItems.length;
+    const items = state.heroItems;
+    const n = items.length;
     if (!n) return;
-    const i = state.heroPhysicalIndex;
-    if (i >= 1 && i <= n) return;
-    state.heroPhysicalIndex = i <= 0 ? n : 1;
-    const tr = q('heroTrack');
-    tr.style.transition = 'none';
-    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
-    void tr.offsetWidth;
-    const li = logicalIndex();
-    root.querySelectorAll('.hero-dot').forEach((d, k) => d.classList.toggle('active', k === li));
+    const idx = ((state.heroIndex % n) + n) % n;
+    state.heroIndex = idx;
+    const stage = q('heroTrack');
+    stage.classList.toggle('mg-still', !anim);
+    for (const c of stage.children) {
+      let d = (Number(c.dataset.i) - idx + n) % n;
+      if (d > n / 2) d -= n;
+      c.dataset.pos = String(Math.abs(d) > 2 ? (d > 0 ? 3 : -3) : d);
+      c.tabIndex = d === 0 ? 0 : -1;
+      c.setAttribute('aria-hidden', String(Math.abs(d) > 2));
+    }
+    root.querySelectorAll('#heroDots .hero-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+    paintHeroCopy(items[idx], anim);
+    paintHeroAmbient(items[idx]);
+    if (!anim) requestAnimationFrame(() => stage.classList.remove('mg-still'));
   }
   function heroNext() {
     if (!state.heroItems.length) return;
-    heroWrap();
-    state.heroPhysicalIndex += 1;
+    state.heroIndex += 1;
     heroPosition(true);
   }
   function heroPrev() {
     if (!state.heroItems.length) return;
-    heroWrap();
-    state.heroPhysicalIndex -= 1;
+    state.heroIndex -= 1;
     heroPosition(true);
   }
   function heroGoLogical(i) {
-    state.heroPhysicalIndex = i + 1;
+    state.heroIndex = i;
     heroPosition(true);
     restartHero();
   }
@@ -1344,8 +1385,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const hero = q('hero');
     if (hero.dataset.bound) return;
     hero.dataset.bound = '1';
-    const tr = q('heroTrack');
-    tr.addEventListener('transitionend', heroWrap);
+    const stage = q('heroTrack');
     const start = (x) => {
       state.heroDragging = true;
       state.heroStartX = x;
@@ -1356,30 +1396,34 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const move = (x) => {
       if (!state.heroDragging) return;
       state.heroDeltaX = x - state.heroStartX;
-      // الشريط يتبع الإصبع: بلا هذا يبدو البانر صورةً ثابتة حتى يُفلت
-      tr.style.transform = `translateX(calc(${-state.heroPhysicalIndex * 100}% + ${state.heroDeltaX}px))`;
+      // المسرح يتبع الإصبع بنصف المسافة: يُحسّ السحب ولا يُفلت الغلاف من مكانه
+      stage.style.translate = `${(state.heroDeltaX * 0.45).toFixed(1)}px 0`;
     };
     const end = () => {
       if (!state.heroDragging) return;
       state.heroDragging = false;
       hero.classList.remove('dragging');
-      if (state.heroDeltaX < -42) heroNext();
-      else if (state.heroDeltaX > 42) heroPrev();
-      else heroPosition(true);
+      stage.style.translate = '';
+      // التالي على اليسار: سحبه نحو الوسط (يمينًا) يجلبه
+      if (state.heroDeltaX > 42) heroNext();
+      else if (state.heroDeltaX < -42) heroPrev();
       setTimeout(() => (state.heroDeltaX = 0), 0);
       restartHero();
     };
-    hero.addEventListener('touchstart', (e) => start(e.touches[0].clientX), { passive: true });
-    hero.addEventListener('touchmove', (e) => move(e.touches[0].clientX), { passive: true });
-    hero.addEventListener('touchend', end);
-    hero.addEventListener('touchcancel', end);
-    hero.addEventListener('pointerdown', (e) => {
+    stage.addEventListener('touchstart', (e) => start(e.touches[0].clientX), { passive: true });
+    stage.addEventListener('touchmove', (e) => move(e.touches[0].clientX), { passive: true });
+    stage.addEventListener('touchend', end);
+    stage.addEventListener('touchcancel', end);
+    stage.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') start(e.clientX);
     });
-    hero.addEventListener('pointermove', (e) => {
+    stage.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'touch') move(e.clientX);
     });
-    hero.addEventListener('pointerup', (e) => {
+    stage.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch') end();
+    });
+    stage.addEventListener('pointerleave', (e) => {
       if (e.pointerType !== 'touch') end();
     });
   }
