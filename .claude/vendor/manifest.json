@@ -142,7 +142,8 @@
       ],
       "patterns": [
         "**/SKILL.md"
-      ]
+      ],
+      "license_file": "LICENSE.txt"
     },
     {
       "repo": "Kotlin/kotlin-agent-skills",
