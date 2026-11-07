@@ -98,10 +98,11 @@ export function pop(node) {
 }
 
 /** دخول صفحة كاملة (صفحة العمل مثلًا): الغلاف ثم الطبقات. */
-export function pageIn(page) {
+export function pageIn(page, { art: withArt = true } = {}) {
   const g = live();
   if (!g || !page) return;
-  const art = page.querySelector('[data-art]');
+  // الغلاف المتصل وصل بحركته: لا تكبير فوقه
+  const art = withArt ? page.querySelector('[data-art]') : null;
   if (art) g.fromTo(art, { scale: 1.08, opacity: 0.4 }, { scale: 1, opacity: 1, duration: 0.9, ease: EASE.out, clearProps: 'opacity' });
   revealIn(page, 0.08);
 }

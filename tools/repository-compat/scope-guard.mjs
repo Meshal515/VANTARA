@@ -325,6 +325,8 @@ for (const path of ['apps/web/v35/reader-anchor.test.js', 'apps/web/v35/reader-p
 for (const path of ['apps/web/lib/account-store.js', 'apps/web/lib/account-store.test.js']) seams.add(path);
 // Manga home redesign (owner-approved mockup): the wide AniList banner for the «finished» pick.
 for (const path of ['apps/web/lib/manga-meta.js']) seams.add(path);
+// Inner page motion (owner request): shared work cover and sub-page fade; section switching untouched.
+for (const path of ['apps/web/v35/motion.js', 'apps/web/v35/page-motion.js', 'apps/web/v35/page-motion.test.js', 'apps/web/v35/core.css']) seams.add(path);
 // Agent skills, agents and their vendored sources (.claude/) are contributor tooling, never shipped in the app.
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);

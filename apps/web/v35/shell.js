@@ -63,6 +63,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, pageIn } from './motion.js';
+import { morphCover, onScreen, pageFadeIn } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -832,9 +833,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         score.hidden = false;
       });
     });
-    a.onclick = () => void openWork(a._work);
+    a.onclick = () => void openWork(a._work, { from: p });
     a.onkeydown = (e) => {
-      if (e.key === 'Enter' && e.target === a) void openWork(a._work);
+      if (e.key === 'Enter' && e.target === a) void openWork(a._work, { from: p });
       if ((e.key === ' ' || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && e.target === a) {
         e.preventDefault();
         openCardActions(a._work);
@@ -1276,15 +1277,44 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ─── بانر المانجا: معرض الأغلفة ───
   // الغلاف المختار في الوسط بحجمه، والسابق يمينًا والتالي يسارًا (اتجاه القراءة)، وخلفها ضوء من
   // ألوان الغلاف نفسه. الضبابية تُخفي صغر أغلفة المصادر بدل أن تفضحها. السحب يمينًا يجلب التالي.
+  // هندسة المعرض: لكل موضع (0 الوسط، 1 التالي…) إزاحة وحجم وشفافية، وما بينها يُحسب بالتدرج، فالسحب
+  // يحرك الأغلفة مع الإصبع إطارًا بإطار، والإفلات يكمل إلى أقرب موضع. لا غلاف يختفي فجأة.
+  const HERO_GEOMETRY = [
+    { min: 1100, x: [0, 215, 400, 540], s: [1, 0.58, 0.46, 0.38], o: [1, 0.55, 0.3, 0] },
+    { min: 700, x: [0, 180, 310, 420], s: [1, 0.58, 0.46, 0.38], o: [1, 0.55, 0.28, 0] },
+    { min: 0, x: [0, 128, 214, 290], s: [1, 0.57, 0.46, 0.38], o: [1, 0.55, 0.3, 0] },
+  ];
+  const heroGeometry = () => HERO_GEOMETRY.find((g) => (globalThis.innerWidth ?? 390) >= g.min);
+  const lerpAt = (arr, t) => {
+    const k = Math.min(Math.floor(t), arr.length - 2);
+    return arr[k] + (arr[k + 1] - arr[k]) * (Math.min(t, arr.length - 1) - k);
+  };
+  /** يضع الغلاف عند موضع متصل p؛ التالي (p>0) على اليسار كاتجاه القراءة. */
+  function placeCover(c, p, animate) {
+    const g = heroGeometry();
+    const a = Math.min(Math.abs(p), 3);
+    const x = -Math.sign(p) * lerpAt(g.x, a);
+    const prev = Number(c.dataset.p ?? p);
+    c.dataset.p = String(p);
+    // الذي يلفّ من طرف إلى طرف يمرّ وهو خارج الشاشة: بلا حركة، فلا يطير عرضها
+    const jump = Math.abs(prev - p) > 2.5;
+    c.style.transition = animate && !jump ? '' : 'none';
+    c.style.transform = `translate(-50%, -50%) translateX(${x.toFixed(1)}px) scale(${lerpAt(g.s, a).toFixed(4)})`;
+    c.style.opacity = lerpAt(g.o, a).toFixed(3);
+    c.style.zIndex = String(10 - Math.round(a * 2));
+    c.style.pointerEvents = a > 2.2 ? 'none' : '';
+    if (jump && animate) { void c.offsetWidth; c.style.transition = ''; }
+  }
   function heroCoverNode(w, i) {
     const c = el('button', 'mg-cover');
     c.type = 'button';
     c.dataset.i = String(i);
+    c.dataset.workId = String(w.id);
     c.setAttribute('aria-label', titleOf(w));
     void mountImage(c, w);
     c.onclick = () => {
       if (Math.abs(state.heroDeltaX) >= 8) return;
-      if (Number(c.dataset.pos) === 0) void openWork(w);
+      if (Number(c.dataset.pos) === 0) void openWork(w, { from: c });
       else heroGoLogical(i);
     };
     return c;
@@ -1303,9 +1333,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     more.onclick = () => void openWork(w);
     acts.append(read, more);
     const lines = [kicker ? el('div', 'hero-kicker', kicker) : null, name, acts].filter(Boolean);
-    for (const line of lines) line.dataset.line = '';
-    copy.replaceChildren(...lines);
-    if (animate) heroSlideIn(copy);
+    const swap = () => {
+      copy.replaceChildren(...lines);
+      copy.classList.remove('mg-swapping');
+    };
+    clearTimeout(state.heroCopyTimer);
+    if (!animate || !copy.childElementCount) return swap();
+    // الكلام يتلاشى ثم يظهر الجديد مكانه: لا قفزة نص ولا سطور تتطاير
+    copy.classList.add('mg-swapping');
+    state.heroCopyTimer = setTimeout(swap, 140);
   }
   function paintHeroAmbient(w) {
     const amb = q('heroAmb');
@@ -1315,28 +1351,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const layer = el('div', 'mg-amb-layer');
     void mountImage(layer, w);
     amb.append(layer);
-    requestAnimationFrame(() => layer.classList.add('in'));
-    // الطبقة السابقة تتلاشى تحت الجديدة ثم تُحذف: تبديل الضوء بلا ومضة
+    requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.add('in')));
+    // الطبقة السابقة تبقى تحت الجديدة حتى يكتمل تلوّنها ثم تُحذف: الألوان تنسجم لا تُستبدل
     const old = [...amb.children].slice(0, -1);
-    setTimeout(() => old.forEach((n) => n.remove()), 520);
+    setTimeout(() => old.forEach((n) => n.remove()), 1100);
   }
   function renderHero() {
     const items = state.heroItems;
     if (!items.length) return renderHeroFallback();
     q('hero').classList.remove('mg-hero--empty');
     q('heroTrack').replaceChildren(...items.map((w, i) => heroCoverNode(w, i)));
-    q('heroDots').replaceChildren(
-      ...items.map((_, i) => {
-        const d = el('button', 'hero-dot');
-        d.type = 'button';
-        d.setAttribute('aria-label', `العمل ${i + 1} من ${items.length}`);
-        d.onclick = (e) => {
-          e.stopPropagation();
-          heroGoLogical(i);
-        };
-        return d;
-      }),
-    );
+    q('heroDots').replaceChildren();
     state.heroIndex = Math.min(state.heroIndex ?? 0, items.length - 1);
     heroPosition(false);
     bindHero();
@@ -1357,26 +1382,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
     copy.replaceChildren(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
     q('heroDots').replaceChildren();
   }
-  /** يضع كل غلاف في مكانه حول المختار: 0 الوسط، 1 التالي (يسار)، -1 السابق (يمين)، ±2 على الشاشة العريضة. */
+  /** المواضع حول المختار مع إزاحة السحب الجارية (offset بوحدة «غلاف واحد»). */
+  function layoutHero(offset, animate) {
+    const n = state.heroItems.length;
+    if (!n) return;
+    for (const c of q('heroTrack').children) {
+      if (!c.dataset.i) continue;
+      let d = (Number(c.dataset.i) - state.heroIndex + n) % n;
+      if (d > n / 2) d -= n;
+      c.dataset.pos = String(d);
+      c.tabIndex = d === 0 ? 0 : -1;
+      c.setAttribute('aria-hidden', String(Math.abs(d) > 1));
+      placeCover(c, d - offset, animate);
+    }
+  }
   function heroPosition(anim = true) {
     const items = state.heroItems;
     const n = items.length;
     if (!n) return;
-    const idx = ((state.heroIndex % n) + n) % n;
-    state.heroIndex = idx;
-    const stage = q('heroTrack');
-    stage.classList.toggle('mg-still', !anim);
-    for (const c of stage.children) {
-      let d = (Number(c.dataset.i) - idx + n) % n;
-      if (d > n / 2) d -= n;
-      c.dataset.pos = String(Math.abs(d) > 2 ? (d > 0 ? 3 : -3) : d);
-      c.tabIndex = d === 0 ? 0 : -1;
-      c.setAttribute('aria-hidden', String(Math.abs(d) > 2));
-    }
-    root.querySelectorAll('#heroDots .hero-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
-    paintHeroCopy(items[idx], anim);
-    paintHeroAmbient(items[idx]);
-    if (!anim) requestAnimationFrame(() => stage.classList.remove('mg-still'));
+    state.heroIndex = ((state.heroIndex % n) + n) % n;
+    layoutHero(0, anim);
+    paintHeroCopy(items[state.heroIndex], anim);
+    paintHeroAmbient(items[state.heroIndex]);
   }
   function heroNext() {
     if (!state.heroItems.length) return;
@@ -1398,27 +1425,41 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (hero.dataset.bound) return;
     hero.dataset.bound = '1';
     const stage = q('heroTrack');
+    let lastX = 0, lastT = 0, velocity = 0, frame = 0;
+    const step = () => heroGeometry().x[1];
     const start = (x) => {
+      if (!state.heroItems.length) return;
       state.heroDragging = true;
-      state.heroStartX = x;
+      state.heroStartX = lastX = x;
+      lastT = performance.now();
+      velocity = 0;
       state.heroDeltaX = 0;
       hero.classList.add('dragging');
       clearInterval(state.heroTimer);
     };
     const move = (x) => {
       if (!state.heroDragging) return;
+      const now = performance.now();
+      velocity = (x - lastX) / Math.max(1, now - lastT);
+      lastX = x;
+      lastT = now;
       state.heroDeltaX = x - state.heroStartX;
-      // المسرح يتبع الإصبع بنصف المسافة: يُحسّ السحب ولا يُفلت الغلاف من مكانه
-      stage.style.translate = `${(state.heroDeltaX * 0.45).toFixed(1)}px 0`;
+      // الأغلفة تتبع الإصبع نفسه: سحب مسافة غلاف يجلب الغلاف التالي إلى الوسط
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => layoutHero(state.heroDeltaX / step(), false));
     };
     const end = () => {
       if (!state.heroDragging) return;
       state.heroDragging = false;
+      cancelAnimationFrame(frame);
       hero.classList.remove('dragging');
-      stage.style.translate = '';
-      // التالي على اليسار: سحبه نحو الوسط (يمينًا) يجلبه
-      if (state.heroDeltaX > 42) heroNext();
-      else if (state.heroDeltaX < -42) heroPrev();
+      // المسافة تحدد كم غلافًا، والنفضة القصيرة السريعة غلافًا واحدًا فقط: لا تخطٍّ لم يقصده الإصبع
+      let shift = Math.round(state.heroDeltaX / step());
+      if (!shift && (Math.abs(velocity) > 0.35 || Math.abs(state.heroDeltaX) > 24)) shift = Math.sign(state.heroDeltaX || velocity);
+      shift = Math.max(-3, Math.min(3, shift));
+      state.heroIndex += shift;
+      if (shift) heroPosition(true);
+      else layoutHero(0, true);
       setTimeout(() => (state.heroDeltaX = 0), 0);
       restartHero();
     };
@@ -1438,6 +1479,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     stage.addEventListener('pointerleave', (e) => {
       if (e.pointerType !== 'touch') end();
     });
+    stage.addEventListener('pointercancel', (e) => {
+      if (e.pointerType !== 'touch') end();
+    });
+    stage.addEventListener('dragstart', (e) => e.preventDefault());
+    // تغيّر عرض الشاشة يغيّر المسافات: تُعاد المواضع بلا حركة
+    globalThis.addEventListener?.('resize', () => layoutHero(0, false), { passive: true });
   }
   function restartHero() {
     clearInterval(state.heroTimer);
@@ -1447,7 +1494,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false, from = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1466,9 +1513,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
     if (work._work?.editions?.length) rememberWork(work);
-    showPage('detail');
-    renderDetail(work);
-    pageIn(q('detail'));
+    // الغلاف نفسه ينتقل من البطاقة إلى صفحة العمل، والبيانات تُجلب في الأثناء لا بعد الحركة
+    const morphed = morphCover(from, () => { showPage('detail', { morph: Boolean(from) }); renderDetail(work); }, () => q('detailCover'));
+    pageIn(q('detail'), { art: !morphed });
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
@@ -4256,7 +4303,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       window.scrollTo({ top, behavior: 'instant' });
     }, wait);
   }
-  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY } = {}) {
+  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY, morph = false } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
       state.socialTab = 'notifications';
@@ -4333,6 +4380,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
+    // الصفحة الفرعية تدخل بتلاشٍ قصير؛ تبديل الأقسام الرئيسية والغلاف المتصل لهما حركتهما
+    if (from !== id && !sectionSwitch && !morph) pageFadeIn(q(id));
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -4418,6 +4467,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (sourceView || addonSourcePending) { void openAddons(); return true; }
     }
     const prev = state.stack.pop();
+    if (prev && currentPage() === 'detail' && state.current) {
+      // الغلاف يعود إلى بطاقته إن كانت ظاهرة بعد استعادة الموضع، وإلا تلاشٍ قصير
+      const id = String(state.current.id);
+      const card = () => [...(q(prev)?.querySelectorAll(`[data-work-id="${CSS.escape(id)}"]`) ?? [])]
+        .map((n) => (n.classList.contains('mg-cover') ? n : n.querySelector('.poster'))).find((n) => onScreen(n)) ?? null;
+      if (!morphCover(q('detailCover'), () => showPage(prev, { push: false, morph: true }), card)) pageFadeIn(q(prev));
+      return true;
+    }
     if (prev) {
       showPage(prev, { push: false });
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
