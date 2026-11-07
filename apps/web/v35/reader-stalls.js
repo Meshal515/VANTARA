@@ -93,11 +93,17 @@ export function createStallRecorder({ scroll, page, now = () => performance.now(
     note,
     stalls: () => stalls.slice(),
     onStall(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    report() {
-      return stalls.map((s) => [
+    /** `native`: رسائل الخيط الرئيسي الطويلة في الـAPK `{ start, end, ms, what, stack }` بساعة هذه الصفحة. */
+    report(native = []) {
+      const overlap = (s) => native.filter((b) => b.end >= s.at - LOOKBACK_MS && b.start <= s.at + s.ms + 50);
+      const nativeLine = (b, at) => `${Math.round(b.start - at)}ms الخيط الرئيسي ${b.ms}ms ${b.what}${b.stack?.length ? ` ← ${b.stack.slice(0, 4).join(' ← ')}` : ''}`;
+      const text = stalls.map((s) => [
         `${s.sec}s ${s.kind === 'scroll-hold' ? `وقف التمرير ${s.ms}ms (${s.frames} إطارات)` : `تجمّد الرسم ${s.ms}ms (قفز ${s.dy}px)`} ${s.finger ? 'والإصبع على الشاشة' : 'أثناء الزخم'}، صفحة ${s.page}`,
         ...s.before.map((line) => `  ${line}`),
+        ...overlap(s).map((b) => `  ${nativeLine(b, s.at)}`),
       ].join('\n')).join('\n') || 'لا وقفات مسجّلة';
+      if (!native.length) return text;
+      return `${text}\n\nالخيط الرئيسي للتطبيق (أطول من 32ms):\n${native.map((b) => `${Math.round((b.start - started) / 100) / 10}s ${b.ms}ms ${b.what}${b.stack?.length ? `\n  ${b.stack.join('\n  ')}` : ''}`).join('\n')}`;
     },
     stop() {
       stopped = true;

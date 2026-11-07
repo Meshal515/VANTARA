@@ -88,3 +88,22 @@ describe('the stall recorder in the reader', () => {
     reader.destroy();
   });
 });
+
+describe('the report', () => {
+  it('puts the app main-thread block that overlaps a stall next to that stall', async () => {
+    const { createStallRecorder } = await import('./reader-stalls.js');
+    let t = 0; const queue = [];
+    const scroll = { scrollTop: 0, addEventListener() {}, removeEventListener() {} };
+    const rec = createStallRecorder({ scroll, page: () => ({ index: 4, total: 40 }), now: () => t, raf: (fn) => queue.push(fn), caf() {}, Observer: class { observe() {} disconnect() {} } });
+    const frame = () => { t += 16; queue.shift()(t); };
+    for (let n = 0; n < 10; n++) { scroll.scrollTop += 30; frame(); }
+    const held = t;
+    for (let n = 0; n < 5; n++) frame();
+    scroll.scrollTop += 30; frame();
+    const text = rec.report([{ start: held - 10, end: held + 70, ms: 80, what: 'Handler (android.os.Handler) UsagePlugin$tick', stack: ['UsageJournal.save:30'] }]);
+    expect(text).toMatch(/وقف التمرير/);
+    expect(text).toMatch(/أثناء الزخم، صفحة 5\/40/);
+    expect(text).toMatch(/الخيط الرئيسي 80ms Handler \(android.os.Handler\) UsagePlugin\$tick ← UsageJournal.save:30/);
+    rec.stop();
+  });
+});

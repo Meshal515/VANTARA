@@ -1721,9 +1721,16 @@ export function openSmartReader(deps, ctx) {
     badge.hidden = false;
     stallRecorder.onStall((n) => { badge.querySelector('span').textContent = `وقفات ${n}`; });
   }).catch(() => {});
-  function openStalls() {
+  async function openStalls() {
     if (!stallRecorder) return;
-    const text = stallRecorder.report();
+    // الـAPK: ما طال على الخيط الرئيسي للتطبيق (MainThreadWatch)، بساعة هذه الصفحة
+    let native = [];
+    try {
+      const { blocks = [] } = (await globalThis.Capacitor?.Plugins?.SystemUi?.mainThreadStalls?.()) ?? {};
+      const at = performance.now();
+      native = blocks.map((b) => ({ end: at - b.agoMs, start: at - b.agoMs - b.ms, ms: b.ms, what: b.what, stack: b.stack ?? [] }));
+    } catch { /* المتصفح، أو Stable: لا رصد أصلي */ }
+    const text = stallRecorder.report(native);
     openSheet((body) => {
       body.append(el('h3', null, 'وقفات التمرير'));
       const pre = el('pre', 'rd-stalls-report', text);

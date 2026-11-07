@@ -311,6 +311,8 @@ const moved=(status,path)=>(status==='D'&&path.startsWith(movedFrom)&&sameBlob(p
 for(const path of ['apps/web/v35/manga.css','apps/web/v35/markup.js','.github/workflows/video-repository-live-qa.yml','.github/workflows/video-cinema-live-qa.yml','.github/workflows/aniyomi-real-qa.yml','.github/workflows/source-certification.yml'])seams.add(path);
 // The general search's parallel slot: a slow Aniyomi source frees its slot instead of being cancelled at 12 s.
 for (const path of ['android/app/src/main/kotlin/com/vantara/anime/SearchSlots.kt', 'android/app/src/test/java/com/vantara/anime/SearchSlotsTest.kt']) seams.add(path);
+// Debug diagnostics: main-thread blocks and blocking GC for the reader's stall report (never installed in Stable).
+for (const path of ['android/app/src/main/kotlin/com/vantara/plugins/MainThreadWatch.kt', 'android/app/src/test/java/com/vantara/plugins/MainThreadBlocksTest.kt']) seams.add(path);
 // Reading time is written off the main thread: its fsync there froze the reader's momentum every 5 s.
 for (const path of ['android/app/src/main/kotlin/com/vantara/usage/UsagePlugin.kt', 'android/app/src/main/kotlin/com/vantara/usage/UsageWriter.kt', 'android/app/src/test/java/com/vantara/anime/UsageWriterTest.kt']) seams.add(path);
 // Project skills for agents working in this repository (text only).
