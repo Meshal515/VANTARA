@@ -40,6 +40,7 @@ import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
 import { createFollower } from '../lib/together/follow.js';
 import { readingPosition, readingTop } from './reader-scroll.js';
+import { clampPan, zoomAround } from './reader-zoom.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
 
@@ -757,12 +758,37 @@ export function openSmartReader(deps, ctx) {
         if (token !== state.token) return;
         return loadSlot(seg, index, PRIORITY.VISIBLE);
       }
-      // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا):
-      // نفس الفصل من مصدر ثانٍ، من نفس الصفحة، بلا أن تطلب
-      if (seg === state.seg && switchSource(seg, index)) return;
+      // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا): نفس الصفحة من مصدر ثانٍ
+      // في مكانها. كان يُعاد فتح الفصل كله من المصدر الثاني: تُحذف الفصول السابقة ويرجع التمرير للأعلى،
+      // فيبدو القارئ وكأنه «طرد» القارئ وهو ينزل للفصل التالي (بلاغ المالك).
+      if (await pageFromOtherSource(seg, index, token)) return;
+      if (token !== state.token) return;
       slot.frame.replaceChildren(pageError(seg, index, error));
       slot.frame.classList.add('rd-page--error');
     }
+  }
+  /**
+   * صفحة واحدة من مصدر آخر عنده نفس الفصل بنفس عدد الصفحات (فالرقم يعني الصفحة نفسها)، توضع في إطارها
+   * دون إعادة فتح شيء: موضعك وما فوقك وما تحتك كما هو. مصدرٌ اخترته بنفسك لا يُستبدل.
+   */
+  async function pageFromOtherSource(seg, index, token) {
+    if (ctx.sourceLocked) return false;
+    const alts = otherSources(seg.row).sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
+    for (const alt of alts) {
+      try {
+        const pages = await pagesOf(alt);
+        if (token !== state.token) return false;
+        if (pages.length !== seg.pages.length) continue;
+        const src = await scheduler.request(imageKey(alt, index), { sourceId: alt.sourceId, page: pages[index] }, PRIORITY.VISIBLE);
+        if (token !== state.token) return false;
+        await placeImage(seg.slots[index], src);
+        tl.onImage(seg, index);
+        return true;
+      } catch (error) {
+        if (error?.cancelled) return false;
+      }
+    }
+    return false;
   }
   /**
    * صفحةٌ أو فصلٌ ما يتحمّل من مصدره: ننتقل للمصدر التالي بالأولوية ممن عنده
@@ -785,6 +811,21 @@ export function openSmartReader(deps, ctx) {
     void openChapter(next, { startAt: index });
     return true;
   }
+  /**
+   * صفحة فوقك اكتمل تحميلها فكبرت من ارتفاعها المؤقت إلى الحقيقي: كروم يثبّت ما تقرؤه (scroll anchoring)،
+   * وسفاري (آيفون، والـPWA عليه) لا يفعل، فكانت الصفحة التي أمامك تنزاح (قيس: 16072 بكسل في فصل واحد).
+   * حيث لا تثبيت أصلي يعوّض القارئ الفرق بنفسه لصفحةٍ كلها فوق موضعك؛ وحيث يوجد لا يضاعفه.
+   */
+  const nativeAnchoring = globalThis.CSS?.supports?.('overflow-anchor', 'auto') ?? false;
+  function holdReadingPlace(frame, change) {
+    if (nativeAnchoring || settings.mode === 'paged') return change();
+    const top = scroll.getBoundingClientRect().top;
+    const before = frame.getBoundingClientRect();
+    change();
+    if (before.bottom > top + 1) return; // في الشاشة أو تحتها: لا يزيح ما تقرؤه
+    const delta = frame.getBoundingClientRect().height - before.height;
+    if (Math.abs(delta) > 0.5) scroll.scrollTop += delta;
+  }
   /** الصورة تُفكّ قبل أن توضع: الإطار يأخذ مقاسها الحقيقي دفعةً واحدة. */
   async function placeImage(slot, src) {
     const img = new Image();
@@ -802,11 +843,13 @@ export function openSmartReader(deps, ctx) {
         img.onerror = () => reject(new Error('الصورة تالفة'));
       });
     }
-    if (img.naturalWidth && img.naturalHeight) {
-      slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
-    }
-    slot.frame.classList.remove('rd-page--error');
-    slot.frame.replaceChildren(img);
+    holdReadingPlace(slot.frame, () => {
+      if (img.naturalWidth && img.naturalHeight) {
+        slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+      }
+      slot.frame.classList.remove('rd-page--error');
+      slot.frame.replaceChildren(img);
+    });
     tickActive();
     slot.loaded = true;
     reportScroll();
@@ -1062,7 +1105,7 @@ export function openSmartReader(deps, ctx) {
     onTap: ({ x, y, target }) => onTap({ clientX: x, clientY: y }, target?.closest?.('.rd-page') ?? null),
     onDoubleTap: ({ x, y, target }) => {
       const frame = target?.closest?.('.rd-page');
-      if (frame) openZoom(frame, x, y);
+      if (frame) openZoom(frame, x, y, 2.2); // حول موضع النقرة
     },
   });
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
@@ -1116,28 +1159,43 @@ export function openSmartReader(deps, ctx) {
 
   // ── التكبير (من الإعدادات فقط) ──
 
-  const zoom = { scale: 1, x: 0, y: 0, start: null };
-  function openZoom(frame, cx, cy) {
+  // التكبير: الصفحة تبدأ من مكانها على الشاشة بلا قفزة، وتكبر وتصغر حول موضع الإصبعين، وتتحرك معهما،
+  // والسحب بإصبع لا يُخرجها من الشاشة (reader-zoom.js). كان يكبّر الصورة حول مركزها ويبدأ من نسخة في وسط الشاشة.
+  const zoom = { scale: 1, t: { x: 0, y: 0 }, base: null, view: null, pinch: null, pan: null };
+  const layerPoint = (x, y) => { const r = q('rdZoom').getBoundingClientRect(); return { x: x - r.left, y: y - r.top }; };
+  const midOf = (t) => layerPoint((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2);
+  function openZoom(frame, cx, cy, scale = 1) {
     const img = frame.querySelector('img');
-    if (!img) return;
+    if (!img) return false;
     const z = q('rdZoom');
     const zi = q('rdZoomImg');
     zi.src = img.src;
     z.hidden = false;
-    zoom.scale = 2.2;
-    zoom.x = (window.innerWidth / 2 - cx) * (zoom.scale - 1);
-    zoom.y = (window.innerHeight / 2 - cy) * (zoom.scale - 1);
+    const layer = z.getBoundingClientRect();
+    const r = img.getBoundingClientRect();
+    zoom.base = { left: r.left - layer.left, top: r.top - layer.top, width: r.width, height: r.height };
+    zoom.view = { left: 0, top: 0, width: layer.width, height: layer.height };
+    Object.assign(zi.style, { left: `${zoom.base.left}px`, top: `${zoom.base.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    zoom.scale = 1;
+    zoom.t = { x: 0, y: 0 };
+    if (scale !== 1) {
+      const p = layerPoint(cx, cy);
+      Object.assign(zoom, zoomAround({ base: zoom.base, scale: 1, t: zoom.t, from: p, to: p, ratio: scale }));
+    }
     paintZoom();
+    return true;
   }
   function closeZoom() {
     const z = q('rdZoom');
     if (z.hidden) return false;
     z.hidden = true;
     zoom.scale = 1;
+    zoom.pinch = null;
+    zoom.pan = null;
     return true;
   }
   function paintZoom() {
-    q('rdZoomImg').style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`;
+    q('rdZoomImg').style.transform = `translate(${zoom.t.x}px, ${zoom.t.y}px) scale(${zoom.scale})`;
   }
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   scroll.addEventListener(
@@ -1159,15 +1217,10 @@ export function openSmartReader(deps, ctx) {
       if (!pinch || e.touches.length !== 2) return;
       const d = dist(e.touches);
       if (Math.abs(d / pinch.d - 1) < 0.12) return;
-      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      openZoom(pinch.frame, cx, cy);
+      const frame = pinch.frame;
       pinch = null;
-      zoom.scale = 1;
-      zoom.x = 0;
-      zoom.y = 0;
-      zoom.start = { d, scale: 1 };
-      paintZoom();
+      // من مكان الصفحة نفسه، والإصبعان يكملان التكبير من هنا
+      if (openZoom(frame, 0, 0)) zoom.pinch = { d, mid: midOf(e.touches) };
     },
     { passive: true },
   );
@@ -1178,29 +1231,38 @@ export function openSmartReader(deps, ctx) {
   zoomEl.addEventListener(
     'touchstart',
     (e) => {
-      if (e.touches.length === 2) zoom.start = { d: dist(e.touches), scale: zoom.scale };
-      else if (e.touches.length === 1) zoom.pan = { x: e.touches[0].clientX - zoom.x, y: e.touches[0].clientY - zoom.y };
+      if (e.touches.length === 2) { zoom.pinch = { d: dist(e.touches), mid: midOf(e.touches) }; zoom.pan = null; }
+      else if (e.touches.length === 1) zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
     },
     { passive: true },
   );
   window.addEventListener('touchmove', onZoomMove, { passive: true });
   function onZoomMove(e) {
-    if (zoomEl.hidden) return;
-    if (e.touches.length === 2 && zoom.start) {
-      zoom.scale = Math.min(5, Math.max(1, zoom.start.scale * (dist(e.touches) / zoom.start.d)));
+    if (zoomEl.hidden || !zoom.base) return;
+    if (e.touches.length === 2 && zoom.pinch) {
+      const d = dist(e.touches);
+      const mid = midOf(e.touches);
+      Object.assign(zoom, zoomAround({ base: zoom.base, scale: zoom.scale, t: zoom.t, from: zoom.pinch.mid, to: mid, ratio: d / zoom.pinch.d }));
+      zoom.pinch = { d, mid };
       paintZoom();
     } else if (e.touches.length === 1 && zoom.pan && zoom.scale > 1) {
-      zoom.x = e.touches[0].clientX - zoom.pan.x;
-      zoom.y = e.touches[0].clientY - zoom.pan.y;
+      const p = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+      zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: { x: zoom.t.x + p.x - zoom.pan.x, y: zoom.t.y + p.y - zoom.pan.y }, view: zoom.view });
+      zoom.pan = p;
       paintZoom();
     }
   }
   zoomEl.addEventListener('touchend', (e) => {
-    if (e.touches.length === 0) {
-      zoom.start = null;
+    if (e.touches.length === 1) {
+      // رُفع إصبع من اثنين: الباقي يسحب من حيث هو
+      zoom.pinch = null;
+      zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+    } else if (e.touches.length === 0) {
+      zoom.pinch = null;
       zoom.pan = null;
       // الإفلات قرب الحجم الطبيعي يرجعك للقراءة
       if (zoom.scale < 1.08) closeZoom();
+      else { zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view }); paintZoom(); }
     }
   });
   zoomEl.addEventListener('click', (e) => {
