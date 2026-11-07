@@ -26,14 +26,14 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
       // Click, pause and every measurement happen in ONE JavaScript task: dock.js finishes a transition with a safety
       // timer (duration + 150 ms) that pausing the animations does not stop. Reading frames over separate CDP calls let
       // a slow emulator WebView finish the switch first, so the device measured settled layers, not the motion.
-      const measured = await evaluate(`(async () => {
+      const measured = await evaluate(`(() => {
         const old = document.querySelector('#${page}');
         // A tall local sentinel makes preservation of the reading position measurable.
         const sentinel = document.createElement('div'); sentinel.dataset.motionSentinel = 'true';
         sentinel.style.cssText = 'height:1600px;padding-top:180px';
         sentinel.innerHTML = '<div class=search-head><h2>موضع القارئ</h2></div><button class=search-genre>تصنيف</button>'; old.append(sentinel);
         const styles = () => [sentinel.querySelector('h2'),sentinel.querySelector('button')].map(n=>{const c=getComputedStyle(n);return [c.fontSize,c.fontWeight,c.padding,c.borderRadius,c.color]});
-        const before0 = styles();
+        window.__sectionProofStyles = styles();
         window.scrollTo({top:'${page}'==='home'?0:120,behavior:'instant'});
         const before = {y:sentinel.getBoundingClientRect().y,text:old.textContent};
         const oldChildren = [...old.children];
@@ -54,19 +54,24 @@ export async function sectionMotionProof(evaluate, capture = async () => {}) {
         });
         for (const a of animations) a.currentTime = 0;
         const syncMs = performance.now() - t0;
-        // Identity freeze: the outgoing page keeps its section styles a couple of frames into the transition.
-        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-        const frozen = JSON.stringify(styles())===JSON.stringify(before0);
-        const live = animations.length > 0 && animations.every(a => a.playState === 'paused');
         return {record:{beforeY:before.y,afterY:after.y,sameText:before.text===after.text,
           sameNodes:oldChildren.every(n=>n.parentNode===old), animations:animations.length,
-          from:'${from}',to:'${to}',page:'${page}'},frames,frozen,live,syncMs};
+          from:'${from}',to:'${to}',page:'${page}'},frames,syncMs};
       })()`);
       const {record, frames} = measured;
       if (!record.animations) throw new Error('No section transition was measured: '+JSON.stringify(record));
       if (page !== 'home' && (!record.sameNodes || !record.sameText)) throw new Error('Outgoing page was rebuilt: '+JSON.stringify(record));
       if (page !== 'home' && Math.abs(record.beforeY-record.afterY)>1) throw new Error('First frame scroll jump: '+JSON.stringify(record));
-      if (page !== 'home' && !measured.frozen) throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
+      // Identity freeze, measured as before in its own call: waiting for frames inside the measuring task hung the
+      // device WebView (CDP timeout), while this separate two-frame check is the one that already ran there.
+      if (page !== 'home') {
+        const frozen = await evaluate(`(async()=>{
+          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          const actual=[window.__sectionProofSentinel.querySelector('h2'),window.__sectionProofSentinel.querySelector('button')].map(n=>{const c=getComputedStyle(n);return [c.fontSize,c.fontWeight,c.padding,c.borderRadius,c.color]});
+          return JSON.stringify(actual)===JSON.stringify(window.__sectionProofStyles);
+        })()`);
+        if(!frozen)throw new Error('Outgoing section styles changed after identity update: '+JSON.stringify(record));
+      }
       if (from === 'manga' && to === 'cinema' && page === 'discover') for (const time of [0, 160, 420]) {
         // Evidence only (screenshots need their own calls); the verdict above used the in-task measurements.
         await evaluate(`(() => {for(const a of window.__sectionProofAnimations) a.currentTime=${time};})()`);
