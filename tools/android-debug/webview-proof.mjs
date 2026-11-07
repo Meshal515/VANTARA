@@ -32,8 +32,13 @@ await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror
 let sequence = 0;
 const pending = new Map();
 const errors = [];
+let pausedStack = null;
 socket.onmessage = ({ data }) => {
   const msg = JSON.parse(data);
+  // Diagnostic: where the page's main thread was when a hung evaluate was interrupted (see the failure handler).
+  if (msg.method === 'Debugger.paused') {
+    pausedStack = (msg.params.callFrames || []).slice(0, 12).map(f => `${f.functionName || '(anonymous)'} ${String(f.url).split('/').slice(-2).join('/')}:${f.location.lineNumber + 1}:${f.location.columnNumber + 1}`);
+  }
   if (msg.method === 'Runtime.exceptionThrown') {
     const d = msg.params.exceptionDetails;
     errors.push(d.exception?.description || d.text);
@@ -228,6 +233,8 @@ try {
     proof.javascriptErrors = await evaluate('window.__debugProofErrors');
     if (proof.javascriptErrors.length || errors.length) throw new Error('Uncaught JavaScript exception during navigation; see proof');
     // Diagnostic trace (CDP timeout three runs in a row inside this proof): which call hangs, and when.
+    // Enabled up front: a hang later can then be interrupted to read the JavaScript stack.
+    try { await command('Debugger.enable'); } catch {}
     proof.sectionTrace = [];
     const begun = Date.now();
     const traced = async (expression) => {
@@ -272,8 +279,19 @@ try {
   // Is the device alive at the moment of failure? (a dead emulator also produces CDP timeouts)
   try { proof.deviceAtFailure = execFileSync('adb', ['get-state'], { encoding: 'utf8', timeout: 10000 }).trim(); }
   catch (e) { proof.deviceAtFailure = 'unreachable: ' + String(e.stderr || e.message).slice(0, 200); }
+  if (/CDP timeout/.test(proof.failure)) {
+    // JavaScript loop or not? V8 honours a pause request even inside a running script; no pause = not JavaScript.
+    try { socket.send(JSON.stringify({ id: ++sequence, method: 'Debugger.pause' })); } catch {}
+    await delay(8000);
+    proof.hangStack = pausedStack ?? 'no Debugger.paused within 8 s (main thread not running JavaScript)';
+    try { socket.send(JSON.stringify({ id: ++sequence, method: 'Debugger.resume' })); } catch {}
+    try {
+      proof.hangCpu = execFileSync('adb', ['shell', 'top', '-b', '-n', '1', '-o', 'PID,%CPU,S,ARGS'], { encoding: 'utf8', timeout: 15000 })
+        .split('\n').filter(l => /vantara|sandboxed|webview|chrome|gpu|surfaceflinger/i.test(l)).slice(0, 12);
+    } catch (e) { proof.hangCpu = 'top failed: ' + String(e.message).slice(0, 120); }
+  }
   const last = (proof.sectionTrace ?? []).slice(-6);
-  console.log('Debug WebView failure context:', JSON.stringify({ device: proof.deviceAtFailure, lastSectionCalls: last }));
+  console.log('Debug WebView failure context:', JSON.stringify({ device: proof.deviceAtFailure, lastSectionCalls: last, hangStack: proof.hangStack, hangCpu: proof.hangCpu }));
   throw error;
 } finally {
   proof.cdpExceptions = errors;
