@@ -5924,7 +5924,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
   dock().activate(currentPage());
   warmed.add(startSection);
   // الأقسام الثلاثة جاهزة قبل أول تبديل: تُرسم مرة في وقت فراغ بعد الإقلاع، ثم التبديل حركة طبقة فقط
-  setTimeout(() => idle(() => { for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id)) renderSection(id); }), 2500);
+  setTimeout(() => idle(() => {
+    for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id)) renderSection(id);
+    // Built is not laid out: a hidden section gets its first style and layout at the moment of the first switch
+    // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
+    // switch on weak devices. In a later idle slot the sections stand by off-screen once so that cost is paid here.
+    idle(() => {
+      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving) return;
+      const motion = sectionLayers();
+      motion.prepare();
+      void q('home')?.offsetHeight; // the off-screen layout itself
+    });
+  }), 2500);
   if (startSection === 'anime') anime.show();
   if (startSection === 'cinema') cinema.show();
 
