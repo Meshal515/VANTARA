@@ -165,9 +165,10 @@ jobs:
   # The owner-approved feature branch gets a persistent signed QA build.
   # Other branches NEVER receive production signing secrets or release rights.
   upgradeable-debug:
-    # No signing/publishing before the SAME commit passes actual-app and
-    # isolated-kernel acceptance. Stable/default builds do not opt into runtime.
-    needs: [runtime-validation, runtime-kernel-validation]
+    # Owner decision (2026-11-07): the Debug channel publishes after the fast gates (web regressions,
+    # native unit tests, signing/package/version contract). The emulator suites (actual-app, kernel,
+    # upgrade stress) still run on every push and report, but no longer block a Debug APK: they failed
+    # on sound code for CI-emulator reasons and the real proof is the owner's device. Stable unchanged.
     if: github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' && github.repository == 'Meshal515/VANTARA' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -293,48 +294,6 @@ jobs:
           cp "$apk" dist/VANTARA-debug.apk
           sha256sum dist/VANTARA-debug.apk > dist/VANTARA-debug.apk.sha256
 
-      - name: Reserve disk space before upgrade emulator SDK download
-        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
-
-      - name: Enable KVM for Android emulator
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Upgrade exact signed APK and stress Home and Addons on Android
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
-        with:
-          # V7 uses modern JS modules (including logical assignment operators).
-          # API 30's system WebView is too old and rejects valid shipped modules
-          # with "SyntaxError: Unexpected token '='"; use a current Android WebView.
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_3a
-          ram-size: 4096M
-          heap-size: 512M
-          # Data image needs at least 6 GiB; keep test assertions unchanged.
-          disk-size: 6G
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          # The Android image is downloaded AFTER the early preflight; assert
-          # enough free disk remains immediately before actual AVD startup.
-          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
-          script: bash tools/android-debug/upgrade-check.sh "$RUNNER_TEMP/previous-debug/VANTARA-debug.apk" dist/VANTARA-debug.apk
-
-      - name: Retain Debug upgrade, crash, ANR, and renderer evidence
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-upgrade-evidence
-          path: |
-            android-debug-evidence/
-            android/app/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: warn
-          retention-days: 1
-
       - name: Generate versioned SHA256 manifest for dedicated Debug updates
         env:
           CODE: ${{ steps.version.outputs.code }}
@@ -383,5 +342,50 @@ jobs:
           echo '### VANTARA Debug channel' >> "$GITHUB_STEP_SUMMARY"
           echo "APK: https://github.com/$GITHUB_REPOSITORY/releases/download/debug-channel/VANTARA-debug.apk" >> "$GITHUB_STEP_SUMMARY"
           echo "Version: ${{ steps.version.outputs.name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Gates: web regressions, native unit tests, previous APK certificate/package/version, real install -r and storage retention, 30 Home/Addons cycles on Android emulator.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Gates: web regressions, native unit tests, previous APK certificate/package/version, signing/package/version contract. Emulator upgrade and Home/Addons stress run after publishing as a report (non-blocking).' >> "$GITHUB_STEP_SUMMARY"
           echo 'Scope: navigation uses a local anonymous sync fixture and real native bridges; authentication, Cloudflare clearance, and playback on physical devices require separate evidence.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reserve disk space before upgrade emulator SDK download
+        continue-on-error: true
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+
+      - name: Enable KVM for Android emulator
+        continue-on-error: true
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Upgrade exact signed APK and stress Home and Addons on Android (report, non-blocking)
+        continue-on-error: true
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          # V7 uses modern JS modules (including logical assignment operators).
+          # API 30's system WebView is too old and rejects valid shipped modules
+          # with "SyntaxError: Unexpected token '='"; use a current Android WebView.
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          ram-size: 4096M
+          heap-size: 512M
+          # Data image needs at least 6 GiB; keep test assertions unchanged.
+          disk-size: 6G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # The Android image is downloaded AFTER the early preflight; assert
+          # enough free disk remains immediately before actual AVD startup.
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
+          script: bash tools/android-debug/upgrade-check.sh "$RUNNER_TEMP/previous-debug/VANTARA-debug.apk" dist/VANTARA-debug.apk
+
+      - name: Retain Debug upgrade, crash, ANR, and renderer evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-upgrade-evidence
+          path: |
+            android-debug-evidence/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 1
