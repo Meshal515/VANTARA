@@ -244,6 +244,12 @@ try {
       step.ms = Date.now() - begun - step.at;
       return value;
     };
+    // DIAGNOSTIC EXPERIMENT (temporary, to be reverted with its result): switching to/from cinema stops the device
+    // WebView's rendering with no JavaScript running. Is cinema's backdrop blur the cause? Blur off for this phase only;
+    // the app is not changed. Passing here = blur confirmed; still hanging = blur ruled out.
+    await evaluate(`(() => { const s = document.createElement('style'); s.id = 'diagNoBlur'; s.textContent = '*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}'; document.head.append(s); return true; })()`);
+    proof.diagnosticExperiment = 'backdrop-filter disabled for the section motion phase';
+    console.log('DIAGNOSTIC EXPERIMENT: backdrop-filter disabled for the section motion phase');
     proof.sectionMotion = await sectionMotionProof(traced, async name => {
       const shot = await command('Page.captureScreenshot', { format: 'png' });
       writeFileSync(`${out}/${name}.png`, Buffer.from(shot.data, 'base64'));
