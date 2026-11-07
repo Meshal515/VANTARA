@@ -3704,26 +3704,11 @@ html[data-motion='off'] .v35 .dock-scrim {
 .v35 .look-swatch--reset i { background: conic-gradient(#8f5cff 0 33%, #3b82f6 0 66%, #c1121f 0); }
 
 /* ───── انتقالات الصفحات الداخلية (page-motion.js) ─────
- * الصفحة الفرعية تدخل بتلاشٍ قصير (شفافية فقط: لا إزاحة تُقاس كقفزة في تبديل الأقسام). الغلاف المتصل: الغلاف ينتقل بين البطاقة وصفحة
- * العمل في 0.5s، والصفحتان تتلاشيان تحته (القديمة أسرع). لا تمسّ انتقال الأقسام الرئيسية. */
+ * الصفحة تدخل بتلاشٍ قصير (شفافية فقط: لا إزاحة تُقاس كقفزة في تبديل الأقسام). الغلاف المتصل: نسخة
+ * واحدة من الصورة تتحرك بـtransform فوق الصفحة (FLIP). لا تمسّ انتقال الأقسام الرئيسية. */
 .v35 .page.page-enter { animation: vantara-page-enter 0.2s cubic-bezier(0.2, 0, 0, 1) both; }
 @keyframes vantara-page-enter { from { opacity: 0; } to { opacity: 1; } }
-::view-transition-group(vantara-work-cover) {
-  animation-duration: 0.5s;
-  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
-  z-index: 50;
-}
-::view-transition-old(vantara-work-cover),
-::view-transition-new(vantara-work-cover) {
-  height: 100%;
-  object-fit: cover;
-  animation-duration: 0.5s;
-  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-html.work-morph::view-transition-old(root) { animation: vantara-vt-out 0.2s ease-out both; }
-html.work-morph::view-transition-new(root) { animation: vantara-vt-in 0.32s 0.08s cubic-bezier(0.2, 0, 0, 1) both; }
-@keyframes vantara-vt-out { to { opacity: 0; } }
-@keyframes vantara-vt-in { from { opacity: 0; } }
+.vantara-morph-ghost { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
   .v35 .page.page-enter { animation: none; }
 }

@@ -1,16 +1,17 @@
 /**
  * انتقالات الصفحات الداخلية (لا انتقال الأقسام الرئيسية: ذاك في dock/طبقات الأقسام ولا يمرّ من هنا).
  *
- * - الغلاف المتصل: الغلاف نفسه ينتقل من بطاقته إلى مكانه في صفحة العمل وبالعكس (View Transitions،
- *   مثل طيّ الشريط في wide.css). المتصفح يلتقط الصورتين فلا يُعاد تحميل الغلاف ولا يومض أثناء
- *   الحركة، والباقي يتلاشى. بلا الواجهة، أو مع «تقليل الحركة»، أو بلا بطاقة ظاهرة: التبديل كما كان
- *   وتلاشٍ قصير للصفحة.
- * - دخول الصفحة الفرعية: تلاشٍ قصير، بلا شاشة فارغة بين الصفحتين ولا إزاحة.
+ * - الغلاف المتصل (FLIP): نسخة واحدة من صورة الغلاف تنتقل من مكانها في البطاقة إلى مكانها في صفحة
+ *   العمل (وبالعكس) بـtransform على خيط الرسم المستقل، والصفحة تدخل بتلاشٍ (opacity). كانت أولًا
+ *   View Transitions: تلتقط الصفحة كلها مرتين، فجمّدت WebView أندرويد نصف ثانية (533ms بإبطاء ×6).
+ *   الصورة نفسها (لا تحميل جديد)، والوجهة مخفية حتى تصلها النسخة فلا ومضة ولا صورتان.
+ * - دخول الصفحة الفرعية: تلاشٍ قصير (شفافية فقط: لا إزاحة تُقاس كقفزة في تبديل الأقسام).
  *
- * كل ما يتحرك هنا transform/opacity، وكل انتقال يُلغى بالذي بعده (startViewTransition يُنهي السابق).
+ * بلا بطاقة ظاهرة أو مع «تقليل الحركة»: التبديل كما كان. أي انتقال جديد يُنهي السابق فورًا.
  */
 
-const NAME = 'vantara-work-cover';
+const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
+const DURATION = 460;
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -24,44 +25,64 @@ export function onScreen(node, view = globalThis) {
 }
 
 let running = null;
+const settle = () => {
+  if (!running) return;
+  const { ghost, to, anim } = running;
+  running = null;
+  anim?.cancel?.();
+  ghost.remove();
+  if (to) to.style.visibility = '';
+};
 
 /**
- * ينقل الغلاف من `from` إلى ما يعيده `target()` بعد `swap()`. يعيد true إن جرى الانتقال المتصل.
- * `swap` يجب أن يرسم الوجهة متزامنًا (المتصفح يلتقطها بعده مباشرة).
+ * ينقل الغلاف من `from` إلى ما يعيده `target()` بعد `swap()` (يرسم الوجهة متزامنًا). يعيد true إن جرى
+ * الانتقال المتصل، وfalse إن بُدّلت الصفحة بلا انتقال (فيتولى المستدعي تلاشيها).
  */
 export function morphCover(from, swap, target, { doc = globalThis.document } = {}) {
-  if (!doc?.startViewTransition || motionReduced(doc) || !onScreen(from)) {
+  settle();
+  const image = from?.querySelector?.('img');
+  if (motionReduced(doc) || !image?.getAttribute('src') || !onScreen(from)) {
     swap();
     return false;
   }
-  running?.skipTransition?.();
-  const image = from.querySelector('img');
-  from.style.viewTransitionName = NAME;
-  doc.documentElement.classList.add('work-morph');
-  const t = doc.startViewTransition(() => {
-    from.style.viewTransitionName = '';
-    swap();
-    const to = target();
-    if (!to) return;
-    // الوجهة لم تُرسم صورتها بعد (تحميلها غير متزامن): الصورة نفسها مكانها فلا تُلتقط علبة فارغة
-    if (image && !to.querySelector('img')) {
-      const copy = image.cloneNode();
-      copy.dataset.morphCopy = '1';
-      to.append(copy);
-    }
-    to.style.viewTransitionName = NAME;
+  const a = from.getBoundingClientRect();
+  const radiusFrom = globalThis.getComputedStyle?.(from).borderRadius ?? '0px';
+  swap();
+  const to = target();
+  if (!to) return false;
+  // الوجهة لم تُرسم صورتها بعد (تحميلها غير متزامن): الصورة نفسها مكانها
+  if (!to.querySelector('img')) {
+    const copy = image.cloneNode();
+    copy.dataset.morphCopy = '1';
+    to.append(copy);
+  }
+  if (!onScreen(to)) return false;
+  const b = to.getBoundingClientRect();
+  const radiusTo = globalThis.getComputedStyle?.(to).borderRadius ?? '0px';
+  const ghost = image.cloneNode();
+  ghost.removeAttribute('id');
+  ghost.className = 'vantara-morph-ghost';
+  Object.assign(ghost.style, {
+    position: 'fixed', left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`,
+    objectFit: 'cover', borderRadius: radiusTo, zIndex: '9999', pointerEvents: 'none', margin: '0', transformOrigin: '0 0',
   });
-  running = t;
-  t.finished.finally(() => {
-    if (running === t) running = null;
-    const to = target();
-    if (to) to.style.viewTransitionName = '';
-    doc.documentElement.classList.remove('work-morph');
-  });
+  doc.body.append(ghost);
+  to.style.visibility = 'hidden';
+  const sx = a.width / b.width;
+  const sy = a.height / b.height;
+  const anim = ghost.animate?.([
+    { transform: `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${sx}, ${sy})`, borderRadius: radiusFrom },
+    { transform: 'none', borderRadius: radiusTo },
+  ], { duration: DURATION, easing: EASE });
+  running = { ghost, to, anim };
+  const mine = running;
+  const done = () => { if (running === mine) settle(); };
+  if (anim) anim.finished.then(done, done);
+  else done();
   return true;
 }
 
-/** دخول صفحة فرعية: تلاشٍ قصير (شفافية فقط)، يُعاد من أوله إن دخلت صفحة أخرى قبل انتهائه. */
+/** دخول صفحة: تلاشٍ قصير (شفافية فقط)، يُعاد من أوله إن دخلت صفحة أخرى قبل انتهائه. */
 export function pageFadeIn(page, { doc = globalThis.document } = {}) {
   if (!page || motionReduced(doc)) return;
   page.classList.remove('page-enter');

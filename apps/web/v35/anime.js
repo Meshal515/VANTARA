@@ -319,7 +319,7 @@ export function createAnime(deps) {
     s.dataset.reveal = '';
     const head = el('div', 'an-rail-head');
     const titles = el('div', 'an-rail-titles');
-    titles.append(el('h2', null, 'تصفّح حسب النوع'));
+    titles.append(el('h2', null, 'التصنيفات'));
     head.append(titles, button('an-more', `<span>الكل</span>${glyph('chevron', { size: 16 })}`, () => openDiscover({})));
     s.append(head, discover.genreStrip());
     return s;

@@ -796,8 +796,6 @@
   height: 520px;
   z-index: -1;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
 }
 .v35 .mg-amb { opacity: 0.45; }
 .v35 .mg-amb-layer {
@@ -815,11 +813,18 @@
 .v35 .mg-copy:not(.mg-swapping) > :nth-child(2) { animation-delay: 0.04s; }
 .v35 .mg-copy:not(.mg-swapping) > :nth-child(3) { animation-delay: 0.08s; }
 @keyframes mg-copy-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* الضوء الرخيص: الصورة بعُشر حجمها تُضبَّب ثم تُكبَّر عشر مرات. ضبابية 44px على المساحة كلها كانت
+ * توقف الرسم على الجوال (15 إطارًا بإبطاء ×6)؛ هذه بنفس الشكل وكلفة ضبابية مساحة أصغر بمئة مرة. */
 .v35 .mg-amb-layer img {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10%;
+  height: 10%;
   object-fit: cover;
-  filter: blur(44px) saturate(1.2);
+  transform-origin: 0 0;
+  transform: scale(10);
+  filter: blur(4.4px) saturate(1.2);
 }
 .v35 .mg-amb::after {
   content: '';
@@ -1030,7 +1035,7 @@
 .v35 .mg-pick-art { position: absolute; inset: 0; z-index: -1; }
 .v35 .mg-pick-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .v35 .mg-pick-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to left, rgba(8, 7, 12, 0.95) 35%, rgba(8, 7, 12, 0.2)); }
-.v35 .mg-pick:not(.mg-pick--wide) .mg-pick-art img { filter: blur(30px) saturate(1.2); transform: scale(1.3); opacity: 0.6; }
+.v35 .mg-pick:not(.mg-pick--wide) .mg-pick-art img { position: absolute; left: 0; top: 0; width: 10%; height: 10%; transform-origin: 0 0; transform: scale(10); filter: blur(3px) saturate(1.2); opacity: 0.6; }
 .v35 .mg-pick-cover { flex: 0 0 104px; aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden; box-shadow: 0 14px 28px -12px rgba(0, 0, 0, 0.9); order: 2; }
 .v35 .mg-pick-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .v35 .mg-pick-copy { min-width: 0; max-width: 64%; }

@@ -1523,7 +1523,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterShown = CHAPTER_BATCH;
     if (work._work?.editions?.length) rememberWork(work);
     // الغلاف نفسه ينتقل من البطاقة إلى صفحة العمل، والبيانات تُجلب في الأثناء لا بعد الحركة
-    const morphed = morphCover(from, () => { showPage('detail', { morph: Boolean(from) }); renderDetail(work); }, () => q('detailCover'));
+    const morphed = morphCover(from, () => { showPage('detail'); renderDetail(work); }, () => q('detailCover'));
     pageIn(q('detail'), { art: !morphed });
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
@@ -4481,7 +4481,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const id = String(state.current.id);
       const card = () => [...(q(prev)?.querySelectorAll(`[data-work-id="${CSS.escape(id)}"]`) ?? [])]
         .map((n) => (n.classList.contains('mg-cover') ? n : n.querySelector('.poster'))).find((n) => onScreen(n)) ?? null;
-      if (!morphCover(q('detailCover'), () => showPage(prev, { push: false, morph: true }), card)) pageFadeIn(q(prev));
+      morphCover(q('detailCover'), () => showPage(prev, { push: false }), card);
       return true;
     }
     if (prev) {
