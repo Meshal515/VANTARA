@@ -6497,6 +6497,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const anime = createAnime({
     root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     playableSources, addSource,
+    // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
+    warmToday: true,
     openUpdates: (section) => openUpdates(section),
     sync,
     openWorkMenu: openMediaWorkMenu,

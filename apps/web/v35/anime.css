@@ -1114,7 +1114,7 @@ html[data-section='cinema'],
 }
 .v35 .an-skel-text {
   display: block;
-  height: 4.9em;
+  height: 5.1em;
   font-size: 13.5px;
   background: repeating-linear-gradient(to bottom, var(--surface-1) 0 0.95em, transparent 0.95em 1.7em);
 }
@@ -2596,6 +2596,14 @@ html[data-section='cinema'],
 .v35 .aw-stage .an-mark > * {
   grid-area: 1 / 1;
 }
+.v35 .aw-stage .an-mark {
+  /* صندوق محجوز بارتفاع الشعار الأقصى وعرض السطر كله من أول إطار: الاسم ثم الشعار مكانه بلا حركة */
+  height: 76px;
+  justify-self: stretch;
+  /* صف واحد بارتفاع الصندوق كله: الشعار أسفله والاسم بموضع ثابت لا يتبع حجم الصف */
+  grid-template-rows: 100%;
+  align-items: end;
+}
 .v35 .aw-stage .an-mark-logo {
   position: static;
   max-height: 76px;
@@ -2605,6 +2613,9 @@ html[data-section='cinema'],
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
 }
 .v35 .aw-stage .an-mark-text {
+  /* عرض السطر كله وأعلى الصندوق: الاسم المختصر ثم الكامل لا يحرّك نقطة بدايته */
+  width: 100%;
+  align-self: center;
   font-size: 24px;
   text-align: center;
   color: var(--text-1);
@@ -2745,6 +2756,8 @@ html[data-section='cinema'],
 /* أدوات الترويسة في الجهة المقابلة للرجوع: رموز بلا كلام في حاوية واحدة، تبقى مع التمرير */
 .v35 .aw-tools {
   position: relative;
+  /* فوق ستارة القائمة (z-index 5): النقاط تبقى ظاهرة لتُغلق بها */
+  z-index: 6;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2799,6 +2812,38 @@ html[data-section='cinema'],
 .v35 .aw-menu.open {
   pointer-events: auto;
 }
+/* ستارة خلف القائمة: تفصل الدوائر وأسماءها عن الغلاف والبنر تحتها بلا أن تغيّر شكلها.
+   تدرّج داكن يبدأ من زاوية النقاط ويذوب نحو الصفحة، مع ضبابية خفيفة؛ يظهر ويختفي مع القائمة */
+.v35 .aw-menu::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -64px;
+  bottom: -40px;
+  inset-inline-end: calc(-1 * var(--gutter, 16px) - 6px);
+  width: max(280px, 170%);
+  border-end-start-radius: 48px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(6, 6, 10, 0.86) 0%, rgba(6, 6, 10, 0.72) 45%, rgba(6, 6, 10, 0) 100%);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: radial-gradient(130% 100% at 100% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(130% 100% at 100% 0%, #000 55%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+[dir='rtl'] .v35 .aw-menu::before,
+.v35[dir='rtl'] .aw-menu::before,
+html[dir='rtl'] .v35 .aw-menu::before {
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(6, 6, 10, 0.86) 0%, rgba(6, 6, 10, 0.72) 45%, rgba(6, 6, 10, 0) 100%);
+  -webkit-mask-image: radial-gradient(130% 100% at 0% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(130% 100% at 0% 0%, #000 55%, transparent 100%);
+}
+.v35 .aw-menu.open::before {
+  opacity: 1;
+}
 .v35 .aw-menu-item {
   display: flex;
   flex-direction: row-reverse;
@@ -2837,7 +2882,8 @@ html[data-section='cinema'],
 .v35 .aw-menu-label {
   padding: 5px 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  box-shadow: 0 0 0 1px var(--line);
   backdrop-filter: blur(10px);
   font-size: 12.5px;
   font-weight: 600;
@@ -2857,6 +2903,9 @@ html[data-section='cinema'],
   }
   .v35 .aw-stage .an-mark-logo {
     max-height: 96px;
+  }
+  .v35 .aw-stage .an-mark {
+    height: 96px;
   }
   .v35 .aw-body {
     max-width: 960px;
@@ -3863,3 +3912,178 @@ html[data-motion='off'] .v35 .ah-row-th { transition: none !important; }
 @media (min-width: 1100px) {
   .v35 #animeHome .an-genres .ag-strip { padding-inline: 56px; }
 }
+
+/* زر «شوهدت» الجانبي في الأنماط الأربعة: على زاوية لقطة الحلقة، بنفس منطق زر المحور.
+   لم تُشاهد: حلقة رفيعة على زجاج داكن؛ شوهدت: ✓ على لون القسم. لا يغيّر مقاس الصف */
+.v35 .wl .er,
+.v35 .wl .sp {
+  position: relative;
+}
+.v35 .wl-seen {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(8, 8, 12, 0.58);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.v35 .wl-seen::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.v35 .wl-seen:active {
+  transform: scale(0.9);
+}
+.v35 .wl-seen[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.v35 .wl-seen:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.v35 .wl-seen-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+.v35 .wl-platform .er .wl-seen {
+  top: 12px;
+  inset-inline-start: 12px;
+}
+.v35 .wl-screen .er .wl-seen {
+  top: 14px;
+}
+
+/* ورقة «علّم حلقات» (episode-marks.js): أوضاع التحديد شرائح، ومعاينة ما سيُعلَّم */
+.v35 .em-modes,
+.v35 .em-seasons {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 4px 0 14px;
+}
+.v35 .em-seasons {
+  margin-bottom: 10px;
+}
+.v35 .em-mode,
+.v35 .em-season {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.v35 .em-mode[aria-selected='true'],
+.v35 .em-season[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.v35 .em-fields.single {
+  grid-template-columns: 1fr;
+}
+.v35 .em-preview,
+.v35 .em-result {
+  margin: 8px 0 0;
+  min-height: 1.5em;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.v35 .em-result {
+  color: var(--accent-text);
+}
+
+/* بنر «اليوم» قبل أن يُحسم: هيكل بمقاس البنر والمعلومات نفسها (لا أسود فارغ ولا إزاحة حين يصل).
+   البريق transform فقط على طبقة داخلية، ويتوقف مع تقليل الحركة */
+.v35 .ah-art--wait::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, var(--surface-1) 0%, color-mix(in srgb, var(--surface-1) 55%, var(--bg)) 100%);
+}
+.v35 .ah-art--wait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* نبض شفافية فقط: بريق منزلق (transform) كان يُحسب إزاحة تخطيط في Chrome */
+  background: radial-gradient(80% 70% at 50% 40%, rgba(255, 255, 255, 0.06), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@keyframes ah-glow { from { opacity: 0.25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .v35 .ah-art--wait::after { animation: none; } }
+html[data-motion='off'] .v35 .ah-art--wait::after { animation: none; }
+.v35 .ah-skel-logo { display: block; width: min(62%, 260px); height: 46px; border-radius: 10px; }
+.v35 .ah-skel-line { display: block; width: min(70%, 300px); height: 12px; margin-top: 4px; border-radius: 6px; }
+.v35 .ah-act--skel { width: 156px; background: var(--surface-1); pointer-events: none; }
+/* المحفوظ يظهر في أول إطار: بلا انتقال */
+.v35 .ah-art-layer--now { transition: none; }
+
+/* ثبات التحميل في الأنماط: صندوق الشعار بارتفاعه الأقصى، وسطرا المعلومات والأنواع محجوزان قبل وصول التفاصيل */
+.v35 .wl-mark { display: flex; align-items: flex-end; height: 70px; min-width: 0; }
+.v35 .wl-mark > .wl-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-meta { min-height: 20px; }
+.v35 .wl-genres { min-height: 18px; }
+.v35 .wl-card .wl-info .wl-mark { height: 72px; justify-content: center; }
+.v35 .wl-screen .wl-mid .wl-mark { height: 56px; }
+.v35 .wl-screen .wl-mid .wl-name { font-size: 22px; }
+.v35 .wl-episode .wl-series .wl-mark { height: 46px; }
+.v35 .aw-stage .aw-genres { min-height: 23px; }
+@media (min-width: 900px) {
+  .v35 .wl-mark { height: 100px; }
+  .v35 .wl-card .wl-info .wl-mark { height: 110px; justify-content: flex-start; }
+  .v35 .wl-screen .wl-mid .wl-mark { height: 84px; }
+  .v35 .wl-episode .wl-series .wl-mark { height: 44px; }
+  .v35 .wl-meta { min-height: 25px; }
+  .v35 .wl-genres { min-height: 22px; }
+}
+/* «الحلقة أولًا»: سطرا قصة الحلقة محجوزان (تصل بعد الفن) */
+.v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.6em); }
+@media (min-width: 900px) { .v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.7em); } }
+/* بطل صفحة العمل قبل حسم صورته: هيكل بمقاس البنر (نبض شفافية فقط، لا إزاحة) */
+.v35 .aw-hero.aw-wait .aw-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 80% at 50% 35%, rgba(255, 255, 255, 0.07), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) { .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; } }
+html[data-motion='off'] .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; }
+/* القصة: ثلاثة أسطر محجوزة دائمًا وسطر «المزيد» تحتها (الهيكل بنفس المقاس) */
+.v35 .aw-about .an-synopsis.clamped { min-height: 5.1em; }
+.v35 .aw-about .aw-link { min-height: 26px; }
+.v35 .aw-about .aw-link--idle { visibility: hidden; pointer-events: none; }
+.v35 .aw-link-space { display: block; height: 26px; margin-top: 2px; }
+@media (min-width: 900px) {
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis.clamped { min-height: 9em; }
+  .v35 .aw[data-style='core'] .aw-main .an-skel-text { height: 9em; font-size: 15px; background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.8em); }
+}
+.v35 .wl-desc--wait {
+  min-height: calc(3 * 1.75em);
+  background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.75em);
+  border-radius: 4px;
+  animation: an-pulse 1.6s ease-in-out infinite;
+}
+@media (min-width: 900px) { .v35 .wl-desc--wait { min-height: calc(4 * 1.85em); } }

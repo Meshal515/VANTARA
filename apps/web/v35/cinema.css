@@ -1123,6 +1123,44 @@
 .v35 .cn-sources:empty {
   display: none;
 }
+/* سطر المصادر يحجز مقاسه من أول إطار: البحث هيكل بمقاس السطر نفسه لا نص يظهر ويختفي */
+.v35 .cn-sources {
+  min-height: 46px;
+  box-sizing: border-box;
+}
+.v35 .cn-sources-skel {
+  display: block;
+  width: min(62%, 260px);
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%) 0 0 / 200% 100%;
+  animation: cn-skel-sweep 1.4s linear infinite;
+}
+@keyframes cn-skel-sweep {
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-sources-skel { animation: none; }
+}
+
+/* أدوات الترويسة: نفس كبسولة صفحة عمل الأنمي (aw-tools/aw-menu في anime.css) */
+.v35 .cn-detail-bar .cn-tools {
+  flex: none;
+  margin-inline-start: auto;
+}
+.v35 .cn-detail-bar > .aw-menu {
+  inset-inline-end: 10px;
+}
+.v35 .cn-detail-bar > .aw-menu:not(.open) {
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tools {
+  background: transparent;
+  backdrop-filter: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tool {
+  color: var(--text-1);
+}
 .v35 .cn-dot {
   width: 7px;
   height: 7px;
@@ -1650,10 +1688,10 @@
   animation: cn-blink 1.4s ease-in-out infinite;
 }
 .v35 .cn-synopsis.cn-pending {
-  height: 5.1em;
+  height: 5.25em;
 }
 .v35 .cn-ep-over.cn-pending {
-  height: 2.7em;
+  height: 3.1em;
   width: 92%;
 }
 
@@ -1830,3 +1868,102 @@
 html[data-motion='off'] .v35 #home > .header .header-end,
 html[data-motion='off'] .v35 #home > .header .icon-btn,
 html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none; }
+
+/* «شوهدت» على كل حلقة: زر على زاوية اللقطة (نفس شكل زر الأنمي)، والعدّاد بمكان محجوز */
+.v35 .cn-ep {
+  position: relative;
+}
+.v35 .cn-ep-seen {
+  position: absolute;
+  top: 14px;
+  inset-inline-start: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(10, 7, 7, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.2s ease;
+}
+.v35 .cn-ep-seen::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.v35 .cn-ep-seen:active {
+  transform: scale(0.9);
+}
+.v35 .cn-ep-seen[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.v35 .cn-ep-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+.v35 .cn-ep.seen .cn-ep-art img {
+  opacity: 0.6;
+}
+.v35 .cn-eps-count {
+  margin: -4px 0 10px;
+  min-height: 1.5em;
+  font-size: 12.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ثبات التحميل: القصة تحجز أسطرها الثلاثة، والخلفية لا تظهر قبل أن تُحسم وتُفك (تلاشٍ واحد) */
+.v35 .cn-synopsis.clamped {
+  min-height: 5.25em;
+}
+.v35 .cn-detail-art > .cn-img {
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.v35 .cn-detail-art > .cn-img.loaded,
+.v35 .cn-detail-art > .cn-img.kept {
+  opacity: 1;
+}
+.v35 .cn-detail-art > .cn-img.kept {
+  transition: none;
+}
+.v35 .cn-detail-art.cn-wait::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 80% at 50% 35%, rgba(255, 255, 255, 0.06), transparent 70%);
+  animation: cn-blink 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-detail-art.cn-wait::before { animation: none; }
+}
+/* رأس صفحة العمل بصناديق محجوزة: الشعار أو الاسم (72)، وسطر الحقائق، وسطر الأنواع */
+.v35 .cn-detail-mark {
+  height: 72px;
+  display: flex;
+  align-items: flex-end;
+}
+.v35 .cn-detail-mark .cn-mark-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.2;
+}
+.v35 .cn-detail-mark:not(.has-logo) .cn-mark-text { font-size: 28px; }
+.v35 .cn-detail-body > .cn-facts { min-height: 22px; }
+.v35 .cn-genre-line { min-height: 1.5em; line-height: 1.5; }
+@media (min-width: 900px) {
+  .v35 .cn-detail-mark { height: 96px; }
+  .v35 .cn-detail-mark .cn-mark-logo { max-height: 96px; }
+}

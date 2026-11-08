@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { airingStatus, defaultPick, lineupOrder } from './anime-today.js';
+import { airingStatus, defaultPick, initialPick, lineupOrder, readTodayMemory, writeTodayMemory } from './anime-today.js';
+
+describe('today banner memory (ready from the first frame)', () => {
+  const store = () => {
+    const m = new Map();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)) };
+  };
+  it('round-trips the resolved banner and ignores corrupt storage', () => {
+    const s = store();
+    expect(readTodayMemory(s)).toBeNull();
+    writeTodayMemory({ for: 7, id: 9, src: 'https://a/b.jpg', logo: 'https://a/l.png', at: 1 }, s);
+    expect(readTodayMemory(s)).toEqual({ for: 7, id: 9, src: 'https://a/b.jpg', logo: 'https://a/l.png', at: 1 });
+    s.setItem('vantara.anime.todayHero.v1', '{bad');
+    expect(readTodayMemory(s)).toBeNull();
+    expect(readTodayMemory({ getItem: () => { throw new Error('blocked'); } })).toBeNull();
+  });
+  it('starts with the remembered pick only for the same default and only if it airs today', () => {
+    const order = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    expect(initialPick(order, order[1], { for: 2, id: 3, src: 'x' })).toEqual({ m: order[2], memory: { for: 2, id: 3, src: 'x' } });
+    expect(initialPick(order, order[0], { for: 2, id: 3, src: 'x' })).toEqual({ m: order[0], memory: null });
+    expect(initialPick(order, order[1], { for: 2, id: 99, src: 'x' })).toEqual({ m: order[1], memory: null });
+    expect(initialPick(order, order[1], null)).toEqual({ m: order[1], memory: null });
+  });
+});
 
 const H = 3600_000;
 const now = Date.UTC(2026, 10, 7, 14, 27); // 5:27 م بتوقيت مكة
