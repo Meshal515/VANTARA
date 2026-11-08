@@ -194,7 +194,9 @@ export function paletteVars(hex, { pureBlack = false } = {}) {
  * @returns {string|null} لون شريط النظام إن تغيّر (أسود صافي) أو null
  */
 export function applyAppearance(section, nodes, a = readAppearance()) {
-  const vars = SECTIONS.includes(section) ? paletteVars(accentOf(section, a), { pureBlack: a.pureBlack }) : {};
+  // «الموحد» لون رابع مستقل؛ بلا اختيار يأخذ لون علامة VANTARA
+  const hex = section === 'unified' ? (accentOf('unified', a) ?? brandOf(a) ?? BRAND_DEFAULT) : accentOf(section, a);
+  const vars = SECTIONS.includes(section) || section === 'unified' ? paletteVars(hex, { pureBlack: a.pureBlack }) : {};
   // علامة VANTARA بلونها المستقل؛ بلا اختيار تبقى على البنفسجي المصمّم في CSS
   const brand = brandOf(a);
   if (brand) vars['--brand'] = brand;

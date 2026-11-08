@@ -6036,7 +6036,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // أثناء الانتقال يتبدّل الاسم مع الحركة (createCrossfade)، لا قبلها
     if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
-    const black = applyAppearance(s.id, [root, document.documentElement]);
+    const black = applyAppearance(root.dataset.content === 'unified' ? 'unified' : s.id, [root, document.documentElement]);
     // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
     for (const [section, home] of Object.entries(HOMES)) { const view = q(home); if (view) applyAppearance(section, [view]); }
     // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
@@ -6103,14 +6103,73 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
   let dockMotion = null;
   let experienceApplied = false;
+  /**
+   * دمج الكبسولات الثلاث في واحدة (أو فصلها): قياس واحد للحالتين ثم Web Animations على transform وopacity
+   * وحدهما، فتبقى الحركة على المؤلِّف بـ120 إطارًا حتى والصفحة مشغولة. لا تحريك لـgap/width/radius.
+   */
   function playDockMotion() {
     const nav = q('bottomNav');
     if (!dockMotion || !nav || nav.hidden) return;
-    const cls = dockMotion; dockMotion = null;
-    nav.classList.remove('dock-merge', 'dock-split');
-    void nav.offsetWidth;
-    nav.classList.add(cls);
-    setTimeout(() => { nav.classList.remove(cls); dockCtl?.activate(currentPage()); }, 900);
+    const merging = dockMotion === 'dock-merge'; dockMotion = null;
+    if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
+    const caps = [...nav.querySelectorAll('.dock-cap')];
+    const icons = [...nav.querySelectorAll('.dock .nav, .dock-switch')];
+    const box = () => nav.getBoundingClientRect();
+    const rel = (el, n) => { const r = el.getBoundingClientRect(); return { x: r.left - n.left, y: r.top - n.top, w: r.width, h: r.height }; };
+    const snap = () => { const n = box(); return { n, caps: caps.map((c) => rel(c, n)), icons: icons.map((i) => rel(i, n)) }; };
+    const end = snap();
+    // الحالة الأخرى لحظةً للقياس فقط (قبل أي رسم)
+    if (merging) delete root.dataset.content; else root.dataset.content = 'unified';
+    const start = snap();
+    if (merging) root.dataset.content = 'unified'; else delete root.dataset.content;
+    const ox = start.n.left - end.n.left;
+    const layer = el('div', 'dock-ghosts');
+    const ghost = (r) => { const g = el('i', 'dock-ghost'); g.style.width = `${r.w}px`; g.style.height = `${r.h}px`; layer.append(g); return g; };
+    const tf = (r, to) => `translate(${r.x + ox}px, ${r.y}px) scale(${r.w / to.w}, ${r.h / to.h})`;
+    const opts = { duration: 620, easing: 'cubic-bezier(.22,.8,.2,1)', fill: 'both' };
+    nav.classList.add('dock-animating');
+    nav.prepend(layer);
+    // الحالة الأولى ثابتة فورًا (لقطة)، والحركة تبدأ بعد أن ترسم الصفحة الثقيلة، فلا تضيع مدتها في انشغالها
+    const steps = [];
+    const run = (target, from, to, o = opts) => { target.style.transform = from[0].transform ?? ''; if (from[0].opacity != null) target.style.opacity = String(from[0].opacity); steps.push(() => target.animate([...from, ...to], o)); };
+    [0, 2].forEach((i) => {
+      const a = start.caps[i], b = end.caps[i];
+      const g = ghost(b);
+      run(g, [{ transform: tf(a, b) }], [{ transform: `translate(${b.x}px, ${b.y}px)` }]);
+    });
+    const big = merging ? start.caps[1] : end.caps[1];
+    const bx = big.x + (merging ? ox : 0);
+    const sw = ghost(big);
+    const full = `translate(${bx}px, ${big.y}px)`;
+    const shrunk = `translate(${bx + big.w * 0.35}px, ${big.y}px) scale(0.3, 1)`;
+    if (merging) run(sw, [{ transform: full, opacity: 1 }], [{ transform: shrunk, opacity: 0 }]);
+    else run(sw, [{ transform: shrunk, opacity: 0 }], [{ transform: full, opacity: 1 }]);
+    if (merging) {
+      const pill = ghost({ w: end.n.width, h: end.n.height });
+      run(pill, [{ transform: 'translate(0px, 0px)', opacity: 0 }], [{ opacity: 0, offset: 0.55 }, { transform: 'translate(0px, 0px)', opacity: 1 }]);
+    } else {
+      // الفصل: نسخ الحالة النهائية تظهر في آخرها بدل الكبسولة الواحدة
+      end.caps.forEach((r) => { if (!r.w) return; const g = ghost(r); run(g, [{ transform: `translate(${r.x}px, ${r.y}px)`, opacity: 0 }], [{ opacity: 0, offset: 0.55 }, { transform: `translate(${r.x}px, ${r.y}px)`, opacity: 1 }]); });
+    }
+    icons.forEach((icon, i) => {
+      const a = start.icons[i], b = end.icons[i];
+      if (!a || !b || !b.w) return;
+      run(icon, [{ transform: `translate(${a.x + ox - b.x}px, 0)`, opacity: a.w ? 1 : 0 }], [{ transform: 'none', opacity: 1 }]);
+    });
+    const anims = [];
+    const go = () => {
+      for (const st of steps) anims.push(st());
+      for (const x of [...layer.children, ...icons]) { x.style.removeProperty('opacity'); if (!x.classList.contains('dock-ghost')) x.style.removeProperty('transform'); }
+      finish();
+    };
+    const later = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+    if (globalThis.requestIdleCallback) requestIdleCallback(() => later(go), { timeout: 400 }); else setTimeout(() => later(go), 120);
+    const finish = () => void Promise.all(anims.map((x) => x.finished.catch(() => {}))).then(() => {
+      layer.remove();
+      nav.classList.remove('dock-animating');
+      dockCtl?.activate(currentPage());
+      for (const ind of nav.querySelectorAll('.cap-ind')) ind.animate?.([{ visibility: 'hidden', offset: 0 }, { visibility: 'visible', offset: 0.01 }, { visibility: 'visible' }], { duration: 220 });
+    });
   }
   function applyExperience() {
     const view = experienceView(readStructure());
@@ -6122,6 +6181,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (unified) root.dataset.content = 'unified';
     else delete root.dataset.content;
     if (unified && !was) dockCtl?.close({ focus: false, instant: true });
+    if (unified !== was) applyAppearance(unified ? 'unified' : (root.dataset.section ?? 'manga'), [root, document.documentElement]);
     // دمج الكبسولات أو فصلها: يُشغَّل أول ما يظهر الشريط (التبديل يتم من الإعدادات والشريط مخفي هناك)
     // لا عند فتح التطبيق: فقط حين يبدّل المستخدم
     if (unified !== was && experienceApplied) { dockMotion = unified ? 'dock-merge' : 'dock-split'; playDockMotion(); }

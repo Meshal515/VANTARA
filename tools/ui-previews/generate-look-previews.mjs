@@ -149,7 +149,15 @@ for (const vp of VIEWPORTS) {
     });
   }
   await appShot(vp, workPreview('cinema', 'current', vp.id), { section: 'cinema', open: "window.__shell.openCinemaRef('cinema:tt0816692', { title: 'Interstellar' })" });
-  for (const [i, s] of MANGA_WORK_STYLES.entries()) await siteShot(vp, workPreview('manga', s.id, vp.id), i + 1);
+  // أنماط صفحة عمل المانجا من التطبيق نفسه (لا من النموذج)، بعمل حقيقي من AniList
+  const m = (D.manga ?? []).find((x) => x.title?.english && x.bannerImage) ?? D.manga[0];
+  for (const s of MANGA_WORK_STYLES) {
+    await appShot(vp, workPreview('manga', s.id, vp.id), {
+      section: 'manga',
+      style: { manga: s.id },
+      open: `window.__shell.openWork(${JSON.stringify({ id: `al:${m.id}`, title: m.title, coverImage: m.coverImage, genres: m.genres, status: m.status, chapters: m.chapters, averageScore: m.averageScore, bannerImage: m.bannerImage ?? null })})`,
+    });
+  }
 }
 await browser.close();
 server.close();

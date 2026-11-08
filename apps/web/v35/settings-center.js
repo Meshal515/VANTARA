@@ -176,20 +176,21 @@ export function renderAppearancePane(body, ctx) {
     sheet.append(head, grid);
   });
   const DESIGNED = { manga: '#8f5cff', anime: '#3b82f6', cinema: '#c1121f' };
-  for (const section of ['manga', 'anime', 'cinema']) {
+  const SECTION_NAMES_ALL = { ...SECTION_NAMES, unified: 'الموحد' };
+  for (const section of ['manga', 'anime', 'cinema', 'unified']) {
     const chosen = ACCENTS.find((c) => c.id === look.accent?.[section]);
     const row = el('button', 'setting look-brand');
     row.type = 'button';
     row.innerHTML = glyph('palette');
     const tx = el('div');
-    tx.append(el('strong', null, `لون ${SECTION_NAMES[section]}`), el('small', null, 'الأزرار والتحديد ومؤشر التنقل'));
+    tx.append(el('strong', null, `لون ${SECTION_NAMES_ALL[section]}`), el('small', null, section === 'unified' ? 'لون الواجهة حين توحّد المحتوى' : 'الأزرار والتحديد ومؤشر التنقل'));
     const val = el('span', 'value');
     const chip = el('i', 'look-chip');
-    chip.style.setProperty('--sw', chosen?.hex ?? DESIGNED[section]);
-    val.append(chip, doc.createTextNode(chosen?.name ?? 'لون القسم'));
+    chip.style.setProperty('--sw', chosen?.hex ?? DESIGNED[section] ?? brandOf(look) ?? BRAND_DEFAULT);
+    val.append(chip, doc.createTextNode(chosen?.name ?? (section === 'unified' ? 'لون العلامة' : 'لون القسم')));
     row.append(tx, val);
     row.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
-    row.onclick = () => swatchSheet(`لون ${SECTION_NAMES[section]}`, chosen?.id ?? null, 'لون القسم', null, (id) => saveLook((a) => {
+    row.onclick = () => swatchSheet(`لون ${SECTION_NAMES_ALL[section]}`, chosen?.id ?? null, section === 'unified' ? 'لون العلامة' : 'لون القسم', null, (id) => saveLook((a) => {
       const accent = { ...a.accent };
       if (id) accent[section] = id;
       else delete accent[section];
