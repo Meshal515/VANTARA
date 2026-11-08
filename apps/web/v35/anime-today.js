@@ -38,6 +38,30 @@ export function defaultPick(order, now = Date.now()) {
   return future[future.length - 1] ?? order.find((m) => m.airingAt <= now) ?? order[0] ?? null;
 }
 
+/**
+ * آخر بنر «اليوم» محسوم: أي عمل اختير لأي افتراضي، وصورته وشعاره. الدخول التالي يرسمه في أول إطار
+ * بدل بنر أسود ثم ظهور مفاجئ. يُستعمل فقط إن كان الافتراضي المحسوب الآن هو نفسه (لا عمل من يوم سابق).
+ */
+export const TODAY_KEY = 'vantara.anime.todayHero.v1';
+export function readTodayMemory(storage = globalThis.localStorage) {
+  try {
+    const v = JSON.parse(storage?.getItem(TODAY_KEY) ?? 'null');
+    return v && typeof v === 'object' && v.for != null && v.id != null && typeof v.src === 'string' ? v : null;
+  } catch { return null; }
+}
+export function writeTodayMemory(v, storage = globalThis.localStorage) {
+  try { storage?.setItem(TODAY_KEY, JSON.stringify({ for: v.for, id: v.id, src: v.src, logo: v.logo ?? null, at: v.at ?? Date.now() })); } catch { /* تخزين محجوب */ }
+}
+/** العمل الذي يبدأ به البنر: المحفوظ لنفس الافتراضي إن كان في تشكيلة اليوم، وإلا الافتراضي. */
+export function initialPick(order, first, memory) {
+  if (!first) return { m: null, memory: null };
+  if (memory && String(memory.for) === String(first.id)) {
+    const m = order.find((x) => String(x.id) === String(memory.id));
+    if (m) return { m, memory };
+  }
+  return { m: first, memory: null };
+}
+
 export function createAnimeToday(h) {
   const { el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip, heroMemory = null, seriesBackdrop = null } = h;
   const motionOff = () => Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || document.documentElement.dataset.motion === 'off';
@@ -92,6 +116,43 @@ export function createAnimeToday(h) {
   };
   const genresLine = (m) => (m.genres ?? []).slice(0, 2).map(genreAr).join('، ');
 
+  /** ما يحتاجه بنر العمل جاهزًا ومفكوكًا: { src, logo } (logo null = لا شعار له، أو لم يصل في وقته). */
+  async function prepare(m) {
+    // بيانات العمل (ومنها معرّف IMDb الذي يأتي منه الشعار والخلفية) قد تتأخر ثواني: كانت المهلة 1.5 ثانية
+    // فيُعرض الغلاف والاسم بديلًا نهائيًا لعمل له بنر وشعار. الآن 6 ثوانٍ، والبنر الحالي ثابت حتى يجهز
+    // الجديد كله (والغلاف المختار ينبض). بعدها فقط البديل: الغلاف، أو الاسم.
+    const deadline = Date.now() + 6000;
+    const late = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), Math.max(0, deadline - Date.now())))]);
+    const art0 = await late(artFor(m));
+    let [src, logo] = await Promise.all([late(firstDecoded(wideCandidates(m, art0))), late(logoFor(art0?.logo))]);
+    // موسم بلا خلفية خاصة: خلفية عمله الأب كما في صفحة العمل (تحتاج علاقاته، وهي في تفاصيله فقط)
+    if (!src && seriesBackdrop && m.relations?.length) src = await late(seriesBackdrop(m).then((b) => (b ? decoded(b).then((ok) => (ok ? b : null)) : null)));
+    // ما ظهر يُحفظ لصفحة العمل وللمرة القادمة؛ لقطة الحلقة وبنر AniList ليسا خلفية العمل فلا يُحفظان
+    if (src && (src.includes('metahub') || src === art0?.fanart)) heroMemory?.set(m.id, src);
+    if (!src) await late(decoded(m.poster));
+    return { src: src ?? null, logo };
+  }
+  /**
+   * «اليوم» يُجهَّز قبل دخول القسم (عند فتح التطبيق أو في وقت الخمول): صورة البنر الافتراضي وشعاره يُفكّان
+   * ويُحفظ اختياره، فأول دخول يجده في أول إطار.
+   */
+  async function prewarm(week, now = Date.now()) {
+    const day = meccaDay(now);
+    const items = (week ?? []).filter((m) => meccaDay(m.airingAt) === day);
+    const first = defaultPick(lineupOrder(items, now), now);
+    if (!first) return null;
+    const mem = readTodayMemory();
+    if (mem && String(mem.for) === String(first.id)) {
+      await Promise.all([decoded(mem.src), mem.logo ? logoFor(mem.logo) : null]);
+      return mem;
+    }
+    const ready = await prepare(first);
+    if (!ready.src) return null;
+    const v = { for: first.id, id: first.id, src: ready.src, logo: ready.logo };
+    writeTodayMemory(v);
+    return v;
+  }
+
   // ───────────── البنر وتشكيلة اليوم ─────────────
   function todayHero(week, now = Date.now()) {
     const today = meccaDay(now);
@@ -116,7 +177,8 @@ export function createAnimeToday(h) {
     // صورة آخر، ولا نص يتحول شعارًا أمام العين. ما لم يجهز بعد يبقى البنر الحالي ثابتًا والغلاف المختار
     // يُعلَّم «يجهز». الشعار المحمّل محفوظ (logoCache)، فالعودة لعمل سبق عرضه تُظهر شعاره مباشرة.
     let latest = null;
-    function paintArt(src, poster) {
+    let shown = null;
+    function paintArt(src, poster, { instant = false } = {}) {
       const layer = el('div', `ah-art-layer${src ? '' : ' ah-art-layer--poster'}`);
       if (src) layer.append(Object.assign(new Image(), { src, alt: '', className: 'ah-art-img', decoding: 'async' }));
       else {
@@ -125,6 +187,13 @@ export function createAnimeToday(h) {
         layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-poster', decoding: 'async' }));
       }
       art.insertBefore(layer, art.lastElementChild);
+      latest = layer;
+      // محفوظ ومفكوك سابقًا (من كاش الصور): يظهر في أول إطار بلا تلاشٍ ولا لحظة سوداء
+      if (instant) {
+        layer.classList.add('in', 'ah-art-layer--now');
+        art.classList.remove('ah-art--wait');
+        return;
+      }
       // صور الطبقة نفسها تُفك قبل أن تظهر: كانت صورة الغلاف المضببة تُرسم بعد إطار، فيظهر البنر السابق من
       // خلال الطبقة الشفافة ثم يتضبب فوقه (بلاغ المالك). الطبقة معتمة (CSS) فلا يظهر ما تحتها أبدًا.
       latest = layer;
@@ -134,6 +203,7 @@ export function createAnimeToday(h) {
     function reveal(layer) {
       // اختيار أحدث سبقها: هذه الطبقة لا تظهر أبدًا (الأحدث يتولى)
       if (layer !== latest) return layer.remove();
+      art.classList.remove('ah-art--wait');
       const old = [...art.querySelectorAll('.ah-art-layer')].filter((n) => n !== layer);
       if (motionOff() || !old.length) {
         layer.classList.add('in');
@@ -165,6 +235,16 @@ export function createAnimeToday(h) {
       act.onclick = () => void openAnime(m, aired ? { episode: m.episode } : {});
       return [mark, meta, act];
     }
+    /** هيكل المعلومات بنفس صناديقها المحجوزة (الشعار 72، السطر، الزر): لا تتحرك التشكيلة حين تصل. */
+    function bodySkeleton() {
+      const mark = el('div', 'ah-mark');
+      mark.append(el('span', 'an-skel ah-skel-logo'));
+      const meta = el('div', 'ah-meta');
+      meta.append(el('span', 'an-skel ah-skel-line'));
+      const act = el('span', 'ah-act ah-act--skel an-skel');
+      act.setAttribute('aria-hidden', 'true');
+      return [mark, meta, act];
+    }
     function paintBody(lines, instant) {
       clearTimeout(body._t);
       if (instant || motionOff() || !body.childElementCount) {
@@ -177,22 +257,6 @@ export function createAnimeToday(h) {
         body.replaceChildren(...lines);
         body.classList.remove('swapping');
       }, 120);
-    }
-    /** ما يحتاجه بنر العمل جاهزًا ومفكوكًا: { src, logo } (logo null = لا شعار له، أو لم يصل في وقته). */
-    async function prepare(m) {
-      // بيانات العمل (ومنها معرّف IMDb الذي يأتي منه الشعار والخلفية) قد تتأخر ثواني: كانت المهلة 1.5 ثانية
-      // فيُعرض الغلاف والاسم بديلًا نهائيًا لعمل له بنر وشعار. الآن 6 ثوانٍ، والبنر الحالي ثابت حتى يجهز
-      // الجديد كله (والغلاف المختار ينبض). بعدها فقط البديل: الغلاف، أو الاسم.
-      const deadline = Date.now() + 6000;
-      const late = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), Math.max(0, deadline - Date.now())))]);
-      const art0 = await late(artFor(m));
-      let [src, logo] = await Promise.all([late(firstDecoded(wideCandidates(m, art0))), late(logoFor(art0?.logo))]);
-      // موسم بلا خلفية خاصة: خلفية عمله الأب كما في صفحة العمل (تحتاج علاقاته، وهي في تفاصيله فقط)
-      if (!src && seriesBackdrop && m.relations?.length) src = await late(seriesBackdrop(m).then((b) => (b ? decoded(b).then((ok) => (ok ? b : null)) : null)));
-      // ما ظهر يُحفظ لصفحة العمل وللمرة القادمة؛ لقطة الحلقة وبنر AniList ليسا خلفية العمل فلا يُحفظان
-      if (src && (src.includes('metahub') || src === art0?.fanart)) heroMemory?.set(m.id, src);
-      if (!src) await late(decoded(m.poster));
-      return { src: src ?? null, logo };
     }
     async function select(m, { fromUser = false, instant = false } = {}) {
       if (fromUser) userPicked = true;
@@ -210,9 +274,18 @@ export function createAnimeToday(h) {
       clearTimeout(slow);
       cover?.classList.remove('loading');
       if (run !== token || !s.isConnected) return;
-      paintBody(bodyFor(m, ready.logo), instant);
+      // المحفوظ ظهر في أول إطار وهو نفسه المحسوم الآن: لا تبديل (انتقال واحد على الأكثر)
+      const same = shown && shown.id === m.id && shown.src === (ready.src ?? null) && shown.logo === (ready.logo ?? null);
+      shown = { id: m.id, src: ready.src ?? null, logo: ready.logo ?? null };
+      if (!userPicked && ready.src) writeTodayMemory({ for: first?.id, id: m.id, src: ready.src, logo: ready.logo });
+      if (same) return void neighbours(m);
+      paintBody(bodyFor(m, ready.logo), instant || Boolean(body.querySelector('.ah-skel-logo')));
       paintArt(ready.src, m.poster);
+      neighbours(m);
+    }
+    function neighbours(m) {
       // الجاران في التشكيلة يُجهَّزان الآن، فالانتقال إليهما فوري. لا أكثر: لا تحميل كل اليوم دفعة
+      if (!s.isConnected) return;
       const i = order.indexOf(m);
       for (const n of [order[i - 1], order[i + 1]]) if (n) void prepare(n);
     }
@@ -236,14 +309,31 @@ export function createAnimeToday(h) {
       lineup.append(c);
     }
     const first = defaultPick(order, now);
-    void select(first, { instant: true });
+    // أول إطار: آخر بنر محسوم لنفس الافتراضي (صورته من كاش الصور وشعاره)، وإلا هيكل بمقاس البنر
+    const start = initialPick(order, first, readTodayMemory());
+    if (start.memory) {
+      selected = start.m;
+      shown = { id: start.m.id, src: start.memory.src, logo: start.memory.logo ?? null };
+      for (const c of lineup.children) {
+        const on = c._m === start.m;
+        c.classList.toggle('sel', on);
+        c.setAttribute('aria-selected', String(on));
+      }
+      body.replaceChildren(...bodyFor(start.m, start.memory.logo ?? null));
+      paintArt(start.memory.src, start.m.poster, { instant: true });
+    } else {
+      art.classList.add('ah-art--wait');
+      body.replaceChildren(...bodySkeleton());
+    }
+    void select(start.m, { instant: true });
     // الافتراضي بلا صورة عريضة: أقرب ثلاثة قادمة تُفحص فقط، وأقربها بصورة يأخذ مكانه ما لم يختر المستخدم
     void artFor(first).then((a0) => {
-      if (wideOf(first, a0)) return;
+      if (start.memory || wideOf(first, a0)) return;
       const next = order.filter((m) => m.airingAt > now).sort((a, b) => a.airingAt - b.airingAt).slice(0, 4);
       return Promise.all(next.map(async (m) => [m, wideOf(m, await artFor(m))])).then((pairs) => {
         const best = pairs.find(([, src]) => src)?.[0];
         if (!userPicked && s.isConnected && best && selected === first) void select(best);
+        // لا بنر عريض للافتراضي ولا للقريب: الغلاف بديلًا محسومًا (يُحفظ كي لا يُعاد البحث في كل دخول)
       });
     });
     requestAnimationFrame(() => centerInStrip(lineup, [...lineup.children].find((c) => c._m === first)));
@@ -375,5 +465,5 @@ export function createAnimeToday(h) {
     return s;
   }
 
-  return { todayHero, continueCard, schedule };
+  return { todayHero, continueCard, schedule, prewarm };
 }

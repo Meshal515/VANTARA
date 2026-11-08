@@ -3999,3 +3999,29 @@ html[data-motion='off'] .v35 .ah-row-th { transition: none !important; }
 .v35 .em-result {
   color: var(--accent-text);
 }
+
+/* بنر «اليوم» قبل أن يُحسم: هيكل بمقاس البنر والمعلومات نفسها (لا أسود فارغ ولا إزاحة حين يصل).
+   البريق transform فقط على طبقة داخلية، ويتوقف مع تقليل الحركة */
+.v35 .ah-art--wait::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, var(--surface-1) 0%, color-mix(in srgb, var(--surface-1) 55%, var(--bg)) 100%);
+}
+.v35 .ah-art--wait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* نبض شفافية فقط: بريق منزلق (transform) كان يُحسب إزاحة تخطيط في Chrome */
+  background: radial-gradient(80% 70% at 50% 40%, rgba(255, 255, 255, 0.06), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@keyframes ah-glow { from { opacity: 0.25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .v35 .ah-art--wait::after { animation: none; } }
+html[data-motion='off'] .v35 .ah-art--wait::after { animation: none; }
+.v35 .ah-skel-logo { display: block; width: min(62%, 260px); height: 46px; border-radius: 10px; }
+.v35 .ah-skel-line { display: block; width: min(70%, 300px); height: 12px; margin-top: 4px; border-radius: 6px; }
+.v35 .ah-act--skel { width: 156px; background: var(--surface-1); pointer-events: none; }
+/* المحفوظ يظهر في أول إطار: بلا انتقال */
+.v35 .ah-art-layer--now { transition: none; }

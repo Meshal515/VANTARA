@@ -1500,10 +1500,8 @@ export function createAnime(deps) {
     Object.assign(w,{title:m.title,poster:m.posterSmall??m.poster,banner:m.banner,color:m.color});
     w.episodes??={};
     const changedHere=applyLocalMarks(w.episodes,keys.map(String),on);
-    // «تابع المشاهدة»: بعد آخر ما عُلّم إن تجاوز ما وصلت إليه (لا يغيّر ترتيب الرف)
-    let moved=false;
-    if(on&&(!w.episode||range.to>=w.episode)){const total=episodeCount(m);const next=total?Math.min(range.to+1,total):range.to+1;if(w.episode!==next){w.episode=next;moved=true;}}
-    if(changedHere||moved){all[m.id]=w;saveWatch(all);}
+    // مؤشر التشغيل الحقيقي (w.episode) لا يتغيّر: «تابع» يتخطى المعلّم عبر isSeen في resumeEpisode
+    if(changedHere){all[m.id]=w;saveWatch(all);}
     return signedIn() ? account.markRange(m,range.from,range.to,on) : changedHere;
   }
 
@@ -3051,6 +3049,30 @@ export function createAnime(deps) {
     const url = `https://anilist.co/anime/${m.id}`;
     if (navigator.share) void navigator.share({ title: m.title, url }).catch(() => {});
     else void navigator.clipboard?.writeText(url).then(() => toast('نُسخ الرابط'));
+  }
+
+  /**
+   * «اليوم» جاهز قبل الدخول: بيانات الرئيسية (المحفوظة، أو الحديثة إن قدُمت) ثم صورة البنر الافتراضي
+   * وشعاره تُفكّ ويُحفظ اختياره (anime-today.js prewarm). في وقت الخمول فقط، ومرة لكل فتح للتطبيق.
+   */
+  let warmed = false;
+  async function warmToday() {
+    if (warmed) return;
+    warmed = true;
+    try {
+      let data = state.home ?? (await deps.readKv(HOME_KEY))?.value ?? null;
+      if (!data?.week?.length || Date.now() - (data.fetchedAt ?? 0) >= STALE_MS) {
+        try {
+          data = await fetchAnimeHome();
+          void deps.writeKv(HOME_KEY, data);
+        } catch { /* بلا شبكة: المحفوظ يكفي */ }
+      }
+      if (data?.week?.length) await today().prewarm(data.week);
+    } catch { /* تجهيز اختياري: لا يُفشل شيئًا */ }
+  }
+  if (deps.warmToday) {
+    const idle = globalThis.requestIdleCallback ? (f) => globalThis.requestIdleCallback(f, { timeout: 5000 }) : (f) => setTimeout(f, 2000);
+    idle(() => void warmToday());
   }
 
   return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, leaveDetail: () => {state.view?.episodeControls?.suspend();} };
