@@ -1,5 +1,7 @@
 import { flushFollowTime } from '../lib/follow-time.js';
 import { glyph } from './icons.js';
+import { createSilk } from '../lib/silk.js';
+import { paletteFromAccent } from '../lib/silk-palette.js';
 
 const el = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -48,155 +50,239 @@ function coverTone(img, key, bar) {
   else img.addEventListener('load', sample, { once: true });
 }
 
-export function createInsights({ sync, host, mountImage, openWork, workFromRef, toast }) {
+const HIDE_KEY = 'vantara.insights.hidden.v1';
+const SHORT_MS = 10 * 60_000;
+const FILTERS = [['all', 'الكل'], ['manga', 'المانجا'], ['anime', 'الأنمي'], ['cinema', 'السينما']];
+
+/** خمسة أشخاص كحد أقصى في الدائرة الواحدة؛ عشرة = دائرتان. */
+export function pieGroups(people, size = 5) {
+  const out = [];
+  for (let i = 0; i < people.length; i += size) out.push(people.slice(i, i + size));
+  return out;
+}
+/** الشرائح بزوايا (درجات من الأعلى مع عقارب الساعة)، ومقاس الأفاتار محصور فلا يغطي ولا يختفي. */
+export function pieSlices(group, { gap = 2, min = 22, max = 34 } = {}) {
+  const total = group.reduce((t, p) => t + p.ms, 0);
+  let at = 0;
+  return group.map((p) => {
+    const frac = total ? p.ms / total : 1 / group.length;
+    const sweep = frac * 360;
+    const s = { ...p, frac, start: at, sweep: Math.max(0, sweep - (group.length > 1 ? gap : 0)), mid: at + sweep / 2, avatar: Math.round(Math.min(max, Math.max(min, min + (max - min) * Math.min(1, frac * 2.5)))) };
+    at += sweep;
+    return s;
+  });
+}
+/** الأعمال الأقل من عشر دقائق تُطوى تحت «عرض المزيد». */
+export function splitShort(content, threshold = SHORT_MS) {
+  return { main: content.filter((r) => r.activeMs >= threshold), short: content.filter((r) => r.activeMs < threshold) };
+}
+function readHidden() { try { return new Set(JSON.parse(localStorage.getItem(HIDE_KEY) ?? '[]')); } catch { return new Set(); } }
+function writeHidden(set) { try { localStorage.setItem(HIDE_KEY, JSON.stringify([...set])); } catch { /* تفضيل محلي */ } }
+
+const SVG = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs = {}) => { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); return n; };
+
+export function createInsights({ sync, host, mountImage, openWork, previewWork = openWork, workFromRef, toast, confirm = (m) => globalThis.confirm?.(m) }) {
   let person = null;
-  let viewer = null;
   let filter = 'all';
   let requestId = 0;
-  let currentResult = null;
+  let results = new Map();
+  let showShort = false;
   const me = () => sync.user?.userId;
 
-  async function show() {
-    if (viewer !== me()) {
-      viewer = me();
-      person = viewer;
-      currentResult = null;
-    }
-    person ??= me();
-    const id = ++requestId;
-    host.dataset.kind = filter;
-    host.replaceChildren();
-    const total = el('div', 'insights-total');
-    total.setAttribute('aria-live', 'polite');
-    total.setAttribute('aria-label', 'إجمالي وقت المتابعة');
-    const people = el('div', 'insights-people');
-    people.setAttribute('aria-label', 'صاحب الإحصائيات');
-    for (const a of sync.rows('accounts').sort((x, y) => Number(y.user_id === me()) - Number(x.user_id === me()))) {
-      const profile = sync.rows('profiles', (p) => p.user_id === a.user_id)[0];
-      const chip = el('button', `insights-person${a.user_id === person ? ' active' : ''}`);
-      chip.type = 'button';
-      chip.disabled = true;
-      chip.dataset.userId = a.user_id;
-      chip.setAttribute('aria-pressed', String(a.user_id === person));
-      if (profile?.avatar_key) {
-        const img = el('img'); img.src = profile.avatar_key; img.alt = ''; chip.append(img);
-      } else chip.append(el('span', 'insights-avatar', (profile?.display_name || a.username || '?').slice(0, 1).toUpperCase()));
-      chip.append(el('span', null, `${profile?.display_name || a.username}${a.user_id === me() ? ' (YOU)' : ''}`));
-      chip.onclick = async () => {
-        if (a.user_id === person) return;
-        const selection = ++requestId;
-        // لا نمسح إحصائية ظاهرة إلا بعدما نتحقق أن الشخص فتح مشاركتها.
-        const result = await sync.insights(a.user_id);
-        if (selection !== requestId || !host.isConnected || viewer !== me()) return;
-        if (!result) { toast('تعذر تحميل الإحصائيات', 3000); return; }
-        if (result.locked || !result.timeShared) { toast('مقفلها', 3000); return; }
-        person = a.user_id;
-        currentResult = result;
-        render(result);
-      };
-      people.append(chip);
-    }
-    const filters = el('div', 'insights-filters');
-    for (const [kind, label] of [['all', 'ALL'], ['manga', 'MANGA'], ['anime', 'ANIME'], ['cinema', 'CINEMA']]) {
-      const button = el('button', kind === filter ? 'active' : '', label);
-      button.type = 'button';
-      button.setAttribute('aria-pressed', String(kind === filter));
-      button.onclick = () => {
-        filter = kind;
-        host.dataset.kind = kind;
-        for (const other of filters.children) {
-          other.classList.toggle('active', other === button);
-          other.setAttribute('aria-pressed', String(other === button));
-        }
-        if (currentResult?.userId === person) render(currentResult);
-      };
-      filters.append(button);
-    }
-    const ranking = el('div', 'insights-ranking');
-    host.append(total, people, filters, ranking);
-    host.setAttribute('aria-busy', 'true');
-    if (!currentResult) {
-      total.classList.add('insights-loading');
-      for (let i = 0; i < 4; i++) ranking.append(el('div', 'insights-placeholder'));
-    }
-    if (person === me() && currentResult?.userId === me()) render(currentResult);
-    if (person === me()) {
-      await flushFollowTime(sync).catch(() => {});
-      await sync.push();
-    }
-    const result = await sync.insights(person);
-    if (id !== requestId || !host.isConnected || viewer !== me()) return;
-    host.setAttribute('aria-busy', 'false');
-    for (const chip of people.children) chip.disabled = false;
-    total.classList.remove('insights-loading');
-    if (!result) {
-      currentResult = null;
-      total.textContent = '';
-      ranking.replaceChildren();
-      const retry = el('button', 'insights-retry');
-      retry.type = 'button';
-      retry.innerHTML = glyph('refresh', { size: 22 });
-      retry.append(el('span', null, 'تعذر تحميل الإحصائيات'));
-      retry.setAttribute('aria-label', 'تعذر تحميل الإحصائيات، أعد المحاولة');
-      retry.onclick = () => void show();
-      ranking.append(retry);
-      return;
-    }
-    if (result.locked || !result.timeShared) {
-      if (person !== me()) { person = me(); toast('مقفلها', 3000); void show(); }
-      return;
-    }
-    currentResult = result;
-    render(result);
+  const profileOf = (uid) => {
+    const a = sync.rows('accounts', (x) => x.user_id === uid)[0];
+    const p = sync.rows('profiles', (x) => x.user_id === uid)[0];
+    return { name: p?.display_name || a?.username || '؟', avatar: p?.avatar_key || null };
+  };
+  const msOf = (r) => (r?.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0).reduce((t, x) => t + x.activeMs, 0);
+  const visible = (r) => r && !r.locked && r.timeShared;
+
+  function avatarNode(uid, size) {
+    const { name, avatar } = profileOf(uid);
+    const n = el('span', 'ins-av');
+    n.style.setProperty('--s', `${size}px`);
+    if (avatar) { const i = el('img'); i.src = avatar; i.alt = ''; n.append(i); } else n.textContent = name.slice(0, 1).toUpperCase();
+    return n;
   }
 
-  function render(result) {
-    const total = host.querySelector('.insights-total');
-    const ranking = host.querySelector('.insights-ranking');
-    if (!total || !ranking) return;
-    total.classList.remove('insights-loading');
+  async function show() {
+    const id = ++requestId;
+    person ??= me();
+    host.replaceChildren(skeleton());
+    host.setAttribute('aria-busy', 'true');
+    await flushFollowTime(sync).catch(() => {});
+    await sync.push?.().catch?.(() => {});
+    const ids = sync.rows('accounts').map((a) => a.user_id).filter(Boolean).slice(0, 10);
+    const got = await Promise.all(ids.map((uid) => sync.insights(uid).then((r) => [uid, r]).catch(() => [uid, null])));
+    if (id !== requestId || !host.isConnected) return;
+    results = new Map(got);
     host.setAttribute('aria-busy', 'false');
-    host.dataset.kind = filter;
-    for (const chip of host.querySelectorAll('.insights-person')) {
-      const selected = chip.dataset.userId === person;
-      chip.classList.toggle('active', selected);
-      chip.setAttribute('aria-pressed', String(selected));
+    if (!visible(results.get(person))) person = me();
+    render();
+  }
+
+  function skeleton() {
+    const box = el('div', 'ins');
+    const t = el('div', 'ins-total'); t.append(el('i', 'ins-sk ins-sk-total'));
+    const ring = el('div', 'ins-pies'); ring.append(el('i', 'ins-sk ins-sk-ring'));
+    box.append(t, ring);
+    return box;
+  }
+
+  function render() {
+    const hidden = readHidden();
+    const people = [...results.entries()].map(([uid, r]) => ({ uid, r, ms: visible(r) ? msOf(r) : 0, locked: !visible(r) }))
+      .sort((a, b) => Number(b.uid === me()) - Number(a.uid === me()) || b.ms - a.ms);
+    const shown = people.filter((p) => !p.locked && p.ms > 0);
+    const total = shown.reduce((t, p) => t + p.ms, 0);
+    const box = el('div', 'ins');
+    box.dataset.kind = filter;
+
+    const head = el('header', 'ins-head');
+    head.append(el('small', null, 'مجموع وقت السيرفر'), el('strong', 'ins-total', duration(total)));
+    const tabs = el('nav', 'ins-tabs');
+    tabs.setAttribute('role', 'tablist');
+    for (const [k, l] of FILTERS) {
+      const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(k === filter));
+      b.onclick = () => { if (k === filter) return; filter = k; showShort = false; box.classList.add('ins-swap'); setTimeout(render, 180); };
+      tabs.append(b);
     }
-    const content = (result.content ?? []).filter((r) => (r.section === filter || filter === 'all') && r.activeMs > 0)
+
+    const pies = el('div', 'ins-pies');
+    const groups = pieGroups(shown);
+    if (!groups.length) { const e = el('p', 'ins-empty', 'لا وقت مسجّل في هذا القسم بعد'); pies.append(e); }
+    for (const g of groups) pies.append(pie(g));
+
+    const legend = el('ul', 'ins-legend');
+    for (const p of people) {
+      const li = el('li', `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}`);
+      const b = el('button'); b.type = 'button';
+      b.append(avatarNode(p.uid, 30));
+      const nm = el('span', 'ins-nm', `${profileOf(p.uid).name}${p.uid === me() ? ' (أنت)' : ''}`); nm.dir = 'auto';
+      b.append(nm, el('span', 'ins-h', p.locked ? 'مقفل' : duration(p.ms)));
+      if (p.locked) b.insertAdjacentHTML('beforeend', glyph('lock', { size: 15 }));
+      b.onclick = () => (p.locked ? toast('مقفلها', 2500) : pick(p.uid));
+      li.append(b); legend.append(li);
+    }
+
+    const works = el('section', 'ins-works');
+    paintWorks(works, hidden);
+    box.append(head, tabs, pies, legend, works);
+    host.replaceChildren(silkLayer(), box);
+    requestAnimationFrame(() => box.classList.add('ins-in'));
+  }
+
+  // خلفية الحرير نفسها التي في البنر، بلون القسم
+  let silkWrap = null, silk = null;
+  function silkLayer() {
+    if (!silkWrap) {
+      silkWrap = el('div', 'ins-silk'); silkWrap.setAttribute('aria-hidden', 'true');
+      const c = document.createElement('canvas'); silkWrap.append(c);
+      try { silk = createSilk(c); } catch { silk = null; }
+    }
+    const accent = getComputedStyle(host).getPropertyValue('--accent').trim();
+    if (silk && /^#[0-9a-f]{6}$/i.test(accent)) silk.setPalette(paletteFromAccent(accent));
+    return silkWrap;
+  }
+  function pie(group) {
+    const size = 220, cx = size / 2, r = 78, w = 30, C = 2 * Math.PI * r;
+    const wrap = el('div', 'ins-pie');
+    const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': 'توزيع الساعات' });
+    svg.append(svgEl('circle', { cx, cy: cx, r, fill: 'none', stroke: 'rgba(255,255,255,.06)', 'stroke-width': w }));
+    const slices = pieSlices(group);
+    const sum = group.reduce((t, p) => t + p.ms, 0);
+    slices.forEach((s, i) => {
+      const len = (s.sweep / 360) * C;
+      const c = svgEl('circle', { cx, cy: cx, r, fill: 'none', 'stroke-width': w, 'stroke-dasharray': `0 ${C}`, 'stroke-dashoffset': C * 0.25 - (s.start / 360) * C, class: `ins-sl${s.uid === person ? ' on' : ''}`, 'data-i': i });
+      c.style.setProperty('--o', String(1 - i * 0.14));
+      c.addEventListener('click', () => pick(s.uid));
+      svg.append(c);
+      requestAnimationFrame(() => requestAnimationFrame(() => c.setAttribute('stroke-dasharray', `${len} ${C - len}`)));
+    });
+    wrap.append(svg);
+    // الأفاتار على منتصف شريحته فوق الحلقة، بحجم محصور
+    for (const s of slices) {
+      if (s.frac < 0.06) continue;
+      const a = (s.mid - 90) * Math.PI / 180;
+      const node = avatarNode(s.uid, s.avatar);
+      node.classList.add('ins-pav');
+      node.style.left = `${((cx + r * Math.cos(a)) / size) * 100}%`;
+      node.style.top = `${((cx + r * Math.sin(a)) / size) * 100}%`;
+      node.onclick = () => pick(s.uid);
+      wrap.append(node);
+    }
+    const sel = slices.find((s) => s.uid === person);
+    const mid = el('div', 'ins-mid');
+    mid.append(el('strong', null, duration(sel ? sel.ms : sum)), el('small', null, sel ? profileOf(sel.uid).name : 'هذه الدائرة'));
+    wrap.append(mid);
+    return wrap;
+  }
+
+  function pick(uid) {
+    if (uid === person) return;
+    person = uid; showShort = false;
+    host.querySelector('.ins')?.classList.add('ins-swap');
+    setTimeout(render, 160);
+  }
+
+  function paintWorks(box, hidden) {
+    const r = results.get(person);
+    box.replaceChildren();
+    const who = profileOf(person).name;
+    box.append(el('h3', null, person === me() ? 'أعمالك' : `أعمال ${who}`));
+    if (!r || r.locked) { box.append(el('p', 'ins-empty', 'أعماله مقفلة، ساعاته فقط ظاهرة')); return; }
+    const content = (r.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0 && !(person === me() && hidden.has(x.seriesRef)))
       .sort((a, b) => b.activeMs - a.activeMs);
-    const sum = content.reduce((sum, r) => sum + r.activeMs, 0);
-    total.textContent = duration(sum);
-    total.classList.toggle('insights-total--short', sum > 0 && sum < 60000);
-    ranking.replaceChildren();
-    if (!content.length) {
-      const empty = el('div', 'insights-empty');
-      empty.innerHTML = glyph('clock', { size: 28 });
-      empty.append(el('span', null, 'لا وقت مسجّل بعد'));
-      ranking.append(empty);
-    }
-    const max = Math.max(1, ...content.map((r) => r.activeMs));
-    for (const item of content) {
-      if (!item.activeMs) continue;
-      const row = el('button', 'insights-rank');
-      row.type = 'button';
-      const fill = el('span', 'insights-bar');
-      fill.style.width = `${item.activeMs / max * 100}%`;
-      const track = el('span', 'insights-track');
-      const cover = el('span', 'insights-cover');
-      const work = workFromRef(item.seriesRef, item.title, item.coverUrl);
-      void Promise.resolve(mountImage(cover, work)).then(() => {
-        const img = cover.querySelector('img');
-        if (img) coverTone(img, item.coverUrl || item.seriesRef, fill);
-      }).catch(() => { /* retain the cover placeholder */ });
-      fill.append(cover);
-      track.append(fill);
-      const text = el('span', 'insights-rank-copy');
-      text.append(el('strong', null, item.title || work.title?.english || '—'), el('small', null, duration(item.activeMs)));
-      row.append(track, text);
-      row.setAttribute('aria-label', `${item.title || 'العمل'} · ${duration(item.activeMs)}`);
-      row.onclick = () => void openWork(work);
-      ranking.append(row);
+    if (!content.length) { box.append(el('p', 'ins-empty', 'لا وقت مسجّل بعد')); return; }
+    const { main, short } = splitShort(content);
+    const max = Math.max(1, ...content.map((x) => x.activeMs));
+    const list = el('div', 'ins-list');
+    for (const item of main) list.append(row(item, max));
+    box.append(list);
+    if (short.length) {
+      if (showShort) { const more = el('div', 'ins-list ins-short'); for (const item of short) more.append(row(item, max)); box.append(more); }
+      else {
+        const b = el('button', 'ins-more', `عرض المزيد (${short.length} أقل من 10 دقائق)`); b.type = 'button';
+        b.onclick = () => { showShort = true; paintWorks(box, readHidden()); };
+        box.append(b);
+      }
     }
   }
+
+  function row(item, max) {
+    const work = workFromRef(item.seriesRef, item.title, item.coverUrl);
+    const rowEl = el('div', 'insights-rank ins-row');
+    const main = el('button', 'ins-row-main'); main.type = 'button';
+    const fill = el('span', 'insights-bar');
+    fill.style.width = `${Math.max(8, item.activeMs / max * 100)}%`;
+    const track = el('span', 'insights-track');
+    const cover = el('span', 'insights-cover');
+    void Promise.resolve(mountImage(cover, work)).then(() => {
+      const img = cover.querySelector('img');
+      if (img) coverTone(img, item.coverUrl || item.seriesRef, fill);
+    }).catch(() => {});
+    fill.append(cover); track.append(fill);
+    const text = el('span', 'insights-rank-copy');
+    const t = el('strong', null, item.title || work.title?.english || '—'); t.dir = 'auto';
+    text.append(t, el('small', null, duration(item.activeMs)));
+    main.append(track, text);
+    main.onclick = () => void previewWork(work);
+    rowEl.append(main);
+    if (person === me()) {
+      const del = el('button', 'ins-del'); del.type = 'button'; del.setAttribute('aria-label', 'إخفاء العمل');
+      del.innerHTML = glyph('trash', { size: 18 });
+      del.onclick = () => {
+        const ok = confirm('إخفاء هذا العمل من إحصائياتك نهائيًا؟\n\nما أحد يقدر يشوفه بعدها، ولا تقدر ترجعه. ساعاتك تبقى محسوبة كما هي.');
+        if (!ok) return;
+        const h = readHidden(); h.add(item.seriesRef); writeHidden(h);
+        toast('أُخفي العمل، وساعاتك كما هي', 2500);
+        render();
+      };
+      rowEl.append(del);
+    }
+    return rowEl;
+  }
+
   return { show };
 }

@@ -2903,9 +2903,60 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // من المجلس والملف: لمسة على عملٍ تعرض غلافه ونبذته أولًا، ثم «افتح».
   // لمسةٌ بالغلط وأنت تمرّر لا تنقلك من مكانك.
 
+  /** ورقة «افتح العمل» للأنمي والسينما: نفس ورقة المانجا بلون قسمها، فلا يُفتح عمل بلمسة خاطئة. */
+  function previewVideo(work, section, { chapter = null } = {}) {
+    let alive = true;
+    const id = String(work.id);
+    const openIt = () => (section === 'anime'
+      ? openAnimeRef(id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter })
+      : openCinemaRef(id, { title: titleOf(work), cover: work.coverImage?.large ?? null }));
+    openSheet((body) => {
+      const box = el('div', 'pv');
+      const cover = el('div', 'pv-cover');
+      void mountImage(cover, work);
+      const copy = el('div', 'pv-copy');
+      const title = el('h3', 'pv-title', titleOf(work));
+      title.dir = 'auto';
+      const meta = el('div', 'pv-meta');
+      const desc = el('p', 'pv-desc');
+      desc.innerHTML = '<span class="skeleton-line"></span><span class="skeleton-line"></span>';
+      copy.append(title, meta, desc);
+      box.append(cover, copy);
+      const actions = el('div', 'sheet-actions pv-actions');
+      const open = el('button', 'btn btn-primary btn-block');
+      open.type = 'button';
+      open.innerHTML = glyph('play', { filled: true });
+      open.append(el('span', null, section === 'anime' ? 'افتح الأنمي' : 'افتح العمل'));
+      open.onclick = () => { closeSheet(); openIt(); };
+      actions.append(open);
+      body.append(box, actions);
+      const done = (bits, text) => {
+        if (!alive) return;
+        meta.textContent = bits.filter(Boolean).join(' · ');
+        desc.textContent = text || 'لا توجد نبذة.';
+        desc.dir = 'auto';
+      };
+      const fail = () => { if (alive) desc.textContent = 'ما قدرنا نجيب النبذة الحين.'; };
+      if (section === 'anime') {
+        const aid = Number(id.split(':')[1]);
+        if (Number.isFinite(aid)) void fetchAnimeDetail(aid).then((d) => done(['أنمي', (d?.genres ?? []).slice(0, 3).map(genreAr).join(' · '), d?.episodes ? `${d.episodes} حلقة` : ''], d?.description)).catch(fail);
+        else fail();
+      } else {
+        const [, imdb] = id.split(':');
+        void import('../lib/cinema-meta.js').then(async ({ detail }) => {
+          for (const type of ['series', 'movie']) {
+            const d = await detail(type, imdb).catch(() => null);
+            if (d) return done([type === 'series' ? 'مسلسل' : 'فيلم', d.year, (d.genres ?? []).slice(0, 3).map(genreAr).join(' · ')], d.description);
+          }
+          fail();
+        }).catch(fail);
+      }
+      return () => (alive = false);
+    }, { tone: section });
+  }
   function previewWork(work, { chapter = null } = {}) {
-    if (isAnimeRef(work?.id)) return openAnimeRef(work.id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter });
-    if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
+    if (isAnimeRef(work?.id)) return previewVideo(work, 'anime', { chapter });
+    if (String(work?.id ?? '').startsWith('cinema:')) return previewVideo(work, 'cinema');
     let alive = true;
     openSheet((body) => {
       const box = el('div', 'pv');
@@ -6118,7 +6169,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh();
   }
 
-  const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
+  const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, previewWork: (w) => previewWork(w), workFromRef, toast });
 
   const actions = {
     toggleSections: () => dock().consumeDrag() || dock().toggle(),
