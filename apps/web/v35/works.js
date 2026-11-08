@@ -14,6 +14,7 @@ import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
 import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
+import { coverCandidates, pickCover } from '../lib/manga-cover.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
@@ -615,6 +616,13 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
  * cards when an alternate title first appears on a later source page.
  * Preserve the earliest card's position and every edition/source.
  */
+const withCover = (item, cover) => ({
+  ...item,
+  coverImage: { ...item.coverImage, extraLarge: cover, large: cover, medium: cover },
+  bannerImage: cover,
+  ...(item._work ? { _work: { ...item._work, thumbnailUrl: cover } } : {}),
+});
+
 export function mergeWorkPages(items) {
   const index = workIndex();
   const positions = new Map();
@@ -655,7 +663,7 @@ export function mergeWorkPages(items) {
   const grouped = index.list().map((work) => {
     work.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
     work.title = work.editions[0]?.manga?.title ?? work.title;
-    work.thumbnailUrl = work.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? work.thumbnailUrl;
+    work.thumbnailUrl = pickCover(work.editions.map((e) => ({ url: e.manga?.thumbnailUrl, sourceId: e.sourceId })), { rank: sourceRank }) ?? work.thumbnailUrl;
     const before = [...new Set(work.keys.flatMap((key) => [...(originalsByKey.get(key) ?? [])]))];
     const preserved = {};
     for (const item of before) for (const [key, value] of Object.entries(item)) {
@@ -693,7 +701,10 @@ export function mergeWorkPages(items) {
     const cls = canonicalRefOf(String(entry.item.id));
     const prior = byClass.get(cls);
     if (!prior) { byClass.set(cls, entry); continue; }
-    const richer = !prior.item._work?.editions?.length && entry.item._work?.editions?.length ? entry.item : prior.item;
+    let richer = !prior.item._work?.editions?.length && entry.item._work?.editions?.length ? entry.item : prior.item;
+    // غلاف واحد للعمل: الرسمي (AniList) من أيٍّ من البطاقتين يسبق غلاف المصادر
+    const cover = pickCover([...coverCandidates(prior.item), ...coverCandidates(entry.item)], { rank: sourceRank });
+    if (cover && cover !== richer.coverImage?.large) richer = withCover(richer, cover);
     byClass.set(cls, { position: Math.min(prior.position, entry.position), item: richer });
   }
   return [...byClass.values()]
@@ -861,7 +872,7 @@ export async function detail(v35work) {
   const chapters = localizeFiller(mergeChapters(values, { rank: sourceRank }));
   const answered = new Set(values.map((v) => v.sourceId));
   // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
-  const cover = v35work.coverImage?.large || main?.detail?.thumbnailUrl || values.find((v) => v.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const cover = v35work.coverImage?.large || pickCover(values.flatMap((v) => [{ url: v.detail?.thumbnailUrl, sourceId: v.sourceId }, { url: v.manga?.thumbnailUrl, sourceId: v.sourceId }]), { rank: sourceRank });
   const covered = cover && !v35work.coverImage?.large
     ? { coverImage: { extraLarge: cover, large: cover, medium: cover, color: null }, bannerImage: cover, _work: { ...work, thumbnailUrl: cover } }
     : {};
@@ -918,7 +929,7 @@ const FIRST_OPEN_HOLD_MS = 3500;
 /** العمل كاملًا من نسخٍ بفصولها: ما تعرضه صفحة العمل ويقرؤه القارئ. */
 function assemble(v35work, editions, detail, failed = []) {
   const chapters = localizeFiller(mergeChapters(editions, { rank: sourceRank }));
-  const cover = v35work.coverImage?.large || detail?.thumbnailUrl || editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const cover = v35work.coverImage?.large || detail?.thumbnailUrl || pickCover(editions.map((e) => ({ url: e.manga?.thumbnailUrl, sourceId: e.sourceId })), { rank: sourceRank });
   const base = v35work._work ?? { key: String(v35work.id).replace(/^ext:/, ''), title: v35work.title?.english, editions: [] };
   const work = {
     ...base,

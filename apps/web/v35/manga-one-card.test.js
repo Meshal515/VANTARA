@@ -106,6 +106,24 @@ describe('manga listing: one work = one card', () => {
     expect(mergeWorkPages([fromTrending, { id: 'ext:kimetsu no yaiba', title: { english: 'Kimetsu no Yaiba' } }])).toHaveLength(1);
   });
 
+  it('one cover per work: the official AniList cover survives the merge, whatever the order', () => {
+    noteRefAlias('ext:demon slayer kimetsu no yaiba', 'ext:kimetsu no yaiba');
+    const AL = 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx87216.jpg';
+    const fromTrending = { id: 'ext:demon slayer kimetsu no yaiba', _metaId: 87216, title: { english: 'Demon Slayer: Kimetsu no Yaiba' }, coverImage: { extraLarge: AL, large: AL }, _work: { key: 'demon slayer kimetsu no yaiba', editions: [] } };
+    const fromSource = card('ar.a', 'Kimetsu no Yaiba', '/kny', { thumbnailUrl: 'https://src/kny.jpg' });
+    for (const order of [[fromTrending, fromSource], [fromSource, fromTrending]]) {
+      const [merged] = mergeWorkPages(order);
+      expect(merged.coverImage.large).toBe(AL);
+      expect(merged._work.thumbnailUrl).toBe(AL);
+    }
+  });
+
+  it('one cover per work: without an official cover the most trusted source wins, not the first to answer', () => {
+    const lek = card(`${P}.ar.mangalek`, 'Magic Emperor', '/m1', { thumbnailUrl: 'https://lek/m.jpg' });
+    const other = card(`${P}.ar.zzz`, 'Magic Emperor', '/m2', { thumbnailUrl: 'https://zzz/m.jpg' });
+    for (const order of [[lek, other], [other, lek]]) expect(mergeWorkPages(order)[0].coverImage.large).toBe('https://lek/m.jpg');
+  });
+
   it('merges a thousand works with five sources without writing the full reference graph per edition', () => {
     const data = new Map();
     let writes = 0;
