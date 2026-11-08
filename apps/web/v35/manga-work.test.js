@@ -18,6 +18,7 @@ describe('أنماط صفحة عمل المانجا', () => {
   it('كل نمط يبني العناصر التي يملؤها shell.js بمعرّفاتها مرة واحدة', () => {
     for (const look of MANGA_LOOKS) {
       const html = detailMarkup(look, { glyph, iconButton });
+      expect(html.match(/<button class="mw-cta"[\s\S]*?<\/button>/)?.[0], look).toContain('data-g="book"');
       for (const id of ['detailTop', 'detailTools', 'detailMenu', 'detailScrim', 'detailCover', 'detailTitle', 'readCta', 'readCtaLabel', 'readCtaSub', 'libraryBtn', 'sourceRow', 'chapterPanel', 'chapterCount', 'chapterSort', 'description', 'moreToggle', 'infoGrid', 'detailStats', 'detailGenres', 'detailInsights']) {
         expect(html.split(`id="${id}"`).length - 1, `${look}: ${id}`).toBe(1);
       }

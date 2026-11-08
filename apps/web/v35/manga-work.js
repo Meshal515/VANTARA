@@ -104,7 +104,7 @@ export function detailMarkup(look, { glyph, iconButton }) {
   const genres = '<div class="mw-chips" id="detailGenres"></div>';
   const cta = (label = 'جارٍ جمع الفصول') =>
     `<button class="mw-cta" type="button" id="readCta" data-act="readNow" disabled><span class="mw-cta-text"><b id="readCtaLabel">${label}</b>` +
-    `<small id="readCtaSub" dir="auto"></small></span><span class="mw-go" aria-hidden="true">${glyph('play', { size: 16, filled: true })}</span></button>`;
+    `<small id="readCtaSub" dir="auto"></small></span><span class="mw-go" aria-hidden="true">${glyph('book', { size: 16 })}</span></button>`;
   const quick = (id, act, icon, label) =>
     `<button class="mw-quick-btn" type="button" id="${id}" data-act="${act}" aria-pressed="false">${glyph(icon, { size: 18 })}<span>${label}</span></button>`;
   const quick3 =
