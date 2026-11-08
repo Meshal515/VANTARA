@@ -24,8 +24,8 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { sideDock } from './side-dock.js';
-import { glyph } from './icons.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, mangaLook, rowsForMark, rowsInGroup } from './manga-work.js';
+import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
@@ -268,11 +268,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // الشريط الجانبي للشاشات العريضة يُرسم بعد اكتمال الإقلاع (يقرأ رفيق والحساب)
   const wideScreen = globalThis.matchMedia?.('(min-width: 1024px)');
   let railReady = false;
-  // صفحة العمل على الكمبيوتر: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب الفصول
-  const detailDock = sideDock(
-    () => [q('detailCover'), root.querySelector('#detail .detail-cta'), root.querySelector('#detail .detail-quick'), q('detailProgress')],
-    { query: wideScreen, className: 'detail-side' },
-  );
 
   const state = {
     home: { trending: [], featured: [], recent: [], popular: [] },
@@ -672,7 +667,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // مصدرٌ يعرض مصغّرًا خفيفًا لغلافه الكبير: يظهر فورًا والكبير يحلّ محله
     let previewShown = false;
     const preview = candidates.map((c) => coverPreview(c.url)).find(Boolean);
-    if (preview) {
+    // صفحة العمل (`final`): لا معاينة صغيرة يحلّ محلها الكبير أمام العين؛ الهيكل حتى يصل النهائي
+    if (preview && !opts.final) {
       const small = await tryUrl(preview, 4000);
       if (container.dataset.imageToken !== token) return null;
       if (small) {
@@ -685,12 +681,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const saved = await nativeCover(url, sourceId);
       if (container.dataset.imageToken !== token) return null;
       const late = (img) => {
+        if (opts.final) img.classList.add('img-fade');
         rememberCover(id, url);
         show(img, img.src, url, sourceId);
       };
       const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000, late));
       if (container.dataset.imageToken !== token) return null;
       if (img) {
+        // من الشبكة: يظهر بتلاشٍ واحد فوق الهيكل (المحفوظ والمعروف يظهران فورًا بلا حركة)
+        if (opts.final) img.classList.add('img-fade');
         rememberCover(id, url);
         return show(img, img.src, url, sourceId);
       }
@@ -1528,8 +1527,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterSource = null;
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
+    state.chapterRange = null;
     if (work._work?.editions?.length) rememberWork(work);
     showPage('detail');
+    mountDetail();
     renderDetail(work);
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
@@ -1623,80 +1624,154 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
     }
   }
-  /** رقم الصفحة في صفحة العمل: عدد الفصول الصحيحة (بلا الجانبية)، كبيرًا. */
-  function paintFolio(w) {
-    const host = q('detailFolio');
-    const n = w._chapters ? countMainChapters(w._chapters) : null;
-    if (!n) return void host.replaceChildren(el('b', null, '—'));
-    host.replaceChildren(el('b', null, String(n)), el('span', null, n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا'));
+  /**
+   * هيكل صفحة العمل بالنمط المختار في الإعدادات (manga-work.js). يُبنى عند كل فتح عمل؛ التحديثات بعده
+   * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
+   */
+  function mountDetail() {
+    closeDetailMenu();
+    state.marking = null;
+    const page = q('detail');
+    const look = mangaLook(workStyleOf('manga'));
+    page.dataset.look = look;
+    page.innerHTML = detailMarkup(look, { glyph, iconButton });
+    state.detailLook = look;
+    if (look === 'gallery') bindDetailTabs();
+    paintDetailTools();
+  }
+  const lookIs = (look) => state.detailLook === look;
+  /** «★ 8.4 · 201 فصلًا · 2018» (أو ثلاثة أرقام كبيرة في «الملف»). التقييم من AniList حين يُعرف. */
+  function paintStats(w) {
+    const host = q('detailStats');
+    if (!host) return;
+    const n = w._chapters ? countMainChapters(w._chapters) : Number(w.chapters) || 0;
+    const year = w.startDate?.year ?? null;
+    const ref = String(w.id);
+    const known = Number(w.averageScore) > 0 ? Number(w.averageScore) / 10 : state.detailScore?.ref === ref ? state.detailScore.score : null;
+    // التقييم يُسأل عنه مرة: «جارٍ» يحجز مكانه فلا يدفع ما بجانبه حين يصل
+    const pending = !(Number(w.averageScore) > 0) && !(state.detailScore?.ref === ref && state.detailScore.done);
+    const chaptersWord = n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا';
+    const reserve = (node) => {
+      node.classList.add('mw-hold');
+      return node;
+    };
+    if (lookIs('profile')) {
+      // ثلاث خانات ثابتة دائمًا: ما لم يُعرف بعد شرطة في مكانه
+      const cell = (value, label, star = false) => {
+        const d = el('div');
+        const b = el('b');
+        if (star && value !== '—') b.innerHTML = '<span class="mw-star">★</span> ';
+        b.append(String(value));
+        d.append(b, el('small', null, label));
+        return d;
+      };
+      host.replaceChildren(
+        cell(known ? known.toFixed(1) : '—', 'التقييم', true),
+        cell(n || '—', n ? chaptersWord : 'فصلًا'),
+        cell(STATUS_AR[w.status] ?? '—', year ? String(year) : 'الحالة'),
+      );
+    } else {
+      const parts = [];
+      if (known || pending) {
+        const s = el('span');
+        s.innerHTML = '<span class="mw-star">★</span> ';
+        s.append(el('b', null, known ? known.toFixed(1) : '0.0'));
+        parts.push(known ? s : reserve(s));
+      }
+      const c = el('span');
+      c.append(el('b', null, n ? String(n) : '000'), ` ${n ? chaptersWord : 'فصلًا'}`);
+      parts.push(n ? c : reserve(c));
+      if (year) parts.push(el('span', null, String(year)));
+      host.replaceChildren(...parts);
+    }
+    if (!(Number(w.averageScore) > 0) && state.detailScore?.ref !== ref) {
+      state.detailScore = { ref, score: null, done: false };
+      void ratingFor(w._work?.title || w.title?.english || titleOf(w)).then((rated) => {
+        if (state.detailScore?.ref !== ref) return;
+        state.detailScore.done = true;
+        if (rated?.score && !rated.adult) state.detailScore.score = rated.score;
+        if (state.current && String(state.current.id) === ref) paintStats(state.current);
+      });
+    }
+  }
+  /** «مانهوا · مكتمل»: نوع العمل إن عُرف بلده، وحالته؛ وإلا تصنيفه الأول. */
+  function kickerOf(w) {
+    const kind = { KR: 'مانهوا', JP: 'مانجا', CN: 'مانها' }[w.countryOfOrigin] ?? null;
+    const parts = [kind, STATUS_AR[w.status]].filter(Boolean);
+    return parts.length ? parts.join(' · ') : (w.genres || []).slice(0, 1).map(genreAr).join('');
+  }
+  /** القصة: هيكل ثلاثة أسطر حتى تصل النبذة، ثم النص في المساحة نفسها (لا إزاحة). */
+  function paintStory(w) {
+    const text = clean(w.description);
+    const d = q('description');
+    const more = q('moreToggle');
+    if (w.description === undefined && !text) {
+      d.innerHTML = '<span class="mw-skel-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
+      d.classList.add('clamped');
+      more.hidden = false;
+      more.classList.add('mw-hold');
+      return;
+    }
+    d.textContent = text || 'لا توجد نبذة من المصدر.';
+    d.classList.add('clamped');
+    more.textContent = 'المزيد';
+    more.hidden = false;
+    // «المزيد» يحجز سطره دائمًا: يختفي بالشفافية لا من التخطيط
+    more.classList.add('mw-hold');
+    requestAnimationFrame(() => more.classList.toggle('mw-hold', d.scrollHeight <= d.clientHeight + 2));
   }
   /** العدد والتصنيف والنبذة تتحدّث مكانها، بلا إعادة الغلاف ولا قفزة. */
   function refreshDetailMeta(w) {
-    paintFolio(w);
-    const sub = q('detailSub');
-    sub.replaceChildren();
-    if (w.status && STATUS_AR[w.status]) {
-      const st = el('span', 'status-dot', STATUS_AR[w.status]);
-      st.dataset.status = w.status;
-      sub.append(st);
-    }
-    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
-    const editions = w._sources ?? [];
-    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
+    paintStats(w);
+    const kick = q('detailKicker');
+    if (kick) kick.textContent = kickerOf(w);
+    paintStory(w);
     renderInfo(w);
   }
   function renderDetail(w) {
     const title = titleOf(w);
-    const h1 = q('detailTitle');
-    h1.textContent = title;
-    h1.dir = 'auto';
+    q('detailTitle').textContent = title;
     q('detailTopTitle').textContent = title;
-    q('detailTopTitle').dir = 'auto';
-
-    const sub = q('detailSub');
-    sub.replaceChildren();
-    if (w.status && STATUS_AR[w.status]) {
-      const s = el('span', 'status-dot', STATUS_AR[w.status]);
-      s.dataset.status = w.status;
-      sub.append(s);
-    }
-    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
-    const editions = w._sources ?? w._work?.editions ?? [];
-    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
-
-    q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
-    q('detailKicker').textContent = (w.genres || []).slice(0, 3).map(genreAr).join(' · ');
-    paintFolio(w);
+    const kick = q('detailKicker');
+    if (kick) kick.textContent = kickerOf(w);
+    const who = q('detailWho');
+    if (who) who.textContent = unique((w.staff?.edges || []).map((e) => e.node?.name?.full).filter(Boolean)).join(' · ');
+    paintStats(w);
+    q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'mw-chip', genreAr(x))));
 
     const cover = q('detailCover');
     if (cover.dataset.for !== String(w.id)) {
       cover.dataset.for = String(w.id);
       const glow = q('detailGlow');
-      glow.classList.remove('ready');
-      glow.style.backgroundImage = '';
-      void mountImage(cover, w).then((url) => {
-        if (!url || state.current?.id !== w.id) return;
-        glow.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
-        glow.classList.add('ready');
+      glow?.classList.remove('ready');
+      glow?.removeAttribute('src');
+      // الغلاف النهائي وحده بلا معاينة صغيرة قبله، وتلاشٍ واحد على الأكثر؛ المحفوظ يظهر فورًا
+      void mountImage(cover, w, { final: true }).then((url) => {
+        if (!url || state.current?.id !== w.id || !glow) return;
+        // الضوء من الغلاف نفسه بعُشر حجمه (الصورة في الذاكرة من الغلاف): ضبابية صغيرة ثم تكبير ×10
+        glow.onload = () => glow.classList.add('ready');
+        glow.src = url;
       });
+      // «الملف»: صورة العمل العريضة من AniList؛ عمل بلا صورة عريضة يلبس ضوء غلافه مكانها
+      const banner = q('detailBanner');
+      if (banner) {
+        const wide = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
+        banner.closest('.mw-ban')?.classList.toggle('mw-ban--art', Boolean(wide));
+        banner.onload = () => banner.classList.add('ready');
+        if (wide) banner.src = wide;
+        else banner.removeAttribute('src');
+      }
     }
-
-    const text = clean(w.description);
-    const d = q('description');
-    d.textContent = text || (w.description === undefined ? '' : 'لا توجد نبذة من المصدر.');
-    d.classList.add('clamped');
-    q('summaryBlock').hidden = w.description === undefined && !text;
-    requestAnimationFrame(() => {
-      q('moreToggle').hidden = d.scrollHeight <= d.clientHeight + 2;
-      q('moreToggle').textContent = 'المزيد';
-    });
+    paintStory(w);
     refreshLibraryDetail();
-    renderRating();
+    paintSimilarTab(w);
     renderInfo(w);
     const insightHost = q('detailInsights');
-    insightHost.dataset.ref = String(w.id);
-    insightHost.replaceChildren();
-    void paintWorkInsights(insightHost, { sync, ref: String(w.id), openProfile });
+    if (insightHost.dataset.ref !== String(w.id)) {
+      insightHost.dataset.ref = String(w.id);
+      insightHost.replaceChildren();
+      void paintWorkInsights(insightHost, { sync, ref: String(w.id), openProfile });
+    }
   }
   function toggleSummary() {
     const d = q('description');
@@ -1704,22 +1779,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('moreToggle').textContent = clamped ? 'المزيد' : 'أقل';
   }
   /**
-   * «ترجمة تلقائية» بجانب العين: تظهر فقط لعملٍ فيه فصول إنجليزية، ومقفلة
-   * افتراضيًا. مفعّلة = كل فصل إنجليزي تدخله يجهّز 30% منه بالعربي أولًا.
+   * «الترجمة العربية» في قائمة «المزيد»: تظهر فقط لعملٍ فيه فصول إنجليزية والترجمة مفعّلة في الإعدادات.
+   * مفعّلة = كل فصل إنجليزي تدخله يجهّز 30% منه بالعربي أولًا.
    */
+  function translateAvailable(w) {
+    return Boolean(w?._chapters?.some((c) => c.lang === 'en')) && readTranslateSettings().enabled && supports('translation');
+  }
   function renderTranslateToggle(w) {
-    const b = q('detailTlBtn');
-    if (!b) return;
-    const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish || !readTranslateSettings().enabled || !supports('translation');
-    const on = translationOn(String(w?.id ?? ''));
-    b.setAttribute('aria-pressed', String(on));
-    b.classList.toggle('detail-tl--on', on);
-    const running = translationJobs.forWork(String(w?.id ?? '')).some((j) => j.status === 'running');
-    b.classList.toggle('detail-tl--busy', running);
-    const label = running ? 'الترجمة العربية: فصول تُترجم الحين' : on ? 'الترجمة العربية: شغّالة لهذا العمل' : 'الترجمة العربية';
-    b.setAttribute('aria-label', label);
-    b.title = label;
+    if (state.current === w && currentPage() === 'detail') paintDetailMenu();
   }
   function toggleReadingTranslation(w) {
     const on = !translationOn(String(w.id));
@@ -2223,43 +2290,85 @@ export function mountV35(deps, { page = 'home' } = {}) {
     );
     // خانة وحيدة في شبكة من عمودين تترك نصفها فارغًا
     if (pairs.length % 2) grid.append(el('div', 'info-box'));
-    grid.parentElement.hidden = pairs.length === 0;
+    grid.hidden = pairs.length === 0;
   }
   function chapterMessage(text) {
     q('chapterPanel').replaceChildren(el('div', 'no-data', text));
   }
   function renderChaptersLoading() {
-    q('chapterCount').textContent = '';
-    q('sourcesBlock').hidden = true;
-    q('detailProgress').hidden = true;
-    const list = el('div', 'chapter-list');
+    const count = q('chapterCount');
+    if (count) count.textContent = ' ';
+    // كل ما سيظهر مع الفصول يحجز مكانه الآن بهيكل بشكله (لا شيء يدفع غيره حين تصل)
+    const src = q('sourcesBlock');
+    src.hidden = false;
+    q('sourceRow').replaceChildren(...[96, 84, 92].map((wpx) => {
+      const chip = el('span', 'source-chip skeleton');
+      chip.style.width = `${wpx}px`;
+      return chip;
+    }));
+    const progress = q('detailProgress');
+    if (progress) {
+      progress.hidden = false;
+      q('progressFill').style.width = '0%';
+      q('progressText').textContent = ' ';
+      q('progressNote').textContent = '';
+    }
+    const ranges = q('chapterRanges');
+    if (ranges) {
+      ranges.hidden = false;
+      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton')));
+    }
+    // الهيكل بعدد ما سيأتي: نطاق كامل (50) في الشبكة إن عُرف أن الفصول أكثر، وإلا عددها
+    const grid = lookIs('resume');
+    const known = Number(state.current?.chapters) || 0;
+    const cells = known ? Math.min(50, known) : 30;
+    const list = el('div', grid ? 'mw-grid' : 'mw-chs');
     list.setAttribute('aria-busy', 'true');
-    for (let i = 0; i < 6; i++) {
-      const row = el('div', 'chapter-row');
-      row.innerHTML =
-        '<div class="chapter-open"><span class="skeleton-line" style="width:40%;margin:0"></span><span class="skeleton-line" style="width:24%"></span></div>';
-      list.append(row);
+    for (let i = 0; i < (grid ? cells : 8); i++) {
+      if (grid) list.append(el('span', 'mw-cell skeleton'));
+      else {
+        const row = el('div', 'mw-ch mw-ch--skel');
+        row.innerHTML = '<span class="mw-ch-open"><span class="n"></span><span class="t"><span class="skeleton-line" style="width:40%;margin:0"></span><span class="skeleton-line" style="width:24%"></span></span></span>';
+        list.append(row);
+      }
     }
     q('chapterPanel').replaceChildren(list);
     setReadCta(undefined);
   }
 
+  const chapterNumberText = (r) => (Number.isFinite(r?.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
+  /** اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») لا يُكرَّر: يُكتب «الفصل 48» بالعربي. */
+  const plainChapterName = (name) => !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
+
   /**
-   * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح.
-   * `undefined` = الفصول تُجمع، `null` = لا فصول.
+   * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح ومصدره («الفصل 143 · Team X»).
+   * `undefined` = الفصول تُجمع، `null` = لا فصول. «من حيث وقفت» يكتب رقم الفصل كبيرًا فوقه.
    */
   function setReadCta(next, { started = false } = {}) {
     const btn = q('readCta');
     const label = q('readCtaLabel');
     const sub = q('readCtaSub');
+    if (!btn) return;
     btn.disabled = !next;
-    sub.textContent = '';
+    // سطر الفصل يحجز مكانه دائمًا: الاسم لا يقفز للأعلى حين يصل
+    sub.textContent = '\u00a0';
+    const resume = lookIs('resume');
     if (next === undefined) label.textContent = 'جارٍ جمع الفصول';
-    else if (next === null) label.textContent = 'لا فصول متاحة';
+    else if (next === null) {
+      label.textContent = 'لا فصول متاحة';
+      if (q('sourceRow')?.querySelector('.skeleton')) q('sourcesBlock').hidden = true;
+      if (q('chapterRanges')?.querySelector('.skeleton')) q('chapterRanges').hidden = true;
+    }
     else {
-      label.textContent = started ? 'تابع القراءة' : 'ابدأ القراءة';
-      sub.textContent = next.chapter.name || `الفصل ${next.number}`;
-      sub.dir = 'auto';
+      label.textContent = resume ? (started ? 'تابع الآن' : 'ابدأ الآن') : started ? 'تابع القراءة' : 'ابدأ القراءة';
+      const name = next.chapter?.name || '';
+      const from = next.chapter?.scanlator || (state.current?._sources ?? []).find((x) => x.sourceId === next.sourceId)?.label || '';
+      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ') || '\u00a0';
+    }
+    if (resume) {
+      q('resumeNum').textContent = next ? chapterNumberText(next) : '—';
+      q('resumeKick').textContent = next && !started ? 'ابدأ من أول فصل' : 'تابع من حيث وقفت';
+      q('resumeLabel').textContent = next && !started ? 'الفصل الأول' : 'الفصل التالي';
     }
   }
 
@@ -2366,10 +2475,71 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return ordered[at + 1] ?? ordered[at];
   }
 
+  /** آخر مرة قرأت فيها هذا العمل (آخر تقدم محفوظ). */
+  function lastReadAt(ref) {
+    const userId = sync.user?.userId;
+    const refs = refsOf(ref);
+    return sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref)).reduce((t, r) => Math.max(t, Number(r.updated_at) || 0), 0);
+  }
+  /** شريط التقدّم وسطره بصياغة النمط: «قرأت 142 من 201» ومعه آخر قراءة، أو ما بقي. */
+  function paintProgress(w, readCount, total) {
+    const box = q('detailProgress');
+    if (!box) return;
+    box.hidden = false;
+    q('progressFill').style.width = `${Math.round((readCount / total) * 100)}%`;
+    const left = total - readCount;
+    const did = readCount ? `قرأت ${readCount} من ${total}` : 'لم تبدأ بعد';
+    let note = '';
+    let text = did;
+    if (lookIs('gallery')) text = readCount && left ? `${did} · باقي ${countLabel(left, 'chapter')}` : did;
+    else if (lookIs('resume')) note = left ? `باقي ${countLabel(left, 'chapter')}` : 'قرأته كله';
+    else {
+      const at = readCount ? lastReadAt(String(w.id)) : 0;
+      note = at ? `آخر قراءة ${agoAr(at)}` : '';
+    }
+    q('progressText').textContent = text;
+    q('progressNote').textContent = note;
+  }
+  /** نطاقات كل 50 («الملف» و«من حيث وقفت»): الأحدث أولًا مع ترتيب الفصول، ويُفتح على المختار أو الافتراضي. */
+  function paintRanges(w, rows, next) {
+    const host = q('chapterRanges');
+    if (!host) return { groups: [], at: 0 };
+    const groups = chapterGroups(rows.map((r) => Number(r.number)));
+    host.hidden = groups.length < 2;
+    if (groups.length < 2) {
+      host.replaceChildren();
+      return { groups: [], at: 0 };
+    }
+    // «من حيث وقفت» يفتح على نطاق فصلك؛ «الملف» على أول نطاق في الترتيب (الأحدث)
+    const fallback = lookIs('resume') && next ? groupIndexOf(groups, Number(next.number)) : state.chapterNewestFirst ? groups.length - 1 : 0;
+    const at = state.chapterRange !== null && state.chapterRange < groups.length ? state.chapterRange : fallback;
+    const order = groups.map((_g, i) => i);
+    if (state.chapterNewestFirst) order.reverse();
+    host.replaceChildren(
+      ...order.map((i) => {
+        const [a, b] = groups[i];
+        const btn = el('button', i === at ? 'on' : '');
+        btn.type = 'button';
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', String(i === at));
+        const label = el('bdi', null, `${a}–${b}`);
+        label.dir = 'ltr';
+        btn.append(label);
+        btn.onclick = () => {
+          state.chapterRange = i;
+          renderChapters(w);
+        };
+        return btn;
+      }),
+    );
+    return { groups, at };
+  }
+
   function renderChapters(w) {
     const all = w._chapters ?? [];
     if (!all.length) {
-      q('chapterCount').textContent = '';
+      const count = q('chapterCount');
+      if (count) count.textContent = '';
       chapterMessage('المصادر لم تُرجع فصولًا لهذا العمل.');
       setReadCta(null);
       return;
@@ -2390,30 +2560,39 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clearTimeout(state.warmTimer);
       state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
     }
-
-    q('detailProgress').hidden = false;
-    q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
-    q('progressText').textContent = readCount ? `قرأت ${readCount} من ${all.length}` : 'لم تبدأ بعد';
+    paintProgress(w, readCount, all.length);
+    paintStats(w);
 
     const rows = visibleRows(w);
     // العدد فصولٌ صحيحة فقط؛ الجانبية (128.1) تُعرض في القائمة ولا تُعدّ
     const main = countMainChapters(rows);
-    q('chapterCount').textContent = main < rows.length ? `${main} · +${rows.length - main} جانبي` : String(main);
-    const list = el('div', 'chapter-list');
-    const fragment = document.createDocumentFragment();
+    q('chapterCount').textContent = main < rows.length ? `${countLabel(main, 'chapter')} · +${rows.length - main} جانبي` : countLabel(main, 'chapter');
+    const sort = q('chapterSort')?.querySelector('span');
+    if (sort) sort.textContent = state.chapterNewestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا';
     const nextKey = chapterKeyOf(ref, next);
-    for (const r of rows.slice(0, state.chapterShown)) {
-      fragment.append(chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
-    }
-    list.append(fragment);
-    const parts = [list];
+    const parts = [];
     for(const source of w._lockedSources??[]){
       const note=el('p','chapter-locked-note');
       note.innerHTML=glyph('lock');
       note.append(el('span',null,`في ${source.label} فصول مقفلة حتى الفصل ${source.lockedMax}`));
-      parts.unshift(note);
+      parts.push(note);
     }
-    const rest = rows.length - state.chapterShown;
+    const ranged = lookIs('profile') || lookIs('resume');
+    const { groups, at } = ranged ? paintRanges(w, rows, next) : { groups: [], at: 0 };
+    const shown = ranged ? rowsInGroup(rows, groups, at) : rows.slice(0, state.chapterShown);
+    const fragment = document.createDocumentFragment();
+    if (lookIs('resume')) {
+      const grid = el('div', 'mw-grid');
+      for (const r of shown) fragment.append(chapterCell(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
+      grid.append(fragment);
+      parts.push(grid);
+    } else {
+      const list = el('div', 'mw-chs');
+      for (const r of shown) fragment.append(chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
+      list.append(fragment);
+      parts.push(list);
+    }
+    const rest = ranged ? 0 : rows.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
       more.type = 'button';
@@ -2425,54 +2604,175 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     q('chapterPanel').replaceChildren(...parts);
   }
-  function chapterRow(w, r, isRead, isNext) {
-    const ref = String(w.id);
-    const row = el('div', `chapter-row${isRead ? ' is-read' : ''}${isNext ? ' is-next' : ''}`);
-    const open = el('button', 'chapter-open');
-    open.type = 'button';
-    // رقم الفصل كبيرًا في البداية كترقيم صفحات كتاب، والاسم والتاريخ بجانبه
-    const num = el('span', 'chapter-num', Number.isFinite(r.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
-    num.dir = 'ltr';
-    // اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») يتكرر بجانب الرقم الكبير:
-    // يُكتفى بالتاريخ، ويبقى الاسم حين يحمل عنوانًا
-    const name = r.chapter.name || '';
-    const plain = !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
-    const when = dateLabel(r.chapter.dateUpload);
-    const no = el('div', 'chapter-no', plain ? when || `الفصل ${r.number}` : name);
-    no.dir = 'auto';
-    const note = el(
-      'div',
-      'chapter-note',
-      (plain ? [r.chapter.scanlator] : [when, r.chapter.scanlator]).filter(Boolean).join(' · '),
+  // ── «علّم فصول»: وضع تحديد فوق القائمة أو الشبكة في الأنماط الأربعة ──
+  // لمسة الفصل تحدّده بدل أن تفتحه؛ والشريط السفلي: مقروء، غير مقروء، كل ما قبله، ما بينهما.
+  // الحفظ بالآلية نفسها (chapter.markMany في الطابور، والطبقة المتفائلة تعرضه فورًا).
+
+  function enterMarkMode() {
+    const w = state.current;
+    if (!w?._chapters?.length) return toast('انتظر لين تجهز الفصول');
+    state.marking = { picked: new Map() };
+    const page = q('detail');
+    page.classList.add('mw-marking');
+    // «المعرض»: الفصول في تبويبها
+    const tab = q('detailTabs')?.querySelector('[data-tab="chapters"]');
+    if (tab && tab.getAttribute('aria-selected') !== 'true') tab.click();
+    let bar = q('markBar');
+    if (!bar) {
+      bar = el('div', 'mw-selbar');
+      bar.id = 'markBar';
+      bar.setAttribute('role', 'toolbar');
+      bar.setAttribute('aria-label', 'علّم فصول');
+      page.append(bar);
+    }
+    paintMarkBar();
+    renderChapters(w);
+    q('chapterPanel')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    window.scrollBy({ top: -76, behavior: 'instant' });
+  }
+  function exitMarkMode() {
+    if (!state.marking) return;
+    state.marking = null;
+    q('detail')?.classList.remove('mw-marking');
+    q('markBar')?.remove();
+    if (state.current?._chapters && currentPage() === 'detail') renderChapters(state.current);
+  }
+  function toggleMarkPick(w, r) {
+    const key = chapterKeyOf(String(w.id), r);
+    const picked = state.marking.picked;
+    if (picked.has(key)) picked.delete(key);
+    else picked.set(key, r);
+    paintMarkBar();
+    renderChapters(w);
+  }
+  function paintMarkBar() {
+    const bar = q('markBar');
+    const m = state.marking;
+    if (!bar || !m) return;
+    const w = state.current;
+    const picked = [...m.picked.values()];
+    const n = picked.length;
+    const btn = (label, run, { primary = false, enabled = true } = {}) => {
+      const b = el('button', `mw-selbtn${primary ? ' is-primary' : ''}`, label);
+      b.type = 'button';
+      b.disabled = !enabled;
+      b.onclick = run;
+      return b;
+    };
+    const head = el('div', 'mw-selhead');
+    head.append(el('span', null, n ? `حدّدت ${countLabel(n, 'chapter')}` : 'المس الفصول لتحديدها'));
+    const close = el('button', 'mw-selclose');
+    close.type = 'button';
+    close.innerHTML = glyph('close', { size: 20 });
+    close.setAttribute('aria-label', 'أنهِ التحديد');
+    close.onclick = exitMarkMode;
+    head.append(close);
+    const all = w?._chapters ?? [];
+    const apply = (rows, read, done) => {
+      if (!rows.length) return;
+      const changed = markRows(w, rows, read, read ? latestChapter(rows) : null);
+      exitMarkMode();
+      toast(changed ? done(changed) : read ? 'كلها مقروءة من قبل' : 'ما فيها فصل معلّم');
+    };
+    const acts = el('div', 'mw-selacts');
+    acts.append(
+      btn('مقروء', () => apply(rowsForMark(all, picked), true, (c) => `علّمت ${countLabel(c, 'chapter')} مقروءة`), { primary: true, enabled: n > 0 }),
+      btn('غير مقروء', () => apply(rowsForMark(all, picked), false, (c) => `ألغيت تعليم ${countLabel(c, 'chapter')}`), { enabled: n > 0 }),
+      btn('كل ما قبله', () => apply(rowsForMark(all, picked, 'upTo'), true, (c) => `علّمت ${countLabel(c, 'chapter')} حتى الفصل ${chapterNumberText(picked[0])}`), { enabled: n === 1 }),
+      btn('ما بينهما', () => {
+        // يحدّد كل ما بين الفصلين، ثم تختار مقروء أو غير مقروء
+        for (const r of rowsForMark(all, picked, 'between')) m.picked.set(chapterKeyOf(String(w.id), r), r);
+        paintMarkBar();
+        renderChapters(w);
+      }, { enabled: n === 2 }),
     );
-    const copy = el('span', 'chapter-copy');
-    copy.append(no, note);
-    open.append(num, copy);
-    open.onclick = () => openChapter(w, r);
-    const eye = el('button', 'chapter-eye');
+    bar.replaceChildren(head, acts);
+  }
+  /** علامة الفصل في نهاية صفّه: زرّ يعلّمه مقروءًا أو يلغيه، وشكله حالة الفصل. */
+  function markButton(w, r, { isNext, onPaint }) {
+    const ref = String(w.id);
+    const eye = el('button', 'st');
     eye.type = 'button';
     const paint = (on) => {
-      eye.classList.toggle('chapter-eye--read', on);
+      eye.classList.toggle('st--read', on);
       eye.setAttribute('aria-pressed', String(on));
-      eye.innerHTML = glyph('eye') + (on ? `<span class="chapter-eye__check">${glyph('check')}</span>` : '');
+      eye.innerHTML = on
+        ? glyph('check', { size: 18 })
+        : isNext
+          ? '<span class="mw-here">وصلت هنا</span>'
+          : isNewChapter(r, on)
+            ? '<span class="mw-new">جديد</span>'
+            : glyph('eye', { size: 18 });
       const label = on ? 'مقروء — المس لإلغاء التعليم' : 'علّمه مقروءًا';
       eye.setAttribute('aria-label', label);
       eye.title = label;
-      row.classList.toggle('is-read', on);
+      onPaint(on);
     };
-    paint(isRead);
     eye.onclick = (e) => {
       e.stopPropagation();
       const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
       markChapter(sync, ref, r, on);
       if (on) recordChapterView(w, r);
       paint(on);
-      // التقدّم وزرّ «تابع» يتبعان العين بعد لحظة، لا بعد المزامنة
-      clearTimeout(state.eyeTimer);
-      state.eyeTimer = setTimeout(() => state.current === w && renderChapters(w), 450);
+      // العلامة والتقدّم وزرّ «تابع» والشبكة تتبعها في الحال، في كل نمط
+      refreshChaptersSoon(w);
     };
+    return { eye, paint };
+  }
+  /** صف فصل كما في النموذج: الرقم كبيرًا، ثم «الفصل N» (أو عنوانه) وتاريخه، ثم حالته. */
+  function chapterRow(w, r, isRead, isNext) {
+    const row = el('div', `mw-ch${isNext ? ' here' : ''}`);
+    const open = el('button', 'mw-ch-open');
+    open.type = 'button';
+    const num = el('span', 'n', chapterNumberText(r));
+    num.dir = 'ltr';
+    const name = r.chapter.name || '';
+    const when = dateLabel(r.chapter.dateUpload);
+    const t = el('span', 't');
+    const b = el('b', null, plainChapterName(name) ? `الفصل ${chapterNumberText(r)}` : name);
+    b.dir = 'auto';
+    t.append(b, el('span', null, [when, r.chapter.scanlator].filter(Boolean).join(' · ')));
+    open.append(num, t);
+    const picked = Boolean(state.marking?.picked.has(chapterKeyOf(String(w.id), r)));
+    if (state.marking) {
+      row.classList.toggle('picked', picked);
+      open.setAttribute('aria-pressed', String(picked));
+    }
+    open.onclick = () => (state.marking ? toggleMarkPick(w, r) : openChapter(w, r));
+    const { eye, paint } = markButton(w, r, { isNext, onPaint: (on) => row.classList.toggle('read', on) });
+    paint(isRead);
     row.append(open, eye);
     return row;
+  }
+  /** خانة رقم في شبكة «من حيث وقفت»: لمسة تفتح الفصل، وضغطة مطوّلة تعلّمه مقروءًا أو تلغيه. */
+  function chapterCell(w, r, isRead, isNext) {
+    const ref = String(w.id);
+    const cell = el('button', 'mw-cell');
+    cell.type = 'button';
+    cell.dir = 'ltr';
+    const picked = Boolean(state.marking?.picked.has(chapterKeyOf(ref, r)));
+    if (state.marking) cell.setAttribute('aria-pressed', String(picked));
+    const paint = (on) => {
+      cell.className = `mw-cell${isNext && !on ? ' here' : on ? ' read' : isNewChapter(r, on) ? ' new' : ''}${picked ? ' picked' : ''}`;
+      cell.setAttribute('aria-label', `الفصل ${chapterNumberText(r)}${on ? '، مقروء' : isNext ? '، وصلت هنا' : ''}`);
+    };
+    cell.textContent = chapterNumberText(r);
+    paint(isRead);
+    cell.onclick = () => {
+      if (cell.dataset.held) return void delete cell.dataset.held;
+      if (state.marking) toggleMarkPick(w, r);
+      else openChapter(w, r);
+    };
+    onLongPress(cell, () => {
+      cell.dataset.held = '1';
+      const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
+      markChapter(sync, ref, r, on);
+      if (on) recordChapterView(w, r);
+      paint(on);
+      toast(on ? `علّمت الفصل ${chapterNumberText(r)} مقروءًا` : `ألغيت تعليم الفصل ${chapterNumberText(r)}`);
+      refreshChaptersSoon(w);
+    });
+    return cell;
   }
   function dateLabel(ms) {
     if (!ms) return '';
@@ -2840,27 +3140,179 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function refreshLibraryDetail() {
     if (!state.current) return;
     const e = libraryEntry(String(state.current.id));
-    // ثلاثة أفعال بأسمائها تحت «اقرأ»، كما في الأنمي: الحالة في الرمز الممتلئ ولون الزر
+    // صف الأفعال تحت «اقرأ» (أو الدائرتان بجانبه): الحالة في الرمز الممتلئ ولون الزر
     const paint = (id, icon, on, label, onLabel, offHint) => {
       const btn = q(id);
+      if (!btn) return;
       btn.setAttribute('aria-pressed', String(on));
-      btn.innerHTML = `${glyph(icon, { filled: on })}<span>${on ? onLabel : label}</span>`;
+      const square = btn.classList.contains('mw-square');
+      btn.innerHTML = square ? glyph(icon, { filled: on }) : `${glyph(icon, { filled: on, size: 18 })}<span>${on ? onLabel : label}</span>`;
       btn.title = on ? `${onLabel} — المس للإزالة` : offHint;
       btn.setAttribute('aria-label', btn.title);
     };
     paint('libraryBtn', 'library', !!e?.row, 'مكتبتي', 'في مكتبتي', 'أضف إلى مكتبتي');
     paint('laterBtn', 'clock', !!e?.later, 'لاحقًا', 'لاحقًا', 'أقرأ لاحقًا');
-    paint('favBtn', 'heart', !!e?.favorite, 'المفضلة', 'المفضلة', 'أضف إلى المفضلة');
+    paintDetailTools();
   }
+
+  // ── شريط صفحة العمل: نفس شريط صفحة الأنمي (رجوع وحده، وكبسولة: المفضلة، رشّح، المزيد) ──
+
+  /** المفضلة ورشّح رمزان بلا كلام، و«المزيد» نقاط ثلاث تفتح دوائر بأسمائها تحتها. */
+  function paintDetailTools() {
+    const tools = q('detailTools');
+    if (!tools) return;
+    const fav = state.current ? Boolean(libraryEntry(String(state.current.id))?.favorite) : false;
+    const tool = (icon, label, act, { pressed, filled = false } = {}) => {
+      const b = el('button', 'aw-tool');
+      b.type = 'button';
+      b.innerHTML = glyph(icon, { size: 21, filled });
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      if (act) b.dataset.act = act;
+      if (pressed !== undefined) b.setAttribute('aria-pressed', String(Boolean(pressed)));
+      return b;
+    };
+    const heart = tool('heart', fav ? 'في المفضلة' : 'المفضلة', 'toggleFavoriteCurrent', { pressed: fav, filled: fav });
+    heart.id = 'favBtn';
+    const more = tool('more', 'المزيد');
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', String(q('detailMenu')?.classList.contains('open') ?? false));
+    more.onclick = () => toggleDetailMenu();
+    // المانجا وحدها فيها الأصدقاء في الشريط: القراءة الجماعية تبدأ من صفحة العمل (الأنمي من داخل الحلقة)
+    tools.replaceChildren(heart, tool('send', 'رشّح', 'shareCurrent'), tool('users', 'اقرأ مع أصدقائك', 'readTogetherCurrent'), more);
+    paintDetailMenu();
+  }
+  /**
+   * «المزيد»: قراءتي السابقة، والترجمة العربية (لعمل فيه فصول إنجليزية)، والتقييم، وخيارات العمل
+   * (أفضل 5، أكملته، بلّغ، حذف)؛ ومعها ما لا يتسع له صف أزرار النمط (لاحقًا، مع أصدقائك).
+   */
+  function paintDetailMenu() {
+    const menu = q('detailMenu');
+    const w = state.current;
+    if (!menu || !w) return;
+    const entry = (icon, label, run, { pressed = false } = {}) => {
+      const b = el('button', 'aw-menu-item');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.innerHTML = `<span class="aw-menu-dot">${glyph(icon, { size: 20, filled: pressed && icon !== 'check' })}</span><span class="aw-menu-label">${label}</span>`;
+      if (pressed) b.setAttribute('aria-pressed', 'true');
+      b.onclick = () => {
+        closeDetailMenu();
+        run();
+      };
+      return b;
+    };
+    const e = libraryEntry(String(w.id));
+    const ref = String(w.id);
+    const rows = [
+      entry('library', e?.row ? 'في مكتبتي' : 'مكتبتي', toggleLibraryCurrent, { pressed: Boolean(e?.row) }),
+      entry('clock', 'لاحقًا', toggleLaterCurrent, { pressed: Boolean(e?.later) }),
+      entry('check', 'علّم فصول', () => enterMarkMode()),
+      entry('flame', inCollection('top', ref) ? 'في أفضل 5' : 'أفضل 5', () => toggleTopCurrent(), { pressed: inCollection('top', ref) }),
+      entry('share', 'مشاركة', () => void shareWorkOut(w)),
+      entry('eye', 'قراءتي السابقة', markPreviousReading),
+    ];
+    if (translateAvailable(w)) {
+      const on = translationOn(ref);
+      rows.push(entry('translateAr', on ? 'الترجمة التلقائية: شغّالة' : 'الترجمة التلقائية', openTranslateMenu, { pressed: on }));
+    }
+    // التقييم وأكملته والبلاغ والحذف في ورقة واحدة
+    rows.push(entry('sliders', 'خيارات أخرى', openWorkMenu));
+    rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
+    menu.replaceChildren(...rows);
+  }
+  /** «مشاركة» خارج التطبيق: ورقة النظام، أو نسخ الاسم حيث لا ورقة. */
+  async function shareWorkOut(w) {
+    const text = `${titleOf(w)} — على VANTARA`;
+    try {
+      if (navigator.share) await navigator.share({ title: titleOf(w), text });
+      else {
+        await navigator.clipboard.writeText(text);
+        toast('نُسخ اسم العمل للمشاركة');
+      }
+    } catch {
+      // ألغى المشاركة
+    }
+  }
+  function toggleDetailMenu(force) {
+    const menu = q('detailMenu');
+    if (!menu) return;
+    const open = force ?? !menu.classList.contains('open');
+    if (!open) return closeDetailMenu();
+    menu.classList.add('open');
+    q('detailScrim')?.classList.add('open');
+    q('detailTools')?.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', 'true');
+    // لمسة خارج القائمة أو Esc تغلقها
+    const away = (e) => {
+      if (e.type === 'keydown' && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && (menu.contains(e.target) || q('detailTools')?.contains(e.target))) return;
+      // Esc يغلق القائمة وحدها، لا يرجع من الصفحة أيضًا
+      if (e.type === 'keydown') e.stopPropagation();
+      closeDetailMenu();
+    };
+    detailMenuAway = away;
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', away, true);
+  }
+  let detailMenuAway = null;
+  function closeDetailMenu() {
+    q('detailMenu')?.classList.remove('open');
+    q('detailScrim')?.classList.remove('open');
+    q('detailTools')?.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', 'false');
+    if (detailMenuAway) {
+      document.removeEventListener('pointerdown', detailMenuAway, true);
+      document.removeEventListener('keydown', detailMenuAway, true);
+      detailMenuAway = null;
+    }
+  }
+
+  // ── «المعرض»: تبويبات الفصول وعن العمل ومشابهة ──
+
+  function bindDetailTabs() {
+    const bar = q('detailTabs');
+    if (!bar) return;
+    bar.addEventListener('click', (e) => {
+      const tab = e.target.closest('[role="tab"]');
+      if (!tab) return;
+      for (const t of bar.querySelectorAll('[role="tab"]')) t.setAttribute('aria-selected', String(t === tab));
+      for (const p of q('detail').querySelectorAll('.mw-tab')) p.hidden = p.dataset.panel !== tab.dataset.tab;
+      if (tab.dataset.tab === 'similar') paintSimilar();
+    });
+  }
+  /** أعمال تشاركه تصنيفًا مما في الرئيسية والاستكشاف (بلا طلب جديد)، الأكثر تقاطعًا أولًا. */
+  function similarWorks(w) {
+    const genres = new Set(w.genres || []);
+    if (!genres.size) return [];
+    const pool = uniqueById([...state.home.trending, ...state.home.popular, ...state.home.featured, ...state.home.recent, ...state.catalog].filter(Boolean));
+    return pool
+      .filter((x) => String(x.id) !== String(w.id) && !isAnimeRef(String(x.id)))
+      .map((x) => ({ x, n: (x.genres || []).filter((g) => genres.has(g)).length }))
+      .filter((s) => s.n > 0)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 12)
+      .map((s) => s.x);
+  }
+  function paintSimilar() {
+    const grid = q('similarGrid');
+    const w = state.current;
+    if (!grid || !w || grid.dataset.for === String(w.id)) return;
+    grid.dataset.for = String(w.id);
+    grid.replaceChildren(...similarWorks(w).map((x) => card(x)));
+  }
+  function paintSimilarTab(w) {
+    const tab = q('similarTab');
+    if (tab) tab.hidden = !similarWorks(w).length;
+  }
+
   function userRating(ref) {
     const row = sync.rows('ratings', (r) => r.user_id === me() && r.series_ref === String(ref))[0];
     return row?.score ? Math.round(row.score / 2) : 0;
   }
   let pendingRating = null;
-  /** التقييم نجومٌ في مكانها: لمسة واحدة، بلا نافذة. */
-  function renderRating() {
-    const box = q('rateStars');
-    const current = pendingRating?.ref === state.current?.id ? pendingRating.stars : state.current ? userRating(state.current.id) : 0;
+  const userRatingNow = () => (pendingRating?.ref === state.current?.id ? pendingRating.stars : state.current ? userRating(state.current.id) : 0);
+  /** التقييم نجوم خمس في ورقة من «المزيد»: لمسة واحدة تحفظ. */
+  function renderRating(box) {
+    const current = userRatingNow();
     box.replaceChildren(
       ...[1, 2, 3, 4, 5].map((i) => {
         const b = el('button', i <= current ? 'on' : '');
@@ -2868,18 +3320,32 @@ export function mountV35(deps, { page = 'home' } = {}) {
         b.setAttribute('role', 'radio');
         b.setAttribute('aria-checked', String(i === current));
         b.setAttribute('aria-label', `تقييمك ${i} من 5`);
-        b.innerHTML = glyph('star', { filled: i <= current, size: 20 });
+        b.innerHTML = glyph('star', { filled: i <= current, size: 28 });
         b.onclick = () => {
           if (!state.current) return;
           // الخادم يحفظ من 10؛ النجوم خمس
           sync.enqueue('rating.set', { ...descriptorOf(state.current), score: i * 2 });
           pendingRating = { ref: state.current.id, stars: i };
           toast(`قيّمته ${i} من 5`);
-          renderRating();
+          renderRating(box);
+          paintDetailMenu();
         };
         return b;
       }),
     );
+  }
+  function openRatingSheet() {
+    if (!state.current) return;
+    openSheet((body) => {
+      const h = el('h3', null, titleOf(state.current));
+      h.dir = 'auto';
+      body.append(h, el('p', null, 'تقييمك لهذا العمل'));
+      const box = el('div', 'rate mw-rate');
+      box.setAttribute('role', 'radiogroup');
+      box.setAttribute('aria-label', 'تقييمك');
+      renderRating(box);
+      body.append(box);
+    });
   }
 
   // ── قائمة ⋮ في صفحة العمل ──
@@ -2892,6 +3358,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       title.dir = 'auto';
       title.style.marginBottom = '8px';
       body.append(title);
+      const stars = userRatingNow();
+      body.append(sheetItem('star', stars ? `تقييمك ${stars} من 5 — غيّره` : 'قيّم العمل', () => {
+        closeSheet();
+        setTimeout(() => openRatingSheet(), 0);
+      }, { pressed: stars > 0 }));
       body.append(
         sheetItem('star', inCollection('top', String(w.id)) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
           closeSheet();
@@ -2950,9 +3421,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return Number.isFinite(b) && b > a ? row : best;
     }, null);
   }
+  /** بعد أي تعليم: الصفحة كلها تتحدث في الحال (القائمة أو الشبكة، التقدّم، زرّ «تابع»). */
   function refreshChaptersSoon(w) {
     clearTimeout(state.eyeTimer);
-    state.eyeTimer = setTimeout(() => state.current?.id === w.id && renderChapters(w), 30);
+    if (state.current?.id === w.id && state.current._chapters && currentPage() === 'detail') renderChapters(state.current);
   }
   /** تعليم (أو إلغاء) دفعة فصول: عملية واحدة، والصفحة تتحدث حالًا. */
   function markRows(w, rows, read, historyRow = null) {
@@ -4355,7 +4827,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else n.removeAttribute('aria-current');
     });
     dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
-    q('detailTop').classList.remove('scrolled');
+    q('detailTop').classList.remove('collapsed');
+    if (id !== 'detail') {
+      closeDetailMenu();
+      exitMarkMode();
+    }
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
@@ -5755,7 +6231,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ترويسة صفحة العمل تكتسي خلفية عند التمرير، وعنوان العمل يظهر فيها
   const onScroll = () => {
-    if (currentPage() === 'detail') q('detailTop').classList.toggle('scrolled', window.scrollY > 170);
+    // كما في نموذج المالك: الشريط يصير صلبًا مع الاسم بعد 220px
+    if (currentPage() === 'detail') q('detailTop').classList.toggle('collapsed', window.scrollY > 220);
   };
   window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -5777,7 +6254,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (tables.includes('ratings')) {
       pendingRating = null;
-      renderRating();
+      paintDetailMenu();
+      const rate = root.querySelector('.mw-rate');
+      if (rate) renderRating(rate);
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
     majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
@@ -5796,6 +6275,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
     if (majlis.closeBar() || closeSheet() || closeDrawer() || room.close()) return true;
+    // صفحة العمل: قائمة «المزيد» ثم وضع «علّم فصول» يُغلقان قبل الرجوع
+    if (currentPage() === 'detail' && q('detailMenu')?.classList.contains('open')) return closeDetailMenu() ?? true;
+    if (currentPage() === 'detail' && state.marking) return exitMarkMode() ?? true;
     return goBack();
   }
 
@@ -6222,6 +6704,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clearInterval(state.heroTimer);
       closeDrawer();
       closeSheet();
+      closeDetailMenu();
     },
     resume(target) {
       const current = currentPage();
@@ -6241,7 +6724,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       finishPageMotion();
       sourceVerification.close();
       addonViewGeneration++;closeAddonSource();
-      detailDock.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
       majlis.hide();

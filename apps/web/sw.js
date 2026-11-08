@@ -246,6 +246,7 @@ const SHELL = [
   '/v35/look-previews.js',
   '/v35/unified-home.js',
   '/v35/work-looks.js',
+  '/v35/manga-work.js',
   '/v35/logo-layer.js',
   '/v35/anime-discover.js',
   '/v35/anime-account.js',
