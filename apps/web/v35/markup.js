@@ -14,6 +14,7 @@
  * السمات تكسرها أول سياسة CSP.
  */
 import { glyph, iconButton } from './icons.js';
+import { detailMarkup } from './manga-work.js';
 
 const bell = (extra = '') =>
   `<button class="icon-btn has-dot" type="button" data-act="navTo" data-arg="notifications" aria-label="الإشعارات" title="الإشعارات"${extra}>` +
@@ -98,73 +99,8 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page cinema-page" id="cinema"></section>
 
-  <section class="page" id="detail">
-    <div class="detail-glow" aria-hidden="true"><i id="detailGlow"></i></div>
-    <div class="detail-top" id="detailTop">
-      ${iconButton('back', 'رجوع', { act: 'backFromDetail' })}
-      <div class="detail-top-title" id="detailTopTitle"></div>
-      <div class="detail-actions">
-        ${iconButton('users', 'اقرأ مع أصدقائك', { act: 'readTogetherCurrent' })}
-        ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
-        <button class="icon-btn detail-tl" type="button" id="detailTlBtn" data-act="toggleTranslateCurrent" aria-pressed="false" aria-label="ترجمة تلقائية للفصول الإنجليزية" title="ترجمة تلقائية" hidden>${glyph('translateAr', { size: 22 })}</button>
-        ${iconButton('eye', 'قراءتي السابقة', { act: 'markPreviousReading' })}
-        ${iconButton('more', 'خيارات', { act: 'openWorkMenu' })}
-      </div>
-    </div>
-
-    <!-- صفحتان متقابلتان كبانر الرئيسية: الغلاف، وفي المقابلة عدد الفصول رقمَ صفحة ثم الاسم -->
-    <div class="detail-head" data-reveal>
-      <div class="detail-cover" id="detailCover"></div>
-      <div class="detail-meta">
-        <div class="detail-folio" id="detailFolio" dir="ltr"></div>
-        <div class="detail-kicker" id="detailKicker"></div>
-        <h1 id="detailTitle">—</h1>
-        <div class="detail-sub" id="detailSub"></div>
-        <div class="chips" id="detailGenres"></div>
-      </div>
-    </div>
-
-    <div class="detail-cta" data-reveal>
-      <button class="btn btn-primary read-cta" type="button" id="readCta" data-act="readNow" disabled>
-        ${glyph('book')}<span id="readCtaLabel">جارٍ جمع الفصول</span><small id="readCtaSub"></small>
-      </button>
-    </div>
-    <!-- نفس ترتيب الأنمي: الفعل الأساسي عريضًا، وتحته ثلاثة بأسمائها -->
-    <div class="detail-quick" data-reveal>
-      <button class="quick-btn" type="button" id="libraryBtn" data-act="toggleLibraryCurrent" aria-pressed="false">${glyph('library')}<span>مكتبتي</span></button>
-      <button class="quick-btn" type="button" id="laterBtn" data-act="toggleLaterCurrent" aria-pressed="false">${glyph('clock')}<span>لاحقًا</span></button>
-      <button class="quick-btn" type="button" id="favBtn" data-act="toggleFavoriteCurrent" aria-pressed="false">${glyph('heart')}<span>المفضلة</span></button>
-    </div>
-
-    <div class="source-switch" id="sourcesBlock" hidden>
-      <div class="source-row" id="sourceRow" role="radiogroup" aria-label="المصدر"></div>
-    </div>
-
-    <div class="detail-progress" id="detailProgress">
-      <div class="progress-bar"><i id="progressFill"></i></div>
-      <div class="progress-row"><span id="progressText"></span><div class="rate" id="rateStars" role="radiogroup" aria-label="تقييمك"></div></div>
-    </div>
-    <div class="work-insights" id="detailInsights"></div>
-
-    <div class="block" id="summaryBlock">
-      <span class="section-eyebrow">STORY</span>
-      <p class="summary clamped" id="description" dir="auto"></p>
-      <button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button>
-    </div>
-
-    <div class="block">
-      <div class="block-head">
-        <div class="section-titles"><span class="section-eyebrow">CHAPTERS</span><h2>الفصول<span class="count" id="chapterCount"></span></h2></div>
-        ${iconButton('sort', 'عكس الترتيب', { act: 'flipChapterOrder', cls: 'icon-btn' })}
-      </div>
-      <div id="chapterPanel"></div>
-    </div>
-
-    <div class="block">
-      <div class="block-head"><div class="section-titles"><span class="section-eyebrow">DETAILS</span><h2>معلومات</h2></div></div>
-      <div class="info-grid" id="infoGrid"></div>
-    </div>
-  </section>
+  <!-- صفحة العمل: هيكلها من manga-work.js حسب النمط المختار (الصفحة، المعرض، الملف، من حيث وقفت) -->
+  <section class="page mw" id="detail" data-look="page">${detailMarkup('page', { glyph, iconButton })}</section>
 
   <section class="page" id="collection">
     ${subTop('عرض الكل', { id: 'collectionTitle' })}

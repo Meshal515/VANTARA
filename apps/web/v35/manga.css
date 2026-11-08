@@ -470,237 +470,573 @@
   color: var(--text-3);
 }
 
-/* ───────────────────────── صفحة العمل ─────────────────────────
- * صفحة عنوان كتاب: الغلاف في الوسط بحجم يُرى، والاسم تحته كبيرًا، ثم «اقرأ»
- * عريضًا وتحته ثلاثة أفعال بأسمائها (نفس ترتيب الأنمي). الفصول كترقيم الصفحات. */
+/* ═════════════════ صفحة العمل: الأنماط الأربعة (النموذج المعتمد 2026-11) ═════════════════
+ * الصفحة، المعرض، الملف، من حيث وقفت (manga-work.js). القيم قيم النموذج كما هي؛ الهرمية بالمسافة لا
+ * بالخطوط، وكل نمط يرتّب العناصر نفسها. الشريط العلوي هو شريط صفحة الأنمي نفسه (aw-bar في anime.css).
+ * الضوء من الغلاف بعُشر حجمه يُضبَّب قليلًا ثم يُكبَّر ×10 (لا ضبابية كبيرة على مساحة واسعة). */
 
-/* صفحتان متقابلتان كبانر الرئيسية: الغلاف بحجم يُرى، وفي المقابلة عدد الفصول
-   رقمَ صفحة كبيرًا، والتصنيف بلون القسم، والاسم، والحالة. */
-.v35 #detail .detail-head {
-  grid-template-columns: 46% minmax(0, 1fr);
-  align-items: stretch;
-  gap: 0;
-  padding: 6px var(--gutter) 0;
+.v35 #detail.mw {
+  --mw-max: 100%;
+  --mw-side: max(var(--gutter), calc((100% - var(--mw-max)) / 2));
+  --mw-gold: #f2b75b;
+  position: relative;
+  isolation: isolate;
+  padding-bottom: 40px;
 }
-.v35 #detail .detail-cover {
-  width: auto;
-  border-radius: var(--m-r);
-  box-shadow: 0 30px 56px -22px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+.v35 #detail .mw-wrap { padding-inline: var(--mw-side); }
+.v35 #detail .mw-bar .aw-bar-title { pointer-events: none; }
+
+/* الغلاف والضوء */
+.v35 #detail .mw-cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
 }
-.v35 #detail .detail-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  margin-inline-start: 16px;
-  padding: 2px 0 2px;
-  padding-inline-start: 14px;
-  border-inline-start: 1px solid var(--line-strong);
+.v35 #detail .mw-cover > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 #detail .mw-amb,
+.v35 #detail .mw-ban-amb,
+.v35 #detail .mw-resume-bg { position: absolute; overflow: hidden; pointer-events: none; }
+.v35 #detail .mw-amb img,
+.v35 #detail .mw-ban-amb img,
+.v35 #detail .mw-resume-bg img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10%;
+  height: 10%;
+  object-fit: cover;
+  transform-origin: 0 0;
+  transform: scale(10);
+  filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
 }
-.v35 .detail-folio {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-bottom: auto;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.v35 .detail-folio b {
-  font-size: 40px;
-  font-weight: 800;
-  letter-spacing: -1.5px;
-  color: var(--paper);
-}
-.v35 .detail-folio span {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-3);
-}
-.v35 .detail-kicker {
-  font-size: var(--fs-caption);
-  font-weight: 700;
-  color: var(--accent-text);
-}
-.v35 .detail-kicker:empty {
-  display: none;
-}
-.v35 #detail .detail-meta h1 {
-  font-size: 22px;
-  line-height: 1.22;
-  font-weight: 800;
-  letter-spacing: -0.2px;
-  color: var(--paper);
-  text-align: right;
-  -webkit-line-clamp: 4;
-}
-.v35 #detail .detail-sub {
-  margin-top: 0;
-  color: var(--text-3);
-}
-.v35 #detail .detail-sub > span + span::before {
-  content: '';
-  display: inline-block;
-  width: 3px;
-  height: 3px;
-  margin-inline-end: 10px;
-  border-radius: 50%;
-  background: var(--text-4);
-  vertical-align: middle;
-}
-/* التصنيفات صارت سطرًا ملوّنًا فوق الاسم */
-.v35 #detail .detail-meta .chips {
-  display: none;
-}
-.v35 #detail #summaryBlock .section-eyebrow {
-  margin-bottom: 10px;
-}
-.v35 #detail .detail-cta {
-  grid-template-columns: 1fr;
-  padding-top: 22px;
-}
-.v35 #detail .read-cta {
-  min-height: 54px;
-  border-radius: 6px;
-  font-size: 16px;
-}
-/* ثلاثة أفعال بأسمائها في سطر واحد بخطوط شعرية، لا ثلاثة صناديق */
-.v35 .detail-quick {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 10px var(--gutter) 0;
-  border-block: 1px solid var(--line);
-}
-.v35 .quick-btn {
-  min-height: 48px;
-  display: flex;
+.v35 #detail .mw-amb::after,
+.v35 #detail .mw-resume-bg::after { content: ''; position: absolute; inset: 0; }
+
+/* السطور المشتركة */
+.v35 #detail .mw-kick { font-size: 12.5px; color: var(--accent-text); font-weight: 700; }
+.v35 #detail .mw-kick,
+.v35 #detail .mw-who { min-height: 1.5em; }
+.v35 #detail .mw-title { font-weight: 800; line-height: 1.3; color: var(--text-1); unicode-bidi: plaintext; text-align: right; overflow-wrap: anywhere; }
+.v35 #detail .mw-who { font-size: 12.5px; color: var(--text-3); margin-top: 6px; unicode-bidi: plaintext; text-align: right; }
+.v35 #detail .mw-stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); }
+.v35 #detail .mw-stats b { color: var(--text-1); font-weight: 800; }
+.v35 #detail .mw-star { color: var(--mw-gold); }
+.v35 #detail .mw-chips { display: flex; flex-wrap: nowrap; gap: 8px; min-height: 30px; overflow: hidden; }
+.v35 #detail .mw-chip { flex: none; }
+.v35 #detail .mw-chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--text-1);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-.v35 .quick-btn .icon {
-  width: 19px;
-  height: 19px;
-  flex: none;
-}
-.v35 .quick-btn + .quick-btn {
-  border-inline-start: 1px solid var(--line);
-}
-.v35 .quick-btn:active {
-  background: var(--surface-1);
-}
-.v35 .quick-btn[aria-pressed='true'] {
-  color: var(--accent-text);
-}
-.v35 #detail .source-chip {
-  border-radius: var(--m-r);
-}
-.v35 #detail .progress-bar {
-  height: 2px;
-  border-radius: 0;
-}
-.v35 #detail .progress-bar > i {
-  border-radius: 0;
-}
-
-/* الكتل بخط شعري بينها بدل الفراغ وحده */
-.v35 #detail .block {
-  margin: 26px var(--gutter) 0;
-  padding: 20px 0 0;
-  border-top: 1px solid var(--line);
-}
-.v35 #detail #summaryBlock {
-  margin-top: 18px;
-  border-top: 0;
-  padding-top: 0;
-}
-.v35 #detail .block-head h2 {
-  font-size: 20px;
-  font-weight: 800;
-}
-.v35 #detail .block-head .count {
-  font-variant-numeric: tabular-nums;
-}
-
-/* الفصول: الرقم كبيرًا في البداية، والاسم والتاريخ بجانبه */
-.v35 #detail .chapter-row {
-  min-height: 62px;
-}
-.v35 #detail .chapter-open {
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 14px;
-}
-.v35 .chapter-num {
-  flex: none;
-  min-width: 50px;
-  font-size: 21px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--paper);
-  text-align: right;
-}
-.v35 .chapter-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.v35 #detail .chapter-no {
-  font-size: 13px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-2);
 }
-.v35 .chapter-row.is-read .chapter-num {
-  color: var(--text-4);
-}
-.v35 .chapter-row.is-next .chapter-num {
-  color: var(--accent-text);
-}
-.v35 #detail .chapter-row.is-next::after {
-  content: '';
-  position: absolute;
-  inset-inline-start: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 3px;
+
+/* زرّ القراءة العريض: الاسم والفصل في البداية، ودائرة التشغيل في النهاية */
+.v35 #detail .mw-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  height: 56px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 16px;
   background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease-out, opacity 0.2s ease-out;
+}
+.v35 #detail .mw-cta:not(:disabled):active { transform: scale(0.98); }
+.v35 #detail .mw-cta:disabled { opacity: 0.6; cursor: default; }
+.v35 #detail .mw-cta-text { min-width: 0; }
+.v35 #detail .mw-cta b { display: block; font-size: 15.5px; font-weight: 800; }
+.v35 #detail .mw-cta small { display: block; margin-top: 1px; font-size: 12px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 #detail .mw-go { flex: none; width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); display: grid; place-items: center; }
+.v35 #detail .mw-go .icon { width: 16px; height: 16px; transform: translateX(1px); }
+
+/* مكتبتي، لاحقًا، مع أصدقائك */
+.v35 #detail .mw-quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.v35 #detail .mw-quick-btn {
+  height: 46px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.15s ease-out, background-color 0.15s ease-out;
+}
+.v35 #detail .mw-quick-btn span { overflow: hidden; text-overflow: ellipsis; }
+.v35 #detail .mw-quick-btn .icon { flex: none; width: 18px; height: 18px; }
+.v35 #detail .mw-quick-btn[aria-pressed='true'],
+.v35 #detail .mw-square[aria-pressed='true'] { color: var(--accent-text); }
+.v35 #detail .mw-quick-btn:active,
+.v35 #detail .mw-square:active { transform: scale(0.96); }
+/* دائرتا المعرض ومربّع الملف بجانب الزر */
+.v35 #detail .mw-row { display: flex; gap: 10px; align-items: center; }
+.v35 #detail .mw-row .mw-cta { flex: 1; min-width: 0; }
+.v35 #detail .mw-square {
+  flex: 0 0 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.15s ease-out;
+}
+.v35 #detail .mw-square .icon { width: 22px; height: 22px; }
+
+/* التقدّم */
+.v35 #detail .mw-line { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.v35 #detail .mw-line i { display: block; height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s ease-out; }
+.v35 #detail .mw-progress-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--text-2); }
+.v35 #detail .mw-faint { color: var(--text-3); }
+.v35 #detail .mw-progress-row { min-height: 1.5em; }
+.v35 #detail .work-insights:empty { display: none; }
+.v35 #detail .work-insights { margin-top: 16px; }
+
+/* القصة */
+.v35 #detail .mw-h { font-size: 17px; font-weight: 800; color: var(--text-1); }
+.v35 #detail .mw-story .mw-h { margin-bottom: 8px; }
+.v35 #detail .mw-desc {
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--text-2);
+  unicode-bidi: plaintext;
+  text-align: right;
+  white-space: pre-line;
+}
+.v35 #detail .mw-desc.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 #detail .mw-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-/* معلومات: قائمة تعريفات بخطوط شعرية، لا مربعات */
-.v35 #detail .info-grid {
-  grid-template-columns: 1fr;
-  gap: 0;
-  border-radius: 0;
+/* رأس الفصول والمصادر والنطاقات */
+.v35 #detail .mw-shead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.v35 #detail .mw-shead small,
+.v35 #detail .mw-count { font-size: 12px; color: var(--text-3); font-weight: 500; margin-inline-start: 8px; font-variant-numeric: tabular-nums; }
+.v35 #detail .mw-count { margin-inline-start: 0; }
+.v35 #detail .mw-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-block: -14px;
+  padding: 0;
+  border: 0;
   background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.v35 #detail .mw-sort .icon { width: 16px; height: 16px; }
+.v35 #detail .mw-src-row,
+.v35 #detail .mw-ranges {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-inline: calc(-1 * var(--mw-side));
+  padding-inline: var(--mw-side);
+  overscroll-behavior-x: contain;
+}
+.v35 #detail .mw-src-row::-webkit-scrollbar,
+.v35 #detail .mw-ranges::-webkit-scrollbar { display: none; }
+.v35 #detail .mw-src { margin-bottom: 14px; }
+.v35 #detail .mw-src .source-chip,
+.v35 #detail .mw-ranges button {
+  flex: 0 0 auto;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface-1);
   box-shadow: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
-.v35 #detail .info-box {
+.v35 #detail .mw-src .source-chip b { font-weight: 500; opacity: 0.7; color: inherit; }
+.v35 #detail .mw-src .source-chip--smart .icon { display: none; }
+.v35 #detail .mw-src .source-chip .icon { width: 16px; height: 16px; }
+.v35 #detail .mw-src .source-chip[aria-checked='true'] { background: var(--accent-soft); color: var(--accent-text); }
+.v35 #detail .mw-ranges { margin-bottom: 6px; }
+.v35 #detail .mw-ranges button.on { background: var(--text-1); color: var(--bg); }
+.v35 #detail .mw-ranges[hidden] { display: none; }
+
+/* صفوف الفصول */
+.v35 #detail .mw-chs { display: grid; }
+.v35 #detail .mw-ch { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.v35 #detail .mw-ch + .mw-ch { border-top: 1px solid var(--line); }
+.v35 #detail .mw-ch-open {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
   gap: 12px;
-  padding: 11px 0;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
   background: none;
-  border-bottom: 1px solid var(--line);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
 }
-.v35 #detail .info-box:empty {
-  display: none;
+.v35 #detail .mw-ch .n { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; color: var(--text-1); }
+.v35 #detail .mw-ch .t { min-width: 0; }
+.v35 #detail .mw-ch .t b { display: block; font-size: 14px; font-weight: 700; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; text-align: start; }
+.v35 #detail .mw-ch .t > span { display: block; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 #detail .mw-ch .t > span:empty { display: none; }
+.v35 #detail .mw-ch.read .n,
+.v35 #detail .mw-ch.read .t b { color: var(--text-3); }
+.v35 #detail .mw-ch.here .n { color: var(--accent-text); }
+.v35 #detail .mw-ch .st {
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center end;
+  color: var(--text-4);
+  cursor: pointer;
 }
-.v35 #detail .info-value {
-  margin-top: 0;
+.v35 #detail .mw-ch .st .icon { width: 18px; height: 18px; }
+.v35 #detail .mw-ch .st--read { color: var(--text-3); }
+.v35 #detail .mw-here { display: flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-text); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.v35 #detail .mw-new { font-size: 11px; font-weight: 800; color: var(--accent-text); }
+.v35 #detail .mw-ch .n:empty::before { content: ''; display: block; width: 28px; height: 16px; margin: auto; border-radius: 4px; background: var(--surface-2); }
+.v35 #detail .chapter-more { width: 100%; margin-top: 12px; }
+
+/* شبكة الأرقام (من حيث وقفت) */
+.v35 #detail .mw-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.v35 #detail .mw-cell {
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease-out;
 }
+.v35 #detail .mw-cell:active { transform: scale(0.96); }
+.v35 #detail .mw-cell.read { background: transparent; color: var(--text-3); box-shadow: inset 0 0 0 1px var(--line); }
+.v35 #detail .mw-cell.here { background: var(--accent); color: var(--on-accent, #fff); }
+.v35 #detail .mw-cell.new { box-shadow: inset 0 0 0 1.5px var(--accent-line); color: var(--accent-text); }
+
+/* معلومات */
+.v35 #detail .mw-info { margin-top: 36px; }
+.v35 #detail .mw-info .mw-h { margin-bottom: 4px; }
+.v35 #detail .info-grid { grid-template-columns: 1fr; gap: 0; border-radius: 0; background: none; box-shadow: none; }
+.v35 #detail .info-box { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 11px 0; background: none; border-bottom: 1px solid var(--line); }
+.v35 #detail .info-box:empty { display: none; }
+.v35 #detail .info-value { margin-top: 0; }
+
+/* ═══ 1. الصفحة ═══ */
+/* الضوء طبقة الصفحة نفسها (#detail معزول): خلف كل شيء، فلا يغطي ما تحت رأسها */
+.v35 #detail[data-look='page'] .mw-amb { inset: 0 0 auto; height: 420px; z-index: -1; }
+.v35 #detail[data-look='page'] .mw-amb img.ready { opacity: 0.35; }
+.v35 #detail[data-look='page'] .mw-amb::after { background: linear-gradient(to top, var(--bg), transparent 70%); }
+.v35 #detail[data-look='page'] .mw-head {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 16px;
+  align-items: end;
+  padding: calc(68px + var(--safe-top)) var(--mw-side) 0;
+}
+.v35 #detail[data-look='page'] .mw-cover { border-radius: 12px; box-shadow: 0 18px 34px -14px rgba(0, 0, 0, 0.9); }
+.v35 #detail[data-look='page'] .mw-title { font-size: 22px; margin-top: 6px; }
+.v35 #detail[data-look='page'] .mw-stats { margin-top: 12px; }
+.v35 #detail[data-look='page'] .mw-chips { margin-top: 16px; }
+.v35 #detail[data-look='page'] .mw-cta { margin-top: 22px; }
+.v35 #detail[data-look='page'] .mw-quick { margin-top: 16px; }
+.v35 #detail[data-look='page'] .mw-progress { margin-top: 22px; }
+.v35 #detail[data-look='page'] .mw-story,
+.v35 #detail[data-look='page'] .mw-chapters { margin-top: 28px; }
+
+/* ═══ 2. المعرض ═══ */
+.v35 #detail[data-look='gallery'] .mw-stage { position: relative; padding-top: calc(64px + var(--safe-top)); overflow: hidden; isolation: isolate; }
+.v35 #detail[data-look='gallery'] .mw-amb { inset: 0 -20px auto; height: 460px; z-index: -1; opacity: 0.5; }
+.v35 #detail[data-look='gallery'] .mw-amb img { filter: blur(4px) saturate(1.2); }
+.v35 #detail[data-look='gallery'] .mw-amb img.ready { opacity: 1; }
+.v35 #detail[data-look='gallery'] .mw-amb::after { background: linear-gradient(to top, var(--bg) 4%, transparent 70%); }
+.v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 190px; margin: 0 auto; border-radius: 12px; box-shadow: 0 24px 44px -16px rgba(0, 0, 0, 0.9); }
+.v35 #detail[data-look='gallery'] .mw-center { text-align: center; }
+.v35 #detail[data-look='gallery'] .mw-title { font-size: 24px; margin-top: 18px; text-align: center; }
+.v35 #detail[data-look='gallery'] .mw-stats { justify-content: center; margin-top: 8px; }
+.v35 #detail[data-look='gallery'] .mw-chips { justify-content: center; margin-top: 12px; }
+.v35 #detail[data-look='gallery'] .mw-acts { padding-top: 22px; }
+.v35 #detail[data-look='gallery'] .mw-progress { margin-top: 16px; }
+.v35 #detail[data-look='gallery'] .mw-progress-row { justify-content: center; }
+.v35 #detail[data-look='gallery'] .mw-tabbed { margin-top: 28px; }
+.v35 #detail[data-look='gallery'] .mw-tabs { display: flex; gap: 26px; margin: 0 var(--mw-side); border-bottom: 1px solid var(--line); }
+.v35 #detail[data-look='gallery'] .mw-tabs button {
+  position: relative;
+  min-height: 44px;
+  padding: 0 0 11px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+}
+.v35 #detail[data-look='gallery'] .mw-tabs button[hidden] { display: none; }
+.v35 #detail[data-look='gallery'] .mw-tabs button[aria-selected='true'] { color: var(--text-1); }
+.v35 #detail[data-look='gallery'] .mw-tabs button[aria-selected='true']::after { content: ''; position: absolute; inset: auto 0 -1px 0; height: 2.5px; border-radius: 2px; background: var(--accent); }
+.v35 #detail[data-look='gallery'] .mw-tab { padding-top: 16px; }
+.v35 #detail[data-look='gallery'] .mw-shead--bare { align-items: center; }
+.v35 #detail[data-look='gallery'] .mw-info { margin-top: 28px; }
+.v35 #detail .mw-similar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
+.v35 #detail .mw-similar .work-card { min-width: 0; }
+
+/* ═══ 3. الملف ═══ */
+.v35 #detail[data-look='profile'] .mw-ban { position: relative; height: calc(210px + var(--safe-top)); overflow: hidden; background: var(--surface-1); }
+.v35 #detail[data-look='profile'] .mw-ban > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-out; }
+.v35 #detail[data-look='profile'] .mw-ban > img.ready { opacity: 1; }
+.v35 #detail[data-look='profile'] .mw-ban::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(8, 7, 12, 0.6), transparent 35%, rgba(8, 7, 12, 0.2) 60%, var(--bg)); }
+/* عمل بلا صورة عريضة: ضوء غلافه مكانها */
+.v35 #detail[data-look='profile'] .mw-ban-amb { inset: 0; }
+.v35 #detail[data-look='profile'] .mw-ban--art .mw-ban-amb { display: none; }
+.v35 #detail[data-look='profile'] .mw-ban-amb img { filter: blur(4px) saturate(1.2); }
+.v35 #detail[data-look='profile'] .mw-ban-amb img.ready { opacity: 0.6; }
+.v35 #detail[data-look='profile'] .mw-idrow { position: relative; display: flex; gap: 14px; align-items: flex-end; margin-top: -74px; padding: 0 var(--mw-side); }
+.v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex: 0 0 112px; border-radius: 12px; box-shadow: 0 0 0 3px var(--bg), 0 16px 30px -10px rgba(0, 0, 0, 0.9); }
+.v35 #detail[data-look='profile'] .mw-id { min-width: 0; padding-bottom: 4px; }
+.v35 #detail[data-look='profile'] .mw-title { font-size: 21px; }
+.v35 #detail[data-look='profile'] .mw-who { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+.v35 #detail[data-look='profile'] .mw-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 22px var(--mw-side) 0; }
+.v35 #detail[data-look='profile'] .mw-nums[hidden] { display: none; }
+.v35 #detail[data-look='profile'] .mw-nums div { min-width: 0; text-align: center; }
+.v35 #detail[data-look='profile'] .mw-nums div + div { border-inline-start: 1px solid var(--line); }
+.v35 #detail[data-look='profile'] .mw-nums b { display: block; font-size: 19px; font-weight: 800; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.v35 #detail[data-look='profile'] .mw-nums small { font-size: 12px; color: var(--text-3); }
+.v35 #detail[data-look='profile'] .mw-row { margin-top: 22px; }
+.v35 #detail[data-look='profile'] .mw-chips { margin-top: 16px; }
+.v35 #detail[data-look='profile'] .mw-story { margin-top: 22px; }
+.v35 #detail[data-look='profile'] .mw-chapters { margin-top: 36px; }
+.v35 #detail[data-look='profile'] .mw-ranges { margin-bottom: 22px; }
+
+/* ═══ 4. من حيث وقفت ═══ */
+.v35 #detail[data-look='resume'] { padding-top: calc(64px + var(--safe-top)); }
+.v35 #detail[data-look='resume'] .mw-resume { position: relative; margin: 0 var(--mw-side); padding: 20px; border-radius: 22px; overflow: hidden; isolation: isolate; background: var(--surface-1); }
+.v35 #detail[data-look='resume'] .mw-resume-bg { inset: 0; z-index: -1; opacity: 0.55; }
+.v35 #detail[data-look='resume'] .mw-resume-bg img { filter: blur(3px) saturate(1.2); }
+.v35 #detail[data-look='resume'] .mw-resume-bg img.ready { opacity: 1; }
+.v35 #detail[data-look='resume'] .mw-resume-bg::after { background: linear-gradient(to left, rgba(8, 7, 12, 0.2), rgba(8, 7, 12, 0.85)); }
+.v35 #detail[data-look='resume'] .mw-resume > small { font-size: 12.5px; color: var(--text-2); font-weight: 600; }
+.v35 #detail[data-look='resume'] .mw-big { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
+.v35 #detail[data-look='resume'] .mw-big b { font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.v35 #detail[data-look='resume'] .mw-big span { font-size: 15px; font-weight: 700; color: var(--text-2); }
+.v35 #detail[data-look='resume'] .mw-progress { margin-top: 16px; }
+.v35 #detail[data-look='resume'] .mw-line { background: rgba(255, 255, 255, 0.16); }
+.v35 #detail[data-look='resume'] .mw-progress-row { font-size: 12px; }
+.v35 #detail[data-look='resume'] .mw-progress-row .mw-faint { color: var(--text-2); }
+.v35 #detail[data-look='resume'] .mw-cta { margin-top: 16px; height: 50px; }
+.v35 #detail[data-look='resume'] .mw-ident { display: flex; gap: 14px; align-items: center; margin-top: 22px; padding: 0 var(--mw-side); }
+.v35 #detail[data-look='resume'] .mw-ident .mw-cover { flex: 0 0 64px; border-radius: 9px; }
+.v35 #detail[data-look='resume'] .mw-ident .mw-id { min-width: 0; }
+.v35 #detail[data-look='resume'] .mw-title { font-size: 18px; }
+.v35 #detail[data-look='resume'] .mw-stats { margin-top: 4px; }
+.v35 #detail[data-look='resume'] .mw-quick { margin-top: 16px; }
+.v35 #detail[data-look='resume'] .mw-chapters { margin-top: 28px; }
+.v35 #detail[data-look='resume'] .mw-ranges { margin-bottom: 14px; }
+.v35 #detail[data-look='resume'] .mw-ranges button.on { background: var(--accent-soft); color: var(--accent-text); }
+.v35 #detail[data-look='resume'] .mw-story { margin-top: 28px; }
+.v35 #detail[data-look='resume'] .mw-chips { margin-top: 16px; }
+
+/* ═══ الآيباد: عمود أعرض ومقاسات أكبر بنفس النسب ═══ */
+@media (min-width: 700px) {
+  .v35 #detail.mw { --mw-max: 720px; }
+  .v35 #detail[data-look='page'] .mw-head { grid-template-columns: 168px minmax(0, 1fr); gap: 22px; padding-top: calc(80px + var(--safe-top)); }
+  .v35 #detail[data-look='page'] .mw-amb { height: 520px; }
+  .v35 #detail[data-look='page'] .mw-title { font-size: 28px; }
+  .v35 #detail[data-look='gallery'] .mw-amb { height: 600px; }
+  .v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 240px; }
+  .v35 #detail[data-look='gallery'] .mw-title { font-size: 30px; }
+  .v35 #detail[data-look='gallery'] .mw-similar { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .v35 #detail[data-look='profile'] .mw-ban { height: calc(300px + var(--safe-top)); }
+  .v35 #detail[data-look='profile'] .mw-idrow { margin-top: -100px; gap: 20px; }
+  .v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex-basis: 150px; }
+  .v35 #detail[data-look='profile'] .mw-title { font-size: 28px; }
+  .v35 #detail[data-look='profile'] .mw-nums b { font-size: 22px; }
+  .v35 #detail[data-look='resume'] .mw-resume { padding: 28px; }
+  .v35 #detail[data-look='resume'] .mw-big b { font-size: 80px; }
+  .v35 #detail[data-look='resume'] .mw-ident .mw-cover { flex-basis: 80px; }
+  .v35 #detail[data-look='resume'] .mw-title { font-size: 22px; }
+  .v35 #detail .mw-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+}
+/* ═══ الكمبيوتر: عمود أعرض، والفصول صفّان ═══ */
+@media (min-width: 1100px) {
+  .v35 #detail.mw { --mw-max: 960px; }
+  .v35 #detail[data-look='page'] .mw-head { grid-template-columns: 200px minmax(0, 1fr); gap: 28px; }
+  .v35 #detail[data-look='page'] .mw-amb { height: 600px; }
+  .v35 #detail[data-look='page'] .mw-title,
+  .v35 #detail[data-look='profile'] .mw-title { font-size: 34px; }
+  .v35 #detail[data-look='page'] .mw-quick { max-width: 560px; }
+  .v35 #detail .mw-desc { font-size: 15px; max-width: 75ch; }
+  .v35 #detail .mw-chs { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .v35 #detail .mw-ch + .mw-ch { border-top: 0; }
+  .v35 #detail .mw-ch:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 262px; }
+  .v35 #detail[data-look='gallery'] .mw-acts,
+  .v35 #detail[data-look='gallery'] .mw-center { --mw-max: 640px; }
+  .v35 #detail[data-look='gallery'] .mw-similar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .v35 #detail[data-look='profile'] .mw-ban { height: calc(360px + var(--safe-top)); }
+  .v35 #detail[data-look='profile'] .mw-idrow { margin-top: -120px; }
+  .v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex-basis: 180px; }
+  .v35 #detail[data-look='profile'] .mw-nums,
+  .v35 #detail[data-look='profile'] .mw-row { max-width: 640px; }
+  .v35 #detail[data-look='resume'] .mw-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+}
+@media (hover: hover) {
+  .v35 #detail .mw-ch-open:hover .t b { color: var(--accent-text); }
+  .v35 #detail .mw-cell:not(.here):hover { background: var(--surface-2); }
+  .v35 #detail .mw-quick-btn:hover,
+  .v35 #detail .mw-square:hover { background: var(--surface-2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 #detail .mw-amb img,
+  .v35 #detail .mw-ban > img,
+  .v35 #detail .mw-resume-bg img,
+  .v35 #detail .mw-ban-amb img { transition: none; }
+}
+html[data-motion='off'] .v35 #detail .mw-amb img,
+html[data-motion='off'] .v35 #detail .mw-ban > img,
+html[data-motion='off'] .v35 #detail .mw-resume-bg img,
+html[data-motion='off'] .v35 #detail .mw-ban-amb img { transition: none; }
+/* ═══ ثبات التحميل: كل عنصر يحجز مقاسه النهائي من أول إطار ═══ */
+.v35 #detail .mw-hold { visibility: hidden; }
+.v35 #detail .mw-stats { min-height: 20px; }
+.v35 #detail .mw-skel-lines { display: flex; flex-direction: column; justify-content: space-around; height: calc(3 * 1.85em); }
+.v35 #detail .mw-skel-lines i { display: block; height: 13px; border-radius: 6px; background: var(--surface-2); }
+.v35 #detail .mw-skel-lines i:last-child { width: 62%; }
+.v35 #detail .mw-src .source-chip.skeleton { pointer-events: none; }
+.v35 #detail .mw-range-skel { flex: 0 0 82px; height: 32px; border-radius: 16px; }
+.v35 #detail .mw-ch--skel .mw-ch-open { cursor: default; }
+.v35 #detail .mw-cell.skeleton { pointer-events: none; }
+.v35 #detail .mw-cover > img.img-fade { animation: mw-img-in 0.32s ease-out both; }
+@keyframes mw-img-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ═══ ستارة قائمة «المزيد»: العناوين تُقرأ فوق ظلّ هادئ لا فوق الغلاف مباشرة ═══ */
+.v35 #detail .mw-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 88%, transparent), color-mix(in srgb, var(--bg) 64%, transparent) 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease-out;
+}
+.v35 #detail .mw-scrim.open { opacity: 1; pointer-events: auto; transition-duration: 0.22s; }
+.v35 #detail .mw-bar .aw-menu-label { background: none; backdrop-filter: none; font-size: 13px; font-weight: 700; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+
+/* ═══ «علّم فصول»: التحديد على الصف أو الخانة، وشريط الأفعال تحت ═══ */
+.v35 #detail.mw-marking { padding-bottom: 150px; }
+.v35 #detail.mw-marking .mw-ch-open .n { position: relative; }
+.v35 #detail.mw-marking .mw-ch.picked { background: var(--accent-soft); border-radius: 12px; }
+.v35 #detail.mw-marking .mw-ch.picked + .mw-ch,
+.v35 #detail.mw-marking .mw-ch.picked { border-top-color: transparent; }
+.v35 #detail.mw-marking .mw-ch.picked .n { color: var(--accent-text); }
+.v35 #detail .mw-cell.picked { box-shadow: inset 0 0 0 2px var(--accent); }
+.v35 #detail .mw-cell.here.picked { box-shadow: inset 0 0 0 2px var(--text-1); }
+.v35 #detail .mw-selbar {
+  position: fixed;
+  inset-inline: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 32;
+  max-width: 560px;
+  margin-inline: auto;
+  padding: 12px;
+  border-radius: 20px;
+  background: var(--surface-2);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px var(--line);
+}
+.v35 #detail .mw-selhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-inline-start: 4px; font-size: 13.5px; font-weight: 700; color: var(--text-1); }
+.v35 #detail .mw-selclose { width: 40px; height: 40px; margin: -6px -4px -6px 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
+.v35 #detail .mw-selacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.v35 #detail .mw-selbtn {
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease-out, opacity 0.15s ease-out;
+}
+.v35 #detail .mw-selbtn.is-primary { background: var(--accent); color: var(--on-accent, #fff); }
+.v35 #detail .mw-selbtn:disabled { opacity: 0.38; cursor: default; }
+.v35 #detail .mw-selbtn:not(:disabled):active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .v35 #detail .mw-cover > img.img-fade { animation: none; }
+  .v35 #detail .mw-scrim { transition: none; }
+}
+html[data-motion='off'] .v35 #detail .mw-cover > img.img-fade { animation: none; }
+html[data-motion='off'] .v35 #detail .mw-scrim { transition: none; }
+
+/* التقييم في ورقته */
+.v35 .mw-rate { justify-content: center; gap: 8px; margin: 12px 0 8px; }
+
 
 /* ───────────────────────── البحث والاكتشاف ─────────────────────────
  * التصنيفات كلمات في إطار شعري لا حبوب ملوّنة، والرائج جدول مرقّم بلا صندوق. */
@@ -771,9 +1107,6 @@
   }
   .v35 .shortcut-label {
     font-size: 13px;
-  }
-  .v35 .detail-folio b {
-    font-size: 32px;
   }
 }
 
