@@ -3706,10 +3706,6 @@ html[data-motion='off'] .v35 .dock-scrim {
 /* ───── انتقالات الصفحات الداخلية (page-motion.js) ─────
  * الصفحة تدخل بتلاشٍ قصير (شفافية فقط: لا إزاحة تُقاس كقفزة في تبديل الأقسام). الغلاف المتصل: نسخة
  * واحدة من الصورة تتحرك بـtransform فوق الصفحة (FLIP). لا تمسّ انتقال الأقسام الرئيسية. */
-.v35 .page.page-enter { animation: vantara-page-enter 0.2s cubic-bezier(0.2, 0, 0, 1) both; }
-@keyframes vantara-page-enter { from { opacity: 0; } to { opacity: 1; } }
 .vantara-morph-ghost { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
-  .v35 .page.page-enter { animation: none; }
 }
-html[data-motion='off'] .v35 .page.page-enter { animation: none; }

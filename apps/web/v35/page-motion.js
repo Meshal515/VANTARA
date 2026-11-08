@@ -62,8 +62,12 @@ export function morphCover(from, swap, target, { doc = globalThis.document } = {
   const ghost = image.cloneNode();
   ghost.removeAttribute('id');
   ghost.className = 'vantara-morph-ghost';
+  // بإحداثيات الصفحة لا الشاشة: إن مرّر المستخدم أثناء الحركة تتحرك النسخة مع الصفحة إلى البطاقة حيث هي
+  // الآن. كانت fixed فتكمل إلى مكان البطاقة القديم ثم تختفي وتظهر البطاقة أعلى منه (تنزل ثم ترتفع دفعة).
+  const sx0 = globalThis.scrollX ?? 0;
+  const sy0 = globalThis.scrollY ?? 0;
   Object.assign(ghost.style, {
-    position: 'fixed', left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`,
+    position: 'absolute', left: `${b.left + sx0}px`, top: `${b.top + sy0}px`, width: `${b.width}px`, height: `${b.height}px`,
     objectFit: 'cover', borderRadius: radiusTo, zIndex: '9999', pointerEvents: 'none', margin: '0', transformOrigin: '0 0',
   });
   doc.body.append(ghost);
@@ -76,7 +80,9 @@ export function morphCover(from, swap, target, { doc = globalThis.document } = {
   ], { duration: DURATION, easing: EASE });
   running = { ghost, to, anim };
   const mine = running;
-  const done = () => { if (running === mine) settle(); };
+  const done = () => { clearTimeout(mine.guard); if (running === mine) settle(); };
+  // ضمان لا يعتمد على finished: حمل ثقيل أو مقاطعة قد تؤخره، والغلاف المخفي لا يبقى مخفيًا أبدًا
+  mine.guard = setTimeout(done, DURATION + 400);
   if (anim) anim.finished.then(done, done);
   else done();
   return true;
@@ -85,9 +91,8 @@ export function morphCover(from, swap, target, { doc = globalThis.document } = {
 /** دخول صفحة: تلاشٍ قصير (شفافية فقط)، يُعاد من أوله إن دخلت صفحة أخرى قبل انتهائه. */
 export function pageFadeIn(page, { doc = globalThis.document } = {}) {
   if (!page || motionReduced(doc)) return;
-  page.classList.remove('page-enter');
-  void page.offsetWidth;
-  page.classList.add('page-enter');
-  clearTimeout(page._enterTimer);
-  page._enterTimer = setTimeout(() => page.classList.remove('page-enter'), 260);
+  // Web Animations على الشفافية وحدها: على خيط الرسم، بلا إعادة تخطيط قسرية (offsetWidth كانت تخطّط
+  // الصفحة كلها لحظة الدخول)، والدخول التالي يلغي السابق.
+  page._enter?.cancel();
+  page._enter = page.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)' }) ?? null;
 }

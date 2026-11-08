@@ -402,11 +402,13 @@ export function slugName(manga) {
  * مفتاح البطاقة ثابت بقاعدة لا بالترتيب: مالك أسماء محفوظة، وإلا الاسم الذي أشارت
  * إليه نسخ أكثر، وإلا الأطول، وإلا الأسبق أبجديًا.
  */
-export function canonicalIndex({ aliases = new Map() } = {}) {
-	const entries = [];
-	const rejected = [];
-	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
-	// يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
+// الأسماء المحفوظة لا تتغير بين فهرس وآخر ما لم تتغير خريطتها (manga-alias-store يبني خريطة جديدة عند كل
+// تعلّم)، فتُجهَّز مرة لكل خريطة. كانت تُعاد مع كل فهرس: فتح «مكتبتي» يبني سبعة فهارس (عدد كل تبويب)، فيُطبَّع
+// جدول الأسماء كله سبع مرات على الخيط الرئيسي (≈400ms بإبطاء ×4) لحظة اللمس.
+const preparedCache = new WeakMap();
+function preparedAliases(aliases) {
+	let hit = preparedCache.get(aliases);
+	if (hit) return hit;
 	const prepared = new Map();
 	const byWord = new Map();
 	for (const [owner, names] of aliases) {
@@ -418,6 +420,17 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			byWord.get(k).add(owner);
 		}
 	}
+	hit = { prepared, byWord };
+	preparedCache.set(aliases, hit);
+	return hit;
+}
+
+export function canonicalIndex({ aliases = new Map() } = {}) {
+	const entries = [];
+	const rejected = [];
+	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
+	// يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
+	const { prepared, byWord } = preparedAliases(aliases);
 	const staticClaimers = (key) => {
 		const words = keyWords(key);
 		let candidates = null;
