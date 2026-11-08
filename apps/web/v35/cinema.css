@@ -1123,6 +1123,44 @@
 .v35 .cn-sources:empty {
   display: none;
 }
+/* سطر المصادر يحجز مقاسه من أول إطار: البحث هيكل بمقاس السطر نفسه لا نص يظهر ويختفي */
+.v35 .cn-sources {
+  min-height: 46px;
+  box-sizing: border-box;
+}
+.v35 .cn-sources-skel {
+  display: block;
+  width: min(62%, 260px);
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%) 0 0 / 200% 100%;
+  animation: cn-skel-sweep 1.4s linear infinite;
+}
+@keyframes cn-skel-sweep {
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-sources-skel { animation: none; }
+}
+
+/* أدوات الترويسة: نفس كبسولة صفحة عمل الأنمي (aw-tools/aw-menu في anime.css) */
+.v35 .cn-detail-bar .cn-tools {
+  flex: none;
+  margin-inline-start: auto;
+}
+.v35 .cn-detail-bar > .aw-menu {
+  inset-inline-end: 10px;
+}
+.v35 .cn-detail-bar > .aw-menu:not(.open) {
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tools {
+  background: transparent;
+  backdrop-filter: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tool {
+  color: var(--text-1);
+}
 .v35 .cn-dot {
   width: 7px;
   height: 7px;

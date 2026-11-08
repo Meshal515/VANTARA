@@ -1424,9 +1424,12 @@ export function createCinema(deps) {
       host.dataset.state = 'web';
       return;
     }
+    // البحث بلا سطر يظهر ويختفي: هيكل بمقاس السطر النهائي في مكانه المحجوز (cinema.css)
     host.dataset.state = 'loading';
-    host.replaceChildren(el('i', 'cn-dot'), el('span', null, 'نبحث في المصادر العربية…'));
+    host.setAttribute('aria-busy', 'true');
+    host.replaceChildren(el('span', 'cn-sources-skel'));
     const found = await locate(m, season);
+    host.removeAttribute('aria-busy');
     if (q('cinemaSources') !== host || state.detail?.id !== m.id || (m.type === 'series' && state.season !== season)) return;
     const retry = () =>
       button('cn-link', 'ابحث مجددًا', () => {
@@ -1534,6 +1537,89 @@ export function createCinema(deps) {
     void similar(full, token);
   }
 
+  // ───────────── أدوات الترويسة (نفس نظام aw-tools/aw-menu في الأنمي) ─────────────
+  let toolsView = null;
+  const inLater = (id) => rows('collections', (r) => r.kind === 'read_later' && r.series_ref === refOf(id) && r.member).length > 0;
+  function paintCinemaTools(m) {
+    const v = toolsView;
+    if (!v || v.m.id !== m.id) return;
+    const tool = (icon, label, onClick, { pressed, filled } = {}) => {
+      const b = button('aw-tool', glyph(icon, { size: 21, filled: Boolean(filled) }), onClick, label);
+      if (pressed !== undefined) b.setAttribute('aria-pressed', String(Boolean(pressed)));
+      return b;
+    };
+    const fav = inList('fav', m.id);
+    const items = [tool('heart', fav ? 'في المفضلة' : 'المفضلة', () => {
+      const on = toggleList('fav', state.detail?.id === m.id ? state.detail : m);
+      paintCinemaTools(m);
+      pop(v.tools.querySelector('.aw-tool'));
+      toast(on ? 'أُضيف إلى المفضلة' : 'أُزيل من المفضلة');
+    }, { pressed: fav, filled: fav })];
+    if (deps.share) items.push(tool('send', 'رشّح', () => deps.share({ ref: `cinema:${playKey(m, m.type === 'series' ? state.season : null)}`, title: displayTitle(m), cover: m.poster ?? null })));
+    const more = tool('more', 'المزيد', () => toggleCinemaMenu());
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', String(v.menu.classList.contains('open')));
+    items.push(more);
+    v.tools.replaceChildren(...items);
+    paintCinemaMenu(m);
+  }
+  function paintCinemaMenu(m) {
+    const v = toolsView;
+    if (!v || v.m.id !== m.id) return;
+    const work = () => (state.detail?.id === m.id ? state.detail : m);
+    const entry = (icon, label, onClick, pressed = false) => {
+      const b = button('aw-menu-item', `<span class="aw-menu-dot">${glyph(icon, { size: 20 })}</span><span class="aw-menu-label">${label}</span>`, onClick, label);
+      b.setAttribute('role', 'menuitem');
+      if (pressed) b.setAttribute('aria-pressed', 'true');
+      return b;
+    };
+    const listName = me() ? 'أتابعها' : 'قائمتي';
+    const mine = inList('later', m.id);
+    const list = [entry(mine ? 'check' : 'plus', listName, () => {
+      const on = toggleList('later', work());
+      paintCinemaMenu(m);
+      toast(on ? `أُضيف إلى ${listName}` : `أُزيل من ${listName}`);
+    }, mine)];
+    if (me()) {
+      const later = inLater(m.id);
+      list.push(entry(later ? 'check' : 'clock', 'لاحقًا', () => {
+        rememberType(work());
+        sync?.enqueue('readLater.set', { ...descriptor(work()), member: !later });
+        paintCinemaMenu(m);
+        toast(!later ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
+      }, later));
+    }
+    if (work().type === 'series' && work().seasons?.length && typeof startMarking === 'function') list.push(entry('eye', 'علّم حلقات', () => { toggleCinemaMenu(false); startMarking(work()); }));
+    if (deps.openWorkMenu) list.push(entry('star', 'أفضل 5', () => {
+      toggleCinemaMenu(false);
+      deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null });
+    }));
+    list.forEach((r, i) => r.style.setProperty('--i', String(i)));
+    v.menu.replaceChildren(...list);
+  }
+  function toggleCinemaMenu(force) {
+    const v = toolsView;
+    if (!v) return;
+    const open = force ?? !v.menu.classList.contains('open');
+    v.menu.classList.toggle('open', open);
+    v.bar.classList.toggle('menu-open', open);
+    v.tools.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', String(open));
+    v.off?.();
+    v.off = null;
+    if (!open) return;
+    const away = (e) => {
+      if (e.type === 'keydown' && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && (v.menu.contains(e.target) || v.tools.contains(e.target))) return;
+      toggleCinemaMenu(false);
+    };
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', away, true);
+    v.off = () => {
+      document.removeEventListener('pointerdown', away, true);
+      document.removeEventListener('keydown', away, true);
+    };
+  }
+
   let unbindHero = null;
   function renderDetail(m, { partial = false } = {}) {
     const page = q('cinema');
@@ -1552,7 +1638,14 @@ export function createCinema(deps) {
       small.src = m.logo;
       barTitle.prepend(small);
     }
-    bar.append(barTitle);
+    // أدوات العمل في الترويسة بنظام صفحة عمل الأنمي: كبسولة (المفضلة، رشّح، ⋮) وقائمة ⋮ تحتها
+    const tools = el('div', 'aw-tools cn-tools');
+    const menu = el('div', 'aw-menu cn-menu');
+    menu.setAttribute('role', 'menu');
+    bar.append(barTitle, tools, menu);
+    toolsView?.off?.();
+    toolsView = { m, bar, tools, menu };
+    paintCinemaTools(m);
 
     const art = el('div', 'cn-detail-art');
     const backdrop = image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true });
@@ -1582,31 +1675,6 @@ export function createCinema(deps) {
         p.append(track, el('span', null, remainingAr(point.record.position, point.record.duration) ?? ''));
         body.append(p);
       }
-      const actions = el('div', 'cn-actions');
-      const toggle = (kind, icon, label, onToast, offToast) => {
-        const b = el('button', 'cn-action');
-        b.type = 'button';
-        const paint = () => {
-          const on = inList(kind, m.id);
-          b.setAttribute('aria-pressed', String(on));
-          b.innerHTML = `${glyph(on && kind === 'later' ? 'check' : icon, { size: 22, filled: on && kind === 'fav' })}<span>${label}</span>`;
-        };
-        paint();
-        b.onclick = () => {
-          const on = toggleList(kind, m);
-          paint();
-          pop(b);
-          toast(on ? onToast : offToast);
-        };
-        return b;
-      };
-      actions.append(
-        toggle('later', 'plus', 'قائمتي', 'أُضيف إلى قائمتي', 'أُزيل من قائمتي'),
-        toggle('fav', 'heart', 'المفضلة', 'أُضيف إلى المفضلة', 'أُزيل من المفضلة'),
-      );
-      if (deps.share) actions.append(button('cn-action', `${glyph('send', { size: 22 })}<span>رشّح</span>`, () => deps.share({ ref: `cinema:${playKey(m, m.type === 'series' ? state.season : null)}`, title: displayTitle(m), cover: m.poster ?? null })));
-      if (deps.openWorkMenu) actions.append(button('cn-action cn-action--more', `${glyph('more', { size: 22 })}<span>المزيد</span>`, () => deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }), 'خيارات العمل'));
-      body.append(actions);
 
       const sources = el('div', 'cn-sources');
       sources.id = 'cinemaSources';
