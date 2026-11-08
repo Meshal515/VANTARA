@@ -189,6 +189,17 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     li.append(time, b);
     return li;
   }
+  function airCard(e) {
+    const t = now(); const done = e.airingAt <= t; const [hm, ap] = clock(e.airingAt);
+    const a = el('button', `uv-po uv-ac${done ? ' done' : ''}`); a.type = 'button';
+    const art = el('span', 'uv-art'); art.append(img(e.poster, 'uv-img', e.title));
+    art.append(el('span', 'uv-ep', `حلقة ${e.episode}`));
+    const line = el('span', 'uv-t2');
+    line.append(el('em', null, `${hm} ${ap}`), document.createTextNode(` · ${done ? 'متاحة' : until(e.airingAt, t)}`));
+    a.append(art, txt('b', 'uv-t1', e.title), line);
+    a.onclick = () => open.anime(e);
+    return a;
+  }
   function dayName(d) { return d === -1 ? 'أمس' : d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : DAYS_AR[new Date(now() + 3 * 3600_000 + d * 86_400_000).getUTCDay()]; }
 
   /* ───── آخر الفصول (المانجا) ───── */
@@ -294,8 +305,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       const week = data.animeHome()?.week ?? [];
       const days = el('div', 'uv-days uv-days-lg');
       for (const d of [-1, 0, 1, 2, 3]) { const b = el('button', st.day === d ? 'on' : ''); b.type = 'button'; b.append(el('span', null, dayName(d)), el('small', null, String(dayLineup(week, d, now()).length))); b.onclick = () => { st.day = d; paintSub(); }; days.append(b); }
-      const ol = el('ol', 'uv-air uv-air-full'); const list = dayLineup(week, st.day, now()); list.forEach((e) => ol.append(airRow(e)));
-      body.append(days, list.length ? ol : el('p', 'uv-none', 'لا حلقات في هذا اليوم'));
+      // بطاقات عمودية في شبكة (قرار المالك)، الوقت والحالة تحت كل غلاف
+      const grid = el('div', 'uv-grid'); const list = dayLineup(week, st.day, now());
+      list.forEach((e) => grid.append(airCard(e)));
+      body.append(days, list.length ? grid : el('p', 'uv-none', 'لا حلقات في هذا اليوم'));
     } else {
       top.append(back, el('h1', null, 'آخر الفصول'));
       const T = [['new', 'آخر الفصول'], ['top', 'الأكثر قراءة']];

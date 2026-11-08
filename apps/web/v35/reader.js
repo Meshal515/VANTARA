@@ -157,7 +157,7 @@ export function openSmartReader(deps, ctx) {
     </header>
     <footer class="rd-bottom" id="rdBottom">
       ${iconButton('skipPrev', 'الفصل السابق', { act: 'prevChapter', cls: 'icon-btn rd-prev' })}
-      <div class="rd-progress"><span id="rdPageLabel"></span><div class="progress-bar"><i id="rdProgress"></i></div></div>
+      <div class="rd-progress"><span id="rdPageLabel"></span><div class="progress-bar rd-scrub" id="rdScrub" role="slider" aria-label="الصفحة" tabindex="0"><i id="rdProgress"></i><b class="rd-knob" id="rdKnob"><em id="rdKnobLabel"></em></b></div></div>
       ${iconButton('skipNext', 'الفصل التالي', { act: 'nextChapter', cls: 'icon-btn rd-next' })}
     </footer>
     <div class="rd-tray" id="rdTray" hidden><div class="rd-tray-strip" id="rdTrayStrip"></div><p id="rdTrayHint">المس الصفحات لتضيفها أو تشيلها</p></div>
@@ -166,6 +166,8 @@ export function openSmartReader(deps, ctx) {
     <div class="toast rd-toast" id="rdToast" role="status" aria-live="polite"></div>`;
   deps.mount(root);
   const q = (id) => root.querySelector(`#${id}`);
+  let scrubbing = false;
+  queueMicrotask(() => bindScrub());
   const scroll = q('rdScroll');
 
   // ───────────────────────── Together: القراءة مع الأصدقاء ─────────────────────────
@@ -1024,7 +1026,45 @@ export function openSmartReader(deps, ctx) {
   function updateProgress() {
     const n = state.pages.length;
     q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
-    q('rdProgress').style.width = `${n ? ((state.current + 1) / n) * 100 : 0}%`;
+    const pct = n ? ((state.current + 1) / n) * 100 : 0;
+    q('rdProgress').style.width = `${pct}%`;
+    if (!scrubbing) q('rdKnob').style.insetInlineStart = `${pct}%`;
+    q('rdScrub').setAttribute('aria-valuenow', String(state.current + 1));
+    q('rdScrub').setAttribute('aria-valuemax', String(n));
+  }
+  // السحب على الشريط: الدائرة تتبع الإصبع وتُظهر رقم الصفحة، والإفلات ينقل مباشرة (نظام Mihon)
+  function scrubIndex(e) {
+    const bar = q('rdScrub'); const r = bar.getBoundingClientRect(); const n = state.pages.length;
+    const rtl = getComputedStyle(bar).direction === 'rtl';
+    const f = Math.min(1, Math.max(0, rtl ? (r.right - e.clientX) / r.width : (e.clientX - r.left) / r.width));
+    return { i: Math.max(0, Math.min(n - 1, Math.round(f * (n - 1)))), f, n };
+  }
+  function bindScrub() {
+    const bar = q('rdScrub');
+    const move = (e) => {
+      const { i, f, n } = scrubIndex(e);
+      q('rdKnob').style.insetInlineStart = `${f * 100}%`;
+      q('rdProgress').style.width = `${f * 100}%`;
+      q('rdKnobLabel').textContent = n ? `${i + 1}` : '';
+      return i;
+    };
+    bar.addEventListener('pointerdown', (e) => {
+      if (!state.pages.length) return;
+      scrubbing = true; root.classList.add('rd--scrubbing');
+      bar.setPointerCapture?.(e.pointerId); move(e); e.preventDefault();
+    });
+    bar.addEventListener('pointermove', (e) => { if (scrubbing) move(e); });
+    const end = (e) => {
+      if (!scrubbing) return;
+      const i = move(e); scrubbing = false; root.classList.remove('rd--scrubbing');
+      jumpTo(i, false);
+    };
+    bar.addEventListener('pointerup', end);
+    bar.addEventListener('pointercancel', () => { scrubbing = false; root.classList.remove('rd--scrubbing'); updateProgress(); });
+    bar.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: 1, ArrowRight: -1, ArrowUp: -1, ArrowDown: 1 }[e.key];
+      if (d && state.pages.length) { e.preventDefault(); jumpTo(Math.max(0, Math.min(state.pages.length - 1, state.current + d)), false); }
+    });
   }
   const activeClock = createActiveClock();
   function tickActive() {

@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../../lib/diagnostics-ui.js';
+import { accentOf } from '../../v35/appearance.js';
 /**
  * مشغّل الويب (بديل المشغّل الأصلي في الـAPK) — بنفس تصميمه.
  *
@@ -228,6 +229,14 @@ export function openPlayer(args) {
 
   const root = el('div', 'pwa-player');
   root.dataset.tone = args.section === 'cinema' ? 'cinema' : 'anime';
+  // لون القسم الذي اختاره المستخدم (المظهر) يسري على المشغّل، وإلا لون القسم المصمّم
+  const picked = accentOf(args.section === 'cinema' ? 'cinema' : 'anime');
+  if (picked) {
+    root.style.setProperty('--accent', picked);
+    root.style.setProperty('--accent-text', `color-mix(in srgb, ${picked} 62%, #fff)`);
+    root.style.setProperty('--accent-soft', `color-mix(in srgb, ${picked} 16%, transparent)`);
+    root.style.setProperty('--accent-line', `color-mix(in srgb, ${picked} 42%, transparent)`);
+  }
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', args.title || 'المشغّل');
   const video = el('video', 'pp-video');

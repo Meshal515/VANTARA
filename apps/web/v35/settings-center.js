@@ -144,26 +144,36 @@ export function renderAppearancePane(body, ctx) {
   head('COLORS', 'ألوان الأقسام', 'اللون يظهر في الأزرار والتحديد ومؤشر التنقل؛ أسطح الشريط تبقى فحمية.');
   // قرار المالك: لا معاينة للألوان (الفرق ظاهر في التطبيق نفسه)؛ المعاينات للأنماط والواجهات وحدها
   const colors = el('div', 'settings-list');
+  const DESIGNED_OF = (title) => ({ المانجا: '#8f5cff', الأنمي: '#3b82f6', السينما: '#c1121f' })[String(title).replace('لون ', '')] ?? '#8f5cff';
+  // منتقي اللون: دوائر كبيرة على شبكة، والمختار باسمه فوق، واللمسة تطبّق ثم تُغلق (لا معاينة حية)
   const swatchSheet = (title, current, resetLabel, resetHex, pick) => openSheet((sheet) => {
-    sheet.append(el('h3', null, title));
-    const grid = el('div', 'look-swatches');
-    const reset = el('button', `look-swatch look-swatch--reset${current ? '' : ' on'}`);
-    reset.type = 'button';
-    reset.setAttribute('aria-pressed', String(!current));
-    if (resetHex) reset.style.setProperty('--sw', resetHex);
-    reset.append(el('i'), el('span', null, resetLabel));
-    reset.onclick = () => { closeSheet(); pick(null); };
-    grid.append(reset);
-    for (const c of ACCENTS) {
-      const b = el('button', `look-swatch${current === c.id ? ' on' : ''}`);
+    const opts = [{ id: null, name: resetLabel, hex: resetHex ?? DESIGNED_OF(title) }, ...ACCENTS];
+    const now = opts.find((o) => o.id === (current ?? null)) ?? opts[0];
+    const head = el('div', 'look-pal-head');
+    const dot = el('i', 'look-pal-dot'); dot.style.setProperty('--sw', now.hex);
+    const name = el('strong', null, now.name);
+    const lbl = el('div'); lbl.append(el('small', null, title), name);
+    head.append(dot, lbl);
+    const grid = el('div', 'look-pal');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', title);
+    for (const c of opts) {
+      const on = c.id === (current ?? null);
+      const b = el('button', `look-pal-sw${on ? ' on' : ''}${c.id ? '' : ' is-default'}`);
       b.type = 'button';
-      b.setAttribute('aria-pressed', String(current === c.id));
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(on));
+      b.setAttribute('aria-label', c.name);
       b.style.setProperty('--sw', c.hex);
-      b.append(el('i'), el('span', null, c.name));
-      b.onclick = () => { closeSheet(); pick(c.id); };
+      b.innerHTML = glyph('check', { size: 18 });
+      b.onclick = () => {
+        for (const x of grid.children) { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }
+        dot.style.setProperty('--sw', c.hex); name.textContent = c.name;
+        setTimeout(() => { closeSheet(); pick(c.id); }, 180);
+      };
       grid.append(b);
     }
-    sheet.append(grid);
+    sheet.append(head, grid);
   });
   const DESIGNED = { manga: '#8f5cff', anime: '#3b82f6', cinema: '#c1121f' };
   for (const section of ['manga', 'anime', 'cinema']) {

@@ -606,6 +606,12 @@ export async function open(args) {
       args = {...args, addonSubtitleProviders: a.nativeSubtitleProviders()};
     } catch { /* ترجمة الإضافة لا تمنع الفيديو */ }
   }
+  // لون القسم الذي اختاره المستخدم يسري على المشغّل الأصلي (وإلا لونه المصمّم)
+  try {
+    const { accentOf } = await import('../v35/appearance.js');
+    const accent = accentOf(args.section === 'cinema' ? 'cinema' : 'anime');
+    if (accent) args = { ...args, accent };
+  } catch { /* اللون تحسين لا شرط */ }
   await plugin.play(args);
   return true;
 }

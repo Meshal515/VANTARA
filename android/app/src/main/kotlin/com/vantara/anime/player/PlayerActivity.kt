@@ -107,6 +107,8 @@ class PlayerActivity : Activity() {
         val animeId: String = "",
         /** القسم الذي يُحتسب له الوقت ومرجع العمل: `anime` (الافتراضي) أو `cinema`. */
         val section: String = "anime",
+        /** لون القسم الذي اختاره المستخدم (#RRGGBB)، أو null = لون القسم المصمّم. */
+        val accent: String? = null,
         val usageUserId: String? = null,
         val malId: Int? = null,
         val episode: Float = 1f,
@@ -545,7 +547,7 @@ class PlayerActivity : Activity() {
 
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
-        Tone.use(launch.section)
+        Tone.use(launch.section, launch.accent)
         sessionId = launch.session
         presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
