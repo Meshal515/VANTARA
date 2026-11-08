@@ -90,6 +90,7 @@ export const SHELL_HTML = `<div class="app">
     </div>
     <div class="home-view anime-home" id="animeHome" data-home="anime" hidden></div>
     <div class="home-view cinema-home" id="cinemaHome" data-home="cinema" hidden></div>
+    <div class="home-view all-home" id="allHome" data-home="all" hidden></div>
   </section>
 
   <section class="page anime-page" id="anime"></section>
@@ -224,7 +225,12 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page" id="settings">
     ${subTop('الإعدادات')}
-    <div class="page-body" id="settingsBody"></div>
+    <div class="page-body settings-body" id="settingsBody"></div>
+  </section>
+
+  <section class="page" id="settingsPane">
+    ${subTop('الإعدادات', { id: 'settingsPaneTitle' })}
+    <div class="page-body settings-body" id="settingsPaneBody"></div>
   </section>
 
   <section class="page" id="insights">

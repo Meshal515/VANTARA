@@ -82,7 +82,10 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
+import { accentOf, applyAppearance, patchAppearance, toneCss } from './appearance.js';
+import { experienceView, readStructure } from './experience.js';
+import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
+import { collectItems, countKinds, filterItems, KINDS, KIND_TAG, loadIdentity, unifiedFeed } from './unified-home.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -427,7 +430,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     jobSheetRefresh?.();
     if (state.current) renderTranslateToggle(state.current);
-    if (currentPage() === 'settings') renderSettings();
+    if (onSettings()) renderSettings();
   });
   // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
   (function resumeJobsWhenSignedIn(tries = 0) {
@@ -4364,13 +4367,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') renderAllHome();
     if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch) {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
     }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
-    if (id === 'settings') {
+    if (id === 'settings' || id === 'settingsPane') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
     }
@@ -4511,9 +4515,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // الإعدادات لكل واحد من العيال: ما يفهمه أي أحد فوق، والتقني تحت «النظام»
   // مطويًّا، وما قد يفصل التطبيق عن الخادم في «منطقة الخطر» بتأكيد صريح.
   // الشاشة القديمة تبقى لحالة واحدة: لا حساب بعد (أول إقلاع)، ولا واجهة أصلًا.
-  let systemOpen = false;
   diagnosticsUi.subscribe(() => {
-    if (currentPage() === 'settings') renderSettings();
+    if (onSettings()) renderSettings();
     if (!diagnosticsUi.visible() && root.querySelector('[data-diagnostic-sheet]')) closeSheet();
   });
   let apkVersion = null;
@@ -4595,7 +4598,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           .then((res) => {
             if (res.status !== 200) return;
             translateUsage = res.body;
-            if (currentPage() === 'settings') renderSettings();
+            if (onSettings()) renderSettings();
           })
           .catch(() => {});
       }
@@ -4636,7 +4639,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!modelsInfo) {
       void modelsStatus().then((info) => {
         modelsInfo = info;
-        if (currentPage() === 'settings') renderSettings();
+        if (onSettings()) renderSettings();
       });
       group('', [row('download', 'ملفات الترجمة', 'جارٍ فحص الملفات…', {})]);
       return;
@@ -4676,8 +4679,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       await downloadModels(({ received, total }) => {
         modelsBusy = { received, total };
-        const sub = q('settingsBody')?.querySelector('.setting small');
-        if (sub && currentPage() === 'settings') renderSettings();
+        const sub = q(currentPage() === 'settingsPane' ? 'settingsPaneBody' : 'settingsBody')?.querySelector('.setting small');
+        if (sub && onSettings()) renderSettings();
       });
       toast('ملفات الترجمة جاهزة');
     } catch {
@@ -4685,7 +4688,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     } finally {
       modelsBusy = null;
       modelsInfo = null;
-      if (currentPage() === 'settings') renderSettings();
+      if (onSettings()) renderSettings();
     }
   }
 
@@ -4789,9 +4792,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
       paint();
     }, { tone: 'manga' });
   }
+  /** فئة الإعدادات المفتوحة: صفحتها بنظام الصفحات نفسه (تلاشٍ ورجوع)، والرئيسية قائمة الفئات. */
+  function openSettingsPane(id) {
+    if (id === 'addons') return void openAddons();
+    state.settingsPane = id;
+    showPage('settingsPane');
+  }
+  const onSettings = () => ['settings', 'settingsPane'].includes(currentPage());
   function renderSettings() {
-    const body = q('settingsBody');
+    const pane = currentPage() === 'settingsPane' ? categoryOf(state.settingsPane)?.id ?? null : null;
+    const body = q(pane ? 'settingsPaneBody' : 'settingsBody');
+    if (!body) return;
     body.replaceChildren();
+    if (pane) q('settingsPaneTitle').textContent = categoryOf(pane).title;
+    const on = (id) => pane === id;
     const api = deps.settings;
     // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
     const EYEBROWS = { 'المظهر': 'APPEARANCE', 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
@@ -4858,6 +4872,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
 
     // رأس الصفحة: أنت. الصورة والاسم يفتحان ملفّك (كان صفًّا بين الصفوف)
+    if (!pane) {
     const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
     const name = profile?.display_name || sync.user?.displayName || sync.user?.username || 'حسابي';
     const meCard = el('button', 'settings-me');
@@ -4874,61 +4889,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     meCard.onclick = () => openProfile(me());
     body.append(meCard);
 
-    // المظهر: نمط صفحة الأنمي، ولون القسم الحالي، والأسود الصافي. على هذا الجهاز فقط
-    const look = readAppearance();
-    const section = root.dataset.section ?? 'manga';
-    const sectionWord = { manga: 'المانجا', anime: 'الأنمي', cinema: 'السينما' }[section] ?? '';
-    const accentNow = ACCENTS.find((c) => c.id === look.accent?.[section]);
-    const saveLook = (next) => {
-      writeAppearance(next);
-      applySection(root.dataset.section);
-      renderSettings();
-    };
-    group('المظهر', [
-      row('layers', 'نمط صفحة الأنمي', WORK_STYLES.find((x) => x.id === workStyleOf('anime', look))?.note, {
-        value: WORK_STYLES.find((x) => x.id === workStyleOf('anime', look))?.name,
-        run: () => openSheet((sheet) => {
-          sheet.append(el('h3', null, 'نمط صفحة الأنمي'));
-          for (const st of WORK_STYLES) {
-            sheet.append(sheetItem(st.id === workStyleOf('anime', look) ? 'check' : 'layers', `${st.name} — ${st.note}`, () => {
-              closeSheet();
-              saveLook({ ...look, style: { ...look.style, anime: st.id } });
-            }, { pressed: st.id === workStyleOf('anime', look) }));
-          }
-        }),
-      }),
-      row('palette', `لون ${sectionWord}`, 'عشرون لونًا هادئًا، وخلفية سوداء فيها لمسة منه', {
-        value: accentNow?.name ?? 'لون القسم',
-        run: () => openSheet((sheet) => {
-          sheet.append(el('h3', null, `لون ${sectionWord}`));
-          const grid = el('div', 'look-swatches');
-          const pick = (id) => {
-            closeSheet();
-            const accent = { ...look.accent };
-            if (id) accent[section] = id;
-            else delete accent[section];
-            saveLook({ ...look, accent });
-          };
-          const reset = el('button', `look-swatch look-swatch--reset${accentNow ? '' : ' on'}`);
-          reset.type = 'button';
-          reset.append(el('i'), el('span', null, 'لون القسم'));
-          reset.onclick = () => pick(null);
-          grid.append(reset);
-          for (const c of ACCENTS) {
-            const b = el('button', `look-swatch${accentNow?.id === c.id ? ' on' : ''}`);
-            b.type = 'button';
-            b.style.setProperty('--sw', c.hex);
-            b.append(el('i'), el('span', null, c.name));
-            b.onclick = () => pick(c.id);
-            grid.append(b);
-          }
-          sheet.append(grid);
-        }),
-      }),
-      toggle('moon', 'أسود صافي', 'خلفية سوداء تمامًا — أوفر لشاشات OLED', look.pureBlack, (on) => saveLook({ ...look, pureBlack: on })),
-    ]);
+    // الفئات: كل واحدة تفتح صفحة خياراتها وحدها
+    const health = api?.health?.();
+    body.append(appearanceFeature({ el, glyph }, () => openSettingsPane('appearance')));
+    group('', CATEGORIES.filter((c) => c.id !== 'appearance').map((c) => row(c.icon, c.title, c.sub, {
+      value: c.id === 'sync' && health ? health.message : null,
+      tone: c.id === 'sync' && health ? (health.state !== 'ok' && health.state !== 'syncing' ? 'warn' : undefined) : undefined,
+      run: () => openSettingsPane(c.id),
+    })), { cls: 'settings-cats' });
+    }
 
-    group('الحساب', [
+    // المظهر والتخصيص: البطاقات والألوان والخلفية وبنية العرض (settings-center.js)
+    if (on('appearance')) {
+      renderAppearancePane(body, {
+        el, glyph, openSheet, closeSheet, toast, patchAppearance,
+        apply: () => { applySection(root.dataset.section); applyExperience(); },
+        rerender: () => renderSettings(),
+      });
+      return;
+    }
+
+    if (on('accounts')) group('الحساب', [
       row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
       sync.deleteAccount ? row('trash', 'حذف الحساب', null, { danger: true, run: confirmDeleteAccount }) : null,
       sync.approveDevice
@@ -4939,8 +4920,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
+    if (on('accounts')) group('', [el('p', 'settings-note', 'الخوادم ومساحات الأصدقاء قادمة؛ الخيارات الحالية كما هي.')]);
     // الخصوصية: قفل الحساب أولًا، ثم اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
-    if (sync.setPin) {
+    if (on('privacy') && sync.setPin) {
       const digits = sync.user?.pinDigits;
       group('الخصوصية', [
         row('lock', 'رمز PIN', digits ? `${digits} أرقام — يُطلب كل ما فُتح حسابك` : 'رمز من أرقام يُطلب كل ما فُتح حسابك', {
@@ -4951,7 +4933,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
     }
     const privacy = mySettings();
-    group(
+    if (on('privacy')) group(
       'ما يراه أصدقاؤك',
       [
         toggle('activity', 'إحصائيات المتابعة', 'مدتك وتقدّمك في صفحة العمل', privacy.shareInsights === true, (on) => {
@@ -5011,7 +4993,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? 'آخر المشاهدات مخفية عن الأصدقاء؛ العمل الحالي ونشاط الإنهاء لهما خياران مستقلان.'
         : 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
     );
-    group('ما تراه أنت', [
+    if (on('privacy')) group('ما تراه أنت', [
       row('activity', 'نشاط أصدقائك في القراءة', 'في «آخر ما صار». يخصّك وحدك', {
         value: privacy.feedReading === 'hide' ? 'إخفاء لدي' : 'إظهار لدي',
         run: () => {
@@ -5026,15 +5008,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sync.pendingDevices().then((n) => {
         if (n !== pendingPhones) {
           pendingPhones = n;
-          if (q('settingsBody')?.isConnected) renderSettings();
+          if (onSettings()) renderSettings();
         }
       });
     }
 
     if (api) {
       const popups = api.popups();
-      const on = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
-      group(
+      const kindsOn = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
+      if (on('privacy')) group(
         'التنبيهات',
         [
           toggle('bell', 'التنبيهات المنبثقة', 'لما يوصلك فريم أو ترشيح', popups.enabled, (enabled) => {
@@ -5042,25 +5024,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
             renderSettings();
           }),
           popups.enabled
-            ? row('sliders', 'وش يطلع لك', null, { value: on === Object.keys(api.labels).length ? 'الكل' : `${on} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
+            ? row('sliders', 'وش يطلع لك', null, { value: kindsOn === Object.keys(api.labels).length ? 'الكل' : `${kindsOn} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
             : null,
         ],
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
-      if (supports('translation')) renderTranslationSettings(group, row, toggle);
-      group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
-      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
+      if (on('playback') && supports('translation')) renderTranslationSettings(group, row, toggle);
+      if (on('privacy')) group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
+      if (!pane) group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
-    if (diagnosticsUi.available()) group('أدوات Debug', [
+    if (on('playback') && !(api && supports('translation'))) {
+      body.append(el('p', 'settings-empty', 'لا خيارات للتشغيل أو الترجمة على هذه المنصة بعد. جودة التشغيل والسيرفر تُختار من المشغّل نفسه.'));
+    }
+    if (on('advanced') && diagnosticsUi.available()) group('أدوات Debug', [
       toggle('activity', 'إظهار التشخيصات', 'أدوات الفحص على هذا الجهاز فقط', diagnosticsUi.visible(), async visible => {
         await diagnosticsUi.setVisible(visible);
         renderSettings();
       }),
     ]);
 
-    group('عن التطبيق', [
+    if (!pane) group('عن التطبيق', [
       // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
       diagnosticsUi.visible() && globalThis.Capacitor?.Plugins?.AnimeEngine
         ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
@@ -5084,27 +5069,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     ]);
 
 
-    if (!api) return;
-    // ── النظام: مطويّ. من يفتحه يعرف أنه دخل مكانًا تقنيًّا ──
-    const toggleSystem = el('button', `system-toggle${systemOpen ? ' open' : ''}`);
-    toggleSystem.type = 'button';
-    toggleSystem.setAttribute('aria-expanded', String(systemOpen));
-    toggleSystem.innerHTML = `${glyph('settings')}<span><strong>النظام</strong><small>للمسؤول فقط: المزامنة والخادم</small></span>${glyph('chevron', { cls: 'icon chev' })}`;
-    toggleSystem.onclick = () => {
-      systemOpen = !systemOpen;
-      renderSettings();
-      if (systemOpen) q('settingsBody').querySelector('.system-toggle')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    };
-    body.append(toggleSystem);
-    if (!systemOpen) return;
-
+    if (!api || !pane) return;
     const health = api.health();
     const bad = health.state !== 'ok' && health.state !== 'syncing';
     // This code contains no account details. Make a failed recovery actionable:
     // the previous screen only said "recovery incomplete" for every cause.
     const recoveryCode = health.lastError?.code
       || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
-    group('', [
+    if (on('sync')) group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
       ...(bad && diagnosticsUi.visible() ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
@@ -5119,6 +5091,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    if (on('sync')) body.append(el('p', 'settings-note', 'مكتبتك وتقدّمك يُحفظان في حسابك ويصلان أجهزتك بالمزامنة.'));
+    if (!on('advanced')) return;
     if (api.resetWeb && available()) {
       // التحديثات تتراجع وحدها عن واجهة معطوبة؛ هذا للحالة التي لا يراها الكود
       group('', [
@@ -5440,7 +5414,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const warmed = new Set();
   /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
   function prepareSections() {
-    if (currentPage() !== 'home') return;
+    if (currentPage() !== 'home' || root.dataset.content === 'unified') return;
     sectionLayers().prepare();
     for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
   }
@@ -5531,7 +5505,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // نوافذ خارج جذر التطبيق (التنبيهات، الأوراق المعلّقة على body) ترث لون القسم من <html>
     document.documentElement.dataset.section = s.id;
     // أثناء الانتقال يتبدّل الاسم مع الحركة (createCrossfade)، لا قبلها
-    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = s.word;
+    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(s.id, [root, document.documentElement]);
     // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
@@ -5574,9 +5548,144 @@ export function mountV35(deps, { page = 'home' } = {}) {
     haptic();
   }
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
-  /** رئيسية القسم وحدها ظاهرة. */
+  /** رئيسية القسم وحدها ظاهرة؛ وفي توحيد المحتوى الرئيسية المشتركة بدلها كلها. */
   function showHome(id) {
-    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = section !== id;
+    const all = root.dataset.content === 'unified';
+    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = all || section !== id;
+    const shared = q('allHome');
+    if (shared) {
+      shared.hidden = !all;
+      if (all) renderAllHome();
+    }
+  }
+
+  // ───────────────────────── بنية التجربة (experience.js) ─────────────────────────
+  // القالب على جذر التطبيق (`data-screens`)، وتوحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
+  // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
+  function applyExperience() {
+    const view = experienceView(readStructure());
+    if (view.template) root.dataset.screens = view.template;
+    else delete root.dataset.screens;
+    const unified = view.home === 'all';
+    const was = root.dataset.content === 'unified';
+    if (unified) root.dataset.content = 'unified';
+    else delete root.dataset.content;
+    if (unified && !was) dockCtl?.close({ focus: false, instant: true });
+    q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
+    showHome(root.dataset.section ?? 'manga');
+    // الشريط تغيّر عرضه (المبدّل ظهر أو اختفى): مؤشر الوجهة يُعاد لموضعها بعد التخطيط
+    requestAnimationFrame(() => dockCtl?.activate(currentPage()));
+  }
+
+  // الرئيسية المشتركة: كل العناصر تمر من unifiedFeed (منع التكرار عبر الأقسام)، والنوع يحدد صفحة التفاصيل
+  const allHome = { kind: 'all', query: '' };
+  let identityAsked = false;
+  function openUnified(item) {
+    if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
+    if (item.section === 'cinema') return openCinemaRef(item.ref, { title: item.title, cover: item.cover });
+    if (root.dataset.section !== 'manga') {
+      writeSection('manga');
+      applySection('manga');
+    }
+    void openWork(workFromRef(item.ref, item.title, item.cover));
+  }
+  function browseSection(id) {
+    writeSection(id);
+    applySection(id);
+    navTo('discover');
+  }
+  function unifiedCard(item) {
+    const b = el('button', 'uh-card');
+    b.type = 'button';
+    b.dataset.kind = item.kind;
+    const art = el('span', 'uh-art');
+    if (item.cover) {
+      const img = el('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = item.cover;
+      img.onerror = () => img.remove();
+      art.append(img);
+    }
+    art.append(el('span', 'uh-tag', KIND_TAG[item.kind] ?? ''));
+    const text = el('span', 'uh-text');
+    const t = el('strong', null, item.title || 'عمل');
+    t.dir = 'auto';
+    text.append(t);
+    text.append(el('small', null, item.label || (item.inLibrary ? 'في مكتبتك' : '')));
+    b.append(art, text);
+    b.setAttribute('aria-label', `${item.title || 'عمل'}، ${KIND_TAG[item.kind] ?? ''}`);
+    b.onclick = () => openUnified(item);
+    return b;
+  }
+  function renderAllHome() {
+    const host = q('allHome');
+    if (!host) return;
+    if (!identityAsked) {
+      identityAsked = true;
+      void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
+    }
+    const items = unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) }));
+    const counts = countKinds(items);
+    const page = el('div', 'uh');
+    const head = el('header', 'uh-head');
+    head.append(el('h2', null, 'كل أعمالك'), el('p', null, 'المانجا والأنمي والسينما في مكان واحد، كل عمل بنوعه.'));
+    const form = el('form', 'search-bar uh-search');
+    form.setAttribute('role', 'search');
+    form.innerHTML = glyph('search');
+    const input = el('input', 'search-input');
+    input.type = 'search';
+    input.placeholder = 'ابحث في أعمالك';
+    input.setAttribute('aria-label', 'ابحث في أعمالك');
+    input.enterKeyHint = 'search';
+    input.autocomplete = 'off';
+    input.value = allHome.query;
+    form.append(input);
+    form.onsubmit = (e) => { e.preventDefault(); input.blur(); };
+    const kinds = el('div', 'uh-kinds');
+    kinds.setAttribute('role', 'group');
+    kinds.setAttribute('aria-label', 'نوع العمل');
+    const grid = el('div', 'uh-grid');
+    const paintGrid = () => {
+      const list = filterItems(items, allHome);
+      grid.replaceChildren(...list.map(unifiedCard));
+      if (!list.length) {
+        const empty = el('div', 'uh-empty');
+        empty.append(el('strong', null, items.length ? 'لا نتيجة بهذا البحث' : 'لا أعمال بعد'));
+        empty.append(el('p', null, items.length ? 'جرّب اسمًا آخر أو نوعًا آخر.' : 'ما تقرأه وتشاهده وتضيفه لمكتبتك من أي قسم يظهر هنا.'));
+        grid.append(empty);
+      }
+    };
+    for (const k of KINDS) {
+      if (k.id !== 'all' && !counts[k.id]) continue;
+      const chip = el('button', 'uh-kind');
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(allHome.kind === k.id));
+      chip.append(el('span', null, k.name), el('b', null, String(counts[k.id] ?? 0)));
+      chip.onclick = () => {
+        allHome.kind = k.id;
+        for (const c of kinds.children) c.setAttribute('aria-pressed', String(c === chip));
+        paintGrid();
+      };
+      kinds.append(chip);
+    }
+    if (allHome.kind !== 'all' && !counts[allHome.kind]) allHome.kind = 'all';
+    input.oninput = () => { allHome.query = input.value; paintGrid(); };
+    paintGrid();
+    const browseRow = el('section', 'uh-browse');
+    browseRow.append(el('h3', null, 'تصفّح'));
+    const doors = el('div', 'uh-doors');
+    for (const id of ['manga', 'anime', 'cinema']) {
+      const d = el('button', `uh-door uh-door--${id}`);
+      d.type = 'button';
+      d.append(el('b', null, SECTIONS[id].word), el('span', null, SECTIONS[id].sub));
+      d.onclick = () => browseSection(id);
+      doors.append(d);
+    }
+    browseRow.append(doors);
+    page.append(head, form, kinds, grid, browseRow);
+    host.replaceChildren(page);
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
@@ -5815,7 +5924,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (res.status === 200 && typeof res.body?.allowed === 'boolean') setTranslationLocked(!res.body.allowed);
         else if (res.status === 403 && res.body?.error === 'translation_locked') setTranslationLocked(true);
         else return;
-        if (currentPage() === 'settings') renderSettings();
+        if (onSettings()) renderSettings();
       })
       .catch(() => {});
   setTimeout(checkTranslationAccess, 1500);
@@ -6056,6 +6165,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const startSection = readSection();
   applySection(startSection);
+  applyExperience();
   showHome(startSection);
   dock().activate(currentPage());
   warmed.add(startSection);
@@ -6066,7 +6176,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
     // switch on weak devices. In a later idle slot the sections stand by off-screen once so that cost is paid here.
     idle(() => {
-      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving) return;
+      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving || root.dataset.content === 'unified') return;
       const motion = sectionLayers();
       motion.prepare();
       void q('home')?.offsetHeight; // the off-screen layout itself
@@ -6100,6 +6210,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openWork,
     /** عمل من مرجعه وحده (إشعار، رابط): صفحته في الواجهة لا الشاشة القديمة. */
     openRef: (ref, title, cover) => void openWork(workFromRef(ref, title, cover)),
+    // أنمي أو سينما من مرجعه (لقطات المعاينة في tools/ui-previews تفتح صفحة العمل بها)
+    openAnimeRef,
+    openCinemaRef,
     openMajlis,
     openProfile,
     handleBack,

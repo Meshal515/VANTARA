@@ -1,5 +1,6 @@
 /**
- * المظهر: نمط صفحة العمل، ولون كل قسم، والخلفية. يُحفظ على هذا الجهاز فقط.
+ * المظهر: نمط صفحة العمل لكل قسم، ولون كل قسم ولون علامة VANTARA، والخلفية. يُحفظ على هذا الجهاز فقط.
+ * بنية التجربة (توحيد الشاشات والمحتوى) في experience.js: مفتاح مستقل لا يمسّ هذا.
  *
  * اللون يغيّر متغيّرات القسم نفسها (--accent وأخواته، وصبغة الخلفية) على جذر التطبيق و<html>
  * معًا، فما يُعلَّق على body (التنبيهات والأوراق) يرث اللون نفسه ولا يرجع لبنفسجي المانجا.
@@ -16,6 +17,30 @@ export const WORK_STYLES = Object.freeze([
   { id: 'screen', name: 'شاشة السينما', note: 'البنر شاشة والحلقات خط زمني' },
   { id: 'episode', name: 'الحلقة أولًا', note: 'ما ستكمله الآن في الأعلى' },
 ]);
+
+/**
+ * أنماط صفحة عمل المانجا. المعرّفات متفق عليها مع تنفيذ صفحة العمل: لا تُغيَّر.
+ * الأول هو الأساسي.
+ */
+export const MANGA_WORK_STYLES = Object.freeze([
+  { id: 'page', name: 'الصفحة', note: 'الغلاف وعمود المعلومات' },
+  { id: 'gallery', name: 'المعرض', note: 'الغلاف في الوسط وتبويبات' },
+  { id: 'profile', name: 'الملف', note: 'صورة العمل العريضة وثلاثة أرقام' },
+  { id: 'resume', name: 'من حيث وقفت', note: 'الفصل التالي أولًا وشبكة أرقام' },
+]);
+
+/** السينما: نمطها الحالي وحده. أنماطها مؤجلة بقرار المالك، فلا يُخترع غيره. */
+export const CINEMA_WORK_STYLES = Object.freeze([
+  { id: 'current', name: 'التصميم الحالي', note: 'أنماط السينما قريبًا', soon: true },
+]);
+
+const STYLE_SETS = { manga: MANGA_WORK_STYLES, anime: WORK_STYLES, cinema: CINEMA_WORK_STYLES };
+
+/** أنماط صفحة العمل المتاحة لقسم (الأنمي لأي قسم غير معروف، كما كان). */
+export const stylesOf = (section) => STYLE_SETS[section] ?? WORK_STYLES;
+
+/** لون علامة VANTARA الافتراضي: البنفسجي، مستقل عن ألوان الأقسام. */
+export const BRAND_DEFAULT = '#8f5cff';
 
 /** ألوان هادئة غير فاقعة؛ أولها ألوان الأقسام الثلاثة ثم الأبيض. */
 export const ACCENTS = Object.freeze([
@@ -70,10 +95,35 @@ export function writeAppearance(next, storage = globalThis.localStorage) {
   return next;
 }
 
-/** نمط صفحة العمل للقسم؛ قيمة غير معروفة ترجع للأساسي. */
+/**
+ * يعدّل المحفوظ دون أن يُسقط منه شيئًا: يُقرأ الكائن كما هو (بما فيه حقول لا يعرفها هذا الإصدار)
+ * ويُدمج التعديل فوقه. هكذا لا يمحو حفظُ لون جديد اختيارًا قديمًا أو حقلًا من إصدار أحدث.
+ * @param {(a: {style: object, accent: object, pureBlack: boolean}) => object} change يعيد الحقول المعدّلة
+ */
+export function patchAppearance(change, storage = globalThis.localStorage) {
+  let raw = {};
+  try {
+    const v = JSON.parse(storage?.getItem(KEY) ?? 'null');
+    if (v && typeof v === 'object' && !Array.isArray(v)) raw = v;
+  } catch {
+    raw = {};
+  }
+  const next = { ...raw, ...change(readAppearance(storage)) };
+  writeAppearance(next, storage);
+  return readAppearance(storage);
+}
+
+/** نمط صفحة العمل للقسم؛ قيمة غير معروفة ترجع لأساسي القسم (المانجا: الصفحة، الأنمي: المحور). */
 export function workStyleOf(section, a = readAppearance()) {
+  const list = stylesOf(section);
   const id = a.style?.[section];
-  return WORK_STYLES.some((s) => s.id === id) ? id : 'core';
+  return list.some((s) => s.id === id) ? id : list[0].id;
+}
+
+/** لون علامة VANTARA المختار (hex) أو null = البنفسجي الافتراضي. */
+export function brandOf(a = readAppearance()) {
+  const id = a.accent?.brand;
+  return ACCENTS.find((c) => c.id === id)?.hex ?? null;
 }
 
 /** لون القسم المختار (hex) أو null = لون القسم المصمّم. */
@@ -82,7 +132,7 @@ export function accentOf(section, a = readAppearance()) {
   return ACCENTS.find((c) => c.id === id)?.hex ?? null;
 }
 
-const VARS = ['--on-accent', '--accent', '--accent-press', '--accent-text', '--accent-soft', '--accent-line', 'accent-color', 'caret-color', '--bg', '--bg-raised', '--surface-1', '--surface-2', '--surface-3', '--line', '--line-strong'];
+const VARS = ['--brand', '--on-accent', '--accent', '--accent-press', '--accent-text', '--accent-soft', '--accent-line', 'accent-color', 'caret-color', '--bg', '--bg-raised', '--surface-1', '--surface-2', '--surface-3', '--line', '--line-strong'];
 
 /** نسبة تباين WCAG بين لونين hex. */
 function luminance(hex) {
@@ -145,6 +195,9 @@ export function paletteVars(hex, { pureBlack = false } = {}) {
  */
 export function applyAppearance(section, nodes, a = readAppearance()) {
   const vars = SECTIONS.includes(section) ? paletteVars(accentOf(section, a), { pureBlack: a.pureBlack }) : {};
+  // علامة VANTARA بلونها المستقل؛ بلا اختيار تبقى على البنفسجي المصمّم في CSS
+  const brand = brandOf(a);
+  if (brand) vars['--brand'] = brand;
   for (const node of nodes) {
     if (!node?.style) continue;
     for (const k of VARS) node.style.removeProperty(k);
