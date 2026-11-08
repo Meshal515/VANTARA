@@ -86,9 +86,9 @@ export function createUnifiedView({ el, glyph, data, open, lock = () => null, ge
     const m = data.mangaPopular() ?? [];
     const c = [...(data.cinema()?.movie ?? []), ...(data.cinema()?.series ?? [])].filter((x) => (x.rating ?? 0) >= 6.8);
     return {
-      anime: a.filter((x) => x.poster).map((x) => ({ kind: 'anime', title: x.title, cover: x.poster, color: x.color, meta: [x.score ? x.score.toFixed(1) : '', gen(x.genres)], go: () => open.anime(x) })),
+      anime: a.filter((x) => x.poster).map((x) => ({ kind: 'anime', title: x.title, cover: x.poster, color: x.color, logo: data.animeLogo?.(x.id) ?? null, meta: [x.score ? x.score.toFixed(1) : '', gen(x.genres)], go: () => open.anime(x) })),
       manga: m.filter((x) => x.cover).map((x) => ({ kind: 'manga', title: x.title, cover: x.cover, color: x.color ?? null, meta: [x.score ? Number(x.score).toFixed(1) : '', gen(x.genres)], go: () => open.manga(x) })),
-      cinema: c.filter((x) => x.poster).map((x) => ({ kind: x.type, title: x.title, cover: x.poster, logo: x.logo, color: null, meta: [x.year ?? '', x.rating ? x.rating.toFixed(1) : '', gen(x.genres)], go: () => open.cinema(x) })),
+      cinema: c.filter((x) => x.poster).map((x) => ({ kind: x.type, title: x.title, cover: x.poster, logo: x.logo || (/^tt\d+$/.test(x.id) ? `https://images.metahub.space/logo/medium/${x.id}/img` : null), color: null, meta: [x.year ?? '', x.rating ? x.rating.toFixed(1) : '', gen(x.genres)], go: () => open.cinema(x) })),
     };
   }
   function tint(item) {

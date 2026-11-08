@@ -4869,6 +4869,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
+    playDockMotion();
     if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
     if (id !== 'home') layers?.finish();
     dockCtl?.repaint();
@@ -6100,6 +6101,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── بنية التجربة (experience.js) ─────────────────────────
   // القالب على جذر التطبيق (`data-screens`)، وتوحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
   // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
+  let dockMotion = null;
+  let experienceApplied = false;
+  function playDockMotion() {
+    const nav = q('bottomNav');
+    if (!dockMotion || !nav || nav.hidden) return;
+    const cls = dockMotion; dockMotion = null;
+    nav.classList.remove('dock-merge', 'dock-split');
+    void nav.offsetWidth;
+    nav.classList.add(cls);
+    setTimeout(() => { nav.classList.remove(cls); dockCtl?.activate(currentPage()); }, 900);
+  }
   function applyExperience() {
     const view = experienceView(readStructure());
     // التوحيد له تصميم واحد (الرئيسية الموحدة): «توحيد التصميم» يعرضه لكل قسم بمحتواه
@@ -6110,6 +6122,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (unified) root.dataset.content = 'unified';
     else delete root.dataset.content;
     if (unified && !was) dockCtl?.close({ focus: false, instant: true });
+    // دمج الكبسولات أو فصلها: يُشغَّل أول ما يظهر الشريط (التبديل يتم من الإعدادات والشريط مخفي هناك)
+    // لا عند فتح التطبيق: فقط حين يبدّل المستخدم
+    if (unified !== was && experienceApplied) { dockMotion = unified ? 'dock-merge' : 'dock-split'; playDockMotion(); }
+    experienceApplied = true;
     q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
     showHome(root.dataset.section ?? 'manga');
     // الشريط تغيّر عرضه (المبدّل ظهر أو اختفى): مؤشر الوجهة يُعاد لموضعها بعد التخطيط
@@ -6133,7 +6149,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     navTo('discover');
   }
   // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
-  const unifiedData = { anime: null, cinema: null, series: null, asked: false };
+  const unifiedData = { anime: null, cinema: null, series: null, logos: new Map(), asked: false };
+  /** شعارات أنمي البنر من مصدر صفحة العمل نفسه (ani.zip ← metahub)، لأول سبعة رائجة فقط. */
+  async function loadHeroLogos(trending) {
+    const { loadAnimeArt } = await import('../lib/anime-art.js');
+    await Promise.all((trending ?? []).slice(0, 7).map((x) => loadAnimeArt(x.id).then((art) => { if (art?.logo) unifiedData.logos.set(x.id, art.logo); }).catch(() => {})));
+  }
   /** آخر حلقة نزلت لأشهر المسلسلات (Cinemeta): أربع طلبات معًا، وما نزل في آخر 45 يومًا فقط. */
   async function loadSeriesUpdates(series) {
     const { detail } = await import('../lib/cinema-meta.js');
@@ -6167,6 +6188,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       animeHome: () => unifiedData.anime,
       cinema: () => unifiedData.cinema,
       seriesUpdates: () => unifiedData.series,
+      animeLogo: (id) => unifiedData.logos.get(id) ?? null,
       mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
       mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
     },
@@ -6181,7 +6203,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function loadUnifiedData() {
     if (unifiedData.asked) return;
     unifiedData.asked = true;
-    void fetchAnimeHome().then((d) => { unifiedData.anime = d; unifiedView.refresh(); }).catch(() => { unifiedData.asked = false; });
+    void fetchAnimeHome().then((d) => {
+      unifiedData.anime = d;
+      unifiedView.refresh();
+      return loadHeroLogos(d?.trending).then(() => unifiedView.refresh());
+    }).catch(() => { unifiedData.asked = false; });
     void import('../lib/cinema-meta.js').then(({ catalog }) => Promise.all([catalog('movie', 'top'), catalog('series', 'top')]))
       .then(([movie, series]) => {
         unifiedData.cinema = { movie, series };

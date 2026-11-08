@@ -1,5 +1,5 @@
 /* الرئيسية الموحدة: بلا حاويات، الهرمية بالطباعة والفراغ، المقاسات محجوزة من أول إطار. */
-.v35 .uv{--uv-g:20px;--uv-r:8px;--uv-t2:var(--text-3,#8f8b9c);--uv-hair:rgba(255,255,255,.07);--uv-sk:#16141b;--uv-sk2:#1f1c26;padding-bottom:24px}
+.v35 .uv{--uv-g:20px;--uv-r:14px;--uv-t2:var(--text-3,#8f8b9c);--uv-hair:rgba(255,255,255,.07);--uv-sk:#16141b;--uv-sk2:#1f1c26;padding-bottom:24px}
 .v35 .uv button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
 .v35 .uv-t1{display:block;font-size:14px;font-weight:600;line-height:20px;color:var(--text-1,#f2f1f5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:plaintext}
 .v35 .uv-2l{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;height:40px}
@@ -127,3 +127,10 @@
 .uv-page .uv-dayhead{font-size:17px;font-weight:800;margin:26px var(--uv-g,20px) 0}
 .uv-page .uv-dayhead+.uv-grid{padding-top:12px}
 .v35 .uv-htitle{text-align:center;width:100%}
+/* بطاقات ناعمة: زوايا أوسع، وحافة ضوء خفيفة، وضغطة لينة */
+.v35 .uv-art,.uv-page .uv-art{border-radius:14px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.v35 .uv-art::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);pointer-events:none}
+.v35 .uv-po{transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.v35 .uv-po:active{transform:scale(.97)}
+.v35 .uv-rc{border-radius:16px}
+.uv-page .uv-grid .uv-art{border-radius:14px}
