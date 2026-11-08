@@ -56,6 +56,9 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     close();
     // Reopening before the fade ends must not allow the old timer to hide us.
     cancelExit();
+    // From display:none the browser has no starting style to transition from, so the sheet
+    // popped in at full size. Commit the closed state once before showing it.
+    const fromHidden = overlay.hasAttribute('hidden');
     overlay.removeAttribute('hidden');
     overlay.removeAttribute('inert');
     overlay.removeAttribute('aria-hidden');
@@ -68,6 +71,7 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     overlay.classList.toggle('sheet-backdrop--full', Boolean(full));
     try {
       onClose = build(body) ?? null;
+      if (fromHidden) void overlay.offsetWidth;
       overlay.classList.add('show');
     } catch (error) {
       overlay.setAttribute('inert', '');

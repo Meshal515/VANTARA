@@ -3726,3 +3726,18 @@ html[data-motion='off'] .v35 .dock-scrim {
 
 .v35 .page.page-in.page-depth { scrollbar-width: none; }
 .v35 .page.page-in.page-depth::-webkit-scrollbar { display: none; }
+
+/* الأوراق (openSheet وورقة السيرفرات): فتح بارتفاع خفيف وتلاشٍ 240ms، وإغلاق عكسي أقصر 160ms.
+ * انتقالات لا إطارات مفتاحية: فتحٌ أثناء إغلاق (أو العكس) يرتدّ من حيث وصل، ولا تراكم.
+ * «تقليل الحركة» يُبقي التلاشي وحده؛ وإيقاف الحركة في الإعدادات يجعلها فورية. */
+.v35 .sheet-backdrop { transition: opacity 160ms cubic-bezier(0.4, 0, 1, 1); }
+.v35 .sheet-backdrop > .sheet { transition: transform 160ms cubic-bezier(0.4, 0, 1, 1); }
+.v35 .sheet-backdrop.show { transition: opacity 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+.v35 .sheet-backdrop.show > .sheet { transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .v35 .sheet-backdrop > .sheet,
+  .v35 .sheet-backdrop.show > .sheet { transform: none; }
+}
+html[data-motion='off'] .v35 .sheet-backdrop,
+html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transition: none !important; }
+html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !important; }
