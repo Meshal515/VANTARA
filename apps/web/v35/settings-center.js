@@ -4,7 +4,7 @@
  */
 
 import { ACCENTS, BRAND_DEFAULT, brandOf, readAppearance, stylesOf, workStyleOf } from './appearance.js';
-import { modeOf, readStructure, setTemplate, setUnifyContent, setUnifyScreens, TEMPLATES, writeStructure } from './experience.js';
+import { modeOf, readStructure, setUnifyContent, setUnifyScreens, TEMPLATES, writeStructure } from './experience.js';
 import { homePreview, previewPicture, workPreview } from './look-previews.js';
 
 /** الفئات بترتيب المالك. `groups`: مجموعات الإعدادات القديمة التي انتقلت إليها (للاختبار والتوثيق). */
@@ -215,7 +215,7 @@ export function renderAppearancePane(body, ctx) {
   const mode = modeOf(structure);
   const toggles = el('div', 'settings-list');
   toggles.append(
-    toggleRow(ctx, 'layers', 'توحيد الشاشات', 'قالب رئيسية واحد للأقسام الثلاثة، وكل قسم بمحتواه ومكتبته', structure.unifyScreens, (on) => saveStructure(setUnifyScreens(structure, on))),
+    toggleRow(ctx, 'layers', 'توحيد الشاشات', 'تصميم VANTARA الموحّد لرئيسية كل قسم، وكل قسم بمحتواه ومكتبته', structure.unifyScreens, (on) => saveStructure(setUnifyScreens(structure, on))),
     toggleRow(
       ctx,
       'grid',
@@ -241,19 +241,10 @@ export function renderAppearancePane(body, ctx) {
     }
     body.append(strip);
   } else {
-    body.append(el('p', 'look-caption', 'قالب الشاشات: يُطبَّق على الأقسام الثلاثة بمحتوى كل قسم.'));
-    const pick = tiles();
-    for (const t of TEMPLATES) {
-      const on = structure.template === t;
-      pick.append(tile({
-        pathOf: (vp) => homePreview(t, vp),
-        alt: `قالب ${SECTION_NAMES[t]}`,
-        title: `تصميم ${SECTION_NAMES[t]}`,
-        pressed: on,
-        onClick: () => { if (!on) saveStructure(setTemplate(structure, t)); },
-      }));
-    }
-    body.append(pick);
+    // قرار المالك: لا اختيار قالب. التوحيد له تصميم واحد مخصص (الرئيسية الموحدة)، وتصاميم الأقسام تبقى لأقسامها.
+    body.append(el('p', 'look-caption', mode === 'content'
+      ? 'الآن: رئيسية واحدة لكل أعمالك بتصميم VANTARA الموحّد.'
+      : 'الآن: تصميم VANTARA الموحّد لرئيسية كل قسم، بمحتواه.'));
   }
 }
 

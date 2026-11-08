@@ -73,7 +73,7 @@ describe('مركز الإعدادات', () => {
     expect(readAppearance(storage).style).toEqual({ anime: 'card', manga: 'resume' });
   });
 
-  it('توحيد المحتوى معطّل حتى توحيد الشاشات، وتشغيل الشاشات يُظهر اختيار القالب', () => {
+  it('توحيد المحتوى معطّل حتى توحيد الشاشات، ولا اختيار قالب: للتوحيد تصميمه الموحّد وحده', () => {
     const storage = memory();
     const { body } = mount(storage);
     const switches = () => [...body.querySelectorAll('input[role="switch"]')];
@@ -84,9 +84,8 @@ describe('مركز الإعدادات', () => {
     switches()[1].onchange();
     expect(readStructure(storage).unifyScreens).toBe(true);
     expect(switches()[2].disabled).toBe(false);
-    const templates = [...body.querySelectorAll('.look-tiles')].at(-1).querySelectorAll('.look-tile');
-    expect(templates).toHaveLength(3);
-    templates[2].onclick();
-    expect(readStructure(storage).template).toBe('cinema');
+    // قرار المالك: لا قوالب أقسام تُختار؛ تصاميم الأقسام تبقى لأقسامها
+    expect(body.querySelector('.look-tiles--static')).toBeFalsy();
+    expect([...body.querySelectorAll('.look-caption')].at(-1).textContent).toContain('الموحّد');
   });
 });
