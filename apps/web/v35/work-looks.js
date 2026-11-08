@@ -33,7 +33,8 @@ function parts(c) {
   const next = !movie && c.next ? `<div class="wl-next"><b>الحلقة ${esc(c.next.episode ?? '')} ${esc(c.next.rel)}</b><span>${esc(c.next.time)}</span></div>` : '';
   const social = '<div class="wl-social" data-slot="insights"></div>';
   const factsBox = c.facts.length ? `<div class="wl-facts">${c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('')}</div>` : '';
-  const logo = c.logo ? `<img class="wl-logo" src="${esc(c.logo)}" alt="${esc(m.title)}" loading="eager" decoding="async">` : `<h1 class="wl-name" dir="auto">${esc(m.title)}</h1>`;
+  // الشعار أو الاسم في صندوق محجوز بارتفاع الشعار الأقصى لكل نمط (anime.css): وصول الشعار لا يحرّك ما تحته
+  const logo = `<div class="wl-mark">${c.logo ? `<img class="wl-logo" src="${esc(c.logo)}" alt="${esc(m.title)}" loading="eager" decoding="async">` : `<h1 class="wl-name" dir="auto">${esc(m.title)}</h1>`}</div>`;
   const facts = c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('');
   const play = glyph('play', { size: 22, filled: true });
   const cur = c.point.episode;
@@ -59,7 +60,7 @@ function parts(c) {
   const epRows = (withO = true) => `<div class="wl-eprows">${eps.map((n) => `<button type="button" class="er ${epState(n)}" data-ep="${n}" data-episode-row="">${thumb(n)}<span class="tx"><b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${withO && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(epSub(n))}</span></span>${seenBtn(n)}</button>`).join('')}${empty}</div>`;
   const chars = (cls, k = 10) => (c.characters.length ? `<div class="${cls}">${c.characters.slice(0, k).map((p) => `<div class="ch">${img(p.image, '', 'center 20%')}<b dir="auto">${esc(p.name)}</b><span dir="auto">${esc(p.voice ?? '')}</span></div>`).join('')}</div>` : '');
   const recs = (cls) => (m.recommendations?.length ? `<div class="${cls}">${m.recommendations.map((r) => `<button type="button" class="rc" data-open="${esc(r.id)}">${img(r.posterSmall ?? r.poster)}<b dir="auto">${esc(r.title)}</b><span>${r.score ? `★ ${r.score.toFixed(1)}` : esc(r.year ?? '')}</span></button>`).join('')}</div>` : '');
-  const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : '';
+  const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : c.descPending ? '<p class="wl-desc wl-desc--wait" aria-hidden="true"></p>' : '';
   const section = (title, body, key = '') =>
     body && !(movie && /الحلقات/.test(title)) ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}">${c.episodeControls && /الحلقات/.test(title) ? episodeControls : `<div class="wl-h"><h2>${title}</h2></div>`}${body}</section>` : '';
   return { movie, meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, episodeControls, empty, eps, epState, epSub, bar, thumb, seenBtn, epRows, chars, recs, desc, section };
@@ -147,7 +148,7 @@ const LOOKS = {
     }
     return `
       <div class="wl-headrow">
-        <div class="wl-now"><small>${c.point.replay ? 'أعد المشاهدة' : c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'}${p.movie ? ' · الفيلم' : ` · الحلقة ${p.cur}`}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1>${c.epOverview(p.cur) ? `<p dir="auto">${esc(c.epOverview(p.cur))}</p>` : ''}<div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
+        <div class="wl-now"><small>${c.point.replay ? 'أعد المشاهدة' : c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'}${p.movie ? ' · الفيلم' : ` · الحلقة ${p.cur}`}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1><p dir="auto" class="wl-now-over">${esc(c.epOverview(p.cur) ?? '')}</p><div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
         <div class="wl-series">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}<div>${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div></div>
       </div>
       ${p.movie ? '' : `<div class="wl-scrub"><div class="wl-track">${scrub.join('')}</div><div class="wl-sline" style="--w:${c.seenRatio * 100}%"></div></div>`}

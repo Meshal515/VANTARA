@@ -1114,7 +1114,7 @@ html[data-section='cinema'],
 }
 .v35 .an-skel-text {
   display: block;
-  height: 4.9em;
+  height: 5.1em;
   font-size: 13.5px;
   background: repeating-linear-gradient(to bottom, var(--surface-1) 0 0.95em, transparent 0.95em 1.7em);
 }
@@ -2596,6 +2596,14 @@ html[data-section='cinema'],
 .v35 .aw-stage .an-mark > * {
   grid-area: 1 / 1;
 }
+.v35 .aw-stage .an-mark {
+  /* صندوق محجوز بارتفاع الشعار الأقصى وعرض السطر كله من أول إطار: الاسم ثم الشعار مكانه بلا حركة */
+  height: 76px;
+  justify-self: stretch;
+  /* صف واحد بارتفاع الصندوق كله: الشعار أسفله والاسم بموضع ثابت لا يتبع حجم الصف */
+  grid-template-rows: 100%;
+  align-items: end;
+}
 .v35 .aw-stage .an-mark-logo {
   position: static;
   max-height: 76px;
@@ -2605,6 +2613,9 @@ html[data-section='cinema'],
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
 }
 .v35 .aw-stage .an-mark-text {
+  /* عرض السطر كله وأعلى الصندوق: الاسم المختصر ثم الكامل لا يحرّك نقطة بدايته */
+  width: 100%;
+  align-self: center;
   font-size: 24px;
   text-align: center;
   color: var(--text-1);
@@ -2892,6 +2903,9 @@ html[dir='rtl'] .v35 .aw-menu::before {
   }
   .v35 .aw-stage .an-mark-logo {
     max-height: 96px;
+  }
+  .v35 .aw-stage .an-mark {
+    height: 96px;
   }
   .v35 .aw-body {
     max-width: 960px;
@@ -4025,3 +4039,51 @@ html[data-motion='off'] .v35 .ah-art--wait::after { animation: none; }
 .v35 .ah-act--skel { width: 156px; background: var(--surface-1); pointer-events: none; }
 /* المحفوظ يظهر في أول إطار: بلا انتقال */
 .v35 .ah-art-layer--now { transition: none; }
+
+/* ثبات التحميل في الأنماط: صندوق الشعار بارتفاعه الأقصى، وسطرا المعلومات والأنواع محجوزان قبل وصول التفاصيل */
+.v35 .wl-mark { display: flex; align-items: flex-end; height: 70px; min-width: 0; }
+.v35 .wl-mark > .wl-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-meta { min-height: 20px; }
+.v35 .wl-genres { min-height: 18px; }
+.v35 .wl-card .wl-info .wl-mark { height: 72px; justify-content: center; }
+.v35 .wl-screen .wl-mid .wl-mark { height: 56px; }
+.v35 .wl-screen .wl-mid .wl-name { font-size: 22px; }
+.v35 .wl-episode .wl-series .wl-mark { height: 46px; }
+.v35 .aw-stage .aw-genres { min-height: 23px; }
+@media (min-width: 900px) {
+  .v35 .wl-mark { height: 100px; }
+  .v35 .wl-card .wl-info .wl-mark { height: 110px; justify-content: flex-start; }
+  .v35 .wl-screen .wl-mid .wl-mark { height: 84px; }
+  .v35 .wl-episode .wl-series .wl-mark { height: 44px; }
+  .v35 .wl-meta { min-height: 25px; }
+  .v35 .wl-genres { min-height: 22px; }
+}
+/* «الحلقة أولًا»: سطرا قصة الحلقة محجوزان (تصل بعد الفن) */
+.v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.6em); }
+@media (min-width: 900px) { .v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.7em); } }
+/* بطل صفحة العمل قبل حسم صورته: هيكل بمقاس البنر (نبض شفافية فقط، لا إزاحة) */
+.v35 .aw-hero.aw-wait .aw-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 80% at 50% 35%, rgba(255, 255, 255, 0.07), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) { .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; } }
+html[data-motion='off'] .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; }
+/* القصة: ثلاثة أسطر محجوزة دائمًا وسطر «المزيد» تحتها (الهيكل بنفس المقاس) */
+.v35 .aw-about .an-synopsis.clamped { min-height: 5.1em; }
+.v35 .aw-about .aw-link { min-height: 26px; }
+.v35 .aw-about .aw-link--idle { visibility: hidden; pointer-events: none; }
+.v35 .aw-link-space { display: block; height: 26px; margin-top: 2px; }
+@media (min-width: 900px) {
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis.clamped { min-height: 9em; }
+  .v35 .aw[data-style='core'] .aw-main .an-skel-text { height: 9em; font-size: 15px; background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.8em); }
+}
+.v35 .wl-desc--wait {
+  min-height: calc(3 * 1.75em);
+  background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.75em);
+  border-radius: 4px;
+  animation: an-pulse 1.6s ease-in-out infinite;
+}
+@media (min-width: 900px) { .v35 .wl-desc--wait { min-height: calc(4 * 1.85em); } }

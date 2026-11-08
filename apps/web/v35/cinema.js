@@ -202,6 +202,20 @@ export function createCinema(deps) {
   // ───────────── التخزين المحلي ─────────────
 
   const watchAll = () => readJson(userKey('watch', currentUser()), {});
+  // خلفية صفحة العمل التي ظهرت فعلًا لكل عمل: الفتح التالي يرسمها من أول إطار (لا ملصق ثم خلفية)
+  const HERO_PICK_KEY = 'vantara.cinema.heroPick.v1';
+  const heroPick = {
+    get: (id) => readJson(HERO_PICK_KEY, {})[id] ?? null,
+    set(id, src) {
+      if (!id || !src) return;
+      const all = readJson(HERO_PICK_KEY, {});
+      if (all[id] === src) return;
+      all[id] = src;
+      const keys = Object.keys(all);
+      for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k];
+      writeJson(HERO_PICK_KEY, all);
+    },
+  };
   function recordWatch(m, season, n, position, duration) {
     const all = watchAll();
     const w = all[m.id] ?? { ...slim(m), episodes: {} };
@@ -1741,9 +1755,29 @@ export function createCinema(deps) {
     toolsView = { m, bar, tools, menu };
     paintCinemaTools(m);
 
-    const art = el('div', 'cn-detail-art');
-    const backdrop = image(m.background ?? m.poster, 'cn-img', { eager: true, hero: true });
-    art.append(backdrop);
+    // الخلفية تُحسم قبل العرض: المحفوظة لهذا العمل، أو خلفيته بعد وصول التفاصيل. الرسم الأولي
+    // (البطاقة فقط) لا يعرض الملصق ثم يستبدله؛ هيكل بمقاس الخلفية حتى تُحسم، وتلاشٍ واحد
+    // نفس العمل (البطاقة ← التفاصيل): صندوق الخلفية نفسه يبقى في مكانه أثناء انتقال الصفحة
+    const priorArt = q('cinema')?.querySelector('.cn-detail-art');
+    const art = priorArt && priorArt.dataset.work === String(m.id) ? priorArt : el('div', 'cn-detail-art');
+    art.dataset.work = String(m.id);
+    const remembered = heroPick.get(m.id);
+    const want = remembered ?? (partial ? null : m.background ?? m.poster);
+    const prior = art === priorArt ? art.querySelector('.cn-img') : null;
+    let backdrop = null;
+    if (prior && prior.dataset.want === want && (prior.classList.contains('loaded') || prior.classList.contains('kept'))) {
+      // نفس الصورة من الرسم السابق (البطاقة ← التفاصيل): تُنقل كما هي بلا إعادة تحميل ولا وميض
+      backdrop = prior;
+      backdrop.classList.add('kept');
+    } else if (want) {
+      backdrop = image(want, 'cn-img', { eager: true, hero: !remembered });
+      backdrop.dataset.want = want;
+      backdrop.addEventListener('load', () => {
+        if (!partial || remembered) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);
+      }, { once: true });
+    }
+    if (backdrop !== prior) art.replaceChildren(...(backdrop ? [backdrop] : []));
+    art.classList.toggle('cn-wait', !backdrop);
 
     const body = el('div', 'cn-detail-body');
     body.id = 'cinemaBody';
@@ -1751,7 +1785,8 @@ export function createCinema(deps) {
     const line = facts(m, { runtime: true });
     if (m.type === 'series' && m.seasons) line.append(el('span', null, seasonsAr(m.seasons.filter((s) => s.n !== 0).length)));
     body.append(line);
-    if (m.genres?.length) body.append(el('p', 'cn-genre-line', m.genres.slice(0, 4).map(genreAr).join(' · ')));
+    // سطر الأنواع محجوز حتى قبل وصول التفاصيل (لا يظهر فجأة فيدفع زر المشاهدة)
+    body.append(el('p', 'cn-genre-line', m.genres?.length ? m.genres.slice(0, 4).map(genreAr).join(' · ') : ''));
 
     if (!partial) {
       const point = resumePoint(m);

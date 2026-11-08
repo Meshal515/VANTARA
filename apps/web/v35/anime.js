@@ -730,6 +730,7 @@ export function createAnime(deps) {
   function fillWork(m) {
     const v = state.view;
     if (!v || v.id !== m.id) return;
+    v.filled = true;
     tint(v.page, m.color);
     const h1 = v.mark.querySelector('h1');
     if (h1 && h1.textContent !== m.title) h1.textContent = m.title;
@@ -779,14 +780,29 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
     const plan = heroPlan(v.look);
+    // كم ينتظر البطل حسم أفضل مصدر قبل أن يعرض أفضل ما جهز (المحفوظ لكل عمل يُعرض فورًا)
+    const HERO_SETTLE_MS = 2500;
     const current = () => state.detail?.id === v.id ? state.detail : m;
     const targetOf = (work) => plan.episodeStill ? `episode:${resumePoint(work).episode}` : 'work';
     const target = targetOf(m);
     let load = v.heroLoad;
     if (!load) {
-      load = v.heroLoad = { target, active: new Map(), tried: new Set(), shown: null, attempts: 0 };
+      load = v.heroLoad = { target, active: new Map(), tried: new Set(), failed: new Set(), shown: null, ready: null, expired: false, attempts: 0 };
+      // مهلة الحسم: البنر لا يُعرض قبل أن يُعرف أفضل مصدر (أو تمضي المهلة)؛ هيكل بمقاسه في الأثناء
+      const armDeadline = () => {
+        clearTimeout(load.deadline);
+        load.expired = false;
+        load.deadline = setTimeout(() => {
+          load.expired = true;
+          if (state.view === v && !load.disposed) paintHero(state.detail?.id === v.id ? state.detail : m);
+        }, HERO_SETTLE_MS);
+      };
+      load.arm = armDeadline;
+      armDeadline();
+      v.hero.classList.add('aw-wait');
       const previousUnbind = v.unbind;
       v.unbind = () => {
+        clearTimeout(load.deadline);
         load.disposed = true;
         for (const task of [...load.active.values()]) task.cancel();
         previousUnbind?.();
@@ -797,7 +813,10 @@ export function createAnime(deps) {
       for (const task of [...load.active.values()]) task.cancel();
       load.target = target;
       load.tried.clear();
+      load.failed.clear();
+      load.ready = null;
       load.attempts = 0;
+      load.arm();
       // The former episode remains visible until this target has decoded artwork.
     }
     const art = artOf(m);
@@ -832,10 +851,54 @@ export function createAnime(deps) {
     add(m.banner, 1, 'backdrop', true);
     if (plan.posterFallback) add(m.poster ?? m.posterSmall, 2, 'poster', true);
     candidates.sort((a, b) => a.rank - b.rank);
+    load.candidates = candidates;
+    load.artKnown = Boolean(art) || Boolean(v.artDone);
     const shownRank = load.shown?.target === target ? load.shown.rank : Infinity;
     const usable = c => c.rank < shownRank && !load.tried.has(c.src);
     const alive = () => state.view === v && v.heroLoad === load && !load.disposed && load.target === target && targetOf(current()) === target;
     const refresh = () => { if (state.view === v && !load.disposed) paintHero(current()); };
+
+    /** حُسم: لا مصدر أفضل منه ما زال ممكنًا، والفن معروف (أو مضت المهلة)، أو هو المحفوظ لهذا العمل. */
+    const decided = (pick) => {
+      if (load.expired) return true;
+      if (pick.src === known) return true;
+      // الفن (IMDb/fanart) لم يصل بعد: قد تأتي منه خلفية أفضل. المرشحون من آخر رسم (لا من رسم بدأ التحميل)
+      if (!load.artKnown && !plan.episodeStill) return false;
+      return !load.candidates.some(c => c.rank < pick.rank && !load.failed.has(c.src) && c.src !== load.ready?.pick.src);
+    };
+    function display(pick, img) {
+      load.ready = null;
+      v.hero.classList.remove('aw-wait');
+      v.bg.append(img);
+      load.shown = { ...pick, img, target };
+      v.heroRank = v.heroShownRank = pick.rank;
+      v.heroShown = true;
+      v.heroSrc = pick.kind === 'poster' ? null : pick.src;
+      if (plan.ambient) {
+        v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
+        requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
+      }
+      if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
+      if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+      // An earlier transition's delayed cleanup must never remove a newer image.
+      requestAnimationFrame(() => {
+        if (state.view !== v || load.shown?.img !== img) return;
+        img.classList.add('in');
+        setTimeout(() => {
+          if (state.view !== v || load.shown?.img !== img) return;
+          for (const oldImg of [...v.bg.querySelectorAll('.aw-bg-img')]) if (oldImg !== img) oldImg.remove();
+        }, 600);
+      });
+      if (v.lw) paintLook(current());
+      for (const pending of [...load.active.values()]) if (pending.rank >= pick.rank) pending.cancel();
+      refresh();
+    }
+    // المُمسَك يُعرض متى حُسم (فشل الأفضل، وصل الفن، أو مضت المهلة)
+    if (load.ready && load.shown?.target !== target && alive() && decided(load.ready.pick)) {
+      const { pick, img } = load.ready;
+      display(pick, img);
+      return;
+    }
 
     const start = (pick) => {
       if (!pick || load.active.size >= 2 || load.attempts >= 8) return;
@@ -860,6 +923,7 @@ export function createAnime(deps) {
       load.active.set(pick.src, task);
       const fail = () => {
         if (!finish(true)) return;
+        load.failed.add(pick.src);
         if (pick.src === known) heroMemory.set(m.id, null);
         if (!alive()) return refresh();
         // Parent artwork is optional and must never delay visible fallback art.
@@ -878,30 +942,20 @@ export function createAnime(deps) {
         if (!alive()) { finish(true); refresh(); return; }
         const old = load.shown;
         if (old?.target === target && old.rank <= pick.rank) { finish(true); return; }
-        finish();
-        v.bg.append(img);
-        load.shown = { ...pick, img, target };
-        v.heroRank = v.heroShownRank = pick.rank;
-        v.heroShown = true;
-        v.heroSrc = pick.kind === 'poster' ? null : pick.src;
-        if (plan.ambient) {
-          v.bg.parentElement?.style.setProperty('--aw-amb', `url(${JSON.stringify(pick.src)})`);
-          requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
+        if (old?.target === target && !plan.episodeStill) {
+          // ظهر بنر هذا العمل: لا تبديل ثانٍ أمام العين. الأفضل يُحفظ فيُرسم من أول إطار في الفتحة القادمة
+          finish(true);
+          if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
+          return;
         }
-        if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-        if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
-        // An earlier transition's delayed cleanup must never remove a newer image.
-        requestAnimationFrame(() => {
-          if (state.view !== v || load.shown?.img !== img) return;
-          img.classList.add('in');
-          setTimeout(() => {
-            if (state.view !== v || load.shown?.img !== img) return;
-            for (const oldImg of [...v.bg.querySelectorAll('.aw-bg-img')]) if (oldImg !== img) oldImg.remove();
-          }, 600);
-        });
-        if (v.lw) paintLook(current());
-        for (const pending of [...load.active.values()]) if (pending.rank >= pick.rank) pending.cancel();
-        refresh();
+        finish();
+        if (old?.target !== target && !decided(pick)) {
+          // جاهز لكن قد يصل أفضل منه: يُمسك (مفكوكًا) حتى يُحسم المصدر أو تمضي المهلة
+          if (!load.ready || pick.rank < load.ready.pick.rank) load.ready = { pick, img };
+          refresh();
+          return;
+        }
+        display(pick, img);
       };
       img.onload = () => {
         // Deadline includes decoding; browsers/doubles which never settle cannot
@@ -1150,6 +1204,8 @@ export function createAnime(deps) {
       progressText: isMovie(m) ? (seen ? 'شاهدت الفيلم' : point.record?.position ? 'تقدّم المشاهدة' : 'لم يُشاهد بعد') : `شاهدت ${seen} من ${m.episodes || aired || '؟'}`,
       lineDone: Math.min(100, ((Math.min(seen, shown) + 0.5) / shown) * 100).toFixed(1),
       characters: m.characters ?? [],
+      // القصة لم تصل بعد: النمط يحجز أسطرها هيكلًا بمقاسها (لا تظهر فجأة فتدفع ما تحتها)
+      descPending: !m.description && !v.filled,
       // عدد التوصيات الظاهر في كل نمط كما في تصميمه (الجوال / العريض)؛ الباقي خلف «الكل»
       heroSrc: v.heroSrc ?? null,
       rangeAt: page.pageIndex,
@@ -1371,7 +1427,8 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v) return;
     if (pending) {
-      v.about.replaceChildren(el('span', 'an-skel an-skel-text'));
+      // الهيكل بمقاس القصة المطوية نفسها وسطر «المزيد» تحتها: وصول القصة لا يغيّر الارتفاع
+      v.about.replaceChildren(el('span', 'an-skel an-skel-text'), el('span', 'aw-link-space'));
       return;
     }
     if (!m.description) {
@@ -1386,10 +1443,11 @@ export function createAnime(deps) {
       const closed = p.classList.toggle('clamped');
       more.textContent = closed ? 'المزيد' : 'أقل';
     });
-    more.hidden = true;
+    // «المزيد» يحجز سطره دائمًا (مخفي بصريًا حين لا يلزم): ظهوره بعد إطار كان يدفع ما تحته
+    more.classList.add('aw-link--idle');
     v.about.replaceChildren(p, more);
     requestAnimationFrame(() => {
-      if (p.scrollHeight > p.clientHeight + 2) more.hidden = false;
+      if (p.scrollHeight > p.clientHeight + 2) more.classList.remove('aw-link--idle');
     });
   }
 
