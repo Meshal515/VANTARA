@@ -8,7 +8,7 @@ function page(rect = { top: -900, left: 0, width: 390, height: 3000 }) {
   const classes = new Set();
   return {
     style: {},
-    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    classList: { add: (c) => classes.add(c), remove: (...names) => names.forEach(c => classes.delete(c)), contains: (c) => classes.has(c) },
     getBoundingClientRect: () => rect,
     animate: vi.fn((frames, opts) => { const a = { frames, opts, cancel: vi.fn(), finished: new Promise(() => {}) }; anims.push(a); return a; }),
     anims,
@@ -36,7 +36,8 @@ describe('page fade (owner: nothing moves; 400ms fade in, the leaving page fades
     const a = page({ top: -924, left: 260, width: 1180, height: 3000 });
     pageOut(a, { doc: doc() });
     expect(a.classes.has('page-out')).toBe(true);
-    expect(a.style).toMatchObject({ top: '-924px', left: '260px', width: '1180px' });
+    expect(a.style).toMatchObject({ top: '0px', left: '260px', width: '1180px' });
+    expect(a.scrollTop).toBe(924);
     finishPageMotion();
     expect(a.classes.has('page-out')).toBe(false);
     expect(a.style).toMatchObject({ top: '', left: '', width: '' });
@@ -61,5 +62,46 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
     bindTabMotion(root, { doc: doc() });
     document.getElementById('t').dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
     expect(animated).toEqual(['c']);
+  });
+});
+
+
+describe('work detail depth transition, with stationary contents', () => {
+  it('zooms the whole work in and out at 400ms without translating its children', () => {
+    const a=page(), b=page();
+    pageOut(a,{depth:true,doc:doc()});pageIn(b,{depth:true,doc:doc()});
+    expect(a.anims[0].frames).toEqual([{opacity:1,transform:'scale(1)'},{opacity:0,transform:'scale(0.985)'}]);
+    expect(b.anims[0].frames).toEqual([{opacity:0,transform:'scale(0.985)'},{opacity:1,transform:'scale(1)'}]);
+    expect(a.anims[0].opts.duration).toBe(400);expect(b.anims[0].opts.duration).toBe(400);
+  });
+  it('clips the outgoing document to the visible viewport while preserving the reader position', () => {
+    vi.stubGlobal('innerHeight',844);
+    const a=page({top:-924,left:260,width:1180,height:14000});
+    a.scrollTop=0;
+    pageOut(a,{depth:true,doc:doc()});
+    expect(a.style).toMatchObject({position:'fixed',top:'0px',left:'260px',width:'1180px',height:'844px',overflow:'hidden'});
+    expect(a.scrollTop).toBe(924);
+    finishPageMotion();expect(a.scrollTop).toBe(0);expect(a.style.height).toBe('');
+  });
+  it('keeps fixed controls in a viewport and preserves document height for root scroll timelines', () => {
+    vi.stubGlobal('innerHeight',844);
+    const a=page({top:0,left:260,width:1180,height:14000});
+    const spacer={style:{},setAttribute:vi.fn(),remove:vi.fn()};
+    a.before=vi.fn();
+    pageIn(a,{depth:true,doc:{...doc(),createElement:()=>spacer}});
+    expect(a.style).toMatchObject({position:'fixed',top:'0px',left:'260px',width:'1180px',height:'844px',overflow:'auto'});
+    expect(spacer.style.height).toBe('14000px');expect(a.before).toHaveBeenCalledWith(spacer);
+    finishPageMotion();expect(spacer.remove).toHaveBeenCalled();expect(a.style.height).toBe('');
+  });
+  it('has a bounded fallback and clears its timers when navigation is interrupted repeatedly', () => {
+    vi.useFakeTimers();
+    try {
+      const a=page();pageIn(a,{depth:true,doc:doc()});
+      expect(a.classes.has('page-in')).toBe(true);
+      vi.advanceTimersByTime(601);
+      expect(a.classes.has('page-in')).toBe(false);
+      for(let i=0;i<50;i++){pageIn(a,{depth:true,doc:doc()});finishPageMotion();}
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {vi.useRealTimers();}
   });
 });

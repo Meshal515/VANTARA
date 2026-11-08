@@ -3719,3 +3719,10 @@ html[data-motion='off'] .v35 .dock-scrim {
 }
 @media (prefers-reduced-motion: reduce) {
 }
+
+/* Temporary compositor hints only while navigating; work contents never stagger or translate. */
+.v35 .page.page-in, .v35 .page.page-out { will-change: opacity; }
+.v35 .page.page-depth { will-change: transform, opacity; }
+
+.v35 .page.page-in.page-depth { scrollbar-width: none; }
+.v35 .page.page-in.page-depth::-webkit-scrollbar { display: none; }

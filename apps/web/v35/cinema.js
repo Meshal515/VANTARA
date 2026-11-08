@@ -1688,7 +1688,6 @@ export function createCinema(deps) {
       startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);
       void arabize(m, m.type === 'series' ? state.season : null);
-      revealIn(wrap);
     }
   }
 

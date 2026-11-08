@@ -62,8 +62,8 @@ import { momentRange, momentStart, repositories as animeRepositories, withPhaseD
 import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
-import { heroSlideIn, pageIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, pageIn as pageMotionIn, pageOut } from './page-motion.js';
+import { heroSlideIn } from './motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -1526,7 +1526,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (work._work?.editions?.length) rememberWork(work);
     showPage('detail');
     renderDetail(work);
-    pageIn(q('detail'), { art: false });
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
@@ -4314,13 +4313,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
       window.scrollTo({ top, behavior: 'instant' });
     }, wait);
   }
-  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY } = {}) {
+  let pageMotionRequest = 0;
+  const WORK_PAGES = new Set(['detail', 'anime', 'cinema']);
+  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = null } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
       state.socialTab = 'notifications';
       id = 'majlis';
     }
     const from = currentPage();
+    const visual = pageMotionState(q(from));
+    sourceScroll ??= visual?.scrollTop ?? window.scrollY;
     if (from !== id) scrollOf.set(from, sourceScroll);
     if(from === "utility" && id !== "utility"){sourceView?.pause?.();addonNavigation.cancel();}
     if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
@@ -4329,10 +4332,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
     // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
-    finishPageMotion();
+    const request = ++pageMotionRequest;
     const outgoing = from !== id && !sectionSwitch ? q(from) : null;
-    const level = MAIN_PAGES.includes(id) && MAIN_PAGES.includes(from);
-    if (outgoing) pageOut(outgoing, { back: !push, still: level, scrollTop: sourceScroll });
+    finishPageMotion();
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
@@ -4396,10 +4399,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
-    // الصفحة الفرعية تدخل بتلاشٍ قصير؛ تبديل الأقسام الرئيسية والغلاف المتصل لهما حركتهما
-    if (from !== id && !sectionSwitch) pageMotionIn(q(id), { back: !push, still: level });
-    // عمل يُفتح من داخل صفحة عمل (مشابه، علاقة): الصفحة نفسها بمحتوى جديد، تدخل بالحركة نفسها
-    else if (from === id && push && !sectionSwitch && !MAIN_PAGES.includes(id)) pageMotionIn(q(id));
+    // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
+    if (!sectionSwitch && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+      const enter = () => {
+        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
+      };
+      if (WORK_PAGES.has(id)) queueMicrotask(enter);
+      else enter();
+    }
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -6113,6 +6120,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      ++pageMotionRequest;
+      finishPageMotion();
       sourceVerification.close();
       addonViewGeneration++;closeAddonSource();
       detailDock.destroy();
