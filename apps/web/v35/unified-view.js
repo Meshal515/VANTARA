@@ -59,7 +59,7 @@ export function dayLineup(week, offset, now = Date.now()) {
   return [...list.filter((e) => e.airingAt > now), ...list.filter((e) => e.airingAt <= now).reverse()];
 }
 
-export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, reducedMotion = () => false, now = () => Date.now() }) {
+export function createUnifiedView({ el, glyph, data, open, lock = () => null, genreAr = (g) => g, reducedMotion = () => false, now = () => Date.now() }) {
   const gen = (list) => (list ?? []).slice(0, 2).map(genreAr).join('، ');
   const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all' };
   let host = null, silk = null, silkWrap = null, timer = 0, overlay = null;
@@ -252,8 +252,14 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   function render() {
     if (!host) return;
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
-    const page = el('div', 'uv');
-    page.append(renderHero(), tabs(st.filter, UNIFIED_FILTERS, (k) => { st.filter = k; st.hero = 0; writeFilter(k); render(); }));
+    // «توحيد التصميم» وحده: كل قسم بهذا التصميم ومحتواه هو، بلا فلتر الأقسام
+    const locked = lock();
+    if (locked && st.filter !== locked) { st.filter = locked; st.hero = 0; }
+    else if (!locked && st.locked) { st.filter = readFilter(); st.hero = 0; }
+    st.locked = Boolean(locked);
+    const page = el('div', `uv${locked ? ' uv-locked' : ''}`);
+    page.append(renderHero());
+    if (!locked) page.append(tabs(st.filter, UNIFIED_FILTERS, (k) => { st.filter = k; st.hero = 0; writeFilter(k); render(); }));
 
     const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter)).slice(0, 12);
     if (cont.length) { const s = el('section', 'uv-sec'); const r = rail(); cont.forEach((it) => r.append(contItem(it))); s.append(head('تابع'), r); page.append(s); }
