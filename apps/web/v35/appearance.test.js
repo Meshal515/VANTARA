@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCENTS, WORK_STYLES, accentOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, MANGA_WORK_STYLES, WORK_STYLES, accentOf, brandOf, stylesOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
 
 const memory = () => {
   const m = new Map();
@@ -9,6 +9,29 @@ const node = () => {
   const props = new Map();
   return { props, style: { setProperty: (k, v) => props.set(k, v), removeProperty: (k) => props.delete(k) } };
 };
+
+describe('أنماط المانجا والسينما ولون العلامة', () => {
+  it('المانجا بأربعة أنماط متفق عليها أولها «الصفحة»، والأنمي كما هو، والسينما نمطها الحالي وحده', () => {
+    expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume']);
+    expect(workStyleOf('manga', readAppearance(memory()))).toBe('page');
+    expect(workStyleOf('manga', { style: { manga: 'gallery' } })).toBe('gallery');
+    expect(workStyleOf('manga', { style: { manga: 'core' } })).toBe('page');
+    expect(workStyleOf('anime', { style: { manga: 'gallery', anime: 'episode' } })).toBe('episode');
+    expect(workStyleOf('anime', { style: { anime: 'page' } })).toBe('core');
+    expect(stylesOf('cinema').map((s) => s.id)).toEqual(['current']);
+    expect(workStyleOf('cinema', { style: {} })).toBe('current');
+  });
+
+  it('لون العلامة مستقل: لا يُكتب بلا اختيار، ويصل --brand دون أن يغيّر لون القسم', () => {
+    expect(brandOf({ accent: {} })).toBeNull();
+    const root = node();
+    applyAppearance('manga', [root], { style: {}, accent: { brand: 'teal' }, pureBlack: false });
+    expect(root.props.get('--brand')).toBe('#169c9a');
+    expect(root.props.has('--accent')).toBe(false);
+    applyAppearance('manga', [root], { style: {}, accent: {}, pureBlack: false });
+    expect(root.props.size).toBe(0);
+  });
+});
 
 describe('المظهر', () => {
   it('عشرون لونًا أولها ألوان الأقسام الثلاثة ثم الأبيض، وخمسة أنماط أولها الأساسي', () => {
