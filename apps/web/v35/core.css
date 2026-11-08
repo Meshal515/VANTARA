@@ -494,8 +494,8 @@ html,
 }
 /* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
 .v35.native-android .dock-cap {
-  background: #121116;
-  background: color-mix(in srgb, var(--accent) 4%, #111015);
+  /* فحمي محايد: لون القسم في مؤشر التحديد وحده، لا في سطح الكبسولة (قرار المالك) */
+  background: #111015;
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -771,8 +771,8 @@ html,
   height: 100%;
   border-radius: 28px;
   overflow: hidden; /* المؤشر وطبقة القسم لا يغادران كبسولتهما */
-  background: #121116;
-  background: color-mix(in srgb, var(--accent) 4%, #111015);
+  /* فحمي محايد: لون القسم في مؤشر التحديد وحده، لا في سطح الكبسولة (قرار المالك) */
+  background: #111015;
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.05),
     0 6px 18px rgba(0, 0, 0, 0.28);
@@ -964,8 +964,7 @@ html,
   margin: 0;
   border: 0;
   border-radius: inherit;
-  background: #19181e;
-  background: color-mix(in srgb, var(--accent) 6%, #18171d);
+  background: #18171d;
   color: var(--text-1);
   display: grid;
   place-items: center;
@@ -980,7 +979,7 @@ html,
   pointer-events: auto;
 }
 .v35 .dock-opt.current {
-  background: color-mix(in srgb, var(--accent) 10%, #17161c);
+  background: #17161c;
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff);
 }
 .v35 .dock-opt:active {
@@ -3500,10 +3499,10 @@ html[data-motion='off'] .v35 .dock-scrim {
    خطوط شعرية كالسينما والرئيسية: رأس هو أنت، وعناوين بكلمة لاتينية صغيرة،
    وصفوف خفيفة. لا خلفيات ولا إطارات حول المجموعات. */
 
-.v35 #settingsBody {
+.v35 :is(#settingsBody, #settingsPaneBody) {
   padding-top: 8px;
 }
-.v35 #settingsBody .settings-me {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -3517,46 +3516,46 @@ html[data-motion='off'] .v35 .dock-scrim {
   font: inherit;
   cursor: pointer;
 }
-.v35 #settingsBody .settings-me-text {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text {
   flex: 1;
   min-width: 0;
   display: grid;
   gap: 2px;
 }
-.v35 #settingsBody .settings-me-text strong {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text strong {
   font-size: 20px;
   font-weight: 750;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 #settingsBody .settings-me-text small {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text small {
   color: var(--text-3);
   font-size: var(--fs-meta);
   text-align: end;
   justify-self: start;
 }
-.v35 #settingsBody .settings-me-cta {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-cta {
   color: var(--accent-text);
   font-size: var(--fs-meta);
   font-weight: 650;
 }
-.v35 #settingsBody .settings-me .chev {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me .chev {
   width: 16px;
   height: 16px;
   color: var(--accent-text);
 }
 
-.v35 #settingsBody .settings-group-label {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-group-label {
   display: grid;
   gap: 2px;
   margin: 30px 0 4px;
   color: var(--text-1);
 }
-.v35 #settingsBody .settings-group-label:first-child {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-group-label:first-child {
   margin-top: 4px;
 }
-.v35 #settingsBody .settings-eyebrow {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3566,53 +3565,53 @@ html[data-motion='off'] .v35 .dock-scrim {
   font-weight: 700;
   letter-spacing: 0.22em;
 }
-.v35 #settingsBody .settings-eyebrow::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-eyebrow::after {
   content: '';
   width: 18px;
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
 }
-.v35 #settingsBody .settings-title {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-title {
   font-size: 19px;
   font-weight: 750;
 }
 /* عنوان فرعي داخل المجموعة («ما تراه أنت»): أصغر وبلا كلمة لاتينية */
-.v35 #settingsBody .settings-sublabel {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-sublabel {
   margin-top: 18px;
 }
-.v35 #settingsBody .settings-sublabel .settings-title {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-sublabel .settings-title {
   font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--text-3);
 }
 
-.v35 #settingsBody .settings-list {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-list {
   border-radius: 0;
   background: none;
   box-shadow: none;
   overflow: visible;
 }
-.v35 #settingsBody .setting {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting {
   min-height: 58px;
   padding: 13px 0;
   gap: 14px;
 }
-.v35 #settingsBody .setting + .setting::before {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting + .setting::before {
   inset-inline: 36px 0;
 }
-.v35 #settingsBody .setting > .icon {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting > .icon {
   flex: none;
   width: 20px;
   height: 20px;
   color: var(--text-3);
 }
-.v35 #settingsBody .setting strong {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting strong {
   font-size: 15px;
   font-weight: 600;
   line-height: 1.45;
 }
-.v35 #settingsBody .setting small {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting small {
   margin-top: 1px;
   font-size: 12.5px;
   line-height: 1.55;
@@ -3621,29 +3620,29 @@ html[data-motion='off'] .v35 .dock-scrim {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.v35 #settingsBody .setting .value {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting .value {
   flex: none;
   max-width: 40%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 #settingsBody button.setting:active {
+.v35 :is(#settingsBody, #settingsPaneBody) button.setting:active {
   background: none;
   opacity: 0.7;
 }
-.v35 #settingsBody .switch-input {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input {
   width: 40px;
   height: 24px;
 }
-.v35 #settingsBody .switch-input::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input::after {
   width: 18px;
   height: 18px;
 }
-.v35 #settingsBody .switch-input:checked::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input:checked::after {
   transform: translateX(-16px);
 }
-.v35 #settingsBody .settings-note {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-note {
   margin: 4px 0 0;
   padding-inline-start: 34px;
   font-size: 12px;
@@ -3651,7 +3650,7 @@ html[data-motion='off'] .v35 .dock-scrim {
 }
 
 /* النظام: صف شعري يُطوى، لا صندوق */
-.v35 #settingsBody .system-toggle {
+.v35 :is(#settingsBody, #settingsPaneBody) .system-toggle {
   min-height: 58px;
   margin-top: 30px;
   padding: 13px 0;
@@ -3660,7 +3659,7 @@ html[data-motion='off'] .v35 .dock-scrim {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.v35 #settingsBody .settings-list.danger-zone {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-list.danger-zone {
   background: none;
   box-shadow: none;
 }

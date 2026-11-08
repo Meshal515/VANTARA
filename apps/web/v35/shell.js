@@ -84,7 +84,7 @@ import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 import { accentOf, applyAppearance, patchAppearance, toneCss } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
-import { CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
+import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, countKinds, filterItems, KINDS, KIND_TAG, loadIdentity, unifiedFeed } from './unified-home.js';
 
 const AR_GENRE = {
@@ -4363,13 +4363,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') renderAllHome();
     if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch) {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
     }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
-    if (id === 'settings') {
+    if (id === 'settings' || id === 'settingsPane') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
     }
@@ -4886,7 +4887,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     // الفئات: كل واحدة تفتح صفحة خياراتها وحدها
     const health = api?.health?.();
-    group('', CATEGORIES.map((c) => row(c.icon, c.title, c.sub, {
+    body.append(appearanceFeature({ el, glyph }, () => openSettingsPane('appearance')));
+    group('', CATEGORIES.filter((c) => c.id !== 'appearance').map((c) => row(c.icon, c.title, c.sub, {
       value: c.id === 'sync' && health ? health.message : null,
       tone: c.id === 'sync' && health ? (health.state !== 'ok' && health.state !== 'syncing' ? 'warn' : undefined) : undefined,
       run: () => openSettingsPane(c.id),
@@ -5408,7 +5410,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const warmed = new Set();
   /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
   function prepareSections() {
-    if (currentPage() !== 'home') return;
+    if (currentPage() !== 'home' || root.dataset.content === 'unified') return;
     sectionLayers().prepare();
     for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
   }
@@ -5499,7 +5501,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // نوافذ خارج جذر التطبيق (التنبيهات، الأوراق المعلّقة على body) ترث لون القسم من <html>
     document.documentElement.dataset.section = s.id;
     // أثناء الانتقال يتبدّل الاسم مع الحركة (createCrossfade)، لا قبلها
-    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = s.word;
+    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(s.id, [root, document.documentElement]);
     // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
@@ -5542,9 +5544,144 @@ export function mountV35(deps, { page = 'home' } = {}) {
     haptic();
   }
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
-  /** رئيسية القسم وحدها ظاهرة. */
+  /** رئيسية القسم وحدها ظاهرة؛ وفي توحيد المحتوى الرئيسية المشتركة بدلها كلها. */
   function showHome(id) {
-    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = section !== id;
+    const all = root.dataset.content === 'unified';
+    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = all || section !== id;
+    const shared = q('allHome');
+    if (shared) {
+      shared.hidden = !all;
+      if (all) renderAllHome();
+    }
+  }
+
+  // ───────────────────────── بنية التجربة (experience.js) ─────────────────────────
+  // القالب على جذر التطبيق (`data-screens`)، وتوحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
+  // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
+  function applyExperience() {
+    const view = experienceView(readStructure());
+    if (view.template) root.dataset.screens = view.template;
+    else delete root.dataset.screens;
+    const unified = view.home === 'all';
+    const was = root.dataset.content === 'unified';
+    if (unified) root.dataset.content = 'unified';
+    else delete root.dataset.content;
+    if (unified && !was) dockCtl?.close({ focus: false, instant: true });
+    q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
+    showHome(root.dataset.section ?? 'manga');
+    // الشريط تغيّر عرضه (المبدّل ظهر أو اختفى): مؤشر الوجهة يُعاد لموضعها بعد التخطيط
+    requestAnimationFrame(() => dockCtl?.activate(currentPage()));
+  }
+
+  // الرئيسية المشتركة: كل العناصر تمر من unifiedFeed (منع التكرار عبر الأقسام)، والنوع يحدد صفحة التفاصيل
+  const allHome = { kind: 'all', query: '' };
+  let identityAsked = false;
+  function openUnified(item) {
+    if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
+    if (item.section === 'cinema') return openCinemaRef(item.ref, { title: item.title, cover: item.cover });
+    if (root.dataset.section !== 'manga') {
+      writeSection('manga');
+      applySection('manga');
+    }
+    void openWork(workFromRef(item.ref, item.title, item.cover));
+  }
+  function browseSection(id) {
+    writeSection(id);
+    applySection(id);
+    navTo('discover');
+  }
+  function unifiedCard(item) {
+    const b = el('button', 'uh-card');
+    b.type = 'button';
+    b.dataset.kind = item.kind;
+    const art = el('span', 'uh-art');
+    if (item.cover) {
+      const img = el('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = item.cover;
+      img.onerror = () => img.remove();
+      art.append(img);
+    }
+    art.append(el('span', 'uh-tag', KIND_TAG[item.kind] ?? ''));
+    const text = el('span', 'uh-text');
+    const t = el('strong', null, item.title || 'عمل');
+    t.dir = 'auto';
+    text.append(t);
+    text.append(el('small', null, item.label || (item.inLibrary ? 'في مكتبتك' : '')));
+    b.append(art, text);
+    b.setAttribute('aria-label', `${item.title || 'عمل'}، ${KIND_TAG[item.kind] ?? ''}`);
+    b.onclick = () => openUnified(item);
+    return b;
+  }
+  function renderAllHome() {
+    const host = q('allHome');
+    if (!host) return;
+    if (!identityAsked) {
+      identityAsked = true;
+      void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
+    }
+    const items = unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) }));
+    const counts = countKinds(items);
+    const page = el('div', 'uh');
+    const head = el('header', 'uh-head');
+    head.append(el('h2', null, 'كل أعمالك'), el('p', null, 'المانجا والأنمي والسينما في مكان واحد، كل عمل بنوعه.'));
+    const form = el('form', 'search-bar uh-search');
+    form.setAttribute('role', 'search');
+    form.innerHTML = glyph('search');
+    const input = el('input', 'search-input');
+    input.type = 'search';
+    input.placeholder = 'ابحث في أعمالك';
+    input.setAttribute('aria-label', 'ابحث في أعمالك');
+    input.enterKeyHint = 'search';
+    input.autocomplete = 'off';
+    input.value = allHome.query;
+    form.append(input);
+    form.onsubmit = (e) => { e.preventDefault(); input.blur(); };
+    const kinds = el('div', 'uh-kinds');
+    kinds.setAttribute('role', 'group');
+    kinds.setAttribute('aria-label', 'نوع العمل');
+    const grid = el('div', 'uh-grid');
+    const paintGrid = () => {
+      const list = filterItems(items, allHome);
+      grid.replaceChildren(...list.map(unifiedCard));
+      if (!list.length) {
+        const empty = el('div', 'uh-empty');
+        empty.append(el('strong', null, items.length ? 'لا نتيجة بهذا البحث' : 'لا أعمال بعد'));
+        empty.append(el('p', null, items.length ? 'جرّب اسمًا آخر أو نوعًا آخر.' : 'ما تقرأه وتشاهده وتضيفه لمكتبتك من أي قسم يظهر هنا.'));
+        grid.append(empty);
+      }
+    };
+    for (const k of KINDS) {
+      if (k.id !== 'all' && !counts[k.id]) continue;
+      const chip = el('button', 'uh-kind');
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(allHome.kind === k.id));
+      chip.append(el('span', null, k.name), el('b', null, String(counts[k.id] ?? 0)));
+      chip.onclick = () => {
+        allHome.kind = k.id;
+        for (const c of kinds.children) c.setAttribute('aria-pressed', String(c === chip));
+        paintGrid();
+      };
+      kinds.append(chip);
+    }
+    if (allHome.kind !== 'all' && !counts[allHome.kind]) allHome.kind = 'all';
+    input.oninput = () => { allHome.query = input.value; paintGrid(); };
+    paintGrid();
+    const browseRow = el('section', 'uh-browse');
+    browseRow.append(el('h3', null, 'تصفّح'));
+    const doors = el('div', 'uh-doors');
+    for (const id of ['manga', 'anime', 'cinema']) {
+      const d = el('button', `uh-door uh-door--${id}`);
+      d.type = 'button';
+      d.append(el('b', null, SECTIONS[id].word), el('span', null, SECTIONS[id].sub));
+      d.onclick = () => browseSection(id);
+      doors.append(d);
+    }
+    browseRow.append(doors);
+    page.append(head, form, kinds, grid, browseRow);
+    host.replaceChildren(page);
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
@@ -6024,6 +6161,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const startSection = readSection();
   applySection(startSection);
+  applyExperience();
   showHome(startSection);
   dock().activate(currentPage());
   warmed.add(startSection);
@@ -6034,7 +6172,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
     // switch on weak devices. In a later idle slot the sections stand by off-screen once so that cost is paid here.
     idle(() => {
-      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving) return;
+      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving || root.dataset.content === 'unified') return;
       const motion = sectionLayers();
       motion.prepare();
       void q('home')?.offsetHeight; // the off-screen layout itself
@@ -6068,6 +6206,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openWork,
     /** عمل من مرجعه وحده (إشعار، رابط): صفحته في الواجهة لا الشاشة القديمة. */
     openRef: (ref, title, cover) => void openWork(workFromRef(ref, title, cover)),
+    // أنمي أو سينما من مرجعه (لقطات المعاينة في tools/ui-previews تفتح صفحة العمل بها)
+    openAnimeRef,
+    openCinemaRef,
     openMajlis,
     openProfile,
     handleBack,

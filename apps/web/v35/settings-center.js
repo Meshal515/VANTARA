@@ -22,6 +22,34 @@ export const categoryOf = (id) => CATEGORIES.find((c) => c.id === id) ?? null;
 export const SECTION_NAMES = Object.freeze({ manga: 'المانجا', anime: 'الأنمي', cinema: 'السينما' });
 
 /**
+ * بطاقة «المظهر والتخصيص» في رأس الفئات: الأقسام الثلاثة بلقطاتها الحقيقية وألوانها الحالية،
+ * فتُرى الواجهة قبل أن تُفتح. مقاس اللقطات محجوز (aspect-ratio) فلا تقفز البطاقة.
+ */
+export function appearanceFeature({ el, glyph }, run, storage) {
+  const doc = globalThis.document;
+  const look = readAppearance(storage);
+  const mode = modeOf(readStructure(storage));
+  const c = categoryOf('appearance');
+  const b = el('button', 'settings-feature');
+  b.type = 'button';
+  b.onclick = run;
+  const shots = el('span', 'settings-feature-shots');
+  shots.setAttribute('aria-hidden', 'true');
+  for (const section of ['manga', 'anime', 'cinema']) {
+    const f = el('span', 'look-frame');
+    f.append(previewPicture(doc, (vp) => homePreview(section, vp), ''));
+    const hex = ACCENTS.find((x) => x.id === look.accent?.[section])?.hex;
+    if (hex) f.style.setProperty('--sw', hex);
+    shots.append(f);
+  }
+  const text = el('span', 'settings-feature-text');
+  text.append(el('strong', null, c.title), el('small', null, { independent: 'كل قسم بشاشته', screens: 'شاشات موحّدة', content: 'محتوى موحّد' }[mode]));
+  b.append(shots, text);
+  b.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
+  return b;
+}
+
+/**
  * صفحة «المظهر والتخصيص».
  * @param {HTMLElement} body
  * @param {{ el: Function, glyph: Function, openSheet: Function, closeSheet: Function, toast: Function,
@@ -179,7 +207,7 @@ export function renderAppearancePane(body, ctx) {
   // ── الخلفية الداكنة الصريحة ──
   head('DISPLAY', 'الخلفية');
   const dark = el('div', 'settings-list');
-  dark.append(toggleRow(ctx, 'moon', 'الخلفية الداكنة الصريحة', 'أسود كامل بدل الداكن المائل للون القسم. على شاشات OLED يُطفئ البكسل الأسود، فيوفّر شيئًا من الطاقة مع المحتوى الداكن والسطوع العالي.', look.pureBlack, (on) => saveLook(() => ({ pureBlack: on }))));
+  dark.append(toggleRow(ctx, 'moon', 'الخلفية الداكنة الصريحة', 'أسود كامل بدل الداكن. على شاشات OLED يُطفأ البكسل الأسود فيوفّر شيئًا من الطاقة.', look.pureBlack, (on) => saveLook(() => ({ pureBlack: on }))));
   body.append(dark);
 
   // ── أنماط العرض والتكامل: ثلاث حالات فقط ──
