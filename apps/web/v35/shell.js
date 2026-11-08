@@ -82,7 +82,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { accentOf, applyAppearance, patchAppearance, toneCss } from './appearance.js';
+import { accentOf, applyAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, countKinds, filterItems, KINDS, KIND_TAG, loadIdentity, unifiedFeed } from './unified-home.js';
