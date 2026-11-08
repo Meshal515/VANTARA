@@ -11,7 +11,7 @@ vi.mock('../lib/extension-engine.js', () => ({
 
 import engine from '../lib/extension-engine.js';
 import { _reset, noteEditionChapters } from '../lib/manga-evidence.js';
-import { _reset as resetAliases, refsOf } from '../lib/manga-alias-store.js';
+import { _reset as resetAliases, noteRefAlias, refsOf } from '../lib/manga-alias-store.js';
 import { browse, describe as describeWork, discoverEditions, mergeWorkPages, resetSources, toV35Work } from './works.js';
 
 const P = 'eu.kanade.tachiyomi.extension';
@@ -90,6 +90,20 @@ describe('manga listing: one work = one card', () => {
     expect(merged.map((w) => w.id)).toEqual(['ext:demonic emperor', 'anime:12']);
     expect(refsOf(merged[0].id)).toEqual(expect.arrayContaining(['ext:former canonical name', 'ext:magic emperor', 'ext:demonic emperor']));
     expect(merged[0]._work.editions).toHaveLength(2);
+  });
+
+  it('a saved reference without editions is not a second card of a work it was already linked to', () => {
+    // «مكتبتي» تبني بطاقة لكل مرجع محفوظ؛ ما حُفظ من «الأكثر قراءة» (اسم AniList) بلا نسخ على هذا الجهاز
+    noteRefAlias('ext:demon slayer kimetsu no yaiba', 'ext:kimetsu no yaiba');
+    const fromTrending = { id: 'ext:demon slayer kimetsu no yaiba', title: { english: 'Demon Slayer: Kimetsu no Yaiba' }, _work: { key: 'demon slayer kimetsu no yaiba', editions: [] } };
+    const fromSource = card('ar.a', 'Kimetsu no Yaiba', '/kny');
+    const merged = mergeWorkPages([fromTrending, fromSource]);
+    expect(merged).toHaveLength(1);
+    // البطاقة التي تحمل نسخًا تفوز، في موضع أسبقهما
+    expect(merged[0].id).toBe('ext:kimetsu no yaiba');
+    expect(merged[0]._work.editions).toHaveLength(1);
+    // وبطاقتان بلا نسخ لعمل واحد بمرجعين: بطاقة واحدة
+    expect(mergeWorkPages([fromTrending, { id: 'ext:kimetsu no yaiba', title: { english: 'Kimetsu no Yaiba' } }])).toHaveLength(1);
   });
 
   it('merges a thousand works with five sources without writing the full reference graph per edition', () => {

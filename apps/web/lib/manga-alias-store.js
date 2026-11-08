@@ -112,19 +112,53 @@ export function noteRefAliases(pairs) {
     refAliases[canonicalRef] = [...list, aliasRef];
     changed = true;
   }
-  if (changed) write(REFS_KEY, refAliases);
+  if (changed) {
+    reverse = null;
+    write(REFS_KEY, refAliases);
+  }
 }
 
-/** كل مراجع العمل: القانوني أولًا ثم أسماؤه القديمة. */
+// الاتجاه العكسي (اسم قديم ← القوانين التي صار جزءًا منها)، يُبنى مرة ويُرمى عند أي تعلّم جديد.
+// بلا هذا الاتجاه كانت البطاقة القديمة (من «الأكثر قراءة» أو سجلّ قبل الدمج) لا ترى تقدّم العمل القانوني،
+// فيظهر العمل الواحد بطاقتين في «تابع القراءة» و«مكتبتي».
+let reverse = null;
+function reverseIndex() {
+  if (reverse) return reverse;
+  reverse = new Map();
+  for (const [canonical, olds] of Object.entries(refAliases)) {
+    for (const old of olds ?? []) {
+      if (!reverse.has(old)) reverse.set(old, []);
+      reverse.get(old).push(canonical);
+    }
+  }
+  return reverse;
+}
+
+/**
+ * كل مراجع العمل الواحد: المرجع نفسه أولًا، ثم أسماؤه القديمة، ثم ما صار هو جزءًا منه.
+ * القراءة فقط تتبع الفئة كلها؛ الكتابة تبقى بمرجع البطاقة، فلا يُنقل ولا يُحذف صف محفوظ.
+ */
 export function refsOf(ref) {
   const refs = [ref];
   const seen = new Set(refs);
+  const back = reverseIndex();
   for (let i = 0; i < refs.length; i++) {
-    for (const old of refAliases[refs[i]] ?? []) {
-      if (!seen.has(old)) { seen.add(old); refs.push(old); }
+    for (const next of [...(refAliases[refs[i]] ?? []), ...(back.get(refs[i]) ?? [])]) {
+      if (!seen.has(next)) { seen.add(next); refs.push(next); }
     }
   }
   return refs;
+}
+
+/**
+ * مفتاح تجميع ثابت للعمل: أصغر مرجع في فئته. لا يُعرض ولا يُخزَّن، بل يجمع بطاقات
+ * العمل الواحد في القوائم (السجل، المكتبة، لقطات الأقسام) أيًّا كان مرجع كل بطاقة.
+ */
+export function canonicalRefOf(ref) {
+  const key = String(ref ?? '');
+  if (!key.startsWith('ext:')) return key;
+  if (!refAliases[key] && !reverseIndex().has(key)) return key;
+  return refsOf(key).reduce((min, r) => (r < min ? r : min));
 }
 
 /** للاختبار فقط. */
@@ -133,6 +167,7 @@ export function _reset() {
   learned = read(KEY);
   twins = read(TWINS_KEY);
   refAliases = read(REFS_KEY);
+  reverse = null;
   map = null;
   loading = null;
 }

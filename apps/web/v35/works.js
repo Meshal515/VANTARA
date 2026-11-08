@@ -12,7 +12,7 @@
 import engine from '../lib/extension-engine.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
-import { aliasMap, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
+import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
@@ -686,11 +686,19 @@ export function mergeWorkPages(items) {
     return { position: Math.min(...work.keys.map((key) => positionsByKey.get(key) ?? Infinity)), item: merged };
   });
   noteRefAliases(formerRefs);
-  const seenIds = new Set();
-  return [...grouped, ...unrelated]
+  // بطاقة بلا نسخ (مرجع محفوظ من «الأكثر قراءة» أو جهاز آخر) لعمل له بطاقة بنسخ: بطاقة واحدة.
+  // التجميع بفئة المرجع (`canonicalRefOf`)، والفائزة البطاقة التي تحمل نسخًا، في موضع أسبقهما.
+  const byClass = new Map();
+  for (const entry of [...grouped, ...unrelated]) {
+    const cls = canonicalRefOf(String(entry.item.id));
+    const prior = byClass.get(cls);
+    if (!prior) { byClass.set(cls, entry); continue; }
+    const richer = !prior.item._work?.editions?.length && entry.item._work?.editions?.length ? entry.item : prior.item;
+    byClass.set(cls, { position: Math.min(prior.position, entry.position), item: richer });
+  }
+  return [...byClass.values()]
     .sort((a, b) => a.position - b.position)
-    .map(({ item }) => item)
-    .filter((item) => !seenIds.has(item.id) && seenIds.add(item.id));
+    .map(({ item }) => item);
 }
 
 /**
