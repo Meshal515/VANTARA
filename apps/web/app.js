@@ -2080,7 +2080,7 @@ function showApkUpdate(apk) {
       };
       document.addEventListener('visibilitychange', resume);
     } else if (out.error) {
-      idle(APK_ERRORS[out.error] ?? 'ما اكتمل التنزيل. جرّب مرة ثانية');
+      idle(APK_ERRORS[out.error] ?? `ما اكتمل التنزيل. جرّب مرة ثانية (${String(out.error).slice(0, 80)})`);
     } else {
       sub.textContent = 'أكّد «تحديث» في شاشة أندرويد';
       go.textContent = 'تثبيت';
