@@ -39,7 +39,7 @@ export function defaultPick(order, now = Date.now()) {
 }
 
 export function createAnimeToday(h) {
-  const { el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip } = h;
+  const { el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip, heroMemory = null, seriesBackdrop = null } = h;
   const motionOff = () => Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || document.documentElement.dataset.motion === 'off';
   const artCache = new Map();
   const artFor = (m) => {
@@ -47,7 +47,32 @@ export function createAnimeToday(h) {
     return artCache.get(m.id);
   };
   /** صورة عريضة بجودتها: الصورة العريضة الأصلية، ثم صورة الحلقة. بانر AniList (400px) يُكبَّر فيضعف فلا يُستعمل هنا. */
-  const wideOf = (m, art) => art?.fanart ?? (episodeStill(m, m.episode, art).still ? episodeStill(m, m.episode, art).src : null);
+  /**
+   * صور البنر العريضة بترتيب صفحة العمل نفسها (anime.js، paintHero): الخلفية الرسمية من metahub بمعرّف IMDb،
+   * ثم fanart، ثم لقطة الحلقة، ثم بنر AniList. كان البنر يأخذ fanart واللقطة فقط، فالعمل الذي له خلفية في
+   * صفحته (Ace of the Diamond مثلًا) يظهر هنا بغلافه.
+   */
+  const wideCandidates = (m, art) => {
+    const out = [];
+    const add = (src) => { if (src && !out.includes(src)) out.push(src); };
+    // الخلفية التي ظهرت فعلًا لهذا العمل (في صفحته أو هنا): ذاكرة صفحة العمل نفسها، فتظهر فورًا
+    add(heroMemory?.get(m.id));
+    if (/^tt\d+$/.test(art?.imdb ?? '')) {
+      add(`https://images.metahub.space/background/large/${art.imdb}/img`);
+      add(`https://images.metahub.space/background/medium/${art.imdb}/img`);
+    }
+    add(art?.fanart);
+    const shot = episodeStill(m, m.episode, art);
+    if (shot.still) add(shot.src);
+    add(m.banner);
+    return out;
+  };
+  const wideOf = (m, art) => wideCandidates(m, art)[0] ?? null;
+  /** أول صورة عريضة تُحمَّل فعلًا من القائمة بالترتيب (رابط metahub قد يفشل لعمل بلا خلفية). */
+  const firstDecoded = async (list) => {
+    for (const src of list) if (await decoded(src)) return src;
+    return null;
+  };
   const decoded = (src) => new Promise((resolve) => {
     const img = new Image();
     img.decoding = 'async';
@@ -155,14 +180,19 @@ export function createAnimeToday(h) {
     }
     /** ما يحتاجه بنر العمل جاهزًا ومفكوكًا: { src, logo } (logo null = لا شعار له، أو لم يصل في وقته). */
     async function prepare(m) {
-      // شبكة بطيئة: لا ينتظر البنر أكثر من ثانية ونصف كلها (بيانات العمل ثم الصورة والشعار). ما لم يصل يُعرض
-      // بديله النهائي لهذه المرة (الغلاف، أو الاسم) ولا يُستبدل لاحقًا أمام العين؛ والتحميل يكمل للزيارة القادمة.
-      const deadline = Date.now() + 1500;
+      // بيانات العمل (ومنها معرّف IMDb الذي يأتي منه الشعار والخلفية) قد تتأخر ثواني: كانت المهلة 1.5 ثانية
+      // فيُعرض الغلاف والاسم بديلًا نهائيًا لعمل له بنر وشعار. الآن 6 ثوانٍ، والبنر الحالي ثابت حتى يجهز
+      // الجديد كله (والغلاف المختار ينبض). بعدها فقط البديل: الغلاف، أو الاسم.
+      const deadline = Date.now() + 6000;
       const late = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), Math.max(0, deadline - Date.now())))]);
       const art0 = await late(artFor(m));
-      const src = wideOf(m, art0);
-      const [img, logo] = await Promise.all([late(decoded(src ?? m.poster)), late(logoFor(art0?.logo))]);
-      return { src: img ? src : null, logo };
+      let [src, logo] = await Promise.all([late(firstDecoded(wideCandidates(m, art0))), late(logoFor(art0?.logo))]);
+      // موسم بلا خلفية خاصة: خلفية عمله الأب كما في صفحة العمل (تحتاج علاقاته، وهي في تفاصيله فقط)
+      if (!src && seriesBackdrop && m.relations?.length) src = await late(seriesBackdrop(m).then((b) => (b ? decoded(b).then((ok) => (ok ? b : null)) : null)));
+      // ما ظهر يُحفظ لصفحة العمل وللمرة القادمة؛ لقطة الحلقة وبنر AniList ليسا خلفية العمل فلا يُحفظان
+      if (src && (src.includes('metahub') || src === art0?.fanart)) heroMemory?.set(m.id, src);
+      if (!src) await late(decoded(m.poster));
+      return { src: src ?? null, logo };
     }
     async function select(m, { fromUser = false, instant = false } = {}) {
       if (fromUser) userPicked = true;

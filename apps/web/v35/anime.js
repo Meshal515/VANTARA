@@ -366,7 +366,7 @@ export function createAnime(deps) {
   const HOME_HISTORY = 10;
 
   let todayKit = null;
-  const today = () => (todayKit ??= createAnimeToday({ el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip }));
+  const today = () => (todayKit ??= createAnimeToday({ el, image, glyph, unitLabel, isMovie, openAnime, loadAnimeArt, episodeStill, clock12, meccaDay, dayLabel, minutesLeft, moreButton, openContinueMenu, genreAr, centerInStrip, heroMemory, seriesBackdrop }));
 
   function renderHome(data) {
     const blocks = el('div', 'an-home');
