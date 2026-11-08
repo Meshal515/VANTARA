@@ -74,7 +74,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { refsOf } from '../lib/manga-alias-store.js';
+import { canonicalRefOf, noteRefAliases, refsOf } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -524,7 +524,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // البطاقة تقول أين وقفت: «الفصل 47» من سجلّك نفسه
   // «222» وحده لا يقول شيئًا: رقم الفصل يُقرأ «الفصل 222»، والاسم الحرفي يبقى كما هو
   const chapterLabelAr = (label) => (label != null && /^\d+(\.\d+)?$/.test(String(label).trim()) ? `الفصل ${String(label).trim()}` : label ?? null);
-  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label), _viewAt: v.viewed_at ?? null }));
+  // سجلّان لعمل واحد بمرجعين (قبل الدمج وبعده، أو من «الأكثر قراءة» ومن البحث): بطاقة واحدة بأحدثهما
+  const historyWorks = () => { const seen = new Set(); return viewRows().filter((v) => { const k = canonicalRefOf(v.series_ref); return !seen.has(k) && seen.add(k); }).map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label), _viewAt: v.viewed_at ?? null })); };
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -981,7 +982,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function friendsReading() {
     const friendIds = (deps.friends?.() ?? sync.rows('accounts').map((r) => ({ userId: r.user_id }))).map((p) => p.userId);
-    return rankFriendsReading(sync.rows('work_views'), { me: me(), friendIds })
+    return rankFriendsReading(sync.rows('work_views'), { me: me(), friendIds, canonical: canonicalRefOf })
       .map((e) => workFromRef(e.ref, e.title, e.cover));
   }
   function refreshFriendsHero() {
@@ -1006,7 +1007,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   const homeSnapshots = new Map();
   function homeSnapshot(kind, incoming) {
-    if (!homeSnapshots.has(kind)) homeSnapshots.set(kind, createFeedSnapshot());
+    // بمفتاح العمل لا بمعرّف البطاقة: بطاقة صار مفتاحها اسمًا آخر بعد دليل جديد تُستبدل في مكانها، لا تبقى بجانب الجديدة
+    if (!homeSnapshots.has(kind)) homeSnapshots.set(kind, createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) }));
     return homeSnapshots.get(kind).accept(incoming);
   }
   async function globalPopular(page) {
@@ -1535,6 +1537,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (found && state.current === work) {
           // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
           const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
+          // مرجع «الأكثر قراءة» (اسم AniList) ومرجع المصادر عمل واحد: المكتبة والتقدّم يُقرآن من الاثنين
+          if (String(found.id) !== String(work.id)) noteRefAliases([[String(work.id), String(found.id)]]);
           work = kept;
           state.current = kept;
           rememberWork(kept);
@@ -3484,7 +3488,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function runSearch(term, grid, stillWanted) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
-    const snapshot = createFeedSnapshot();
+    const snapshot = createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) });
     // حارس أخير في البحث: عمل بلا نسخة عربية واحدة، أو للكبار، لا يظهر مهما كان مساره
     const arabicOnly = (items) => items.filter((w) => !w._work || ((w._work.editions ?? []).some((e) => !isFiller(e.sourceId) && (!String(e.sourceId).includes('#') || /\.ar\./.test(String(e.sourceId)))) && !isAdult(w._work)));
     const paintSnapshot = (items) => {

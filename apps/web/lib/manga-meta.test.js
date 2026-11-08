@@ -16,6 +16,21 @@ describe('AniList manga rating', () => {
     expect(items.items[0].coverImage.large).toBe('https://c/one.jpg');
     expect(items.hasNextPage).toBe(true);
   });
+  it('a light novel is not a manga card, and two AniList works with one name are one card', async () => {
+    // حيّ 2026-11-08: «Mushoku Tensei: Jobless Reincarnation» المانجا (85564) والرواية (85470) بمرجع واحد
+    let query;
+    const items = await fetchMangaPopular({ fetchImpl: async (_url, init) => {
+      query = JSON.parse(init.body).query;
+      return { ok: true, json: async () => ({ data: { Page: { pageInfo: { hasNextPage: false }, media: [
+        { id: 85564, format: 'MANGA', title: { english: 'Mushoku Tensei: Jobless Reincarnation' } },
+        { id: 85470, format: 'NOVEL', title: { english: 'Mushoku Tensei: Jobless Reincarnation' } },
+        { id: 30013, format: 'MANGA', title: { english: 'One Piece' } },
+        { id: 999, format: 'ONE_SHOT', title: { english: 'ONE PIECE' } },
+      ] } } }) };
+    } });
+    expect(query).toContain('format_not: NOVEL');
+    expect(items.items.map((m) => [m.id, m._metaId])).toEqual([['ext:mushoku tensei jobless reincarnation', 85564], ['ext:one piece', 30013]]);
+  });
   it('falls back to worldwide readership on Kitsu if AniList is unavailable', async () => {
     const result = await fetchMangaPopular({ fetchImpl: async (url) => url.includes('anilist') ? { ok: false, status: 403 } : {
       ok: true, json: async () => ({ data: [{ id: '38', attributes: { canonicalTitle: 'One Piece', userCount: 100000, posterImage: { original: 'https://c/op.jpg' } } }], links: {} }),

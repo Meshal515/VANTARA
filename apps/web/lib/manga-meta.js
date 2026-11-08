@@ -11,13 +11,14 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({ query: `query ($page: Int) { Page(page: $page, perPage: 24) { pageInfo { hasNextPage }
-        media(type: MANGA, sort: POPULARITY_DESC, isAdult: false) { id title { english romaji native } synonyms
+        media(type: MANGA, sort: POPULARITY_DESC, isAdult: false, format_not: NOVEL) { id format title { english romaji native } synonyms
           coverImage { extraLarge large } bannerImage genres popularity averageScore status chapters isAdult } } }`, variables: { page } }),
     });
     if (!response.ok) throw new Error(`anilist_${response.status}`);
     const data = (await response.json())?.data?.Page;
     if (!data?.media) throw new Error('anilist_no_popularity');
-    const items = data.media.filter((m) => !m.isAdult && !adultGenre(m.genres)).map((m) => {
+    // الرواية الخفيفة ليست بطاقة مانجا: باسم مانجاها نفسه كانت تصير بطاقة ثانية بمرجع واحد
+    const items = data.media.filter((m) => !m.isAdult && !adultGenre(m.genres) && m.format !== 'NOVEL').map((m) => {
       const title = m.title?.english || m.title?.romaji || m.title?.native;
       const key = normalizeTitle(title);
       return {
@@ -26,7 +27,7 @@ export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch
         popularity: m.popularity, averageScore: m.averageScore, chapters: m.chapters, staff: { edges: [] },
         _metaId: m.id, _work: { key, title, thumbnailUrl: m.coverImage?.large ?? null, editions: [] },
       };
-    }).filter((w) => w.title.english && w._work.key);
+    }).filter((w, i, all) => w.title.english && w._work.key && all.findIndex((x) => x.id === w.id) === i);
     return { items, hasNextPage: Boolean(data.pageInfo?.hasNextPage), page };
   } catch (primaryError) {
     // A provider outage must not turn global popularity back into source ranking.
