@@ -123,3 +123,6 @@
 .v35 .uv-btn{display:inline-flex!important;align-items:center;justify-content:center;line-height:1}
 .v35 .uv-btn .icon{display:block;flex:none}
 .v35 .uv-btn span{display:block;line-height:1}
+
+.uv-page .uv-dayhead{font-size:17px;font-weight:800;margin:26px var(--uv-g,20px) 0}
+.uv-page .uv-dayhead+.uv-grid{padding-top:12px}

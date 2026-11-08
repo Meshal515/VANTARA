@@ -195,7 +195,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const art = el('span', 'uv-art'); art.append(img(e.poster, 'uv-img', e.title));
     art.append(el('span', 'uv-ep', `حلقة ${e.episode}`));
     const line = el('span', 'uv-t2');
-    line.append(el('em', null, `${hm} ${ap}`), document.createTextNode(` · ${done ? 'متاحة' : until(e.airingAt, t)}`));
+    // بعد أكثر من يوم يكفي الوقت (عنوان اليوم فوقه)، وإلا «بعد…» أو «متاحة»
+    const far = !done && e.airingAt - t > 86_400_000;
+    line.append(el('em', null, `${hm} ${ap}`));
+    if (!far) line.append(document.createTextNode(` · ${done ? 'متاحة' : until(e.airingAt, t)}`));
     a.append(art, txt('b', 'uv-t1', e.title), line);
     a.onclick = () => open.anime(e);
     return a;
@@ -262,8 +265,9 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       const days = el('div', 'uv-days');
       for (const d of [0, 1, 2]) { const b = el('button', st.day === d ? 'on' : '', dayName(d)); b.type = 'button'; b.onclick = () => { st.day = d; render(); }; days.append(b); }
       s.append(days);
-      if (!week) { const ol = el('ol', 'uv-air'); for (let i = 0; i < 4; i++) { const li = el('li', 'uv-ar'); li.append(sk(46, 14), sk('60%', 13)); ol.append(li); } s.append(ol); }
-      else { const list = dayLineup(week, st.day, now()).slice(0, 5); const ol = el('ol', 'uv-air'); list.forEach((e) => ol.append(airRow(e))); s.append(list.length ? ol : el('p', 'uv-none', 'لا حلقات في هذا اليوم')); }
+      // بطاقات مثل «آخر التحديثات» (قرار المالك)، لا سطور
+      if (!week) s.append(skRail(4, 120, 180));
+      else { const list = dayLineup(week, st.day, now()).slice(0, 12); const r = rail(); list.forEach((e) => r.append(airCard(e))); s.append(list.length ? r : el('p', 'uv-none', 'لا حلقات في هذا اليوم')); }
       page.append(s);
     }
     // آخر التحديثات: فصول المانجا وحلقات المسلسلات معًا (الأنمي له جدول البث)
@@ -325,13 +329,21 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const body = el('div', 'uv-pbody');
     if (st.sub === 'schedule') {
       top.append(back, el('h1', null, 'جدول البث'));
+      // «نزلت» (كل ما نزل، الأحدث أولًا) و«قادمة» (حتى الأسبوع القادم، الأقرب أولًا)، مقسّمة بالأيام
       const week = data.animeHome()?.week ?? [];
-      const days = el('div', 'uv-days uv-days-lg');
-      for (const d of [-1, 0, 1, 2, 3]) { const b = el('button', st.day === d ? 'on' : ''); b.type = 'button'; b.append(el('span', null, dayName(d)), el('small', null, String(dayLineup(week, d, now()).length))); b.onclick = () => { st.day = d; paintSub(); }; days.append(b); }
-      // بطاقات عمودية في شبكة (قرار المالك)، الوقت والحالة تحت كل غلاف
-      const grid = el('div', 'uv-grid'); const list = dayLineup(week, st.day, now());
-      list.forEach((e) => grid.append(airCard(e)));
-      body.append(days, list.length ? grid : el('p', 'uv-none', 'لا حلقات في هذا اليوم'));
+      const t = now();
+      const mode = st.airTab ?? 'soon';
+      body.append(tabs(mode, [['soon', 'قادمة'], ['aired', 'نزلت']], (k) => { st.airTab = k; paintSub(); }));
+      const list = mode === 'aired'
+        ? week.filter((e) => e.airingAt <= t).sort((a, b) => b.airingAt - a.airingAt)
+        : week.filter((e) => e.airingAt > t && e.airingAt - t <= 7 * 86_400_000).sort((a, b) => a.airingAt - b.airingAt);
+      if (!list.length) body.append(el('p', 'uv-none', mode === 'aired' ? 'ما نزل شيء هذا الأسبوع' : 'لا حلقات قادمة'));
+      let day = null, grid = null;
+      for (const e of list) {
+        const d = riyadhDay(e.airingAt) - riyadhDay(t);
+        if (d !== day) { day = d; body.append(el('h3', 'uv-dayhead', d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : d === -1 ? 'أمس' : DAYS_AR[new Date(e.airingAt + 3 * 3600_000).getUTCDay()])); grid = el('div', 'uv-grid'); body.append(grid); }
+        grid.append(airCard(e));
+      }
     } else {
       top.append(back, el('h1', null, 'آخر التحديثات'));
       body.append(tabs(st.subTab, UPD, (k) => { st.subTab = k; paintSub(); }));
