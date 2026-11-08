@@ -3510,7 +3510,7 @@ html[data-section='cinema'],
   position: absolute;
   inset: 0;
   opacity: 0;
-  transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .v35 .ah-art-layer.in { opacity: 1; }
 .v35 .ah-art-img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -3544,6 +3544,19 @@ html[data-section='cinema'],
   transition: opacity 0.13s ease-out;
 }
 .v35 .ah-body.swapping { opacity: 0; }
+.v35 .ah-body:not(.swapping) { transition-duration: 0.18s; }
+/* أبعاد ثابتة: الشعار أو الاسم في صندوق محجوز، والمعلومات سطر واحد، والزر في مكانه. اختلاف العمل لا يحرك
+ * شيئًا ولا يغيّر ارتفاع البنر. */
+.v35 .ah-mark { height: 72px; display: flex; align-items: flex-end; max-width: 78%; }
+.v35 .ah-mark .ah-logo { max-height: 72px; max-width: 100%; }
+.v35 .ah-mark .ah-name { max-width: 100%; }
+.v35 .ah-name--long { font-size: 17px; line-height: 1.3; }
+.v35 .ah-meta { flex-wrap: nowrap; height: 20px; overflow: hidden; white-space: nowrap; }
+.v35 .ah-meta > span { flex: none; }
+.v35 .ah-meta > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* الغلاف المختار ينتظر صورته: حلقة تنبض بهدوء، والبنر الحالي ثابت حتى يجهز الجديد */
+.v35 .ah-cover.sel.loading .ah-cover-img { animation: ah-wait 0.9s ease-in-out infinite alternate; }
+@keyframes ah-wait { to { outline-color: transparent; } }
 .v35 .ah-logo {
   display: block;
   max-width: 58%;
@@ -3765,6 +3778,8 @@ html[data-section='cinema'],
   .v35 .ah-art { aspect-ratio: auto; height: min(56.25vw, 62vh); }
   .v35 .ah-body { margin-top: -56px; padding: 0 32px; }
   .v35 .ah-logo { max-height: 96px; max-width: 44%; }
+  .v35 .ah-mark { height: 96px; max-width: 60%; }
+  .v35 .ah-mark .ah-logo { max-height: 96px; }
   .v35 .ah-art-poster { width: 150px; top: auto; bottom: 70px; }
   .v35 .ah-lineup { gap: 16px; padding-inline: 32px; }
   .v35 .ah-cover { flex-basis: 112px; }
@@ -3785,6 +3800,8 @@ html[data-section='cinema'],
   .v35 .ah-body { position: absolute; inset: auto 0 0 auto; margin: 0; padding: 0 56px 40px; max-width: 640px; }
   .v35 .ah-stage { position: relative; }
   .v35 .ah-logo { max-height: 120px; max-width: 420px; }
+  .v35 .ah-mark { height: 120px; max-width: 520px; }
+  .v35 .ah-mark .ah-logo { max-height: 120px; }
   .v35 .ah-name { font-size: 34px; }
   .v35 .ah-meta { font-size: 15px; }
   .v35 .ah-art-poster { width: 190px; bottom: 90px; }

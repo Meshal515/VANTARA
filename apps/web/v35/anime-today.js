@@ -55,6 +55,16 @@ export function createAnimeToday(h) {
     img.onerror = () => resolve(null);
     img.src = src;
   });
+  // الشعارات المفكوكة محفوظة (حتى 48): لا تُطلب ولا تُفك مرتين، ولا يرجع الاسم مكان شعار سبق عرضه
+  const logoCache = new Map();
+  const logoFor = (url) => {
+    if (!url) return Promise.resolve(null);
+    if (!logoCache.has(url)) {
+      logoCache.set(url, decoded(url).then((img) => (img ? url : null)));
+      if (logoCache.size > 48) logoCache.delete(logoCache.keys().next().value);
+    }
+    return logoCache.get(url);
+  };
   const genresLine = (m) => (m.genres ?? []).slice(0, 2).map(genreAr).join('، ');
 
   // ───────────── البنر وتشكيلة اليوم ─────────────
@@ -77,73 +87,94 @@ export function createAnimeToday(h) {
     let token = 0;
     let userPicked = false;
 
-    function paintArt(m, src, poster) {
+    // البنر يتبدل بلقطة واحدة: الصورة العريضة والشعار يُجهَّزان (يُفكّان) معًا ثم يُعرضان معًا، فلا اسم عمل فوق
+    // صورة آخر، ولا نص يتحول شعارًا أمام العين. ما لم يجهز بعد يبقى البنر الحالي ثابتًا والغلاف المختار
+    // يُعلَّم «يجهز». الشعار المحمّل محفوظ (logoCache)، فالعودة لعمل سبق عرضه تُظهر شعاره مباشرة.
+    function paintArt(src, poster) {
       const layer = el('div', `ah-art-layer${src ? '' : ' ah-art-layer--poster'}`);
-      const swap = () => {
-        art.insertBefore(layer, art.lastElementChild);
-        requestAnimationFrame(() => layer.classList.add('in'));
-        const old = [...art.querySelectorAll('.ah-art-layer')].filter((n) => n !== layer);
-        setTimeout(() => old.forEach((n) => n.remove()), motionOff() ? 0 : 560);
-      };
-      if (src) {
-        layer.append(Object.assign(new Image(), { src, alt: '', className: 'ah-art-img', decoding: 'async' }));
-        return swap();
+      if (src) layer.append(Object.assign(new Image(), { src, alt: '', className: 'ah-art-img', decoding: 'async' }));
+      else {
+        // بلا صورة عريضة: ضوء من ألوان الغلاف، والغلاف نفسه واضحًا في الطرف
+        layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-amb', decoding: 'async' }));
+        layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-poster', decoding: 'async' }));
       }
-      // بلا صورة عريضة: ضوء من ألوان الغلاف، والغلاف نفسه واضحًا في الطرف
-      layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-amb', decoding: 'async' }));
-      layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-poster', decoding: 'async' }));
-      swap();
+      art.insertBefore(layer, art.lastElementChild);
+      const old = [...art.querySelectorAll('.ah-art-layer')].filter((n) => n !== layer);
+      if (motionOff() || !old.length) {
+        layer.classList.add('in');
+        old.forEach((n) => n.remove());
+        return;
+      }
+      requestAnimationFrame(() => layer.classList.add('in'));
+      // القديمة تبقى تحت الجديدة حتى تكتمل: لا لحظة سوداء بين الصورتين
+      setTimeout(() => old.forEach((n) => n.remove()), 360);
     }
-    function paintBody(m, art0) {
+    function bodyFor(m, logoSrc) {
       const st = airingStatus(m.airingAt, Date.now());
-      const lines = [];
-      const logo = art0?.logo ? Object.assign(new Image(), { alt: m.title, className: 'ah-logo', decoding: 'async' }) : null;
-      const name = el('h2', 'ah-name', m.title);
-      name.dir = 'auto';
-      if (logo) {
-        // الشعار يحلّ محل الاسم حين يصل، والاسم يبقى إن فشل
-        logo.onload = () => { if (name.isConnected) name.replaceWith(logo); };
-        logo.src = art0.logo;
+      const mark = el('div', `ah-mark${logoSrc ? ' ah-mark--logo' : ''}`);
+      if (logoSrc) mark.append(Object.assign(new Image(), { src: logoSrc, alt: m.title, className: 'ah-logo', decoding: 'sync' }));
+      else {
+        const name = el('h2', `ah-name${m.title.length > 26 ? ' ah-name--long' : ''}`, m.title);
+        name.dir = 'auto';
+        mark.append(name);
       }
-      lines.push(name);
       const meta = el('div', 'ah-meta');
       meta.append(el('span', `ah-st ah-st--${st.kind}`, st.kind === 'aired' ? `نزلت اليوم ${clock12(m.airingAt)}` : st.kind === 'now' ? 'ينزل الآن' : `التالية اليوم · ${st.text}`));
       if (!isMovie(m)) meta.append(el('span', null, unitLabel(m, m.episode)));
       const g = genresLine(m);
       if (g) meta.append(el('span', null, g));
-      lines.push(meta);
       const aired = st.kind === 'aired';
       const act = el('button', `ah-act${aired ? '' : ' ah-act--quiet'}`);
       act.type = 'button';
       act.innerHTML = aired ? `${glyph('play', { size: 15, filled: true })}<span>شاهد ${unitLabel(m, m.episode)}</span>` : '<span>افتح العمل</span>';
       act.onclick = () => void openAnime(m, aired ? { episode: m.episode } : {});
-      lines.push(act);
-      body.classList.add('swapping');
+      return [mark, meta, act];
+    }
+    function paintBody(lines, instant) {
       clearTimeout(body._t);
+      if (instant || motionOff() || !body.childElementCount) {
+        body.classList.remove('swapping');
+        body.replaceChildren(...lines);
+        return;
+      }
+      body.classList.add('swapping');
       body._t = setTimeout(() => {
         body.replaceChildren(...lines);
         body.classList.remove('swapping');
-      }, body.childElementCount && !motionOff() ? 130 : 0);
+      }, 120);
     }
-    async function select(m, { fromUser = false } = {}) {
+    /** ما يحتاجه بنر العمل جاهزًا ومفكوكًا: { src, logo } (logo null = لا شعار له، أو لم يصل في وقته). */
+    async function prepare(m) {
+      // شبكة بطيئة: لا ينتظر البنر أكثر من ثانية ونصف كلها (بيانات العمل ثم الصورة والشعار). ما لم يصل يُعرض
+      // بديله النهائي لهذه المرة (الغلاف، أو الاسم) ولا يُستبدل لاحقًا أمام العين؛ والتحميل يكمل للزيارة القادمة.
+      const deadline = Date.now() + 1500;
+      const late = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), Math.max(0, deadline - Date.now())))]);
+      const art0 = await late(artFor(m));
+      const src = wideOf(m, art0);
+      const [img, logo] = await Promise.all([late(decoded(src ?? m.poster)), late(logoFor(art0?.logo))]);
+      return { src: img ? src : null, logo };
+    }
+    async function select(m, { fromUser = false, instant = false } = {}) {
       if (fromUser) userPicked = true;
       selected = m;
       const run = ++token;
       for (const c of lineup.children) {
         const on = c._m === m;
         c.classList.toggle('sel', on);
+        c.classList.remove('loading');
         c.setAttribute('aria-selected', String(on));
       }
-      const known = artCache.has(m.id) ? await artFor(m) : null;
-      if (run !== token) return;
-      paintBody(m, known);
-      const art0 = known ?? (await artFor(m));
-      if (run !== token) return;
-      if (!known) paintBody(m, art0);
-      const src = wideOf(m, art0);
-      const ready = await decoded(src ?? m.poster);
-      if (run !== token || !ready) return;
-      paintArt(m, src, m.poster);
+      const cover = [...lineup.children].find((c) => c._m === m);
+      const slow = setTimeout(() => { if (run === token) cover?.classList.add('loading'); }, 160);
+      const ready = await prepare(m);
+      clearTimeout(slow);
+      cover?.classList.remove('loading');
+      if (run !== token || !s.isConnected) return;
+      paintBody(bodyFor(m, ready.logo), instant);
+      paintArt(ready.src, m.poster);
+      // الجاران في التشكيلة يُجهَّزان الآن، فالانتقال إليهما فوري. لا أكثر: لا تحميل كل اليوم دفعة
+      const i = order.indexOf(m);
+      for (const n of [order[i - 1], order[i + 1]]) if (n) void prepare(n);
     }
     for (const m of order) {
       const st = airingStatus(m.airingAt, now);
@@ -165,13 +196,15 @@ export function createAnimeToday(h) {
       lineup.append(c);
     }
     const first = defaultPick(order, now);
-    void select(first);
-    // الافتراضي بلا صورة عريضة: أقرب ما سينزل وله صورة يأخذ مكانه ما لم يختر المستخدم بنفسه
-    void Promise.all(order.filter((m) => m.airingAt > now).map(async (m) => [m, wideOf(m, await artFor(m))])).then((pairs) => {
-      if (userPicked || !s.isConnected || !selected || wideOf(selected, null)) return;
-      const withArt = pairs.filter(([, src]) => src).map(([m]) => m);
-      const best = withArt.sort((a, b) => a.airingAt - b.airingAt)[0];
-      if (best && best !== selected) void select(best);
+    void select(first, { instant: true });
+    // الافتراضي بلا صورة عريضة: أقرب ثلاثة قادمة تُفحص فقط، وأقربها بصورة يأخذ مكانه ما لم يختر المستخدم
+    void artFor(first).then((a0) => {
+      if (wideOf(first, a0)) return;
+      const next = order.filter((m) => m.airingAt > now).sort((a, b) => a.airingAt - b.airingAt).slice(0, 4);
+      return Promise.all(next.map(async (m) => [m, wideOf(m, await artFor(m))])).then((pairs) => {
+        const best = pairs.find(([, src]) => src)?.[0];
+        if (!userPicked && s.isConnected && best && selected === first) void select(best);
+      });
     });
     requestAnimationFrame(() => centerInStrip(lineup, [...lineup.children].find((c) => c._m === first)));
     return s;

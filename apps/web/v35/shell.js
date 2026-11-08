@@ -1325,13 +1325,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const name = el('h3', 'hero-name', titleOf(w));
     name.dir = 'auto';
     const acts = el('div', 'mg-acts');
-    const read = el('button', 'btn btn-primary', 'اقرأ الآن');
+    // بقرار المالك: «اقرأ الآن» وحدها نصًا تفاعليًا بلا حاوية (التفاصيل بلمس الغلاف نفسه)
+    const read = el('button', 'mg-read');
     read.type = 'button';
+    read.innerHTML = '<span>اقرأ الآن</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11c0 .9.98 1.45 1.74.98l8.7-5.5a1.15 1.15 0 0 0 0-1.96l-8.7-5.5A1.15 1.15 0 0 0 8 6.5z"/></svg>';
     read.onclick = () => void openWork(w, { autoRead: true });
-    const more = el('button', 'btn btn-secondary', 'التفاصيل');
-    more.type = 'button';
-    more.onclick = () => void openWork(w);
-    acts.append(read, more);
+    acts.append(read);
     const lines = [kicker ? el('div', 'hero-kicker', kicker) : null, name, acts].filter(Boolean);
     const swap = () => {
       copy.replaceChildren(...lines);
