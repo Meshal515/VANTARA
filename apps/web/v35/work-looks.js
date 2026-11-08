@@ -52,13 +52,17 @@ function parts(c) {
     const s = c.still(n, size === 'full');
     return `<div class="th">${img(s.src, '', s.still ? '' : 'center 22%', {fallbacks:[...(s.fallbacks??[]),c.m.posterSmall??c.m.poster].filter(Boolean)})}<em>${n}</em>${bar(n)}</div>`;
   };
-  const epRows = (withO = true) => `<div class="wl-eprows">${eps.map((n) => `<button type="button" class="er ${epState(n)}" data-ep="${n}" data-episode-row="">${thumb(n)}<span class="tx"><b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${withO && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(epSub(n))}</span></span></button>`).join('')}${empty}</div>`;
+  // زر «شوهدت» الجانبي على كل حلقة (نفس زر المحور an-er-icon): ✓ بلون القسم أو حلقة فارغة
+  const seenBtn = (n) => (c.toggleSeen && c.canMark?.(n) !== false
+    ? `<span class="wl-seen" role="button" tabindex="0" data-seen-ep="${n}" aria-pressed="${c.seen(n)}" aria-label="${c.seen(n) ? `ألغِ «شوهدت» للحلقة ${n}` : `علّم الحلقة ${n} شوهدت`}">${c.seen(n) ? c.glyph('check', { size: 16 }) : '<i class="wl-seen-ring"></i>'}</span>`
+    : '');
+  const epRows = (withO = true) => `<div class="wl-eprows">${eps.map((n) => `<button type="button" class="er ${epState(n)}" data-ep="${n}" data-episode-row="">${thumb(n)}<span class="tx"><b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${withO && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(epSub(n))}</span></span>${seenBtn(n)}</button>`).join('')}${empty}</div>`;
   const chars = (cls, k = 10) => (c.characters.length ? `<div class="${cls}">${c.characters.slice(0, k).map((p) => `<div class="ch">${img(p.image, '', 'center 20%')}<b dir="auto">${esc(p.name)}</b><span dir="auto">${esc(p.voice ?? '')}</span></div>`).join('')}</div>` : '');
   const recs = (cls) => (m.recommendations?.length ? `<div class="${cls}">${m.recommendations.map((r) => `<button type="button" class="rc" data-open="${esc(r.id)}">${img(r.posterSmall ?? r.poster)}<b dir="auto">${esc(r.title)}</b><span>${r.score ? `★ ${r.score.toFixed(1)}` : esc(r.year ?? '')}</span></button>`).join('')}</div>` : '');
   const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : '';
   const section = (title, body, key = '') =>
     body && !(movie && /الحلقات/.test(title)) ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}">${c.episodeControls && /الحلقات/.test(title) ? episodeControls : `<div class="wl-h"><h2>${title}</h2></div>`}${body}</section>` : '';
-  return { movie, meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, episodeControls, empty, eps, epState, epSub, bar, thumb, epRows, chars, recs, desc, section };
+  return { movie, meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, episodeControls, empty, eps, epState, epSub, bar, thumb, seenBtn, epRows, chars, recs, desc, section };
 }
 
 /** «من نفس العالم»: ما قبله، ثم العمل نفسه («أنت هنا»)، ثم ما بعده، ثم بقية المرتبط؛ أنمي ومانجا. */
@@ -109,7 +113,7 @@ const LOOKS = {
   /* ── البطاقة الطائرة ── */
   card(c, p) {
     const world = worldItems(c);
-    const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}" data-episode-row="">${p.thumb(n)}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span></button>`).join('');
+    const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}" data-episode-row="">${p.thumb(n)}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span>${p.seenBtn(n)}</button>`).join('');
     return `
       <div class="wl-head">
         ${logoLayer(c)}
@@ -200,6 +204,13 @@ export function renderLook(look, host, c, { center = true } = {}) {
   host.onclick = (e) => {
     const r = e.target.closest('[data-range]');
     if (r) return c.onRange?.(Number(r.dataset.range));
+    // زر «شوهدت» داخل صف الحلقة: يبدّل العلامة ولا يشغّل الحلقة
+    const seen = e.target.closest('[data-seen-ep]');
+    if (seen) {
+      const row = seen.closest('[data-ep]');
+      if (row?._held) row._held = false;
+      return void c.toggleSeen?.(Number(seen.dataset.seenEp));
+    }
     const ep = e.target.closest('[data-ep]');
     // ضغطة مطوّلة فتحت قائمة الحلقة: اللمسة التي تتبعها ليست تشغيلًا
     if (ep?._held) return void (ep._held = false);
@@ -213,6 +224,13 @@ export function renderLook(look, host, c, { center = true } = {}) {
     if (open) return c.open(open.dataset.open);
     const manga = e.target.closest('[data-manga]');
     if (manga) return c.openManga?.(manga.dataset.manga);
+  };
+  host.onkeydown = (e) => {
+    const seen = e.target.closest?.('[data-seen-ep]');
+    if (!seen || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    c.toggleSeen?.(Number(seen.dataset.seenEp));
   };
   // الحلقة الحالية في وسط الشرائط الأفقية عند أول رسم وعند تبديل المجموعة فقط (أفقيًا؛ الصفحة لا تتحرك)
   if (center) requestAnimationFrame(() => {

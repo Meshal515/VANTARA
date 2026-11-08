@@ -36,6 +36,7 @@ import { bindCollapsingHero } from './collapse-hero.js';
 import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
+import { applyLocalMarks, buildMarkSheet } from './episode-marks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { createAnimeToday } from './anime-today.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
@@ -1161,6 +1162,9 @@ export function createAnime(deps) {
       epOverview: (n) => art?.episodes?.[String(n)]?.overview ?? null,
       still: (n, full = false) => episodeStill(m, n, art, { full, width: full ? null : v.look === 'episode' ? Math.max(200, ((globalThis.innerWidth || 390) - (globalThis.innerWidth >= 900 ? 638 : 42)) / 2) : 250, dpr: globalThis.devicePixelRatio || 1 }),
       seen: (n) => epRecord(m, n).done,
+      // زر «شوهدت» الجانبي على كل حلقة في كل الأنماط (نفس زر المحور)
+      canMark: (n) => !isMovie(m) && (!aired || n <= aired || m.status === 'FINISHED'),
+      toggleSeen: (n) => toggleSeen(m, n),
       minutes,
       play: (n) => (upcoming ? soonToast(m) : playEpisode(m, n)),
       openGenre: (g) => openCollection({ kind: 'genre', genre: g }),
@@ -1318,6 +1322,8 @@ export function createAnime(deps) {
         paintMenu(m);
         toast(now ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
       }, { pressed: later }));
+    }
+    {
       const w = work();
       const total = w.aired || w.episodes || 0;
       if (isMovie(w)) rows.push(entry('eye', epRecord(w, 1).done ? 'ألغِ مشاهدة الفيلم' : 'شاهدت الفيلم', () => { closeMenu(); toggleSeen(w, 1); }));
@@ -1487,13 +1493,18 @@ export function createAnime(deps) {
   function markSeenRange(m, from, to, on) {
     const range=normalizeEpisodeRange(from,to,episodeCount(m));
     if (!range.count) return 0;
-    if (signedIn()) return account.markRange(m,range.from,range.to,on);
+    const keys=[];
+    for(let n=range.from;n<=range.to;n++)keys.push(n);
+    // سجل الجهاز يتبع دائمًا (تابع المشاهدة والعدّاد يقرآنه)، بلا أن يُفقد موضع توقف أو مدة
     const all=localWatch(), w=all[m.id]??{id:m.id,episodes:{}};
     Object.assign(w,{title:m.title,poster:m.posterSmall??m.poster,banner:m.banner,color:m.color});
-    let changed=0;
-    for(let n=range.from;n<=range.to;n++)if(Boolean(w.episodes[n]?.done)!==on){updateSeenRecord(w,n,on);changed++;}
-    if(changed){all[m.id]=w;saveWatch(all);}
-    return changed;
+    w.episodes??={};
+    const changedHere=applyLocalMarks(w.episodes,keys.map(String),on);
+    // «تابع المشاهدة»: بعد آخر ما عُلّم إن تجاوز ما وصلت إليه (لا يغيّر ترتيب الرف)
+    let moved=false;
+    if(on&&(!w.episode||range.to>=w.episode)){const total=episodeCount(m);const next=total?Math.min(range.to+1,total):range.to+1;if(w.episode!==next){w.episode=next;moved=true;}}
+    if(changedHere||moved){all[m.id]=w;saveWatch(all);}
+    return signedIn() ? account.markRange(m,range.from,range.to,on) : changedHere;
   }
 
   /**
@@ -1889,68 +1900,22 @@ export function createAnime(deps) {
    */
   function openMarkSheet(m, total) {
     deps.openSheet((body) => {
-      const head = el('div', 'an-sheet-head');
-      const t = el('div', 'an-sheet-title', m.title);
-      t.dir = 'auto';
-      const count = () => seenCountOf(m);
-      const kicker = el('div', 'an-sheet-kicker');
-      const paintCount = () => (kicker.textContent = `شاهدت ${count()} من ${total}`);
-      paintCount();
-      head.append(kicker, t);
-      const field = (label, value) => {
-        const f = el('label', 'field');
-        f.append(el('span', 'field-label', label));
-        const input = el('input', 'field-input');
-        input.type = 'number';
-        input.inputMode = 'numeric';
-        input.min = '1';
-        input.max = String(total);
-        input.value = String(value);
-        f.append(input);
-        return { f, input };
-      };
       // البداية بعد آخر حلقة معلّمة: الغالب أنك تكمل من حيث وقفت
       let last = 0;
-      const watch = localWatch()[m.id];
-      for (let n = 1; n <= total; n++) if (signedIn() ? account.isSeen(m.id,n) : watch?.episodes?.[n]?.done) last = n;
-      const from = field('من الحلقة', Math.min(total, last + 1));
-      const to = field('إلى الحلقة', total);
-      const pair = el('div', 'an-mark-range');
-      pair.append(from.f, to.f);
-      const applyRange = (from, to, on) => markSeenRange(m,from,to,on);
-      const clamp = (v) => Math.max(1, Math.min(total, Math.round(Number(v) || 1)));
-      const done = (changed, msg) => {
-        paintCount();
-        repaintRows(m);
-        toast(changed ? msg : 'ما تغيّر شيء');
-      };
-      const act = el('div', 'an-mark-actions');
-      const seenBtn = button('btn btn-primary', 'علّمها شوهدت', () => {
-        const a = clamp(from.input.value);
-        const b = clamp(to.input.value);
-        const n = applyRange(a, b, true);
-        done(n, `عُلّمت ${n} حلقة (${Math.min(a, b)}–${Math.max(a, b)})`);
+      for (let n = 1; n <= total; n++) if (epRecord(m, n).done) last = n;
+      buildMarkSheet(body, {
+        el,
+        button,
+        title: m.title,
+        total,
+        start: Math.min(total, last + 1),
+        count: () => seenCountOf(m),
+        apply: (nums, on) => {
+          const n = markSeenRange(m, nums[0], nums[nums.length - 1], on);
+          repaintRows(m);
+          return n;
+        },
       });
-      const unseenBtn = button('btn', 'ألغِ تعليمها', () => {
-        const a = clamp(from.input.value);
-        const b = clamp(to.input.value);
-        const n = applyRange(a, b, false);
-        done(n, `أُلغي تعليم ${n} حلقة`);
-      });
-      act.append(seenBtn, unseenBtn);
-      const quick = el('div', 'an-mark-actions');
-      quick.append(
-        button('btn', 'شاهدته كله', () => {
-          const n = applyRange(1, total, true);
-          done(n, `عُلّمت كل الحلقات (${total})`);
-        }),
-        button('btn', 'ألغِ الكل', () => {
-          const had = count();
-          if (signedIn()) account.clearAll(m);
-          else applyRange(1, total, false);
-          done(had, 'أُلغي تعليم كل الحلقات');
-        }),
-      );
       const completed = el('label', 'an-mark-toggle');
       completed.hidden = !signedIn();
       const box = el('input');
@@ -1961,7 +1926,7 @@ export function createAnime(deps) {
         toast(box.checked ? 'أُضيف إلى «المكتمل»' : 'أُزيل من «المكتمل»');
       };
       completed.append(box, el('span', null, 'أكملته (يظهر في «المكتمل» بملفك)'));
-      body.append(head, pair, act, quick, completed);
+      body.append(completed);
     });
   }
 

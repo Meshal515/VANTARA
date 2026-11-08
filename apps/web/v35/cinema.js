@@ -32,6 +32,7 @@ import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.j
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { bindCollapsingHero } from './collapse-hero.js';
+import { applyLocalMarks, buildMarkSheet, cinemaEpisodeKey, cinemaLocalKey, changedKeys, seenFrom, syncOps } from './episode-marks.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -206,8 +207,11 @@ export function createCinema(deps) {
     const w = all[m.id] ?? { ...slim(m), episodes: {} };
     Object.assign(w, slim(m));
     const ep = `${season ?? 0}:${n}`;
-    const done = Boolean(w.episodes[ep]?.done) || (duration > 0 && position / duration >= 0.9);
-    w.episodes[ep] = { position, duration, done };
+    const was = Boolean(w.episodes[ep]?.done);
+    const done = was || (duration > 0 && position / duration >= 0.9);
+    w.episodes[ep] = { ...w.episodes[ep], position, duration, done };
+    // اكتمال التشغيل علامة «شوهدت» في الحساب أيضًا (تتغلّب على إلغاء قديم من جهاز آخر)
+    if (done && !was) markAccount(m, [[season ?? 0, n]], true);
     w.season = season;
     w.episode = n;
     w.at = Date.now();
@@ -234,6 +238,50 @@ export function createCinema(deps) {
     writeJson(TYPES_KEY, types);
   };
   const rows = (table, pick) => sync?.rows?.(table, (r) => r.user_id === me() && isCinemaRef(r.series_ref) && pick(r)) ?? [];
+  // ───────────── «شوهدت» للحلقات ─────────────
+  // سجل الجهاز (watch) نفسه للتقدم، وعلامة الحساب في chapter_marks بمفتاح cinema:<id>#ep:<s>:<n>
+  // تصل لكل الأجهزة. صف الحساب إن وُجد هو المرجع (يشمل الإلغاء)، وإلا سجل الجهاز.
+  const accountMark = (key) => {
+    if (!me()) return null;
+    const hit = typeof sync?.row === 'function' ? sync.row('chapter_marks', `${me()}/${key}`) : null;
+    return hit ?? rows('chapter_marks', (r) => r.chapter_key === key)[0] ?? null;
+  };
+  const epSeen = (m, season, n, local = watchAll()[m.id]?.episodes) => seenFrom(accountMark(cinemaEpisodeKey(m.id, season ?? 0, n)), local?.[cinemaLocalKey(season, n)]);
+  function markAccount(m, pairs, on) {
+    if (!me() || !sync?.enqueue) return;
+    const keys = pairs.map(([s, n]) => cinemaEpisodeKey(m.id, s, n));
+    rememberType(m);
+    for (const { op, payload } of syncOps(refOf(m.id), keys, on)) sync.enqueue(op, payload);
+  }
+  /** يعلّم حلقات موسم واحد: الجهاز والحساب معًا، بلا أن يُفقد موضع توقف. يرجع كم تغيّر. */
+  function markEpisodes(m, season, nums, on) {
+    const all = watchAll();
+    const w = all[m.id] ?? { ...slim(m), episodes: {} };
+    w.episodes ??= {};
+    const local = w.episodes;
+    const changing = nums.filter((n) => epSeen(m, season, n, local) !== on);
+    const localKeys = changedKeys(nums.map((n) => cinemaLocalKey(season, n)), (k) => Boolean(local[k]?.done), on);
+    applyLocalMarks(local, localKeys, on);
+    // «تابع المشاهدة»: بعد آخر حلقة معلّمة إن كانت أبعد مما وصلت إليه
+    if (on && nums.length) {
+      const last = Math.max(...nums);
+      if (!w.episode || season > (w.season ?? 0) || (season === w.season && last >= w.episode)) {
+        w.season = season;
+        w.episode = last;
+        w.at ??= Date.now();
+      }
+    }
+    Object.assign(w, slim(m));
+    all[m.id] = w;
+    writeJson(userKey('watch', currentUser()), all);
+    markAccount(m, changing.map((n) => [season, n]), on);
+    return changing.length;
+  }
+  const seasonSeen = (m, s) => {
+    const local = watchAll()[m.id]?.episodes;
+    return (s?.episodes ?? []).filter((e) => epSeen(m, s.n, e.n, local)).length;
+  };
+
   const inList = (kind, id) =>
     kind === 'later'
       ? rows('library', (r) => r.series_ref === refOf(id) && !r.removed).length > 0
@@ -1589,7 +1637,7 @@ export function createCinema(deps) {
         toast(!later ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
       }, later));
     }
-    if (work().type === 'series' && work().seasons?.length && typeof startMarking === 'function') list.push(entry('eye', 'علّم حلقات', () => { toggleCinemaMenu(false); startMarking(work()); }));
+    if (work().type === 'series' && work().seasons?.length) list.push(entry('eye', 'علّم حلقات', () => { toggleCinemaMenu(false); startMarking(work()); }));
     if (deps.openWorkMenu) list.push(entry('star', 'أفضل 5', () => {
       toggleCinemaMenu(false);
       deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null });
@@ -1618,6 +1666,52 @@ export function createCinema(deps) {
       document.removeEventListener('pointerdown', away, true);
       document.removeEventListener('keydown', away, true);
     };
+  }
+
+  /** بعد تعليم حلقات: الحلقات والعدّاد وزر المشاهدة يتحدّثون في مكانهم (لا إعادة رسم للصفحة). */
+  function refreshMarks(m) {
+    const eps = q('cinemaEpisodes');
+    if (eps && state.detail?.id === m.id) renderEpisodes(eps, m);
+    const main = q('cinemaPlay');
+    if (main && m.type === 'series') {
+      const p = resumePoint(m);
+      const many = (m.seasons ?? []).filter((s) => s.n !== 0).length > 1;
+      const span = main.querySelector('span');
+      if (span) span.textContent = `${p.resume ? 'تابع' : 'شاهد'} الحلقة ${p.episode}${many ? ` · الموسم ${p.season}` : ''}`;
+    }
+  }
+
+  /** «علّم حلقات» من قائمة ⋮: ورقة التحديد المشتركة مع الأنمي، بموسم قابل للتبديل. */
+  function startMarking(m) {
+    const seasons = (m.seasons ?? []).filter((s) => s.episodes.length);
+    if (!seasons.length) return;
+    let season = seasons.find((s) => s.n === state.season) ?? seasons.find((s) => s.n !== 0) ?? seasons[0];
+    const totalOf = (s) => s.episodes.length;
+    deps.openSheet((body) => {
+      const local = watchAll()[m.id]?.episodes;
+      let last = 0;
+      season.episodes.forEach((e, i) => { if (epSeen(m, season.n, e.n, local)) last = i + 1; });
+      buildMarkSheet(body, {
+        el,
+        button,
+        title: displayTitle(m),
+        kicker: null,
+        total: totalOf(season),
+        start: Math.min(totalOf(season), last + 1),
+        seasons: seasons.map((s) => ({ n: s.n, label: s.n === 0 ? 'إضافات' : `الموسم ${s.n}`, total: totalOf(s) })),
+        season: season.n,
+        onSeason: (n) => { season = seasons.find((s) => s.n === n) ?? season; },
+        count: () => seasonSeen(m, season),
+        apply: (nums, on) => {
+          // أرقام الورقة ترتيبية (1..عدد حلقات الموسم) → أرقام الحلقات الفعلية في الموسم
+          const real = nums.map((i) => season.episodes[i - 1]?.n).filter((n) => n != null);
+          const n = markEpisodes(m, season.n, real, on);
+          if (state.season !== season.n && m.type === 'series') state.season = season.n;
+          refreshMarks(m);
+          return n;
+        },
+      });
+    }, { tone: 'cinema' });
   }
 
   let unbindHero = null;
@@ -1663,7 +1757,11 @@ export function createCinema(deps) {
       const point = resumePoint(m);
       const many = (m.seasons ?? []).filter((s) => s.n !== 0).length > 1;
       const label = m.type === 'movie' ? (point.resume ? 'أكمل الفيلم' : 'شاهد الفيلم') : `${point.resume ? 'تابع' : 'شاهد'} الحلقة ${point.episode}${many ? ` · الموسم ${point.season}` : ''}`;
-      const main = button('cn-btn cn-btn--play cn-btn--block', `${glyph('play', { size: 20, filled: true })}<span>${label}</span>`, () => play(m, point.season, point.episode, point.position));
+      const main = button('cn-btn cn-btn--play cn-btn--block', `${glyph('play', { size: 20, filled: true })}<span>${label}</span>`, () => {
+        const p = resumePoint(m);
+        play(m, p.season, p.episode, p.position);
+      });
+      main.id = 'cinemaPlay';
       body.append(main);
       if (point.record && !point.record.done && point.record.duration) {
         const ratio = Math.min(1, point.record.position / point.record.duration);
@@ -1808,9 +1906,14 @@ export function createCinema(deps) {
     head.append(pick);
     const watched = watchAll()[m.id]?.episodes ?? {};
     const now = Date.now();
+    // العدّاد بمكان محجوز دائمًا (لا يظهر فجأة فيزيح ما تحته)
+    const aired = season.episodes.filter((e) => !(e.released && e.released > now)).length;
+    const counter = el('p', 'cn-eps-count', `شاهدت ${seasonSeen(m, season)} من ${aired || season.episodes.length}`);
     const list = el('ol', 'cn-eps');
     for (const e of season.episodes) {
-      const rec = watched[`${season.n}:${e.n}`];
+      const raw = watched[`${season.n}:${e.n}`];
+      const seen = epSeen(m, season.n, e.n, watched);
+      const rec = raw ? { ...raw, done: seen } : seen ? { position: 0, duration: 0, done: true } : null;
       const ratio = rec?.duration ? Math.min(1, rec.position / rec.duration) : 0;
       const upcoming = e.released && e.released > now;
       const li = el('li', `cn-ep${rec?.done ? ' seen' : ''}${upcoming ? ' soon' : ''}`);
@@ -1849,10 +1952,29 @@ export function createCinema(deps) {
       row.append(art, copy);
       row.onclick = () => play(m, season.n, e.n, rec && !rec.done ? rec.position : 0);
       li.append(row);
+      // زر «شوهدت» الجانبي: على زاوية لقطة الحلقة، يبدّلها وحدها
+      if (!upcoming) {
+        const on = Boolean(rec?.done);
+        const mark = button('cn-ep-seen', on ? glyph('check', { size: 16 }) : '<i class="cn-ep-ring"></i>', () => {
+          markEpisodes(m, season.n, [e.n], !on);
+          refreshMarks(m);
+          pop(host.querySelector(`.cn-ep[data-ep="${e.n}"] .cn-ep-seen`));
+        }, on ? `ألغِ «شوهدت» للحلقة ${e.n}` : `علّم الحلقة ${e.n} شوهدت`);
+        mark.setAttribute('aria-pressed', String(on));
+        li.append(mark);
+      }
+      li.dataset.ep = String(e.n);
       list.append(li);
     }
-    host.replaceChildren(head, list);
-    stripIn([...list.children].slice(0, 6));
+    const first = !host.dataset.painted;
+    // إعادة الرسم (بعد تعليم حلقة) تحتفظ بالقصص المعرّبة التي وصلت (لا ترجع هياكل)
+    for (const old of host.querySelectorAll('.cn-ep-over[data-overview]:not(.cn-pending)')) {
+      const fresh = list.querySelector(`.cn-ep-over.cn-pending[data-overview="${CSS.escape(old.dataset.overview)}"]`);
+      if (fresh) { fresh.textContent = old.textContent; fresh.classList.remove('cn-pending'); }
+    }
+    host.replaceChildren(head, counter, list);
+    host.dataset.painted = '1';
+    if (first) stripIn([...list.children].slice(0, 6));
   }
 
   // ───────────── التشغيل ─────────────

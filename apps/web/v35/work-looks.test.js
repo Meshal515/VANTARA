@@ -211,3 +211,26 @@ it('keeps an expanded description and visible episode mini-player through a prog
   expect(mini.classList.contains('on')).toBe(true);
   expect(mini.textContent).toContain('تابع الحلقة 3');
 });
+
+it('every look shows a side «seen» button per episode that toggles without playing, and repaints in place', () => {
+  for (const look of LOOK_IDS.filter((l) => l !== 'core')) {
+    const host = dom();
+    const seen = new Set([1]);
+    const play = vi.fn();
+    let c;
+    const paint = () => renderLook(look, host, (c = ctx({ seen: (n) => seen.has(n), play, canMark: () => true, toggleSeen: (n) => { if (seen.has(n)) seen.delete(n); else seen.add(n); paint(); }, progressText: `شاهدت ${seen.size} من 1100` })), { center: false });
+    paint();
+    const btn = () => host.querySelector('[data-seen-ep="2"]');
+    expect(btn(), look).toBeTruthy();
+    expect(btn().getAttribute('aria-pressed'), look).toBe('false');
+    expect(host.querySelector('[data-seen-ep="1"]').getAttribute('aria-pressed'), look).toBe('true');
+    host.onclick({ target: btn().firstElementChild ?? btn() });
+    expect(play, look).not.toHaveBeenCalled();
+    expect(btn().getAttribute('aria-pressed'), look).toBe('true');
+    expect(host.querySelector('[data-ep="2"].seen'), look).toBeTruthy();
+    expect(host.textContent, look).toContain('شاهدت 2 من 1100');
+    host.onclick({ target: btn() });
+    expect(btn().getAttribute('aria-pressed'), look).toBe('false');
+    expect(c.seen(2), look).toBe(false);
+  }
+});
