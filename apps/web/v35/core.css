@@ -3704,14 +3704,18 @@ html[data-motion='off'] .v35 .dock-scrim {
 .v35 .look-swatch--reset i { background: conic-gradient(#8f5cff 0 33%, #3b82f6 0 66%, #c1121f 0); }
 
 /* ───── انتقالات الصفحات الداخلية (page-motion.js) ─────
- * الخارجة تبقى ظاهرة بموضعها المرئي فوق الداخلة وهي تتلاشى (لا اختفاء فجائي). لا تمسّ الأقسام الرئيسية. */
+ * تلاشٍ خالص 400ms: الداخلة تظهر فوق، والخارجة بموضعها المرئي خلفها تتلاشى. لا شيء يتحرك. لا تمسّ الأقسام الرئيسية. */
 .v35 .page.page-out {
   display: block;
   position: fixed;
   z-index: 5;
   pointer-events: none;
   contain: layout paint;
-  transform-origin: 50% 30vh;
+}
+/* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
+.v35 .page.page-in {
+  position: relative;
+  z-index: 6;
 }
 @media (prefers-reduced-motion: reduce) {
 }

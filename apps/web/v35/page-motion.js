@@ -1,20 +1,20 @@
 /**
  * انتقالات الصفحات الداخلية (لا انتقال الأقسام الرئيسية: ذاك في dock/طبقات الأقسام ولا يمرّ من هنا).
  *
- * بقرار المالك: لا غلاف يطير بين البطاقة والصفحة. الدخول تلاشٍ مع حركة للداخل، والخروج تلاشٍ مع حركة
- * للخارج، والصفحتان تتقاطعان (لا تختفي القديمة فجأة):
- *   - إلى الأعمق (فتح عمل، قسم فرعي): الجديدة تصعد 14px وتظهر، والقديمة تصغر إلى 0.97 وتتلاشى.
- *   - رجوع: العكس؛ السابقة تكبر من 0.97 وتظهر، والحالية تنزل 14px وتتلاشى.
- * بين تبويبات الشريط (الرئيسية، اكتشف، مكتبتي، الاجتماع) تلاشٍ متقاطع بلا حركة (still): هي مستوى واحد،
- * وتبديل القسم الرئيسي قد يأتي فورًا بعدها فلا إزاحة تُقطع. الخروج 160ms والدخول 260ms، transform وopacity فقط (Web Animations على خيط الرسم). الصفحة الخارجة تبقى
- * ظاهرة في مكانها المرئي (بموضع تمريرها) فوق الجديدة حتى تختفي، ثم تُعاد كما كانت. أي تنقل جديد أو تبديل
- * قسم رئيسي يُنهي الجاري فورًا. مع «تقليل الحركة»: تبديل مباشر.
+ * بقرار المالك بعد التجربة: لا شيء يتحرك. لا صعود ولا نزول ولا تصغير، ولا غلاف يطير. الصفحة بأزرارها
+ * وأغلفتها في مكانها، والذي يتغير هو الشفافية وحدها:
+ *   - الداخلة تظهر (fade in) في 400ms فوق.
+ *   - الخارجة تبقى في مكانها المرئي (بموضع تمريرها) خلف الداخلة وتتلاشى (fade out) في 400ms.
+ * الدخول والرجوع وتبويبات الشريط بالقاعدة نفسها. أي تنقل جديد أو تبديل قسم رئيسي يُنهي الجاري فورًا.
+ * opacity وحدها على خيط الرسم (Web Animations). مع «تقليل الحركة»: تبديل مباشر.
  */
 
-const IN_MS = 260;
-const OUT_MS = 160;
-const EASE_IN = 'cubic-bezier(0.22, 1, 0.36, 1)';
-const EASE_OUT = 'cubic-bezier(0.4, 0, 1, 1)';
+const MS = 400;
+const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const IN_MS = MS;
+const OUT_MS = MS;
+const EASE_IN = EASE;
+const EASE_OUT = EASE;
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -38,7 +38,7 @@ export function pageOut(page, { back = false, still = false, scrollTop = 0, doc 
   page.classList.add('page-out');
   Object.assign(page.style, { top: `${Number.isFinite(r.top) ? r.top : -scrollTop}px`, left: `${r.left}px`, width: `${r.width}px` });
   const anim = page.animate(
-    still ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: back ? 'translateY(14px)' : 'scale(0.97)' }],
+    [{ opacity: 1 }, { opacity: 0 }],
     { duration: OUT_MS, easing: EASE_OUT, fill: 'forwards' },
   );
   let done = false;
@@ -58,16 +58,19 @@ export function pageOut(page, { back = false, still = false, scrollTop = 0, doc 
 /** الصفحة الداخلة: تظهر مع حركة للداخل. */
 export function pageIn(page, { back = false, still = false, doc = globalThis.document } = {}) {
   if (!page?.animate || motionReduced(doc)) return;
+  // الداخلة فوق الخارجة: الخارجة تنسحب للخلف تحتها
+  page.classList.add('page-in');
   const anim = page.animate(
-    still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: back ? 'scale(0.97)' : 'translateY(14px)' }, { opacity: 1, transform: 'none' }],
+    [{ opacity: 0 }, { opacity: 1 }],
     { duration: IN_MS, easing: EASE_IN },
   );
   const stop = () => {
     running.delete(stop);
     anim.cancel();
+    page.classList.remove('page-in');
   };
   running.add(stop);
-  anim.finished.then(() => running.delete(stop), () => running.delete(stop));
+  anim.finished.then(() => { running.delete(stop); page.classList.remove('page-in'); }, stop);
 }
 
 /** للتوافق: دخول قسم ظهر لأول مرة داخل الصفحة (تلاشٍ فقط، لا حركة تحرك ما حوله). */
@@ -78,7 +81,7 @@ export function fadeIn(node, { doc = globalThis.document } = {}) {
 
 /**
  * التبويبات داخل الصفحة (مكتبتي، الاجتماع، الأصدقاء، المجلس، جدول البث…): نظام واحد لـVANTARA كلها. بعد أن
- * يرسم معالج التبويب محتواه الجديد، يدخل ما بعد شريط التبويبات بتلاشٍ قصير مع صعود 6px. الشريط نفسه لا
+ * يرسم معالج التبويب محتواه الجديد، يظهر ما بعد شريط التبويبات بتلاشٍ قصير في مكانه. الشريط نفسه لا
  * يتحرك. يُركَّب مرة على جذر التطبيق.
  */
 export function bindTabMotion(root, { doc = globalThis.document } = {}) {
@@ -92,7 +95,7 @@ export function bindTabMotion(root, { doc = globalThis.document } = {}) {
     requestAnimationFrame(() => {
       // المعالج قد يعيد بناء الشريط: ما بعد موضعه في الحاوية نفسها هو المحتوى
       const nodes = host.isConnected ? [...host.children].slice(index + 1).filter((n) => !n.matches('[role="tablist"]') && !n.querySelector('[role="tablist"]')) : [];
-      for (const n of nodes.slice(0, 4)) n.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: EASE_IN });
+      for (const n of nodes.slice(0, 4)) n.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: EASE_IN });
     });
   }, true);
 }

@@ -17,18 +17,20 @@ function page(rect = { top: -900, left: 0, width: 390, height: 3000 }) {
 }
 const doc = (motion) => ({ documentElement: { dataset: motion ? { motion } : {} } });
 
-describe('page fade with motion (owner: fade in moving in, fade out moving out; no flying cover)', () => {
-  it('deeper: the new page rises in, the old one shrinks out', () => {
+describe('page fade (owner: nothing moves; 400ms fade in, the leaving page fades out behind)', () => {
+  it('only opacity changes, in and out, 400ms, with the new page above the old', () => {
     const a = page(); const b = page();
     pageOut(a, { doc: doc() }); pageIn(b, { doc: doc() });
-    expect(a.anims[0].frames.at(-1)).toMatchObject({ opacity: 0, transform: 'scale(0.97)' });
-    expect(b.anims[0].frames[0]).toMatchObject({ opacity: 0, transform: 'translateY(14px)' });
+    expect(a.anims[0].frames).toEqual([{ opacity: 1 }, { opacity: 0 }]);
+    expect(b.anims[0].frames).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+    expect(a.anims[0].opts.duration).toBe(400);
+    expect(b.anims[0].opts.duration).toBe(400);
+    expect(b.classes.has('page-in')).toBe(true);
   });
-  it('back: exactly the reverse', () => {
+  it('back is the same fade: no direction, no movement', () => {
     const a = page(); const b = page();
     pageOut(a, { back: true, doc: doc() }); pageIn(b, { back: true, doc: doc() });
-    expect(a.anims[0].frames.at(-1).transform).toBe('translateY(14px)');
-    expect(b.anims[0].frames[0].transform).toBe('scale(0.97)');
+    expect(JSON.stringify([a.anims[0].frames, b.anims[0].frames])).not.toMatch(/transform|translate|scale/);
   });
   it('the leaving page stays where it was on screen (scroll and side rail), then is restored', () => {
     const a = page({ top: -924, left: 260, width: 1180, height: 3000 });
