@@ -90,6 +90,7 @@ export function createAnimeToday(h) {
     // البنر يتبدل بلقطة واحدة: الصورة العريضة والشعار يُجهَّزان (يُفكّان) معًا ثم يُعرضان معًا، فلا اسم عمل فوق
     // صورة آخر، ولا نص يتحول شعارًا أمام العين. ما لم يجهز بعد يبقى البنر الحالي ثابتًا والغلاف المختار
     // يُعلَّم «يجهز». الشعار المحمّل محفوظ (logoCache)، فالعودة لعمل سبق عرضه تُظهر شعاره مباشرة.
+    let latest = null;
     function paintArt(src, poster) {
       const layer = el('div', `ah-art-layer${src ? '' : ' ah-art-layer--poster'}`);
       if (src) layer.append(Object.assign(new Image(), { src, alt: '', className: 'ah-art-img', decoding: 'async' }));
@@ -99,6 +100,15 @@ export function createAnimeToday(h) {
         layer.append(Object.assign(new Image(), { src: poster, alt: '', className: 'ah-art-poster', decoding: 'async' }));
       }
       art.insertBefore(layer, art.lastElementChild);
+      // صور الطبقة نفسها تُفك قبل أن تظهر: كانت صورة الغلاف المضببة تُرسم بعد إطار، فيظهر البنر السابق من
+      // خلال الطبقة الشفافة ثم يتضبب فوقه (بلاغ المالك). الطبقة معتمة (CSS) فلا يظهر ما تحتها أبدًا.
+      latest = layer;
+      const imgs = [...layer.querySelectorAll('img')];
+      void Promise.all(imgs.map((im) => im.decode?.().catch(() => {}))).then(() => reveal(layer));
+    }
+    function reveal(layer) {
+      // اختيار أحدث سبقها: هذه الطبقة لا تظهر أبدًا (الأحدث يتولى)
+      if (layer !== latest) return layer.remove();
       const old = [...art.querySelectorAll('.ah-art-layer')].filter((n) => n !== layer);
       if (motionOff() || !old.length) {
         layer.classList.add('in');
@@ -107,7 +117,7 @@ export function createAnimeToday(h) {
       }
       requestAnimationFrame(() => layer.classList.add('in'));
       // القديمة تبقى تحت الجديدة حتى تكتمل: لا لحظة سوداء بين الصورتين
-      setTimeout(() => old.forEach((n) => n.remove()), 360);
+      setTimeout(() => { for (const n of old) if (n !== latest) n.remove(); }, 380);
     }
     function bodyFor(m, logoSrc) {
       const st = airingStatus(m.airingAt, Date.now());

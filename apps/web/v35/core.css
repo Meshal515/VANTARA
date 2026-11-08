@@ -3704,8 +3704,14 @@ html[data-motion='off'] .v35 .dock-scrim {
 .v35 .look-swatch--reset i { background: conic-gradient(#8f5cff 0 33%, #3b82f6 0 66%, #c1121f 0); }
 
 /* ───── انتقالات الصفحات الداخلية (page-motion.js) ─────
- * الصفحة تدخل بتلاشٍ قصير (شفافية فقط: لا إزاحة تُقاس كقفزة في تبديل الأقسام). الغلاف المتصل: نسخة
- * واحدة من الصورة تتحرك بـtransform فوق الصفحة (FLIP). لا تمسّ انتقال الأقسام الرئيسية. */
-.vantara-morph-ghost { will-change: transform; }
+ * الخارجة تبقى ظاهرة بموضعها المرئي فوق الداخلة وهي تتلاشى (لا اختفاء فجائي). لا تمسّ الأقسام الرئيسية. */
+.v35 .page.page-out {
+  display: block;
+  position: fixed;
+  z-index: 5;
+  pointer-events: none;
+  contain: layout paint;
+  transform-origin: 50% 30vh;
+}
 @media (prefers-reduced-motion: reduce) {
 }

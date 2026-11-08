@@ -63,7 +63,7 @@ import { fetchAnimeDetail } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, pageIn } from './motion.js';
-import { morphCover, onScreen, pageFadeIn } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -231,6 +231,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   connectSourceReports((path, opts) => sync.translation(path, opts));
   onChapters(observeMangaChapters);
   const root = el('div', 'v35');
+  bindTabMotion(root);
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
   const sourceVerification = createSourceVerification();
@@ -833,9 +834,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         score.hidden = false;
       });
     });
-    a.onclick = () => void openWork(a._work, { from: p });
+    a.onclick = () => void openWork(a._work);
     a.onkeydown = (e) => {
-      if (e.key === 'Enter' && e.target === a) void openWork(a._work, { from: p });
+      if (e.key === 'Enter' && e.target === a) void openWork(a._work);
       if ((e.key === ' ' || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && e.target === a) {
         e.preventDefault();
         openCardActions(a._work);
@@ -1114,7 +1115,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const snapshot = homeSnapshot(kind, items);
       const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, snapshot, kind);
       // قسم يظهر لأول مرة (وصلت بياناته) يدخل بتلاشٍ قصير لا فجأة؛ إعادة الرسم لا تحرّكه
-      if (!old.has(kind)) pageFadeIn(section);
+      if (!old.has(kind)) fadeIn(section);
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), snapshot);
       const pending = homeSnapshots.get(kind).pending;
       let refresh = section.querySelector('.feed-refresh');
@@ -1316,7 +1317,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     void mountImage(c, w);
     c.onclick = () => {
       if (Math.abs(state.heroDeltaX) >= 8) return;
-      if (Number(c.dataset.pos) === 0) void openWork(w, { from: c });
+      if (Number(c.dataset.pos) === 0) void openWork(w);
       else heroGoLogical(i);
     };
     return c;
@@ -1504,7 +1505,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false, from = null } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1523,9 +1524,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
     if (work._work?.editions?.length) rememberWork(work);
-    // الغلاف نفسه ينتقل من البطاقة إلى صفحة العمل، والبيانات تُجلب في الأثناء لا بعد الحركة
-    const morphed = morphCover(from, () => { showPage('detail'); renderDetail(work); }, () => q('detailCover'));
-    pageIn(q('detail'), { art: !morphed });
+    showPage('detail');
+    renderDetail(work);
+    pageIn(q('detail'), { art: false });
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
@@ -4313,7 +4314,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       window.scrollTo({ top, behavior: 'instant' });
     }, wait);
   }
-  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY, morph = false } = {}) {
+  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = window.scrollY } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
       state.socialTab = 'notifications';
@@ -4327,6 +4328,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
+    // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
+    finishPageMotion();
+    const outgoing = from !== id && !sectionSwitch ? q(from) : null;
+    const level = MAIN_PAGES.includes(id) && MAIN_PAGES.includes(from);
+    if (outgoing) pageOut(outgoing, { back: !push, still: level, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
@@ -4391,7 +4397,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // الصفحة الفرعية تدخل بتلاشٍ قصير؛ تبديل الأقسام الرئيسية والغلاف المتصل لهما حركتهما
-    if (from !== id && !sectionSwitch && !morph) pageFadeIn(q(id));
+    if (from !== id && !sectionSwitch) pageMotionIn(q(id), { back: !push, still: level });
+    // عمل يُفتح من داخل صفحة عمل (مشابه، علاقة): الصفحة نفسها بمحتوى جديد، تدخل بالحركة نفسها
+    else if (from === id && push && !sectionSwitch && !MAIN_PAGES.includes(id)) pageMotionIn(q(id));
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -4477,14 +4485,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (sourceView || addonSourcePending) { void openAddons(); return true; }
     }
     const prev = state.stack.pop();
-    if (prev && currentPage() === 'detail' && state.current) {
-      // الغلاف يعود إلى بطاقته إن كانت ظاهرة بعد استعادة الموضع، وإلا تلاشٍ قصير
-      const id = String(state.current.id);
-      const card = () => [...(q(prev)?.querySelectorAll(`[data-work-id="${CSS.escape(id)}"]`) ?? [])]
-        .map((n) => (n.classList.contains('mg-cover') ? n : n.querySelector('.poster'))).find((n) => onScreen(n)) ?? null;
-      morphCover(q('detailCover'), () => showPage(prev, { push: false }), card);
-      return true;
-    }
     if (prev) {
       showPage(prev, { push: false });
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);

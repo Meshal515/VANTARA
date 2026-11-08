@@ -38,7 +38,6 @@ import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { createAnimeToday } from './anime-today.js';
-import { morphCover } from './page-motion.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
 const isMovie = m => m?.format === 'MOVIE';
@@ -284,7 +283,7 @@ export function createAnime(deps) {
       c.append(art, t, cardMeta(m));
     }
     // الغلاف وحده ينتقل إلى غلاف صفحة العمل (نظام الانتقال نفسه في المانجا)
-    c.onclick = () => (onOpen ? onOpen(m) : void openAnime(m, { from: art }));
+    c.onclick = () => (onOpen ? onOpen(m) : void openAnime(m));
     return c;
   }
 
@@ -498,7 +497,7 @@ export function createAnime(deps) {
   const artOf = (m) => (state.art?.id === m?.id ? state.art : null);
   const SOURCE_AR = { ORIGINAL: 'عمل أصلي', MANGA: 'مانجا', LIGHT_NOVEL: 'رواية خفيفة', WEB_NOVEL: 'رواية ويب', NOVEL: 'رواية', VIDEO_GAME: 'لعبة فيديو', VISUAL_NOVEL: 'رواية مرئية', MANHWA: 'مانهوا', ONE_SHOT: 'قصة قصيرة', OTHER: 'أخرى' };
 
-  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false, from = null } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false } = {}) {
     const token = ++state.detailToken;
     state.detailLoad = null;
     state.episodeRange = null;
@@ -521,9 +520,7 @@ export function createAnime(deps) {
       // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
       window.scrollTo?.({ top: 0, behavior: 'instant' });
     };
-    const coverOf = () => [...(q('anime')?.querySelectorAll('.aw-cover, .wl-cover') ?? [])].find((n) => n.getBoundingClientRect().width > 8) ?? null;
-    if (from) morphCover(from, open, coverOf);
-    else open();
+    open();
     // لقطات الحلقات والشعار وخلفية IMDb من ani.zip: المخبّأ يصل في لحظة، والبطل
     // ينتظره قليلًا فيُختار مرة واحدة (لا بانر يتبدّل بعد ثانية بخلفية أخرى)
     void artworkLoading.then((art) => {
