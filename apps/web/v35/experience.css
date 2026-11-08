@@ -529,3 +529,10 @@
     scale: 1;
   }
 }
+
+/* تبديل التوحيد: الواجهة الجديدة تظهر بتلاشٍ في مكانها، ومع تقليل الحركة تبديل مباشر */
+@keyframes look-fade-in{from{opacity:0}to{opacity:1}}
+.v35 .look-fade{animation:look-fade-in .42s cubic-bezier(.4,0,.2,1) both}
+html[data-motion='off'] .v35 .look-fade{animation:none}
+@media (prefers-reduced-motion:reduce){.v35 .look-fade{animation:none}}
+.v35 .look-unified{display:block;width:min(46%,220px);margin:6px auto 0}

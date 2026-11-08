@@ -20,7 +20,8 @@ describe('لقطات المعاينة الحقيقية', () => {
     for (const s of WORK_STYLES) expect(all).toContain(workPreview('anime', s.id, 'pc'));
     expect(all).toContain(workPreview('cinema', 'current', 'ipad'));
     expect(all).toContain(homePreview('cinema', 'phone'));
-    expect(all).toHaveLength(3 * (3 + 4 + 5 + 1));
+    expect(all).toContain(homePreview('unified', 'phone'));
+    expect(all).toHaveLength(3 * (3 + 4 + 5 + 1) + 3);
   });
 
   it('لا لقطة يتيمة في المجلد: كل ملف له نمط أو رئيسية', () => {

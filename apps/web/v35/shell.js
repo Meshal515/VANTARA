@@ -59,7 +59,7 @@ import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
-import { fetchAnimeDetail } from '../lib/anime-meta.js';
+import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn } from './motion.js';
@@ -85,7 +85,8 @@ import { paintWorkInsights } from './work-insights.js';
 import { accentOf, applyAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
-import { collectItems, countKinds, filterItems, KINDS, KIND_TAG, loadIdentity, unifiedFeed } from './unified-home.js';
+import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
+import { createUnifiedView } from './unified-view.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -6054,7 +6055,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   // الرئيسية المشتركة: كل العناصر تمر من unifiedFeed (منع التكرار عبر الأقسام)، والنوع يحدد صفحة التفاصيل
-  const allHome = { kind: 'all', query: '' };
   let identityAsked = false;
   function openUnified(item) {
     if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
@@ -6070,31 +6070,43 @@ export function mountV35(deps, { page = 'home' } = {}) {
     applySection(id);
     navTo('discover');
   }
-  function unifiedCard(item) {
-    const b = el('button', 'uh-card');
-    b.type = 'button';
-    b.dataset.kind = item.kind;
-    const art = el('span', 'uh-art');
-    if (item.cover) {
-      const img = el('img');
-      img.alt = '';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.src = item.cover;
-      img.onerror = () => img.remove();
-      art.append(img);
-    }
-    art.append(el('span', 'uh-tag', KIND_TAG[item.kind] ?? ''));
-    const text = el('span', 'uh-text');
-    const t = el('strong', null, item.title || 'عمل');
-    t.dir = 'auto';
-    text.append(t);
-    text.append(el('small', null, item.label || (item.inLibrary ? 'في مكتبتك' : '')));
-    b.append(art, text);
-    b.setAttribute('aria-label', `${item.title || 'عمل'}، ${KIND_TAG[item.kind] ?? ''}`);
-    b.onclick = () => openUnified(item);
-    return b;
+  // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
+  const unifiedData = { anime: null, cinema: null, asked: false };
+  const mangaView = (w) => w && !isAdult(w) ? {
+    title: titleOf(w), cover: w.coverImage?.extraLarge || w.coverImage?.large || w._work?.thumbnailUrl || null,
+    color: w.coverImage?.color ?? null, genres: w.genres ?? [], score: w.averageScore ? w.averageScore / 10 : null,
+    chapters: w.chapters ?? null, _latestChapter: w._latestChapter ?? null, _updateAt: w._updateAt ?? null, raw: w,
+  } : null;
+  const openManga = (w) => {
+    if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+    void openWork(w.raw ?? w);
+  };
+  const unifiedView = createUnifiedView({
+    el, glyph, genreAr: (g) => AR_GENRE[g] ?? g,
+    reducedMotion: () => document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    data: {
+      continue: () => unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) })),
+      animeHome: () => unifiedData.anime,
+      cinema: () => unifiedData.cinema,
+      mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
+      mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
+    },
+    open: {
+      item: (it) => openUnified(it),
+      manga: openManga,
+      anime: (x) => openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }),
+      cinema: (x) => openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster }),
+      browse: (id) => browseSection(id),
+    },
+  });
+  function loadUnifiedData() {
+    if (unifiedData.asked) return;
+    unifiedData.asked = true;
+    void fetchAnimeHome().then((d) => { unifiedData.anime = d; unifiedView.refresh(); }).catch(() => { unifiedData.asked = false; });
+    void import('../lib/cinema-meta.js').then(({ catalog }) => Promise.all([catalog('movie', 'top'), catalog('series', 'top')]))
+      .then(([movie, series]) => { unifiedData.cinema = { movie, series }; unifiedView.refresh(); }).catch(() => {});
   }
+  let unifiedMounted = false;
   function renderAllHome() {
     const host = q('allHome');
     if (!host) return;
@@ -6102,66 +6114,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       identityAsked = true;
       void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
     }
-    const items = unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) }));
-    const counts = countKinds(items);
-    const page = el('div', 'uh');
-    const head = el('header', 'uh-head');
-    head.append(el('h2', null, 'كل أعمالك'), el('p', null, 'المانجا والأنمي والسينما في مكان واحد، كل عمل بنوعه.'));
-    const form = el('form', 'search-bar uh-search');
-    form.setAttribute('role', 'search');
-    form.innerHTML = glyph('search');
-    const input = el('input', 'search-input');
-    input.type = 'search';
-    input.placeholder = 'ابحث في أعمالك';
-    input.setAttribute('aria-label', 'ابحث في أعمالك');
-    input.enterKeyHint = 'search';
-    input.autocomplete = 'off';
-    input.value = allHome.query;
-    form.append(input);
-    form.onsubmit = (e) => { e.preventDefault(); input.blur(); };
-    const kinds = el('div', 'uh-kinds');
-    kinds.setAttribute('role', 'group');
-    kinds.setAttribute('aria-label', 'نوع العمل');
-    const grid = el('div', 'uh-grid');
-    const paintGrid = () => {
-      const list = filterItems(items, allHome);
-      grid.replaceChildren(...list.map(unifiedCard));
-      if (!list.length) {
-        const empty = el('div', 'uh-empty');
-        empty.append(el('strong', null, items.length ? 'لا نتيجة بهذا البحث' : 'لا أعمال بعد'));
-        empty.append(el('p', null, items.length ? 'جرّب اسمًا آخر أو نوعًا آخر.' : 'ما تقرأه وتشاهده وتضيفه لمكتبتك من أي قسم يظهر هنا.'));
-        grid.append(empty);
-      }
-    };
-    for (const k of KINDS) {
-      if (k.id !== 'all' && !counts[k.id]) continue;
-      const chip = el('button', 'uh-kind');
-      chip.type = 'button';
-      chip.setAttribute('aria-pressed', String(allHome.kind === k.id));
-      chip.append(el('span', null, k.name), el('b', null, String(counts[k.id] ?? 0)));
-      chip.onclick = () => {
-        allHome.kind = k.id;
-        for (const c of kinds.children) c.setAttribute('aria-pressed', String(c === chip));
-        paintGrid();
-      };
-      kinds.append(chip);
-    }
-    if (allHome.kind !== 'all' && !counts[allHome.kind]) allHome.kind = 'all';
-    input.oninput = () => { allHome.query = input.value; paintGrid(); };
-    paintGrid();
-    const browseRow = el('section', 'uh-browse');
-    browseRow.append(el('h3', null, 'تصفّح'));
-    const doors = el('div', 'uh-doors');
-    for (const id of ['manga', 'anime', 'cinema']) {
-      const d = el('button', `uh-door uh-door--${id}`);
-      d.type = 'button';
-      d.append(el('b', null, SECTIONS[id].word), el('span', null, SECTIONS[id].sub));
-      d.onclick = () => browseSection(id);
-      doors.append(d);
-    }
-    browseRow.append(doors);
-    page.append(head, form, kinds, grid, browseRow);
-    host.replaceChildren(page);
+    loadUnifiedData();
+    if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh();
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
@@ -6272,6 +6226,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
     if (editor?.open) return editor.handleBack();
+    if (unifiedView.back()) return true;
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
     if (majlis.closeBar() || closeSheet() || closeDrawer() || room.close()) return true;

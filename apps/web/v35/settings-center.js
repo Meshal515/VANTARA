@@ -142,7 +142,8 @@ export function renderAppearancePane(body, ctx) {
 
   // ── ألوان الأقسام: لقطة رئيسية كل قسم، ولونه المختار ──
   head('COLORS', 'ألوان الأقسام', 'اللون يظهر في الأزرار والتحديد ومؤشر التنقل؛ أسطح الشريط تبقى فحمية.');
-  const colors = tiles();
+  // قرار المالك: لا معاينة للألوان (الفرق ظاهر في التطبيق نفسه)؛ المعاينات للأنماط والواجهات وحدها
+  const colors = el('div', 'settings-list');
   const swatchSheet = (title, current, resetLabel, resetHex, pick) => openSheet((sheet) => {
     sheet.append(el('h3', null, title));
     const grid = el('div', 'look-swatches');
@@ -167,19 +168,24 @@ export function renderAppearancePane(body, ctx) {
   const DESIGNED = { manga: '#8f5cff', anime: '#3b82f6', cinema: '#c1121f' };
   for (const section of ['manga', 'anime', 'cinema']) {
     const chosen = ACCENTS.find((c) => c.id === look.accent?.[section]);
-    colors.append(tile({
-      pathOf: (vp) => homePreview(section, vp),
-      alt: `رئيسية ${SECTION_NAMES[section]}`,
-      title: SECTION_NAMES[section],
-      sub: chosen?.name ?? 'لون القسم',
-      chip: chosen?.hex ?? DESIGNED[section],
-      onClick: () => swatchSheet(`لون ${SECTION_NAMES[section]}`, chosen?.id ?? null, 'لون القسم', null, (id) => saveLook((a) => {
-        const accent = { ...a.accent };
-        if (id) accent[section] = id;
-        else delete accent[section];
-        return { accent };
-      })),
+    const row = el('button', 'setting look-brand');
+    row.type = 'button';
+    row.innerHTML = glyph('palette');
+    const tx = el('div');
+    tx.append(el('strong', null, `لون ${SECTION_NAMES[section]}`), el('small', null, 'الأزرار والتحديد ومؤشر التنقل'));
+    const val = el('span', 'value');
+    const chip = el('i', 'look-chip');
+    chip.style.setProperty('--sw', chosen?.hex ?? DESIGNED[section]);
+    val.append(chip, doc.createTextNode(chosen?.name ?? 'لون القسم'));
+    row.append(tx, val);
+    row.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
+    row.onclick = () => swatchSheet(`لون ${SECTION_NAMES[section]}`, chosen?.id ?? null, 'لون القسم', null, (id) => saveLook((a) => {
+      const accent = { ...a.accent };
+      if (id) accent[section] = id;
+      else delete accent[section];
+      return { accent };
     }));
+    colors.append(row);
   }
   body.append(colors);
   const brandHex = brandOf(look);
@@ -231,7 +237,7 @@ export function renderAppearancePane(body, ctx) {
   body.append(toggles);
   if (mode === 'independent') {
     body.append(el('p', 'look-caption', 'الآن: كل قسم بشاشته وتصميمه.'));
-    const strip = tiles('look-tiles--static');
+    const strip = tiles('look-tiles--static look-fade');
     for (const section of TEMPLATES) {
       const fig = el('figure', 'look-tile look-tile--static');
       const frame = el('span', 'look-frame');
@@ -245,6 +251,12 @@ export function renderAppearancePane(body, ctx) {
     body.append(el('p', 'look-caption', mode === 'content'
       ? 'الآن: رئيسية واحدة لكل أعمالك بتصميم VANTARA الموحّد.'
       : 'الآن: تصميم VANTARA الموحّد لرئيسية كل قسم، بمحتواه.'));
+    // الواجهات الثلاث تتلاشى وتظهر مكانها الواجهة الموحدة
+    const fig = el('figure', 'look-tile look-tile--static look-unified look-fade');
+    const frame = el('span', 'look-frame');
+    frame.append(previewPicture(doc, (vp) => homePreview('unified', vp), 'الرئيسية الموحدة'));
+    fig.append(frame, el('figcaption', null, 'الرئيسية الموحدة'));
+    body.append(fig);
   }
 }
 

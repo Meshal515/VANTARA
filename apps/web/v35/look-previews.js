@@ -28,6 +28,8 @@ export function requiredPreviews() {
       for (const s of stylesOf(section)) out.push(workPreview(section, s.id, vp.id));
     }
   }
+  // الرئيسية الموحدة (تصميم واحد للتوحيد، تُولَّد من التطبيق نفسه)
+  for (const vp of VIEWPORTS) out.push(homePreview('unified', vp.id));
   return out;
 }
 
