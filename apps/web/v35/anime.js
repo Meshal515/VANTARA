@@ -38,6 +38,7 @@ import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { createAnimeToday } from './anime-today.js';
+import { morphCover } from './page-motion.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
 const isMovie = m => m?.format === 'MOVIE';
@@ -282,7 +283,8 @@ export function createAnime(deps) {
       if (rankInline) art.append(el('span', 'an-rank-chip', String(rankInline)));
       c.append(art, t, cardMeta(m));
     }
-    c.onclick = () => (onOpen ? onOpen(m) : void openAnime(m));
+    // الغلاف وحده ينتقل إلى غلاف صفحة العمل (نظام الانتقال نفسه في المانجا)
+    c.onclick = () => (onOpen ? onOpen(m) : void openAnime(m, { from: art }));
     return c;
   }
 
@@ -496,7 +498,7 @@ export function createAnime(deps) {
   const artOf = (m) => (state.art?.id === m?.id ? state.art : null);
   const SOURCE_AR = { ORIGINAL: 'عمل أصلي', MANGA: 'مانجا', LIGHT_NOVEL: 'رواية خفيفة', WEB_NOVEL: 'رواية ويب', NOVEL: 'رواية', VIDEO_GAME: 'لعبة فيديو', VISUAL_NOVEL: 'رواية مرئية', MANHWA: 'مانهوا', ONE_SHOT: 'قصة قصيرة', OTHER: 'أخرى' };
 
-  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false, from = null } = {}) {
     const token = ++state.detailToken;
     state.detailLoad = null;
     state.episodeRange = null;
@@ -512,10 +514,16 @@ export function createAnime(deps) {
     } catch (error) { detailLoading = Promise.reject(error); }
     // The original promise remains rejected for the guarded UI handler below.
     void detailLoading.catch(() => {});
-    deps.showPage('anime');
-    buildWork(m, token);
-    // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
-    window.scrollTo?.({ top: 0, behavior: 'instant' });
+    // الغلاف من البطاقة إلى غلاف الصفحة إن كان النمط يُظهره، وإلا تلاشٍ قصير؛ البيانات تُجلب في الأثناء
+    const open = () => {
+      deps.showPage('anime');
+      buildWork(m, token);
+      // العمل يفتح من أعلاه (البطل ظاهر) أيًّا كان موضع الصفحة السابقة
+      window.scrollTo?.({ top: 0, behavior: 'instant' });
+    };
+    const coverOf = () => [...(q('anime')?.querySelectorAll('.aw-cover, .wl-cover') ?? [])].find((n) => n.getBoundingClientRect().width > 8) ?? null;
+    if (from) morphCover(from, open, coverOf);
+    else open();
     // لقطات الحلقات والشعار وخلفية IMDb من ani.zip: المخبّأ يصل في لحظة، والبطل
     // ينتظره قليلًا فيُختار مرة واحدة (لا بانر يتبدّل بعد ثانية بخلفية أخرى)
     void artworkLoading.then((art) => {

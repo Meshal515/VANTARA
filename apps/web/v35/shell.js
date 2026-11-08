@@ -1113,6 +1113,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (kind === 'pick') return pickBlock(old.get('pick'), title, items);
       const snapshot = homeSnapshot(kind, items);
       const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, snapshot, kind);
+      // قسم يظهر لأول مرة (وصلت بياناته) يدخل بتلاشٍ قصير لا فجأة؛ إعادة الرسم لا تحرّكه
+      if (!old.has(kind)) pageFadeIn(section);
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), snapshot);
       const pending = homeSnapshots.get(kind).pending;
       let refresh = section.querySelector('.feed-refresh');
