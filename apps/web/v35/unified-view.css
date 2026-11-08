@@ -118,3 +118,8 @@
 .v35 .uv-btn{background:none!important;padding:0 8px!important;height:48px;color:var(--text-1,#f2f1f5)!important;font-size:16px;font-weight:700;gap:10px}
 .v35 .uv-btn .icon{color:var(--accent-text,var(--accent))}
 .v35 .uv-btn:active{opacity:.7}
+
+.v35 .uv-hacts{justify-content:center;align-items:center}
+.v35 .uv-btn{display:inline-flex!important;align-items:center;justify-content:center;line-height:1}
+.v35 .uv-btn .icon{display:block;flex:none}
+.v35 .uv-btn span{display:block;line-height:1}

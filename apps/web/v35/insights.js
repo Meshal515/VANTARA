@@ -95,8 +95,11 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     const p = sync.rows('profiles', (x) => x.user_id === uid)[0];
     return { name: p?.display_name || a?.username || '؟', avatar: p?.avatar_key || null };
   };
-  const msOf = (r) => (r?.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0).reduce((t, x) => t + x.activeMs, 0);
+  // المجموع من الخادم (يشمل وقت الأعمال المخفية)، وتفصيل الأقسام من القائمة
+  const msOf = (r) => (filter === 'all' && Number.isFinite(r?.totalMs) ? r.totalMs : (r?.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0).reduce((t, x) => t + x.activeMs, 0));
   const visible = (r) => r && !r.locked && r.timeShared;
+  // المقفل: وقته الكلي يظهر في «الكل» وحدها، وأعماله وأقسامه مقفلة
+  const countsIn = (r) => visible(r) || (r?.locked && filter === 'all' && Number(r.totalMs) > 0);
 
   function avatarNode(uid, size) {
     const { name, avatar } = profileOf(uid);
@@ -118,7 +121,7 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     if (id !== requestId || !host.isConnected) return;
     results = new Map(got);
     host.setAttribute('aria-busy', 'false');
-    if (!visible(results.get(person))) person = me();
+    if (!countsIn(results.get(person))) person = me();
     render();
   }
 
@@ -132,9 +135,9 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
 
   function render() {
     const hidden = readHidden();
-    const people = [...results.entries()].map(([uid, r]) => ({ uid, r, ms: visible(r) ? msOf(r) : 0, locked: !visible(r) }))
+    const people = [...results.entries()].map(([uid, r]) => ({ uid, r, ms: countsIn(r) ? msOf(r) : 0, locked: !visible(r), shown: countsIn(r) }))
       .sort((a, b) => Number(b.uid === me()) - Number(a.uid === me()) || b.ms - a.ms);
-    const shown = people.filter((p) => !p.locked && p.ms > 0);
+    const shown = people.filter((p) => p.shown && p.ms > 0);
     const total = shown.reduce((t, p) => t + p.ms, 0);
     const box = el('div', 'ins');
     box.dataset.kind = filter;
@@ -160,9 +163,9 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
       const b = el('button'); b.type = 'button';
       b.append(avatarNode(p.uid, 30));
       const nm = el('span', 'ins-nm', `${profileOf(p.uid).name}${p.uid === me() ? ' (أنت)' : ''}`); nm.dir = 'auto';
-      b.append(nm, el('span', 'ins-h', p.locked ? 'مقفل' : duration(p.ms)));
+      b.append(nm, el('span', 'ins-h', p.shown ? duration(p.ms) : 'مقفل'));
       if (p.locked) b.insertAdjacentHTML('beforeend', glyph('lock', { size: 15 }));
-      b.onclick = () => (p.locked ? toast('مقفلها', 2500) : pick(p.uid));
+      b.onclick = () => (p.shown ? pick(p.uid) : toast('مقفل في هذا القسم', 2500));
       li.append(b); legend.append(li);
     }
 
@@ -188,7 +191,7 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
   function pie(group) {
     const size = 220, cx = size / 2, r = 78, w = 30, C = 2 * Math.PI * r;
     const wrap = el('div', 'ins-pie');
-    const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': 'توزيع الساعات' });
+    const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: '100%', height: '100%', role: 'img', 'aria-label': 'توزيع الساعات' });
     svg.append(svgEl('circle', { cx, cy: cx, r, fill: 'none', stroke: 'rgba(255,255,255,.06)', 'stroke-width': w }));
     const slices = pieSlices(group);
     const sum = group.reduce((t, p) => t + p.ms, 0);
@@ -231,7 +234,7 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     box.replaceChildren();
     const who = profileOf(person).name;
     box.append(el('h3', null, person === me() ? 'أعمالك' : `أعمال ${who}`));
-    if (!r || r.locked) { box.append(el('p', 'ins-empty', 'أعماله مقفلة، ساعاته فقط ظاهرة')); return; }
+    if (!r || r.locked) { box.append(el('p', 'ins-empty', 'أعماله مقفلة، وقته في VANTARA فقط ظاهر')); return; }
     const content = (r.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0 && !(person === me() && hidden.has(x.seriesRef)))
       .sort((a, b) => b.activeMs - a.activeMs);
     if (!content.length) { box.append(el('p', 'ins-empty', 'لا وقت مسجّل بعد')); return; }
@@ -276,8 +279,11 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
         const ok = confirm('إخفاء هذا العمل من إحصائياتك نهائيًا؟\n\nما أحد يقدر يشوفه بعدها، ولا تقدر ترجعه. ساعاتك تبقى محسوبة كما هي.');
         if (!ok) return;
         const h = readHidden(); h.add(item.seriesRef); writeHidden(h);
-        toast('أُخفي العمل، وساعاتك كما هي', 2500);
         render();
+        void Promise.resolve(sync.hideInsight?.(item.seriesRef)).then((ok) => {
+          toast(ok === false ? 'أُخفي عندك، وسيُرسل للخادم لاحقًا' : 'أُخفي العمل نهائيًا، وساعاتك كما هي', 2600);
+          if (ok) { const cur = results.get(me()); if (cur?.content) cur.content = cur.content.filter((x) => x.seriesRef !== item.seriesRef); }
+        });
       };
       rowEl.append(del);
     }

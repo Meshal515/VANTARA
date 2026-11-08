@@ -2932,7 +2932,11 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   try { prefs = JSON.parse(account.data ?? '{}') as Record<string, unknown>; } catch { /* fail closed */ }
   const timeShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightTime'] !== false);
   const progressShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightProgress'] !== false);
-  if (!timeShared && !progressShared) return json({ locked: true }, { status: 403 });
+  // المقفل: الأعمال وتفصيل الأقسام مقفلة، أما مجموع وقته في VANTARA فظاهر للمجموعة (قرار المالك)
+  if (!timeShared && !progressShared) {
+    const sum = await env.DB.prepare('SELECT COALESCE(SUM(active_ms), 0) AS t FROM work_insights WHERE user_id = ?').bind(targetId).first<{ t: number }>();
+    return json({ userId: targetId, locked: true, timeShared: false, progressShared: false, totalMs: Number(sum?.t ?? 0), content: [] });
+  }
   if (workRef && workRef.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
   const [times, manga, anime] = await env.DB.batch<Record<string, unknown>>([
     timeShared
@@ -2965,8 +2969,20 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   }
   for (const r of manga?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
   for (const r of anime?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
-  const content = [...items.values()].sort((a, b) => b.activeMs - a.activeMs);
-  return json({ userId: targetId, timeShared, progressShared, totalMs: content.reduce((sum, item) => sum + item.activeMs, 0), content });
+  // المخفي يغيب عن القائمة للجميع، ووقته يبقى في المجموع
+  const totalMs = [...items.values()].reduce((sum, item) => sum + item.activeMs, 0);
+  const hidden = await env.DB.prepare('SELECT series_ref FROM insight_hidden WHERE user_id = ?').bind(targetId).all<{ series_ref: string }>();
+  const gone = new Set((hidden.results ?? []).map((r) => r.series_ref));
+  const content = [...items.values()].filter((item) => !gone.has(item.seriesRef)).sort((a, b) => b.activeMs - a.activeMs);
+  return json({ userId: targetId, timeShared, progressShared, totalMs, content });
+}
+
+async function handleInsightHide(request: Request, env: Env, userId: string, now: number): Promise<Response> {
+  const body = await request.json().catch(() => null) as { seriesRef?: unknown } | null;
+  const ref = typeof body?.seriesRef === 'string' ? body.seriesRef : '';
+  if (!ref || ref.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
+  await env.DB.prepare('INSERT OR IGNORE INTO insight_hidden (user_id, series_ref, hidden_at) VALUES (?, ?, ?)').bind(userId, ref, now).run();
+  return json({ ok: true });
 }
 
 async function handleStats(env: Env, viewerId: string, targetId: string, now: number): Promise<Response> {
@@ -3234,6 +3250,7 @@ export default {
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, userId, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
       }
+      else if (path === '/v1/insights/hide' && request.method === 'POST') response = await handleInsightHide(request, env, userId, now);
       else if (path.startsWith('/v1/insights/') && request.method === 'GET') {
         response = await handleInsights(env, userId, decodeURIComponent(path.slice('/v1/insights/'.length)), url.searchParams.get('work'));
       }

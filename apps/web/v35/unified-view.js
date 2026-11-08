@@ -3,7 +3,7 @@
  *
  *   البنر: غلاف واحد في المنتصف، والحرير خلفه بلون الغلاف (لون AniList/اللون المحفوظ، فلا قراءة
  *   بكسلات ولا مشكلة CORS). التبديل يحرّك الغلاف والمعلومات في مكانها، فارتفاع البنر ثابت.
- *   الفلتر نص فقط. «تابع» مختلط. جدول البث للأنمي. آخر الفصول للمانجا. الرائج مفصول بالنوع.
+ *   الفلتر نص فقط. «تابع» مختلط. جدول البث للأنمي. آخر التحديثات للمانجا والمسلسلات. الرائج مفصول بالنوع.
  *   «الكل» يفتح صفحة فرعية بلا الشريط العلوي.
  *
  * العرض فقط: لا يكتب في المكتبة ولا التقدم. البيانات تأتي من `data` (القشرة تملكها).
@@ -61,7 +61,7 @@ export function dayLineup(week, offset, now = Date.now()) {
 
 export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, reducedMotion = () => false, now = () => Date.now() }) {
   const gen = (list) => (list ?? []).slice(0, 2).map(genreAr).join('، ');
-  const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'new' };
+  const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all' };
   let host = null, silk = null, silkWrap = null, timer = 0, overlay = null;
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
@@ -202,7 +202,27 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function dayName(d) { return d === -1 ? 'أمس' : d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : DAYS_AR[new Date(now() + 3 * 3600_000 + d * 86_400_000).getUTCDay()]; }
 
-  /* ───── آخر الفصول (المانجا) ───── */
+  /* ───── آخر التحديثات (المانجا والمسلسلات) ───── */
+  const UPD = [['all', 'الكل'], ['manga', 'المانجا'], ['series', 'المسلسلات']];
+  function updTabs(cur, onPick) {
+    const d = el('div', 'uv-days');
+    for (const [k, l] of UPD) { const b = el('button', cur === k ? 'on' : '', l); b.type = 'button'; b.onclick = () => onPick(k); d.append(b); }
+    return d;
+  }
+  function updates(kind) {
+    const m = kind === 'series' ? [] : (data.mangaRecent() ?? []).map((w) => ({ at: w._updateAt ?? 0, node: () => updItem(w) }));
+    const sr = kind === 'manga' ? [] : (data.seriesUpdates?.() ?? []).map((u) => ({ at: u.released, node: () => seriesItem(u) }));
+    return [...m, ...sr].sort((a, b) => b.at - a.at);
+  }
+  function seriesItem(u) {
+    const a = el('button', 'uv-po uv-up'); a.type = 'button';
+    const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
+    const line = el('span', 'uv-t2');
+    line.append(el('em', null, `م${u.season} ح${u.episode}`), document.createTextNode(` · ${ago(u.released, now())}`));
+    a.append(art, txt('b', 'uv-t1', u.x.title), line);
+    a.onclick = () => open.cinema(u.x);
+    return a;
+  }
   function updItem(w) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
     const art = el('span', 'uv-art'); art.append(img(w.cover, 'uv-img', w.title));
@@ -246,10 +266,13 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       else { const list = dayLineup(week, st.day, now()).slice(0, 5); const ol = el('ol', 'uv-air'); list.forEach((e) => ol.append(airRow(e))); s.append(list.length ? ol : el('p', 'uv-none', 'لا حلقات في هذا اليوم')); }
       page.append(s);
     }
-    if (passes('manga', st.filter)) {
-      const recent = data.mangaRecent();
-      const s = el('section', 'uv-sec'); s.append(head('آخر الفصول', () => openSub('chapters')));
-      if (!recent?.length) s.append(skRail(4, 120, 180)); else { const r = rail(); recent.slice(0, 10).forEach((w) => r.append(updItem(w))); s.append(r); }
+    // آخر التحديثات: فصول المانجا وحلقات المسلسلات معًا (الأنمي له جدول البث)
+    if (st.filter !== 'anime') {
+      const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'series' : st.upd;
+      const list = updates(allow);
+      const s = el('section', 'uv-sec'); s.append(head('آخر التحديثات', () => openSub('updates')));
+      if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; render(); }));
+      if (!list.length) s.append(skRail(4, 120, 180)); else { const r = rail(); list.slice(0, 12).forEach((u) => r.append(u.node())); s.append(r); }
       page.append(s);
     }
     const rows = [];
@@ -310,12 +333,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       list.forEach((e) => grid.append(airCard(e)));
       body.append(days, list.length ? grid : el('p', 'uv-none', 'لا حلقات في هذا اليوم'));
     } else {
-      top.append(back, el('h1', null, 'آخر الفصول'));
-      const T = [['new', 'آخر الفصول'], ['top', 'الأكثر قراءة']];
-      body.append(tabs(st.subTab, T, (k) => { st.subTab = k; paintSub(); }));
+      top.append(back, el('h1', null, 'آخر التحديثات'));
+      body.append(tabs(st.subTab, UPD, (k) => { st.subTab = k; paintSub(); }));
       const grid = el('div', 'uv-grid');
-      if (st.subTab === 'new') (data.mangaRecent() ?? []).forEach((w) => grid.append(updItem(w)));
-      else (data.mangaPopular() ?? []).forEach((w) => grid.append(poster(w, 'manga', () => open.manga(w))));
+      updates(st.subTab).forEach((u) => grid.append(u.node()));
       body.append(grid);
     }
     overlay.replaceChildren(top, body);

@@ -1533,6 +1533,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
   }
 
+  /** إخفاء عمل من إحصائياتي نهائيًا (عن الجميع وعني)؛ وقته يبقى في المجموع. */
+  async function hideInsight(seriesRef) {
+    if (!token || !seriesRef) return false;
+    try { await request('/v1/insights/hide', { method: 'POST', body: { seriesRef } }); return true; } catch { return false; }
+  }
+
   // ───────────────────────── دورة حياة الحساب ─────────────────────────
 
   /** طلب لا يرمي: `{ ok, status, data }` — رموز PIN والسقف تُقرأ من data. */
@@ -1809,6 +1815,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     topWorks,
     stats,
     insights,
+    hideInsight,
     translation,
     stream,
     pendingProgress,

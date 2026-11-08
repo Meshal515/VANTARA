@@ -6122,7 +6122,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     navTo('discover');
   }
   // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
-  const unifiedData = { anime: null, cinema: null, asked: false };
+  const unifiedData = { anime: null, cinema: null, series: null, asked: false };
+  /** آخر حلقة نزلت لأشهر المسلسلات (Cinemeta): أربع طلبات معًا، وما نزل في آخر 45 يومًا فقط. */
+  async function loadSeriesUpdates(series) {
+    const { detail } = await import('../lib/cinema-meta.js');
+    const now = Date.now(), out = [];
+    const list = (series ?? []).slice(0, 16);
+    for (let i = 0; i < list.length; i += 4) {
+      const got = await Promise.all(list.slice(i, i + 4).map((x) => detail('series', x.id).then((d) => [x, d]).catch(() => [x, null])));
+      for (const [x, d] of got) {
+        let best = null;
+        for (const s of d?.seasons ?? []) if (s.n > 0) for (const e of s.episodes) if (e.released && e.released <= now && (!best || e.released > best.released)) best = { season: s.n, episode: e.n, released: e.released };
+        if (best && now - best.released < 45 * 86_400_000) out.push({ x, ...best });
+      }
+    }
+    return out.sort((a, b) => b.released - a.released);
+  }
   const mangaView = (w) => w && !isAdult(w) ? {
     title: titleOf(w), cover: w.coverImage?.extraLarge || w.coverImage?.large || w._work?.thumbnailUrl || null,
     color: w.coverImage?.color ?? null, genres: w.genres ?? [], score: w.averageScore ? w.averageScore / 10 : null,
@@ -6139,6 +6154,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       continue: () => unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) })),
       animeHome: () => unifiedData.anime,
       cinema: () => unifiedData.cinema,
+      seriesUpdates: () => unifiedData.series,
       mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
       mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
     },
@@ -6155,7 +6171,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     unifiedData.asked = true;
     void fetchAnimeHome().then((d) => { unifiedData.anime = d; unifiedView.refresh(); }).catch(() => { unifiedData.asked = false; });
     void import('../lib/cinema-meta.js').then(({ catalog }) => Promise.all([catalog('movie', 'top'), catalog('series', 'top')]))
-      .then(([movie, series]) => { unifiedData.cinema = { movie, series }; unifiedView.refresh(); }).catch(() => {});
+      .then(([movie, series]) => {
+        unifiedData.cinema = { movie, series };
+        unifiedView.refresh();
+        return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refresh(); });
+      }).catch(() => {});
   }
   let unifiedMounted = false;
   function renderAllHome() {

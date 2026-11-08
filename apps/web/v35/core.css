@@ -3756,15 +3756,15 @@ html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !importa
 .v35 .ins-tabs button.on { color: var(--text-1); }
 .v35 .ins-tabs button.on::after { content: ""; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; background: var(--text-1); }
 .v35 .ins-pies { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 28px; padding: 18px 0 8px; }
-.v35 .ins-pie { position: relative; width: 220px; height: 220px; flex: none; }
+.v35 .ins-pie { position: relative; width: clamp(250px, 80vw, 340px); aspect-ratio: 1; flex: none; }
 .v35 .ins-pie svg { display: block; overflow: visible; }
 .v35 .ins-sl { stroke: var(--accent); opacity: var(--o, 1); cursor: pointer; transition: stroke-dasharray .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease; }
 .v35 .ins-sl.on { opacity: 1; stroke: color-mix(in srgb, var(--accent) 70%, #fff); }
 .v35 .ins-av { display: inline-grid; place-items: center; width: var(--s, 30px); height: var(--s, 30px); border-radius: 50%; overflow: hidden; flex: none; background: var(--surface-3); color: var(--text-1); font-weight: 800; font-size: calc(var(--s, 30px) * .42); }
 .v35 .ins-av img { width: 100%; height: 100%; object-fit: cover; }
 .v35 .ins-pav { position: absolute; translate: -50% -50%; box-shadow: 0 0 0 3px var(--bg), 0 4px 12px rgba(0,0,0,.4); cursor: pointer; }
-.v35 .ins-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; padding: 0 52px; }
-.v35 .ins-mid strong { white-space: nowrap; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.v35 .ins-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; padding: 0 24%; }
+.v35 .ins-mid strong { white-space: nowrap; font-size: clamp(17px, 5.4vw, 22px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .v35 .ins-mid small { font-size: 11.5px; color: var(--text-3); max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .v35 .ins-legend { list-style: none; margin: 8px 0 0; padding: 0; }
 .v35 .ins-legend button { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 52px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; box-shadow: 0 1px 0 rgba(255,255,255,.06); }
