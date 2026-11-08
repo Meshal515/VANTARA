@@ -97,16 +97,6 @@ export function pop(node) {
   g.fromTo(node, { scale: 0.92 }, { scale: 1, duration: 0.45, ease: EASE.spring, clearProps: 'transform' });
 }
 
-/** دخول صفحة كاملة (صفحة العمل مثلًا): الغلاف ثم الطبقات. */
-export function pageIn(page, { art: withArt = true } = {}) {
-  const g = live();
-  if (!g || !page) return;
-  // الغلاف المتصل وصل بحركته: لا تكبير فوقه
-  const art = withArt ? page.querySelector('[data-art]') : null;
-  if (art) g.fromTo(art, { scale: 1.08, opacity: 0.4 }, { scale: 1, opacity: 1, duration: 0.9, ease: EASE.out, clearProps: 'opacity' });
-  revealIn(page, 0.08);
-}
-
 /** عدّ رقمٍ حتى قيمته (التقييم مثلًا). */
 export function countUp(node, to, { decimals = 1 } = {}) {
   const g = live();
