@@ -1,0 +1,92 @@
+/* ═════════════ نظام تصميم البطاقات — VANTARA (قرار المالك، 9 نوفمبر) ═════════════
+ * بطاقة واحدة للتطبيق كله: المانجا والأنمي والسينما والموحد وصفحاته الفرعية والمكتبات والبحث والتحديثات.
+ * القيم من سلّم core.css نفسه، ويُحمَّل هذا الملف آخرًا فيحكم كل الأقسام. لكل قسم توزيعه وشكل رئيسيته،
+ * أما البطاقة نفسها (الانحناء، الإطار، العنوان، السطر الثانوي، الضغط) فواحدة.
+ *
+ *   الصورة:   2:3 للملصق، 16:9 للعريضة، انحناء --card-r (12) — والمصغّرة ≤64px بانحناء --card-r-sm (8)
+ *   الإطار:   خط داخلي شعري واحد فوق الصورة (حافة الغلاف الأبيض لا تذوب في الخلفية)
+ *   العنوان:  13/18 بوزن 700، يمين دائمًا (حتى الاسم الإنجليزي)، يُقصّ بنقاط
+ *   الثانوي:  11.5/16 بلون النص الثالث، أرقام بعرض ثابت
+ *   الضغط:   تصغير 0.97 بمنحنى واحد (transform فقط)
+ */
+.v35 {
+  --card-r: var(--r-md, 12px);
+  --card-r-sm: var(--r-sm, 8px);
+  --card-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --card-sk: #16141b;
+  --card-title-size: 13px;
+  --card-title-line: 18px;
+  --card-sub-size: 11.5px;
+  --card-sub-line: 16px;
+  --card-press: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ── الصورة: ملصقات وعريضة ── */
+.v35.v35 :is(.poster, .an-poster, .cn-poster-art, .cn-wide-art, .uv-art, .ul-art, .ul-recent-art, .uv-rv-art, .us-art,
+  .up-art, .an-hc-poster, .ah-cw-poster, .uv-slot-art, .an-slot-art) {
+  border-radius: var(--card-r);
+  overflow: hidden;
+  background-color: var(--card-sk);
+  box-shadow: var(--card-ring);
+}
+/* المصغّرات (قوائم مرقّمة وأغلفة التصفّح): نفس الشكل بانحناء أصغر يناسب حجمها */
+.v35.v35 :is(.ad-trend-cover, .us-rank-art, .uv-door-cv, .uv-ar-img, .rv-cover) {
+  border-radius: var(--card-r-sm);
+}
+/* الإطار الشعري فوق الصورة لا تحتها */
+.v35.v35 :is(.uv-art, .ul-art, .ul-recent-art, .uv-rv-art, .us-art, .cn-poster-art, .up-art) { position: relative; }
+.v35.v35 :is(.uv-art, .ul-art, .ul-recent-art, .uv-rv-art, .us-art, .cn-poster-art, .up-art)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--card-ring);
+  pointer-events: none;
+}
+
+/* ── العنوان: سطر الطباعة نفسه، ويمين دائمًا (الاسم الإنجليزي كان يبدأ من يساره فيبدو موسّطًا) ── */
+.v35.v35 :is(.work-title, .an-card-title, .cn-poster-title, .uv-t1, .ul-title, .us-t1, .up-title, .uv-rv-t, .uv-slot-title) {
+  font-size: var(--card-title-size);
+  line-height: var(--card-title-line);
+  font-weight: 700;
+  color: var(--text-1, #f2f1f5);
+  text-align: right;
+}
+
+/* ── السطر الثانوي ── */
+.v35.v35 :is(.work-meta, .cn-poster-meta, .uv-t2, .ul-sub, .us-t2, .uv-rv-s, .up-meta) {
+  font-size: var(--card-sub-size);
+  line-height: var(--card-sub-line);
+  color: var(--text-3, #8f8b9c);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── الضغط ── */
+.v35.v35 :is(.poster, .an-poster, .cn-poster-art, .uv-art, .ul-art, .us-art, .up-art, .uv-rv-art) {
+  transition: transform 0.18s var(--card-press);
+}
+.v35.v35 :is(.work-card, .an-card, .cn-poster, .uv-po, .ul-card, .us-po, .up-card, .uv-rv):active
+  :is(.poster, .an-poster, .cn-poster-art, .uv-art, .ul-art, .us-art, .up-art, .uv-rv-art) {
+  transform: scale(0.97);
+}
+
+/* ── الصفحات الفرعية للموحد (الرائج، آخر التحديثات، جدول البث): شبكة بالسلّم نفسه ── */
+.v35.v35 .uv-page .uv-grid { gap: 18px 10px; }
+.v35.v35 .uv-page .uv-grid .uv-po { display: grid; align-content: start; min-width: 0; }
+.v35.v35 .uv-page .uv-grid .uv-t1 { margin-top: 8px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v35.v35 :is(.poster, .an-poster, .cn-poster-art, .uv-art, .ul-art, .us-art, .up-art, .uv-rv-art) { transition: none; }
+}
+
+/* صورة محمّل القشرة (mountImage) بلا صنف: تملأ إطار أي بطاقة بالنسبة نفسها، وهيكل التحميل بمقاسه */
+.v35.v35 :is(.uv-art, .uv-rv-art, .uv-door-cv, .ul-art, .ul-recent-art, .us-art, .us-rank-art) > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.v35.v35 :is(.uv-art, .uv-rv-art, .uv-door-cv) > :is(.image-loading, .image-fallback) {
+  position: absolute;
+  inset: 0;
+}

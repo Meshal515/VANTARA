@@ -91,6 +91,9 @@ import { workMenuEntries, workOptionEntries } from './work-menu.js';
 import { EMPTY_COPY, LIBRARY_TABS, libraryShelves } from './library-model.js';
 import { createUnifiedLibrary } from './unified-library.js';
 import { createUnifiedSearch } from './unified-search.js';
+import { createUnifiedDiscover } from './unified-discover.js';
+import { GENRES_AR as CINEMA_GENRES_AR } from '../lib/cinema-meta.js';
+import { trimArtCache } from '../lib/together/art.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -238,6 +241,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   connectUpdates((path, opts) => sync.translation(path, opts));
   connectSourceReports((path, opts) => sync.translation(path, opts));
   onChapters(observeMangaChapters);
+  // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
+  try { trimArtCache(); } catch { /* اختياري */ }
   const root = el('div', 'v35');
   bindTabMotion(root);
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
@@ -3726,6 +3731,74 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function renderUnifiedLibrary() {
     unifiedLibrary.render(q('unifiedLibrary'));
   }
+  const unifiedCard = (it, group) => group === 'manga'
+      ? { title: titleOf(it), cover: it.coverImage?.large ?? null, sub: (it.genres ?? []).slice(0, 2).map((g) => AR_GENRE[g] ?? g).join('، ') }
+      : group === 'anime'
+        ? { title: it.title, cover: it.posterSmall ?? it.poster ?? null, sub: [it.year, it.score ? it.score.toFixed(1) : null].filter(Boolean).join(' · ') }
+        : { title: it.title, cover: it.poster ?? null, sub: [it.type === 'series' ? 'مسلسل' : 'فيلم', it.year].filter(Boolean).join(' · ') };
+  function mixedTrending(filter = 'all') {
+    const pools = [
+      ['anime', unifiedData.anime?.trending ?? []],
+      ['manga', uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])])],
+      ['cinema', unifiedData.cinema?.series ?? []],
+      ['cinema', unifiedData.cinema?.movie ?? []],
+    ].filter(([g]) => filter === 'all' || g === filter);
+    const out = [];
+    for (let i = 0; i < 12; i++) for (const [group, list] of pools) if (list[i]) out.push({ item: list[i], group });
+    return out;
+  }
+  function openUnifiedResult(it, group) {
+    unifiedSearch.close();
+    unifiedDiscover.back();
+    if (group === 'anime') return openAnimeRef(`anime:${it.id}`, { title: it.title, cover: it.posterSmall ?? it.poster });
+    if (group === 'cinema') return openCinemaRef(`cinema:${it.id}`, { title: it.title, cover: it.poster, type: it.type ?? null });
+    if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+    void openWork(it);
+  }
+  // «اكتشف» الموحد: تصنيفات كل نوع بفلتره الحقيقي، والرائج المنوّع (unified-discover.js)
+  const ANIME_GENRES = ['Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Romance', 'Mystery', 'Horror', 'Psychological', 'Sci-Fi', 'Supernatural', 'Thriller', 'Sports', 'Slice of Life', 'Mecha', 'Music'];
+  const CINEMA_GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
+  const genreLabel = (en) => AR_GENRE[en] ?? CINEMA_GENRES_AR[en] ?? GENRES.find((g) => g.en === en)?.ar ?? en;
+  const genreHue = (en) => GENRES.find((g) => g.en === en)?.hue ?? (([...en].reduce((n, c) => n + c.charCodeAt(0), 0) * 37) % 360);
+  /** صورة كل تصنيف من عمل فيه، ولا تتكرر صورة في بلاطتين (عمل مشهور يحمل تصنيفات كثيرة). */
+  function genreCover(type, en, used = new Set()) {
+    const pools = type === 'anime' ? [unifiedData.anime?.trending, unifiedData.anime?.season, unifiedData.anime?.popular]
+      : type === 'cinema' ? [unifiedData.cinema?.movie, unifiedData.cinema?.series]
+        : [state.home.trending, state.home.popular];
+    for (const list of pools) for (const x of list ?? []) {
+      if (!(x.genres ?? []).includes(en)) continue;
+      const src = x.backdrop ?? x.background ?? x.banner ?? x.poster ?? x.coverImage?.large ?? null;
+      if (src && !used.has(src)) { used.add(src); return src; }
+    }
+    return null;
+  }
+  const unifiedDiscover = createUnifiedDiscover({
+    el, glyph,
+    mount: (node) => root.append(node),
+    genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
+      .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genreCover(type, en, used) }))(new Set())),
+    results: async (type, genre) => {
+      if (type === 'anime') {
+        const { searchAnime } = await import('../lib/anime-meta.js');
+        return (await searchAnime(genre ? { genre } : {}))?.items ?? [];
+      }
+      const { catalog } = await import('../lib/cinema-meta.js');
+      const [movie, series] = await Promise.all([catalog('movie', 'top', { genre: genre ?? '' }), catalog('series', 'top', { genre: genre ?? '' })]);
+      const out = [];
+      for (let i = 0; i < Math.max(movie.length, series.length); i++) out.push(movie[i], series[i]);
+      return out.filter(Boolean);
+    },
+    card: (it, type) => unifiedCard(it, type),
+    open: (it, type) => openUnifiedResult(it, type),
+    openMangaGenre: (en) => {
+      if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+      if (!en) return void openCollection('catalogue');
+      const g = GENRES.find((x) => x.en === en);
+      if (g) void openGenre(g);
+    },
+    openSearch: () => unifiedSearch.open(),
+    trending: () => mixedTrending('all'),
+  });
   const unifiedSearch = createUnifiedSearch({
     el, glyph,
     recent: recentStore('vantara.unified.recent.v1'),
@@ -3740,35 +3813,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       },
     })),
     // الرائج الآن منوّع: أنمي، مانجا، مسلسل، فيلم بالتناوب، ويتبع الفلتر
-    trending: (filter) => {
-      const pools = [
-        ['anime', unifiedData.anime?.trending ?? []],
-        ['manga', uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])])],
-        ['cinema', unifiedData.cinema?.series ?? []],
-        ['cinema', unifiedData.cinema?.movie ?? []],
-      ].filter(([g]) => filter === 'all' || g === filter);
-      const out = [];
-      for (let i = 0; i < 12; i++) for (const [group, list] of pools) if (list[i]) out.push({ item: list[i], group });
-      return out;
-    },
+    trending: (filter) => mixedTrending(filter),
     mount: (node) => root.append(node),
     engines: {
       anime: (term) => import('../lib/anime-meta.js').then(({ searchAnime }) => searchAnime({ search: term })).then((r) => r?.items ?? []),
       manga: (term) => (available() ? browseLive({ query: term }, () => {}).then((r) => r?.items ?? []) : Promise.resolve([])),
       cinema: (term) => import('../lib/cinema-meta.js').then(({ search }) => search(term)),
     },
-    card: (it, group) => group === 'manga'
-      ? { title: titleOf(it), cover: it.coverImage?.large ?? null, sub: (it.genres ?? []).slice(0, 2).map((g) => AR_GENRE[g] ?? g).join('، ') }
-      : group === 'anime'
-        ? { title: it.title, cover: it.posterSmall ?? it.poster ?? null, sub: [it.year, it.score ? it.score.toFixed(1) : null].filter(Boolean).join(' · ') }
-        : { title: it.title, cover: it.poster ?? null, sub: [it.type === 'series' ? 'مسلسل' : 'فيلم', it.year].filter(Boolean).join(' · ') },
-    open: (it, group) => {
-      unifiedSearch.close();
-      if (group === 'anime') return openAnimeRef(`anime:${it.id}`, { title: it.title, cover: it.posterSmall ?? it.poster });
-      if (group === 'cinema') return openCinemaRef(`cinema:${it.id}`, { title: it.title, cover: it.poster, type: it.type ?? null });
-      if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
-      void openWork(it);
-    },
+    card: (it, group) => unifiedCard(it, group),
+    open: (it, group) => openUnifiedResult(it, group),
   });
   let libraryRepaint = 0;
   /** «مكتبتي» الظاهرة: الموحدة في توحيد المحتوى، وإلا مكتبة القسم بتصميمه. */
@@ -4958,6 +5011,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     if (id === 'library') afterDock(renderActiveLibrary);
     if (id === 'discover') afterDock(() => {
+      if (root.dataset.content === 'unified') return unifiedDiscover.render(q('unifiedDiscover'));
       if (inAnime) anime.showDiscover();
       // رجوع إلى قائمة السينما: تبقى كما تُركت (كان showList يعيد بناء الشبكة من الصفر فتضيع العناصر والموضع)
       else if (inCinema) { if (push || !q('cinemaDiscover')?.childElementCount) cinema.showDiscover(); }
@@ -6183,7 +6237,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     dockMotion = null;
     dockCtl?.activate(currentPage());
     if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
-    nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
+    const a = nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
+    // بعد الحركة: الدائرة تُوضع من جديد على مركز وجهتها بلا حركة (الشريط تغيّر عرضه)
+    a?.finished?.then(() => dockCtl?.repaint?.(true)).catch(() => {});
   }
   function applyExperience() {
     const view = experienceView(readStructure());
@@ -6289,6 +6345,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       cinema: () => unifiedData.cinema,
       seriesUpdates: () => unifiedData.series,
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
+      // أغلفة المانجا بمحمّل الصور نفسه في قسم المانجا (ترويسات المصدر، البدائل، الغلاف الموحّد)
+      cover: (node, x) => {
+        const w = x?.raw ?? (x?.ref ? workFromRef(String(x.ref), x.title, x.cover) : x?.coverImage ? x : null);
+        if (!w) return false;
+        void mountImage(node, w);
+        return true;
+      },
       // جدول البث: لقطة الحلقة لما لا بنر له (نفس سلسلة صور صفحة العمل)، والكتابة كسولة
       animeArt: (id) => import('../lib/anime-art.js').then(({ loadAnimeArt }) => loadAnimeArt(id)),
       episodeStill: (...a) => artMod?.episodeStill(...a) ?? null,
@@ -6306,7 +6369,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       itemMenu: (it) => openRecentMenu(it),
       // التصنيفات وكل الأعمال: صفحة الاكتشاف (للتوحيد اكتشاف قسمه الحالي إلى أن يُبنى الاكتشاف الموحد)
       categories: () => navTo('discover'),
-      discover: () => navTo('discover'),
+      discover: () => unifiedDiscover.openAll(),
     },
   });
   function loadUnifiedData() {
@@ -6319,7 +6382,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void import('../lib/anime-art.js').then(({ loadAnimeArt }) => {
         const t = Date.now();
         const near = [...(d?.week ?? [])].filter((e) => Math.abs(e.airingAt - t) < 36 * 3600_000).sort((a, b) => Math.abs(a.airingAt - t) - Math.abs(b.airingAt - t));
-        const ids = [...new Set(near.map((e) => e.id))];
+        const ids = [...new Set(near.map((e) => e.id))].slice(0, 12); // داخل سقف كاش الصور (art.js)
         // دفعات صغيرة: لا تزاحم طلبات الصفحة الأولى
         const next = () => { const batch = ids.splice(0, 4); if (batch.length) void Promise.all(batch.map((id) => loadAnimeArt(id).catch(() => null))).then(next); };
         next();
@@ -6459,6 +6522,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function handleBack() {
     if (editor?.open) return editor.handleBack();
     if (unifiedSearch.close()) return true;
+    if (unifiedDiscover.back()) return true;
     if (unifiedView.back()) return true;
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)

@@ -649,7 +649,10 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const barCenter = (nav) => {
     const b = bar.getBoundingClientRect();
     const r = nav.getBoundingClientRect();
-    return r.left - b.left + r.width / 2 + inkOffset(nav)[0];
+    // الشريط قد يكون مصغّرًا لحظة القياس (حركة الدمج/الفصل scale 0.94): القياس بوحدات التخطيط لا الشاشة،
+    // وإلا وقعت الدائرة خارج مركز الأيقونة بعد التبديل بين الموحد والعادي
+    const k = (bar.offsetWidth && b.width / bar.offsetWidth) || 1;
+    return (r.left - b.left + r.width / 2) / k + inkOffset(nav)[0];
   };
   /** مجال المؤشر: الشريط كله في التوحيد، وإلا كبسولة الوجهة. */
   const zoneOf = (page) => (unified() ? bar : capOf(page));
@@ -1033,9 +1036,15 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       }
       moveIndicator(page);
     },
-    repaint() {
+    /** `force`: أعد الدائرة لمركز وجهتها الآن (بعد تغيّر عرض الشريط) ولو كانت ظاهرة. */
+    repaint(force = false) {
       if (!activePage) return;
       const cap = zoneOf(activePage);
+      if (force && cap) {
+        const nav = navs.find((n) => n.dataset.page === activePage);
+        if (nav) { haltInd(cap); showInd(cap, centerIn(cap, nav)); }
+        return;
+      }
       if (cap && !stateOf(cap).shown) {
         const page = activePage;
         activePage = null;

@@ -37,8 +37,43 @@ function cached(key, now) {
     return now - v.at >= 0 && now - v.at < TTL_MS ? v.data : null;
   } catch { return null; }
 }
+/**
+ * سقف كاش الصور (خلل الـAPK، 9 نوفمبر): كان مفتاح لكل أنمي بلا حد ولا إخلاء، ففتحة واحدة للرئيسية الموحدة
+ * تكتب ~2.4MB، ومع الأيام يمتلئ localStorage (~5MB) فيفشل حفظ الإعدادات بصمت (الألوان والتوحيد).
+ * الآن: حد أقصى لعدد الأعمال، والأقدم يُخلى أولًا، وامتلاء التخزين يُخلي الكاش كله بدل أن يزاحم الإعدادات.
+ */
+export const ART_CACHE_MAX = 24;
+export function artCacheKeys(storage = globalThis.localStorage) {
+  const out = [];
+  try {
+    for (let i = 0; i < (storage?.length ?? 0); i++) { const k = storage.key(i); if (k?.startsWith(CACHE_PREFIX)) out.push(k); }
+  } catch { /* تخزين محجوب */ }
+  return out;
+}
+/** يُخلي كاش الصور كله أو حتى يبقى `keep` مدخلًا (الأحدث). كاش يُعاد جلبه: لا بيانات للمستخدم تضيع. */
+export function trimArtCache(keep = ART_CACHE_MAX, storage = globalThis.localStorage) {
+  const keys = artCacheKeys(storage);
+  if (keys.length <= keep) return 0;
+  const aged = keys.map((k) => {
+    let at = 0;
+    try { at = JSON.parse(storage.getItem(k) ?? '{}')?.at ?? 0; } catch { at = 0; }
+    return [k, at];
+  }).sort((a, b) => a[1] - b[1]);
+  const drop = aged.slice(0, keys.length - keep);
+  for (const [k] of drop) { try { storage.removeItem(k); } catch { /* */ } }
+  return drop.length;
+}
 function remember(key, data, now) {
-  try { globalThis.localStorage?.setItem(CACHE_PREFIX + key, JSON.stringify({ at: now, data })); } catch { /* اختياري */ }
+  const storage = globalThis.localStorage;
+  const value = JSON.stringify({ at: now, data });
+  try {
+    storage?.setItem(CACHE_PREFIX + key, value);
+    if (artCacheKeys(storage).length > ART_CACHE_MAX) trimArtCache(ART_CACHE_MAX, storage);
+  } catch {
+    // ممتلئ: الكاش لا يزاحم ما يحفظه المستخدم. نصفه يُخلى ثم محاولة واحدة، وإلا يبقى في الذاكرة فقط
+    trimArtCache(Math.floor(ART_CACHE_MAX / 2), storage);
+    try { storage?.setItem(CACHE_PREFIX + key, value); } catch { /* اختياري */ }
+  }
 }
 
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */

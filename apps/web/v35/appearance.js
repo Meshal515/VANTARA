@@ -7,6 +7,11 @@
  * بلا اختيار: البنفسجي هو اللون الأساسي لكل الأقسام.
  */
 
+import { trimArtCache } from '../lib/together/art.js';
+
+/** كاشات تُعاد من الشبكة بلا فقد: تُخلى حين يمتلئ التخزين قبل أن يفشل حفظ إعداد. */
+const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1'];
+
 const KEY = 'vantara.appearance.v1';
 // Keep unsaved preferences usable during the session if persistent storage refuses a write.
 const fallbackByStorage = new WeakMap();
@@ -40,6 +45,23 @@ export function writePreference(key, value, storage = globalThis.localStorage) {
     try { if (storage === globalThis.localStorage) globalThis.sessionStorage?.removeItem(`vantara.unsaved.${key}`); } catch {}
     lastPreferenceSaved = true;
   } catch {
+    // التخزين ممتلئ غالبًا بكاش الصور: يُخلى (يُعاد جلبه، لا يضيع شيء) ثم محاولة ثانية قبل حل الجلسة
+    // على مراحل: صور الأنمي أولًا، ثم بقية الكاشات المُعاد جلبها. بيانات المستخدم (المكتبة والتقدم) لا تُمس.
+    const stages = [
+      () => trimArtCache(0, storage),
+      () => { for (const k of REGENERABLE) { try { storage.removeItem(k); } catch { /* */ } } },
+    ];
+    for (const free of stages) {
+      try {
+        if (!storage) break;
+        free();
+        storage.setItem(key, value);
+        fallback.delete(key);
+        try { if (storage === globalThis.localStorage) globalThis.sessionStorage?.removeItem(`vantara.unsaved.${key}`); } catch {}
+        lastPreferenceSaved = true;
+        return true;
+      } catch { /* ما زال ممتلئًا: المرحلة التالية */ }
+    }
     fallback.set(key, value);
     try { if (storage && storage === globalThis.localStorage) globalThis.sessionStorage?.setItem(`vantara.unsaved.${key}`, value); } catch {}
     lastPreferenceSaved = false;

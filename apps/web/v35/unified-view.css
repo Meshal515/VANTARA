@@ -137,7 +137,7 @@
 
 /* جدول البث بتصميم Stable (anime.css على main: an-days/an-slot): أيام بخط تحت المختار، وبطاقات 16:9
  * والوقت والحلقة والاسم ومتى تحت الصورة. لا نص فوق الصورة ولا صناديق. المقاس محجوز قبل الصورة. */
-.v35 .uv-air .uv-sh{align-items:flex-end}
+.v35 .uv-sched .uv-sh{align-items:flex-end}
 .v35 .uv-air-titles{display:grid;gap:2px}
 .v35 .uv-air-titles h2{font-size:20px;font-weight:800;line-height:28px;margin:0}
 .v35 .uv-air-sub{font-size:12px;color:var(--uv-t2)}

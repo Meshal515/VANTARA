@@ -364,7 +364,8 @@ export function createSilk(canvas, initialPalette = null) {
   };
   const resize = () => {
     const r = canvas.getBoundingClientRect();
-    const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    // تدرّج ناعم بلا حواف: كثافة 1 مطابقة بصريًا وأخف بأربعة أضعاف على شاشات 2x (الجولة الثانية)
+    const dpr = 1;
     canvas.width = Math.max(1, Math.round(r.width * dpr));
     canvas.height = Math.max(1, Math.round(r.height * dpr));
     cw = canvas.width;
@@ -386,8 +387,11 @@ export function createSilk(canvas, initialPalette = null) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     frame = !reduce?.matches || transition ? requestAnimationFrame(draw) : null;
   };
+  // خارج الشاشة لا رسم (الجولة الثانية من التفتيش): كان الحرير يُرسم كل إطار ولو كان البنر فوق الشاشة
+  // والقائمة تُمرَّر، فيزاحم التمرير ويستهلك البطارية. لا يتوقف إلا بخروج التطبيق كله.
+  let onScreen = true;
   const play = () => {
-    if (frame === null && running) frame = requestAnimationFrame(draw);
+    if (frame === null && running && onScreen && !document.hidden) frame = requestAnimationFrame(draw);
   };
   const pause = () => {
     if (frame !== null) cancelAnimationFrame(frame);
@@ -412,6 +416,13 @@ export function createSilk(canvas, initialPalette = null) {
   observer.observe(canvas);
   const visibility = () => (document.hidden ? pause() : play());
   document.addEventListener('visibilitychange', visibility);
+  const seen = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => {
+      onScreen = entries.some((e) => e.isIntersecting);
+      if (onScreen) play(); else pause();
+    })
+    : null;
+  seen?.observe(canvas);
   resize();
   upload(current);
   play();
@@ -424,6 +435,7 @@ export function createSilk(canvas, initialPalette = null) {
       running = false;
       pause();
       observer.disconnect();
+      seen?.disconnect();
       document.removeEventListener('visibilitychange', visibility);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);

@@ -416,15 +416,20 @@ export function createAnimeToday(h) {
       const tm = el('span', 'ah-row-tm');
       tm.append(el('b', null, time), el('small', null, /م|PM/i.test(period ?? '') ? 'مساءً' : 'صباحًا'));
       const th = el('span', 'ah-row-th');
-      const img = image(m.banner ?? m.posterSmall ?? m.poster, 'an-img', { position: m.banner ? 'center' : 'center 22%' });
+      // الصورة تُحسم قبل الظهور (قاعدة المالك): كان الغلاف يظهر ثم تحل محله لقطة الحلقة أمام العين.
+      // المكان محجوز، ثم صورة واحدة: لقطة الحلقة، وإلا fanart، وإلا البنر أو الغلاف (مهلة 1.5ث)
+      const base = m.banner ?? m.posterSmall ?? m.poster;
+      const img = image(null, 'an-img', { fallback: base });
       th.append(img);
+      const show = (src, wide) => { if (img.src) return; img.style.objectPosition = wide || m.banner ? 'center' : 'center 22%'; img.src = src; };
+      const wait = setTimeout(() => show(base, false), 1500);
       void artFor(m).then(async (art) => {
         const shot = episodeStill(m, m.episode, art);
         const src = shot.still ? shot.src : art?.fanart;
-        if (!src || !r.isConnected || !(await decoded(src)) || !r.isConnected) return;
-        img.src = src;
-        img.style.objectPosition = 'center';
-      });
+        if (src && r.isConnected && (await decoded(src))) { clearTimeout(wait); return show(src, true); }
+        clearTimeout(wait);
+        show(base, false);
+      }, () => { clearTimeout(wait); show(base, false); });
       const tx = el('span', 'ah-row-tx');
       const t = el('b', null, m.title);
       t.dir = 'auto';

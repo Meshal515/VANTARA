@@ -135,6 +135,7 @@ export const SHELL_HTML = `<div class="app">
     ${mainTop('اكتشف')}
     <div class="page-body anime-only" id="animeDiscover"></div>
     <div class="page-body cinema-only" id="cinemaDiscover"></div>
+    <div class="page-body" id="unifiedDiscover"></div>
     <div class="page-body manga-only">
       <form class="search-bar" data-submit="discoverSearch" role="search">
         ${glyph('search')}

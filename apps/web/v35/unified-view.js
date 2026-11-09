@@ -71,6 +71,15 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     i.onerror = () => { i.style.visibility = 'hidden'; };
     return i;
   };
+  /**
+   * صورة البطاقة: المانجا من محمّل صور القشرة (mountImage: ترويسات المصدر والبدائل والغلاف الموحّد)، لأن
+   * أغلفة المصادر لا تُحمَّل بـ<img> مجرد فتبقى البطاقة هيكلًا للأبد؛ والأنمي والسينما بصورة مباشرة.
+   */
+  const fill = (art, x, kind, src, alt = '') => {
+    if (kind === 'manga' && data.cover?.(art, x)) return art;
+    art.append(img(src, 'uv-img', alt));
+    return art;
+  };
   const head = (title, go, more = 'الكل') => {
     const h = el('header', 'uv-sh');
     h.append(el('h2', null, title));
@@ -135,12 +144,19 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     });
     let sx = null;
     reel.addEventListener('pointerdown', (e) => { sx = e.clientX; });
-    reel.addEventListener('pointerup', (e) => { if (sx == null) return; const dx = e.clientX - sx; sx = null; if (Math.abs(dx) > 40) setHero(st.hero + (dx < 0 ? 1 : -1), dx < 0 ? 1 : -1); });
+    // RTL (قرار المالك): السحب يمينًا يأتي بالتالي من اليسار، والخطوط تتقدّم من اليمين لليسار. كان بمنطق الإنجليزية
+    reel.addEventListener('pointerup', (e) => {
+      if (sx == null) return; const dx = e.clientX - sx; sx = null;
+      if (Math.abs(dx) <= 40) return;
+      const forward = isRtl(reel) ? dx > 0 : dx < 0;
+      setHero(st.hero + (forward ? 1 : -1), forward ? 1 : -1);
+    });
     sec.append(reel, info, idx);
     sec._list = list;
     queueMicrotask(() => tint(list[st.hero]));
     return sec;
   }
+  const isRtl = (node) => (node?.ownerDocument?.defaultView?.getComputedStyle?.(node)?.direction ?? 'rtl') === 'rtl';
   function setHero(n, dir) {
     const h = host?.querySelector('.uv-hero'); const list = h?._list; if (!list?.length) return;
     const prev = st.hero, next = ((n % list.length) + list.length) % list.length; if (prev === next) return;
@@ -148,8 +164,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     st.hero = next;
     const rc = h.querySelectorAll('.uv-rc'), hi = h.querySelectorAll('.uv-hi'), dots = h.querySelectorAll('.uv-hidx button');
     rc.forEach((e) => { e.classList.remove('on', 'out', 'from'); });
-    rc[prev].style.setProperty('--dir', dir); rc[prev].classList.add('out');
-    rc[next].style.setProperty('--dir', dir); rc[next].classList.add('from');
+    // اتجاه الحركة على الشاشة: التالي يدخل من جهة القراءة التالية (اليسار في العربية)
+    const vis = isRtl(h) ? -dir : dir;
+    rc[prev].style.setProperty('--dir', vis); rc[prev].classList.add('out');
+    rc[next].style.setProperty('--dir', vis); rc[next].classList.add('from');
     void rc[next].offsetWidth; rc[next].classList.remove('from'); rc[next].classList.add('on');
     hi.forEach((e, k) => e.classList.toggle('on', k === next));
     dots.forEach((e, k) => e.classList.toggle('on', k === next));
@@ -273,7 +291,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     return c;
   }
   function airSchedule(week) {
-    const s = el('section', 'uv-sec uv-air');
+    const s = el('section', 'uv-sec uv-sched');
     const h = el('header', 'uv-sh');
     const titles = el('div', 'uv-air-titles');
     titles.append(el('h2', null, 'جدول البث'), el('span', 'uv-air-sub', 'بتوقيت مكة'));
@@ -343,7 +361,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function updItem(w) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
-    const art = el('span', 'uv-art'); art.append(img(w.cover, 'uv-img', w.title));
+    const art = fill(el('span', 'uv-art'), w, 'manga', w.cover, w.title);
     const ch = w._latestChapter?.chapterNumber;
     const line = el('span', 'uv-t2');
     if (ch != null) line.append(el('em', null, `فصل ${ch}`));
@@ -354,7 +372,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function poster(x, kind, go) {
     const a = el('button', 'uv-po'); a.type = 'button';
-    const art = el('span', 'uv-art'); art.append(img(x.poster ?? x.cover, 'uv-img', x.title));
+    const art = fill(el('span', 'uv-art'), x, kind, x.poster ?? x.cover, x.title);
     const score = x.score ?? x.rating;
     const meta = [kind === 'manga' ? (x.chapters ? `${x.chapters} فصل` : '') : (x.year ?? ''), score ? Number(score).toFixed(1) : ''].filter(Boolean).join(' · ');
     a.append(art, txt('b', 'uv-t1 uv-2l', x.title), el('span', 'uv-t2', meta));
@@ -382,7 +400,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function recentCover(it) {
     const a = el('button', 'uv-rv'); a.type = 'button';
-    const art = el('span', 'uv-rv-art'); art.append(img(it.cover, 'uv-img', it.title));
+    const art = fill(el('span', 'uv-rv-art'), it, it.section, it.cover, it.title);
     a.append(art, txt('b', 'uv-rv-t', it.title || 'عمل'), txt('span', 'uv-rv-s', [KIND_AR[it.kind] ?? KIND_AR[it.section] ?? '', it.label].filter(Boolean).join(' · ')));
     a.setAttribute('aria-label', `${it.title ?? ''}${it.label ? `، ${it.label}` : ''}`);
     return pressable(a, () => open.item(it), open.itemMenu ? () => open.itemMenu(it) : null);
@@ -399,10 +417,11 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   /* ───── تصفّح: أربعة أبواب تحت البنر مباشرة ─────
    * شبكة 2×2 بخطوط شعرية لا صناديق (فكرة تصفّح المانجا)، وهوية الموحد: أغلفة صغيرة متراكبة من الأنواع
    * الثلاثة، والاسم، وسطر حيّ، وسهم. الأبواب بارتفاع ثابت فلا يتغيّر شيء حين تصل البيانات. */
+  const cov = (x) => x?.cover ?? x?.poster ?? x?.posterSmall ?? x?.coverImage?.large ?? null;
   function browseDoor(label, sub, covers, go) {
     const b = el('button', 'uv-door'); b.type = 'button';
     const art = el('span', 'uv-door-art'); art.setAttribute('aria-hidden', 'true');
-    for (const c of covers.filter(Boolean).slice(0, 3)) { const f = el('span', 'uv-door-cv'); f.append(img(c, 'uv-img')); art.append(f); }
+    for (const [x, kind] of covers.filter((c) => c?.[0]).slice(0, 3)) art.append(fill(el('span', 'uv-door-cv'), x, kind, cov(x)));
     const t = el('span', 'uv-door-text'); t.append(el('span', 'uv-door-l', label), el('small', 'uv-door-s', sub));
     b.append(art, t);
     b.insertAdjacentHTML('beforeend', glyph('chevron', { size: 16, cls: 'icon uv-door-chev' }));
@@ -413,8 +432,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const a = data.animeHome?.() ?? null;
     const c = data.cinema?.() ?? null;
     const manga = data.mangaPopular?.() ?? [];
-    const cov = (x) => x?.cover ?? x?.poster ?? x?.posterSmall ?? x?.coverImage?.large ?? null;
-    const mix = (...lists) => { const out = []; for (let i = 0; i < 3; i++) for (const l of lists) if (l?.[i]) out.push(cov(l[i])); return out; };
+    const mix = (...lists) => { const out = []; for (let i = 0; i < 3; i++) for (const [l, kind] of lists) if (l?.[i]) out.push([l[i], kind]); return out; };
     const series = data.seriesUpdates?.() ?? [];
     const recent = data.mangaRecent?.() ?? [];
     const genres = new Set([...(a?.trending ?? []), ...(c?.movie ?? []), ...(c?.series ?? [])].flatMap((x) => x?.genres ?? []));
@@ -423,10 +441,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const grid = el('nav', 'uv-doors'); grid.setAttribute('aria-label', 'تصفّح كل الأعمال');
     const updCount = recent.length + series.length;
     grid.append(
-      browseDoor('آخر التحديثات', updCount ? `${updCount} فصلًا وحلقة` : 'فصول وحلقات نزلت', mix(recent, series.map((u) => u.item ?? u)), () => openSub('updates')),
-      browseDoor('الرائج', 'أنمي ومانجا وسينما', mix(a?.trending, manga, c?.series), () => openSub('trending')),
-      browseDoor('التصنيفات', genres.size ? `${genres.size} تصنيفًا` : 'كل الأنواع', mix(c?.movie, a?.trending?.slice(3), manga.slice(3)), () => (open.categories ? open.categories() : open.browse('anime'))),
-      browseDoor('كل الأعمال', 'ابحث واكتشف', mix(c?.series?.slice(3), manga.slice(6), a?.trending?.slice(6)), () => (open.discover ? open.discover() : open.browse('anime'))),
+      browseDoor('آخر التحديثات', updCount ? `${updCount} فصلًا وحلقة` : 'فصول وحلقات نزلت', mix([recent, 'manga'], [series.map((u) => u.x ?? u.item ?? u), 'cinema']), () => openSub('updates')),
+      browseDoor('الرائج', 'أنمي ومانجا وسينما', mix([a?.trending, 'anime'], [manga, 'manga'], [c?.series, 'cinema']), () => openSub('trending')),
+      browseDoor('التصنيفات', 'لكل نوع تصنيفاته', mix([c?.movie, 'cinema'], [a?.trending?.slice(3), 'anime'], [manga.slice(3), 'manga']), () => (open.categories ? open.categories() : open.browse('anime'))),
+      browseDoor('كل الأعمال', 'الأشهر بكل نوع', mix([c?.series?.slice(3), 'cinema'], [manga.slice(6), 'manga'], [a?.trending?.slice(6), 'anime']), () => (open.discover ? open.discover() : open.browse('anime'))),
     );
     s.append(grid);
     return s;
