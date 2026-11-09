@@ -77,6 +77,22 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
 });
 
 
+describe('cinema detail jump regression', () => {
+  it('Dexter and marquee use an in-place fade, never a temporary fixed viewport or scroll restore', () => {
+    const movie = page({top: 0, left: 0, width: 390, height: 2400});
+    movie.id = 'cinema';
+    const spacer = {style:{}, setAttribute:vi.fn(), remove:vi.fn()};
+    movie.before = vi.fn();
+    pageIn(movie, {depth:true,doc:{...doc(),createElement:()=>spacer}});
+    expect(movie.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
+    expect(movie.before).not.toHaveBeenCalled();
+    expect(movie.style.position).toBeUndefined();
+    expect(movie.classes.has('page-depth')).toBe(false);
+    finishPageMotion();
+    expect(movie.style.position).toBeUndefined();
+  });
+});
+
 describe('work detail depth transition, with stationary contents', () => {
   it('zooms the whole work in and out at 400ms without translating its children', () => {
     const a=page(), b=page();

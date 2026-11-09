@@ -6246,7 +6246,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     run(motion);
     // الهوية بعد الإطار الأول، وفقط إن بقيت الحركة متجهة لهذا القسم (سحب أُلغي قبلها لا يلبّسه هويته)
     afterFirstFrame(() => {
-      if (motion.moving ? motion.target === id : motion.section === id) applySection(id, { keepLabel: true });
+      if (root.dataset.section !== id && (motion.moving ? motion.target === id : motion.section === id)) {
+        applySection(id, { keepLabel: true });
+      }
     });
   }
   /** خارج الرئيسية: لا حركة طبقات، القسم والصفحة مباشرة. */
@@ -6359,6 +6361,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       beginSection(id, motion => motion.go(id, { outgoing: leave, scrollY: y }));
       showHome(id);
       showPage('home', { sectionSwitch: true, sourceScroll: y });
+      // Freeze the destination header/hero layout before the first rendered frame.
+      // Applying the section identity one frame later moved the manga cover visibly.
+      applySection(id, { keepLabel: true });
       haptic();
       return;
     }

@@ -25,4 +25,59 @@ await page.waitForSelector('#home.active');
   if(warm.scroll>before+1)throw new Error('Standby sections lengthen the page scroll: '+JSON.stringify({before,...warm}));
 }
 const {sectionMotionProof}=await import('./section-motion-proof.mjs');
-try {const proof=await sectionMotionProof(expr=>page.evaluate(expr),name=>page.screenshot({path:out+'/'+name+'.png'}));await writeFile(out+'/proof.json',JSON.stringify(proof,null,2));if(errors.length)throw new Error('Uncaught shell exceptions: '+errors.join('\n'));console.log('Section compositor PASS:',proof.cases.length,'cases; rapid selection; reduced motion; no first-frame scroll jumps');} finally {await browser.close();server.close();}
+try {
+  const proof=await sectionMotionProof(expr=>page.evaluate(expr),name=>page.screenshot({path:out+'/'+name+'.png'}));
+  await writeFile(out+'/proof.json',JSON.stringify(proof,null,2));
+  if(errors.length)throw new Error('Uncaught shell exceptions: '+errors.join('\\n'));
+  // Reproduce the reported cinema -> manga transition from inside a work page.
+  await page.evaluate(()=>document.querySelector('#secOpt-cinema').click());
+  await page.waitForFunction(()=>document.querySelector('.v35')?.dataset.section==='cinema'&&!document.querySelector('.layering,.section-page-layer'),null,{timeout:8000});
+  await page.evaluate(()=>window.__shell.showPage('cinema'));
+  await page.waitForTimeout(650);
+  await page.evaluate(()=>document.querySelector('#secOpt-manga').click());
+  const samples=[];
+  for(const delay of [0,35,75,115,175,310]) {
+    if(delay) await page.waitForTimeout(delay);
+    samples.push(await page.evaluate(()=>{
+      const hero=document.querySelector('#mangaHome .mg-hero');
+      return {top:hero?.getBoundingClientRect().top??null,section:document.querySelector('.v35')?.dataset.section};
+    }));
+  }
+  if(samples.some(s=>s.top===null))throw new Error('Manga hero not rendered during cinema exit: '+JSON.stringify(samples));
+  const delta=Math.max(...samples.map(s=>s.top))-Math.min(...samples.map(s=>s.top));
+  if(delta>8)throw new Error('Cinema to manga first-frame hero jump: '+JSON.stringify({delta,samples}));
+  await page.screenshot({path:out+'/cinema-to-manga-settled.png'});
+  // Real CSS + Web Animations test: wide artwork stays at a constant screen Y
+  // from first frame through animation completion (DOM existence alone is not proof).
+  const visual=await browser.newPage({viewport:{width:390,height:844}});
+  try {
+    await visual.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:')?route.continue():route.abort());
+    await visual.goto('http://127.0.0.1:'+server.address().port+'/__ui');
+    for(const [width,height] of [[360,780],[390,844],[768,1024]]) {
+      await visual.setViewportSize({width,height});
+      const start=await visual.evaluate(async()=>{
+        document.body.innerHTML='<div class="v35" data-section="cinema"><div class="app"><section class="page active cinema-page" id="cinema"><article class="cn-detail" data-style="marquee"><div class="cn-detail-bar"></div><div class="cn-detail-art"><img class="cn-img loaded" alt=""></div><div class="cn-detail-body"><div class="cn-detail-mark">DEXTER</div></div></article></section></div></div>';
+        const image=document.querySelector('.cn-detail-art img');
+        image.src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="502"><rect width="1200" height="502" fill="#158ad9"/></svg>');
+        const {pageIn}=await import('/v35/page-motion.js');
+        const art=document.querySelector('.cn-detail-art');
+        const before=art.getBoundingClientRect().top;
+        const shadow=getComputedStyle(art).boxShadow;
+        pageIn(document.querySelector('#cinema'),{depth:true});
+        return {before,shadow};
+      });
+      if(start.shadow!=='none')throw new Error('Marquee still has hard black bands: '+JSON.stringify({width,start}));
+      const ys=[start.before];
+      for(const delay of [30,90,160,260]) {
+        await visual.waitForTimeout(delay);
+        ys.push(await visual.evaluate(()=>document.querySelector('.cn-detail-art').getBoundingClientRect().top));
+      }
+      const travel=Math.max(...ys)-Math.min(...ys);
+      if(travel>2)throw new Error('Dexter art shifts on page entry: '+JSON.stringify({width,travel,ys}));
+      if(width===390)await visual.screenshot({path:out+'/marquee-no-jump.png'});
+    }
+  } finally {await visual.close()}
+  await writeFile(out+'/visual-proof.json',JSON.stringify({cinemaToManga:{delta,samples},marqueeWidths:[360,390,768]},null,2));
+  if(errors.length)throw new Error('Uncaught shell exceptions: '+errors.join('\\n'));
+  console.log('Visual motion PASS: 24 section cases, cinema work -> manga, marquee art at 3 widths, no black bars or entry jump');
+} finally {await browser.close();server.close();}

@@ -222,11 +222,12 @@ const contrast = (a, b) => {
 };
 
 /**
- * لون النص فوق اللون المختار: الأبيض كما في تصميم الأقسام ما دام مقروءًا عليه (تباين 3 فأكثر، معيار
- * عناصر الواجهة والنص الكبير)، والأسود للألوان الفاتحة فقط (الأبيض والذهبي والعنبري والليموني).
+ * Contrast-aware label/icon color for every user-selectable section accent.
+ * Require readable normal text (WCAG AA 4.5:1), not merely the 3:1 large-icon threshold.
  */
 export function onAccent(hex) {
-  return contrast(hex, '#ffffff') >= 3 ? '#ffffff' : '#0b0b0f';
+  if (contrast(hex, '#ffffff') >= 4.5) return '#ffffff';
+  return contrast(hex, '#0b0b0f') >= 4.5 ? '#0b0b0f' : '#000000';
 }
 
 /**

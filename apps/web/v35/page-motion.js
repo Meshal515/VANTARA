@@ -133,6 +133,9 @@ function viewportWork(page, doc) {
 export function pageIn(page, { depth = false, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
+  // Cinema's wide hero must not be put in a temporary fixed, scrollable viewport:
+  // restoring that viewport after the fade caused a visible Dexter/Marquee jump.
+  if (page.id === 'cinema') depth = false;
   const restore = save(page, ['transformOrigin']);
   const restoreViewport = depth ? viewportWork(page, doc) : () => {};
   if (depth) {

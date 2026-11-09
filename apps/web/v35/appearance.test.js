@@ -107,9 +107,26 @@ describe('المظهر', () => {
     expect(onAccent('#c1121f')).toBe('#ffffff');
     expect(onAccent('#5260d2')).toBe('#ffffff');
     expect(paletteVars('#e6e6ec')['--on-accent']).toBe('#0b0b0f');
-    // ألوان الأقسام المصمّمة تبقى بنص أبيض كما هي
-    expect(onAccent('#8f5cff')).toBe('#ffffff');
-    expect(onAccent('#3b82f6')).toBe('#ffffff');
+    // الألوان المتوسطة (حتى البنفسجي والأزرق): اللون الداكن أوضح للنص الصغير
+    expect(onAccent('#8f5cff')).toBe('#0b0b0f');
+    expect(onAccent('#3b82f6')).toBe('#0b0b0f');
+  });
+
+  it('كل ألوان الأقسام العشرين تقرأ عليها النصوص الصغيرة بنسبة تباين 4.5:1 أو أعلى', () => {
+    const luminance = hex => {
+      const ch = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+    };
+    const contrast = (a, b) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((a, b) => b - a);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    for (const a of ACCENTS) {
+      expect(contrast(a.hex, onAccent(a.hex)), a.id).toBeGreaterThanOrEqual(4.5);
+      const vars = paletteVars(a.hex);
+      expect(vars['--on-accent']).toBe(onAccent(a.hex));
+    }
   });
 
   it('الأوراق تلبس البنفسجي الأساسي أو لون القسم المختار', () => {
