@@ -2173,10 +2173,10 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
 .v35 .cn-detail:not([data-style='current']) .cn-detail-body > .cn-facts { font-size: 12.5px; color: var(--text-2); }
 .v35 .cn-detail:not([data-style='current']) .cn-genre-line { letter-spacing: 0; font-size: 12.5px; }
 .v35 .cn-look-credits dt { letter-spacing: 0; }
-/* زر التشغيل في الملصق والشريط العريض: أبيض حاد كضوء الشاشة */
+/* زر التشغيل في الملصق والشريط العريض: بلون القسم الذي اختاره المستخدم (لا أبيض ثابت)، حاد الزوايا */
 .v35 .cn-detail:is([data-style='poster'], [data-style='marquee']) #cinemaPlay {
-  background: #f4f2f0;
-  color: #0b0909;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
   border-radius: var(--look-r);
   height: 52px;
   font-weight: 800;
@@ -2184,7 +2184,7 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
 
 /* العرض الأول: الخلفية ظاهرة والملصق على حافتها السفلى فقط */
 .v35 .cn-detail[data-style='premiere'] .cn-detail-body { margin-top: calc(-0.42 * min(46vw, 200px) * 1.5); }
-.v35 .cn-look-still .cn-still-go { background: #f4f2f0; color: #0b0909; width: 48px; height: 48px; }
+.v35 .cn-look-still .cn-still-go { width: 48px; height: 48px; } /* بلون القسم (var(--accent)) كبقية أزرار التشغيل */
 .v35 .cn-look-still.cn-btn--play { aspect-ratio: 2.1 / 1; }
 /* حلقات العرض الأول: لقطة عريضة كاملة العرض والعنوان تحتها (كبطاقات الأفلام القصيرة) */
 .v35 .cn-detail[data-style='premiere'] .cn-eps { gap: 18px; }
