@@ -259,6 +259,8 @@ const SHELL = [
   '/v35/unified-view.js',
   '/v35/unified-library.css',
   '/v35/unified-library.js',
+  '/v35/unified-search.css',
+  '/v35/unified-search.js',
   '/v35/library-model.js',
   '/v35/work-menu.js',
   '/v35/addons.css',

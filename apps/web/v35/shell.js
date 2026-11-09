@@ -90,6 +90,7 @@ import { createUnifiedView } from './unified-view.js';
 import { workMenuEntries, workOptionEntries } from './work-menu.js';
 import { EMPTY_COPY, LIBRARY_TABS, libraryShelves } from './library-model.js';
 import { createUnifiedLibrary } from './unified-library.js';
+import { createUnifiedSearch } from './unified-search.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -3725,6 +3726,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function renderUnifiedLibrary() {
     unifiedLibrary.render(q('unifiedLibrary'));
   }
+  const unifiedSearch = createUnifiedSearch({
+    el, glyph,
+    mount: (node) => root.append(node),
+    engines: {
+      anime: (term) => import('../lib/anime-meta.js').then(({ searchAnime }) => searchAnime({ search: term })).then((r) => r?.items ?? []),
+      manga: (term) => (available() ? browseLive({ query: term }, () => {}).then((r) => r?.items ?? []) : Promise.resolve([])),
+      cinema: (term) => import('../lib/cinema-meta.js').then(({ search }) => search(term)),
+    },
+    card: (it, group) => group === 'manga'
+      ? { title: titleOf(it), cover: it.coverImage?.large ?? null, sub: (it.genres ?? []).slice(0, 2).map((g) => AR_GENRE[g] ?? g).join('، ') }
+      : group === 'anime'
+        ? { title: it.title, cover: it.posterSmall ?? it.poster ?? null, sub: [it.year, it.score ? it.score.toFixed(1) : null].filter(Boolean).join(' · ') }
+        : { title: it.title, cover: it.poster ?? null, sub: [it.type === 'series' ? 'مسلسل' : 'فيلم', it.year].filter(Boolean).join(' · ') },
+    open: (it, group) => {
+      unifiedSearch.close();
+      if (group === 'anime') return openAnimeRef(`anime:${it.id}`, { title: it.title, cover: it.posterSmall ?? it.poster });
+      if (group === 'cinema') return openCinemaRef(`cinema:${it.id}`, { title: it.title, cover: it.poster, type: it.type ?? null });
+      if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+      void openWork(it);
+    },
+  });
   let libraryRepaint = 0;
   /** «مكتبتي» الظاهرة: الموحدة في توحيد المحتوى، وإلا مكتبة القسم بتصميمه. */
   function renderActiveLibrary() {
@@ -4140,6 +4162,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openSearch() {
+    // توحيد المحتوى: بحث واحد في الأنواع الثلاثة (unified-search.js)
+    if (root.dataset.content === 'unified') return unifiedSearch.open();
     if (root.dataset.section === 'anime' || root.dataset.section === 'cinema') {
       const host = root.dataset.section === 'anime' ? 'animeDiscover' : 'cinemaDiscover';
       showPage('discover');
@@ -6411,6 +6435,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
     if (editor?.open) return editor.handleBack();
+    if (unifiedSearch.close()) return true;
     if (unifiedView.back()) return true;
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
