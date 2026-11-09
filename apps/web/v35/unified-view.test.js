@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { createUnifiedView } from './unified-view.js';
 import { createUnifiedDiscover } from './unified-discover.js';
+
+// Node/linkedom has no requestAnimationFrame; production WebView provides it.
+globalThis.requestAnimationFrame ??= (callback) => setTimeout(callback, 0);
 import { dayLineup, heroOrder, passes, readFilter, until } from './unified-view.js';
 
 const H = 3_600_000;
