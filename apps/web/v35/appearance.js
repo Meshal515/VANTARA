@@ -8,6 +8,7 @@
  */
 
 const KEY = 'vantara.appearance.v1';
+// Keep unsaved preferences usable during the session if persistent storage refuses a write.
 const fallbackByStorage = new WeakMap();
 const fallbackWithoutStorage = new Map();
 let lastPreferenceSaved = true;
