@@ -1656,6 +1656,12 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   /** «أفضل 5» لأي حساب: واجهة الملف يراها الأصدقاء. */
+  /** تقييم السيرفر لعمل (متوسط مستخدمي VANTARA من 5، يبدأ 0). */
+  async function ratingsAvg(refs) {
+    if (!token) return null;
+    try { return await request(`/v1/ratings/avg?refs=${encodeURIComponent(refs.join(','))}`); } catch { return null; }
+  }
+
   async function topWorks(userId) {
     if (!token) return [];
     try {
@@ -1813,6 +1819,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     presence,
     uploadMedia,
     topWorks,
+    ratingsAvg,
     stats,
     insights,
     hideInsight,

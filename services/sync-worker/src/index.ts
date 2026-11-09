@@ -3196,6 +3196,15 @@ export default {
       else if (path === '/v1/collections' && request.method === 'GET') {
         response = await handleCollection(url, env, userId);
       }
+      // تقييم السيرفر لعمل: متوسط تقييمات مستخدمي VANTARA من 5 (يبدأ 0). مجموع فقط: لا من قيّم ولا كم قيّم كل واحد
+      else if (path === '/v1/ratings/avg' && request.method === 'GET') {
+        const refs = (url.searchParams.get('refs') ?? '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4);
+        if (!refs.length) response = json({ score: 0, count: 0 });
+        else {
+          const row = await env.DB.prepare(`SELECT AVG(score) AS a, COUNT(*) AS n FROM ratings WHERE score > 0 AND series_ref IN (${refs.map(() => '?').join(',')})`).bind(...refs).first<{ a: number | null; n: number }>();
+          response = json({ score: row?.a ? Math.round((row.a / 2) * 10) / 10 : 0, count: row?.n ?? 0 });
+        }
+      }
       else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, userId, now);
       // نبض خفيف: رقم آخر كتابة فقط. الجهاز يسأله كل ثوانٍ ويسحب حين يتقدّم —
       // رسالة صديقك تصلك في ثوانٍ لا بعد دقيقة، بلا سحب كامل كل مرة

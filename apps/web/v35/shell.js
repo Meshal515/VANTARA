@@ -1657,7 +1657,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const n = w._chapters ? countMainChapters(w._chapters) : Number(w.chapters) || 0;
     const year = w.startDate?.year ?? null;
     const ref = String(w.id);
-    const known = Number(w.averageScore) > 0 ? Number(w.averageScore) / 10 : state.detailScore?.ref === ref ? state.detailScore.score : null;
+    // حقائق من عدة مصادر (lib/manga-facts.js): الحالة بالتصويت، والتقييم من AniList أو MAL؛ وما لا تقييم له
+    // يأخذ تقييم السيرفر من 5 (متوسط مستخدمي VANTARA، يبدأ 0) — لا شرطة أبدًا (قرار المالك، 9 نوفمبر)
+    const facts = state.detailFacts?.ref === ref ? state.detailFacts : null;
+    if (!facts) {
+      state.detailFacts = { ref, status: null, score: null, server: null };
+      const title = w._work?.title || w.title?.english || w.title?.romaji || titleOf(w);
+      void Promise.all([
+        import('../lib/manga-facts.js').then((m) => m.mangaFacts({ ref, title, alStatus: w.status, alScore: w.averageScore })).catch(() => null),
+        sync.ratingsAvg?.(refsOf(ref)) ?? null,
+      ]).then(([f, srv]) => {
+        if (state.detailFacts?.ref !== ref) return;
+        Object.assign(state.detailFacts, { status: f?.status ?? null, score: f?.score ?? null, server: srv ? Number(srv.score) || 0 : 0 });
+        if (state.current && String(state.current.id) === ref) { paintStats(state.current); renderInfo(state.current); }
+      });
+    }
+    const status = facts?.status ?? w.status;
+    const fromSources = Number(w.averageScore) > 0 ? Number(w.averageScore) / 10 : state.detailScore?.ref === ref ? state.detailScore.score : null;
+    const known = fromSources ?? facts?.score ?? null;
+    const server = known == null && facts?.server != null ? facts.server : null;
     // التقييم يُسأل عنه مرة: «جارٍ» يحجز مكانه فلا يدفع ما بجانبه حين يصل
     const pending = !(Number(w.averageScore) > 0) && !(state.detailScore?.ref === ref && state.detailScore.done);
     const chaptersWord = n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا';
@@ -1676,17 +1694,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return d;
       };
       host.replaceChildren(
-        cell(known ? known.toFixed(1) : '—', 'التقييم', true),
+        cell(known ? known.toFixed(1) : (server ?? 0).toFixed(1), known ? 'التقييم' : 'تقييم VANTARA من 5', true),
         cell(n || '—', n ? chaptersWord : 'فصلًا'),
-        cell(STATUS_AR[w.status] ?? '—', year ? String(year) : 'الحالة'),
+        cell(STATUS_AR[status] ?? '—', year ? String(year) : 'الحالة'),
       );
     } else {
       const parts = [];
-      if (known || pending) {
+      {
         const s = el('span');
         s.innerHTML = '<span class="mw-star">★</span> ';
-        s.append(el('b', null, known ? known.toFixed(1) : '0.0'));
-        parts.push(known ? s : reserve(s));
+        s.append(el('b', null, known ? known.toFixed(1) : (server ?? 0).toFixed(1)));
+        if (!known && server != null) s.append(' من 5');
+        parts.push(known || server != null || !pending ? s : reserve(s));
       }
       const c = el('span');
       c.append(el('b', null, n ? String(n) : '000'), ` ${n ? chaptersWord : 'فصلًا'}`);
@@ -1705,9 +1724,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   /** «مانهوا · مكتمل»: نوع العمل إن عُرف بلده، وحالته؛ وإلا تصنيفه الأول. */
+  /** الحالة بعد تصويت المصادر (manga-facts) متى وصلت، وإلا ما قاله AniList. */
+  const statusOf = (w) => (state.detailFacts?.ref === String(w?.id) && state.detailFacts.status) || w?.status;
   function kickerOf(w) {
     const kind = { KR: 'مانهوا', JP: 'مانجا', CN: 'مانها' }[w.countryOfOrigin] ?? null;
-    const parts = [kind, STATUS_AR[w.status]].filter(Boolean);
+    const parts = [kind, STATUS_AR[statusOf(w)]].filter(Boolean);
     return parts.length ? parts.join(' · ') : (w.genres || []).slice(0, 1).map(genreAr).join('');
   }
   /** القصة: هيكل ثلاثة أسطر حتى تصل النبذة، ثم النص في المساحة نفسها (لا إزاحة). */
@@ -2290,7 +2311,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const pairs = [
       ['المؤلف', role('story')],
       ['الرسام', role('art')],
-      ['الحالة', STATUS_AR[w.status]],
+      ['الحالة', STATUS_AR[statusOf(w)]],
       ['الفصول', w._chapters ? String(w._chapters.length) : null],
       ['المصادر', (w._sources ?? w._work?.editions ?? []).map((s) => s.label).join('، ')],
       ['التصنيفات', (w.genres || []).map(genreAr).join('، ')],
