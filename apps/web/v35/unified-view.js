@@ -62,7 +62,7 @@ export function dayLineup(week, offset, now = Date.now()) {
 export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, reducedMotion = () => false, now = () => Date.now() }) {
   const gen = (list) => (list ?? []).slice(0, 2).map(genreAr).join('، ');
   const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all', airDay: null, airScrolled: false };
-  let host = null, silk = null, silkWrap = null, timer = 0, overlay = null;
+  let host = null, silk = null, silkWrap = null, timer = 0, overlay = null, suspended = false, suspendedScroll = 0;
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
   const img = (src, cls, alt = '') => {
@@ -523,16 +523,44 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   function openSub(kind) {
     st.sub = kind;
     overlay?.remove();
+    suspended = false;
     overlay = el('div', 'uv-page'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
     paintSub();
     (host.closest('.v35') ?? host.ownerDocument.body).append(overlay);
     requestAnimationFrame(() => overlay?.classList.add('in'));
   }
   function closeSub() {
-    if (!overlay) return false;
+    if (!overlay || suspended) return false;
     const o = overlay; overlay = null; st.sub = null;
     o.classList.remove('in');
     setTimeout(() => o.remove(), reducedMotion() ? 0 : 260);
+    return true;
+  }
+  function suspend() {
+    if (!overlay || suspended) return false;
+    suspended = true;
+    suspendedScroll = overlay.scrollTop || 0;
+    overlay.style.pointerEvents = 'none';
+    return true;
+  }
+  function hideSuspended() {
+    if (!suspended || !overlay) return;
+    overlay.style.visibility = 'hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  function resume() {
+    if (!suspended || !overlay) return false;
+    suspended = false;
+    overlay.style.visibility = '';
+    overlay.style.pointerEvents = '';
+    overlay.removeAttribute('aria-hidden');
+    overlay.scrollTop = suspendedScroll;
+    return true;
+  }
+  function discardSuspended() {
+    if (!suspended) return false;
+    overlay?.remove();
+    overlay = null; suspended = false; st.sub = null;
     return true;
   }
   function paintSub() {
@@ -605,6 +633,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       render();
     },
     back: closeSub,
-    destroy() { stop(); closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
+    suspend, hideSuspended, resume, discardSuspended,
+    destroy() { stop(); if (!discardSuspended()) closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
   };
 }

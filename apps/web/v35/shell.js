@@ -60,7 +60,7 @@ import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
-import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
+import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn } from './motion.js';
 import { bindTabMotion, fadeIn, finishPageMotion, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
@@ -3854,9 +3854,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     for (let i = 0; i < 12; i++) for (const [group, list] of pools) if (list[i]) out.push({ item: list[i], group });
     return out;
   }
+  let unifiedReturn = null;
+  const unifiedSurfaces = () => ({ discover: unifiedDiscover, view: unifiedView, search: unifiedSearch });
+  /** Keep subpage DOM + its scroll when entering a work, instead of revealing Home beneath it. */
+  function suspendUnifiedOrigin() {
+    if (root.dataset.content !== 'unified' || unifiedReturn) return false;
+    const page = currentPage();
+    for (const kind of ['discover', 'view', 'search']) {
+      if (!unifiedSurfaces()[kind]?.suspend?.()) continue;
+      unifiedReturn = { kind, page };
+      return true;
+    }
+    return false;
+  }
   function openUnifiedResult(it, group) {
-    unifiedSearch.close();
-    unifiedDiscover.back();
+    suspendUnifiedOrigin();
     if (group === 'anime') return openAnimeRef(`anime:${it.id}`, { title: it.title, cover: it.posterSmall ?? it.poster });
     if (group === 'cinema') return openCinemaRef(`cinema:${it.id}`, { title: it.title, cover: it.poster, type: it.type ?? null });
     if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
@@ -3941,6 +3953,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (type === 'anime') {
         const { searchAnime } = await import('../lib/anime-meta.js');
         return (await searchAnime(genre ? { genre } : {}))?.items ?? [];
+      }
+      if (type === 'manga') {
+        return (await (genre ? fetchMangaGenre(genre) : fetchMangaPopular())).items;
       }
       const { catalog } = await import('../lib/cinema-meta.js');
       const [movie, series] = await Promise.all([catalog('movie', 'top', { genre: genre ?? '' }), catalog('series', 'top', { genre: genre ?? '' })]);
@@ -5122,6 +5137,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       id = 'majlis';
     }
     const from = currentPage();
+    // An overlay owns the visual transition; do not animate Home beneath the old subpage.
+    const unifiedHandoff = Boolean(unifiedReturn && WORK_PAGES.has(id) && from !== id);
+    if (unifiedReturn && push && MAIN_PAGES.includes(id) && id !== from) {
+      unifiedSurfaces()[unifiedReturn.kind]?.discardSuspended?.();
+      unifiedReturn = null;
+    }
     const visual = pageMotionState(q(from));
     sourceScroll ??= visual?.scrollTop ?? window.scrollY;
     if (from !== id) scrollOf.set(from, sourceScroll);
@@ -5137,7 +5158,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // (56ms على جوال متوسط في المقياس) قبل أن تبدأ حركة الشريط، فيتقطّع الشريط مع كل انتقال
     const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
     if (dockFirst) dockCtl?.activate(id);
-    const outgoing = from !== id && !sectionSwitch ? q(from) : null;
+    const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
     if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
@@ -5224,12 +5245,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
-    if (!sectionSwitch && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+    if (!sectionSwitch && !unifiedHandoff && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
         if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
       };
       if (WORK_PAGES.has(id)) queueMicrotask(enter);
       else enter();
+    }
+    if (unifiedHandoff) {
+      const handoff = unifiedReturn;
+      requestAnimationFrame(() => {
+        if (unifiedReturn === handoff && currentPage() === id) unifiedSurfaces()[handoff.kind]?.hideSuspended?.();
+      });
     }
   }
   function navTo(id) {
@@ -5318,6 +5345,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const prev = state.stack.pop();
     if (prev) {
       showPage(prev, { push: false });
+      if (unifiedReturn && prev === unifiedReturn.page && root.dataset.content === 'unified') {
+        unifiedSurfaces()[unifiedReturn.kind]?.resume?.();
+        unifiedReturn = null;
+      }
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
       return true;
     }
@@ -6456,6 +6487,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   function openUnified(item) {
+    suspendUnifiedOrigin();
     if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
     if (item.section === 'cinema') return openCinemaRef(item.ref, { title: item.title, cover: item.cover });
     if (root.dataset.section !== 'manga') {
@@ -6497,6 +6529,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     chapters: w.chapters ?? null, _latestChapter: w._latestChapter ?? null, _updateAt: w._updateAt ?? null, raw: w,
   } : null;
   const openManga = (w) => {
+    suspendUnifiedOrigin();
     if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
     void openWork(w.raw ?? w);
   };
@@ -6527,8 +6560,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     open: {
       item: (it) => openUnified(it),
       manga: openManga,
-      anime: (x) => openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }),
-      cinema: (x) => openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster, type: x.type ?? null }),
+      anime: (x) => { suspendUnifiedOrigin(); return openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }); },
+      cinema: (x) => { suspendUnifiedOrigin(); return openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster, type: x.type ?? null }); },
       browse: (id) => browseSection(id),
       // «عرض الكل» لآخر المشاهدات: السجل كاملًا في المكتبة الموحدة
       recent: () => { unifiedLibrary.state.tab = 'recent'; navTo('library'); },

@@ -37,7 +37,7 @@ export function runSearch(query, engines, onGroup, isCurrent = () => true) {
  */
 export function createUnifiedSearch({ el, glyph, engines, open, card, mount, debounceMs = 320, recent = null, genres = () => [], trending = () => [], openTrend = null }) {
   let page = null, input = null, results = null, filterNav = null;
-  let query = '', token = 0, timer = 0, filter = 'all';
+  let query = '', token = 0, timer = 0, filter = 'all', suspended = false, suspendedScroll = 0;
   const groups = new Map(); // id → { items, error, done, expanded }
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
@@ -192,6 +192,7 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
   }
 
   function openPage(initial = '') {
+    if (suspended) resume();
     if (!page) build();
     if (!page.isConnected) mount(page);
     if (!query) paintResults(); // الرائج والسجل بآخر حالهما في كل فتح
@@ -200,11 +201,37 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
     setTimeout(() => input?.focus(), 60);
   }
   function close() {
-    if (!page?.isConnected) return false;
+    if (!page?.isConnected || suspended) return false;
     page.classList.remove('in');
     const p = page;
     setTimeout(() => p.remove(), 260);
     return true;
   }
-  return { open: openPage, close, isOpen: () => Boolean(page?.isConnected), search, state: () => ({ query, filter, groups }) };
+  function suspend() {
+    if (!page?.isConnected || suspended) return false;
+    suspended = true;
+    suspendedScroll = page.scrollTop || 0;
+    page.style.pointerEvents = 'none';
+    return true;
+  }
+  function hideSuspended() {
+    if (!suspended || !page) return;
+    page.style.visibility = 'hidden';
+    page.setAttribute('aria-hidden', 'true');
+  }
+  function resume() {
+    if (!suspended || !page) return false;
+    suspended = false;
+    page.style.visibility = '';
+    page.style.pointerEvents = '';
+    page.removeAttribute('aria-hidden');
+    page.scrollTop = suspendedScroll;
+    return true;
+  }
+  function discardSuspended() {
+    if (!suspended) return false;
+    page?.remove(); page = null; suspended = false;
+    return true;
+  }
+  return { open: openPage, close, suspend, hideSuspended, resume, discardSuspended, isOpen: () => Boolean(page?.isConnected && !suspended), search, state: () => ({ query, filter, groups, suspended }) };
 }

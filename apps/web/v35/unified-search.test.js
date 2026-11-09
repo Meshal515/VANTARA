@@ -8,6 +8,22 @@ const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
 const deferred = () => { let resolve, reject; const p = new Promise((a, b) => { resolve = a; reject = b; }); return { p, resolve, reject }; };
 
 describe('البحث الموحد', () => {
+  it('suspends the full search page over a work and restores the same filter on back', () => {
+    const mount=(n)=>document.body.append(n);
+    const s=createUnifiedSearch({el,glyph:()=>'',engines:{},open:()=>{},mount,card:()=>({title:'X',cover:null}),debounceMs:0});
+    s.open();
+    const modal=document.querySelector('.us-page');
+    modal.scrollTop=130;
+    expect(s.suspend()).toBe(true);
+    s.hideSuspended();
+    expect(s.close()).toBe(false);
+    expect(modal.style.visibility).toBe('hidden');
+    expect(s.resume()).toBe(true);
+    expect(modal.scrollTop).toBe(130);
+    expect(s.state().suspended).toBe(false);
+    expect(s.close()).toBe(true);
+  });
+
   it('يبحث في الأنواع الثلاثة، وفشل نوع لا يُسقط غيره', async () => {
     const got = {};
     await runSearch('naruto', { anime: async () => [1, 2], manga: async () => { throw new Error('x'); }, cinema: async () => [3] }, (id, r) => { got[id] = r; });

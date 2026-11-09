@@ -3,7 +3,7 @@
  * في «تصفّح» يفتحانه أيضًا (مضلل). هنا صفحة واحدة بلغة الموحد:
  *   البحث (يفتح البحث الموحد) ← التصنيفات بفلتر النوع (أنمي/مانجا/سينما) ← الرائج الآن مرقّمًا ومنوّعًا.
  * كل تصنيف يفتح نتائج نوعه الحقيقية: الأنمي من AniList بفلتر التصنيف، والسينما من Cinemeta بفلتره،
- * والمانجا من فلتر التصنيف في المصادر (صفحة مجموعة المانجا نفسها).
+ * والمانجا من AniList بفلتر تصنيف أو وسم حقيقي، دون اشتراط مصدر مثبّت لعرض الأغلفة.
  * البطاقات من نظام البطاقات الموحد (cards.css).
  */
 
@@ -20,7 +20,7 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   const KEY = 'vantara.unified.discover.type';
   let type = 'anime';
   try { const v = storage?.getItem(KEY); if (DISCOVER_TYPES.some(([k]) => k === v)) type = v; } catch { /* */ }
-  let host = null, overlay = null, token = 0;
+  let host = null, overlay = null, token = 0, suspended = false, suspendedScroll = 0;
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
   // صورة في ذاكرة المتصفح تظهر فورًا (لا تتلاشى من جديد مع كل رسم)، والفاشلة تُزال فلا يبقى إطار مكسور
   const img = (src, cls) => { const i = el('img', cls); i.alt = ''; i.loading = 'lazy'; i.decoding = 'async'; i.onload = () => i.classList.add('in'); i.onerror = () => i.remove(); if (src) i.src = src; if (i.complete && i.naturalWidth) i.classList.add('in'); return i; };
@@ -57,9 +57,9 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
    * بلمسة. المانجا تفتح صفحة مجموعتها (فلتر التصنيف في المصادر) لأنها تُجلب من محرّك التطبيق.
    */
   function openGenre(g, t = type) {
-    if (t === 'manga') { closeGenre(); return openMangaGenre(g.id); }
     const mine = ++token;
     overlay?.remove();
+    suspended = false;
     overlay = el('div', 'uv-page'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
     const top = el('div', 'uv-ptop');
     const back = el('button', 'uv-back'); back.type = 'button'; back.setAttribute('aria-label', 'رجوع'); back.innerHTML = glyph('back', { size: 24 }); back.onclick = closeGenre;
@@ -82,10 +82,38 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
     }, () => { if (mine === token && overlay) grid.replaceWith(el('p', 'uv-none', 'تعذّر الجلب، حاول بعد قليل')); });
   }
   function closeGenre() {
-    if (!overlay) return false;
+    if (!overlay || suspended) return false;
     const o = overlay; overlay = null; token++;
     o.classList.remove('in');
     setTimeout(() => o.remove(), 260);
+    return true;
+  }
+
+  function suspend() {
+    if (!overlay || suspended) return false;
+    suspended = true;
+    suspendedScroll = overlay.scrollTop || 0;
+    overlay.style.pointerEvents = 'none';
+    return true;
+  }
+  function hideSuspended() {
+    if (!suspended || !overlay) return;
+    overlay.style.visibility = 'hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  function resume() {
+    if (!suspended || !overlay) return false;
+    suspended = false;
+    overlay.style.visibility = '';
+    overlay.style.pointerEvents = '';
+    overlay.removeAttribute('aria-hidden');
+    overlay.scrollTop = suspendedScroll;
+    return true;
+  }
+  function discardSuspended() {
+    if (!suspended) return false;
+    overlay?.remove();
+    overlay = null; suspended = false; token++;
     return true;
   }
 
@@ -141,5 +169,5 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   }
   /** «كل الأعمال» بنوع الاكتشاف الحالي (الأنمي افتراضيًا). */
   const openAll = (t = type) => openGenre({ id: null, label: 'كل الأعمال' }, t);
-  return { render, back: closeGenre, openAll, openGenre, state: () => ({ type }) };
+  return { render, back: closeGenre, openAll, openGenre, suspend, hideSuspended, resume, discardSuspended, state: () => ({ type, suspended }) };
 }
