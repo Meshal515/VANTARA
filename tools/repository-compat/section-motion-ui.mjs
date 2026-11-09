@@ -137,10 +137,10 @@ try {
   await writeFile(out+'/scrolled-cinema-proof.json',JSON.stringify(scrolledProof,null,2));
   // The native scrollbar is independent of CSS scrollbar styles and must be
   // disabled for the actual Android WebView.
-  const activitySource = await readFile(path.join(repo,'android/app/src/main/java/com/vantara/app/MainActivity.java'),'utf8');
-  if (!activitySource.includes('setVerticalScrollBarEnabled(false)')
-      || !activitySource.includes('setHorizontalScrollBarEnabled(false)'))
-    throw new Error('Native Android scroll indicators were not disabled');
+  const nativeUi = await readFile(path.join(repo,'android/app/src/main/kotlin/com/vantara/plugins/SystemUiPlugin.kt'),'utf8');
+  if (!nativeUi.includes('web.isVerticalScrollBarEnabled = false')
+      || !nativeUi.includes('web.isHorizontalScrollBarEnabled = false'))
+    throw new Error('Native Android main WebView scroll indicators were not disabled');
   // Real CSS + Web Animations test: wide artwork stays at a constant screen Y
   // from first frame through animation completion (DOM existence alone is not proof).
   const visual=await browser.newPage({viewport:{width:390,height:844}});

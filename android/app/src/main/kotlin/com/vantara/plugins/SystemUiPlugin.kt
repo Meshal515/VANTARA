@@ -38,6 +38,14 @@ class SystemUiPlugin : Plugin() {
     // رصد الخيط الرئيسي (MainThreadWatch): يعمل مع «إظهار التشخيص» في Debug فقط، من الإقلاع
     override fun load() {
         if (DiagnosticVisibility.visible(context)) MainThreadWatch.start()
+        // Bridge's main WebView owns the OS-drawn scroll indicator. Keep scrolling,
+        // touch input and scroll restoration untouched: hide only that indicator.
+        activity?.runOnUiThread {
+            bridge?.webView?.let { web ->
+                web.isVerticalScrollBarEnabled = false
+                web.isHorizontalScrollBarEnabled = false
+            }
+        }
     }
 
     /** الرسائل الطويلة على الخيط الرئيسي مؤخرًا، لتقرير وقفات القارئ. Debug فقط. */
