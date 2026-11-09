@@ -497,27 +497,6 @@
 .v35 .uh-door--anime { --door: #3b82f6; }
 .v35 .uh-door--cinema { --door: #c1121f; }
 
-/* القالب الموحّد يحدد هندسة الرئيسية المشتركة: المانجا أغلفة طولية، والأنمي بطاقات عريضة،
- * والسينما ملصقات صغيرة بأولها عريض. البطاقة نفسها تبقى بوسم نوعها. */
-.v35[data-screens='anime'] .uh-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.v35[data-screens='anime'] .uh-art {
-  aspect-ratio: 16 / 9;
-}
-.v35[data-screens='cinema'] .uh-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.v35[data-screens='cinema'] .uh-card:first-child {
-  grid-column: 1 / -1;
-}
-.v35[data-screens='cinema'] .uh-card:first-child .uh-art {
-  aspect-ratio: 16 / 9;
-  border-radius: var(--r-lg);
-}
-.v35[data-screens='cinema'] .uh-card:first-child .uh-art img {
-  object-position: center 25%;
-}
 @media (min-width: 700px) {
   .v35 .uh {
     max-width: 1200px;
@@ -526,9 +505,6 @@
   .v35 .uh-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 22px 16px;
-  }
-  .v35[data-screens='anime'] .uh-grid {
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   }
 }
 @media (prefers-reduced-motion: reduce) {

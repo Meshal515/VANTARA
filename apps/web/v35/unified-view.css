@@ -112,8 +112,8 @@
 .uv-ac:not(.done) .uv-t2 em{color:var(--accent-text,var(--accent))}
 
 /* بكامل الشاشة مثل رئيسية الأنمي: البنر يمتد تحت الترويسة الشفافة */
-.v35[data-content='unified'] #home > .header,.v35[data-screens='unified'] #home > .header{position:relative;z-index:4;background:transparent!important;box-shadow:none!important}
-.v35[data-content='unified'] #allHome .uv-hero,.v35[data-screens='unified'] #allHome .uv-hero{margin-top:calc(-1 * (var(--top-h,56px) + var(--safe-top,0px)));padding-top:calc(var(--top-h,56px) + var(--safe-top,0px) + 12px)}
+.v35[data-content='unified'] #home > .header{position:relative;z-index:4;background:transparent!important;box-shadow:none!important}
+.v35[data-content='unified'] #allHome .uv-hero{margin-top:calc(-1 * (var(--top-h,56px) + var(--safe-top,0px)));padding-top:calc(var(--top-h,56px) + var(--safe-top,0px) + 12px)}
 /* «شاهد» بلا حاوية: أيقونة ونص */
 .v35 .uv-btn{background:none!important;padding:0 8px!important;height:48px;color:var(--text-1,#f2f1f5)!important;font-size:16px;font-weight:700;gap:10px}
 .v35 .uv-btn .icon{color:var(--accent-text,var(--accent))}

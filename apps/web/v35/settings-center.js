@@ -4,7 +4,7 @@
  */
 
 import { ACCENTS, BRAND_DEFAULT, brandOf, readAppearance, stylesOf, workStyleOf } from './appearance.js';
-import { modeOf, readStructure, setUnifyContent, setUnifyScreens, TEMPLATES, writeStructure } from './experience.js';
+import { modeOf, readStructure, SECTION_ORDER, setUnifyContent, writeStructure } from './experience.js';
 import { homePreview, previewPicture, workPreview } from './look-previews.js';
 
 /** الفئات بترتيب المالك. `groups`: مجموعات الإعدادات القديمة التي انتقلت إليها (للاختبار والتوثيق). */
@@ -43,7 +43,7 @@ export function appearanceFeature({ el, glyph }, run, storage) {
     shots.append(f);
   }
   const text = el('span', 'settings-feature-text');
-  text.append(el('strong', null, c.title), el('small', null, { independent: 'كل قسم بشاشته', screens: 'شاشات موحّدة', content: 'محتوى موحّد' }[mode]));
+  text.append(el('strong', null, c.title), el('small', null, mode === 'content' ? 'محتوى موحّد' : 'كل قسم بشاشته'));
   b.append(shots, text);
   b.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
   return b;
@@ -62,12 +62,12 @@ export function renderAppearancePane(body, ctx) {
   const structure = readStructure(ctx.storage);
   const saveLook = (change) => {
     ctx.patchAppearance(change);
-    ctx.apply();
+    ctx.apply('look');
     ctx.rerender();
   };
   const saveStructure = (next) => {
     writeStructure(next, ctx.storage);
-    ctx.apply();
+    ctx.apply('structure');
     ctx.rerender();
   };
 
@@ -227,29 +227,18 @@ export function renderAppearancePane(body, ctx) {
   dark.append(toggleRow(ctx, 'moon', 'الخلفية الداكنة الصريحة', 'أسود كامل بدل الداكن. على شاشات OLED يُطفأ البكسل الأسود فيوفّر شيئًا من الطاقة.', look.pureBlack, (on) => saveLook(() => ({ pureBlack: on }))));
   body.append(dark);
 
-  // ── أنماط العرض والتكامل: ثلاث حالات فقط ──
+  // ── أنماط العرض والتكامل: حالتان فقط (قرار المالك: «توحيد الشاشات» محذوف) ──
   head('STRUCTURE', 'أنماط العرض والتكامل', 'العرض فقط يتغيّر: مكتباتك وتقدّمك وتشغيل كل نوع كما هي، وترجع متى شئت.');
   const mode = modeOf(structure);
   const toggles = el('div', 'settings-list');
   toggles.append(
-    toggleRow(ctx, 'layers', 'توحيد الشاشات', 'تصميم VANTARA الموحّد لرئيسية كل قسم، وكل قسم بمحتواه ومكتبته', structure.unifyScreens, (on) => saveStructure(setUnifyScreens(structure, on))),
-    toggleRow(
-      ctx,
-      'grid',
-      'توحيد المحتوى',
-      structure.unifyScreens
-        ? 'رئيسية واحدة لكل أعمالك، كل عمل بوسم نوعه، ويختفي مبدّل الأقسام'
-        : structure.contentPreferred ? 'يتاح بعد توحيد الشاشات، ويعود كما تركته' : 'يتاح بعد توحيد الشاشات',
-      structure.unifyContent,
-      (on) => saveStructure(setUnifyContent(structure, on)),
-      { disabled: !structure.unifyScreens },
-    ),
+    toggleRow(ctx, 'grid', 'توحيد المحتوى', 'تطبيق واحد لكل أعمالك: رئيسية ومكتبة وبحث واستكشاف بفلتر الأنواع', structure.unifyContent, (on) => saveStructure(setUnifyContent(structure, on))),
   );
   body.append(toggles);
   if (mode === 'independent') {
     body.append(el('p', 'look-caption', 'الآن: كل قسم بشاشته وتصميمه.'));
     const strip = tiles('look-tiles--static look-fade');
-    for (const section of TEMPLATES) {
+    for (const section of SECTION_ORDER) {
       const fig = el('figure', 'look-tile look-tile--static');
       const frame = el('span', 'look-frame');
       frame.append(previewPicture(doc, (vp) => homePreview(section, vp), `رئيسية ${SECTION_NAMES[section]}`));
@@ -258,11 +247,7 @@ export function renderAppearancePane(body, ctx) {
     }
     body.append(strip);
   } else {
-    // قرار المالك: لا اختيار قالب. التوحيد له تصميم واحد مخصص (الرئيسية الموحدة)، وتصاميم الأقسام تبقى لأقسامها.
-    body.append(el('p', 'look-caption', mode === 'content'
-      ? 'الآن: رئيسية واحدة لكل أعمالك بتصميم VANTARA الموحّد.'
-      : 'الآن: تصميم VANTARA الموحّد لرئيسية كل قسم، بمحتواه.'));
-    // الواجهات الثلاث تتلاشى وتظهر مكانها الواجهة الموحدة
+    body.append(el('p', 'look-caption', 'الآن: رئيسية ومكتبة واحدة لكل أعمالك بتصميم VANTARA الموحّد.'));
     const fig = el('figure', 'look-tile look-tile--static look-unified look-fade');
     const frame = el('span', 'look-frame');
     frame.append(previewPicture(doc, (vp) => homePreview('unified', vp), 'الرئيسية الموحدة'));

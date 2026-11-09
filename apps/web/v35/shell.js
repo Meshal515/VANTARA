@@ -4896,7 +4896,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else if (!state.catalog.length) void loadMoreDiscover();
     }
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
-    if (id === 'home' && from !== 'home' && (root.dataset.content === 'unified' || root.dataset.screens === 'unified')) renderAllHome();
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') renderAllHome();
     if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch) {
       if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
       void refreshHomeUpdates();
@@ -5432,7 +5432,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (on('appearance')) {
       renderAppearancePane(body, {
         el, glyph, openSheet, closeSheet, toast, patchAppearance,
-        apply: () => { applySection(root.dataset.section); applyExperience(); },
+        // المظهر يغيّر الألوان فقط؛ البنية وحدها تعيد التجربة (الشريط والرئيسية). فصلهما يجعل
+        // اختيار نمط أو لون لمسة خفيفة بدل إعادة بناء الرئيسية الموحدة كل مرة
+        apply: (kind) => (kind === 'structure' ? applyExperience() : applySection(root.dataset.section)),
         rerender: () => renderSettings(),
       });
       return;
@@ -5943,7 +5945,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const warmed = new Set();
   /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
   function prepareSections() {
-    if (currentPage() !== 'home' || root.dataset.content === 'unified' || root.dataset.screens === 'unified') return;
+    if (currentPage() !== 'home' || root.dataset.content === 'unified') return;
     sectionLayers().prepare();
     for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
   }
@@ -6060,16 +6062,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
-    // «توحيد التصميم»: الصفحة نفسها (الموحدة) بمحتوى القسم الجديد، بلا طبقات الأقسام
-    if (root.dataset.screens === 'unified' && root.dataset.content !== 'unified') {
-      setSectionsOpen(false);
-      applySection(id);
-      showHome(id);
-      if (currentPage() !== 'home') showPage('home', { sectionSwitch: true });
-      else window.scrollTo({ top: 0, behavior: 'instant' });
-      haptic();
-      return;
-    }
     if (currentPage() !== 'home') {
       const leave = root.querySelector('.page.active');
       const y = window.scrollY;
@@ -6089,17 +6081,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
   /** رئيسية القسم وحدها ظاهرة؛ وفي توحيد المحتوى الرئيسية المشتركة بدلها كلها. */
   function showHome(id) {
-    const all = root.dataset.content === 'unified' || root.dataset.screens === 'unified';
+    const all = root.dataset.content === 'unified';
     for (const [section, home] of Object.entries(HOMES)) q(home).hidden = all || section !== id;
     const shared = q('allHome');
     if (shared) {
       shared.hidden = !all;
-      if (all) renderAllHome();
+      // خارج الرئيسية (الإعدادات): البناء يؤجَّل لحين الرجوع إليها (showPage يرسمها)، فلا يثقل اللمسة
+      if (all && currentPage() === 'home') renderAllHome();
     }
   }
 
   // ───────────────────────── بنية التجربة (experience.js) ─────────────────────────
-  // القالب على جذر التطبيق (`data-screens`)، وتوحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
+  // توحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
   // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
   let dockMotion = null;
   let experienceApplied = false;
@@ -6173,9 +6166,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function applyExperience() {
     const view = experienceView(readStructure());
-    // التوحيد له تصميم واحد (الرئيسية الموحدة): «توحيد التصميم» يعرضه لكل قسم بمحتواه
-    if (view.template) root.dataset.screens = 'unified';
-    else delete root.dataset.screens;
+    delete root.dataset.screens; // «توحيد الشاشات» محذوف (قرار المالك)
     const unified = view.home === 'all';
     const was = root.dataset.content === 'unified';
     if (unified) root.dataset.content = 'unified';
@@ -6241,7 +6232,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   const unifiedView = createUnifiedView({
     el, glyph, genreAr: (g) => AR_GENRE[g] ?? g,
-    lock: () => (root.dataset.content !== 'unified' && root.dataset.screens === 'unified' ? (root.dataset.section ?? 'manga') : null),
     reducedMotion: () => document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     data: {
       continue: () => unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) })),
@@ -6784,7 +6774,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
     // switch on weak devices. In a later idle slot the sections stand by off-screen once so that cost is paid here.
     idle(() => {
-      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving || root.dataset.content === 'unified' || root.dataset.screens === 'unified') return;
+      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving || root.dataset.content === 'unified') return;
       const motion = sectionLayers();
       motion.prepare();
       void q('home')?.offsetHeight; // the off-screen layout itself
