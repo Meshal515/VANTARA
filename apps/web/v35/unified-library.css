@@ -80,3 +80,5 @@
 .v35 .ul-art,.v35 .ul-recent-art{border-radius:12px}
 .v35 .ul-recent-grid .ul-recent-art{border-radius:12px}
 @media (min-width:700px){.v35 .ul-peek{grid-template-columns:repeat(4,minmax(0,150px));gap:16px}}
+.v35 .ul-imgbox{position:absolute;inset:0;display:block}
+.v35 .ul-imgbox > img{width:100%;height:100%;object-fit:cover;display:block}

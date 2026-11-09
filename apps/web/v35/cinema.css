@@ -1695,18 +1695,10 @@
   width: 92%;
 }
 
-/* لم يُعثر عليه: سبب واضح، نتائج قريبة يختارها الشخص، وفحص المصادر */
-.v35 .cn-sources[data-state='none'] {
+/* لم يُعثر عليه: بلا سطر حالة (قرار المالك)؛ تظهر النتائج القريبة وفحص المطوّر فقط، وإلا يختفي السطر وخطّاه */
+.v35 .cn-sources[data-state='none']:not(:empty) {
   display: grid;
   gap: 10px;
-}
-.v35 .cn-sources-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.v35 .cn-sources-row .cn-link {
-  margin-inline-start: auto;
 }
 .v35 .cn-near {
   display: grid;
@@ -1967,3 +1959,5 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
   .v35 .cn-detail-mark { height: 96px; }
   .v35 .cn-detail-mark .cn-mark-logo { max-height: 96px; }
 }
+/* المكتبة: هامش الصفحة وحده (كان هامش الصفحة + هامش الشبكة = 32px، فراغ يمين ويسار — ملاحظة المالك) */
+.v35 #cinemaLibrary :is(.cn-grid, .cn-wide-grid) { padding-inline: 0; }

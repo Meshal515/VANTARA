@@ -24,7 +24,7 @@ import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
-import { REJECT_AR, STATE, STATE_AR, overallSearchState, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
+import { REJECT_AR, STATE, STATE_AR, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
 import { matchCriteria, mergeWork, namesOf } from '../lib/cinema-identity.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
@@ -570,7 +570,10 @@ export function createCinema(deps) {
     const c = asButton(el('div', 'cn-wide'), displayTitle(w));
     c.dataset.ref = refOf(w.id);
     const art = el('span', 'cn-wide-art');
-    art.append(image(w.background ?? w.poster));
+    // البطاقة عريضة: الخلفية العريضة دائمًا، لا الملصق الطولي مضغوطًا (ملاحظة المالك). الأعمال الآتية من الحساب
+    // بلا خلفية محفوظة تأخذ خلفية IMDb الرسمية بمعرّفها، والملصق آخر بديل
+    const wide = w.background ?? (/^tt\d+$/.test(String(w.id)) ? `https://images.metahub.space/background/medium/${w.id}/img` : null);
+    art.append(image(wide ?? w.poster, 'cn-img', { fallback: wide ? w.poster : null }));
     const bar = el('span', 'cn-progress');
     const fill = el('i');
     fill.style.width = `${(ratio * 100).toFixed(1)}%`;
@@ -1510,28 +1513,11 @@ export function createCinema(deps) {
     const found = await locate(m, season);
     host.removeAttribute('aria-busy');
     if (q('cinemaSources') !== host || state.detail?.id !== m.id || (m.type === 'series' && state.season !== season)) return;
-    const retry = () =>
-      button('cn-link', 'ابحث مجددًا', () => {
-        state.works.get(playKey(m, season))?.cancel?.();
-        state.works.delete(playKey(m, season));
-        dropWarm();
-        void paintSources(m, season);
-        startWarm(m);
-      });
     if (!found || !found.copies.length) {
+      // قرار المالك (9 نوفمبر): لا سطر حالة ولا «ابحث مجددًا» تحت «شاهد». مهلة بلا رد لا تُحفظ
+      // (locateHandle)، فلمسة «شاهد» تبحث من جديد؛ ويبقى ما يُختار فعلًا: النتائج القريبة وفحص المطوّر
       host.dataset.state = 'none';
-      // «لم ترد» فقط لمصادر صامتة فعلًا؛ مصدر ردّ ولم نطابق فيه هذا العمل يُقال كذلك
-      const st = found ? overallSearchState(found.sources) : null;
-      const msg = !found
-        ? 'تعذّر البحث في المصادر — تحقّق من الاتصال'
-        : st === STATE.SOURCE_RESPONDED_NO_MATCH
-          ? m.type === 'series' ? `ردّت المصادر، والموسم ${season} من هذا المسلسل غير موجود فيها حاليًا` : 'ردّت المصادر، وهذا الفيلم بعينه غير موجود فيها حاليًا'
-          : st === STATE.SOURCE_ERROR
-            ? 'المصادر ردّت بخطأ الآن'
-            : 'المصادر لم ترد في الوقت';
-      const row = el('div', 'cn-sources-row');
-      row.append(el('i', 'cn-dot'), el('span', null, msg), retry());
-      const nodes = [row];
+      const nodes = [];
       if (found?.near?.length) {
         const near = el('div', 'cn-near');
         near.append(el('span', 'cn-near-label', 'نتائج قريبة — اختر الصحيح:'));

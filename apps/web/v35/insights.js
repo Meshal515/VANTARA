@@ -171,6 +171,26 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     node._raf = requestAnimationFrame(step);
   }
   const reducedMotion = () => document.documentElement.dataset.motion === 'off' || Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const EASE = 'cubic-bezier(.22,.8,.2,1)';
+  /**
+   * «لا يختفي، يتحرك» (ملاحظة المالك، 9 نوفمبر): العقد نفسها تبقى، وكل عقدة تغيّر مكانها تنزلق إليه من
+   * مكانها القديم (FLIP بـ transform وحده). لا تلاشٍ للقسم ولا إعادة بناء.
+   */
+  function flip(nodes, mutate) {
+    const before = new Map(nodes.filter((n) => n.isConnected).map((n) => [n, n.getBoundingClientRect().top]));
+    mutate();
+    if (reducedMotion()) return;
+    for (const [n, top] of before) {
+      if (!n.isConnected || !n.animate) continue;
+      const dy = top - n.getBoundingClientRect().top;
+      if (Math.abs(dy) >= 1) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 420, easing: EASE });
+    }
+  }
+  /** عقدة جديدة (شخص أو عمل لم يكن ظاهرًا) تدخل في مكانها بلا قفز. */
+  function enter(node) {
+    if (reducedMotion() || !node.animate) return;
+    node.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE });
+  }
   /** القائمة تحت الدائرة: صف لكل شخص مربوط به، يتحدّث في مكانه (الصور لا تُعاد) ويُرتّب بنقل العقد نفسها. */
   function legendRow(p) {
     const li = el('li');
@@ -185,16 +205,21 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
   }
   function paintLegend(legend, people) {
     const rows = new Map([...legend.children].map((li) => [li.dataset.uid, li]));
-    for (const p of people) {
-      const li = rows.get(p.uid) ?? legendRow(p);
-      // المقفل: ساعاته ظاهرة وقفل صغير يقول إن أعماله مقفلة؛ يخفت فقط من لا وقت له هنا
-      li.className = `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}${p.shown ? '' : ' empty'}`;
-      li.querySelector('.ins-h').textContent = p.shown ? duration(p.ms) : '—';
-      li.querySelector('.ins-lock').style.display = p.locked ? '' : 'none';
-      li.querySelector('button').onclick = () => (p.shown ? pick(p.uid) : toast('لا وقت مسجّل له في هذا القسم', 2500));
-      legend.append(li);
-    }
-    for (const [uid, li] of rows) if (!people.some((p) => p.uid === uid)) li.remove();
+    flip([...rows.values()], () => {
+      for (const p of people) {
+        const fresh = !rows.has(p.uid);
+        const li = rows.get(p.uid) ?? legendRow(p);
+        // المقفل: ساعاته ظاهرة وقفل صغير يقول إن أعماله مقفلة. من لا وقت له هنا يبقى ظاهرًا بـ«—» (لا يخفت
+        // ولا يختفي). الصنف «ins-none» لا «empty»: ذاك صنف حالة الفراغ العامة (min-height: 46vh لكل صف)
+        li.className = `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}${p.shown ? '' : ' ins-none'}`;
+        li.querySelector('.ins-h').textContent = p.shown ? duration(p.ms) : '—';
+        li.querySelector('.ins-lock').style.display = p.locked ? '' : 'none';
+        li.querySelector('button').onclick = () => (p.shown ? pick(p.uid) : toast('لا وقت مسجّل له في هذا القسم', 2500));
+        legend.append(li);
+        if (fresh && legend.isConnected) enter(li);
+      }
+      for (const [uid, li] of rows) if (!people.some((p) => p.uid === uid)) li.remove();
+    });
     return legend;
   }
   const legendNode = (people) => paintLegend(el('ul', 'ins-legend'), people);
@@ -224,10 +249,7 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     const legend = box.querySelector('.ins-legend');
     if (legend) paintLegend(legend, people);
     const works = box.querySelector('.ins-works');
-    if (works) {
-      works.classList.add('ins-fade');
-      setTimeout(() => { paintWorks(works, readHidden()); works.classList.remove('ins-fade'); }, reducedMotion() ? 0 : 140);
-    }
+    if (works) paintWorks(works, readHidden());
     tintSilk();
   }
 
@@ -368,36 +390,54 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     update();
   }
 
+  /**
+   * الأعمال تُرسم في مكانها: صف العمل الظاهر من قبل يبقى هو نفسه (غلافه لا يُحمَّل من جديد) وينزلق لمكانه،
+   * والجديد يدخل، والخارج يُزال. كانت القائمة تتلاشى كلها وتُبنى من الصفر مع كل زر.
+   */
   function paintWorks(box, hidden) {
     const r = results.get(person);
-    box.replaceChildren();
+    const old = new Map([...box.querySelectorAll('.ins-row')].map((x) => [x.dataset.ref, x]));
     const who = profileOf(person).name;
-    box.append(el('h3', null, person === me() ? 'أعمالك' : `أعمال ${who}`));
-    if (!r || r.locked) { box.append(el('p', 'ins-empty', 'أعماله مقفلة، وقته في VANTARA فقط ظاهر')); return; }
-    const content = (r.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0 && !(person === me() && hidden.has(x.seriesRef)))
+    const head = el('h3', null, person === me() ? 'أعمالك' : `أعمال ${who}`);
+    const content = !r || r.locked ? [] : (r.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0 && !(person === me() && hidden.has(x.seriesRef)))
       .sort((a, b) => b.activeMs - a.activeMs);
-    if (!content.length) { box.append(el('p', 'ins-empty', 'لا وقت مسجّل بعد')); return; }
-    const { main, short } = splitShort(content);
-    const max = Math.max(1, ...content.map((x) => x.activeMs));
-    const list = el('div', 'ins-list');
-    for (const item of main) list.append(row(item, max));
-    box.append(list);
-    if (short.length) {
-      if (showShort) { const more = el('div', 'ins-list ins-short'); for (const item of short) more.append(row(item, max)); box.append(more); }
-      else {
-        const b = el('button', 'ins-more', `عرض المزيد (${short.length} أقل من 10 دقائق)`); b.type = 'button';
-        b.onclick = () => { showShort = true; paintWorks(box, readHidden()); };
-        box.append(b);
+    flip([...old.values()], () => {
+      if (!r || r.locked) { box.replaceChildren(head, el('p', 'ins-empty', 'أعماله مقفلة، وقته في VANTARA فقط ظاهر')); return; }
+      if (!content.length) { box.replaceChildren(head, el('p', 'ins-empty', 'لا وقت مسجّل بعد')); return; }
+      const { main, short } = splitShort(content);
+      const max = Math.max(1, ...content.map((x) => x.activeMs));
+      const take = (item) => {
+        const kept = old.get(item.seriesRef);
+        if (kept && kept._mine === (person === me())) { kept._bar.style.width = `${Math.max(8, item.activeMs / max * 100)}%`; old.delete(item.seriesRef); return kept; }
+        const n = row(item, max);
+        n._fresh = box.isConnected;
+        return n;
+      };
+      const list = el('div', 'ins-list');
+      list.append(...main.map(take));
+      const nodes = [head, list];
+      if (short.length) {
+        if (showShort) { const more = el('div', 'ins-list ins-short'); more.append(...short.map(take)); nodes.push(more); }
+        else {
+          const b = el('button', 'ins-more', `عرض المزيد (${short.length} أقل من 10 دقائق)`); b.type = 'button';
+          b.onclick = () => { showShort = true; paintWorks(box, readHidden()); };
+          nodes.push(b);
+        }
       }
-    }
+      box.replaceChildren(...nodes);
+      for (const n of box.querySelectorAll('.ins-row')) if (n._fresh) { n._fresh = false; enter(n); }
+    });
   }
 
   function row(item, max) {
     const work = workFromRef(item.seriesRef, item.title, item.coverUrl);
     const rowEl = el('div', 'insights-rank ins-row');
+    rowEl.dataset.ref = item.seriesRef;
+    rowEl._mine = person === me();
     const main = el('button', 'ins-row-main'); main.type = 'button';
     const fill = el('span', 'insights-bar');
     fill.style.width = `${Math.max(8, item.activeMs / max * 100)}%`;
+    rowEl._bar = fill;
     const track = el('span', 'insights-track');
     const cover = el('span', 'insights-cover');
     void Promise.resolve(mountImage(cover, work)).then(() => {

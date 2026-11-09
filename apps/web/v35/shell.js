@@ -3727,6 +3727,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     shelves: () => libraryShelves(sync, me(), { qualifiesView: (v) => isMediaRef(v.series_ref) || qualifiesOwnView(v) }),
     open: (item) => openUnified(item),
     discover: () => navTo('discover'),
+    coverInto: (node, item) => { void mountImage(node, workFromRef(String(item.ref), item.title, item.cover)); return true; },
+    itemMenu: (item) => openRecentMenu({ ...item, ref: item.view?.series_ref ?? item.ref }),
   });
   function renderUnifiedLibrary() {
     unifiedLibrary.render(q('unifiedLibrary'));
@@ -3767,7 +3769,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : [state.home.trending, state.home.popular];
     for (const list of pools) for (const x of list ?? []) {
       if (!(x.genres ?? []).includes(en)) continue;
-      const src = type === 'manga' ? (x.coverImage?.large ?? x.poster ?? null) : (x.background ?? x.backdrop ?? x.banner ?? null);
+      const src = type === 'manga' ? (x.wideBanner ?? null) : (x.background ?? x.backdrop ?? x.banner ?? null);
       if (src && !used.has(src) && !genreArtUsed.has(src)) { used.add(src); genreArtUsed.add(src); return src; }
     }
     return null;
@@ -3791,7 +3793,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
           const { catalog } = await import('../lib/cinema-meta.js');
           return pick(await catalog('movie', 'top', { genre: en }), 'background');
         }
-        return null;
+        // المانجا: أشهر مانجا التصنيف في AniList ببنرها العريض (وإلا غلافها). ما ليس تصنيفًا عندهم وسمٌ
+        const ANILIST_GENRES = ['Action', 'Adventure', 'Comedy', 'Drama', 'Ecchi', 'Fantasy', 'Horror', 'Mahou Shoujo', 'Mecha', 'Music', 'Mystery', 'Psychological', 'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller'];
+        const TAGS = { Isekai: 'Isekai', 'Martial Arts': 'Martial Arts', Historical: 'Historical', 'School Life': 'School' };
+        const byGenre = ANILIST_GENRES.includes(en);
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            query: `query ($v: String) { Page(perPage: 12) { media(type: MANGA, isAdult: false, sort: POPULARITY_DESC, ${byGenre ? 'genre: $v' : 'tag: $v'}) { bannerImage coverImage { large } } } }`,
+            variables: { v: byGenre ? en : (TAGS[en] ?? en) },
+          }),
+        });
+        const media = (await res.json())?.data?.Page?.media ?? [];
+        return pick(media.map((m) => ({ src: m.bannerImage })), 'src') ?? pick(media.map((m) => ({ src: m.coverImage?.large })), 'src');
       })().catch(() => null));
     }
     return genreArtCache.get(key);

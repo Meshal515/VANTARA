@@ -40,7 +40,7 @@ export function agoShort(at, now = Date.now()) {
  * @param {{ el: Function, glyph: Function, shelves: () => ReturnType<import('./library-model.js').libraryShelves>,
  *   open: (item: object) => void, discover: () => void, storage?: Storage, now?: () => number }} ctx
  */
-export function createUnifiedLibrary({ el, glyph, shelves, open, discover, storage = globalThis.localStorage, now = () => Date.now() }) {
+export function createUnifiedLibrary({ el, glyph, shelves, open, discover, coverInto = null, itemMenu = null, storage = globalThis.localStorage, now = () => Date.now() }) {
   const KEY = 'vantara.unified.library.v1';
   const read = () => { try { return JSON.parse(storage?.getItem(KEY) ?? '{}') ?? {}; } catch { return {}; } };
   const saved = read();
@@ -52,6 +52,13 @@ export function createUnifiedLibrary({ el, glyph, shelves, open, discover, stora
 
   const cover = (item, cls) => {
     const box = el('span', cls);
+    // المانجا بمحمّل صور القشرة (ترويسات المصدر والبدائل والغلاف الموحّد): <img> مجرد كان يبقى فارغًا لبعضها
+    if (item.section === 'manga' && coverInto) {
+      const holder = el('span', 'ul-imgbox');
+      box.append(holder);
+      if (coverInto(holder, item)) return box;
+      holder.remove();
+    }
     if (item.cover) {
       const img = el('img');
       img.alt = '';
@@ -72,11 +79,25 @@ export function createUnifiedLibrary({ el, glyph, shelves, open, discover, stora
     return t;
   };
 
+  /** لمسة تفتح العمل، والضغط المطوّل يفتح خياراته (أضف لمكتبتي، أزل من آخر المشاهدات). */
+  function hold(node, item) {
+    let timer = 0, held = false, x = 0, y = 0;
+    const cancel = () => { clearTimeout(timer); timer = 0; };
+    node.addEventListener('pointerdown', (e) => {
+      held = false; x = e.clientX; y = e.clientY; cancel();
+      if (itemMenu) timer = setTimeout(() => { timer = 0; held = true; itemMenu(item); }, 480);
+    });
+    node.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 8) cancel(); });
+    for (const t of ['pointerup', 'pointercancel', 'pointerleave']) node.addEventListener(t, cancel);
+    node.addEventListener('contextmenu', (e) => { if (itemMenu) e.preventDefault(); });
+    node.onclick = (e) => { if (held) { held = false; e.preventDefault(); return; } open(item); };
+    return node;
+  }
+
   /** بطاقة «آخر المشاهدات»: غلاف كبير، وتحته النوع والتقدّم، ثم العنوان ومتى. */
   function recentCard(item) {
-    const b = el('button', 'ul-recent');
+    const b = hold(el('button', 'ul-recent'), item);
     b.type = 'button';
-    b.onclick = () => open(item);
     const art = cover(item, 'ul-recent-art');
     const go = el('span', 'ul-recent-go');
     go.innerHTML = glyph(item.section === 'manga' ? 'book' : 'play', { size: 15, filled: item.section !== 'manga' });
@@ -92,9 +113,8 @@ export function createUnifiedLibrary({ el, glyph, shelves, open, discover, stora
 
   /** بطاقة الشبكة: غلاف 2:3 وعنوان سطر، والنوع (والتقدّم إن وُجد) تحته. */
   function gridCard(item) {
-    const b = el('button', 'ul-card');
+    const b = hold(el('button', 'ul-card'), item);
     b.type = 'button';
-    b.onclick = () => open(item);
     const sub = el('span', 'ul-sub');
     const p = progressLabel(item);
     sub.append(el('span', null, KIND_WORD[item.section]));

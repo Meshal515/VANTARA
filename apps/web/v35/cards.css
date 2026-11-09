@@ -90,3 +90,14 @@
   position: absolute;
   inset: 0;
 }
+
+/* مساحة الموحد = مساحة المانجا (ملاحظة المالك: فراغ يمين ويسار): هامش الصفحة نفسه 16px لا هامشان (كان
+ * page-body بهامشه + هامش المكتبة = 36px)، وشبكة الثلاثة بتباعد «آخر التحديثات» في المانجا 14×10 */
+.v35.v35 :is(#unifiedLibrary, #unifiedDiscover) { padding-inline: 0; }
+.v35.v35 .ul { --ul-g: var(--gutter, 16px); }
+.v35.v35 .ud { --ud-g: var(--gutter, 16px); }
+.v35.v35 .uv { --uv-g: var(--gutter, 16px); }
+.us-page { --us-g: 16px; }
+.v35.v35 :is(.ul-grid, .ul-recent-grid, .us-grid, .uv-page .uv-grid) { gap: 14px 10px; }
+.v35.v35 .uv-page .uv-grid { padding-inline: 16px; }
+.v35.v35 .ul-peek, .v35.v35 .uv-rv-grid { gap: 10px; }

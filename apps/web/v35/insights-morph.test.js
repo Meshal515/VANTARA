@@ -74,3 +74,37 @@ describe('خللا الإحصائيات (9 نوفمبر): دحمي يختفي، 
     expect(m.querySelector('.ins-lock').style.display).not.toBe('none');
   });
 });
+
+describe('«لا يختفي، يتحرك» (9 نوفمبر): الصفوف تبقى في أماكنها والأعمال لا تُبنى من الصفر', () => {
+  it('من لا وقت له لا يأخذ صنف الفراغ العام (46vh لكل صف)، وصف العمل نفسه يبقى بعد الكل ← الأنمي ← الكل', async () => {
+    const { document, window } = parseHTML('<html><body><div id="h"></div></body></html>');
+    globalThis.document = document; globalThis.window = window;
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#8f5cff' });
+    globalThis.requestAnimationFrame = (f) => { f(performance.now() + 1000); return 1; };
+    globalThis.cancelAnimationFrame = () => {};
+    globalThis.localStorage = { getItem: () => null, setItem() {} };
+    const { createInsights } = await import('./insights.js');
+    const host = document.getElementById('h');
+    const data = {
+      me: { timeShared: true, totalMs: 36e6, content: [{ section: 'anime', seriesRef: 'anime:1', activeMs: 18e6 }, { section: 'cinema', seriesRef: 'cinema:tt1', activeMs: 18e6 }] },
+      mansour: { locked: true, totalMs: 7.2e6, content: [] },
+    };
+    const sync = { user: { userId: 'me' }, rows: (t) => (t === 'accounts' ? Object.keys(data).map((user_id) => ({ user_id })) : []), insights: async (uid) => data[uid] };
+    const ins = createInsights({ sync, host, mountImage: async () => {}, openWork() {}, workFromRef: (r) => ({ id: r, title: {} }), toast() {} });
+    await ins.show();
+    const tab = (k) => [...host.querySelectorAll('.ins-tabs button')].find((b) => b.dataset.k === k).onclick();
+    const animeRow = host.querySelector('.ins-row[data-ref="anime:1"]');
+    expect(animeRow).not.toBeNull();
+    tab('anime');
+    expect(host.querySelector('.ins-row[data-ref="anime:1"]')).toBe(animeRow);
+    expect(host.querySelector('.ins-row[data-ref="cinema:tt1"]')).toBeNull();
+    expect(host.querySelector('.ins-works').classList.contains('ins-fade')).toBe(false);
+    tab('all');
+    expect(host.querySelector('.ins-row[data-ref="anime:1"]')).toBe(animeRow);
+    tab('cinema');
+    const rows = [...host.querySelectorAll('.ins-legend li')];
+    expect(rows.length).toBe(2);
+    expect(rows.some((li) => li.classList.contains('empty'))).toBe(false);
+    expect(rows.find((li) => li.dataset.uid === 'mansour').classList.contains('ins-none')).toBe(true);
+  });
+});
