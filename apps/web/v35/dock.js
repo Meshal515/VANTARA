@@ -335,7 +335,12 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
     const h = host.getBoundingClientRect?.();
     const r = (header ?? v).getBoundingClientRect?.();
     if (!r || !h || !(r.height || r.top || h.top)) return v.offsetTop || 0;
-    return (header ? r.bottom : r.top) - h.top;
+    
+if (header && globalThis.getComputedStyle?.(header)?.position === 'fixed') {
+  return r.bottom;
+}
+return (header ? r.bottom : r.top) - h.top;
+
   };
   const enterLayering = () => {
     if (pageViews) return;
