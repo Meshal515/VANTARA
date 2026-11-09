@@ -8,13 +8,6 @@
 .v35 .ud-sec{margin-top:28px}
 .v35 .ud-sh{padding:0 var(--ud-g);margin-bottom:14px}
 .v35 .ud-sh h2{margin:0;font-size:20px;line-height:28px;font-weight:800;color:var(--text-1,#f2f1f5)}
-/* فلتر النوع المقطّع (نفس فلتر البحث الموحد) */
-.v35 .ud-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin:0 var(--ud-g) 14px;padding:4px;border-radius:12px;background:rgba(255,255,255,.05)}
-.v35 .ud-seg button{height:36px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-3,#8f8b9c)!important;transition:background-color .2s ease,color .2s ease}
-.v35 .ud-seg button.on{background:rgba(255,255,255,.12)!important;color:var(--text-1,#f2f1f5)!important}
-.uv-page .ud-seg--page{margin:8px 20px 4px}
-.uv-page .ud-seg button{height:36px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-3,#8f8b9c)}
-.uv-page .ud-seg button.on{background:rgba(255,255,255,.12);color:var(--text-1,#f2f1f5)}
 /* التصنيفات بتصميم «حسب النوع» في السينما (قرار المالك): بلاطتان في السطر، ارتفاع 84، صورة عريضة كاملة،
  * تدرّج داكن من الأسفل، والاسم في الزاوية السفلية بسطر يتسع لذيول الحروف (ج، ي، ر) فلا تُقص */
 .v35 .ud-genres{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0 var(--ud-g)}
@@ -29,4 +22,13 @@
 @media (min-width:700px){.v35 .ud-genres{grid-template-columns:repeat(4,minmax(0,1fr))}.v35 .ud{max-width:1200px;margin-inline:auto}}
 @media (prefers-reduced-motion:reduce){.v35 .ud-genre,.v35 .ud-genre-img,.v35 .ud-seg button{transition:none}}
 /* ذيل الجيم في «مانجا» و«المانجا» كان يُقص في الأزرار ذات الارتفاع الثابت: سطر أوسع بلا قص */
-.v35 .ud-seg button,.uv-page .ud-seg button,.uv-page .us-seg button{line-height:1.6;overflow:visible;padding-bottom:1px!important}
+
+/* فلتر النوع نصًّا بخط تحت المختار (قاعدة المالك: بلا حاويات) — نفس فلتر الرئيسية الموحدة */
+.v35 .ud-seg{display:flex;gap:26px;margin:0 var(--ud-g) 16px;padding:0;border-radius:0;background:none}
+.v35 .ud-seg button{position:relative;height:38px;padding:0!important;border-radius:0;background:none!important;font-size:15px;font-weight:700;line-height:1.6;color:var(--text-3,#8f8b9c)!important;overflow:visible;transition:color .2s ease}
+.v35 .ud-seg button.on{background:none!important;color:var(--text-1,#f2f1f5)!important}
+.v35 .ud-seg button.on::after{content:'';position:absolute;inset-inline:0;bottom:0;height:2px;border-radius:1px;background:var(--text-1,#f2f1f5)}
+.uv-page .ud-seg--page{display:flex;gap:26px;margin:10px 20px 6px;padding:0;border-radius:0;background:none}
+.uv-page .ud-seg button{position:relative;height:38px;padding:0!important;border-radius:0;background:none!important;font-size:15px;font-weight:700;line-height:1.6;color:var(--text-3,#8f8b9c)!important;overflow:visible;transition:color .2s ease}
+.uv-page .ud-seg button.on{background:none!important;color:var(--text-1,#f2f1f5)!important}
+.uv-page .ud-seg button.on::after{content:'';position:absolute;inset-inline:0;bottom:0;height:2px;border-radius:1px;background:var(--text-1,#f2f1f5)}
