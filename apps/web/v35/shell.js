@@ -87,6 +87,7 @@ import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
 import { createUnifiedView } from './unified-view.js';
+import { workMenuEntries, workOptionEntries } from './work-menu.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -2887,7 +2888,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
-  function openCinemaRef(ref, { title = null, cover = null, playAt = null } = {}) {
+  function openCinemaRef(ref, { title = null, cover = null, playAt = null, type = null } = {}) {
     const [, id, season] = ref.split(':');
     if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
     closeSheet();
@@ -2896,7 +2897,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       applySection('cinema');
       showHome('cinema');
     }
-    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover }, { playAt });
+    // النوع: الممرَّر، أو الموسم في المرجع، وإلا يبقى مجهولًا فيحسمه prefetch في السينما (مسلسل أولًا ثم فيلم،
+    // مع ما عرفه الجهاز). كان كل مرجع بلا موسم يُفتح «فيلمًا» فيُعطي Cinemeta مسلسلًا ناقصًا بلا حلقات
+    // وبزر «شاهد الفيلم» (من الرئيسية الموحدة والإحصائيات والترشيحات)
+    const known = id.startsWith('addon-') ? null : type ?? (season ? 'series' : null);
+    void cinema.openWork({ id, type: known, title: title ?? '', poster: cover }, { playAt });
   }
 
   // ── ورقة المعاينة ──
@@ -3202,7 +3207,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       btn.title = on ? `${onLabel} — المس للإزالة` : offHint;
       btn.setAttribute('aria-label', btn.title);
     };
-    paint('libraryBtn', 'library', !!e?.row, 'مكتبتي', 'في مكتبتي', 'أضف إلى مكتبتي');
+    paint('libraryBtn', 'library', !!e?.row, 'أتابعها', 'في مكتبتي', 'أضف إلى «أتابعها»');
     paint('laterBtn', 'clock', !!e?.later, 'لاحقًا', 'لاحقًا', 'أقرأ لاحقًا');
     paintDetailTools();
   }
@@ -3256,35 +3261,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     const e = libraryEntry(String(w.id));
     const ref = String(w.id);
-    const rows = [
-      entry('library', e?.row ? 'في مكتبتي' : 'مكتبتي', toggleLibraryCurrent, { pressed: Boolean(e?.row) }),
-      entry('clock', 'لاحقًا', toggleLaterCurrent, { pressed: Boolean(e?.later) }),
-      entry('check', 'علّم فصول', () => enterMarkMode()),
-      entry('flame', inCollection('top', ref) ? 'في أفضل 5' : 'أفضل 5', () => toggleTopCurrent(), { pressed: inCollection('top', ref) }),
-      entry('share', 'مشاركة', () => void shareWorkOut(w)),
-      entry('eye', 'قراءتي السابقة', markPreviousReading),
-    ];
-    if (translateAvailable(w)) {
-      const on = translationOn(ref);
-      rows.push(entry('translateAr', on ? 'الترجمة التلقائية: شغّالة' : 'الترجمة التلقائية', openTranslateMenu, { pressed: on }));
-    }
-    // التقييم وأكملته والبلاغ والحذف في ورقة واحدة
-    rows.push(entry('sliders', 'خيارات أخرى', openWorkMenu));
+    // الترتيب والأسماء من work-menu.js (واحدة للأقسام الثلاثة)
+    const readCount = (w._chapters ?? []).filter((r) => isChapterRead(sync, ref, chapterKeyOf(ref, r))).length;
+    const run = {
+      library: toggleLibraryCurrent,
+      later: toggleLaterCurrent,
+      mark: () => enterMarkMode(),
+      previous: markPreviousReading,
+      top: () => toggleTopCurrent(),
+      translate: openTranslateMenu,
+      options: openWorkMenu,
+    };
+    const spec = workMenuEntries('manga', {
+      library: Boolean(e?.row),
+      later: Boolean(e?.later),
+      top: inCollection('top', ref),
+      previous: readCount > 0,
+      translate: translateAvailable(w) ? { available: true, on: translationOn(ref) } : null,
+    });
+    const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
     rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
     menu.replaceChildren(...rows);
-  }
-  /** «مشاركة» خارج التطبيق: ورقة النظام، أو نسخ الاسم حيث لا ورقة. */
-  async function shareWorkOut(w) {
-    const text = `${titleOf(w)} — على VANTARA`;
-    try {
-      if (navigator.share) await navigator.share({ title: titleOf(w), text });
-      else {
-        await navigator.clipboard.writeText(text);
-        toast('نُسخ اسم العمل للمشاركة');
-      }
-    } catch {
-      // ألغى المشاركة
-    }
   }
   function toggleDetailMenu(force) {
     const menu = q('detailMenu');
@@ -3356,15 +3353,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (tab) tab.hidden = !similarWorks(w).length;
   }
 
+  // ── التقييم الشخصي وأكملته: للأقسام الثلاثة (الجدولان واحدان، `series_ref` يميّز النوع) ──
   function userRating(ref) {
-    const row = sync.rows('ratings', (r) => r.user_id === me() && r.series_ref === String(ref))[0];
+    const refs = refsOf(String(ref));
+    const row = sync.rows('ratings', (r) => r.user_id === me() && refs.includes(r.series_ref))
+      .sort((x, y) => (y.updated_at ?? 0) - (x.updated_at ?? 0))[0];
     return row?.score ? Math.round(row.score / 2) : 0;
   }
   let pendingRating = null;
-  const userRatingNow = () => (pendingRating?.ref === state.current?.id ? pendingRating.stars : state.current ? userRating(state.current.id) : 0);
-  /** التقييم نجوم خمس في ورقة من «المزيد»: لمسة واحدة تحفظ. */
-  function renderRating(box) {
-    const current = userRatingNow();
+  const ratingOf = (ref) => (pendingRating?.ref === String(ref) ? pendingRating.stars : userRating(ref));
+  const userRatingNow = () => (state.current ? ratingOf(String(state.current.id)) : 0);
+  /** وصف عمل للكتابة: من صفحة المانجا الحالية، أو من مرجع أنمي/سينما بعنوانه وغلافه. */
+  const describeRef = ({ ref, title, cover }) => ({ seriesRef: ref, seriesTitle: title ?? null, coverUrl: cover ?? null, sourceId: null });
+  /** التقييم نجوم خمس: لمسة واحدة تحفظ (الخادم يحفظ من 10). `target` اختياري لغير المانجا. */
+  function renderRating(box, target = null) {
+    const d = target ? describeRef(target) : state.current ? descriptorOf(state.current) : null;
+    if (!d) return;
+    const current = ratingOf(d.seriesRef);
     box.replaceChildren(
       ...[1, 2, 3, 4, 5].map((i) => {
         const b = el('button', i <= current ? 'on' : '');
@@ -3374,84 +3379,71 @@ export function mountV35(deps, { page = 'home' } = {}) {
         b.setAttribute('aria-label', `تقييمك ${i} من 5`);
         b.innerHTML = glyph('star', { filled: i <= current, size: 28 });
         b.onclick = () => {
-          if (!state.current) return;
-          // الخادم يحفظ من 10؛ النجوم خمس
-          sync.enqueue('rating.set', { ...descriptorOf(state.current), score: i * 2 });
-          pendingRating = { ref: state.current.id, stars: i };
+          sync.enqueue('rating.set', { ...d, score: i * 2 });
+          pendingRating = { ref: d.seriesRef, stars: i };
           toast(`قيّمته ${i} من 5`);
-          renderRating(box);
+          renderRating(box, target);
           paintDetailMenu();
         };
         return b;
       }),
     );
+    box.dataset.ref = d.seriesRef;
+    if (target) box._target = target;
   }
-  function openRatingSheet() {
-    if (!state.current) return;
+  function openRatingSheet(target = null) {
+    const title = target ? target.title : state.current ? titleOf(state.current) : null;
+    if (!target && !state.current) return;
     openSheet((body) => {
-      const h = el('h3', null, titleOf(state.current));
+      const h = el('h3', null, title ?? '');
       h.dir = 'auto';
       body.append(h, el('p', null, 'تقييمك لهذا العمل'));
       const box = el('div', 'rate mw-rate');
       box.setAttribute('role', 'radiogroup');
       box.setAttribute('aria-label', 'تقييمك');
-      renderRating(box);
+      renderRating(box, target);
       body.append(box);
     });
   }
 
-  // ── قائمة ⋮ في صفحة العمل ──
-
-  function openWorkMenu() {
-    if (!state.current) return;
-    const w = state.current;
+  /**
+   * «خيارات أخرى» واحدة للأقسام الثلاثة (work-menu.js): التقييم، أكملته، الإبلاغ، والحذف للمانجا.
+   * @param {{ ref: string, title: string, cover?: string|null }|null} target بلا هدف: عمل المانجا الحالي
+   */
+  function openWorkOptions(target = null) {
+    const w = target ? workFromRef(target.ref, target.title, target.cover) : state.current;
+    if (!w) return;
+    const ref = target ? target.ref : String(w.id);
+    const d = target ? describeRef(target) : descriptorOf(w);
     openSheet((body) => {
-      const title = el('h3', null, titleOf(w));
+      const title = el('h3', null, target ? target.title : titleOf(w));
       title.dir = 'auto';
       title.style.marginBottom = '8px';
       body.append(title);
-      const stars = userRatingNow();
-      body.append(sheetItem('star', stars ? `تقييمك ${stars} من 5 — غيّره` : 'قيّم العمل', () => {
-        closeSheet();
-        setTimeout(() => openRatingSheet(), 0);
-      }, { pressed: stars > 0 }));
-      body.append(
-        sheetItem('star', inCollection('top', String(w.id)) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
+      const run = {
+        rate: () => { closeSheet(); setTimeout(() => openRatingSheet(target), 0); },
+        completed: () => {
           closeSheet();
-          setTimeout(() => toggleTopCurrent(), 0);
-        }, { pressed: inCollection('top', String(w.id)) }),
-        sheetItem('check', 'أكملته', () => {
-          closeSheet();
-          const member = !inCollection('completed', String(w.id));
-          sync.enqueue('completed.set', { ...descriptorOf(w), member });
+          const member = !inCollection('completed', ref);
+          sync.enqueue('completed.set', { ...d, member });
           toast(member ? 'في «المكتمل»' : 'أزيل من «المكتمل»');
-        }, { pressed: inCollection('completed', String(w.id)) }),
-      );
-      body.append(sheetItem('trash', 'حذف العمل', () => {
-        closeSheet();
-        deleteWork(w);
-        goBack();
-      }, { danger: true }));
-      if (deps.report) {
-        body.append(
-          sheetItem('flag', 'بلّغ عن مشكلة في العمل', () => {
-            closeSheet();
-            openReport(w);
-          }),
-        );
+          target?.onChange?.();
+        },
+        report: () => { closeSheet(); openReport(w); },
+        delete: () => { closeSheet(); deleteWork(w); goBack(); },
+      };
+      for (const x of workOptionEntries({ rating: ratingOf(ref), completed: inCollection('completed', ref), canReport: Boolean(deps.report), canDelete: !target })) {
+        body.append(sheetItem(x.icon, x.label, run[x.id], { pressed: x.pressed, danger: x.danger }));
       }
     });
   }
-  // Same saved five slots as manga; media keeps its canonical section reference.
+  const openWorkMenu = () => openWorkOptions(null);
+  // أفضل 5 للأنمي والسينما: نفس الخانات الخمس، بمرجع القسم
   function openMediaWorkMenu({ ref, title, cover }) {
-    const w = workFromRef(ref, title, cover);
-    openSheet((body) => {
-      const heading = el('h3', null, title); heading.dir = 'auto'; body.append(heading);
-      body.append(sheetItem('star', inCollection('top', ref) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
-        closeSheet(); openTopPicker(w);
-      }, { pressed: inCollection('top', ref) }));
-    });
+    openTopPicker(workFromRef(ref, title, cover));
   }
+  /** حالة العمل في الجداول المشتركة: لقوائم ⋮ في الأنمي والسينما. */
+  const mediaState = (ref) => ({ top: inCollection('top', ref), completed: inCollection('completed', ref), rating: ratingOf(ref) });
   function avatarNode(person, size = 44) {
     if (person.avatarKey) {
       const img = el('img');
@@ -6246,7 +6238,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       item: (it) => openUnified(it),
       manga: openManga,
       anime: (x) => openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }),
-      cinema: (x) => openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster }),
+      cinema: (x) => openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster, type: x.type ?? null }),
       browse: (id) => browseSection(id),
     },
   });
@@ -6368,8 +6360,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (tables.includes('ratings')) {
       pendingRating = null;
       paintDetailMenu();
-      const rate = root.querySelector('.mw-rate');
-      if (rate) renderRating(rate);
+      const rate = root.querySelector('.mw-rate') ?? document.querySelector('.mw-rate');
+      if (rate) renderRating(rate, rate._target ?? null);
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
     majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
@@ -6616,6 +6608,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openUpdates: (section) => openUpdates(section),
     sync,
     openWorkMenu: openMediaWorkMenu,
+    openWorkOptions: (target) => openWorkOptions(target),
+    mediaState,
     // «من نفس العالم»: مانجا العمل تُفتح في قسم المانجا ببحث عن اسمها في مصادر المستخدم
     openMangaTitle: (title) => {
       writeSection('manga');
@@ -6648,6 +6642,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
     playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
+    openWorkOptions: (target) => openWorkOptions(target),
+    mediaState,
     restoreSourceWork: restoreAddonWork,
     together: () => together,
     // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه

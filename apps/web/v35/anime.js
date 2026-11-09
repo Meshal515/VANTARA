@@ -38,6 +38,7 @@ import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { applyLocalMarks, buildMarkSheet } from './episode-marks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
+import { workKind, workMenuEntries } from './work-menu.js';
 import { createAnimeToday } from './anime-today.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
@@ -1341,7 +1342,8 @@ export function createAnime(deps) {
         toast(now ? 'في المفضلة' : 'أُزيل من المفضلة');
       }, { pressed: fav, filled: fav }));
     }
-    items.push(tool(deps.share ? 'send' : 'share', deps.share ? 'رشّح' : 'شارك', () => shareCurrent()));
+    // «رشّح» للأصدقاء وحده؛ لا «مشاركة» خارج التطبيق في صفحة العمل (قرار المالك)
+    if (deps.share) items.push(tool('send', 'رشّح', () => shareCurrent()));
     const moreBtn = tool('more', 'المزيد', () => toggleMenu());
     moreBtn.setAttribute('aria-haspopup', 'menu');
     moreBtn.setAttribute('aria-expanded', String(v.menu.classList.contains('open')));
@@ -1362,33 +1364,40 @@ export function createAnime(deps) {
       if (pressed) b.setAttribute('aria-pressed', 'true');
       return b;
     };
-    const rows = [];
-    const listName = signedIn() ? 'أتابعها' : 'قائمتي';
-    const inMine = inList(m.id);
-    rows.push(entry(inMine ? 'check' : 'plus', listName, () => {
-      const now = toggleList(work());
-      paintMenu(m);
-      toast(now ? `أُضيف إلى ${listName}` : `أُزيل من ${listName}`);
-    }, { pressed: inMine }));
-    if (signedIn()) {
-      const later = Boolean(account?.inCollection('read_later', m.id));
-      rows.push(entry(later ? 'check' : 'clock', 'لاحقًا', () => {
+    // الترتيب والأسماء من work-menu.js (واحدة للأقسام الثلاثة)
+    const w0 = work();
+    const ref = `anime:${m.id}`;
+    const total = w0.aired || w0.episodes || 0;
+    const movie = isMovie(w0);
+    const kind = workKind('anime', { movie });
+    const media = signedIn() ? deps.mediaState?.(ref) : null;
+    const target = () => ({ ref, title: work().title, cover: m.posterSmall ?? m.poster ?? null, onChange: () => paintMenu(m) });
+    const run = {
+      library: () => {
+        const now = toggleList(work());
+        paintMenu(m);
+        toast(now ? 'أُضيف إلى «أتابعها»' : 'أُزيل من «أتابعها»');
+      },
+      later: () => {
         const now = !account?.inCollection('read_later', m.id);
         account?.setCollection('read_later', work(), now);
         paintMenu(m);
-        toast(now ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
-      }, { pressed: later }));
-    }
-    {
-      const w = work();
-      const total = w.aired || w.episodes || 0;
-      if (isMovie(w)) rows.push(entry('eye', epRecord(w, 1).done ? 'ألغِ مشاهدة الفيلم' : 'شاهدت الفيلم', () => { closeMenu(); toggleSeen(w, 1); }));
-      else if (total) rows.push(entry('eye', 'علّم حلقات', () => { closeMenu(); openMarkSheet(w, total); }));
-    }
-    if (deps.openWorkMenu) rows.push(entry('star', 'أفضل 5', () => {
-      closeMenu();
-      deps.openWorkMenu({ ref: `anime:${m.id}`, title: work().title, cover: m.posterSmall ?? m.poster ?? null });
-    }));
+        toast(now ? 'في «لاحقًا»' : 'أُزيل من «لاحقًا»');
+      },
+      mark: () => { closeMenu(); openMarkSheet(work(), total); },
+      previous: () => { closeMenu(); movie ? toggleSeen(work(), 1) : openPreviousSheet(work(), total); paintMenu(m); },
+      top: () => { closeMenu(); deps.openWorkMenu?.({ ref, title: work().title, cover: m.posterSmall ?? m.poster ?? null }); },
+      options: () => { closeMenu(); deps.openWorkOptions?.(target()); },
+    };
+    const spec = workMenuEntries(kind, {
+      library: inList(m.id),
+      later: Boolean(account?.inCollection('read_later', m.id)),
+      top: Boolean(media?.top),
+      previous: movie ? epRecord(w0, 1).done : seenCountOf(w0) > 0,
+      canMark: total > 0,
+      signedIn: signedIn(),
+    }).filter((x) => run[x.id] && (x.id !== 'previous' || movie || total > 0) && (x.id !== 'top' || deps.openWorkMenu) && (x.id !== 'options' || deps.openWorkOptions));
+    const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
     rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
     v.menu.replaceChildren(...rows);
   }
@@ -1954,6 +1963,27 @@ export function createAnime(deps) {
    * عين الحلقات: «من ← إلى» دفعة واحدة، «شاهدته كله»، «ألغِ الكل»، و«أكملته».
    * تُحفظ في حسابك فتظهر في كل أجهزتك وفي ملفك.
    */
+  /** «شاهدته سابقًا»: علّم كل ما عُرض دفعة واحدة، أو مدى منه (سجلّ الحلقات نفسه، لا سجل جديد). */
+  function openPreviousSheet(m, total) {
+    deps.openSheet((body) => {
+      const seen = seenCountOf(m);
+      body.append(el('h3', null, 'مشاهدتك لهذا العمل'));
+      const note = el('p', null, seen ? `علّمت ${seen} من ${total} حلقة.` : 'شاهدته من قبل؟ علّم ما شاهدته ويظهر في سجلّك.');
+      note.style.marginBottom = '8px';
+      body.append(note);
+      const item = (icon, label, onClick) => button('sheet-item', `${glyph(icon)}<span>${label}</span>`, onClick, label);
+      body.append(
+        item('check', 'نعم، كله', () => {
+          deps.closeSheet();
+          const n = markSeenRange(m, 1, total, true);
+          repaintRows(m);
+          toast(n ? `علّمت ${n} حلقة مشاهدة` : 'كلها مشاهدة من قبل');
+        }),
+        item('eye', 'من حلقة إلى حلقة', () => { deps.closeSheet(); setTimeout(() => openMarkSheet(m, total), 0); }),
+      );
+    });
+  }
+
   function openMarkSheet(m, total) {
     deps.openSheet((body) => {
       // البداية بعد آخر حلقة معلّمة: الغالب أنك تكمل من حيث وقفت

@@ -33,6 +33,7 @@ import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { bindCollapsingHero } from './collapse-hero.js';
 import { applyLocalMarks, buildMarkSheet, cinemaEpisodeKey, cinemaLocalKey, changedKeys, seenFrom, syncOps } from './episode-marks.js';
+import { workKind, workMenuEntries } from './work-menu.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -1635,27 +1636,52 @@ export function createCinema(deps) {
       if (pressed) b.setAttribute('aria-pressed', 'true');
       return b;
     };
-    const listName = me() ? 'أتابعها' : 'قائمتي';
-    const mine = inList('later', m.id);
-    const list = [entry(mine ? 'check' : 'plus', listName, () => {
-      const on = toggleList('later', work());
-      paintCinemaMenu(m);
-      toast(on ? `أُضيف إلى ${listName}` : `أُزيل من ${listName}`);
-    }, mine)];
-    if (me()) {
-      const later = inLater(m.id);
-      list.push(entry(later ? 'check' : 'clock', 'لاحقًا', () => {
+    // الترتيب والأسماء من work-menu.js (واحدة للأقسام الثلاثة). `library` اسمه «أتابعها» لا «قائمتي»
+    const w0 = work();
+    const movie = w0.type === 'movie';
+    const kind = workKind('cinema', { movie });
+    const ref = refOf(m.id);
+    const media = me() ? deps.mediaState?.(ref) : null;
+    const seasons = (w0.seasons ?? []).filter((s) => s.episodes?.length);
+    const seenAny = movie ? epSeen(w0, 0, 1) : seasons.some((s) => seasonSeen(w0, s) > 0);
+    const target = () => ({ ref, title: displayTitle(m), cover: m.poster ?? null, onChange: () => paintCinemaMenu(m) });
+    const run = {
+      library: () => {
+        const on = toggleList('later', work());
+        paintCinemaMenu(m);
+        toast(on ? 'أُضيف إلى «أتابعها»' : 'أُزيل من «أتابعها»');
+      },
+      later: () => {
+        const later = inLater(m.id);
         rememberType(work());
         sync?.enqueue('readLater.set', { ...descriptor(work()), member: !later });
         paintCinemaMenu(m);
-        toast(!later ? 'في «شاهد لاحقًا»' : 'أُزيل من «شاهد لاحقًا»');
-      }, later));
-    }
-    if (work().type === 'series' && work().seasons?.length) list.push(entry('eye', 'علّم حلقات', () => { toggleCinemaMenu(false); startMarking(work()); }));
-    if (deps.openWorkMenu) list.push(entry('star', 'أفضل 5', () => {
-      toggleCinemaMenu(false);
-      deps.openWorkMenu({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null });
-    }));
+        toast(!later ? 'في «لاحقًا»' : 'أُزيل من «لاحقًا»');
+      },
+      mark: () => { toggleCinemaMenu(false); startMarking(work()); },
+      previous: () => {
+        toggleCinemaMenu(false);
+        if (movie) {
+          const on = !epSeen(work(), 0, 1);
+          markEpisodes(work(), 0, [1], on);
+          refreshMarks(work());
+          toast(on ? 'علّمته مشاهدًا' : 'أُلغيت مشاهدته');
+          paintCinemaMenu(m);
+        } else openPreviousSheet(work());
+      },
+      top: () => { toggleCinemaMenu(false); deps.openWorkMenu?.({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }); },
+      options: () => { toggleCinemaMenu(false); deps.openWorkOptions?.(target()); },
+    };
+    const list = workMenuEntries(kind, {
+      library: inList('later', m.id),
+      later: me() ? inLater(m.id) : false,
+      top: Boolean(media?.top),
+      previous: seenAny,
+      canMark: seasons.length > 0,
+      signedIn: Boolean(me()),
+    })
+      .filter((x) => (x.id !== 'previous' || movie || seasons.length) && (x.id !== 'top' || deps.openWorkMenu) && (x.id !== 'options' || deps.openWorkOptions))
+      .map((x) => entry(x.icon, x.label, run[x.id], x.pressed));
     list.forEach((r, i) => r.style.setProperty('--i', String(i)));
     v.menu.replaceChildren(...list);
   }
@@ -1696,6 +1722,32 @@ export function createCinema(deps) {
   }
 
   /** «علّم حلقات» من قائمة ⋮: ورقة التحديد المشتركة مع الأنمي، بموسم قابل للتبديل. */
+  /** «شاهدته سابقًا» للمسلسل: كل ما عُرض في مواسمه (بلا الإضافات) دفعة واحدة، أو مدى من ورقة التعليم. */
+  function openPreviousSheet(m) {
+    const now = Date.now();
+    const seasons = (m.seasons ?? []).filter((s) => s.n !== 0 && s.episodes?.length);
+    const aired = (s) => s.episodes.filter((e) => !(e.released && e.released > now)).map((e) => e.n);
+    const total = seasons.reduce((n, s) => n + aired(s).length, 0);
+    const seen = seasons.reduce((n, s) => n + seasonSeen(m, s), 0);
+    deps.openSheet((body) => {
+      body.append(el('h3', null, 'مشاهدتك لهذا العمل'));
+      const note = el('p', null, seen ? `علّمت ${seen} من ${total} حلقة.` : 'شاهدته من قبل؟ علّم ما شاهدته ويظهر في سجلّك.');
+      note.style.marginBottom = '8px';
+      body.append(note);
+      const item = (icon, label, onClick) => button('sheet-item', `${glyph(icon)}<span>${label}</span>`, onClick, label);
+      body.append(
+        item('check', 'نعم، كله', () => {
+          deps.closeSheet();
+          let n = 0;
+          for (const s of seasons) n += markEpisodes(m, s.n, aired(s), true);
+          refreshMarks(m);
+          toast(n ? `علّمت ${n} حلقة مشاهدة` : 'كلها مشاهدة من قبل');
+        }),
+        item('eye', 'من حلقة إلى حلقة', () => { deps.closeSheet(); setTimeout(() => startMarking(m), 0); }),
+      );
+    }, { tone: 'cinema' });
+  }
+
   function startMarking(m) {
     const seasons = (m.seasons ?? []).filter((s) => s.episodes.length);
     if (!seasons.length) return;
