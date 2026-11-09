@@ -53,3 +53,25 @@
 .uv-page .us-chip{background:rgba(255,255,255,.06);padding:0 16px;border-radius:19px}
 .uv-page .us-chip--recent{padding:0}
 .uv-page .us-chip:active{background:rgba(255,255,255,.1)}
+
+/* ═════ صقل البحث (9 نوفمبر) ═════
+ * ترويسة ثابتة: عنوان «البحث» بسطر الأدوات، ثم حقل بانحناء 14px (لا كبسولة) ثم فلتر مقطّع ظاهر. */
+.us-head{position:sticky;top:0;z-index:3;background:var(--bg,#09080c);padding-bottom:12px;box-shadow:0 1px 0 rgba(255,255,255,.05)}
+.us-page .us-top{position:static;height:calc(env(safe-area-inset-top,0px) + 56px);padding:env(safe-area-inset-top,0px) 6px 0;gap:2px;background:none}
+.us-title{margin:0;font-size:18px;font-weight:800;color:var(--text-1,#f2f1f5)}
+.us-page .us-field{margin:4px var(--us-g) 0;height:48px;padding:0 14px;border-radius:14px;background:rgba(255,255,255,.07);gap:10px}
+.us-page .us-field:focus-within{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 55%,transparent);background:rgba(255,255,255,.09)}
+.us-page .us-input{font-size:15px}
+.us-seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:12px var(--us-g) 0;padding:4px;border-radius:12px;background:rgba(255,255,255,.05)}
+.uv-page .us-seg button{height:34px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-3,#8f8b9c);transition:background-color .2s ease,color .2s ease}
+.uv-page .us-seg button.on{background:rgba(255,255,255,.12);color:var(--text-1,#f2f1f5)}
+.us-results .us-sec:first-child{margin-top:22px}
+/* الرائج الآن: صفوف بفواصل شعرية، رقم ثابت العرض، غلاف 56px، وعنوان أوضح */
+.us-rank{gap:0}
+.us-rank li + li .us-rank-row{border-top:1px solid rgba(255,255,255,.05)}
+.us-rank-row{padding:12px 0;gap:16px}
+.us-rank-n{width:24px;font-size:18px;font-weight:800;color:var(--text-3,#8f8b9c)}
+.us-rank li:nth-child(-n+3) .us-rank-n{color:var(--accent,#8f5cff)}
+.us-rank-art{width:56px;border-radius:10px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.us-rank-tx .us-t1{font-size:15px;font-weight:700}
+.us-rank-tx .us-t2{font-size:12px}

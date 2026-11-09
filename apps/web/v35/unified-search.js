@@ -173,19 +173,21 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
 
   function build() {
     page = el('div', 'uv-page us-page'); page.setAttribute('role', 'dialog'); page.setAttribute('aria-modal', 'true'); page.setAttribute('aria-label', 'البحث');
+    // ترويسة بعنوان، ثم الحقل تحتها بمسافة (كان الحقل كبسولة ملتصقة بأعلى الشاشة)، ثم الفلتر مقطّعًا ظاهرًا
     const top = el('div', 'us-top');
     const back = el('button', 'uv-back'); back.type = 'button'; back.setAttribute('aria-label', 'رجوع'); back.innerHTML = glyph('back', { size: 24 }); back.onclick = close;
+    top.append(back, el('h1', 'us-title', 'البحث'));
     const form = el('form', 'us-field'); form.setAttribute('role', 'search');
     form.insertAdjacentHTML('afterbegin', glyph('search', { size: 20 }));
-    input = el('input', 'us-input'); input.type = 'search'; input.enterKeyHint = 'search'; input.autocomplete = 'off'; input.placeholder = 'ابحث في الأنمي والمانجا والسينما'; input.setAttribute('aria-label', 'ابحث');
+    input = el('input', 'us-input'); input.type = 'search'; input.enterKeyHint = 'search'; input.autocomplete = 'off'; input.placeholder = 'أنمي، مانجا، فيلم أو مسلسل'; input.setAttribute('aria-label', 'ابحث');
     input.oninput = () => { clearTimeout(timer); timer = setTimeout(() => search(input.value), debounceMs); };
     form.onsubmit = (e) => { e.preventDefault(); clearTimeout(timer); void search(input.value); input.blur(); };
     form.append(input);
-    top.append(back, form);
-    filterNav = el('nav', 'uv-tabs us-filter'); filterNav.setAttribute('role', 'tablist');
-    for (const [k, l] of FILTERS) { const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'tab'); b.onclick = () => setFilter(k); filterNav.append(b); }
+    filterNav = el('nav', 'us-seg'); filterNav.setAttribute('role', 'tablist'); filterNav.setAttribute('aria-label', 'النوع');
+    for (const [k, l] of FILTERS) { const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(k === filter)); b.onclick = () => setFilter(k); filterNav.append(b); }
+    const head = el('div', 'us-head'); head.append(top, form, filterNav);
     results = el('div', 'us-results');
-    page.append(top, filterNav, results);
+    page.append(head, results);
     paintResults();
   }
 
