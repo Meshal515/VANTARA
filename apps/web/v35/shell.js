@@ -3728,6 +3728,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const unifiedSearch = createUnifiedSearch({
     el, glyph,
+    recent: recentStore('vantara.unified.recent.v1'),
+    // التصنيفات: تفتح اكتشاف القسم بالتصنيف (الكل ← الأنمي، أوسعها تصنيفًا)
+    genres: (filter) => ['Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Romance', 'Mystery', 'Horror', 'Sci-Fi', 'Psychological'].map((g) => ({
+      label: AR_GENRE[g] ?? g,
+      open: () => {
+        unifiedSearch.close();
+        const section = filter === 'all' ? 'anime' : filter;
+        if (section === 'anime') return void anime.openDiscover({ genre: g });
+        browseSection(section);
+      },
+    })),
+    // الرائج الآن منوّع: أنمي، مانجا، مسلسل، فيلم بالتناوب، ويتبع الفلتر
+    trending: (filter) => {
+      const pools = [
+        ['anime', unifiedData.anime?.trending ?? []],
+        ['manga', uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])])],
+        ['cinema', unifiedData.cinema?.series ?? []],
+        ['cinema', unifiedData.cinema?.movie ?? []],
+      ].filter(([g]) => filter === 'all' || g === filter);
+      const out = [];
+      for (let i = 0; i < 12; i++) for (const [group, list] of pools) if (list[i]) out.push({ item: list[i], group });
+      return out;
+    },
     mount: (node) => root.append(node),
     engines: {
       anime: (term) => import('../lib/anime-meta.js').then(({ searchAnime }) => searchAnime({ search: term })).then((r) => r?.items ?? []),

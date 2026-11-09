@@ -33,3 +33,23 @@
 @media (prefers-reduced-motion:reduce){.us-img,.us-art{transition:none}}
 .us-page .us-input,.us-page .us-input:focus,.us-page .us-input:focus-visible{outline:none!important;box-shadow:none!important;border:0!important;background:none!important}
 .us-field:focus-within{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 60%,transparent)}
+/* قبل الكتابة: شرائح هادئة بلا حدود، وقائمة رائج مرقّمة بغلاف صغير (الرقم بلون الواجهة) */
+.us-sh .us-link{margin-inline-start:auto;font-size:13px;font-weight:600;color:var(--text-3,#8f8b9c)}
+.us-chips{display:flex;flex-wrap:wrap;gap:8px;padding:0 var(--us-g)}
+.us-chip{display:inline-flex;align-items:center;height:38px;padding:0 16px;border-radius:19px;background:rgba(255,255,255,.06);color:var(--text-1,#f2f1f5);font-size:13.5px;font-weight:600;transition:background-color .15s ease,transform .15s ease}
+.us-chip:active{transform:scale(.97);background:rgba(255,255,255,.1)}
+.us-chip--recent{padding:0;gap:0}
+.us-chip-go{display:inline-flex;align-items:center;gap:8px;height:100%;padding:0 6px 0 0;padding-inline:14px 4px;color:inherit;font:inherit;max-width:60vw}
+.us-chip-go span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.us-chip-go .icon{color:var(--text-4,#57536a);flex:none}
+.us-chip-x{display:grid;place-items:center;width:32px;height:100%;color:var(--text-4,#57536a)}
+.us-rank{list-style:none;margin:0;padding:0 var(--us-g);display:grid;gap:4px}
+.us-rank-row{display:flex;align-items:center;gap:14px;width:100%;padding:8px 0;text-align:start}
+.us-rank-n{flex:none;width:22px;font-size:20px;font-weight:800;color:var(--accent,#8f5cff);font-variant-numeric:tabular-nums;text-align:center}
+.us-rank-art{flex:none;width:52px;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:#16141b}
+.us-rank-tx{flex:1;min-width:0;display:grid;gap:3px}
+.us-rank-tx .us-t1{margin:0;font-size:14.5px;height:20px;line-height:20px}
+.us-rank-row:active{opacity:.6}
+.uv-page .us-chip{background:rgba(255,255,255,.06);padding:0 16px;border-radius:19px}
+.uv-page .us-chip--recent{padding:0}
+.uv-page .us-chip:active{background:rgba(255,255,255,.1)}

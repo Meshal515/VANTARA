@@ -15,6 +15,7 @@ export const SEARCH_GROUPS = Object.freeze([
 ]);
 const FILTERS = [['all', 'الكل'], ['anime', 'الأنمي'], ['manga', 'المانجا'], ['cinema', 'السينما']];
 const PREVIEW = 6;
+const KIND = { anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 
 /**
  * يطلب الأنواع الثلاثة ويستدعي `onGroup` لكل مجموعة حين تصل. آخر استعلام يفوز (`isCurrent`).
@@ -34,7 +35,7 @@ export function runSearch(query, engines, onGroup, isCurrent = () => true) {
  *   card: (item: object, group: string) => { title: string, cover: string|null, sub?: string }, mount: (node: HTMLElement) => void,
  *   debounceMs?: number }} ctx
  */
-export function createUnifiedSearch({ el, glyph, engines, open, card, mount, debounceMs = 320 }) {
+export function createUnifiedSearch({ el, glyph, engines, open, card, mount, debounceMs = 320, recent = null, genres = () => [], trending = () => [], openTrend = null }) {
   let page = null, input = null, results = null, filterNav = null;
   let query = '', token = 0, timer = 0, filter = 'all';
   const groups = new Map(); // id → { items, error, done, expanded }
@@ -88,18 +89,72 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
   }
   function paintResults() {
     if (!results) return;
-    if (!query) {
-      const idle = el('div', 'us-idle');
-      idle.append(el('strong', null, 'ابحث في كل شيء'), el('p', null, 'أنمي ومانجا وأفلام ومسلسلات في بحث واحد.'));
-      results.replaceChildren(idle);
-      return;
-    }
+    if (!query) { results.replaceChildren(...idleNodes()); return; }
     const shown = SEARCH_GROUPS.filter((g) => filter === 'all' || g.id === filter).map((g) => groupNode(g.id));
     results.replaceChildren(...shown);
+  }
+  /**
+   * قبل الكتابة (طلب المالك): آخر ما بحثت عنه، ثم التصنيفات، ثم «الرائج الآن» قائمة مرقّمة منوّعة بين الأنواع.
+   * الفلتر يصفّي الرائج والتصنيفات معًا.
+   */
+  function idleNodes() {
+    const out = [];
+    const terms = recent?.list() ?? [];
+    if (terms.length) {
+      const sec = el('section', 'us-sec');
+      const h = el('header', 'us-sh'); h.append(el('h2', null, 'آخر ما بحثت عنه'));
+      const clear = el('button', 'us-link', 'امسح'); clear.type = 'button'; clear.onclick = () => { recent.clear(); paintResults(); };
+      h.append(clear);
+      const chips = el('div', 'us-chips');
+      for (const t of terms) {
+        const c = el('span', 'us-chip us-chip--recent');
+        const go = el('button', 'us-chip-go'); go.type = 'button';
+        go.insertAdjacentHTML('afterbegin', glyph('history', { size: 16 }));
+        go.append(txt('span', null, t));
+        go.onclick = () => { input.value = t; void search(t); };
+        const x = el('button', 'us-chip-x'); x.type = 'button'; x.setAttribute('aria-label', `احذف ${t}`); x.innerHTML = glyph('close', { size: 14 });
+        x.onclick = () => { recent.remove(t); paintResults(); };
+        c.append(go, x); chips.append(c);
+      }
+      sec.append(h, chips); out.push(sec);
+    }
+    const gs = genres(filter);
+    if (gs.length) {
+      const sec = el('section', 'us-sec');
+      const h = el('header', 'us-sh'); h.append(el('h2', null, 'تصفّح بالتصنيف'));
+      const chips = el('div', 'us-chips');
+      for (const g of gs) { const b = el('button', 'us-chip', g.label); b.type = 'button'; b.onclick = () => g.open(); chips.append(b); }
+      sec.append(h, chips); out.push(sec);
+    }
+    const tr = trending(filter);
+    const sec = el('section', 'us-sec');
+    const h = el('header', 'us-sh'); h.append(el('h2', null, 'الرائج الآن'));
+    sec.append(h);
+    if (!tr.length) sec.append(skeleton());
+    else {
+      const list = el('ol', 'us-rank');
+      tr.slice(0, 10).forEach(({ item, group }, i) => {
+        const c = card(item, group);
+        const li = el('li');
+        const b = el('button', 'us-rank-row'); b.type = 'button';
+        const n = el('span', 'us-rank-n', String(i + 1));
+        const art = el('span', 'us-rank-art');
+        if (c.cover) { const im = el('img', 'us-img'); im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.onload = () => im.classList.add('in'); im.src = c.cover; art.append(im); }
+        const tx = el('span', 'us-rank-tx');
+        tx.append(txt('b', 'us-t1', c.title || 'عمل'), txt('span', 'us-t2', [group === 'cinema' ? null : KIND[group], c.sub].filter(Boolean).join(' · ')));
+        b.append(n, art, tx);
+        b.onclick = () => (openTrend ? openTrend(item, group) : open(item, group));
+        li.append(b); list.append(li);
+      });
+      sec.append(list);
+    }
+    out.push(sec);
+    return out;
   }
   function search(q) {
     query = q.trim();
     const mine = ++token;
+    if (query.length >= 2) recent?.remember(query);
     groups.clear();
     if (!query) return paintResults();
     for (const g of SEARCH_GROUPS) groups.set(g.id, { items: [], error: false, done: false, expanded: false });
@@ -111,6 +166,7 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
   }
   function setFilter(k) {
     filter = k;
+    // الرائج والتصنيفات تتبع الفلتر أيضًا
     for (const b of filterNav.children) { const on = b.dataset.k === k; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
     paintResults();
   }
@@ -136,6 +192,7 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
   function openPage(initial = '') {
     if (!page) build();
     if (!page.isConnected) mount(page);
+    if (!query) paintResults(); // الرائج والسجل بآخر حالهما في كل فتح
     requestAnimationFrame(() => page.classList.add('in'));
     if (initial) { input.value = initial; void search(initial); }
     setTimeout(() => input?.focus(), 60);
