@@ -133,30 +133,29 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     return box;
   }
 
-  function render() {
-    const hidden = readHidden();
+  function computePeople() {
     const people = [...results.entries()].map(([uid, r]) => ({ uid, r, ms: countsIn(r) ? msOf(r) : 0, locked: !visible(r), shown: countsIn(r) }))
       .sort((a, b) => Number(b.uid === me()) - Number(a.uid === me()) || b.ms - a.ms);
     const shown = people.filter((p) => p.shown && p.ms > 0);
-    const total = shown.reduce((t, p) => t + p.ms, 0);
-    const box = el('div', 'ins');
-    box.dataset.kind = filter;
-
-    const head = el('header', 'ins-head');
-    head.append(el('small', null, 'مجموع وقت السيرفر'), el('strong', 'ins-total', duration(total)));
-    const tabs = el('nav', 'ins-tabs');
-    tabs.setAttribute('role', 'tablist');
-    for (const [k, l] of FILTERS) {
-      const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(k === filter));
-      b.onclick = () => { if (k === filter) return; filter = k; showShort = false; box.classList.add('ins-swap'); setTimeout(render, 180); };
-      tabs.append(b);
-    }
-
-    const pies = el('div', 'ins-pies');
-    const groups = pieGroups(shown);
-    if (!groups.length) { const e = el('p', 'ins-empty', 'لا وقت مسجّل في هذا القسم بعد'); pies.append(e); }
-    for (const g of groups) pies.append(pie(g));
-
+    return { people, shown, total: shown.reduce((t, p) => t + p.ms, 0) };
+  }
+  /** عدّ الرقم من قيمته الظاهرة إلى الجديدة (نص فقط، إطار واحد لكل تحديث، يحترم تقليل الحركة). */
+  function countTo(node, to) {
+    if (!node) return;
+    const from = Number(node.dataset.ms ?? to);
+    node.dataset.ms = String(to);
+    cancelAnimationFrame(node._raf ?? 0);
+    if (reducedMotion() || from === to) { node.textContent = duration(to); return; }
+    const t0 = performance.now(), D = 600;
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
+      node.textContent = duration(from + (to - from) * e);
+      if (k < 1) node._raf = requestAnimationFrame(step);
+    };
+    node._raf = requestAnimationFrame(step);
+  }
+  const reducedMotion = () => document.documentElement.dataset.motion === 'off' || Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  function legendNode(people) {
     const legend = el('ul', 'ins-legend');
     for (const p of people) {
       const li = el('li', `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}`);
@@ -168,6 +167,61 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
       b.onclick = () => (p.shown ? pick(p.uid) : toast('مقفل في هذا القسم', 2500));
       li.append(b); legend.append(li);
     }
+    return legend;
+  }
+  function piesNode(shown, pies = el('div', 'ins-pies')) {
+    const groups = pieGroups(shown);
+    if (!groups.length) pies.replaceChildren(el('p', 'ins-empty', 'لا وقت مسجّل في هذا القسم بعد'));
+    else pies.replaceChildren(...groups.map(pie));
+    return pies;
+  }
+  /**
+   * تبديل القسم أو الشخص (الجولة الثالثة): لا هدم للصفحة. الشرائح تتحوّل من زواياها الحالية، والأرقام تُعدّ،
+   * والخلفية تنتقل للون القسم، والأعمال وحدها تتلاشى وتظهر. البناء الكامل فقط إن تغيّر عدد الدوائر.
+   */
+  function update() {
+    const box = host.querySelector('.ins');
+    if (!box) return render();
+    const { people, shown, total } = computePeople();
+    box.dataset.kind = filter;
+    for (const b of box.querySelectorAll('.ins-tabs button')) { const on = b.dataset.k === filter; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+    countTo(box.querySelector('.ins-head .ins-total'), total);
+    const pies = box.querySelector('.ins-pies');
+    const groups = pieGroups(shown);
+    const wraps = [...pies.querySelectorAll(':scope > .ins-pie')];
+    const same = groups.length && wraps.length === groups.length && groups.every((g, i) => wraps[i]._uids === g.map((p) => p.uid).join(','));
+    if (same) groups.forEach((g, i) => morphPie(wraps[i], g));
+    else piesNode(shown, pies);
+    box.querySelector('.ins-legend')?.replaceWith(legendNode(people));
+    const works = box.querySelector('.ins-works');
+    if (works) {
+      works.classList.add('ins-fade');
+      setTimeout(() => { paintWorks(works, readHidden()); works.classList.remove('ins-fade'); }, reducedMotion() ? 0 : 140);
+    }
+    tintSilk();
+  }
+
+  function render() {
+    const hidden = readHidden();
+    const { people, shown, total } = computePeople();
+    const box = el('div', 'ins');
+    box.dataset.kind = filter;
+
+    const head = el('header', 'ins-head');
+    const totalNode = el('strong', 'ins-total', duration(total));
+    totalNode.dataset.ms = String(total);
+    head.append(el('small', null, 'مجموع وقت السيرفر'), totalNode);
+    const tabs = el('nav', 'ins-tabs');
+    tabs.setAttribute('role', 'tablist');
+    for (const [k, l] of FILTERS) {
+      const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(k === filter));
+      b.dataset.k = k;
+      b.onclick = () => { if (k === filter) return; filter = k; showShort = false; update(); };
+      tabs.append(b);
+    }
+
+    const pies = piesNode(shown);
+    const legend = legendNode(people);
 
     const works = el('section', 'ins-works');
     paintWorks(works, hidden);
@@ -184,13 +238,21 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
       const c = document.createElement('canvas'); silkWrap.append(c);
       try { silk = createSilk(c); } catch { silk = null; }
     }
-    const accent = getComputedStyle(host).getPropertyValue('--accent').trim();
-    if (silk && /^#[0-9a-f]{6}$/i.test(accent)) silk.setPalette(paletteFromAccent(accent));
+    tintSilk();
     return silkWrap;
+  }
+  /** لون الخلفية للقسم المختار: لون رئيسية القسم كما اختاره المستخدم، و«الكل» بلون الواجهة. الحرير ينتقل بينها بسلاسة. */
+  function tintSilk() {
+    const homes = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
+    const src = (homes[filter] && document.getElementById(homes[filter])) || host;
+    const accent = getComputedStyle(src).getPropertyValue('--accent').trim() || getComputedStyle(host).getPropertyValue('--accent').trim();
+    if (silk && /^#[0-9a-f]{6}$/i.test(accent)) silk.setPalette(paletteFromAccent(accent));
+    host.style.setProperty('--ins-accent', /^#[0-9a-f]{6}$/i.test(accent) ? accent : '');
   }
   function pie(group) {
     const size = 220, cx = size / 2, r = 78, w = 30, C = 2 * Math.PI * r;
     const wrap = el('div', 'ins-pie');
+    wrap._uids = group.map((p) => p.uid).join(',');
     const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: '100%', height: '100%', role: 'img', 'aria-label': 'توزيع الساعات' });
     svg.append(svgEl('circle', { cx, cy: cx, r, fill: 'none', stroke: 'rgba(255,255,255,.06)', 'stroke-width': w }));
     const slices = pieSlices(group);
@@ -217,16 +279,46 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     }
     const sel = slices.find((s) => s.uid === person);
     const mid = el('div', 'ins-mid');
-    mid.append(el('strong', null, duration(sel ? sel.ms : sum)), el('small', null, sel ? profileOf(sel.uid).name : 'هذه الدائرة'));
+    const midMs = el('strong', null, duration(sel ? sel.ms : sum));
+    midMs.dataset.ms = String(sel ? sel.ms : sum);
+    mid.append(midMs, el('small', null, sel ? profileOf(sel.uid).name : 'هذه الدائرة'));
     wrap.append(mid);
     return wrap;
+  }
+  /** الدائرة نفسها بأرقام جديدة: الشرائح تنزلق لزواياها الجديدة (انتقال CSS على الطول والإزاحة)، والأفاتار معها. */
+  function morphPie(wrap, group) {
+    const size = 220, cx = size / 2, r = 78, C = 2 * Math.PI * r;
+    const slices = pieSlices(group);
+    const circles = [...wrap.querySelectorAll('circle.ins-sl')];
+    slices.forEach((s, i) => {
+      const c = circles[i];
+      if (!c) return;
+      const len = (s.sweep / 360) * C;
+      c.setAttribute('stroke-dasharray', `${len} ${C - len}`);
+      c.setAttribute('stroke-dashoffset', String(C * 0.25 - (s.start / 360) * C));
+      c.classList.toggle('on', s.uid === person);
+    });
+    const avs = [...wrap.querySelectorAll('.ins-pav')];
+    let k = 0;
+    for (const s of slices) {
+      if (s.frac < 0.06) continue;
+      const node = avs[k++];
+      if (!node) continue;
+      const a = (s.mid - 90) * Math.PI / 180;
+      node.style.left = `${((cx + r * Math.cos(a)) / size) * 100}%`;
+      node.style.top = `${((cx + r * Math.sin(a)) / size) * 100}%`;
+    }
+    const sel = slices.find((s) => s.uid === person);
+    const sum = group.reduce((t, p) => t + p.ms, 0);
+    countTo(wrap.querySelector('.ins-mid strong'), sel ? sel.ms : sum);
+    const label = wrap.querySelector('.ins-mid small');
+    if (label) label.textContent = sel ? profileOf(sel.uid).name : 'هذه الدائرة';
   }
 
   function pick(uid) {
     if (uid === person) return;
     person = uid; showShort = false;
-    host.querySelector('.ins')?.classList.add('ins-swap');
-    setTimeout(render, 160);
+    update();
   }
 
   function paintWorks(box, hidden) {

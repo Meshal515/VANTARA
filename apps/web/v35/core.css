@@ -3787,3 +3787,10 @@ html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !importa
 .v35 .ins-sk-total { width: 180px; height: 44px; border-radius: 8px; margin-top: 30px; }
 .v35 .ins-sk-ring { width: 220px; height: 220px; border-radius: 50%; -webkit-mask: radial-gradient(circle, transparent 63px, #000 64px, #000 93px, transparent 94px); mask: radial-gradient(circle, transparent 63px, #000 64px, #000 93px, transparent 94px); }
 @media (prefers-reduced-motion: reduce) { .v35 .ins-sl { transition: none; } .v35 .ins.ins-swap { filter: none; } }
+/* إحصائيات المتابعة (الجولة الثالثة): التبديل يحوّل ولا يهدم */
+.v35 .ins-sl { transition: stroke-dasharray .7s cubic-bezier(.22,.8,.2,1), stroke-dashoffset .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, stroke .4s ease; }
+.v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1); }
+.v35 .ins-works { transition: opacity .14s ease; }
+.v35 .ins-works.ins-fade { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .v35 .ins-sl, .v35 .ins-pav, .v35 .ins-works { transition: none; } }
+.v35 .ins-sl { stroke: var(--ins-accent, var(--accent)); }
