@@ -227,3 +227,12 @@
 .v35 .uv > .uv-tabs button.on::after{bottom:0}
 .v35 .uv-body > .uv-sec:first-child{margin-top:28px}
 .v35 .uv-browse .uv-sh{margin-bottom:12px}
+
+/* الصقل (9 نوفمبر، بعد التفتيش): أهداف لمس 44px دون تغيير ما يُرى، وأبواب «تصفّح» بلا سهم يأكل النص */
+.v35 .uv-hidx{height:44px;margin-top:-6px}
+.v35 .uv-hidx button{width:30px;height:44px}
+.v35 .uv-sched .uv-air-days button{min-width:44px;min-height:40px;text-align:center}
+.v35 .uv > .uv-tabs button{min-width:44px;min-height:40px}
+.v35 .uv-door{gap:12px}
+.v35 .uv-door-l{font-size:14px}
+.v35 .uv-days button{min-width:44px;min-height:40px;text-align:center}

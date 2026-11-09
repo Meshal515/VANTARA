@@ -424,7 +424,6 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     for (const [x, kind] of covers.filter((c) => c?.[0]).slice(0, 3)) art.append(fill(el('span', 'uv-door-cv'), x, kind, cov(x)));
     const t = el('span', 'uv-door-text'); t.append(el('span', 'uv-door-l', label), el('small', 'uv-door-s', sub));
     b.append(art, t);
-    b.insertAdjacentHTML('beforeend', glyph('chevron', { size: 16, cls: 'icon uv-door-chev' }));
     b.onclick = go;
     return b;
   }
@@ -441,10 +440,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const grid = el('nav', 'uv-doors'); grid.setAttribute('aria-label', 'تصفّح كل الأعمال');
     const updCount = recent.length + series.length;
     grid.append(
-      browseDoor('آخر التحديثات', updCount ? `${updCount} فصلًا وحلقة` : 'فصول وحلقات نزلت', mix([recent, 'manga'], [series.map((u) => u.x ?? u.item ?? u), 'cinema']), () => openSub('updates')),
-      browseDoor('الرائج', 'أنمي ومانجا وسينما', mix([a?.trending, 'anime'], [manga, 'manga'], [c?.series, 'cinema']), () => openSub('trending')),
-      browseDoor('التصنيفات', 'لكل نوع تصنيفاته', mix([c?.movie, 'cinema'], [a?.trending?.slice(3), 'anime'], [manga.slice(3), 'manga']), () => (open.categories ? open.categories() : open.browse('anime'))),
-      browseDoor('كل الأعمال', 'الأشهر بكل نوع', mix([c?.series?.slice(3), 'cinema'], [manga.slice(6), 'manga'], [a?.trending?.slice(6), 'anime']), () => (open.discover ? open.discover() : open.browse('anime'))),
+      browseDoor('آخر التحديثات', updCount ? `${updCount} جديدًا` : 'فصول وحلقات', mix([recent, 'manga'], [series.map((u) => u.x ?? u.item ?? u), 'cinema']), () => openSub('updates')),
+      browseDoor('الرائج', 'الأنواع الثلاثة', mix([a?.trending, 'anime'], [manga, 'manga'], [c?.series, 'cinema']), () => openSub('trending')),
+      browseDoor('التصنيفات', 'لكل نوع', mix([c?.movie, 'cinema'], [a?.trending?.slice(3), 'anime'], [manga.slice(3), 'manga']), () => (open.categories ? open.categories() : open.browse('anime'))),
+      browseDoor('كل الأعمال', 'الأشهر', mix([c?.series?.slice(3), 'cinema'], [manga.slice(6), 'manga'], [a?.trending?.slice(6), 'anime']), () => (open.discover ? open.discover() : open.browse('anime'))),
     );
     s.append(grid);
     return s;
