@@ -1758,9 +1758,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // الغلاف النهائي وحده بلا معاينة صغيرة قبله، وتلاشٍ واحد على الأكثر؛ المحفوظ يظهر فورًا
       void mountImage(cover, w, { final: true }).then((url) => {
         if (!url || state.current?.id !== w.id || !glow) return;
-        // الضوء من الغلاف نفسه بعُشر حجمه (الصورة في الذاكرة من الغلاف): ضبابية صغيرة ثم تكبير ×10
-        glow.onload = () => glow.classList.add('ready');
-        glow.src = url;
+        // الضوء من الغلاف نفسه بعُشر حجمه (الصورة في الذاكرة من الغلاف): ضبابية صغيرة ثم تكبير ×10.
+        // كل نسخ الضوء في الصفحة (المعرّف مكرّر: ضوء الغلاف وضوء بنر «الملف»)؛ كان الثاني يبقى فارغًا شفافًا
+        for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
+          g.onload = () => g.classList.add('ready');
+          g.src = url;
+        }
       });
       // «الملف»: صورة العمل العريضة من AniList؛ عمل بلا صورة عريضة يلبس ضوء غلافه مكانها
       const banner = q('detailBanner');
@@ -1768,6 +1771,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const wide = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
         banner.closest('.mw-ban')?.classList.toggle('mw-ban--art', Boolean(wide));
         banner.onload = () => banner.classList.add('ready');
+        // صورة عريضة تعذّرت: البنر يلبس ضوء الغلاف بدلها (لا يبقى شفافًا)
+        banner.onerror = () => { banner.removeAttribute('src'); banner.closest('.mw-ban')?.classList.remove('mw-ban--art'); };
         if (wide) banner.src = wide;
         else banner.removeAttribute('src');
       }
@@ -3337,7 +3342,45 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   /** أعمال تشاركه تصنيفًا مما في الرئيسية والاستكشاف (بلا طلب جديد)، الأكثر تقاطعًا أولًا. */
+  /**
+   * «أعمال مشابهة» للمانجا من توصيات AniList (تقييم القرّاء: قرابة حقيقية) كما «قد يعجبك» في الأنمي. كانت مطابقة
+   * أنواع داخل مخزون صغير محلي (الرائج والشائع): نتائج بلا قرابة، وأعمال لا يظهر لها التبويب أصلًا. المطابقة
+   * بالأنواع تبقى بديلًا حتى تصل التوصيات أو إن تعذّرت.
+   */
+  const similarCache = new Map();
+  function similarRecs(w) {
+    const key = String(w.id);
+    if (!similarCache.has(key)) {
+      const alId = /^al:(\d+)$/.exec(key)?.[1];
+      const title = typeof w.title === 'string' ? w.title : w.title?.english || w.title?.romaji || w.title?.native || '';
+      const job = (async () => {
+        if (!alId && !title) return [];
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            query: `query ($id: Int, $q: String) { Media(${alId ? 'id: $id' : 'search: $q'}, type: MANGA) { recommendations(perPage: 14, sort: RATING_DESC) { nodes { rating mediaRecommendation { id type isAdult title { english romaji } coverImage { large color } bannerImage genres status averageScore chapters } } } } }`,
+            variables: alId ? { id: Number(alId) } : { q: title },
+          }),
+        });
+        const nodes = (await res.json())?.data?.Media?.recommendations?.nodes ?? [];
+        return nodes.map((n) => n.mediaRecommendation).filter((m) => m && m.type === 'MANGA' && !m.isAdult && m.coverImage?.large)
+          .map((m) => ({ id: `al:${m.id}`, title: m.title, coverImage: m.coverImage, bannerImage: m.bannerImage ?? null, genres: m.genres ?? [], status: m.status, averageScore: m.averageScore, chapters: m.chapters }));
+      })().catch(() => []);
+      similarCache.set(key, { list: null, job });
+      void job.then((list) => {
+        similarCache.get(key).list = list;
+        if (String(state.current?.id) !== key) return;
+        const grid = q('similarGrid');
+        if (grid && list.length) { grid.dataset.for = ''; paintSimilar(); }
+        paintSimilarTab(w);
+      });
+    }
+    return similarCache.get(key).list;
+  }
   function similarWorks(w) {
+    const recs = similarRecs(w);
+    if (recs?.length) return recs.slice(0, 12);
     const genres = new Set(w.genres || []);
     if (!genres.size) return [];
     const pool = uniqueById([...state.home.trending, ...state.home.popular, ...state.home.featured, ...state.home.recent, ...state.catalog].filter(Boolean));

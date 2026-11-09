@@ -2055,14 +2055,16 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
   aspect-ratio: auto;
   height: min(64svh, 540px);
 }
-/* الأجواء: الخلفية مغبّشة وثابتة (لا حركة عمق فوق مرشّح: تكلفة إطار على أندرويد) */
+/* الأجواء: الخلفية مغبّشة. الحجم الزائد بـ inset لا بـ transform، وحركة العمق تبقى CSS مربوطة بالتمرير:
+ * «animation: none» كان يجعل collapse-hero يحرّكها من JavaScript بعد كل تمرير، وهو سبب الاهتزاز القديم
+ * على WebView أندرويد (d823bd0) — لا يُعطَّل الخط الزمني هنا أبدًا */
 .v35 .cn-detail[data-style='poster'] .cn-detail-art > .cn-img {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: -36px;
+  width: calc(100% + 72px);
+  height: calc(100% + 72px);
   object-fit: cover;
   filter: blur(22px) saturate(1.2) brightness(0.55);
-  transform: scale(1.18);
-  animation: none;
 }
 .v35 .cn-detail[data-style='poster'] .cn-detail-art::after {
   height: 60%;
