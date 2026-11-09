@@ -315,7 +315,15 @@
   padding-block: 7px;
   border-radius: 8px;
 }
-.v35 .rd-titles--chapters:active { background: var(--surface-2); }
+/* الضغط لا يرسم صندوقًا داكنًا (كان يبدو كترويسة القارئ القديمة فوق الترويسة الشفافة): خفوت النص وحده،
+ * واللمسة تفتح قائمة الفصول للانتقال السريع */
+.v35 .rd-titles--chapters,
+.v35 .rd-titles--chapters:active,
+.v35 .rd-titles--chapters:focus,
+.v35 .rd-titles--chapters:focus-visible { background: transparent !important; box-shadow: none !important; outline: none; -webkit-tap-highlight-color: transparent; }
+.v35 .rd-titles--chapters > * { transition: opacity 0.15s ease; }
+.v35 .rd-titles--chapters:active > * { opacity: 0.55; }
+.v35 .rd-titles--chapters:focus-visible strong { text-decoration: underline; text-underline-offset: 4px; }
 .v35 .rd-chapter-sheet { max-height: min(80vh, 740px); display: flex; flex-direction: column; }
 .v35 .rd-chapter-sheet__head { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 4px 14px; }
 .v35 .rd-chapter-sheet__head span { color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -708,13 +716,13 @@
   width: 18px;
   height: 18px;
   margin: -9px 0 0;
-  translate: 50% 0;
+  /* الموضع محسوب داخل المسار (reader.js: (100% - 18px) × النسبة) فلا تُقص الدائرة عند الطرفين */
+  translate: 0 0;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 0 0 4px var(--accent-soft), 0 2px 8px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s ease;
 }
-[dir='ltr'] .v35 .rd-knob { translate: -50% 0; }
 .v35 .rd-knob em {
   position: absolute;
   bottom: 30px;

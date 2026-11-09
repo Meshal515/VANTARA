@@ -1023,44 +1023,77 @@ export function openSmartReader(deps, ctx) {
     tl.focus(seg, index, segs);
     tgPage(seg, index);
   }
+  /** الدائرة والتعبئة داخل المسار دائمًا: مركز الدائرة من 9px إلى (العرض − 9px)، فلا تُقص عند الطرفين. */
+  function paintScrub(f) {
+    const k = Math.min(1, Math.max(0, f));
+    q('rdKnob').style.insetInlineStart = `calc((100% - 18px) * ${k.toFixed(4)})`;
+    q('rdProgress').style.width = `calc((100% - 18px) * ${k.toFixed(4)} + 9px)`;
+  }
+  const fractionOf = (i, n) => (n > 1 ? i / (n - 1) : 1);
   function updateProgress() {
     const n = state.pages.length;
-    q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
-    const pct = n ? ((state.current + 1) / n) * 100 : 0;
-    q('rdProgress').style.width = `${pct}%`;
-    if (!scrubbing) q('rdKnob').style.insetInlineStart = `${pct}%`;
+    // أثناء السحب الرقم والدائرة للإصبع؛ تمرير الصفحات تحته لا يرجعهما
+    if (!scrubbing) {
+      q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
+      paintScrub(n ? fractionOf(state.current, n) : 0);
+    }
     q('rdScrub').setAttribute('aria-valuenow', String(state.current + 1));
     q('rdScrub').setAttribute('aria-valuemax', String(n));
   }
-  // السحب على الشريط: الدائرة تتبع الإصبع وتُظهر رقم الصفحة، والإفلات ينقل مباشرة (نظام Mihon)
+  /**
+   * السحب على الشريط (قرار المالك): الصفحة تتحرك مع الإصبع والرقم معها، لا قفزة واحدة عند الإفلات
+   * (كانت تُسوِّد الشاشة لحظة ثم تنقلك). صفحة واحدة لكل إطار على الأكثر، والصور تُطلب أولًا بأول.
+   */
   function scrubIndex(e) {
     const bar = q('rdScrub'); const r = bar.getBoundingClientRect(); const n = state.pages.length;
     const rtl = getComputedStyle(bar).direction === 'rtl';
-    const f = Math.min(1, Math.max(0, rtl ? (r.right - e.clientX) / r.width : (e.clientX - r.left) / r.width));
+    const span = Math.max(1, r.width - 18);
+    const x = rtl ? r.right - 9 - e.clientX : e.clientX - r.left - 9;
+    const f = Math.min(1, Math.max(0, x / span));
     return { i: Math.max(0, Math.min(n - 1, Math.round(f * (n - 1)))), f, n };
   }
   function bindScrub() {
     const bar = q('rdScrub');
+    let shown = -1;
+    let want = -1;
+    let frame = 0;
+    const follow = () => {
+      frame = 0;
+      if (!scrubbing || want < 0 || want === shown) return;
+      shown = want;
+      jumpTo(want, false);
+    };
     const move = (e) => {
       const { i, f, n } = scrubIndex(e);
-      q('rdKnob').style.insetInlineStart = `${f * 100}%`;
-      q('rdProgress').style.width = `${f * 100}%`;
+      paintScrub(f);
       q('rdKnobLabel').textContent = n ? `${i + 1}` : '';
+      q('rdPageLabel').textContent = n ? `${i + 1} / ${n}` : '';
+      want = i;
+      if (!frame) frame = requestAnimationFrame(follow);
       return i;
+    };
+    const stop = () => {
+      scrubbing = false; root.classList.remove('rd--scrubbing');
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
     };
     bar.addEventListener('pointerdown', (e) => {
       if (!state.pages.length) return;
       scrubbing = true; root.classList.add('rd--scrubbing');
+      shown = state.current; want = -1;
       bar.setPointerCapture?.(e.pointerId); move(e); e.preventDefault();
     });
     bar.addEventListener('pointermove', (e) => { if (scrubbing) move(e); });
     const end = (e) => {
       if (!scrubbing) return;
-      const i = move(e); scrubbing = false; root.classList.remove('rd--scrubbing');
-      jumpTo(i, false);
+      const i = move(e);
+      stop();
+      // الصفحة غالبًا وصلت أثناء السحب؛ الإفلات يثبّت آخر موضع فقط
+      if (i !== shown) jumpTo(i, false);
+      updateProgress();
     };
     bar.addEventListener('pointerup', end);
-    bar.addEventListener('pointercancel', () => { scrubbing = false; root.classList.remove('rd--scrubbing'); updateProgress(); });
+    bar.addEventListener('pointercancel', () => { stop(); updateProgress(); });
     bar.addEventListener('keydown', (e) => {
       const d = { ArrowLeft: 1, ArrowRight: -1, ArrowUp: -1, ArrowDown: 1 }[e.key];
       if (d && state.pages.length) { e.preventDefault(); jumpTo(Math.max(0, Math.min(state.pages.length - 1, state.current + d)), false); }
