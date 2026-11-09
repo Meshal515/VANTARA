@@ -847,7 +847,7 @@
 .v35 #detail .mw-similar .work-card { min-width: 0; }
 
 /* ═══ 3. الملف ═══ */
-.v35 #detail[data-look='profile'] .mw-ban { position: relative; height: calc(210px + var(--safe-top)); overflow: hidden; background: var(--surface-1); }
+.v35 #detail[data-look='profile'] .mw-ban { position: relative; z-index: 0; isolation: isolate; height: calc(210px + var(--safe-top)); overflow: hidden; background: var(--surface-1); }
 .v35 #detail[data-look='profile'] .mw-ban > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-out; }
 .v35 #detail[data-look='profile'] .mw-ban > img.ready { opacity: 1; }
 /* A portrait cover is background art, NOT a second giant poster.
@@ -879,7 +879,7 @@
 .v35 #detail[data-look='profile'] .mw-ban--art .mw-ban-amb { display: none; }
 .v35 #detail[data-look='profile'] .mw-ban-amb img { filter: blur(4px) saturate(1.2); }
 .v35 #detail[data-look='profile'] .mw-ban-amb img.ready { opacity: 0.6; }
-.v35 #detail[data-look='profile'] .mw-idrow { position: relative; display: flex; gap: 14px; align-items: flex-end; margin-top: -74px; padding: 0 var(--mw-side); }
+.v35 #detail[data-look='profile'] .mw-idrow { position: relative; z-index: 2; display: flex; gap: 14px; align-items: flex-end; margin-top: -74px; padding: 0 var(--mw-side); }
 .v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex: 0 0 112px; border-radius: 12px; box-shadow: 0 0 0 3px var(--bg), 0 16px 30px -10px rgba(0, 0, 0, 0.9); }
 .v35 #detail[data-look='profile'] .mw-id { min-width: 0; padding-bottom: 4px; }
 .v35 #detail[data-look='profile'] .mw-title { font-size: 21px; }
