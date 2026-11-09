@@ -24,7 +24,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, mangaLook, mountMangaScrollDepth, rowsForMark, rowsInGroup } from './manga-work.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, mountMangaScrollDepth, rowsForMark, rowsInGroup } from './manga-work.js';
 import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -1798,8 +1798,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
         bannerBox?.classList.remove('mw-ban--art', 'mw-ban--cover');
         banner.onload = () => {
           if (!banner.isConnected || state.current?.id !== w.id) return;
+          // Some manga providers label a portrait cover as bannerImage.
+          // Only true landscape art occupies the hero at full strength.
+          const isWide = !usingCover && isWideMangaArtwork(banner.naturalWidth, banner.naturalHeight);
+          bannerBox?.classList.toggle('mw-ban--art', isWide);
+          bannerBox?.classList.toggle('mw-ban--cover', !isWide);
           banner.classList.add('ready');
-          if (!usingCover) bannerBox?.classList.add('mw-ban--art');
         };
         // فشل البنر لا يخفي الصورة: جرّب الغلاف النهائي عند توفره.
         banner.onerror = () => {

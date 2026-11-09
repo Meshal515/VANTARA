@@ -850,15 +850,27 @@
 .v35 #detail[data-look='profile'] .mw-ban { position: relative; height: calc(210px + var(--safe-top)); overflow: hidden; background: var(--surface-1); }
 .v35 #detail[data-look='profile'] .mw-ban > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-out; }
 .v35 #detail[data-look='profile'] .mw-ban > img.ready { opacity: 1; }
-/* Fallback uses the actual cover as SHARP art; never enlarge-and-blur it as the banner. */
-.v35 #detail[data-look='profile'] .mw-ban--cover > img {
-  object-fit: contain;
-  object-position: center;
-  filter: none;
-  z-index: 1;
+/* A portrait cover is background art, NOT a second giant poster.
+ * Fill the wide header without visible portrait edges; the crisp real cover
+ * stays at its intended size in .mw-idrow. Only the background is dimmed. */
+.v35 #detail[data-look='profile'] .mw-ban--cover {
+  background: linear-gradient(145deg, var(--surface-1), var(--bg));
 }
+.v35 #detail[data-look='profile'] .mw-ban--cover > img {
+  object-fit: cover;
+  object-position: center 25%;
+  filter: none;
+}
+.v35 #detail[data-look='profile'] .mw-ban--cover > img.ready {
+  opacity: 0.48;
+}
+/* No additional blurred copy behind the cropped art. */
+.v35 #detail[data-look='profile'] .mw-ban--cover .mw-ban-amb { display: none; }
 .v35 #detail[data-look='profile'] .mw-ban--cover::after {
-  background: linear-gradient(to bottom, rgba(8, 7, 12, 0.16), transparent 55%, var(--bg));
+  z-index: 1;
+  background:
+    linear-gradient(to top, var(--bg) 0%, rgba(8, 7, 12, 0.42) 40%, rgba(8, 7, 12, 0.24) 100%),
+    linear-gradient(to right, rgba(8, 7, 12, 0.48), transparent 48%, rgba(8, 7, 12, 0.40));
   pointer-events: none;
 }
 .v35 #detail[data-look='profile'] .mw-ban::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(8, 7, 12, 0.6), transparent 35%, rgba(8, 7, 12, 0.2) 60%, var(--bg)); }
