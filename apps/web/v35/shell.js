@@ -6269,7 +6269,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       seriesUpdates: () => unifiedData.series,
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
       // جدول البث: لقطة الحلقة لما لا بنر له (نفس سلسلة صور صفحة العمل)، والكتابة كسولة
-      animeArt: (id) => import('../lib/anime-art.js').then(({ loadAnimeArt }) => loadAnimeArt(id, { timeoutMs: 1500 })),
+      animeArt: (id) => import('../lib/anime-art.js').then(({ loadAnimeArt }) => loadAnimeArt(id)),
       episodeStill: (...a) => artMod?.episodeStill(...a) ?? null,
       mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
       mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
@@ -6287,6 +6287,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     unifiedData.asked = true;
     void fetchAnimeHome().then((d) => {
       unifiedData.anime = d;
+      // صور جدول البث (خلفية IMDb/fanart) تُطلب مع وصول الجدول لا عند رسم البطاقة، فتكون جاهزة قبل ظهورها
+      // الأقرب لـ«الآن» أولًا (اليوم ثم أمس وغدًا): كانت تُطلب بترتيب الأسبوع فتتأخر بطاقات اليوم خلف الأمس
+      void import('../lib/anime-art.js').then(({ loadAnimeArt }) => {
+        const t = Date.now();
+        const near = [...(d?.week ?? [])].filter((e) => Math.abs(e.airingAt - t) < 36 * 3600_000).sort((a, b) => Math.abs(a.airingAt - t) - Math.abs(b.airingAt - t));
+        const ids = [...new Set(near.map((e) => e.id))];
+        // دفعات صغيرة: لا تزاحم طلبات الصفحة الأولى
+        const next = () => { const batch = ids.splice(0, 4); if (batch.length) void Promise.all(batch.map((id) => loadAnimeArt(id).catch(() => null))).then(next); };
+        next();
+      });
       unifiedView.refresh();
       return loadHeroLogos(d?.trending).then(() => unifiedView.refresh());
     }).catch(() => { unifiedData.asked = false; });

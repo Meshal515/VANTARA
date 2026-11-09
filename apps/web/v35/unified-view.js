@@ -226,32 +226,46 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   const slotArt = new Map();
   /** صورة البطاقة العريضة: البنر فورًا، وإلا تُطلب لقطة الحلقة (بمهلة) ثم الغلاف. لا تبديل بعد الظهور. */
+  /**
+   * صورة البطاقة العريضة بسلسلة بنر الأنمي نفسها (anime-today.js، wideCandidates): الخلفية الرسمية من metahub
+   * بمعرّف IMDb، ثم fanart، ثم لقطة الحلقة، ثم بنر AniList، والغلاف آخرًا. تُحسم قبل الظهور (مهلة 4ث، والطلب يبدأ مع وصول الجدول
+   * للمعرّفات)، وإن تعذّر تحميل صورة تُجرَّب التالية، فلا تبديل صورة ظاهرة بأخرى.
+   */
   function slotImage(e, box) {
-    const show = (src) => {
-      if (!src) return;
+    const show = (list) => {
+      const chain = [...new Set(list.filter(Boolean))];
+      if (!chain.length) return;
+      const [src, ...rest] = chain;
       const i = el('img', 'uv-slot-img');
       i.alt = '';
       i.decoding = 'async';
       i.loading = 'lazy';
-      i.onload = () => i.classList.add('in');
-      i.onerror = () => { if (src !== e.poster && e.poster) { i.remove(); show(e.poster); } };
+      i.onload = () => {
+        // بعض الخلفيات تردّ بصورة فارغة صغيرة بدل 404
+        if (rest.length && i.naturalWidth && i.naturalWidth < 200) { i.remove(); show(rest); return; }
+        i.classList.add('in');
+      };
+      i.onerror = () => { i.remove(); show(rest); };
+      if (src === e.poster) i.style.objectPosition = 'center 22%';
       i.src = src;
-      if (!e.banner || src === e.poster) i.style.objectPosition = 'center 22%';
       box.append(i);
     };
-    if (e.banner) return show(e.banner);
-    if (!data.animeArt) return show(e.poster);
-    const key = `${e.id}:${e.episode}`;
-    if (!slotArt.has(key)) {
-      slotArt.set(key, Promise.race([
-        Promise.resolve(data.animeArt(e.id)).then((art) => {
-          const shot = data.episodeStill?.(e, e.episode, art, { width: 290, dpr: globalThis.devicePixelRatio || 1 });
-          return shot?.still ? shot.src : e.poster;
-        }).catch(() => e.poster),
-        new Promise((r) => setTimeout(() => r(e.poster), 1500)),
+    const tail = [e.banner, e.poster];
+    if (!data.animeArt) return show(tail);
+    if (!slotArt.has(e.id)) {
+      slotArt.set(e.id, Promise.race([
+        Promise.resolve(data.animeArt(e.id)).catch(() => null),
+        new Promise((r) => setTimeout(() => r(null), 4000)),
       ]));
     }
-    void slotArt.get(key).then((src) => { if (box.isConnected || !box.firstChild) show(src); });
+    void slotArt.get(e.id).then((art) => {
+      const list = [];
+      if (/^tt\d+$/.test(art?.imdb ?? '')) list.push(`https://images.metahub.space/background/medium/${art.imdb}/img`);
+      list.push(art?.fanart);
+      const shot = art ? data.episodeStill?.(e, e.episode, art, { width: 290, dpr: globalThis.devicePixelRatio || 1 }) : null;
+      if (shot?.still) list.push(shot.src);
+      show([...list, ...tail]);
+    });
   }
   function slot(e) {
     const t = now();
