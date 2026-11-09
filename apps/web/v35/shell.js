@@ -88,6 +88,8 @@ import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from 
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
 import { createUnifiedView } from './unified-view.js';
 import { workMenuEntries, workOptionEntries } from './work-menu.js';
+import { EMPTY_COPY, LIBRARY_TABS, libraryShelves } from './library-model.js';
+import { createUnifiedLibrary } from './unified-library.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -3713,8 +3715,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
 
+  // المكتبة الموحدة (التصميم الرابع): الجداول المشتركة نفسها، فلا ترحيل ولا نسخ
+  const unifiedLibrary = createUnifiedLibrary({
+    el, glyph,
+    shelves: () => libraryShelves(sync, me(), { qualifiesView: (v) => isMediaRef(v.series_ref) || qualifiesOwnView(v) }),
+    open: (item) => openUnified(item),
+    discover: () => navTo('discover'),
+  });
+  function renderUnifiedLibrary() {
+    unifiedLibrary.render(q('unifiedLibrary'));
+  }
+  let libraryRepaint = 0;
+  /** «مكتبتي» الظاهرة: الموحدة في توحيد المحتوى، وإلا مكتبة القسم بتصميمه. */
+  function renderActiveLibrary() {
+    if (root.dataset.content === 'unified') return renderUnifiedLibrary();
+    const section = root.dataset.section;
+    if (section === 'anime') anime.renderLibrary();
+    else if (section === 'cinema') cinema.renderLibrary();
+    else renderLibrary();
+  }
   function renderLibrary() {
-    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['completed', 'المكتمل'], ['favorite', 'المفضلة']];
+    // الأسماء والترتيب من library-model.js (واحدة للأقسام الثلاثة)؛ المفاتيح القديمة للمانجا باقية
+    const KEY = { all: 'all', following: 'reading', recent: 'history', later: 'later', favorite: 'favorite', completed: 'completed' };
+    const tabs = LIBRARY_TABS.map((t) => [KEY[t.id], t.label]);
     q('libraryTabs').replaceChildren(
       ...tabs.map(([k, l]) => {
         const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
@@ -3745,13 +3768,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('libraryToolbar').hidden = items.length < 2;
     q('libraryCount').textContent = countLabel(items.length, 'work');
     if (!items.length) {
-      const copy = {
-        all: ['مكتبتك فاضية', 'المس رمز المكتبة في صفحة أي عمل، ويظهر هنا على أجهزتك كلها.'],
-        reading: ['ما تتابع شي الحين', 'الأعمال اللي تضيفها لمكتبتك تظهر هنا.'],
-        later: ['القائمة فاضية', 'من قائمة الخيارات في صفحة العمل اختر «أقرأ لاحقًا».'],
-        favorite: ['ما عندك مفضلة', 'القلب في صفحة العمل يضيفه هنا.'],
-        completed: ['ما أكملت شي بعد', 'من قائمة ⋮ في صفحة العمل اختر «أكملته»، أو خلّص آخر فصل في عمل مكتمل.'],
-      }[state.libraryFilter];
+      const copy = EMPTY_COPY[{ reading: 'following' }[state.libraryFilter] ?? state.libraryFilter] ?? EMPTY_COPY.all;
       emptyState(grid, {
         icon: { favorite: 'heart', later: 'clock' }[state.libraryFilter] ?? 'library',
         title: copy[0],
@@ -4880,7 +4897,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
-    if (id === 'library') inAnime ? anime.renderLibrary() : inCinema ? cinema.renderLibrary() : renderLibrary();
+    if (id === 'library') renderActiveLibrary();
     if (id === 'discover') {
       if (inAnime) anime.showDiscover();
       // رجوع إلى قائمة السينما: تبقى كما تُركت (كان showList يعيد بناء الشبكة من الصفر فتضيع العناصر والموضع)
@@ -5631,6 +5648,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (diagnosticsUi.visible() && available()) {
       group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
     }
+    // «المصادر» كانت تبويبًا في مكتبة الأنمي وليست مجموعة أعمال: مكانها هنا
+    if (anime.sourcesAvailable?.()) group('', [row('activity', 'صحة مصادر الأنمي', 'نجاح كل مصدر وآخر نجاح أو فشل', { run: () => anime.openSourcesHealth() })]);
 
     // Not a general account setting: hide ALL dangerous actions for friends.
     if (canManageDangerZone(sync)) {
@@ -6352,6 +6371,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (!state.heroItems.length) refreshFriendsHero();
         renderHome();
       }
+    }
+    // المكتبة الظاهرة تتحدّث فورًا (كانت تبقى قديمة حتى تُفتح من جديد)، بإطار واحد مهما تتابعت الكتابات
+    if (currentPage() === 'library' && tables.some((t) => ['library', 'collections', 'completions', 'work_views', 'ratings'].includes(t))) {
+      if (!libraryRepaint) libraryRepaint = requestAnimationFrame(() => { libraryRepaint = 0; if (currentPage() === 'library') renderActiveLibrary(); });
     }
     if (tables.some((t) => ['library', 'collections', 'completions'].includes(t))) {
       refreshLibraryDetail();

@@ -39,6 +39,7 @@ import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './w
 import { applyLocalMarks, buildMarkSheet } from './episode-marks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { workKind, workMenuEntries } from './work-menu.js';
+import { EMPTY_COPY, LIBRARY_TABS } from './library-model.js';
 import { createAnimeToday } from './anime-today.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
@@ -2114,7 +2115,7 @@ export function createAnime(deps) {
 
   /** المصادر سطرًا هادئًا واحدًا: نقطة حالة، ومن أين تشاهد. لا شرائح بإطارات. */
   diagnosticsUi.subscribe(() => {
-    const health = q('animeLibrary')?.querySelector('.an-health');
+    const health = document.querySelector('.an-health');
     if (health) void renderSourcesHealth(health);
     const m = state.detail;
     if (m?.id != null) paintSources(m);
@@ -2935,27 +2936,25 @@ export function createAnime(deps) {
   function renderLibrary() {
     const host = q('animeLibrary');
     if (!host) return;
-    // نفس شرائح «مكتبتي» في المانجا والسينما: الاسم وعدده، وبنفس الترتيب (قانون التوحيد)
+    // التبويبات بأسمائها وترتيبها من library-model.js (واحدة للأقسام الثلاثة). «المصادر» ليست مجموعة
+    // أعمال: صارت في الإعدادات ← الإعدادات المتقدمة ← «صحة مصادر الأنمي»
     const tabs = el('div', 'segmented library-tabs');
     tabs.setAttribute('role', 'tablist');
-    const countOf = (k) =>
-      k === 'history' ? watching().length
-        : k === 'list' ? (signedIn() ? account.shelf('library').length : Object.keys(readJson(LIST_KEY, {})).length)
-          : k === 'sources' ? 0
-            : signedIn() ? account.shelf(k).length : 0;
-    for (const [k, label] of [
-      ['list', signedIn() ? 'أتابعها' : 'قائمتي'],
-      ['history', 'آخر المشاهدات'],
-      ...(signedIn()
-        ? [
-            ['read_later', 'لاحقًا'],
-            ['favorite', 'المفضلة'],
-            ['completed', 'المكتمل'],
-          ]
-        : []),
-      ...(engine.available() ? [['sources', 'المصادر']] : []),
-    ]) {
-      const b = el('button', `library-tab${state.libraryTab === k ? ' active' : ''}`, label);
+    const KEY = { all: 'all', following: 'list', recent: 'history', later: 'read_later', favorite: 'favorite', completed: 'completed' };
+    if (state.libraryTab === 'sources' || !Object.values(KEY).includes(state.libraryTab)) state.libraryTab = 'list';
+    const shelfOf = (k) => {
+      if (!signedIn()) return k === 'list' || k === 'all' ? Object.values(readJson(LIST_KEY, {})).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
+      if (k === 'all') {
+        const seen = new Set();
+        return ['library', 'read_later', 'favorite', 'completed'].flatMap((x) => account.shelf(x)).filter((m) => !seen.has(String(m.id)) && seen.add(String(m.id)));
+      }
+      return account.shelf(k === 'list' ? 'library' : k);
+    };
+    const countOf = (k) => (k === 'history' ? watching().length : shelfOf(k).length);
+    for (const t of LIBRARY_TABS) {
+      const k = KEY[t.id];
+      if (!signedIn() && !['all', 'list', 'history'].includes(k)) continue;
+      const b = el('button', `library-tab${state.libraryTab === k ? ' active' : ''}`, t.label);
       b.type = 'button';
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', String(state.libraryTab === k));
@@ -2968,14 +2967,6 @@ export function createAnime(deps) {
       tabs.append(b);
     }
     const nodes = [tabs];
-    if (state.libraryTab === 'sources') {
-      const box = el('div', 'an-health');
-      box.append(el('p', 'an-note', 'نقرأ صحة المصادر…'));
-      nodes.push(box);
-      host.replaceChildren(...nodes);
-      void renderSourcesHealth(box);
-      return;
-    }
     if (state.libraryTab === 'history') {
       const items = watching();
       if (!items.length) nodes.push(emptyBox('clock', 'لا مشاهدات بعد', 'أول حلقة تشاهدها تظهر هنا بتقدّمها.'));
@@ -2995,24 +2986,18 @@ export function createAnime(deps) {
     } else {
       // رفوف الحساب (تظهر في ملفك ولأصدقائك)، أو قائمة الجهاز لمن لم يسجّل
       const kind = state.libraryTab;
-      const SHELF = {
-        list: ['library', 'أتابعها', 'اضغط «قائمتي» على أي أنمي ليظهر هنا.', 'تتابعها'],
-        read_later: ['clock', 'شاهد لاحقًا', 'اضغط الساعة في صفحة أي أنمي تنوي تشاهده.', 'في «شاهد لاحقًا»'],
-        favorite: ['heart', 'المفضلة', 'اضغط القلب في صفحة الأنمي اللي تحبه.', 'في المفضلة'],
-        completed: ['check', 'المكتمل', 'علّم «أكملته» من زر العين في قائمة الحلقات.', 'أكملتها'],
-      };
-      const [icon, title, hint, unit] = SHELF[kind] ?? SHELF.list;
-      const items = signedIn()
-        ? account.shelf(kind === 'list' ? 'library' : kind)
-        : Object.values(readJson(LIST_KEY, {})).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+      const id = Object.entries(KEY).find(([, v]) => v === kind)?.[0] ?? 'following';
+      const [title, hint] = EMPTY_COPY[id];
+      const icon = { all: 'library', following: 'library', later: 'clock', favorite: 'heart', completed: 'check' }[id] ?? 'library';
+      const items = shelfOf(kind);
       if (!items.length) {
-        const box = emptyBox(icon, `${title}: فارغة`, hint);
+        const box = emptyBox(icon, title, hint);
         box.append(button('an-btn an-btn--primary', 'اكتشف أنمي', () => openDiscover({})));
         nodes.push(box);
       } else {
         const grid = el('div', 'an-grid');
         grid.append(...items.map((m) => posterCard(m)));
-        nodes.push(el('p', 'an-count', `${items.length} ${unit}`), grid);
+        nodes.push(el('p', 'an-count', `${items.length} ${items.length === 1 ? 'عمل' : 'أعمال'}`), grid);
       }
     }
     host.replaceChildren(...nodes);
@@ -3027,6 +3012,16 @@ export function createAnime(deps) {
       }
     });
     stripIn([...host.querySelectorAll('.an-hc, .an-card')].slice(0, 10));
+  }
+  /** «صحة مصادر الأنمي» من الإعدادات: الشاشة نفسها التي كانت تبويبًا في المكتبة، في ورقة. */
+  function openSourcesHealth() {
+    deps.openSheet((body) => {
+      body.append(el('h3', null, 'صحة مصادر الأنمي'));
+      const box = el('div', 'an-health');
+      box.append(el('p', 'an-note', 'نقرأ صحة المصادر…'));
+      body.append(box);
+      void renderSourcesHealth(box);
+    }, { tone: 'anime' });
   }
   /** صحة كل مصدر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي، والكتالوج المحلوب. */
   async function renderSourcesHealth(box) {
@@ -3116,8 +3111,8 @@ export function createAnime(deps) {
 
   // تقدّم الحلب يحدّث شاشة الصحة إن كانت مفتوحة
   engine.on('catalog', () => {
-    const box = q('animeLibrary')?.querySelector('.an-health');
-    if (box && state.libraryTab === 'sources') void renderSourcesHealth(box);
+    const box = document.querySelector('.an-health');
+    if (box?.isConnected) void renderSourcesHealth(box);
   });
 
   function emptyBox(icon, title, text) {
@@ -3163,5 +3158,5 @@ export function createAnime(deps) {
     idle(() => void warmToday());
   }
 
-  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, leaveDetail: () => {state.view?.episodeControls?.suspend();} };
+  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, openSourcesHealth, sourcesAvailable: () => engine.available(), leaveDetail: () => {state.view?.episodeControls?.suspend();} };
 }

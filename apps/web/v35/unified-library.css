@@ -1,0 +1,67 @@
+/* المكتبة الموحدة: بلا حاويات، الهرمية بالطباعة والفراغ، حافة واحدة (اليمين)، ولا ألوان للأنواع.
+ * مقاسات البطاقات ونعومتها من السينما (ملصق 2:3، ثلاثة أعمدة، 16×10)، والمقاس محجوز من أول إطار. */
+.v35 #unifiedLibrary{display:none}
+.v35[data-content='unified'] #library > .page-body:not(#unifiedLibrary){display:none!important}
+.v35[data-content='unified'] #unifiedLibrary{display:block}
+
+.v35 .ul{--ul-g:20px;--ul-r:10px;--ul-t2:var(--text-3,#8f8b9c);--ul-sk:#16141b;padding-bottom:32px}
+.v35 .ul button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+.v35 .ul .ul-types{position:static;margin-top:0}
+
+/* تبويبات المكتبة: نص بعدّاد مرفوع، والمختار بلون النص الأول ووزنه */
+.v35 .ul-shelves{display:flex;gap:22px;overflow-x:auto;padding:18px var(--ul-g) 2px;scrollbar-width:none;scroll-padding-inline:var(--ul-g)}
+.v35 .ul-shelves::-webkit-scrollbar{display:none}
+.v35 .ul-shelf{flex:none;display:inline-flex;align-items:flex-start;gap:3px;height:28px;font-size:14px;font-weight:600;color:var(--ul-t2);transition:color .2s ease}
+.v35 .ul-shelf sup{font-size:10.5px;font-weight:600;line-height:14px;font-variant-numeric:tabular-nums;color:var(--text-4,#57536a)}
+.v35 .ul-shelf.on{color:var(--text-1,#f2f1f5);font-weight:800}
+.v35 .ul-shelf.on sup{color:var(--accent)}
+
+.v35 .ul-sec{margin-top:26px}
+.v35 .ul-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 var(--ul-g);margin-bottom:14px}
+.v35 .ul-head h2{margin:0;font-size:19px;font-weight:800;line-height:26px;color:var(--text-1,#f2f1f5)}
+.v35 .ul-more{display:inline-flex;align-items:center;gap:2px;font-size:13px;font-weight:600;color:var(--ul-t2)}
+.v35 .ul-more .icon{transform:scaleX(-1)}
+
+/* آخر المشاهدات: الغلاف بطل البطاقة، وفوق العنوان سطر النوع والتقدّم بلغته */
+.v35 .ul-rail{display:flex;gap:14px;overflow-x:auto;padding:0 var(--ul-g);scroll-snap-type:x mandatory;scroll-padding-inline:var(--ul-g);scrollbar-width:none}
+.v35 .ul-rail::-webkit-scrollbar{display:none}
+.v35 .ul-rail .ul-recent{flex:none;width:136px;scroll-snap-align:start}
+.v35 .ul-recent{display:grid;align-content:start;gap:0;min-width:0}
+.v35 .ul-recent-art{position:relative;display:block;aspect-ratio:2/3;border-radius:var(--ul-r);overflow:hidden;background:var(--ul-sk);
+  box-shadow:0 18px 30px -18px rgba(0,0,0,.8);transition:transform .18s ease}
+.v35 .ul-recent:active .ul-recent-art,.v35 .ul-card:active .ul-art{transform:scale(.97)}
+.v35 .ul-recent-go{position:absolute;inset-inline-end:8px;bottom:8px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+  background:rgba(10,9,14,.62);color:#fff;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.v35 .ul-eyebrow,.v35 .ul-sub{display:flex;align-items:center;min-width:0;height:18px;font-size:11.5px;font-weight:600;color:var(--ul-t2);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+.v35 .ul-eyebrow{margin-top:10px}
+.v35 .ul-eyebrow i,.v35 .ul-sub i{flex:none;width:3px;height:3px;border-radius:50%;background:var(--text-4,#57536a);margin-inline:6px}
+.v35 .ul-eyebrow bdi,.v35 .ul-sub bdi{overflow:hidden;text-overflow:ellipsis;color:var(--text-2,#bab6c6)}
+.v35 .ul-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;height:36px;margin-top:2px;
+  font-size:13px;font-weight:700;line-height:18px;color:var(--text-1,#f2f1f5);text-align:right}
+.v35 .ul-when{display:block;height:16px;margin-top:2px;font-size:11px;color:var(--text-4,#57536a)}
+
+/* الصور: هيكل بمقاسها، والصورة تظهر مرة واحدة حين تكتمل (لا وميض ولا قفز) */
+.v35 .ul-art img,.v35 .ul-recent-art img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s ease}
+.v35 .ul-art img.in,.v35 .ul-recent-art img.in{opacity:1}
+
+/* الشبكة: ملصقات السينما (2:3، ثلاثة أعمدة) */
+.v35 .ul-grid,.v35 .ul-recent-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 10px;padding:0 var(--ul-g)}
+.v35 .ul-recent-grid{margin-top:22px}
+.v35 .ul-card{display:grid;align-content:start;gap:0;min-width:0}
+.v35 .ul-art{display:block;aspect-ratio:2/3;border-radius:var(--ul-r);overflow:hidden;background:var(--ul-sk);transition:transform .18s ease}
+.v35 .ul-card .ul-title{display:block;white-space:nowrap;text-overflow:ellipsis;height:18px;margin-top:8px}
+.v35 .ul-sub{margin-top:1px}
+
+.v35 .ul-empty{padding:56px var(--ul-g) 24px;text-align:right}
+.v35 .ul-empty strong{display:block;font-size:19px;font-weight:800;color:var(--text-1,#f2f1f5)}
+.v35 .ul-empty p{margin:8px 0 0;max-width:34ch;font-size:14px;line-height:22px;color:var(--ul-t2)}
+.v35 .ul-cta{display:inline-flex;align-items:center;gap:8px;height:44px;margin-top:20px;padding:0 22px!important;border-radius:22px;background:var(--accent)!important;color:#fff!important;font-size:14px;font-weight:700}
+
+@media (min-width:700px){
+  .v35 .ul{max-width:1200px;margin-inline:auto}
+  .v35 .ul-grid,.v35 .ul-recent-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:24px 16px}
+  .v35 .ul-rail .ul-recent{width:168px}
+}
+@media (prefers-reduced-motion:reduce){
+  .v35 .ul-art img,.v35 .ul-recent-art img,.v35 .ul-art,.v35 .ul-recent-art,.v35 .ul-shelf{transition:none}
+}

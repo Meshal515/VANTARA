@@ -118,6 +118,7 @@ export const SHELL_HTML = `<div class="app">
     ${mainTop('مكتبتي')}
     <div class="page-body anime-only" id="animeLibrary"></div>
     <div class="page-body cinema-only" id="cinemaLibrary"></div>
+    <div class="page-body" id="unifiedLibrary"></div>
     <div class="page-body manga-only">
       <div class="segmented library-tabs" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">

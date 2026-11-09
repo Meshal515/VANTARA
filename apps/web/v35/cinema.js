@@ -34,6 +34,7 @@ import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-men
 import { bindCollapsingHero } from './collapse-hero.js';
 import { applyLocalMarks, buildMarkSheet, cinemaEpisodeKey, cinemaLocalKey, changedKeys, seenFrom, syncOps } from './episode-marks.js';
 import { workKind, workMenuEntries } from './work-menu.js';
+import { EMPTY_COPY, LIBRARY_TABS } from './library-model.js';
 
 const HOME_KEY = 'cinema.home.v3';
 const OVERVIEW_KEY = 'vantara.cinema.overviews.v1';
@@ -315,13 +316,28 @@ export function createCinema(deps) {
     const work = sync?.rows?.('works', (w) => w.series_ref === refOf(id))[0];
     return { ...local, id, type: types[id] ?? local.type ?? null, title: title ?? work?.title ?? local.title ?? id, poster: cover ?? work?.cover_url ?? local.poster ?? null };
   }
-  /** رف من الحساب: «قائمتي» أو «المفضلة»، الأحدث أولًا. */
+  /**
+   * رف من الحساب، الأحدث أولًا. المفاتيح: `later` = جدول library («أتابعها»، اسمها القديم «قائمتي»)،
+   * `read_later` = «لاحقًا»، `fav` = المفضلة، `completed` = المكتمل، `all` = كلها بلا تكرار.
+   * «لاحقًا» و«المكتمل» كانا يُحفظان من ⋮ ولا يظهر لهما تبويب (محفوظات مخفية).
+   */
   function shelf(kind) {
+    if (kind === 'all') {
+      const seen = new Set();
+      return ['later', 'read_later', 'fav', 'completed'].flatMap((k) => shelf(k)).filter((m) => !seen.has(m.id) && seen.add(m.id));
+    }
+    const newest = (a, b) => (b.updated_at ?? b.added_at ?? 0) - (a.updated_at ?? a.added_at ?? 0);
     const list =
-      kind === 'later'
-        ? rows('library', (r) => !r.removed).sort((a, b) => (b.added_at ?? 0) - (a.added_at ?? 0))
-        : rows('collections', (r) => r.kind === 'favorite' && r.member).sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-    return [...new Map(list.map((r) => [r.series_ref, r])).values()].map((r) => fromRef(r.series_ref, r.series_title, r.cover_url));
+      kind === 'later' ? rows('library', (r) => !r.removed)
+        : kind === 'completed' ? rows('completions', (r) => r.member)
+          : rows('collections', (r) => r.kind === (kind === 'fav' ? 'favorite' : kind) && r.member);
+    // موسم المسلسل (`cinema:tt…:2`) والمسلسل عمل واحد في الرف
+    const byWork = new Map();
+    for (const r of list.sort(newest)) {
+      const id = r.series_ref.slice('cinema:'.length).split(':')[0];
+      if (!byWork.has(id)) byWork.set(id, r);
+    }
+    return [...byWork.values()].map((r) => fromRef(r.series_ref, r.series_title, r.cover_url));
   }
   /** «آخر المشاهدات» في الحساب: مرة لكل حلقة في الجلسة. */
   const viewed = new Set();
@@ -847,7 +863,7 @@ export function createCinema(deps) {
     const cont = continuing().filter((w) => wants(w.type));
     if (cont.length) page.append(rail('أكمل المشاهدة', cont.slice(0, 12), continueCard, { more: () => openLibrary('continue') }));
     const later = shelf('later').filter((x) => !x.type || wants(x.type));
-    if (later.length) page.append(rail('قائمتي', later.slice(0, 16), posterCard, { more: () => openLibrary('later') }));
+    if (later.length) page.append(rail('أتابعها', later.slice(0, 16), posterCard, { more: () => openLibrary('later') }));
     const fresh = (state.updates ?? []).filter((g) => wants(g.kind === 'movie' ? 'movie' : 'series'));
     if (fresh.length) page.append(rail('آخر التحديثات', fresh, updateCard, { more: deps.openUpdates ? () => deps.openUpdates('cinema') : undefined }));
     const skip = new Set(heroItems.map((m) => m.id));
@@ -2731,7 +2747,10 @@ export function createCinema(deps) {
     const tabs = el('div', 'segmented library-tabs');
     tabs.setAttribute('role', 'tablist');
     const countOf = (k) => (k === 'continue' ? continuing().length : shelf(k).length);
-    for (const [k, label] of [['later', 'قائمتي'], ['continue', 'آخر المشاهدات'], ['fav', 'المفضلة']]) {
+    // الأسماء والترتيب من library-model.js (واحدة للأقسام الثلاثة)
+    const KEY = { all: 'all', following: 'later', recent: 'continue', later: 'read_later', favorite: 'fav', completed: 'completed' };
+    const signed = Boolean(me());
+    for (const [k, label] of LIBRARY_TABS.map((t) => [KEY[t.id], t.label]).filter(([k]) => signed || k === 'continue')) {
       const b = el('button', `library-tab${state.libraryTab === k ? ' active' : ''}`, label);
       b.type = 'button';
       b.setAttribute('role', 'tab');
@@ -2748,11 +2767,9 @@ export function createCinema(deps) {
     const items = tab === 'continue' ? continuing() : shelf(tab);
     const grid = el('div', tab === 'continue' ? 'cn-wide-grid' : 'cn-grid');
     grid.append(...items.map((m) => (tab === 'continue' ? continueCard(m) : posterCard(m))));
-    const empty = {
-      continue: ['play', 'لم تشاهد شيئًا بعد', 'ما تبدأ مشاهدته يظهر هنا لتكمله من حيث وقفت.'],
-      later: ['plus', 'قائمتك فاضية', 'أضف أي فيلم أو مسلسل بزر «قائمتي».'],
-      fav: ['heart', 'لا مفضلات بعد', 'علّم ما تحب بزر القلب.'],
-    }[tab];
+    const id = Object.entries(KEY).find(([, v]) => v === tab)?.[0] ?? 'following';
+    const icon = { all: 'library', following: 'plus', recent: 'play', later: 'clock', favorite: 'heart', completed: 'check' }[id];
+    const empty = [icon, ...EMPTY_COPY[id]];
     host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty));
   }
 
