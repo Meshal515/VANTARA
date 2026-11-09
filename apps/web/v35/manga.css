@@ -850,6 +850,29 @@
 .v35 #detail[data-look='profile'] .mw-ban { position: relative; height: calc(210px + var(--safe-top)); overflow: hidden; background: var(--surface-1); }
 .v35 #detail[data-look='profile'] .mw-ban > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-out; }
 .v35 #detail[data-look='profile'] .mw-ban > img.ready { opacity: 1; }
+/* A portrait cover is background art, NOT a second giant poster.
+ * Fill the wide header without visible portrait edges; the crisp real cover
+ * stays at its intended size in .mw-idrow. Only the background is dimmed. */
+.v35 #detail[data-look='profile'] .mw-ban--cover {
+  background: linear-gradient(145deg, var(--surface-1), var(--bg));
+}
+.v35 #detail[data-look='profile'] .mw-ban--cover > img {
+  object-fit: cover;
+  object-position: center 25%;
+  filter: none;
+}
+.v35 #detail[data-look='profile'] .mw-ban--cover > img.ready {
+  opacity: 0.48;
+}
+/* No additional blurred copy behind the cropped art. */
+.v35 #detail[data-look='profile'] .mw-ban--cover .mw-ban-amb { display: none; }
+.v35 #detail[data-look='profile'] .mw-ban--cover::after {
+  z-index: 1;
+  background:
+    linear-gradient(to top, var(--bg) 0%, rgba(8, 7, 12, 0.42) 40%, rgba(8, 7, 12, 0.24) 100%),
+    linear-gradient(to right, rgba(8, 7, 12, 0.48), transparent 48%, rgba(8, 7, 12, 0.40));
+  pointer-events: none;
+}
 .v35 #detail[data-look='profile'] .mw-ban::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(8, 7, 12, 0.6), transparent 35%, rgba(8, 7, 12, 0.2) 60%, var(--bg)); }
 /* عمل بلا صورة عريضة: ضوء غلافه مكانها */
 .v35 #detail[data-look='profile'] .mw-ban-amb { inset: 0; }
@@ -900,6 +923,70 @@
 .v35 #detail[data-look='resume'] .mw-ranges button.on { background: var(--accent-soft); color: var(--accent-text); }
 .v35 #detail[data-look='resume'] .mw-story { margin-top: 28px; }
 .v35 #detail[data-look='resume'] .mw-chips { margin-top: 16px; }
+
+/* ═══ عمق التمرير — مستقل عن حركات الدخول والخروج ═══
+ * One normalized --mw-scroll-depth (0..1), updated at most once per frame.
+ * Each look has its own spatial mechanic. No layout properties are animated;
+ * all transforms are compositor-friendly and scoped to the active detail page.
+ */
+.v35 #detail.mw.active[data-scroll-depth='on'] {
+  --mw-scroll-depth: 0;
+}
+/* الصفحة: غلاف يتراجع داخل العمق، والنص يبقى واضحًا ثابت الموضع. */
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head {
+  perspective: 900px;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head .mw-cover {
+  transform: translate3d(0, calc(var(--mw-scroll-depth) * -18px), calc(var(--mw-scroll-depth) * -220px))
+    rotateY(calc(var(--mw-scroll-depth) * -10deg));
+  backface-visibility: hidden;
+  will-change: transform;
+}
+/* المعرض: الغلاف يميل للخلف كصفحة في مساحة ثلاثية الأبعاد. */
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage {
+  perspective: 1000px;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage .mw-cover {
+  transform: translate3d(0, calc(var(--mw-scroll-depth) * -22px), calc(var(--mw-scroll-depth) * -175px))
+    rotateX(calc(var(--mw-scroll-depth) * 13deg));
+  backface-visibility: hidden;
+  will-change: transform;
+}
+/* الملف: البنر يتحرك في مستوى أعمق، والغلاف في المقدمة دون تعتيم الصورة. */
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-ban > img {
+  transform: translate3d(0, calc(var(--mw-scroll-depth) * 22px), 0) scale(1.06);
+  will-change: transform;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow {
+  perspective: 900px;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow .mw-cover {
+  transform: translate3d(0, calc(var(--mw-scroll-depth) * -12px), calc(var(--mw-scroll-depth) * 90px))
+    rotateY(calc(var(--mw-scroll-depth) * 7deg));
+  backface-visibility: hidden;
+  will-change: transform;
+}
+/* من حيث وقفت: الرقم يقترب تدريجيًا والغلاف يتراجع؛ بقية الأزرار لا تتحرك. */
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-resume,
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident {
+  perspective: 900px;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-big {
+  transform: translate3d(0, calc(var(--mw-scroll-depth) * -8px), calc(var(--mw-scroll-depth) * 70px));
+  will-change: transform;
+}
+.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident .mw-cover {
+  transform: translate3d(0, 0, calc(var(--mw-scroll-depth) * -130px))
+    rotateY(calc(var(--mw-scroll-depth) * -11deg));
+  backface-visibility: hidden;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 #detail.mw[data-scroll-depth] :is(.mw-head .mw-cover, .mw-stage .mw-cover, .mw-ban > img, .mw-idrow .mw-cover, .mw-big, .mw-ident .mw-cover) {
+    transform: none !important;
+    will-change: auto;
+  }
+}
 
 /* ═══ الآيباد: عمود أعرض ومقاسات أكبر بنفس النسب ═══ */
 @media (min-width: 700px) {
@@ -1574,16 +1661,3 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
 .v35 #detail .mw-cell-open:active { opacity: 0.7; }
 @media (min-width: 700px) { .v35 #detail .mw-grid, .v35 #detail[data-look='resume'] .mw-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 
-/* «الملف»: البنر بنسبته كاملًا (لا تكبير ×2.5 يغبّشه ويقص أعلاه) فوق نسخة مغبّشة منه تملأ الإطار، والغلاف على
- * المنطقة المغبّشة لا فوق الصورة. بلا بنر: ضوء الغلاف خلفية متناسقة */
-.v35 #detail[data-look='profile'] .mw-ban--art::before {
-  content: ''; position: absolute; inset: -24px; background: var(--ban-src) center / cover no-repeat;
-  filter: blur(18px) saturate(1.15) brightness(0.7);
-}
-.v35 #detail[data-look='profile'] .mw-ban > img {
-  inset: calc(var(--safe-top) + 44px) 0 auto; height: auto; aspect-ratio: auto; max-height: 100%;
-  object-fit: contain; object-position: center top;
-}
-.v35 #detail[data-look='profile'] .mw-ban-amb img { object-fit: cover; object-position: center 22%; }
-.v35 #detail[data-look='profile'] .mw-ban--art { height: calc(232px + var(--safe-top)); }
-.v35 #detail[data-look='profile'] .mw-ban > img { -webkit-mask-image: linear-gradient(#000 62%, transparent); mask-image: linear-gradient(#000 62%, transparent); }

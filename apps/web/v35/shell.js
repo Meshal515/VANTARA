@@ -24,7 +24,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, mangaLook, rowsForMark, rowsInGroup } from './manga-work.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, mountMangaScrollDepth, rowsForMark, rowsInGroup } from './manga-work.js';
 import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -1638,7 +1638,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * هيكل صفحة العمل بالنمط المختار في الإعدادات (manga-work.js). يُبنى عند كل فتح عمل؛ التحديثات بعده
    * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
    */
+  let mangaDepth = null;
   function mountDetail() {
+    mangaDepth?.destroy();
     closeDetailMenu();
     state.marking = null;
     const page = q('detail');
@@ -1646,6 +1648,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     page.dataset.look = look;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
+    mangaDepth = mountMangaScrollDepth(root);
     if (look === 'gallery') bindDetailTabs();
     paintDetailTools();
   }
@@ -1776,30 +1779,53 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const glow = q('detailGlow');
       glow?.classList.remove('ready');
       glow?.removeAttribute('src');
-      // الغلاف النهائي وحده بلا معاينة صغيرة قبله، وتلاشٍ واحد على الأكثر؛ المحفوظ يظهر فورًا
+      // «الملف»: البنر الحقيقي أولًا، ثم الغلاف الحادّ كبديل؛ الضبابية خلفية زخرفية فقط.
+      const banner = q('detailBanner');
+      const bannerBox = banner?.closest('.mw-ban');
+      const wide = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
+      let coverUrl = null;
+      let usingCover = false;
+      const showCover = () => {
+        if (!banner || !coverUrl || !banner.isConnected || state.current?.id !== w.id) return;
+        usingCover = true;
+        bannerBox?.classList.remove('mw-ban--art');
+        bannerBox?.classList.add('mw-ban--cover');
+        banner.classList.remove('ready');
+        banner.src = coverUrl;
+      };
+      if (banner) {
+        banner.classList.remove('ready');
+        bannerBox?.classList.remove('mw-ban--art', 'mw-ban--cover');
+        banner.onload = () => {
+          if (!banner.isConnected || state.current?.id !== w.id) return;
+          // Some manga providers label a portrait cover as bannerImage.
+          // Only true landscape art occupies the hero at full strength.
+          const isWide = !usingCover && isWideMangaArtwork(banner.naturalWidth, banner.naturalHeight);
+          bannerBox?.classList.toggle('mw-ban--art', isWide);
+          bannerBox?.classList.toggle('mw-ban--cover', !isWide);
+          banner.classList.add('ready');
+        };
+        // فشل البنر لا يخفي الصورة: جرّب الغلاف النهائي عند توفره.
+        banner.onerror = () => {
+          banner.classList.remove('ready');
+          bannerBox?.classList.remove('mw-ban--art');
+          if (!usingCover && coverUrl) showCover();
+          else banner.removeAttribute('src');
+        };
+        if (wide) banner.src = wide;
+        else banner.removeAttribute('src');
+      }
+      // لا معاينة منخفضة الجودة قبل الغلاف النهائي، ولا تتبدل الصورة عند وصول metadata.
       void mountImage(cover, w, { final: true }).then((url) => {
-        if (!url || state.current?.id !== w.id || !glow) return;
-        // الضوء من الغلاف نفسه بعُشر حجمه (الصورة في الذاكرة من الغلاف): ضبابية صغيرة ثم تكبير ×10.
-        // كل نسخ الضوء في الصفحة (المعرّف مكرّر: ضوء الغلاف وضوء بنر «الملف»)؛ كان الثاني يبقى فارغًا شفافًا
+        if (!url || state.current?.id !== w.id) return;
+        coverUrl = url;
+        // ضوء خلفي فقط؛ NEVER use the blurred ambient image as the visible profile banner.
         for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
           g.onload = () => g.classList.add('ready');
           g.src = url;
         }
+        if (banner && (!wide || !banner.hasAttribute('src'))) showCover();
       });
-      // «الملف»: صورة العمل العريضة من AniList؛ عمل بلا صورة عريضة يلبس ضوء غلافه مكانها
-      const banner = q('detailBanner');
-      if (banner) {
-        const wide = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
-        banner.closest('.mw-ban')?.classList.toggle('mw-ban--art', Boolean(wide));
-        banner.onload = () => banner.classList.add('ready');
-        // صورة عريضة تعذّرت: البنر يلبس ضوء الغلاف بدلها (لا يبقى شفافًا)
-        banner.onerror = () => { banner.removeAttribute('src'); banner.closest('.mw-ban')?.classList.remove('mw-ban--art'); };
-        // البنر العريض (≈4.75:1) يظهر كاملًا بنسبته فوق نسخة مغبّشة منه تملأ الإطار: كان يُكبَّر ×2.5 ليملأ
-        // 210px فيتغبّش ويُقص أعلاه
-        banner.closest('.mw-ban')?.style.setProperty('--ban-src', wide ? `url("${String(wide).replace(/"/g, '%22')}")` : 'none');
-        if (wide) banner.src = wide;
-        else banner.removeAttribute('src');
-      }
     }
     paintStory(w);
     refreshLibraryDetail();
@@ -5195,6 +5221,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
+    mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
     if (!sectionSwitch && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
@@ -7112,6 +7139,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      mangaDepth?.destroy();
       ++pageMotionRequest;
       finishPageMotion();
       sourceVerification.close();

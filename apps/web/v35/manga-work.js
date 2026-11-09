@@ -15,6 +15,10 @@ export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume'
 /** أي قيمة غير الأربعة (ومنها «core» قبل أن تعرف الإعدادات أنماط المانجا) = «الصفحة». */
 export const mangaLook = (id) => (MANGA_LOOKS.includes(id) ? id : 'page');
 
+/** Distinguish a genuine wide banner from a portrait/square metadata image. */
+export const isWideMangaArtwork = (width, height) =>
+  Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 && width / height >= 1.2;
+
 /**
  * وضع «علّم فصول»: ما يُعلَّم لكل فعل. الصفوف من أي ترتيب؛ المرجع رقم الفصل.
  *   - selected: المحدّد كما هو (فصل أو مجموعة).
@@ -171,4 +175,60 @@ export function detailMarkup(look, { glyph, iconButton }) {
     `<div class="mw-wrap">${genres}${cta()}${quick3}${progress()}${story(true)}` +
     `<section class="mw-chapters">${chead}${sources}${panel}</section>${info}</div>`
   );
+}
+
+
+/**
+ * Scroll-linked depth for the four manga detail looks. This is deliberately
+ * independent of page enter/exit animation and of manga data/rendering.
+ * Only a compositor-friendly CSS custom property changes on scroll.
+ */
+export function mangaScrollProgress(y, distance = 380) {
+  return Math.max(0, Math.min(1, (Number(y) || 0) / distance));
+}
+
+/** One passive scroll listener per mounted detail; no timers or DOM rebuilds. */
+export function mountMangaScrollDepth(root, win = window, doc = document) {
+  const page = root.querySelector('#detail');
+  if (!page) return { sync() {}, destroy() {} };
+  const reduced = typeof win.matchMedia === 'function'
+    ? win.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+  let frame = null;
+  let disposed = false;
+
+  const paint = () => {
+    frame = null;
+    if (disposed) return;
+    const enabled = page.isConnected && page.classList.contains('active')
+      && root.dataset.section === 'manga' && !reduced?.matches && !doc.hidden;
+    if (!enabled) {
+      page.removeAttribute('data-scroll-depth');
+      page.style.removeProperty('--mw-scroll-depth');
+      return;
+    }
+    const depth = mangaScrollProgress(win.scrollY);
+    page.dataset.scrollDepth = 'on';
+    page.style.setProperty('--mw-scroll-depth', depth.toFixed(3));
+  };
+  const sync = () => {
+    if (!disposed && frame === null) frame = win.requestAnimationFrame(paint);
+  };
+  win.addEventListener('scroll', sync, { passive: true });
+  reduced?.addEventListener?.('change', sync);
+  doc.addEventListener('visibilitychange', sync);
+  sync();
+  return {
+    sync,
+    destroy() {
+      if (disposed) return;
+      disposed = true;
+      if (frame !== null) win.cancelAnimationFrame(frame);
+      win.removeEventListener('scroll', sync);
+      reduced?.removeEventListener?.('change', sync);
+      doc.removeEventListener('visibilitychange', sync);
+      page.removeAttribute('data-scroll-depth');
+      page.style.removeProperty('--mw-scroll-depth');
+    },
+  };
 }
