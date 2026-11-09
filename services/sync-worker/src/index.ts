@@ -2932,10 +2932,15 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   try { prefs = JSON.parse(account.data ?? '{}') as Record<string, unknown>; } catch { /* fail closed */ }
   const timeShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightTime'] !== false);
   const progressShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightProgress'] !== false);
-  // المقفل: الأعمال وتفصيل الأقسام مقفلة، أما مجموع وقته في VANTARA فظاهر للمجموعة (قرار المالك)
+  // المقفل (قرار المالك، 9 نوفمبر): ساعاته ظاهرة للمجموعة، مجموعًا ولكل قسم، أما أعماله فمقفلة.
+  // لا عنوان ولا غلاف ولا مرجع عمل يخرج هنا: مجاميع بالقسم فقط.
   if (!timeShared && !progressShared) {
-    const sum = await env.DB.prepare('SELECT COALESCE(SUM(active_ms), 0) AS t FROM work_insights WHERE user_id = ?').bind(targetId).first<{ t: number }>();
-    return json({ userId: targetId, locked: true, timeShared: false, progressShared: false, totalMs: Number(sum?.t ?? 0), content: [] });
+    const rows = await env.DB.prepare('SELECT section, COALESCE(SUM(active_ms), 0) AS t FROM work_insights WHERE user_id = ? GROUP BY section')
+      .bind(targetId).all<{ section: string; t: number }>();
+    const sections: Record<string, number> = { manga: 0, anime: 0, cinema: 0 };
+    for (const r of rows.results ?? []) if (r.section in sections) sections[r.section] = Number(r.t ?? 0);
+    const totalMs = Object.values(sections).reduce((a, b) => a + b, 0);
+    return json({ userId: targetId, locked: true, timeShared: false, progressShared: false, totalMs, sections, content: [] });
   }
   if (workRef && workRef.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
   const [times, manga, anime] = await env.DB.batch<Record<string, unknown>>([

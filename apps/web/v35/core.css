@@ -3794,3 +3794,10 @@ html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !importa
 .v35 .ins-works.ins-fade { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .v35 .ins-sl, .v35 .ins-pav, .v35 .ins-works { transition: none; } }
 .v35 .ins-sl { stroke: var(--ins-accent, var(--accent)); }
+/* المقفل يُرى بساعاته (لا يخفت)؛ يخفت من لا وقت له في القسم. الصورة الخارجة تتلاشى قبل إزالتها */
+.v35 .ins-legend li.locked { opacity: 1; }
+.v35 .ins-legend li.empty { opacity: .5; }
+.v35 .ins-legend .ins-lock { color: var(--text-3); flex: none; }
+.v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, scale .3s ease; }
+.v35 .ins-pav--gone { opacity: 0; scale: .6; pointer-events: none; }
+.v35 .ins-row-gone { opacity: 0; transform: translateY(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }

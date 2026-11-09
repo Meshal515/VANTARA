@@ -61,13 +61,24 @@ export function pieGroups(people, size = 5) {
   return out;
 }
 /** الشرائح بزوايا (درجات من الأعلى مع عقارب الساعة)، ومقاس الأفاتار محصور فلا يغطي ولا يختفي. */
-export function pieSlices(group, { gap = 2, min = 22, max = 34 } = {}) {
+/**
+ * الشرائح بنسبها، مع حد أدنى مرئي لكل من له وقت (خلل «دحمي يختفي»): من تابع دقيقة أمام من تابع ساعات كانت
+ * شريحته أصغر من فاصل الدرجتين فتصير صفرًا، وصورته لا تُرسم تحت 6%، فيبدو كأنه غاب. الآن كل شخص له
+ * `minSweep` درجة على الأقل، والباقي يُوزّع بالنسب على الآخرين؛ والنسبة الحقيقية (`frac`) باقية للأرقام.
+ */
+export function pieSlices(group, { gap = 2, min = 22, max = 34, minSweep = 18 } = {}) {
   const total = group.reduce((t, p) => t + p.ms, 0);
+  const real = group.map((p) => (total ? p.ms / total : 1 / group.length));
+  const floor = group.length > 1 ? Math.min(minSweep, 360 / group.length) : 0;
+  const small = real.map((f) => f * 360 < floor);
+  const reserved = small.filter(Boolean).length * floor;
+  const restReal = real.reduce((t, f, i) => t + (small[i] ? 0 : f), 0) || 1;
+  const sweeps = real.map((f, i) => (small[i] ? floor : (f / restReal) * (360 - reserved)));
   let at = 0;
-  return group.map((p) => {
-    const frac = total ? p.ms / total : 1 / group.length;
-    const sweep = frac * 360;
-    const s = { ...p, frac, start: at, sweep: Math.max(0, sweep - (group.length > 1 ? gap : 0)), mid: at + sweep / 2, avatar: Math.round(Math.min(max, Math.max(min, min + (max - min) * Math.min(1, frac * 2.5)))) };
+  return group.map((p, i) => {
+    const frac = real[i];
+    const sweep = sweeps[i];
+    const s = { ...p, frac, start: at, sweep: Math.max(0, sweep - (group.length > 1 ? gap : 0)), mid: at + sweep / 2, avatar: Math.round(Math.min(max, Math.max(min, min + (max - min) * Math.min(1, (sweep / 360) * 2.5)))) };
     at += sweep;
     return s;
   });
@@ -96,10 +107,15 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     return { name: p?.display_name || a?.username || '؟', avatar: p?.avatar_key || null };
   };
   // المجموع من الخادم (يشمل وقت الأعمال المخفية)، وتفصيل الأقسام من القائمة
-  const msOf = (r) => (filter === 'all' && Number.isFinite(r?.totalMs) ? r.totalMs : (r?.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0).reduce((t, x) => t + x.activeMs, 0));
+  // المقفل (قرار المالك): ساعاته ظاهرة مجموعًا ولكل قسم (`sections` من الخادم)، وأعماله وحدها مقفلة
+  const msOf = (r) => {
+    if (filter === 'all' && Number.isFinite(r?.totalMs)) return r.totalMs;
+    if (r?.locked) return Number(r.sections?.[filter] ?? 0);
+    return (r?.content ?? []).filter((x) => (filter === 'all' || x.section === filter) && x.activeMs > 0).reduce((t, x) => t + x.activeMs, 0);
+  };
   const visible = (r) => r && !r.locked && r.timeShared;
   // المقفل: وقته الكلي يظهر في «الكل» وحدها، وأعماله وأقسامه مقفلة
-  const countsIn = (r) => visible(r) || (r?.locked && filter === 'all' && Number(r.totalMs) > 0);
+  const countsIn = (r) => visible(r) || Boolean(r?.locked && msOf(r) > 0);
 
   function avatarNode(uid, size) {
     const { name, avatar } = profileOf(uid);
@@ -155,20 +171,33 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     node._raf = requestAnimationFrame(step);
   }
   const reducedMotion = () => document.documentElement.dataset.motion === 'off' || Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-  function legendNode(people) {
-    const legend = el('ul', 'ins-legend');
+  /** القائمة تحت الدائرة: صف لكل شخص مربوط به، يتحدّث في مكانه (الصور لا تُعاد) ويُرتّب بنقل العقد نفسها. */
+  function legendRow(p) {
+    const li = el('li');
+    li.dataset.uid = p.uid;
+    const b = el('button'); b.type = 'button';
+    b.append(avatarNode(p.uid, 30));
+    const nm = el('span', 'ins-nm', `${profileOf(p.uid).name}${p.uid === me() ? ' (أنت)' : ''}`); nm.dir = 'auto';
+    b.append(nm, el('span', 'ins-h', ''));
+    b.insertAdjacentHTML('beforeend', glyph('lock', { size: 15, cls: 'icon ins-lock' }));
+    li.append(b);
+    return li;
+  }
+  function paintLegend(legend, people) {
+    const rows = new Map([...legend.children].map((li) => [li.dataset.uid, li]));
     for (const p of people) {
-      const li = el('li', `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}`);
-      const b = el('button'); b.type = 'button';
-      b.append(avatarNode(p.uid, 30));
-      const nm = el('span', 'ins-nm', `${profileOf(p.uid).name}${p.uid === me() ? ' (أنت)' : ''}`); nm.dir = 'auto';
-      b.append(nm, el('span', 'ins-h', p.shown ? duration(p.ms) : 'مقفل'));
-      if (p.locked) b.insertAdjacentHTML('beforeend', glyph('lock', { size: 15 }));
-      b.onclick = () => (p.shown ? pick(p.uid) : toast('مقفل في هذا القسم', 2500));
-      li.append(b); legend.append(li);
+      const li = rows.get(p.uid) ?? legendRow(p);
+      // المقفل: ساعاته ظاهرة وقفل صغير يقول إن أعماله مقفلة؛ يخفت فقط من لا وقت له هنا
+      li.className = `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}${p.shown ? '' : ' empty'}`;
+      li.querySelector('.ins-h').textContent = p.shown ? duration(p.ms) : '—';
+      li.querySelector('.ins-lock').style.display = p.locked ? '' : 'none';
+      li.querySelector('button').onclick = () => (p.shown ? pick(p.uid) : toast('لا وقت مسجّل له في هذا القسم', 2500));
+      legend.append(li);
     }
+    for (const [uid, li] of rows) if (!people.some((p) => p.uid === uid)) li.remove();
     return legend;
   }
+  const legendNode = (people) => paintLegend(el('ul', 'ins-legend'), people);
   function piesNode(shown, pies = el('div', 'ins-pies')) {
     const groups = pieGroups(shown);
     if (!groups.length) pies.replaceChildren(el('p', 'ins-empty', 'لا وقت مسجّل في هذا القسم بعد'));
@@ -189,10 +218,11 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     const pies = box.querySelector('.ins-pies');
     const groups = pieGroups(shown);
     const wraps = [...pies.querySelectorAll(':scope > .ins-pie')];
-    const same = groups.length && wraps.length === groups.length && groups.every((g, i) => wraps[i]._uids === g.map((p) => p.uid).join(','));
-    if (same) groups.forEach((g, i) => morphPie(wraps[i], g));
+    // نفس عدد الدوائر: تتحوّل مهما تغيّر من فيها (دخل أحد أو خرج). يُعاد البناء فقط إن تغيّر عددها
+    if (groups.length && wraps.length === groups.length) groups.forEach((g, i) => morphPie(wraps[i], g));
     else piesNode(shown, pies);
-    box.querySelector('.ins-legend')?.replaceWith(legendNode(people));
+    const legend = box.querySelector('.ins-legend');
+    if (legend) paintLegend(legend, people);
     const works = box.querySelector('.ins-works');
     if (works) {
       works.classList.add('ins-fade');
@@ -249,70 +279,87 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     if (silk && /^#[0-9a-f]{6}$/i.test(accent)) silk.setPalette(paletteFromAccent(accent));
     host.style.setProperty('--ins-accent', /^#[0-9a-f]{6}$/i.test(accent) ? accent : '');
   }
+  const PIE = { size: 220, r: 78, w: 30 };
+  const PIE_C = 2 * Math.PI * PIE.r;
+  /** دائرة لمجموعة (حتى خمسة)؛ الشرائح والصور مربوطة بأصحابها (data-uid) فتتحوّل ولا تُهدم. */
   function pie(group) {
-    const size = 220, cx = size / 2, r = 78, w = 30, C = 2 * Math.PI * r;
+    const { size } = PIE;
+    const cx = size / 2;
     const wrap = el('div', 'ins-pie');
-    wrap._uids = group.map((p) => p.uid).join(',');
     const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: '100%', height: '100%', role: 'img', 'aria-label': 'توزيع الساعات' });
-    svg.append(svgEl('circle', { cx, cy: cx, r, fill: 'none', stroke: 'rgba(255,255,255,.06)', 'stroke-width': w }));
-    const slices = pieSlices(group);
-    const sum = group.reduce((t, p) => t + p.ms, 0);
-    slices.forEach((s, i) => {
-      const len = (s.sweep / 360) * C;
-      const c = svgEl('circle', { cx, cy: cx, r, fill: 'none', 'stroke-width': w, 'stroke-dasharray': `0 ${C}`, 'stroke-dashoffset': C * 0.25 - (s.start / 360) * C, class: `ins-sl${s.uid === person ? ' on' : ''}`, 'data-i': i });
-      c.style.setProperty('--o', String(1 - i * 0.14));
-      c.addEventListener('click', () => pick(s.uid));
-      svg.append(c);
-      requestAnimationFrame(() => requestAnimationFrame(() => c.setAttribute('stroke-dasharray', `${len} ${C - len}`)));
-    });
+    svg.append(svgEl('circle', { cx, cy: cx, r: PIE.r, fill: 'none', stroke: 'rgba(255,255,255,.06)', 'stroke-width': PIE.w }));
     wrap.append(svg);
-    // الأفاتار على منتصف شريحته فوق الحلقة، بحجم محصور
-    for (const s of slices) {
-      if (s.frac < 0.06) continue;
-      const a = (s.mid - 90) * Math.PI / 180;
-      const node = avatarNode(s.uid, s.avatar);
-      node.classList.add('ins-pav');
-      node.style.left = `${((cx + r * Math.cos(a)) / size) * 100}%`;
-      node.style.top = `${((cx + r * Math.sin(a)) / size) * 100}%`;
-      node.onclick = () => pick(s.uid);
-      wrap.append(node);
-    }
-    const sel = slices.find((s) => s.uid === person);
     const mid = el('div', 'ins-mid');
-    const midMs = el('strong', null, duration(sel ? sel.ms : sum));
-    midMs.dataset.ms = String(sel ? sel.ms : sum);
-    mid.append(midMs, el('small', null, sel ? profileOf(sel.uid).name : 'هذه الدائرة'));
+    const midMs = el('strong', null, '');
+    midMs.dataset.ms = '0';
+    mid.append(midMs, el('small', null, ''));
     wrap.append(mid);
+    morphPie(wrap, group, { enter: true });
     return wrap;
   }
-  /** الدائرة نفسها بأرقام جديدة: الشرائح تنزلق لزواياها الجديدة (انتقال CSS على الطول والإزاحة)، والأفاتار معها. */
+  /**
+   * الدائرة نفسها بأرقام جديدة: كل شريحة تنزلق لزاويتها، ومن دخل القسم تنمو شريحته من الصفر في مكانها،
+   * ومن خرج تنكمش ثم تُزال. الصور تتبع أصحابها. لا هدم ولا إعادة رسم للدائرة.
+   */
   function morphPie(wrap, group) {
-    const size = 220, cx = size / 2, r = 78, C = 2 * Math.PI * r;
+    const { size, r, w } = PIE;
+    const cx = size / 2, C = PIE_C;
+    const svg = wrap.querySelector('svg');
     const slices = pieSlices(group);
-    const circles = [...wrap.querySelectorAll('circle.ins-sl')];
-    slices.forEach((s, i) => {
-      const c = circles[i];
-      if (!c) return;
-      const len = (s.sweep / 360) * C;
-      c.setAttribute('stroke-dasharray', `${len} ${C - len}`);
-      c.setAttribute('stroke-dashoffset', String(C * 0.25 - (s.start / 360) * C));
-      c.classList.toggle('on', s.uid === person);
-    });
-    const avs = [...wrap.querySelectorAll('.ins-pav')];
-    let k = 0;
-    for (const s of slices) {
-      if (s.frac < 0.06) continue;
-      const node = avs[k++];
-      if (!node) continue;
+    const keep = new Set(slices.map((s) => s.uid));
+    const place = (node, s) => {
       const a = (s.mid - 90) * Math.PI / 180;
       node.style.left = `${((cx + r * Math.cos(a)) / size) * 100}%`;
       node.style.top = `${((cx + r * Math.sin(a)) / size) * 100}%`;
+    };
+    slices.forEach((s, i) => {
+      const len = (s.sweep / 360) * C;
+      const offset = String(C * 0.25 - (s.start / 360) * C);
+      let c = [...svg.querySelectorAll('circle.ins-sl')].find((x) => x.dataset.uid === s.uid);
+      if (!c) {
+        c = svgEl('circle', { cx, cy: cx, r, fill: 'none', 'stroke-width': w, 'stroke-dasharray': `0 ${C}`, 'stroke-dashoffset': offset, class: 'ins-sl', 'data-uid': s.uid });
+        c.addEventListener('click', () => pick(s.uid));
+        svg.append(c);
+        requestAnimationFrame(() => requestAnimationFrame(() => c.setAttribute('stroke-dasharray', `${len} ${C - len}`)));
+      } else {
+        c.dataset.gone = '';
+        c.setAttribute('stroke-dasharray', `${len} ${C - len}`);
+      }
+      c.setAttribute('stroke-dashoffset', offset);
+      c.style.setProperty('--o', String(1 - i * 0.14));
+      c.classList.toggle('on', s.uid === person);
+      let av = [...wrap.querySelectorAll('.ins-pav')].find((x) => x.dataset.uid === s.uid);
+      if (!av) {
+        av = avatarNode(s.uid, s.avatar);
+        av.classList.add('ins-pav');
+        av.dataset.uid = s.uid;
+        av.onclick = () => pick(s.uid);
+        place(av, s);
+        wrap.append(av);
+      } else {
+        av.classList.remove('ins-pav--gone');
+        av.style.setProperty('--s', `${s.avatar}px`);
+        place(av, s);
+      }
+    });
+    // من خرج: شريحته تنكمش وصورته تتلاشى، ثم يُزالان (إلا إن عاد قبل ذلك)
+    for (const c of svg.querySelectorAll('circle.ins-sl')) {
+      if (keep.has(c.dataset.uid)) continue;
+      c.setAttribute('stroke-dasharray', `0 ${C}`);
+      c.dataset.gone = '1';
+      setTimeout(() => { if (c.dataset.gone === '1') c.remove(); }, 750);
     }
-    const sel = slices.find((s) => s.uid === person);
+    for (const av of wrap.querySelectorAll('.ins-pav')) {
+      if (keep.has(av.dataset.uid)) continue;
+      av.classList.add('ins-pav--gone');
+      setTimeout(() => { if (av.classList.contains('ins-pav--gone')) av.remove(); }, 400);
+    }
+    const sel = slices.find((x) => x.uid === person);
     const sum = group.reduce((t, p) => t + p.ms, 0);
     countTo(wrap.querySelector('.ins-mid strong'), sel ? sel.ms : sum);
     const label = wrap.querySelector('.ins-mid small');
     if (label) label.textContent = sel ? profileOf(sel.uid).name : 'هذه الدائرة';
+    wrap._uids = group.map((p) => p.uid).join(',');
   }
 
   function pick(uid) {
@@ -371,7 +418,9 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
         const ok = confirm('إخفاء هذا العمل من إحصائياتك نهائيًا؟\n\nما أحد يقدر يشوفه بعدها، ولا تقدر ترجعه. ساعاتك تبقى محسوبة كما هي.');
         if (!ok) return;
         const h = readHidden(); h.add(item.seriesRef); writeHidden(h);
-        render();
+        // الصف وحده يتلاشى ثم تُعاد قائمة الأعمال: المجموع والدائرة لا يتغيّران (الساعات تبقى محسوبة)
+        rowEl.classList.add('ins-row-gone');
+        setTimeout(() => { const works = host.querySelector('.ins-works'); if (works) paintWorks(works, readHidden()); }, reducedMotion() ? 0 : 220);
         void Promise.resolve(sync.hideInsight?.(item.seriesRef)).then((ok) => {
           toast(ok === false ? 'أُخفي عندك، وسيُرسل للخادم لاحقًا' : 'أُخفي العمل نهائيًا، وساعاتك كما هي', 2600);
           if (ok) { const cur = results.get(me()); if (cur?.content) cur.content = cur.content.filter((x) => x.seriesRef !== item.seriesRef); }

@@ -36,7 +36,10 @@ describe('per-work insights privacy and attribution', () => {
     // مقفل: لا أعمال ولا عناوين، لكن مجموع الوقت ظاهر
     const locked = await (await call(env, B, `/v1/insights/${A}`)).json() as any;
     expect(locked).toMatchObject({ locked: true, totalMs: 60000, content: [] });
+    // ساعاته لكل قسم ظاهرة (قرار المالك)، بلا عنوان ولا مرجع عمل
+    expect(locked.sections).toEqual({ manga: 0, anime: 60000, cinema: 0 });
     expect(JSON.stringify(locked)).not.toContain('Private Anime');
+    expect(JSON.stringify(locked)).not.toContain('anime:123');
     expect((await call(env, B, `/v1/stats/${A}`)).status).toBe(403);
     const oldSync = await (await call(env, B, '/v1/sync?since=0')).text();
     expect(oldSync).not.toContain('Private Anime');
