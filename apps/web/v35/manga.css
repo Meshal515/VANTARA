@@ -1552,3 +1552,38 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 @keyframes mw-d-profile { from { scale: 1.12; opacity: 0; } }
 @keyframes mw-d-fade { from { opacity: 0; } }
 html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: none !important; }
+
+/* بلوكات «من حيث وقفت»: أكبر، بمقاس موحّد مهما طال الرقم (حتى 11111 والعشري 1234.5) بلا قص ولا تداخل */
+.v35 #detail .mw-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.v35 #detail .mw-cell { position: relative; height: 76px; padding: 0; display: block; border-radius: 12px; }
+.v35 #detail .mw-cell-open {
+  width: 100%; height: 100%; padding: 12px; border: 0; background: none; color: inherit; font: inherit;
+  display: grid; align-content: center; gap: 4px; text-align: start; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.v35 #detail .mw-cell-n { margin-left: 26px; font-size: 17px; font-weight: 800; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; text-align: right; }
+.v35 #detail .mw-cell-t { font-size: 11px; line-height: 14px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 #detail .mw-cell.here .mw-cell-t { color: color-mix(in srgb, var(--on-accent, #fff) 78%, transparent); }
+.v35 #detail .mw-cell-mark {
+  position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
+  display: grid; place-items: center; background: none; color: inherit; cursor: pointer;
+}
+.v35 #detail .mw-cell-mark::after { content: ''; position: absolute; inset: -10px; }
+.v35 #detail .mw-cell-mark i { width: 15px; height: 15px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: 0.6; }
+.v35 #detail .mw-cell.read .mw-cell-mark { color: var(--accent-text); }
+.v35 #detail .mw-cell:active { transform: none; }
+.v35 #detail .mw-cell-open:active { opacity: 0.7; }
+@media (min-width: 700px) { .v35 #detail .mw-grid, .v35 #detail[data-look='resume'] .mw-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+/* «الملف»: البنر بنسبته كاملًا (لا تكبير ×2.5 يغبّشه ويقص أعلاه) فوق نسخة مغبّشة منه تملأ الإطار، والغلاف على
+ * المنطقة المغبّشة لا فوق الصورة. بلا بنر: ضوء الغلاف خلفية متناسقة */
+.v35 #detail[data-look='profile'] .mw-ban--art::before {
+  content: ''; position: absolute; inset: -24px; background: var(--ban-src) center / cover no-repeat;
+  filter: blur(18px) saturate(1.15) brightness(0.7);
+}
+.v35 #detail[data-look='profile'] .mw-ban > img {
+  inset: calc(var(--safe-top) + 44px) 0 auto; height: auto; aspect-ratio: auto; max-height: 100%;
+  object-fit: contain; object-position: center top;
+}
+.v35 #detail[data-look='profile'] .mw-ban-amb img { object-fit: cover; object-position: center 22%; }
+.v35 #detail[data-look='profile'] .mw-ban--art { height: calc(232px + var(--safe-top)); }
+.v35 #detail[data-look='profile'] .mw-ban > img { -webkit-mask-image: linear-gradient(#000 62%, transparent); mask-image: linear-gradient(#000 62%, transparent); }

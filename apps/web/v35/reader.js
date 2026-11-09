@@ -172,6 +172,7 @@ export function openSmartReader(deps, ctx) {
   deps.mount(root);
   const q = (id) => root.querySelector(`#${id}`);
   let scrubbing = false;
+  let scrubQuietUntil = 0;
   queueMicrotask(() => bindScrub());
   const scroll = q('rdScroll');
 
@@ -1078,7 +1079,7 @@ export function openSmartReader(deps, ctx) {
       return i;
     };
     const stop = () => {
-      scrubbing = false; root.classList.remove('rd--scrubbing');
+      scrubbing = false; scrubQuietUntil = performance.now() + 400; root.classList.remove('rd--scrubbing');
       if (frame) cancelAnimationFrame(frame);
       frame = 0;
     };
@@ -1271,7 +1272,9 @@ export function openSmartReader(deps, ctx) {
     'scroll',
     () => {
       const y = settings.mode === 'paged' ? scroll.scrollLeft : scroll.scrollTop;
-      // التمرير يُخفي الشريط: القراءة لا تتوقف لتغلقه
+      // التمرير يُخفي الشريط: القراءة لا تتوقف لتغلقه. إلا التمرير الذي يحدثه سحب دائرة شريط الصفحات (وما يصل
+      // منه بعد رفع الإصبع): الأدوات تبقى ظاهرة حتى ينتهي السحب (ملاحظة المالك، 10 نوفمبر)
+      if (scrubbing || performance.now() < scrubQuietUntil) { lastScrollY = y; return; }
       if (state.chrome && !state.frameMode && Math.abs(y - lastScrollY) > 24) setChrome(false);
       lastScrollY = y;
     },

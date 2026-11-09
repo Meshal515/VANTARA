@@ -25,4 +25,12 @@ describe('شريط القارئ السفلي (قرار المالك)', () => {
     expect(js).toContain('data-act="chapters"');
     expect(js).toContain('chapters: () => openChapters()');
   });
+  it('سحب دائرة الصفحات لا يخفي الأدوات: تمرير السحب وما يصل بعد الإفلات مستثنى (ملاحظة المالك، 10 نوفمبر)', () => {
+    const at = js.indexOf('التمرير يُخفي الشريط');
+    const onScroll = js.slice(at, js.indexOf('{ passive: true }', at));
+    // الاستثناء قبل الإخفاء
+    expect(onScroll.indexOf('if (scrubbing || performance.now() < scrubQuietUntil)')).toBeGreaterThan(-1);
+    expect(onScroll.indexOf('if (scrubbing || performance.now() < scrubQuietUntil)')).toBeLessThan(onScroll.indexOf('setChrome(false)'));
+    expect(scrub).toContain('scrubQuietUntil = performance.now() + 400');
+  });
 });

@@ -1794,6 +1794,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         banner.onload = () => banner.classList.add('ready');
         // صورة عريضة تعذّرت: البنر يلبس ضوء الغلاف بدلها (لا يبقى شفافًا)
         banner.onerror = () => { banner.removeAttribute('src'); banner.closest('.mw-ban')?.classList.remove('mw-ban--art'); };
+        // البنر العريض (≈4.75:1) يظهر كاملًا بنسبته فوق نسخة مغبّشة منه تملأ الإطار: كان يُكبَّر ×2.5 ليملأ
+        // 210px فيتغبّش ويُقص أعلاه
+        banner.closest('.mw-ban')?.style.setProperty('--ban-src', wide ? `url("${String(wide).replace(/"/g, '%22')}")` : 'none');
         if (wide) banner.src = wide;
         else banner.removeAttribute('src');
       }
@@ -2780,40 +2783,52 @@ export function mountV35(deps, { page = 'home' } = {}) {
     row.append(open, eye);
     return row;
   }
-  /** خانة رقم في شبكة «من حيث وقفت»: لمسة تفتح الفصل، وضغطة مطوّلة تعلّمه مقروءًا أو تلغيه. */
+  /**
+   * بلوك فصل في «من حيث وقفت» (قرار المالك، 10 نوفمبر): الرقم أعلى، وتحته وقت النشر، ودائرة ○ تعلّمه مقروءًا.
+   * لمسة البلوك تفتح الفصل فقط؛ الدائرة وحدها تبدّل التعليم. أُزيلت الضغطة المطوّلة: كانت تعيد رسم الشبكة
+   * والإصبع ما زال على الشاشة، فيقع رفعه على عنصر جديد ويبدو التعليم وكأنه أُلغي فورًا.
+   */
   function chapterCell(w, r, isRead, isNext) {
     const ref = String(w.id);
-    const cell = el('button', 'mw-cell');
-    cell.type = 'button';
-    cell.dir = 'ltr';
+    const cell = el('div', 'mw-cell');
     const picked = Boolean(state.marking?.picked.has(chapterKeyOf(ref, r)));
-    if (state.marking) cell.setAttribute('aria-pressed', String(picked));
-    const paint = (on) => {
+    const open = el('button', 'mw-cell-open');
+    open.type = 'button';
+    const num = el('b', 'mw-cell-n', chapterNumberText(r));
+    num.dir = 'ltr';
+    open.append(num, el('small', 'mw-cell-t', dateLabel(r.chapter?.dateUpload) || ' '));
+    const mark = el('button', 'mw-cell-mark');
+    mark.type = 'button';
+    let on = isRead;
+    const paint = () => {
       cell.className = `mw-cell${isNext && !on ? ' here' : on ? ' read' : isNewChapter(r, on) ? ' new' : ''}${picked ? ' picked' : ''}`;
-      cell.setAttribute('aria-label', `الفصل ${chapterNumberText(r)}${on ? '، مقروء' : isNext ? '، وصلت هنا' : ''}`);
+      mark.innerHTML = on ? glyph('check', { size: 14 }) : '<i></i>';
+      mark.setAttribute('aria-pressed', String(on));
+      mark.setAttribute('aria-label', on ? `ألغِ تعليم الفصل ${chapterNumberText(r)}` : `علّم الفصل ${chapterNumberText(r)} مقروءًا`);
+      open.setAttribute('aria-label', `افتح الفصل ${chapterNumberText(r)}${on ? '، مقروء' : isNext ? '، وصلت هنا' : ''}`);
     };
-    cell.textContent = chapterNumberText(r);
-    paint(isRead);
-    cell.onclick = () => {
-      if (cell.dataset.held) return void delete cell.dataset.held;
-      if (state.marking) toggleMarkPick(w, r);
-      else openChapter(w, r);
-    };
-    onLongPress(cell, () => {
-      cell.dataset.held = '1';
-      const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
+    paint();
+    open.onclick = () => (state.marking ? toggleMarkPick(w, r) : openChapter(w, r));
+    mark.onclick = (e) => {
+      e.stopPropagation();
+      on = !on;
       markChapter(sync, ref, r, on);
       if (on) recordChapterView(w, r);
-      paint(on);
-      toast(on ? `علّمت الفصل ${chapterNumberText(r)} مقروءًا` : `ألغيت تعليم الفصل ${chapterNumberText(r)}`);
+      paint();
       refreshChaptersSoon(w);
-    });
+    };
+    cell.append(open, mark);
     return cell;
   }
   function dateLabel(ms) {
     if (!ms) return '';
     const days = Math.floor((Date.now() - ms) / 86_400_000);
-    if (days < 1) return 'اليوم';
+    if (days < 1) {
+      // وقت النشر بالساعات في اليوم نفسه («قبل 10 ساعات»)
+      const h = Math.floor((Date.now() - ms) / 3_600_000);
+      if (h < 1) return 'قبل دقائق';
+      return h === 1 ? 'قبل ساعة' : h === 2 ? 'قبل ساعتين' : h <= 10 ? `قبل ${h} ساعات` : `قبل ${h} ساعة`;
+    }
     if (days < 2) return 'أمس';
     if (days < 7) return `قبل ${countLabel(days, 'day')}`;
     return new Date(ms).toLocaleDateString('ar', {
