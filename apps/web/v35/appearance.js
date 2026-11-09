@@ -1,13 +1,52 @@
 /**
- * المظهر: نمط صفحة العمل لكل قسم، ولون كل قسم ولون علامة VANTARA، والخلفية. يُحفظ على هذا الجهاز فقط.
+ * المظهر: نمط صفحة العمل ولون كل قسم والخلفية. يُحفظ على هذا الجهاز فقط.
  * بنية التجربة (توحيد الشاشات والمحتوى) في experience.js: مفتاح مستقل لا يمسّ هذا.
  *
  * اللون يغيّر متغيّرات القسم نفسها (--accent وأخواته، وصبغة الخلفية) على جذر التطبيق و<html>
  * معًا، فما يُعلَّق على body (التنبيهات والأوراق) يرث اللون نفسه ولا يرجع لبنفسجي المانجا.
- * بلا اختيار: لا شيء يُكتب، وتبقى ألوان الأقسام المصمّمة في CSS كما هي.
+ * بلا اختيار: البنفسجي هو اللون الأساسي لكل الأقسام.
  */
 
 const KEY = 'vantara.appearance.v1';
+const fallbackByStorage = new WeakMap();
+const fallbackWithoutStorage = new Map();
+let lastPreferenceSaved = true;
+
+function fallbackFor(storage) {
+  if (!storage || (typeof storage !== 'object' && typeof storage !== 'function')) return fallbackWithoutStorage;
+  if (!fallbackByStorage.has(storage)) fallbackByStorage.set(storage, new Map());
+  return fallbackByStorage.get(storage);
+}
+
+export function readPreference(key, storage = globalThis.localStorage) {
+  const fallback = fallbackFor(storage);
+  if (fallback.has(key)) return fallback.get(key);
+  try {
+    if (storage && storage === globalThis.localStorage) {
+      const value = globalThis.sessionStorage?.getItem(`vantara.unsaved.${key}`);
+      if (value !== null && value !== undefined) return value;
+    }
+  } catch { /* session storage is optional */ }
+  try { return storage?.getItem(key) ?? null; } catch { return null; }
+}
+
+export function writePreference(key, value, storage = globalThis.localStorage) {
+  const fallback = fallbackFor(storage);
+  try {
+    if (!storage) throw new Error('storage unavailable');
+    storage.setItem(key, value);
+    fallback.delete(key);
+    try { if (storage === globalThis.localStorage) globalThis.sessionStorage?.removeItem(`vantara.unsaved.${key}`); } catch {}
+    lastPreferenceSaved = true;
+  } catch {
+    fallback.set(key, value);
+    try { if (storage && storage === globalThis.localStorage) globalThis.sessionStorage?.setItem(`vantara.unsaved.${key}`, value); } catch {}
+    lastPreferenceSaved = false;
+  }
+  return lastPreferenceSaved;
+}
+
+export const preferenceSaved = () => lastPreferenceSaved;
 
 /** أنماط صفحة عمل الأنمي. الأول هو الأساسي. */
 export const WORK_STYLES = Object.freeze([
@@ -74,7 +113,7 @@ function blank() {
 
 export function readAppearance(storage = globalThis.localStorage) {
   try {
-    const v = JSON.parse(storage?.getItem(KEY) ?? 'null');
+    const v = JSON.parse(readPreference(KEY, storage) ?? 'null');
     if (!v || typeof v !== 'object') return blank();
     return {
       style: v.style && typeof v.style === 'object' ? v.style : {},
@@ -87,11 +126,7 @@ export function readAppearance(storage = globalThis.localStorage) {
 }
 
 export function writeAppearance(next, storage = globalThis.localStorage) {
-  try {
-    storage?.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // تخزين محجوب: الاختيار يبقى لهذه الجلسة
-  }
+  writePreference(KEY, JSON.stringify(next), storage);
   return next;
 }
 
@@ -103,7 +138,7 @@ export function writeAppearance(next, storage = globalThis.localStorage) {
 export function patchAppearance(change, storage = globalThis.localStorage) {
   let raw = {};
   try {
-    const v = JSON.parse(storage?.getItem(KEY) ?? 'null');
+    const v = JSON.parse(readPreference(KEY, storage) ?? 'null');
     if (v && typeof v === 'object' && !Array.isArray(v)) raw = v;
   } catch {
     raw = {};
@@ -194,12 +229,11 @@ export function paletteVars(hex, { pureBlack = false } = {}) {
  * @returns {string|null} لون شريط النظام إن تغيّر (أسود صافي) أو null
  */
 export function applyAppearance(section, nodes, a = readAppearance()) {
-  // «الموحد» لون رابع مستقل؛ بلا اختيار يأخذ لون علامة VANTARA
-  const hex = section === 'unified' ? (accentOf('unified', a) ?? brandOf(a) ?? BRAND_DEFAULT) : accentOf(section, a);
+  // «الموحد» لون رابع مستقل؛ البنفسجي هو الأساسي للجميع.
+  const hex = accentOf(section, a) ?? BRAND_DEFAULT;
   const vars = SECTIONS.includes(section) || section === 'unified' ? paletteVars(hex, { pureBlack: a.pureBlack }) : {};
-  // علامة VANTARA بلونها المستقل؛ بلا اختيار تبقى على البنفسجي المصمّم في CSS
-  const brand = brandOf(a);
-  if (brand) vars['--brand'] = brand;
+  // علامة VANTARA تبقى على اللون الأساسي.
+  vars['--brand'] = BRAND_DEFAULT;
   for (const node of nodes) {
     if (!node?.style) continue;
     for (const k of VARS) node.style.removeProperty(k);
@@ -211,11 +245,11 @@ export function applyAppearance(section, nodes, a = readAppearance()) {
 /**
  * الأوراق والنوافذ تُفتح بنغمة قسم ثابتة (`data-tone="anime"` في ورقة السيرفرات مثلًا) وقاعدتها في CSS
  * تعيد لون القسم المصمّم فوق ما اختاره المستخدم. هذه القواعد تُحقن بعد CSS الأقسام فتلبس كل نغمة
- * اللون المختار لقسمها والأسود الصافي، وتُفرغ حين لا اختيار.
+ * اللون المختار لقسمها أو البنفسجي الأساسي والأسود الصافي.
  */
 export function toneCss(a = readAppearance()) {
   return SECTIONS.map((id) => {
-    const vars = paletteVars(accentOf(id, a), { pureBlack: a.pureBlack });
+    const vars = paletteVars(accentOf(id, a) ?? BRAND_DEFAULT, { pureBlack: a.pureBlack });
     const body = Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(';');
     return body ? `.v35 [data-tone='${id}']{${body}}` : '';
   }).filter(Boolean).join('\n');

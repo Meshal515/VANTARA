@@ -72,4 +72,15 @@ describe('الرئيسية المشتركة', () => {
     expect(filterItems(items, { query: 'وَن' }).map((i) => i.title)).toEqual(['ون بيس']);
     expect(countKinds(items)).toEqual({ all: 4, manga: 1, anime: 1, movie: 1, series: 1 });
   });
+
+  it('مكتبة الهوية الفعلية لا تخفي الأعمال ولا تفقد بيانات بطاقة الاستمرار', async () => {
+    await loadIdentity();
+    const items = collectItems(table({ library: [
+      { user_id: U, series_ref: 'anime:21', series_title: 'One Piece', cover_url: '/cover', added_at: 25 },
+      { user_id: U, series_ref: 'al:13', series_title: 'Manga', added_at: 20 },
+    ] }), { userId: U });
+    const out = unifiedFeed(items);
+    expect(out.map((item) => item.ref)).toEqual(['anime:21', 'al:13']);
+    expect(out[0]).toMatchObject({ section: 'anime', kind: 'anime', title: 'One Piece', cover: '/cover', inLibrary: true });
+  });
 });

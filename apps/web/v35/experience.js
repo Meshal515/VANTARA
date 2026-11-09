@@ -13,7 +13,7 @@
  * «توحيد الشاشات» حُذف نهائيًا: قيمته المحفوظة من إصدار سابق تُقرأ استقلالًا، ولا تُكتب بعد اليوم.
  */
 
-import { readAppearance, workStyleOf } from './appearance.js';
+import { readAppearance, readPreference, workStyleOf, writePreference } from './appearance.js';
 
 const KEY = 'vantara.experience.v1';
 
@@ -50,7 +50,7 @@ export function modeOf(s) {
 /** القراءة لا تكتب شيئًا: لا ترحيل مدمّر عند الإقلاع. بلا مفتاح: الاستقلال. */
 export function readStructure(storage = globalThis.localStorage) {
   try {
-    const raw = storage?.getItem(KEY);
+    const raw = readPreference(KEY, storage);
     return raw == null ? defaultStructure() : normalizeStructure(JSON.parse(raw));
   } catch {
     return defaultStructure();
@@ -59,11 +59,7 @@ export function readStructure(storage = globalThis.localStorage) {
 
 export function writeStructure(next, storage = globalThis.localStorage) {
   const s = normalizeStructure(next);
-  try {
-    storage?.setItem(KEY, JSON.stringify({ v: 2, ...s }));
-  } catch {
-    // تخزين محجوب: الاختيار يبقى لهذه الجلسة
-  }
+  writePreference(KEY, JSON.stringify({ v: 2, ...s }), storage);
   return s;
 }
 

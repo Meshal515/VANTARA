@@ -120,8 +120,15 @@ export async function loadIdentity(importer = () => import('../lib/unified-ident
  * و`sources` (من أين جاء).
  */
 export function unifiedFeed(items, unify = identityImpl) {
-  const list = (unify ?? dedupeByIds)(items.map((i) => ({ ...i, ids: { ...(i.ids ?? {}) } })));
-  return list.map((i) => ({ ...i, sources: i.sources ?? [{ section: i.section, ref: i.ref }] }));
+  const input = items.map((i) => ({ ...i, id: i.id ?? i.ref, ids: { ...(i.ids ?? {}) } }));
+  const list = (unify ?? dedupeByIds)(input);
+  return list.map((group) => {
+    const item = group.item ?? group;
+    return {
+      ...item,
+      sources: (group.sources ?? [{ section: item.section, ref: item.ref }]).map((s) => ({ ...s, ref: s.ref ?? s.id })),
+    };
+  });
 }
 
 const fold = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[ً-ْـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').trim();

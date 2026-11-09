@@ -22,18 +22,32 @@ describe('أنماط المانجا والسينما ولون العلامة', (
     expect(workStyleOf('cinema', { style: {} })).toBe('current');
   });
 
-  it('لون العلامة مستقل: لا يُكتب بلا اختيار، ويصل --brand دون أن يغيّر لون القسم', () => {
+  it('لون العلامة القديم لا يغيّر اللون الأساسي الجديد', () => {
     expect(brandOf({ accent: {} })).toBeNull();
     const root = node();
     applyAppearance('manga', [root], { style: {}, accent: { brand: 'teal' }, pureBlack: false });
-    expect(root.props.get('--brand')).toBe('#169c9a');
-    expect(root.props.has('--accent')).toBe(false);
+    expect(root.props.get('--brand')).toBe('#8f5cff');
+    expect(root.props.get('--accent')).toBe('#8f5cff');
     applyAppearance('manga', [root], { style: {}, accent: {}, pureBlack: false });
-    expect(root.props.size).toBe(0);
+    expect(root.props.get('--accent')).toBe('#8f5cff');
   });
 });
 
 describe('المظهر', () => {
+  it('اختيار اللون يبقى فعالًا في الجلسة عند رفض التخزين', () => {
+    const storage = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
+    writeAppearance({ style: {}, accent: { anime: 'gold' }, pureBlack: false }, storage);
+    expect(accentOf('anime', readAppearance(storage))).toBe('#c9a227');
+  });
+  it('البنفسجي هو الأساسي لكل الأقسام والموحد، مع احترام اللون المحفوظ لكل واحد', () => {
+    for (const section of ['manga', 'anime', 'cinema', 'unified']) {
+      const root = node();
+      applyAppearance(section, [root], { accent: {}, pureBlack: false });
+      expect(root.props.get('--accent'), section).toBe('#8f5cff');
+      applyAppearance(section, [root], { accent: { [section]: 'gold' }, pureBlack: false });
+      expect(root.props.get('--accent'), section).toBe('#c9a227');
+    }
+  });
   it('عشرون لونًا أولها ألوان الأقسام الثلاثة ثم الأبيض، وخمسة أنماط أولها الأساسي', () => {
     expect(ACCENTS).toHaveLength(20);
     expect(ACCENTS.slice(0, 4).map((c) => c.id)).toEqual(['manga', 'anime', 'cinema', 'white']);
@@ -41,14 +55,14 @@ describe('المظهر', () => {
     expect(WORK_STYLES.map((s) => s.id)).toEqual(['core', 'platform', 'card', 'screen', 'episode']);
   });
 
-  it('بلا اختيار: النمط الأساسي ولون القسم المصمّم، ولا يُكتب شيء على العقد', () => {
+  it('بلا اختيار: النمط الأساسي واللون البنفسجي', () => {
     const s = memory();
     const a = readAppearance(s);
     expect(workStyleOf('anime', a)).toBe('core');
     expect(accentOf('anime', a)).toBeNull();
     const root = node();
     expect(applyAppearance('anime', [root], a)).toBeNull();
-    expect(root.props.size).toBe(0);
+    expect(root.props.get('--accent')).toBe('#8f5cff');
   });
 
   it('اختيار محفوظ يُقرأ كما هو؛ وقيمة تالفة ترجع للأساسي', () => {
@@ -72,8 +86,8 @@ describe('المظهر', () => {
     }
     // قسم آخر بلا اختيار: لا يبقى لون الأنمي عالقًا عليه
     applyAppearance('cinema', [root, html], { style: {}, accent: { anime: 'teal' }, pureBlack: false });
-    expect(root.props.size).toBe(0);
-    expect(html.props.size).toBe(0);
+    expect(root.props.get('--accent')).toBe('#8f5cff');
+    expect(html.props.get('--accent')).toBe('#8f5cff');
   });
 
   it('أسود صافي: خلفية سوداء تمامًا مع لون القسم المصمّم أو المختار، وشريط النظام أسود', () => {
@@ -96,12 +110,12 @@ describe('المظهر', () => {
     expect(onAccent('#3b82f6')).toBe('#ffffff');
   });
 
-  it('الأوراق بنغمة قسم ثابتة تلبس اللون المختار لقسمها، ولا قاعدة بلا اختيار', () => {
-    expect(toneCss({ style: {}, accent: {}, pureBlack: false })).toBe('');
+  it('الأوراق تلبس البنفسجي الأساسي أو لون القسم المختار', () => {
+    expect(toneCss({ style: {}, accent: {}, pureBlack: false })).toContain(".v35 [data-tone='anime']{--accent:#8f5cff");
     const css = toneCss({ style: {}, accent: { anime: 'gold' }, pureBlack: false });
     expect(css).toContain(".v35 [data-tone='anime']{");
     expect(css).toContain('--accent:#c9a227');
     expect(css).toContain('--on-accent:#0b0b0f');
-    expect(css).not.toContain("[data-tone='cinema']");
+    expect(css).toContain("[data-tone='cinema']{--accent:#8f5cff");
   });
 });

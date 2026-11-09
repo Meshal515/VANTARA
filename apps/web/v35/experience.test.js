@@ -43,6 +43,14 @@ describe('بنية التجربة: حالتان فقط (توحيد الشاشا�
     }
   });
 
+  it('عند فشل التخزين لا يرجع مفتاح التوحيد لحالته القديمة داخل الجلسة', () => {
+    const storage = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
+    writeStructure(setUnifyContent(readStructure(storage), true), storage);
+    expect(readStructure(storage).unifyContent).toBe(true);
+    writeStructure(setUnifyContent(readStructure(storage), false), storage);
+    expect(readStructure(storage).unifyContent).toBe(false);
+  });
+
   it('نمط البطاقة مستقل عن توحيد المحتوى', () => {
     const look = { style: { manga: 'gallery', anime: 'screen' }, accent: {}, pureBlack: false };
     const a = experienceView(defaultStructure(), look);

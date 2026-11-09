@@ -3,7 +3,7 @@
  * الصفحات نفسه). الخيارات القديمة كلها باقية بمفاتيحها؛ هنا ترتيبها فقط، و«المظهر والتخصيص» كاملة.
  */
 
-import { ACCENTS, BRAND_DEFAULT, brandOf, readAppearance, stylesOf, workStyleOf } from './appearance.js';
+import { ACCENTS, BRAND_DEFAULT, preferenceSaved, readAppearance, stylesOf, workStyleOf } from './appearance.js';
 import { modeOf, readStructure, SECTION_ORDER, setUnifyContent, writeStructure } from './experience.js';
 import { homePreview, previewPicture, workPreview } from './look-previews.js';
 
@@ -64,11 +64,13 @@ export function renderAppearancePane(body, ctx) {
     ctx.patchAppearance(change);
     ctx.apply('look');
     ctx.rerender();
+    if (!preferenceSaved()) ctx.toast('تعذّر حفظ الإعداد على الجهاز؛ سيبقى خلال هذه الجلسة فقط.');
   };
   const saveStructure = (next) => {
     writeStructure(next, ctx.storage);
     ctx.apply('structure');
     ctx.rerender();
+    if (!preferenceSaved()) ctx.toast('تعذّر حفظ الإعداد على الجهاز؛ سيبقى خلال هذه الجلسة فقط.');
   };
 
   const head = (eyebrow, title, intro) => {
@@ -144,10 +146,9 @@ export function renderAppearancePane(body, ctx) {
   head('COLORS', 'ألوان الأقسام', 'اللون يظهر في الأزرار والتحديد ومؤشر التنقل؛ أسطح الشريط تبقى فحمية.');
   // قرار المالك: لا معاينة للألوان (الفرق ظاهر في التطبيق نفسه)؛ المعاينات للأنماط والواجهات وحدها
   const colors = el('div', 'settings-list');
-  const DESIGNED_OF = (title) => ({ المانجا: '#8f5cff', الأنمي: '#3b82f6', السينما: '#c1121f' })[String(title).replace('لون ', '')] ?? '#8f5cff';
   // منتقي اللون: دوائر كبيرة على شبكة، والمختار باسمه فوق، واللمسة تطبّق ثم تُغلق (لا معاينة حية)
   const swatchSheet = (title, current, resetLabel, resetHex, pick) => openSheet((sheet) => {
-    const opts = [{ id: null, name: resetLabel, hex: resetHex ?? DESIGNED_OF(title) }, ...ACCENTS];
+    const opts = [{ id: null, name: resetLabel, hex: resetHex ?? BRAND_DEFAULT }, ...ACCENTS];
     const now = opts.find((o) => o.id === (current ?? null)) ?? opts[0];
     const head = el('div', 'look-pal-head');
     const dot = el('i', 'look-pal-dot'); dot.style.setProperty('--sw', now.hex);
@@ -175,7 +176,6 @@ export function renderAppearancePane(body, ctx) {
     }
     sheet.append(head, grid);
   });
-  const DESIGNED = { manga: '#8f5cff', anime: '#3b82f6', cinema: '#c1121f' };
   const SECTION_NAMES_ALL = { ...SECTION_NAMES, unified: 'الموحد' };
   for (const section of ['manga', 'anime', 'cinema', 'unified']) {
     const chosen = ACCENTS.find((c) => c.id === look.accent?.[section]);
@@ -186,11 +186,11 @@ export function renderAppearancePane(body, ctx) {
     tx.append(el('strong', null, `لون ${SECTION_NAMES_ALL[section]}`), el('small', null, section === 'unified' ? 'لون الواجهة حين توحّد المحتوى' : 'الأزرار والتحديد ومؤشر التنقل'));
     const val = el('span', 'value');
     const chip = el('i', 'look-chip');
-    chip.style.setProperty('--sw', chosen?.hex ?? DESIGNED[section] ?? brandOf(look) ?? BRAND_DEFAULT);
-    val.append(chip, doc.createTextNode(chosen?.name ?? (section === 'unified' ? 'لون العلامة' : 'لون القسم')));
+    chip.style.setProperty('--sw', chosen?.hex ?? BRAND_DEFAULT);
+    val.append(chip, doc.createTextNode(chosen?.name ?? 'الأساسي'));
     row.append(tx, val);
     row.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
-    row.onclick = () => swatchSheet(`لون ${SECTION_NAMES_ALL[section]}`, chosen?.id ?? null, section === 'unified' ? 'لون العلامة' : 'لون القسم', null, (id) => saveLook((a) => {
+    row.onclick = () => swatchSheet(`لون ${SECTION_NAMES_ALL[section]}`, chosen?.id ?? null, 'الأساسي', BRAND_DEFAULT, (id) => saveLook((a) => {
       const accent = { ...a.accent };
       if (id) accent[section] = id;
       else delete accent[section];
@@ -199,27 +199,6 @@ export function renderAppearancePane(body, ctx) {
     colors.append(row);
   }
   body.append(colors);
-  const brandHex = brandOf(look);
-  const brand = el('button', 'setting look-brand');
-  brand.type = 'button';
-  brand.innerHTML = glyph('spark');
-  const bt = el('div');
-  bt.append(el('strong', null, 'لون علامة VANTARA'), el('small', null, 'شعار التطبيق بلونه المستقل عن الأقسام'));
-  const bv = el('span', 'value');
-  const bc = el('i', 'look-chip');
-  bc.style.setProperty('--sw', brandHex ?? BRAND_DEFAULT);
-  bv.append(bc, doc.createTextNode(ACCENTS.find((c) => c.hex === brandHex)?.name ?? 'البنفسجي'));
-  brand.append(bt, bv);
-  brand.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
-  brand.onclick = () => swatchSheet('لون علامة VANTARA', brandHex ? look.accent.brand : null, 'البنفسجي', BRAND_DEFAULT, (id) => saveLook((a) => {
-    const accent = { ...a.accent };
-    if (id) accent.brand = id;
-    else delete accent.brand;
-    return { accent };
-  }));
-  const brandList = el('div', 'settings-list');
-  brandList.append(brand);
-  body.append(brandList);
 
   // ── الخلفية الداكنة الصريحة ──
   head('DISPLAY', 'الخلفية');

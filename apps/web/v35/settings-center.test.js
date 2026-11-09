@@ -87,4 +87,17 @@ describe('مركز الإعدادات', () => {
     expect(body.querySelector('.look-tiles--static')).toBeFalsy();
     expect([...body.querySelectorAll('.look-caption')].at(-1).textContent).toContain('الموحّد');
   });
+
+  it('ألوان الأقسام الأربعة تبدأ بالأساسي البنفسجي دون خيار مستقل للعلامة', () => {
+    const { body, sheets } = mount(memory());
+    expect(body.textContent).not.toContain('لون علامة VANTARA');
+    const rows = [...body.querySelectorAll('button.setting')];
+    for (const label of ['لون المانجا', 'لون الأنمي', 'لون السينما', 'لون الموحد']) {
+      const row = rows.find((node) => node.textContent.includes(label));
+      expect(row?.textContent, label).toContain('الأساسي');
+      row.onclick();
+      expect(sheets.at(-1).querySelector('[role="radio"]').getAttribute('aria-label')).toBe('الأساسي');
+    }
+    expect(body.textContent).not.toContain('لون القسم');
+  });
 });

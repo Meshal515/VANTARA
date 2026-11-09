@@ -82,7 +82,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { accentOf, applyAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
+import { applyAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
@@ -6124,7 +6124,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     toneTag.textContent = toneCss();
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', black ?? s.theme);
-    document.documentElement.style.background = black ?? (accentOf(s.id) ? 'var(--bg)' : s.theme);
+    document.documentElement.style.background = black ?? 'var(--bg)';
     paintRail();
   }
   const pickSection = (_e, t) => selectSection(t.dataset.arg);
