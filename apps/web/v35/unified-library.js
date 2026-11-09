@@ -165,12 +165,13 @@ export function createUnifiedLibrary({ el, glyph, shelves, open, discover, stora
       head.append(el('h2', null, 'آخر المشاهدات'));
       const more = el('button', 'ul-more');
       more.type = 'button';
-      more.innerHTML = `<span>الكل</span>${glyph('chevron', { size: 16 })}`;
+      more.innerHTML = `<span>عرض الكل</span>${glyph('chevron', { size: 16 })}`;
       more.onclick = () => { st.tab = 'recent'; save(); render(host); };
       head.append(more);
-      const rail = el('div', 'ul-rail');
-      rail.append(...data.recent.slice(0, 12).map(recentCard));
-      sec.append(head, rail);
+      // معاينة من أربعة أغلفة بعرض ربع السطر: أصغر من شبكة الأعمال تحتها فلا تطغى عليها (كانت شريطًا بعرض 136px)
+      const peek = el('div', 'ul-peek');
+      peek.append(...data.recent.slice(0, 4).map(recentCard));
+      sec.append(head, peek);
       page.append(sec);
     }
     if (st.tab === 'recent') {

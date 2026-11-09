@@ -71,10 +71,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     i.onerror = () => { i.style.visibility = 'hidden'; };
     return i;
   };
-  const head = (title, go) => {
+  const head = (title, go, more = 'الكل') => {
     const h = el('header', 'uv-sh');
     h.append(el('h2', null, title));
-    if (go) { const b = el('button', 'uv-all'); b.type = 'button'; b.innerHTML = `الكل${glyph('chevron', { size: 16 })}`; b.onclick = go; h.append(b); }
+    if (go) { const b = el('button', 'uv-all'); b.type = 'button'; b.innerHTML = `${more}${glyph('chevron', { size: 16 })}`; b.onclick = go; h.append(b); }
     return h;
   };
   const rail = (cls = '') => el('div', `uv-rail ${cls}`);
@@ -164,16 +164,6 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       b.onclick = () => onPick(k); n.append(b);
     }
     return n;
-  }
-
-  /* ───── تابع ───── */
-  function contItem(it) {
-    const a = el('button', 'uv-po uv-ci'); a.type = 'button';
-    const art = el('span', 'uv-art'); art.append(img(it.cover, 'uv-img', it.title));
-    const go = el('span', 'uv-go'); go.innerHTML = glyph(it.section === 'manga' ? 'book' : 'play', { size: 15, filled: it.section !== 'manga' }); art.append(go);
-    a.append(art, txt('b', 'uv-t1', it.title || 'عمل'), txt('span', 'uv-t2', [KIND_AR[it.kind] ?? '', it.label].filter(Boolean).join(' · ')));
-    a.onclick = () => open.item(it);
-    return a;
   }
 
   /* ───── جدول البث (الأنمي) ───── */
@@ -373,38 +363,128 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   const skRail = (n, w, h) => { const r = rail(); for (let i = 0; i < n; i++) { const c = el('div', 'uv-po'); c.append(sk(w, h, 'uv-art-sk'), sk('70%', 13, 'uv-l1'), sk('45%', 11, 'uv-l2')); r.append(c); } return r; };
 
+  /* ───── آخر المشاهدات: معاينة من أربعة أغلفة (قرار المالك) ─────
+   * أغلفة 2:3 بعرض ربع السطر، أصغر من ملصقات الصفوف تحتها فلا تطغى عليها؛ تحتها العنوان سطرًا والتقدّم بلغة
+   * النوع. لمسة تفتح العمل، والضغط المطوّل يفتح خياراته (أضف لمكتبتي، أزل من آخر المشاهدات). */
+  function pressable(node, onTap, onHold) {
+    let timer = 0, held = false, x = 0, y = 0;
+    const cancel = () => { clearTimeout(timer); timer = 0; };
+    node.addEventListener('pointerdown', (e) => {
+      held = false; x = e.clientX; y = e.clientY; cancel();
+      if (onHold) timer = setTimeout(() => { timer = 0; held = true; node.classList.remove('pressing'); onHold(); }, 480);
+      node.classList.add('pressing');
+    });
+    node.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 8) { cancel(); node.classList.remove('pressing'); } });
+    for (const t of ['pointerup', 'pointercancel', 'pointerleave']) node.addEventListener(t, () => { cancel(); node.classList.remove('pressing'); });
+    node.addEventListener('contextmenu', (e) => { if (onHold) e.preventDefault(); });
+    node.onclick = (e) => { if (held) { held = false; e.preventDefault(); return; } onTap(); };
+    return node;
+  }
+  function recentCover(it) {
+    const a = el('button', 'uv-rv'); a.type = 'button';
+    const art = el('span', 'uv-rv-art'); art.append(img(it.cover, 'uv-img', it.title));
+    a.append(art, txt('b', 'uv-rv-t', it.title || 'عمل'), txt('span', 'uv-rv-s', [KIND_AR[it.kind] ?? KIND_AR[it.section] ?? '', it.label].filter(Boolean).join(' · ')));
+    a.setAttribute('aria-label', `${it.title ?? ''}${it.label ? `، ${it.label}` : ''}`);
+    return pressable(a, () => open.item(it), open.itemMenu ? () => open.itemMenu(it) : null);
+  }
+  function recentSection(list) {
+    const s = el('section', 'uv-sec uv-sec--recent');
+    s.append(head('آخر المشاهدات', open.recent ? () => open.recent() : null, 'عرض الكل'));
+    const g = el('div', 'uv-rv-grid');
+    list.slice(0, 4).forEach((it) => g.append(recentCover(it)));
+    s.append(g);
+    return s;
+  }
+
+  /* ───── تصفّح: أربعة أبواب تحت البنر مباشرة ─────
+   * شبكة 2×2 بخطوط شعرية لا صناديق (فكرة تصفّح المانجا)، وهوية الموحد: أغلفة صغيرة متراكبة من الأنواع
+   * الثلاثة، والاسم، وسطر حيّ، وسهم. الأبواب بارتفاع ثابت فلا يتغيّر شيء حين تصل البيانات. */
+  function browseDoor(label, sub, covers, go) {
+    const b = el('button', 'uv-door'); b.type = 'button';
+    const art = el('span', 'uv-door-art'); art.setAttribute('aria-hidden', 'true');
+    for (const c of covers.filter(Boolean).slice(0, 3)) { const f = el('span', 'uv-door-cv'); f.append(img(c, 'uv-img')); art.append(f); }
+    const t = el('span', 'uv-door-text'); t.append(el('span', 'uv-door-l', label), el('small', 'uv-door-s', sub));
+    b.append(art, t);
+    b.insertAdjacentHTML('beforeend', glyph('chevron', { size: 16, cls: 'icon uv-door-chev' }));
+    b.onclick = go;
+    return b;
+  }
+  function browseSection() {
+    const a = data.animeHome?.() ?? null;
+    const c = data.cinema?.() ?? null;
+    const manga = data.mangaPopular?.() ?? [];
+    const cov = (x) => x?.cover ?? x?.poster ?? x?.posterSmall ?? x?.coverImage?.large ?? null;
+    const mix = (...lists) => { const out = []; for (let i = 0; i < 3; i++) for (const l of lists) if (l?.[i]) out.push(cov(l[i])); return out; };
+    const series = data.seriesUpdates?.() ?? [];
+    const recent = data.mangaRecent?.() ?? [];
+    const genres = new Set([...(a?.trending ?? []), ...(c?.movie ?? []), ...(c?.series ?? [])].flatMap((x) => x?.genres ?? []));
+    const s = el('section', 'uv-browse');
+    s.append(head('تصفّح'));
+    const grid = el('nav', 'uv-doors'); grid.setAttribute('aria-label', 'تصفّح كل الأعمال');
+    const updCount = recent.length + series.length;
+    grid.append(
+      browseDoor('آخر التحديثات', updCount ? `${updCount} فصلًا وحلقة` : 'فصول وحلقات نزلت', mix(recent, series.map((u) => u.item ?? u)), () => openSub('updates')),
+      browseDoor('الرائج', 'أنمي ومانجا وسينما', mix(a?.trending, manga, c?.series), () => openSub('trending')),
+      browseDoor('التصنيفات', genres.size ? `${genres.size} تصنيفًا` : 'كل الأنواع', mix(c?.movie, a?.trending?.slice(3), manga.slice(3)), () => (open.categories ? open.categories() : open.browse('anime'))),
+      browseDoor('كل الأعمال', 'ابحث واكتشف', mix(c?.series?.slice(3), manga.slice(6), a?.trending?.slice(6)), () => (open.discover ? open.discover() : open.browse('anime'))),
+    );
+    s.append(grid);
+    return s;
+  }
+
   /* ───── الرئيسية ───── */
-  function render() {
-    if (!host) return;
-    lastSig = signature();
-    const y = host.ownerDocument.defaultView?.scrollY ?? 0;
-    const page = el('div', 'uv');
-    page.append(renderHero());
-    page.append(tabs(st.filter, UNIFIED_FILTERS, (k) => { st.filter = k; st.hero = 0; writeFilter(k); render(); }));
+  // البنر و«تصفّح» يُبنيان مع الصفحة؛ تغيير الفلتر يعيد ما تحت الفلتر وحده (لا يهدم البنر ولا الشريط)
+  function renderBody() {
+    const body = el('div', 'uv-body');
+    const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter));
+    if (cont.length) body.append(recentSection(cont));
 
-    const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter)).slice(0, 12);
-    if (cont.length) { const s = el('section', 'uv-sec'); const r = rail(); cont.forEach((it) => r.append(contItem(it))); s.append(head('تابع'), r); page.append(s); }
-
-    if (st.filter === 'all' || st.filter === 'anime') page.append(airSchedule(data.animeHome()?.week));
+    if (st.filter === 'all' || st.filter === 'anime') body.append(airSchedule(data.animeHome()?.week));
     // آخر التحديثات: فصول المانجا وحلقات المسلسلات معًا (الأنمي له جدول البث)
     if (st.filter !== 'anime') {
       const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'series' : st.upd;
       const list = updates(allow);
       const s = el('section', 'uv-sec'); s.append(head('آخر التحديثات', () => openSub('updates')));
-      if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; render(); }));
+      if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; repaintBody(); }));
       if (!list.length) s.append(skRail(4, 120, 180)); else { const r = rail(); list.slice(0, 12).forEach((u) => r.append(u.node())); s.append(r); }
-      page.append(s);
+      body.append(s);
     }
-    const rows = [];
-    if (passes('anime', st.filter)) rows.push(['الأنمي الرائج', data.animeHome()?.trending, 'anime', (x) => open.anime(x)]);
-    if (passes('manga', st.filter)) rows.push(['المانجا الرائجة', data.mangaPopular(), 'manga', (x) => open.manga(x)]);
-    if (passes('series', st.filter)) rows.push(['مسلسلات', data.cinema()?.series, 'series', (x) => open.cinema(x)]);
-    if (passes('movie', st.filter)) rows.push(['أفلام', data.cinema()?.movie, 'movie', (x) => open.cinema(x)]);
-    for (const [t, list, kind, go] of rows) {
+    for (const [t, list, kind, go] of trendRows()) {
       const s = el('section', 'uv-sec'); s.append(head(t, () => open.browse(sectionOf(kind))));
       if (!list?.length) s.append(skRail(4, 120, 180)); else { const r = rail(); list.slice(0, 12).forEach((x) => r.append(poster(x, kind, () => go(x)))); s.append(r); }
-      page.append(s);
+      body.append(s);
     }
+    return body;
+  }
+  function trendRows(filter = st.filter) {
+    const rows = [];
+    if (passes('anime', filter)) rows.push(['الأنمي الرائج', data.animeHome()?.trending, 'anime', (x) => open.anime(x)]);
+    if (passes('manga', filter)) rows.push(['المانجا الرائجة', data.mangaPopular(), 'manga', (x) => open.manga(x)]);
+    if (passes('series', filter)) rows.push(['مسلسلات', data.cinema()?.series, 'series', (x) => open.cinema(x)]);
+    if (passes('movie', filter)) rows.push(['أفلام', data.cinema()?.movie, 'movie', (x) => open.cinema(x)]);
+    return rows;
+  }
+  function repaintBody() {
+    const old = host?.querySelector('.uv-body');
+    if (!old) return render();
+    const y = host.ownerDocument.defaultView?.scrollY ?? 0;
+    old.replaceWith(renderBody());
+    lastSig = signature();
+    host.ownerDocument.defaultView?.scrollTo?.(0, y);
+  }
+  function render() {
+    if (!host) return;
+    lastSig = signature();
+    const y = host.ownerDocument.defaultView?.scrollY ?? 0;
+    const page = el('div', 'uv');
+    page.append(renderHero(), browseSection());
+    const t = tabs(st.filter, UNIFIED_FILTERS, (k) => {
+      if (k === st.filter) return;
+      st.filter = k; writeFilter(k);
+      for (const b of t.children) { const on = b.textContent === UNIFIED_FILTERS.find(([x]) => x === k)[1]; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+      repaintBody();
+    });
+    page.append(t, renderBody());
     host.replaceChildren(page);
     ensureSilk();
     host.ownerDocument.defaultView?.scrollTo?.(0, y);
@@ -460,6 +540,16 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
         if (d !== day) { day = d; body.append(el('h3', 'uv-dayhead', d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : d === -1 ? 'أمس' : DAYS_AR[new Date(e.airingAt + 3 * 3600_000).getUTCDay()])); grid = el('div', 'uv-grid'); body.append(grid); }
         grid.append(airCard(e));
       }
+    } else if (st.sub === 'trending') {
+      // الرائج بالتناوب بين الأنواع (لا يطغى نوع على غيره)، وبفلتر النوع نفسه
+      top.append(back, el('h1', null, 'الرائج'));
+      const k = st.trendTab ?? 'all';
+      body.append(tabs(k, UNIFIED_FILTERS, (x) => { st.trendTab = x; paintSub(); }));
+      const pools = trendRows('all').filter(([, , kind]) => k === 'all' || sectionOf(kind) === k).map(([, list, kind, go]) => (list ?? []).map((x) => [x, kind, go]));
+      const grid = el('div', 'uv-grid');
+      const longest = Math.max(0, ...pools.map((l) => l.length));
+      for (let i = 0; i < longest; i++) for (const l of pools) if (l[i]) grid.append(poster(l[i][0], l[i][1], () => l[i][2](l[i][0])));
+      body.append(grid.childElementCount ? grid : el('p', 'uv-none', 'نجهّز الرائج…'));
     } else {
       top.append(back, el('h1', null, 'آخر التحديثات'));
       body.append(tabs(st.subTab, UPD, (k) => { st.subTab = k; paintSub(); }));

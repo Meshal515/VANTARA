@@ -6128,68 +6128,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * وحدهما، فتبقى الحركة على المؤلِّف بـ120 إطارًا حتى والصفحة مشغولة. لا تحريك لـgap/width/radius.
    */
   function playDockMotion() {
+    // خلل «يرتبط ثم يختفي ثم يرجع» (9 نوفمبر): الدمج كان يجعل الكبسولات الحقيقية شفافة وينتظر نسخًا خلفية
+    // تُرسم بعد الخمول، فيبقى الشريط بلا سطح لحظات. الآن الشريط بشكله الجديد مرسوم من أول إطار، وحركة
+    // واحدة عليه كله (opacity وscale فقط على المؤلِّف): لا لحظة بلا سطح، في الدمج والفصل.
     const nav = q('bottomNav');
     if (!dockMotion || !nav || nav.hidden) return;
-    const merging = dockMotion === 'dock-merge'; dockMotion = null;
+    dockMotion = null;
+    dockCtl?.activate(currentPage());
     if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
-    const caps = [...nav.querySelectorAll('.dock-cap')];
-    const icons = [...nav.querySelectorAll('.dock .nav, .dock-switch')];
-    const box = () => nav.getBoundingClientRect();
-    const rel = (el, n) => { const r = el.getBoundingClientRect(); return { x: r.left - n.left, y: r.top - n.top, w: r.width, h: r.height }; };
-    const snap = () => { const n = box(); return { n, caps: caps.map((c) => rel(c, n)), icons: icons.map((i) => rel(i, n)) }; };
-    const end = snap();
-    // الحالة الأخرى لحظةً للقياس فقط (قبل أي رسم)
-    if (merging) delete root.dataset.content; else root.dataset.content = 'unified';
-    const start = snap();
-    if (merging) root.dataset.content = 'unified'; else delete root.dataset.content;
-    const ox = start.n.left - end.n.left;
-    const layer = el('div', 'dock-ghosts');
-    const ghost = (r) => { const g = el('i', 'dock-ghost'); g.style.width = `${r.w}px`; g.style.height = `${r.h}px`; layer.append(g); return g; };
-    const tf = (r, to) => `translate(${r.x + ox}px, ${r.y}px) scale(${r.w / to.w}, ${r.h / to.h})`;
-    const opts = { duration: 620, easing: 'cubic-bezier(.22,.8,.2,1)', fill: 'both' };
-    nav.classList.add('dock-animating');
-    nav.prepend(layer);
-    // الحالة الأولى ثابتة فورًا (لقطة)، والحركة تبدأ بعد أن ترسم الصفحة الثقيلة، فلا تضيع مدتها في انشغالها
-    const steps = [];
-    const run = (target, from, to, o = opts) => { target.style.transform = from[0].transform ?? ''; if (from[0].opacity != null) target.style.opacity = String(from[0].opacity); steps.push(() => target.animate([...from, ...to], o)); };
-    [0, 2].forEach((i) => {
-      const a = start.caps[i], b = end.caps[i];
-      const g = ghost(b);
-      run(g, [{ transform: tf(a, b) }], [{ transform: `translate(${b.x}px, ${b.y}px)` }]);
-    });
-    const big = merging ? start.caps[1] : end.caps[1];
-    const bx = big.x + (merging ? ox : 0);
-    const sw = ghost(big);
-    const full = `translate(${bx}px, ${big.y}px)`;
-    const shrunk = `translate(${bx + big.w * 0.35}px, ${big.y}px) scale(0.3, 1)`;
-    if (merging) run(sw, [{ transform: full, opacity: 1 }], [{ transform: shrunk, opacity: 0 }]);
-    else run(sw, [{ transform: shrunk, opacity: 0 }], [{ transform: full, opacity: 1 }]);
-    if (merging) {
-      const pill = ghost({ w: end.n.width, h: end.n.height });
-      run(pill, [{ transform: 'translate(0px, 0px)', opacity: 0 }], [{ opacity: 0, offset: 0.55 }, { transform: 'translate(0px, 0px)', opacity: 1 }]);
-    } else {
-      // الفصل: نسخ الحالة النهائية تظهر في آخرها بدل الكبسولة الواحدة
-      end.caps.forEach((r) => { if (!r.w) return; const g = ghost(r); run(g, [{ transform: `translate(${r.x}px, ${r.y}px)`, opacity: 0 }], [{ opacity: 0, offset: 0.55 }, { transform: `translate(${r.x}px, ${r.y}px)`, opacity: 1 }]); });
-    }
-    icons.forEach((icon, i) => {
-      const a = start.icons[i], b = end.icons[i];
-      if (!a || !b || !b.w) return;
-      run(icon, [{ transform: `translate(${a.x + ox - b.x}px, 0)`, opacity: a.w ? 1 : 0 }], [{ transform: 'none', opacity: 1 }]);
-    });
-    const anims = [];
-    const go = () => {
-      for (const st of steps) anims.push(st());
-      for (const x of [...layer.children, ...icons]) { x.style.removeProperty('opacity'); if (!x.classList.contains('dock-ghost')) x.style.removeProperty('transform'); }
-      finish();
-    };
-    const later = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
-    if (globalThis.requestIdleCallback) requestIdleCallback(() => later(go), { timeout: 400 }); else setTimeout(() => later(go), 120);
-    const finish = () => void Promise.all(anims.map((x) => x.finished.catch(() => {}))).then(() => {
-      layer.remove();
-      nav.classList.remove('dock-animating');
-      dockCtl?.activate(currentPage());
-      for (const ind of nav.querySelectorAll('.cap-ind')) ind.animate?.([{ visibility: 'hidden', offset: 0 }, { visibility: 'visible', offset: 0.01 }, { visibility: 'visible' }], { duration: 220 });
-    });
+    nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
   }
   function applyExperience() {
     const view = experienceView(readStructure());
@@ -6212,6 +6159,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // الرئيسية المشتركة: كل العناصر تمر من unifiedFeed (منع التكرار عبر الأقسام)، والنوع يحدد صفحة التفاصيل
   let identityAsked = false;
+  /**
+   * الضغط المطوّل على عمل في «آخر المشاهدات»: افتحه، أضفه لمكتبتك (أو هو فيها)، أو أزله من السجل.
+   * الإزالة تخفي صف المشاهدة وحده (view.remove): لا تمسّ المكتبة ولا التقدّم ولا تعليم الفصول.
+   */
+  function openRecentMenu(item) {
+    const ref = String(item.ref ?? '');
+    if (!ref) return;
+    const inLib = sync.rows('library', (r) => r.user_id === me() && !r.removed && r.series_ref === ref).length > 0;
+    const d = { seriesRef: ref, seriesTitle: item.title ?? null, coverUrl: item.cover ?? null, sourceId: null };
+    openSheet((body) => {
+      const h = el('h3', null, item.title || 'عمل');
+      h.dir = 'auto';
+      h.style.marginBottom = '8px';
+      body.append(h,
+        sheetItem(item.section === 'manga' ? 'book' : 'play', item.section === 'manga' ? 'تابع القراءة' : 'تابع المشاهدة', () => { closeSheet(); openUnified(item); }),
+        inLib
+          ? sheetItem('check', 'في مكتبتي', () => closeSheet(), { pressed: true })
+          : sheetItem('plus', 'أضف إلى مكتبتي', () => { closeSheet(); sync.enqueue('library.add', d); toast('أضيف إلى «أتابعها»'); }),
+        sheetItem('close', 'أزل من آخر المشاهدات', () => {
+          closeSheet();
+          sync.enqueue('view.remove', { seriesRef: ref });
+          toast('أُزيل من آخر المشاهدات');
+          renderAllHome({ ifChanged: true });
+        }),
+      );
+    });
+  }
   function openUnified(item) {
     if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
     if (item.section === 'cinema') return openCinemaRef(item.ref, { title: item.title, cover: item.cover });
@@ -6280,6 +6254,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       anime: (x) => openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }),
       cinema: (x) => openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster, type: x.type ?? null }),
       browse: (id) => browseSection(id),
+      // «عرض الكل» لآخر المشاهدات: السجل كاملًا في المكتبة الموحدة
+      recent: () => { unifiedLibrary.state.tab = 'recent'; navTo('library'); },
+      itemMenu: (it) => openRecentMenu(it),
+      // التصنيفات وكل الأعمال: صفحة الاكتشاف (للتوحيد اكتشاف قسمه الحالي إلى أن يُبنى الاكتشاف الموحد)
+      categories: () => navTo('discover'),
+      discover: () => navTo('discover'),
     },
   });
   function loadUnifiedData() {

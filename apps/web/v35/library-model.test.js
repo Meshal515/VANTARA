@@ -151,7 +151,7 @@ describe('المكتبة الموحدة (التصميم الرابع)', () => {
     sync.enqueue('view.add', { ...d('al:1'), chapterLabel: '48', chapterNumber: 48, at: 50 });
     sync.enqueue('view.add', { ...d('anime:2'), chapterLabel: 'الحلقة 4', chapterNumber: 4, at: 60 });
     const { host, opened } = mount(sync);
-    const cards = [...host.querySelectorAll('.ul-rail .ul-recent')];
+    const cards = [...host.querySelectorAll('.ul-peek .ul-recent')];
     expect(cards).toHaveLength(2);
     expect(cards[0].textContent).toContain('الحلقة 4');
     expect(cards[1].textContent).toContain('الفصل 48');
