@@ -1839,8 +1839,8 @@ export function createCinema(deps) {
 
     const body = el('div', 'cn-detail-body');
     body.id = 'cinemaBody';
-    // «الملصق»: ملصق العمل نفسه في الوسط فوق أجواء خلفيته (بمقاسه المحجوز من أول إطار)
-    if (look === 'poster') {
+    // «الملصق» و«العرض الأول» (نسخة المحور): ملصق العمل نفسه في الوسط على حافة الخلفية (مقاس محجوز)
+    if (look === 'poster' || look === 'premiere') {
       const card = el('div', 'cn-look-poster');
       if (m.poster) card.append(image(m.poster, 'cn-img', { eager: true }));
       body.append(card);
@@ -1863,6 +1863,7 @@ export function createCinema(deps) {
         play(m, p.season, p.episode, p.position);
       });
       main.id = 'cinemaPlay';
+      if (look === 'premiere') stillCard(main, m, point);
       body.append(main);
       if (point.record && !point.record.done && point.record.duration) {
         const ratio = Math.min(1, point.record.position / point.record.duration);
@@ -1897,8 +1898,6 @@ export function createCinema(deps) {
       if (m.type === 'series') {
         const eps = el('section', 'cn-episodes');
         eps.id = 'cinemaEpisodes';
-        // النمط على القسم نفسه: الرسم الأول يحدث قبل أن تُضاف الصفحة إلى .cn-detail
-        eps.dataset.look = look;
         // الأنماط الجديدة: المسلسل مقسوم على مواسم، فالمواسم والحلقات ثانيًا بعد التشغيل مباشرة (قبل القصة)
         const about = look !== 'current' ? body.querySelector(':scope > .cn-about') : null;
         if (about) about.before(eps); else body.append(eps);
@@ -1976,6 +1975,24 @@ export function createCinema(deps) {
     }
   }
 
+  /**
+   * «العرض الأول» = المحور في الأنمي: زر التشغيل لقطة 16:9 (لقطة الحلقة التي ستكملها، أو خلفية الفيلم) عليها
+   * زر دائري واسم ما ستشاهده. الوظيفة والمعرّف نفسهما؛ أول span هو النص الذي يحدّثه refreshMarks.
+   */
+  function stillCard(main, m, point) {
+    main.classList.add('cn-look-still');
+    const ep = m.type === 'series' ? m.seasons?.find((s) => s.n === point.season)?.episodes.find((e) => e.n === point.episode) : null;
+    const label = main.querySelector('span');
+    const sub = el('small', null, ep?.title ? ep.title : m.type === 'series' ? `الموسم ${point.season}` : displayTitle(m));
+    sub.dir = 'auto';
+    const art = el('i', 'cn-still-art');
+    const src = ep?.thumbHd ?? ep?.thumb ?? m.background ?? m.poster;
+    if (src) art.append(image(src, 'cn-img', { fallback: [ep?.thumbHd ? ep.thumb : null, m.background ?? m.poster].filter(Boolean) }));
+    const go = el('i', 'cn-still-go');
+    go.innerHTML = glyph('play', { size: 22, filled: true });
+    main.replaceChildren(label, sub, art, go);
+  }
+
   /** كريدت «الشريط العريض»: السنة، والمدة أو المواسم، والتقييم؛ ما يُعرف فقط بلا خانات فارغة. */
   function creditsOf(m) {
     const dl = el('dl', 'cn-look-credits');
@@ -2018,27 +2035,8 @@ export function createCinema(deps) {
     }
     const head = el('header', 'cn-eps-head');
     head.append(el('h2', null, 'الحلقات'));
-    // الأنماط الجديدة: المواسم فلتر نصي ظاهر فوق الحلقات (لا ورقة)، والمختار بخط تحته
-    const tabbed = (host.dataset.look ?? host.closest('.cn-detail')?.dataset.style ?? 'current') !== 'current' && seasons.length > 1;
-    let tabs = null;
-    if (tabbed) {
-      tabs = el('nav', 'cn-seasons');
-      tabs.setAttribute('role', 'tablist');
-      tabs.setAttribute('aria-label', 'المواسم');
-      for (const s of seasons) {
-        const on = s.n === season.n;
-        const b = button(on ? 'on' : '', s.n === 0 ? 'إضافات' : `الموسم ${s.n}`, () => {
-          if (s.n === state.season) return;
-          state.season = s.n;
-          renderEpisodes(host, m);
-          void arabize(m, s.n);
-          void paintSources(m, s.n);
-        });
-        b.setAttribute('role', 'tab');
-        b.setAttribute('aria-selected', String(on));
-        tabs.append(b);
-      }
-    } else {
+    // قاعدة التطبيق: زر واحد باسم الموسم يفتح قائمة المواسم (في كل الأنماط)
+    {
       const pick = button('cn-season-btn', `<span>${season.n === 0 ? 'إضافات' : `الموسم ${season.n}`}</span>${glyph('chevron', { size: 14 })}`, () => seasonPicker(m, host));
       if (seasons.length < 2) pick.disabled = true;
       head.append(pick);
@@ -2111,15 +2109,7 @@ export function createCinema(deps) {
       const fresh = list.querySelector(`.cn-ep-over.cn-pending[data-overview="${CSS.escape(old.dataset.overview)}"]`);
       if (fresh) { fresh.textContent = old.textContent; fresh.classList.remove('cn-pending'); }
     }
-    // شريط المواسم يبقى حيث مرّره الشخص بعد إعادة الرسم (لا يقفز لأوله)
-    const tabsX = host.querySelector(':scope > .cn-seasons')?.scrollLeft ?? null;
-    host.replaceChildren(...(tabs ? [tabs, head, counter, list] : [head, counter, list]));
-    if (tabs && tabsX != null) tabs.scrollLeft = tabsX;
-    else if (tabs) {
-      // أول رسم: الموسم الحالي في وسط الشريط إن كان بعيدًا (أفقيًا فقط؛ لا يحرّك الصفحة)
-      const on = tabs.querySelector('.on');
-      if (on && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = on.offsetLeft + on.offsetWidth / 2 - tabs.clientWidth / 2;
-    }
+    host.replaceChildren(head, counter, list);
     host.dataset.painted = '1';
     if (first) stripIn([...list.children].slice(0, 6));
   }

@@ -42,24 +42,24 @@ it('الأساسي كما هو: زر المواسم وورقته، والحلق�
   expect(kids.indexOf(page.querySelector('.cn-about'))).toBeLessThan(kids.indexOf(page.querySelector('#cinemaEpisodes')));
 });
 
-it('الأنماط الثلاثة: المواسم فلتر نصي فوق الحلقات، والحلقات ثانيًا بعد التشغيل، والتبديل يرسم الموسم', async () => {
+it('الأنماط الثلاثة: زر واحد باسم الموسم يفتح قائمته (قاعدة التطبيق)، والحلقات بلقطاتها ثانيًا بعد التشغيل', async () => {
   for (const style of ['premiere', 'poster', 'marquee']) {
     const page = await open(style);
     expect(page.dataset.style).toBe(style);
     const eps = page.querySelector('#cinemaEpisodes');
-    const tabs = [...eps.querySelectorAll('.cn-seasons [role="tab"]')];
-    expect(tabs.map((b) => b.textContent)).toEqual(['الموسم 1', 'الموسم 2', 'الموسم 3']);
-    expect(eps.firstElementChild.classList.contains('cn-seasons')).toBe(true);
+    expect(eps.querySelector('.cn-seasons')).toBeNull();
+    expect(eps.querySelector('.cn-season-btn').textContent).toContain('الموسم 1');
     const kids = [...page.querySelector('#cinemaBody').children];
     expect(kids.indexOf(eps)).toBeLessThan(kids.indexOf(page.querySelector('.cn-about')));
     expect(page.querySelector('#cinemaPlay')).not.toBeNull();
-    tabs[1].onclick();
-    const now = [...eps.querySelectorAll('.cn-seasons [role="tab"]')];
-    expect(now[1].getAttribute('aria-selected')).toBe('true');
-    expect(eps.querySelector('.cn-ep-title').textContent).toBe('S2E1');
-    // «شوهدت» على كل حلقة باقٍ في كل نمط
+    // الحلقات بلقطاتها و«شوهدت» على كل حلقة في كل نمط
+    expect(eps.querySelectorAll('.cn-ep-art img')).toHaveLength(2);
     expect(eps.querySelectorAll('.cn-ep-seen')).toHaveLength(2);
   }
+  // العرض الأول: زر التشغيل لقطة بنصه الذي يحدّثه refreshMarks أولًا
+  const still = (await open('premiere')).querySelector('#cinemaPlay.cn-look-still');
+  expect(still.querySelector('span').textContent).toContain('الحلقة 1');
+  expect(still.querySelector('.cn-still-art img')).not.toBeNull();
 });
 
 it('الملصق يضع ملصق العمل، والشريط العريض كريدت بما يُعرف فقط (الفيلم بمدته)', async () => {
