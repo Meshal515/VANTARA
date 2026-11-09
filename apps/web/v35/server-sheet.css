@@ -313,14 +313,12 @@
   color: var(--text-3);
 }
 
-/* ── المصادر: رأس ومرشّحات نصّية ثابتة عند التمرير ── */
+/* ── المصادر: رأس ومرشّحات نصّية تمرّ مع القائمة (لا تلحق القارئ فوق السيرفرات: قرار المالك) ── */
 .v35 .ss-src {
   padding: 0 var(--gutter) 24px;
 }
 .v35 .ss-tools {
-  position: sticky;
-  top: var(--ss-bar-h);
-  z-index: 2;
+  position: static;
   margin-top: 20px;
   background: var(--bg);
 }

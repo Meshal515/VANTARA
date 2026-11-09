@@ -37,7 +37,8 @@
 .v35 .uv-hidx .on i{width:22px;background:var(--text-1,#f2f1f5)}
 
 /* الفلتر: نص فقط */
-.v35 .uv-tabs{position:sticky;top:var(--top-h,56px);z-index:5;display:flex;gap:26px;padding:0 var(--uv-g);height:50px;background:var(--bg,#09080c);box-shadow:0 1px 0 var(--uv-hair);margin-top:4px}
+/* الفلتر يمرّ مع الصفحة: لا يلحق القارئ فوق المحتوى (قرار المالك) */
+.v35 .uv-tabs{position:static;display:flex;gap:26px;padding:0 var(--uv-g);height:50px;background:var(--bg,#09080c);box-shadow:0 1px 0 var(--uv-hair);margin-top:4px}
 .v35 .uv-tabs button{position:relative;font-size:15px;font-weight:700;color:var(--uv-t2)}
 .v35 .uv-tabs button.on{color:var(--text-1,#f2f1f5)}
 .v35 .uv-tabs button.on::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:2px;background:var(--text-1,#f2f1f5)}
@@ -92,7 +93,6 @@
 .uv-page .uv-days-lg{overflow-x:auto;scrollbar-width:none;margin:8px 0 4px}
 .uv-page .uv-days-lg button{display:flex;align-items:baseline;gap:6px;font-size:15px}
 .uv-page .uv-days-lg small{font-size:11px;color:var(--text-4,#57536a);font-weight:600}
-.uv-page .uv-tabs{top:calc(env(safe-area-inset-top,0px) + 60px)}
 .uv-page .uv-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px 12px;padding:20px var(--uv-g,20px)}
 .uv-page .uv-grid .uv-po{width:auto}
 .uv-page .uv-grid .uv-art{width:100%;height:auto;aspect-ratio:2/3}
