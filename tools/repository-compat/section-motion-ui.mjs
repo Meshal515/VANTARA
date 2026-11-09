@@ -47,6 +47,86 @@ try {
   const delta=Math.max(...samples.map(s=>s.top))-Math.min(...samples.map(s=>s.top));
   if(delta>8)throw new Error('Cinema to manga first-frame hero jump: '+JSON.stringify({delta,samples}));
   await page.screenshot({path:out+'/cinema-to-manga-settled.png'});
+  // Regression for a real scrolled cinema HOME (earlier proof forced home scroll to zero).
+  // The fixed cinema header and the flow-positioned manga header must share one
+  // logical top offset; scrolling cinema must not become extra blank space in manga.
+  const scrolledProof = [];
+  let baselineMangaTop = null;
+  for (const sourceScroll of [0, 180, 440, 1000]) {
+    await page.evaluate(() => document.querySelector('#secOpt-cinema').click());
+    await page.waitForFunction(
+      () => document.querySelector('.v35')?.dataset.section === 'cinema'
+        && !document.querySelector('#home.layering,.section-page-layer'),
+      null, {timeout: 8000}
+    );
+    // Local deterministic layout: the same full-bleed cinema CSS with enough
+    // content to reproduce actual scrolling, independent of remote movie metadata.
+    await page.evaluate(y => {
+      const view = document.querySelector('#cinemaHome');
+      if (!view.querySelector(':scope > .cn-hero-alt')) {
+        const hero = document.createElement('div');
+        hero.className = 'cn-hero-alt';
+        hero.style.height = '320px';
+        view.prepend(hero);
+      }
+      if (!view.querySelector('#motion-cinema-scroll-sentinel')) {
+        const tall = document.createElement('div');
+        tall.id = 'motion-cinema-scroll-sentinel';
+        tall.style.height = '2600px';
+        view.append(tall);
+      }
+      window.scrollTo({top: y, behavior: 'instant'});
+    }, sourceScroll);
+    await page.waitForTimeout(45);
+    const before = await page.evaluate(() => {
+      const header = document.querySelector('#home > .header');
+      return {
+        scrollY: window.scrollY,
+        fixed: getComputedStyle(header).position === 'fixed',
+        headerBottom: header.getBoundingClientRect().bottom,
+      };
+    });
+    if (!before.fixed || Math.abs(before.scrollY - sourceScroll) > 2)
+      throw new Error('Cinema scroll fixture did not reproduce the fixed header: '+JSON.stringify({sourceScroll,before}));
+    const first = await page.evaluate(() => {
+      document.querySelector('#secOpt-manga').click();
+      const home = document.querySelector('#home');
+      return {
+        layering: home.classList.contains('layering'),
+        layerTop: Number.parseFloat(home.style.getPropertyValue('--layer-top')),
+        hiddenButtons: getComputedStyle(home.querySelector(':scope > .header .header-start')).pointerEvents === 'none',
+      };
+    });
+    if (!first.layering || Math.abs(first.layerTop - before.headerBottom) > 2 || !first.hiddenButtons)
+      throw new Error('Cinema leaked its scroll offset into manga or did not gate header actions: '+JSON.stringify({sourceScroll,before,first}));
+    await page.waitForTimeout(85);
+    const during = await page.evaluate(() => ({
+      fading: Number.parseFloat(getComputedStyle(document.querySelector('#home > .header .header-start')).opacity),
+      moving: document.querySelector('#home').classList.contains('layering'),
+    }));
+    if (!during.moving || !(during.fading < 0.99))
+      throw new Error('Header actions did not fade out during the section transition: '+JSON.stringify({sourceScroll,during}));
+    if (sourceScroll === 440) await page.screenshot({path:out+'/cinema-440-to-manga-midfade.png'});
+    await page.waitForFunction(
+      () => document.querySelector('.v35')?.dataset.section === 'manga'
+        && !document.querySelector('#home.layering,.section-page-layer'),
+      null, {timeout: 8000}
+    );
+    await page.waitForTimeout(210);
+    const after = await page.evaluate(() => ({
+      heroTop: document.querySelector('#mangaHome .mg-hero')?.getBoundingClientRect().top,
+      headerOpacity: Number.parseFloat(getComputedStyle(document.querySelector('#home > .header .header-start')).opacity),
+      section: document.querySelector('.v35')?.dataset.section,
+    }));
+    if (after.heroTop == null || Math.abs(after.headerOpacity-1) > 0.02)
+      throw new Error('Manga hero missing or header buttons failed to reappear: '+JSON.stringify({sourceScroll,after}));
+    if (baselineMangaTop === null) baselineMangaTop = after.heroTop;
+    if (Math.abs(after.heroTop-baselineMangaTop) > 8)
+      throw new Error('Manga top changed based on how far cinema had scrolled: '+JSON.stringify({sourceScroll,baselineMangaTop,after}));
+    if (sourceScroll === 440) await page.screenshot({path:out+'/cinema-440-to-manga-settled.png'});
+    scrolledProof.push({sourceScroll,headerBottom:before.headerBottom,layerTop:first.layerTop,heroTop:after.heroTop});
+  }
+  await writeFile(out+'/scrolled-cinema-proof.json',JSON.stringify(scrolledProof,null,2));
   // Real CSS + Web Animations test: wide artwork stays at a constant screen Y
   // from first frame through animation completion (DOM existence alone is not proof).
   const visual=await browser.newPage({viewport:{width:390,height:844}});

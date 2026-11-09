@@ -104,6 +104,43 @@ describe('layer model', () => {
     expect(document.getElementById('home').classList.contains('layering')).toBe(false);
   });
 
+  it('fixed cinema header does not leak a 440px page scroll into --layer-top', () => {
+    const host = document.getElementById('home'), v = views();
+    const header = document.createElement('header');
+    header.className = 'header';
+    host.prepend(header);
+    host.getBoundingClientRect = () => ({ top: -440, bottom: 1080, height: 1520 });
+    header.getBoundingClientRect = () => ({ top: 0, bottom: 64, height: 64 });
+    const style = globalThis.getComputedStyle;
+    const originalScrollTo = globalThis.scrollTo;
+    const originalScrollY = globalThis.scrollY;
+    const originalInnerHeight = globalThis.innerHeight;
+    globalThis.getComputedStyle = el => ({ position: el === header ? 'fixed' : 'static' });
+    globalThis.scrollY = 440;
+    globalThis.innerHeight = 844;
+    globalThis.scrollTo = ({ top }) => { globalThis.scrollY = top; };
+    v.cinema.hidden = false;
+    v.manga.hidden = true;
+    try {
+      const layers = createLayers({ views: v, host, current: 'cinema' });
+      layers.go('manga');
+      expect(host.style.getPropertyValue('--layer-top')).toBe('64px');
+      expect(v.cinema.scrollTop).toBe(440);
+      tick(600);
+      expect(layers.section).toBe('manga');
+      expect(host.style.getPropertyValue('--layer-top')).toBe('');
+    } finally {
+      if (style === undefined) delete globalThis.getComputedStyle;
+      else globalThis.getComputedStyle = style;
+      if (originalScrollTo === undefined) delete globalThis.scrollTo;
+      else globalThis.scrollTo = originalScrollTo;
+      if (originalScrollY === undefined) delete globalThis.scrollY;
+      else globalThis.scrollY = originalScrollY;
+      if (originalInnerHeight === undefined) delete globalThis.innerHeight;
+      else globalThis.innerHeight = originalInnerHeight;
+    }
+  });
+
   it('each section keeps its own reading position across switches', () => {
     const v = views();
     let y = 0;
