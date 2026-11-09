@@ -91,9 +91,15 @@ export const MANGA_WORK_STYLES = Object.freeze([
   { id: 'resume', name: 'من حيث وقفت', note: 'الفصل التالي أولًا وشبكة أرقام' },
 ]);
 
-/** السينما: نمطها الحالي وحده. أنماطها مؤجلة بقرار المالك، فلا يُخترع غيره. */
+/**
+ * أنماط صفحة عمل السينما (قرار المالك، 9 نوفمبر): الأساسي كما هو، واثنان بروح نمطَي الأنمي «شاشة السينما»
+ * و«البطاقة الطائرة» بفخامة سينمائية، وواحد جديد خاص بالسينما. المعرّف `current` محفوظ عند المستخدمين: لا يُغيَّر.
+ */
 export const CINEMA_WORK_STYLES = Object.freeze([
-  { id: 'current', name: 'التصميم الحالي', note: 'أنماط السينما قريبًا', soon: true },
+  { id: 'current', name: 'الأساسي', note: 'الخلفية والمعلومات تحتها' },
+  { id: 'premiere', name: 'العرض الأول', note: 'الخلفية شاشة كاملة والتشغيل عليها' },
+  { id: 'poster', name: 'الملصق', note: 'ملصق العمل في أجواء خلفيته' },
+  { id: 'marquee', name: 'الشريط العريض', note: 'إطار 2.39 وكريدت العمل' },
 ]);
 
 const STYLE_SETS = { manga: MANGA_WORK_STYLES, anime: WORK_STYLES, cinema: CINEMA_WORK_STYLES };

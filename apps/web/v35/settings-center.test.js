@@ -58,7 +58,8 @@ describe('مركز الإعدادات', () => {
     // المانجا ثم الأنمي ثم السينما
     expect([...tiles[0].querySelectorAll('.look-tile-text strong')].map((n) => n.textContent)).toEqual(['المانجا', 'الأنمي', 'السينما']);
     expect(tiles[0].querySelector('img').getAttribute('src')).toBe('/v35/looks/work-manga-page-phone.webp');
-    expect(tiles[0].querySelectorAll('.look-tile')[2].hasAttribute('disabled')).toBe(true);
+    // السينما صارت بأنماط: بلاطتها تُفتح كالقسمين الآخرين
+    expect(tiles[0].querySelectorAll('.look-tile')[2].hasAttribute('disabled')).toBe(false);
     expect(tiles[1].querySelector('img').getAttribute('src')).toBe('/v35/looks/home-manga-phone.webp');
     expect(tiles[0].querySelector('source').getAttribute('srcset')).toBe('/v35/looks/work-manga-page-pc.webp');
   });

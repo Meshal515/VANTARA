@@ -34,7 +34,7 @@ const OUT = join(WEB, 'v35/looks');
 const pw = process.env.VANTARA_PLAYWRIGHT_MODULE || join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'playwright/index.mjs');
 const { chromium } = await import(pw);
 const { VIEWPORTS, homePreview, workPreview } = await import(join(WEB, 'v35/look-previews.js'));
-const { MANGA_WORK_STYLES, WORK_STYLES } = await import(join(WEB, 'v35/appearance.js'));
+const { CINEMA_WORK_STYLES, MANGA_WORK_STYLES, WORK_STYLES } = await import(join(WEB, 'v35/appearance.js'));
 const D = JSON.parse(await readFile(join(HERE, 'fixture.json'), 'utf8'));
 const only = process.env.ONLY || '';
 
@@ -148,7 +148,10 @@ for (const vp of VIEWPORTS) {
       open: `window.__shell.openAnimeRef('anime:${anime.id}', { title: ${JSON.stringify(anime.title.english || anime.title.romaji)}, cover: ${JSON.stringify(anime.coverImage.large)} })`,
     });
   }
-  await appShot(vp, workPreview('cinema', 'current', vp.id), { section: 'cinema', open: "window.__shell.openCinemaRef('cinema:tt0816692', { title: 'Interstellar' })" });
+  // أنماط السينما الأربعة بمسلسل (المواسم ظاهرة في الأنماط الجديدة)، من التطبيق نفسه
+  for (const s of CINEMA_WORK_STYLES) {
+    await appShot(vp, workPreview('cinema', s.id, vp.id), { section: 'cinema', style: { cinema: s.id }, open: "window.__shell.openCinemaRef('cinema:tt0944947', { title: 'Game of Thrones' })" });
+  }
   // أنماط صفحة عمل المانجا من التطبيق نفسه (لا من النموذج)، بعمل حقيقي من AniList
   const m = (D.manga ?? []).find((x) => x.title?.english && x.bannerImage) ?? D.manga[0];
   for (const s of MANGA_WORK_STYLES) {

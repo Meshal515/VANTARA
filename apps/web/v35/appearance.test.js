@@ -11,14 +11,16 @@ const node = () => {
 };
 
 describe('أنماط المانجا والسينما ولون العلامة', () => {
-  it('المانجا بأربعة أنماط متفق عليها أولها «الصفحة»، والأنمي كما هو، والسينما نمطها الحالي وحده', () => {
+  it('المانجا بأربعة أنماط متفق عليها أولها «الصفحة»، والأنمي كما هو، والسينما بأساسيها وثلاثة أنماط (قرار المالك، 9 نوفمبر)', () => {
     expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume']);
     expect(workStyleOf('manga', readAppearance(memory()))).toBe('page');
     expect(workStyleOf('manga', { style: { manga: 'gallery' } })).toBe('gallery');
     expect(workStyleOf('manga', { style: { manga: 'core' } })).toBe('page');
     expect(workStyleOf('anime', { style: { manga: 'gallery', anime: 'episode' } })).toBe('episode');
     expect(workStyleOf('anime', { style: { anime: 'page' } })).toBe('core');
-    expect(stylesOf('cinema').map((s) => s.id)).toEqual(['current']);
+    expect(stylesOf('cinema').map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee']);
+    expect(workStyleOf('cinema', { style: { cinema: 'marquee' } })).toBe('marquee');
+    expect(workStyleOf('cinema', { style: { cinema: 'core' } })).toBe('current');
     expect(workStyleOf('cinema', { style: {} })).toBe('current');
   });
 
