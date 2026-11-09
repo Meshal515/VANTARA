@@ -3767,13 +3767,38 @@ export function mountV35(deps, { page = 'home' } = {}) {
         : [state.home.trending, state.home.popular];
     for (const list of pools) for (const x of list ?? []) {
       if (!(x.genres ?? []).includes(en)) continue;
-      const src = x.backdrop ?? x.background ?? x.banner ?? x.poster ?? x.coverImage?.large ?? null;
-      if (src && !used.has(src)) { used.add(src); return src; }
+      const src = type === 'manga' ? (x.coverImage?.large ?? x.poster ?? null) : (x.background ?? x.backdrop ?? x.banner ?? null);
+      if (src && !used.has(src) && !genreArtUsed.has(src)) { used.add(src); genreArtUsed.add(src); return src; }
     }
     return null;
   }
+  // صورة عريضة لكل تصنيف من نوعه (كما في «حسب النوع» بالسينما)، مرة لكل تصنيف، وبلا تكرار صورة بين بلاطتين
+  const genreArtCache = new Map();
+  const genreArtUsed = new Set();
+  function genreArt(type, en) {
+    const key = `${type}:${en}`;
+    if (!genreArtCache.has(key)) {
+      const pick = (list, field) => {
+        for (const x of list ?? []) { const src = x?.[field]; if (src && !genreArtUsed.has(src)) { genreArtUsed.add(src); return src; } }
+        return null;
+      };
+      genreArtCache.set(key, (async () => {
+        if (type === 'anime') {
+          const { searchAnime } = await import('../lib/anime-meta.js');
+          return pick((await searchAnime({ genre: en }))?.items, 'banner');
+        }
+        if (type === 'cinema') {
+          const { catalog } = await import('../lib/cinema-meta.js');
+          return pick(await catalog('movie', 'top', { genre: en }), 'background');
+        }
+        return null;
+      })().catch(() => null));
+    }
+    return genreArtCache.get(key);
+  }
   const unifiedDiscover = createUnifiedDiscover({
     el, glyph,
+    genreArt,
     mount: (node) => root.append(node),
     genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
       .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genreCover(type, en, used) }))(new Set())),

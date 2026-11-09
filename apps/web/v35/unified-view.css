@@ -236,3 +236,6 @@
 .v35 .uv-door{gap:12px}
 .v35 .uv-door-l{font-size:14px}
 .v35 .uv-days button{min-width:44px;min-height:40px;text-align:center}
+.v35 .uv > .uv-tabs button,.v35 .uv-days button,.v35 .uv-air-days button{line-height:1.6;overflow:visible}
+.v35 .uv > .uv-tabs{height:44px}
+.v35 .uv > .uv-tabs button{height:36px}

@@ -15,14 +15,18 @@
 .uv-page .ud-seg--page{margin:8px 20px 4px}
 .uv-page .ud-seg button{height:36px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-3,#8f8b9c)}
 .uv-page .ud-seg button.on{background:rgba(255,255,255,.12);color:var(--text-1,#f2f1f5)}
-/* التصنيفات: بلاطات بارتفاع ثابت 76px بانحناء البطاقات، صورة عمل من التصنيف على الطرف وتدرّج يحمل الاسم */
-.v35 .ud-genres{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 var(--ud-g)}
-.v35 .ud-genre{position:relative;height:76px;border-radius:var(--card-r,12px);overflow:hidden;isolation:isolate;
-  background:hsl(var(--h) 28% 16%)!important;box-shadow:var(--card-ring,inset 0 0 0 1px rgba(255,255,255,.06));transition:transform .18s cubic-bezier(.2,.8,.2,1)}
-.v35 .ud-genre:active{transform:scale(.97)}
-.v35 .ud-genre-img{position:absolute;inset-block:0;inset-inline-end:0;width:58%;height:100%;object-fit:cover;object-position:center 25%;z-index:-1;opacity:0;transition:opacity .3s ease;
-  -webkit-mask-image:linear-gradient(to left,#000 35%,transparent);mask-image:linear-gradient(to left,#000 35%,transparent)}
-.v35 .ud-genre-img.in{opacity:.85}
-.v35 .ud-genre-l{position:absolute;inset-inline-start:16px;top:50%;transform:translateY(-50%);font-size:15px;font-weight:800;color:#fff}
+/* التصنيفات بتصميم «حسب النوع» في السينما (قرار المالك): بلاطتان في السطر، ارتفاع 84، صورة عريضة كاملة،
+ * تدرّج داكن من الأسفل، والاسم في الزاوية السفلية بسطر يتسع لذيول الحروف (ج، ي، ر) فلا تُقص */
+.v35 .ud-genres{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0 var(--ud-g)}
+.v35 .ud-genre{position:relative;display:flex;align-items:flex-end;height:84px;padding:0 12px 10px!important;border-radius:var(--card-r,12px);overflow:hidden;isolation:isolate;
+  background:hsl(var(--h) 22% 14%)!important;text-align:start;transition:transform .15s ease}
+.v35 .ud-genre:active{transform:scale(.98)}
+.v35 .ud-genre-art{position:absolute;inset:0;z-index:-2}
+.v35 .ud-genre-img{width:100%;height:100%;object-fit:cover;object-position:50% 30%;display:block;opacity:0;transition:opacity .35s ease}
+.v35 .ud-genre-img.in{opacity:1}
+.v35 .ud-genre::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(to top,rgba(8,7,12,.88) 0%,rgba(8,7,12,.45) 55%,rgba(8,7,12,.15) 100%)}
+.v35 .ud-genre-l{position:static;transform:none;display:block;font-size:16px;font-weight:800;line-height:1.5;color:#fff;padding-bottom:1px;white-space:nowrap;overflow:visible}
 @media (min-width:700px){.v35 .ud-genres{grid-template-columns:repeat(4,minmax(0,1fr))}.v35 .ud{max-width:1200px;margin-inline:auto}}
 @media (prefers-reduced-motion:reduce){.v35 .ud-genre,.v35 .ud-genre-img,.v35 .ud-seg button{transition:none}}
+/* ذيل الجيم في «مانجا» و«المانجا» كان يُقص في الأزرار ذات الارتفاع الثابت: سطر أوسع بلا قص */
+.v35 .ud-seg button,.uv-page .ud-seg button,.uv-page .us-seg button{line-height:1.6;overflow:visible;padding-bottom:1px!important}

@@ -16,7 +16,7 @@ const KIND = { anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
  *   open: (item: any, type: string) => void, openMangaGenre: (genreId: string) => void, openSearch: () => void,
  *   trending: () => {item: any, group: string}[], mount: (node: HTMLElement) => void, storage?: Storage }} ctx
  */
-export function createUnifiedDiscover({ el, glyph, genres, results, card, open, openMangaGenre, openSearch, trending, mount, storage = globalThis.localStorage }) {
+export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, results, card, open, openMangaGenre, openSearch, trending, mount, storage = globalThis.localStorage }) {
   const KEY = 'vantara.unified.discover.type';
   let type = 'anime';
   try { const v = storage?.getItem(KEY); if (DISCOVER_TYPES.some(([k]) => k === v)) type = v; } catch { /* */ }
@@ -33,15 +33,24 @@ export function createUnifiedDiscover({ el, glyph, genres, results, card, open, 
     b.onclick = () => open(item, t);
     return b;
   }
+  /**
+   * بلاطة التصنيف بتصميم «حسب النوع» في السينما: صورة عمل عريضة تغطي البلاطة، وتدرّج داكن من الأسفل يحمل
+   * الاسم في زاويته. الصورة: مما في الرئيسية إن وُجدت، وإلا تُطلب لنوعها (بنر الأنمي، خلفية السينما) وتظهر بتلاشٍ.
+   */
   function genreTile(g) {
     const b = el('button', 'ud-genre'); b.type = 'button';
     b.style.setProperty('--h', String(g.hue ?? 260));
-    if (g.cover) b.append(img(g.cover, 'ud-genre-img'));
-    b.append(el('span', 'ud-genre-l', g.label));
+    const art = el('span', 'ud-genre-art');
+    const put = (src) => { if (src && !art.firstChild) art.append(img(src, 'ud-genre-img')); };
+    put(g.cover);
+    if (!g.cover && genreArt) {
+      const t = type;
+      void Promise.resolve(genreArt(t, g.id)).then((src) => { if (t === type) put(src); }, () => {});
+    }
+    b.append(art, el('b', 'ud-genre-l', g.label));
     b.onclick = () => openGenre(g);
     return b;
   }
-
   /**
    * نتائج تصنيف (أو «كل الأعمال» حين `g.id` فارغ) بنوعها، وفوقها فلتر النوع نفسه: نفس التصنيف في نوع آخر
    * بلمسة. المانجا تفتح صفحة مجموعتها (فلتر التصنيف في المصادر) لأنها تُجلب من محرّك التطبيق.
