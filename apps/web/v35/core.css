@@ -1092,6 +1092,7 @@ html,
 }
 .v35 #home.layering > .header {
   z-index: 40; 
+}
 
 .v35 #home > .header .header-start,
 .v35 #home > .header .header-end {
@@ -1105,7 +1106,7 @@ html,
   transition-duration: 140ms;
 }
  /* الترويسة فوق الطبقات المتحركة */
-}
+
 .v35 #home > .home-view.layer-standby {
   position: absolute;
   inset-inline: 0;
