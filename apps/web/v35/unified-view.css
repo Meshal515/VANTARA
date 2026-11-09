@@ -134,3 +134,30 @@
 .v35 .uv-po:active{transform:scale(.97)}
 .v35 .uv-rc{border-radius:16px}
 .uv-page .uv-grid .uv-art{border-radius:14px}
+
+/* جدول البث بتصميم Stable (anime.css على main: an-days/an-slot): أيام بخط تحت المختار، وبطاقات 16:9
+ * والوقت والحلقة والاسم ومتى تحت الصورة. لا نص فوق الصورة ولا صناديق. المقاس محجوز قبل الصورة. */
+.v35 .uv-air .uv-sh{align-items:flex-end}
+.v35 .uv-air-titles{display:grid;gap:2px}
+.v35 .uv-air-titles h2{font-size:20px;font-weight:800;line-height:28px;margin:0}
+.v35 .uv-air-sub{font-size:12px;color:var(--uv-t2)}
+.v35 .uv-air-days{display:flex;gap:22px;padding:0 var(--uv-g);margin:-2px 0 14px;overflow-x:auto;scrollbar-width:none;min-height:34px}
+.v35 .uv-air-days::-webkit-scrollbar{display:none}
+.v35 .uv-air-days button{position:relative;flex:none;padding:6px 0!important;font-size:15px;font-weight:700;color:var(--uv-t2);transition:color .2s ease}
+.v35 .uv-air-days button::after{content:"";position:absolute;inset-inline:0;bottom:0;height:2px;background:var(--accent);transform:scaleX(0);transition:transform .25s ease}
+.v35 .uv-air-days button.on{color:var(--text-1,#f2f1f5)}
+.v35 .uv-air-days button.on::after{transform:scaleX(1)}
+.v35 .uv-air-strip{gap:14px}
+.v35 .uv-slot{--art:var(--uv-sk);width:min(74vw,290px);display:grid;gap:4px;align-content:start}
+.v35 .uv-slot-art{position:relative;display:block;aspect-ratio:16/9;margin-bottom:6px;border-radius:12px;overflow:hidden;
+  background:color-mix(in srgb,var(--art) 30%,var(--uv-sk));transition:transform .18s ease}
+.v35 .uv-slot:active .uv-slot-art{transform:scale(.97)}
+.v35 .uv-slot-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease}
+.v35 .uv-slot-img.in{opacity:1}
+.v35 .uv-slot-line{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--text-2,#bab6c6)}
+.v35 .uv-slot-time{font-size:17px;font-weight:850;color:var(--text-1,#f2f1f5);font-variant-numeric:tabular-nums}
+.v35 .uv-slot.aired .uv-slot-time{color:var(--text-2,#bab6c6)}
+.v35 .uv-slot-title{display:block;font-size:13.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.v35 .uv-slot-when{font-size:11.5px;color:var(--uv-t2)}
+.v35 .uv-slot:not(.aired) .uv-slot-when{color:var(--text-2,#bab6c6)}
+@media (prefers-reduced-motion:reduce){.v35 .uv-slot-img,.v35 .uv-air-days button::after{transition:none}}

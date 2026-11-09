@@ -4873,6 +4873,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else if (push && from !== id) state.stack.push(from);
     // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
     const request = ++pageMotionRequest;
+    // المؤشر يُقاس ويتحرك قبل أي كتابة في الصفحات: القياس بعدها كان يفرض تخطيطًا ثانيًا للصفحة كلها
+    // (56ms على جوال متوسط في المقياس) قبل أن تبدأ حركة الشريط، فيتقطّع الشريط مع كل انتقال
+    const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
+    if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch ? q(from) : null;
     finishPageMotion();
     if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll });
@@ -4888,7 +4892,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (on) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
-    dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
+    if (!dockFirst) dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
     q('detailTop').classList.remove('collapsed');
     if (id !== 'detail') {
       closeDetailMenu();
@@ -4897,18 +4901,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
-    if (id === 'library') renderActiveLibrary();
-    if (id === 'discover') {
+    // خلل «إعادة رسم الشريط السفلي» (8 نوفمبر): رسم الصفحة الثقيلة (40–110ms على جوال متوسط) كان يجري في
+    // الإطار نفسه الذي تبدأ فيه حركة مؤشر الشريط، فتضيع إطاراتها الأولى ويبدو الشريط كأنه يُعاد رسمه.
+    // بين وجهات الشريط: المؤشر يُسلَّم للمؤلِّف أولًا، والرسم بعد أول إطار (والصفحة الداخلة في أول تلاشيها).
+    const dockHop = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && typeof requestAnimationFrame === 'function';
+    const afterDock = (fn) => {
+      if (!dockHop) return fn();
+      requestAnimationFrame(() => setTimeout(() => { if (request === pageMotionRequest && currentPage() === id) fn(); }, 0));
+    };
+    if (id === 'library') afterDock(renderActiveLibrary);
+    if (id === 'discover') afterDock(() => {
       if (inAnime) anime.showDiscover();
       // رجوع إلى قائمة السينما: تبقى كما تُركت (كان showList يعيد بناء الشبكة من الصفر فتضيع العناصر والموضع)
       else if (inCinema) { if (push || !q('cinemaDiscover')?.childElementCount) cinema.showDiscover(); }
       else if (!state.catalog.length) void loadMoreDiscover();
-    }
+    });
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
-    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') renderAllHome();
-    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch) {
-      if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
-      void refreshHomeUpdates();
+    // الرئيسية الموحدة لا تُبنى من جديد عند الرجوع إلا إن تغيّرت بياناتها (كانت تُبنى كل مرة: تضيع مواضع
+    // الشرائط وتُفكّ الصور من جديد، فيبدو التطبيق كأنه يعيد التحميل)
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') afterDock(() => renderAllHome({ ifChanged: true }));
+    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch && root.dataset.content !== 'unified') {
+      afterDock(() => {
+        if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
+        void refreshHomeUpdates();
+      });
     }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
@@ -6241,6 +6257,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
     void openWork(w.raw ?? w);
   };
+  let artMod = null;
+  void import('../lib/anime-art.js').then((m) => { artMod = m; }).catch(() => {});
   const unifiedView = createUnifiedView({
     el, glyph, genreAr: (g) => AR_GENRE[g] ?? g,
     reducedMotion: () => document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches,
@@ -6250,6 +6268,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       cinema: () => unifiedData.cinema,
       seriesUpdates: () => unifiedData.series,
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
+      // جدول البث: لقطة الحلقة لما لا بنر له (نفس سلسلة صور صفحة العمل)، والكتابة كسولة
+      animeArt: (id) => import('../lib/anime-art.js').then(({ loadAnimeArt }) => loadAnimeArt(id, { timeoutMs: 1500 })),
+      episodeStill: (...a) => artMod?.episodeStill(...a) ?? null,
       mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
       mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
     },
@@ -6277,7 +6298,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }).catch(() => {});
   }
   let unifiedMounted = false;
-  function renderAllHome() {
+  function renderAllHome({ ifChanged = false } = {}) {
     const host = q('allHome');
     if (!host) return;
     if (!identityAsked) {
@@ -6285,7 +6306,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
     }
     loadUnifiedData();
-    if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh();
+    if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh({ ifChanged });
   }
 
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, previewWork: (w) => previewWork(w), workFromRef, toast });

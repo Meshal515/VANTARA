@@ -61,7 +61,7 @@ export function dayLineup(week, offset, now = Date.now()) {
 
 export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, reducedMotion = () => false, now = () => Date.now() }) {
   const gen = (list) => (list ?? []).slice(0, 2).map(genreAr).join('، ');
-  const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all' };
+  const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all', airDay: null, airScrolled: false };
   let host = null, silk = null, silkWrap = null, timer = 0, overlay = null;
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
@@ -203,6 +203,117 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     a.onclick = () => open.anime(e);
     return a;
   }
+  /* ───── جدول البث بتصميم Stable (anime.js على main): أيام بخط تحت المختار، وبطاقات عريضة 16:9
+   * والوقت والحلقة تحت الصورة. الصورة: بنر الأنمي، وإلا لقطة الحلقة، وإلا الغلاف؛ تُحسم قبل الظهور. ───── */
+  const clock12 = (ts) => new Date(ts).toLocaleTimeString('ar', { timeZone: 'Asia/Riyadh', hour: 'numeric', minute: '2-digit', hour12: true, numberingSystem: 'latn' });
+  const meccaKey = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  function airDayLabel(key, today) {
+    const d = Math.round((Date.parse(key) - Date.parse(today)) / 86_400_000);
+    if (d === 0) return 'اليوم';
+    if (d === -1) return 'أمس';
+    if (d === 1) return 'غدًا';
+    return new Date(`${key}T12:00:00Z`).toLocaleDateString('ar', { weekday: 'long', timeZone: 'UTC' });
+  }
+  /** «بعد 5 ساعات» / «نزلت قبل ساعتين»: كلمات كاملة كما في الأنمي. */
+  function airWhen(at, t) {
+    const past = at <= t;
+    const m = Math.max(1, Math.round(Math.abs(at - t) / 60_000));
+    const h = Math.round(m / 60);
+    const span = m < 60 ? (m === 1 ? 'دقيقة' : m === 2 ? 'دقيقتين' : m <= 10 ? `${m} دقائق` : `${m} دقيقة`)
+      : h < 24 ? (h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : h <= 10 ? `${h} ساعات` : `${h} ساعة`)
+        : (Math.round(h / 24) === 1 ? 'يوم' : `${Math.round(h / 24)} أيام`);
+    return past ? `نزلت قبل ${span}` : `بعد ${span}`;
+  }
+  const slotArt = new Map();
+  /** صورة البطاقة العريضة: البنر فورًا، وإلا تُطلب لقطة الحلقة (بمهلة) ثم الغلاف. لا تبديل بعد الظهور. */
+  function slotImage(e, box) {
+    const show = (src) => {
+      if (!src) return;
+      const i = el('img', 'uv-slot-img');
+      i.alt = '';
+      i.decoding = 'async';
+      i.loading = 'lazy';
+      i.onload = () => i.classList.add('in');
+      i.onerror = () => { if (src !== e.poster && e.poster) { i.remove(); show(e.poster); } };
+      i.src = src;
+      if (!e.banner || src === e.poster) i.style.objectPosition = 'center 22%';
+      box.append(i);
+    };
+    if (e.banner) return show(e.banner);
+    if (!data.animeArt) return show(e.poster);
+    const key = `${e.id}:${e.episode}`;
+    if (!slotArt.has(key)) {
+      slotArt.set(key, Promise.race([
+        Promise.resolve(data.animeArt(e.id)).then((art) => {
+          const shot = data.episodeStill?.(e, e.episode, art, { width: 290, dpr: globalThis.devicePixelRatio || 1 });
+          return shot?.still ? shot.src : e.poster;
+        }).catch(() => e.poster),
+        new Promise((r) => setTimeout(() => r(e.poster), 1500)),
+      ]));
+    }
+    void slotArt.get(key).then((src) => { if (box.isConnected || !box.firstChild) show(src); });
+  }
+  function slot(e) {
+    const t = now();
+    const aired = e.airingAt <= t;
+    const c = el('button', `uv-slot${aired ? ' aired' : ''}`);
+    c.type = 'button';
+    c.setAttribute('aria-label', `${e.title} — الحلقة ${e.episode}`);
+    const art = el('span', 'uv-slot-art');
+    if (e.color) art.style.setProperty('--art', e.color);
+    slotImage(e, art);
+    const line = el('span', 'uv-slot-line');
+    line.append(el('b', 'uv-slot-time', clock12(e.airingAt)), el('span', null, `الحلقة ${e.episode}`));
+    c.append(art, line, txt('span', 'uv-slot-title', e.title), el('span', 'uv-slot-when', airWhen(e.airingAt, t)));
+    c.onclick = () => open.anime(e);
+    return c;
+  }
+  function airSchedule(week) {
+    const s = el('section', 'uv-sec uv-air');
+    const h = el('header', 'uv-sh');
+    const titles = el('div', 'uv-air-titles');
+    titles.append(el('h2', null, 'جدول البث'), el('span', 'uv-air-sub', 'بتوقيت مكة'));
+    const all = el('button', 'uv-all'); all.type = 'button'; all.innerHTML = `الكل${glyph('chevron', { size: 16 })}`; all.onclick = () => openSub('schedule');
+    h.append(titles, all);
+    s.append(h);
+    if (!week) { s.append(el('div', 'uv-air-days uv-air-days--sk'), skRail(3, 290, 163)); return s; }
+    const t = now();
+    const today = meccaKey(t);
+    const days = new Map();
+    for (const e of week) { const k = meccaKey(e.airingAt); if (!days.has(k)) days.set(k, []); days.get(k).push(e); }
+    const keys = [...days.keys()].filter((k) => k >= meccaKey(t - 86_400_000)).sort();
+    if (!keys.length) { s.append(el('p', 'uv-none', 'لا حلقات هذا الأسبوع')); return s; }
+    if (!keys.includes(st.airDay)) st.airDay = keys.includes(today) ? today : keys[0];
+    const tabs = el('nav', 'uv-air-days'); tabs.setAttribute('role', 'tablist');
+    const strip = el('div', 'uv-rail uv-air-strip');
+    const showDay = (k, { scroll }) => {
+      st.airDay = k;
+      for (const b of tabs.children) { const on = b.dataset.day === k; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+      const list = days.get(k) ?? [];
+      strip.replaceChildren(...list.map(slot));
+      // اليوم يبدأ عند «الآن»: آخر ما نزل، وبعده القادم
+      if (scroll) {
+        const at = k === today ? Math.max(0, list.findIndex((e) => e.airingAt > now()) - 1) : 0;
+        const target = strip.children[at];
+        // بداية السطر (اليمين) عند البطاقة، بلا تحريك الصفحة رأسيًّا
+        requestAnimationFrame(() => {
+          if (!target || !strip.isConnected || !at) return;
+          const pad = parseFloat(getComputedStyle(strip).paddingInlineStart) || 0;
+          strip.scrollBy({ left: target.getBoundingClientRect().right - (strip.getBoundingClientRect().right - pad), behavior: 'instant' });
+        });
+      }
+    };
+    for (const k of keys) {
+      const b = el('button', '', airDayLabel(k, today)); b.type = 'button'; b.dataset.day = k; b.setAttribute('role', 'tab');
+      b.onclick = () => showDay(k, { scroll: true });
+      tabs.append(b);
+    }
+    s.append(tabs, strip);
+    showDay(st.airDay, { scroll: !st.airScrolled });
+    st.airScrolled = true;
+    return s;
+  }
+
   function dayName(d) { return d === -1 ? 'أمس' : d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : DAYS_AR[new Date(now() + 3 * 3600_000 + d * 86_400_000).getUTCDay()]; }
 
   /* ───── آخر التحديثات (المانجا والمسلسلات) ───── */
@@ -251,6 +362,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   /* ───── الرئيسية ───── */
   function render() {
     if (!host) return;
+    lastSig = signature();
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
     const page = el('div', 'uv');
     page.append(renderHero());
@@ -259,18 +371,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter)).slice(0, 12);
     if (cont.length) { const s = el('section', 'uv-sec'); const r = rail(); cont.forEach((it) => r.append(contItem(it))); s.append(head('تابع'), r); page.append(s); }
 
-    if (st.filter === 'all' || st.filter === 'anime') {
-      const week = data.animeHome()?.week;
-      const s = el('section', 'uv-sec');
-      s.append(head('جدول البث', () => openSub('schedule')));
-      const days = el('div', 'uv-days');
-      for (const d of [0, 1, 2]) { const b = el('button', st.day === d ? 'on' : '', dayName(d)); b.type = 'button'; b.onclick = () => { st.day = d; render(); }; days.append(b); }
-      s.append(days);
-      // بطاقات مثل «آخر التحديثات» (قرار المالك)، لا سطور
-      if (!week) s.append(skRail(4, 120, 180));
-      else { const list = dayLineup(week, st.day, now()).slice(0, 12); const r = rail(); list.forEach((e) => r.append(airCard(e))); s.append(list.length ? r : el('p', 'uv-none', 'لا حلقات في هذا اليوم')); }
-      page.append(s);
-    }
+    if (st.filter === 'all' || st.filter === 'anime') page.append(airSchedule(data.animeHome()?.week));
     // آخر التحديثات: فصول المانجا وحلقات المسلسلات معًا (الأنمي له جدول البث)
     if (st.filter !== 'anime') {
       const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'series' : st.upd;
@@ -355,6 +456,16 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     overlay.replaceChildren(top, body);
   }
 
+  /** بصمة رخيصة لما يُعرض: الفلتر و«تابع» بتقدّمه وأطوال القوائم. */
+  let lastSig = '';
+  function signature() {
+    const n = (x) => (Array.isArray(x) ? x.length : x ? 1 : 0);
+    const cont = (data.continue() ?? []).slice(0, 12).map((it) => `${it.ref ?? it.id}@${it.at ?? it.viewedAt ?? ''}:${it.label ?? it.chapterLabel ?? ''}`).join(',');
+    const a = data.animeHome?.() ?? null;
+    const c = data.cinema?.() ?? null;
+    return [st.filter, cont, n(a?.week), n(a?.trending), n(c?.movie), n(c?.series), n(data.seriesUpdates?.()), n(data.mangaRecent?.()), n(data.mangaPopular?.())].join('|');
+  }
+
   function start() {
     stop();
     timer = setInterval(() => {
@@ -366,7 +477,12 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
 
   return {
     mount(node) { host = node; render(); start(); },
-    refresh() { if (host?.isConnected) render(); },
+    /** `ifChanged`: يُعاد البناء فقط إن تغيّر ما يُعرض (الرجوع للرئيسية لا يهدم الشرائط ومواضعها). */
+    refresh({ ifChanged = false } = {}) {
+      if (!host?.isConnected) return;
+      if (ifChanged && signature() === lastSig) return;
+      render();
+    },
     back: closeSub,
     destroy() { stop(); closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
   };
