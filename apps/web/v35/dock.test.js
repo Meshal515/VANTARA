@@ -237,6 +237,41 @@ describe('layer model', () => {
     }
   });
 
+  it('preserves the old uninterrupted header across all six top-to-top section directions', () => {
+    const host = document.getElementById('home'), v = views();
+    const header = document.createElement('header');
+    header.className = 'header';
+    const brand = document.createElement('div');
+    brand.className = 'brand-lockup';
+    header.append(brand);
+    host.prepend(header);
+    const originalY = globalThis.scrollY;
+    const originalScrollTo = globalThis.scrollTo;
+    globalThis.scrollY = 0;
+    globalThis.scrollTo = ({ top }) => { globalThis.scrollY = top; };
+    try {
+      for (const from of ORDER) for (const to of ORDER) {
+        if (from === to) continue;
+        for (const [id, view] of Object.entries(v)) view.hidden = id !== from;
+        const layers = createLayers({ views: v, host, current: from });
+        layers.go(to);
+        expect(host.classList.contains('layering'), from + ' → ' + to).toBe(true);
+        expect(host.classList.contains('header-scroll-fade'), from + ' → ' + to).toBe(false);
+        tick(170);
+        expect(brand.style.opacity, from + ' → ' + to).toBe('');
+        tick(480);
+        expect(layers.section, from + ' → ' + to).toBe(to);
+        expect(host.classList.contains('header-scroll-fade')).toBe(false);
+        expect(brand.style.opacity).toBe('');
+      }
+    } finally {
+      if (originalY === undefined) delete globalThis.scrollY;
+      else globalThis.scrollY = originalY;
+      if (originalScrollTo === undefined) delete globalThis.scrollTo;
+      else globalThis.scrollTo = originalScrollTo;
+    }
+  });
+
   it('each section keeps its own reading position across switches', () => {
     const v = views();
     let y = 0;
