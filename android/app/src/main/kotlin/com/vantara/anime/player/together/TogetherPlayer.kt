@@ -110,7 +110,8 @@ class TogetherPlayer(
     private var lobbyCount: TextView? = null
     private var countdownAt = 0.0
     /** لون القسم: أحمر السينما، ولون الأنمي للأنمي. */
-    private val accent: Int get() = if (launch.kindText == "أنمي") 0xFF3B82F6.toInt() else 0xFFC1121F.toInt()
+    // لون الواجهة نفسه الذي لبسه المشغّل (Tone.use)، لا أزرق/أحمر ثابت
+    private val accent: Int get() = com.vantara.anime.player.Tone.ACCENT
     private fun serverNow() = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
     /** الغرفة بدأت لكن لحظة البدء المشتركة لم تأتِ: العدّ 3-2-1. */
     private fun counting(t: Timeline? = client.timeline) = synced && t != null && t.started && t.at - serverNow() > 400

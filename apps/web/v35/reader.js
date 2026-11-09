@@ -18,6 +18,8 @@ import { nativeFollowTime, setReaderTime, flushFollowTime, listenFollowForegroun
  */
 
 import { glyph, iconButton } from './icons.js';
+import { applyAppearance } from './appearance.js';
+import { readStructure } from './experience.js';
 import { countLabel } from './plural.js';
 import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
 import { editionRows, sourceLabel, sourceRank } from './works.js';
@@ -137,6 +139,9 @@ export function openSmartReader(deps, ctx) {
     coverUrl: ctx.work?.coverImage?.large ?? ctx.row?.manga?.thumbnailUrl ?? null };
 
   const root = el('div', 'v35 rd');
+  // القارئ جذر .v35 جديد: قاعدة .v35 في core.css تعطيه البنفسجي مباشرة فلا يرث اللون المختار. يلبس لون الواجهة
+  // نفسه: لون المانجا المختار (أو البنفسجي الأساسي)، ومع توحيد المحتوى لون الموحد (ملاحظة المالك، 9 نوفمبر)
+  try { applyAppearance(readStructure().unifyContent ? 'unified' : 'manga', [root]); } catch { /* اللون تحسين لا شرط */ }
   root.setAttribute('role', 'application');
   root.setAttribute('aria-label', 'القارئ');
   root.innerHTML = `

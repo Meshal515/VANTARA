@@ -121,3 +121,19 @@ describe('المظهر', () => {
     expect(css).toContain("[data-tone='cinema']{--accent:#8f5cff");
   });
 });
+
+describe('لون ما يُفتح من الواجهة (المشغّل والقارئ والأوراق) = لون الواجهة نفسه', () => {
+  it('لون القسم المختار، وإلا البنفسجي الأساسي (لا أزرق/أحمر مصمّم)، ومع التوحيد لون الموحد', async () => {
+    const { liveAccent, toneCss, BRAND_DEFAULT } = await import('./appearance.js');
+    const a = { accent: { manga: 'emerald', cinema: 'gold', unified: 'rose' } };
+    const hex = (id) => ACCENTS.find((c) => c.id === id)?.hex;
+    expect(liveAccent('manga', {}, a)).toBe(hex('emerald'));
+    expect(liveAccent('cinema', {}, a)).toBe(hex('gold'));
+    expect(liveAccent('anime', {}, a)).toBe(BRAND_DEFAULT);
+    expect(liveAccent('cinema', { unified: true }, a)).toBe(hex('rose'));
+    expect(liveAccent('anime', { unified: true }, { accent: {} })).toBe(BRAND_DEFAULT);
+    // أوراق السيرفرات بنغمة القسم تلبس لون الموحد مع التوحيد
+    expect(toneCss(a, { unified: true })).toContain(`[data-tone='cinema']{--accent:${hex('rose')}`);
+    expect(toneCss(a)).toContain(`[data-tone='cinema']{--accent:${hex('gold')}`);
+  });
+});

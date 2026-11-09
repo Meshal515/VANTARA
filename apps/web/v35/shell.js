@@ -6231,7 +6231,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       toneTag.id = 'look-tones';
       document.head.append(toneTag);
     }
-    toneTag.textContent = toneCss();
+    toneTag.textContent = toneCss(undefined, { unified: root.dataset.content === 'unified' });
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', black ?? s.theme);
     document.documentElement.style.background = black ?? 'var(--bg)';
     paintRail();

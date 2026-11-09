@@ -191,6 +191,15 @@ export function brandOf(a = readAppearance()) {
 }
 
 /** لون القسم المختار (hex) أو null = لون القسم المصمّم. */
+/**
+ * اللون الذي تلبسه الواجهة الآن لقسم، وهو نفسه لكل ما يُفتح منها (المشغّل الأصلي، القارئ، الأوراق): لون القسم
+ * المختار أو البنفسجي الأساسي، ومع توحيد المحتوى لون «الموحد». كان المشغّل يأخذ لون القسم المختار فقط، فإن لم
+ * يُختر رجع لأزرقه أو أحمره المصمّم بينما الواجهة بنفسجية (ملاحظة المالك، 9 نوفمبر).
+ */
+export function liveAccent(section, { unified = false } = {}, a = readAppearance()) {
+  return accentOf(unified ? 'unified' : section, a) ?? BRAND_DEFAULT;
+}
+
 export function accentOf(section, a = readAppearance()) {
   const id = a.accent?.[section];
   return ACCENTS.find((c) => c.id === id)?.hex ?? null;
@@ -276,9 +285,10 @@ export function applyAppearance(section, nodes, a = readAppearance()) {
  * تعيد لون القسم المصمّم فوق ما اختاره المستخدم. هذه القواعد تُحقن بعد CSS الأقسام فتلبس كل نغمة
  * اللون المختار لقسمها أو البنفسجي الأساسي والأسود الصافي.
  */
-export function toneCss(a = readAppearance()) {
+export function toneCss(a = readAppearance(), { unified = false } = {}) {
   return SECTIONS.map((id) => {
-    const vars = paletteVars(accentOf(id, a) ?? BRAND_DEFAULT, { pureBlack: a.pureBlack });
+    // مع التوحيد كل نغمة بلون الموحد: ورقة سيرفرات الأنمي لا تلبس لونًا غير لون الواجهة
+    const vars = paletteVars(liveAccent(id, { unified }, a), { pureBlack: a.pureBlack });
     const body = Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(';');
     return body ? `.v35 [data-tone='${id}']{${body}}` : '';
   }).filter(Boolean).join('\n');

@@ -228,6 +228,9 @@ seams.add('extensions/runtime-android/integration/src/androidTest/kotlin/com/van
 seams.add('android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt');
 seams.add('android/app/src/main/kotlin/com/vantara/anime/player/RouteGroups.kt');
+// ألوان المشغّل فقط (لون الواجهة المختار على الأسطح والأزرار، 9 نوفمبر): لا منطق تشغيل
+seams.add('android/app/src/main/kotlin/com/vantara/anime/player/Ui.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherPlayer.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeRepositoryLifecycleTest.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AnimeSourcePublicationTest.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/VideoQualityTest.kt');

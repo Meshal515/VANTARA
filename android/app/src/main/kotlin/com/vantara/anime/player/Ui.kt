@@ -61,7 +61,8 @@ object Tone {
             LINE = 0x1FA0BEFF; TEXT = 0xFFF3F6FC.toInt(); TEXT_2 = 0xFFB4BDD0.toInt(); TEXT_3 = 0xFF7D879D.toInt(); TEXT_4 = 0xFF4E576B.toInt()
             ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6
         }
-        // لون المستخدم يغلب لون القسم المصمّم (الأزرار والتحديد فقط؛ الأسطح تبقى)
+        // لون الواجهة (الويب يمرّره دائمًا: المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد) يغلب المصمّم،
+        // والأسطح تأخذ لمسة منه بنسب paletteVars في appearance.js نفسها: المشغّل «نوع من اللون» لا أحمر ثابت
         val rgb = accent?.removePrefix("#")?.toIntOrNull(16) ?: return
         ACCENT = (0xFF shl 24) or rgb
         val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
@@ -69,6 +70,18 @@ object Tone {
         ACCENT_TEXT = (0xFF shl 24) or (lift(r) shl 16) or (lift(g) shl 8) or lift(b)
         ACCENT_SOFT = (0x29 shl 24) or rgb
         ACCENT_LINE = (0x6B shl 24) or rgb
+        BG = mix(rgb, 4, 0x050508); SURFACE = mix(rgb, 6, 0x0C0C11); SURFACE_2 = mix(rgb, 7, 0x131319); SURFACE_3 = mix(rgb, 8, 0x1B1B23)
+        LINE = (0x1F shl 24) or (mix(rgb, 30, 0xFFFFFF) and 0x00FFFFFF)
+        TEXT = 0xFFF3F3F6.toInt(); TEXT_2 = mix(rgb, 6, 0xBAB8C4); TEXT_3 = mix(rgb, 6, 0x87849A); TEXT_4 = mix(rgb, 6, 0x56536A)
+    }
+
+    /** color-mix(in srgb, accent p%, base): نفس خلط الويب، معتمًا. */
+    private fun mix(accent: Int, p: Int, base: Int): Int {
+        fun ch(a: Int, b: Int) = (a * p + b * (100 - p)) / 100
+        val r = ch((accent shr 16) and 0xFF, (base shr 16) and 0xFF)
+        val g = ch((accent shr 8) and 0xFF, (base shr 8) and 0xFF)
+        val bl = ch(accent and 0xFF, base and 0xFF)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
     }
 
     /** اللون نفسه بشفافية أخرى (0..255). */
