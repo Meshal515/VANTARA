@@ -69,7 +69,9 @@ button:disabled:not(.v35 *) { opacity: .5; cursor: default; }
 h1:not(.v35 *), h2:not(.v35 *), h3:not(.v35 *), p:not(.v35 *) { margin: 0; }
 .hidden:not(.v35 *) { display: none !important; }
 ::selection { background: var(--accent); color: var(--on-accent, #fff); }
-::-webkit-scrollbar { width: 0; height: 0; }
+/* Hide the platform's visual scroll indicators, never scrolling itself or its saved positions. */
+html, body, body * { scrollbar-width: none; -ms-overflow-style: none; }
+::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
 /* اللاتيني بخط النظام: خط النسخ العربي يرسم الأرقام واللاتينية ضعيفة */
 .latin:not(.v35 *), .topbar__title:not(.v35 *), .drawer__me-user:not(.v35 *), .profile__user:not(.v35 *), .stats__value:not(.v35 *), .reader__page:not(.v35 *) {

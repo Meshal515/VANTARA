@@ -141,6 +141,46 @@ describe('layer model', () => {
     }
   });
 
+  it('VANTARA logo stays visible at top, but fades out/in only for scrolled Home switches', () => {
+    const host = document.getElementById('home'), v = views();
+    const header = document.createElement('header'); header.className = 'header';
+    const brand = document.createElement('div'); brand.className = 'brand-lockup';
+    header.append(brand); host.prepend(header);
+    const originalScrollTo = globalThis.scrollTo, originalScrollY = globalThis.scrollY;
+    globalThis.scrollTo = ({ top }) => { globalThis.scrollY = top; };
+    globalThis.scrollY = 0;
+    try {
+      const layers = createLayers({ views: v, host, current: 'manga' });
+      layers.go('anime');
+      tick(170);
+      expect(brand.style.opacity).toBe(''); // original name crossfade remains uninterrupted
+      tick(440);
+      globalThis.scrollY = 440;
+      layers.go('cinema');
+      tick(95);
+      expect(Number(brand.style.opacity)).toBeLessThan(1);
+      tick(90);
+      expect(Number(brand.style.opacity)).toBeLessThan(0.3);
+      tick(420);
+      expect(brand.style.opacity).toBe('');
+      expect(layers.section).toBe('cinema');
+      globalThis.scrollY = 350;
+      layers.go('manga');
+      tick(110);
+      const before = Number(brand.style.opacity);
+      layers.go('anime'); // interruption: starts where the previous fade stopped
+      expect(Number(brand.style.opacity)).toBeLessThanOrEqual(before + 0.02);
+      tick(700);
+      expect(brand.style.opacity).toBe('');
+      expect(layers.section).toBe('anime');
+    } finally {
+      if (originalScrollTo === undefined) delete globalThis.scrollTo;
+      else globalThis.scrollTo = originalScrollTo;
+      if (originalScrollY === undefined) delete globalThis.scrollY;
+      else globalThis.scrollY = originalScrollY;
+    }
+  });
+
   it('each section keeps its own reading position across switches', () => {
     const v = views();
     let y = 0;

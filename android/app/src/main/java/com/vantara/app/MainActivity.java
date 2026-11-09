@@ -24,6 +24,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(com.vantara.usage.UsagePlugin.class);
         registerPlugin(com.vantara.verification.VerificationPlugin.class);
         super.onCreate(savedInstanceState);
+        // Android WebView draws an OS scrollbar outside the CSS scrollbar tree.
+        // Keep touch scrolling and restoration enabled; only suppress its indicators.
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setVerticalScrollBarEnabled(false);
+            getBridge().getWebView().setHorizontalScrollBarEnabled(false);
+        }
     }
 
     @Override

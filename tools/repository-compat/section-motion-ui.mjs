@@ -102,10 +102,15 @@ try {
     await page.waitForTimeout(85);
     const during = await page.evaluate(() => ({
       fading: Number.parseFloat(getComputedStyle(document.querySelector('#home > .header .header-start')).opacity),
+      brandOpacity: Number.parseFloat(getComputedStyle(document.querySelector('#brandLockup')).opacity),
       moving: document.querySelector('#home').classList.contains('layering'),
     }));
     if (!during.moving || !(during.fading < 0.99))
       throw new Error('Header actions did not fade out during the section transition: '+JSON.stringify({sourceScroll,during}));
+    if (sourceScroll === 0 && Math.abs(during.brandOpacity - 1) > 0.02)
+      throw new Error('VANTARA brand must stay visible at Home top: '+JSON.stringify({sourceScroll,during}));
+    if (sourceScroll > 8 && !(during.brandOpacity < 0.99))
+      throw new Error('Scrolled section brand must fade during switch: '+JSON.stringify({sourceScroll,during}));
     if (sourceScroll === 440) await page.screenshot({path:out+'/cinema-440-to-manga-midfade.png'});
     await page.waitForFunction(
       () => document.querySelector('.v35')?.dataset.section === 'manga'
@@ -116,9 +121,11 @@ try {
     const after = await page.evaluate(() => ({
       heroTop: document.querySelector('#mangaHome .mg-hero')?.getBoundingClientRect().top,
       headerOpacity: Number.parseFloat(getComputedStyle(document.querySelector('#home > .header .header-start')).opacity),
+      brandOpacity: Number.parseFloat(getComputedStyle(document.querySelector('#brandLockup')).opacity),
+      scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
       section: document.querySelector('.v35')?.dataset.section,
     }));
-    if (after.heroTop == null || Math.abs(after.headerOpacity-1) > 0.02)
+    if (after.heroTop == null || Math.abs(after.headerOpacity-1) > 0.02 || Math.abs(after.brandOpacity-1) > 0.02 || after.scrollbarWidth !== 'none')
       throw new Error('Manga hero missing or header buttons failed to reappear: '+JSON.stringify({sourceScroll,after}));
     if (baselineMangaTop === null) baselineMangaTop = after.heroTop;
     if (Math.abs(after.heroTop-baselineMangaTop) > 8)
@@ -127,6 +134,12 @@ try {
     scrolledProof.push({sourceScroll,headerBottom:before.headerBottom,layerTop:first.layerTop,heroTop:after.heroTop});
   }
   await writeFile(out+'/scrolled-cinema-proof.json',JSON.stringify(scrolledProof,null,2));
+  // The native scrollbar is independent of CSS scrollbar styles and must be
+  // disabled for the actual Android WebView.
+  const activitySource = await readFile(path.join(repo,'android/app/src/main/java/com/vantara/app/MainActivity.java'),'utf8');
+  if (!activitySource.includes('setVerticalScrollBarEnabled(false)')
+      || !activitySource.includes('setHorizontalScrollBarEnabled(false)'))
+    throw new Error('Native Android scroll indicators were not disabled');
   // Real CSS + Web Animations test: wide artwork stays at a constant screen Y
   // from first frame through animation completion (DOM existence alone is not proof).
   const visual=await browser.newPage({viewport:{width:390,height:844}});

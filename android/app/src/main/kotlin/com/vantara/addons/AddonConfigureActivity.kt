@@ -68,6 +68,8 @@ class AddonConfigureActivity : Activity() {
         root.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)))
 
         web = WebView(this).apply {
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             // target=_blank وwindow.open تفتح في نفس النافذة فنلتقط روابطها هنا

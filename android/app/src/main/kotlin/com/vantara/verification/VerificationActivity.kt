@@ -124,6 +124,8 @@ class VerificationActivity : Activity() {
         val current = endpoint ?: return
         try {
             val view = WebView(this)
+            view.isVerticalScrollBarEnabled = false
+            view.isHorizontalScrollBarEnabled = false
             browser = view
             val profile=runtimeProfile
             selectedCookies=if(profile!=null) {

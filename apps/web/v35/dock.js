@@ -276,6 +276,11 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
   let pageViews = null, restorePage = null, queued = null, pageDrag = null;
   const viewOf = (id) => (pageViews ?? views)[id];
   const fade = label ?? null;
+  // The brand stays visible at Home's top, preserving the existing section-name crossfade.
+  // Only a scrolled section fades the whole lockup while the next home enters.
+  const brand = host.querySelector?.(':scope > .header .brand-lockup');
+  let brandScrollFade = false;
+  let brandStartOpacity = 1;
 
   const dimOf = (v) => v.querySelector(':scope > .layer-dim');
 
@@ -296,6 +301,13 @@ export function createLayers({ views, host, current, label, wordOf = (id) => id.
       }
     }
     if (fade) for (const [el, s] of fade.frame(wordOf(words.from), wordOf(words.to), e)) out.set(el, s);
+    if (brandScrollFade && brand) {
+      // Fade out early, remain invisible as the section identity changes, fade in late.
+      const opacity = e < 0.34
+        ? brandStartOpacity * (1 - Math.max(0, e) / 0.34)
+        : e > 0.66 ? Math.min(1, (e - 0.66) / 0.34) : 0;
+      out.set(brand, { opacity: opacity.toFixed(3) });
+    }
     return out;
   };
   const coverAt = (e) => {
@@ -348,6 +360,8 @@ return (header ? r.bottom : r.top) - h.top;
     const scrollY = globalThis.scrollY || 0;
     savedScroll = scrollY;
     scrolls[section] = scrollY;
+    brandScrollFade = scrollY > 8;
+    brandStartOpacity = 1;
     host.style.minHeight = `${globalThis.innerHeight || 0}px`;
     host.style.setProperty('--layer-top', `${top}px`);
     host.classList.add('layering');
@@ -387,6 +401,9 @@ return (header ? r.bottom : r.top) - h.top;
     cover = start = goal = motion = words = null;
     offsets = {};
     fade?.rest(wordOf(shown));
+    if (brand) brand.style.opacity = '';
+    brandScrollFade = false;
+    brandStartOpacity = 1;
     // رجع للقسم نفسه (سحب أُلغي أو اختيار عُكس): يعود القارئ لموضعه
     const back = shown === from ? savedScroll : scrolls[shown] ?? 0;
     if (back > 0) globalThis.scrollTo?.({ top: back, behavior: 'instant' });
@@ -403,6 +420,7 @@ return (header ? r.bottom : r.top) - h.top;
     if (motion) {
       const e = motion.halt();
       cover = coverAt(e);
+      if (brandScrollFade && brand) brandStartOpacity = Number(brand.style.opacity) || 0;
       shownWord = e >= 0.5 ? words.to : words.from;
     } else if (words) {
       shownWord = words.e >= 0.5 ? words.to : words.from;
