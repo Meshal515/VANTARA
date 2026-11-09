@@ -1295,7 +1295,7 @@ html[data-motion='off'] .v35 #detail .mw-scrim { transition: none; }
 
 /* ─── تصفّح: بطاقة فيها مروحة أغلفة في طرفها والاسم في أسفلها ─── */
 .v35 .mg-browse { padding: 34px var(--gutter) 0; }
-.v35 .mg-browse .section-head { margin-bottom: 12px; }
+.v35 .mg-browse .section-head { margin-bottom: 12px; padding-inline: 0; } /* الحاوية تحمل الهامش: لا هامش مضاعف (كان العنوان على 32 والبلاطات على 16) */
 .v35 #mangaHome .shortcuts { margin: 0; border: 0; gap: 10px; }
 .v35 #mangaHome .shortcut,
 .v35 #mangaHome .shortcut:nth-child(odd),

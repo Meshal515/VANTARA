@@ -63,6 +63,17 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
     document.getElementById('t').dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
     expect(animated).toEqual(['c']);
   });
+  it('a screen that moves its own content (insights) opts out: nothing under its tabs is faded out and back', async () => {
+    const { parseHTML } = await import('linkedom');
+    const { document } = parseHTML('<div id="r"><section><nav role="tablist" data-tab-motion="self"><button role="tab" id="t">أ</button></nav><div id="c"></div></section></div>');
+    const root = document.getElementById('r');
+    const animated = [];
+    for (const n of root.querySelectorAll('*')) n.animate = () => { animated.push(n.id || n.tagName); return {}; };
+    vi.stubGlobal('requestAnimationFrame', (fn) => fn());
+    bindTabMotion(root, { doc: doc() });
+    document.getElementById('t').dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+    expect(animated).toEqual([]);
+  });
 });
 
 

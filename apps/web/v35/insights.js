@@ -212,7 +212,8 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
         // المقفل: ساعاته ظاهرة وقفل صغير يقول إن أعماله مقفلة. من لا وقت له هنا يبقى ظاهرًا بـ«—» (لا يخفت
         // ولا يختفي). الصنف «ins-none» لا «empty»: ذاك صنف حالة الفراغ العامة (min-height: 46vh لكل صف)
         li.className = `${p.uid === person ? 'on' : ''}${p.locked ? ' locked' : ''}${p.shown ? '' : ' ins-none'}`;
-        li.querySelector('.ins-h').textContent = p.shown ? duration(p.ms) : '—';
+        // المقفل بلا رقم من الخادم: القفل وحده (قرار المالك)، لا «—»
+        li.querySelector('.ins-h').textContent = p.shown ? duration(p.ms) : p.locked ? '' : '—';
         li.querySelector('.ins-lock').style.display = p.locked ? '' : 'none';
         li.querySelector('button').onclick = () => (p.shown ? pick(p.uid) : toast('لا وقت مسجّل له في هذا القسم', 2500));
         legend.append(li);
@@ -265,6 +266,7 @@ export function createInsights({ sync, host, mountImage, openWork, previewWork =
     head.append(el('small', null, 'مجموع وقت السيرفر'), totalNode);
     const tabs = el('nav', 'ins-tabs');
     tabs.setAttribute('role', 'tablist');
+    tabs.dataset.tabMotion = 'self';
     for (const [k, l] of FILTERS) {
       const b = el('button', k === filter ? 'on' : '', l); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(k === filter));
       b.dataset.k = k;

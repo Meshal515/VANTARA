@@ -101,3 +101,5 @@
 .v35.v35 :is(.ul-grid, .ul-recent-grid, .us-grid, .uv-page .uv-grid) { gap: 14px 10px; }
 .v35.v35 .uv-page .uv-grid { padding-inline: 16px; }
 .v35.v35 .ul-peek, .v35.v35 .uv-rv-grid { gap: 10px; }
+/* مكوّنات الموحد خارج .uv (فلتر النوع في المكتبة الموحدة uv-tabs) كانت بلا --uv-g فتلتصق بالحافة (0) */
+.v35.v35 { --uv-g: var(--gutter, 16px); }

@@ -161,7 +161,9 @@ export function fadeIn(node, { doc = globalThis.document } = {}) {
 export function bindTabMotion(root, { doc = globalThis.document } = {}) {
   root.addEventListener('click', (e) => {
     const tab = e.target?.closest?.('[role="tab"]');
-    if (!tab || tab.closest('.dock, .bottom-nav, .rail, .drawer') || motionReduced(doc)) return;
+    // شاشة تحرّك محتواها في مكانها (الإحصائيات: شرائح تنزلق وصفوف تنتقل) تعلن ذلك بـ data-tab-motion="self":
+    // التلاشي العام هنا كان يُخفي كل ما تحت التبويبات ثم يعيده فوق حركتها (ملاحظة المالك، 9 نوفمبر)
+    if (!tab || tab.closest('.dock, .bottom-nav, .rail, .drawer, [data-tab-motion="self"]') || motionReduced(doc)) return;
     const bar = tab.closest('[role="tablist"]') ?? tab.parentElement;
     const host = bar?.parentElement;
     if (!host) return;
