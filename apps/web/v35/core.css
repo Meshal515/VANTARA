@@ -1091,7 +1091,20 @@ html,
   display: block !important;
 }
 .v35 #home.layering > .header {
-  z-index: 40; /* الترويسة فوق الطبقات المتحركة */
+  z-index: 40; 
+
+.v35 #home > .header .header-start,
+.v35 #home > .header .header-end {
+  transition: opacity 180ms ease;
+}
+
+.v35 #home.layering > .header .header-start,
+.v35 #home.layering > .header .header-end {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 140ms;
+}
+ /* الترويسة فوق الطبقات المتحركة */
 }
 .v35 #home > .home-view.layer-standby {
   position: absolute;
