@@ -354,13 +354,16 @@ if (header && globalThis.getComputedStyle?.(header)?.position === 'fixed') {
 return (header ? r.bottom : r.top) - h.top;
 
   };
-  const enterLayering = () => {
+  const enterLayering = (to) => {
     if (pageViews) return;
     const top = topOf(views[section]);
     const scrollY = globalThis.scrollY || 0;
     savedScroll = scrollY;
     scrolls[section] = scrollY;
-    brandScrollFade = scrollY > 8;
+    // A pair of sections both at the top uses the old, uninterrupted header.
+    // Either end scrolled: fade the header controls and the VANTARA lockup.
+    brandScrollFade = scrollY > 8 || (scrolls[to] ?? 0) > 8;
+    host.classList.toggle('header-scroll-fade', brandScrollFade);
     brandStartOpacity = 1;
     host.style.minHeight = `${globalThis.innerHeight || 0}px`;
     host.style.setProperty('--layer-top', `${top}px`);
@@ -393,7 +396,7 @@ return (header ? r.bottom : r.top) - h.top;
     restorePage?.();
     restorePage = pageViews = null;
     standby = false;
-    host.classList.remove('layering', 'layer-ready');
+    host.classList.remove('layering', 'layer-ready', 'header-scroll-fade');
     host.style.removeProperty('min-height');
     host.style.removeProperty('--layer-top');
     const from = section;
@@ -427,8 +430,13 @@ return (header ? r.bottom : r.top) - h.top;
     }
     motion = null;
     if (!cover) {
-      enterLayering();
+      enterLayering(to);
       cover = { [section]: 1 };
+    } else if (!pageViews) {
+      // Re-evaluate destination on an interrupted/redirected switch.
+      brandScrollFade = savedScroll > 8 || (scrolls[to] ?? 0) > 8;
+      host.classList.toggle('header-scroll-fade', brandScrollFade);
+      if (!brandScrollFade && brand) brand.style.opacity = '';
     }
     words = { from: shownWord, to, e: 0 };
     cover = admit(cover, to);

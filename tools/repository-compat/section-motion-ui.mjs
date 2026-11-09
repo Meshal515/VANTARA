@@ -97,16 +97,17 @@ try {
         hiddenButtons: getComputedStyle(home.querySelector(':scope > .header .header-start')).pointerEvents === 'none',
       };
     });
-    if (!first.layering || Math.abs(first.layerTop - before.headerBottom) > 2 || !first.hiddenButtons)
-      throw new Error('Cinema leaked its scroll offset into manga or did not gate header actions: '+JSON.stringify({sourceScroll,before,first}));
+    if (!first.layering || Math.abs(first.layerTop - before.headerBottom) > 2
+        || first.hiddenButtons !== (sourceScroll > 8))
+      throw new Error('Cinema leaked its scroll offset or wrong top/top header visibility: '+JSON.stringify({sourceScroll,before,first}));
     await page.waitForTimeout(85);
     const during = await page.evaluate(() => ({
       fading: Number.parseFloat(getComputedStyle(document.querySelector('#home > .header .header-start')).opacity),
       brandOpacity: Number.parseFloat(getComputedStyle(document.querySelector('#brandLockup')).opacity),
       moving: document.querySelector('#home').classList.contains('layering'),
     }));
-    if (!during.moving || !(during.fading < 0.99))
-      throw new Error('Header actions did not fade out during the section transition: '+JSON.stringify({sourceScroll,during}));
+    if (!during.moving || (sourceScroll > 8 ? !(during.fading < 0.99) : Math.abs(during.fading - 1) > 0.02))
+      throw new Error('Header actions violated top/top or scrolled transition rules: '+JSON.stringify({sourceScroll,during}));
     if (sourceScroll === 0 && Math.abs(during.brandOpacity - 1) > 0.02)
       throw new Error('VANTARA brand must stay visible at Home top: '+JSON.stringify({sourceScroll,during}));
     if (sourceScroll > 8 && !(during.brandOpacity < 0.99))

@@ -1099,8 +1099,8 @@ html,
   transition: opacity 180ms ease;
 }
 
-.v35 #home.layering > .header .header-start,
-.v35 #home.layering > .header .header-end {
+.v35 #home.layering.header-scroll-fade > .header .header-start,
+.v35 #home.layering.header-scroll-fade > .header .header-end {
   opacity: 0;
   pointer-events: none;
   transition-duration: 140ms;

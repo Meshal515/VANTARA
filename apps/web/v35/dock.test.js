@@ -141,7 +141,7 @@ describe('layer model', () => {
     }
   });
 
-  it('VANTARA logo stays visible at top, but fades out/in only for scrolled Home switches', () => {
+  it('keeps the old header for top/top, but fades when either source or destination is scrolled', () => {
     const host = document.getElementById('home'), v = views();
     const header = document.createElement('header'); header.className = 'header';
     const brand = document.createElement('div'); brand.className = 'brand-lockup';
@@ -151,33 +151,89 @@ describe('layer model', () => {
     globalThis.scrollY = 0;
     try {
       const layers = createLayers({ views: v, host, current: 'manga' });
+      // Both at the top: no fading of the brand or header action buttons.
       layers.go('anime');
+      expect(host.classList.contains('header-scroll-fade')).toBe(false);
       tick(170);
-      expect(brand.style.opacity).toBe(''); // original name crossfade remains uninterrupted
+      expect(brand.style.opacity).toBe('');
       tick(440);
-      globalThis.scrollY = 440;
-      layers.go('cinema');
+      expect(layers.section).toBe('anime');
+
+      // Source scrolled, target at top: hide then show.
+      globalThis.scrollY = 310;
+      layers.go('manga');
+      expect(host.classList.contains('header-scroll-fade')).toBe(true);
       tick(95);
       expect(Number(brand.style.opacity)).toBeLessThan(1);
-      tick(90);
-      expect(Number(brand.style.opacity)).toBeLessThan(0.3);
-      tick(420);
+      tick(440);
+      expect(layers.section).toBe('manga');
       expect(brand.style.opacity).toBe('');
-      expect(layers.section).toBe('cinema');
-      globalThis.scrollY = 350;
-      layers.go('manga');
+
+      // Source at top, destination remembers 310px: still fade.
+      expect(globalThis.scrollY).toBe(0);
+      layers.go('anime');
+      expect(host.classList.contains('header-scroll-fade')).toBe(true);
       tick(110);
-      const before = Number(brand.style.opacity);
-      layers.go('anime'); // interruption: starts where the previous fade stopped
-      expect(Number(brand.style.opacity)).toBeLessThanOrEqual(before + 0.02);
-      tick(700);
-      expect(brand.style.opacity).toBe('');
+      expect(Number(brand.style.opacity)).toBeLessThan(1);
+      tick(440);
       expect(layers.section).toBe('anime');
+      expect(globalThis.scrollY).toBe(310);
+
+      // Scrolled source -> top destination.
+      layers.go('cinema');
+      expect(host.classList.contains('header-scroll-fade')).toBe(true);
+      tick(590);
+      expect(layers.section).toBe('cinema');
+      expect(globalThis.scrollY).toBe(0);
+
+      // Both at the top again: old smooth section-label transition without header blink.
+      layers.go('manga');
+      expect(host.classList.contains('header-scroll-fade')).toBe(false);
+      tick(570);
+      expect(layers.section).toBe('manga');
+
+      // Scrolled destination and scrolled source together.
+      layers.go('cinema');tick(570);
+      globalThis.scrollY = 250;
+      layers.go('anime');
+      expect(host.classList.contains('header-scroll-fade')).toBe(true);
+      tick(600);
+      expect(layers.section).toBe('anime');
+      expect(globalThis.scrollY).toBe(310);
+      expect(host.classList.contains('header-scroll-fade')).toBe(false);
+      expect(brand.style.opacity).toBe('');
     } finally {
       if (originalScrollTo === undefined) delete globalThis.scrollTo;
       else globalThis.scrollTo = originalScrollTo;
       if (originalScrollY === undefined) delete globalThis.scrollY;
       else globalThis.scrollY = originalScrollY;
+    }
+  });
+
+  it('rechecks the fade condition when a switch is redirected before settling', () => {
+    const host=document.getElementById('home'),v=views();
+    const header=document.createElement('header');header.className='header';
+    const brand=document.createElement('div');brand.className='brand-lockup';
+    header.append(brand);host.prepend(header);
+    const originalScroll=globalThis.scrollTo,originalY=globalThis.scrollY;
+    globalThis.scrollTo=({top})=>{globalThis.scrollY=top;};
+    globalThis.scrollY=0;
+    try {
+      const layers=createLayers({views:v,host,current:'manga'});
+      globalThis.scrollY=250;
+      layers.go('anime');tick(570); // store manga 250, arrive anime at top
+      layers.go('manga');tick(65); // source top -> scrolled manga: fade
+      expect(host.classList.contains('header-scroll-fade')).toBe(true);
+      layers.go('cinema'); // source top -> unscrolled cinema: old header again
+      expect(host.classList.contains('header-scroll-fade')).toBe(false);
+      tick(650);
+      expect(brand.style.opacity).toBe('');
+      expect(layers.section).toBe('cinema');
+    } finally {
+      if(originalScroll===undefined) delete globalThis.scrollTo;
+      else globalThis.scrollTo=originalScroll;
+      if(originalY===undefined) delete globalThis.scrollY;
+      else globalThis.scrollY=originalY;
     }
   });
 
