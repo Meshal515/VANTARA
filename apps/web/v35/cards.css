@@ -103,3 +103,7 @@
 .v35.v35 .ul-peek, .v35.v35 .uv-rv-grid { gap: 10px; }
 /* مكوّنات الموحد خارج .uv (فلتر النوع في المكتبة الموحدة uv-tabs) كانت بلا --uv-g فتلتصق بالحافة (0) */
 .v35.v35 { --uv-g: var(--gutter, 16px); }
+/* «الرائج الآن» في اكتشف: --us-g معرّف في صفحة البحث فقط، فكانت القائمة ملتصقة بالحافة (0). هامش 16 وصفوف تتنفس */
+.v35.v35 { --us-g: var(--gutter, 16px); }
+.v35.v35 .ud .us-rank-row { padding: 16px 0; gap: 16px; }
+.v35.v35 .ud .us-rank li + li .us-rank-row { border-top-color: rgba(255, 255, 255, 0.045); }
