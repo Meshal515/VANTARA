@@ -15,6 +15,10 @@ export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume'
 /** أي قيمة غير الأربعة (ومنها «core» قبل أن تعرف الإعدادات أنماط المانجا) = «الصفحة». */
 export const mangaLook = (id) => (MANGA_LOOKS.includes(id) ? id : 'page');
 
+/** Distinguish a genuine wide banner from a portrait/square metadata image. */
+export const isWideMangaArtwork = (width, height) =>
+  Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 && width / height >= 1.2;
+
 /**
  * وضع «علّم فصول»: ما يُعلَّم لكل فعل. الصفوف من أي ترتيب؛ المرجع رقم الفصل.
  *   - selected: المحدّد كما هو (فصل أو مجموعة).
