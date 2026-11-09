@@ -10,7 +10,7 @@
 import { trimArtCache } from '../lib/together/art.js';
 
 /** كاشات تُعاد من الشبكة بلا فقد: تُخلى حين يمتلئ التخزين قبل أن يفشل حفظ إعداد. */
-const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1'];
+const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1', 'vantara.unified.genre-art.v1'];
 
 const KEY = 'vantara.appearance.v1';
 // Keep unsaved preferences usable during the session if persistent storage refuses a write.

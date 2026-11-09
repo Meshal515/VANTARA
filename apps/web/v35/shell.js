@@ -3776,9 +3776,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   // صورة عريضة لكل تصنيف من نوعه (كما في «حسب النوع» بالسينما)، مرة لكل تصنيف، وبلا تكرار صورة بين بلاطتين
   const genreArtCache = new Map();
-  const genreArtUsed = new Set();
+  /**
+   * صورة التصنيف تُثبَّت أول مرة تُعرف، وتُحفظ على الجهاز، ولا تتغيّر بعدها (خلل «تتبدّل وتجي»: كان كل رسم
+   * يستبعد ما اختاره الرسم السابق عبر genreArtUsed فتأخذ البلاطة صورة أخرى أو لا شيء). تصنيف بلا صورة تُجلب له مرة.
+   */
+  const GENRE_PIN_KEY = 'vantara.unified.genre-art.v1';
+  const genrePins = (() => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(GENRE_PIN_KEY) ?? '{}') ?? {})); } catch { return new Map(); } })();
+  const genreArtUsed = new Set(genrePins.values());
+  const pinGenre = (key, src) => {
+    if (genrePins.has(key)) return genrePins.get(key);
+    if (!src) return null;
+    genrePins.set(key, src);
+    genreArtUsed.add(src);
+    try { localStorage.setItem(GENRE_PIN_KEY, JSON.stringify(Object.fromEntries(genrePins))); } catch { /* تفضيل قابل للتوليد */ }
+    return src;
+  };
   function genreArt(type, en) {
     const key = `${type}:${en}`;
+    if (genrePins.has(key)) return Promise.resolve(genrePins.get(key));
     if (!genreArtCache.has(key)) {
       const pick = (list, field) => {
         for (const x of list ?? []) { const src = x?.[field]; if (src && !genreArtUsed.has(src)) { genreArtUsed.add(src); return src; } }
@@ -3807,7 +3822,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
         const media = (await res.json())?.data?.Page?.media ?? [];
         return pick(media.map((m) => ({ src: m.bannerImage })), 'src') ?? pick(media.map((m) => ({ src: m.coverImage?.large })), 'src');
-      })().catch(() => null));
+      })().then((src) => pinGenre(key, src), () => null));
     }
     return genreArtCache.get(key);
   }
@@ -3816,7 +3831,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     genreArt,
     mount: (node) => root.append(node),
     genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
-      .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genreCover(type, en, used) }))(new Set())),
+      .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genrePins.get(`${type}:${en}`) ?? pinGenre(`${type}:${en}`, genreCover(type, en, used)) }))(new Set())),
     results: async (type, genre) => {
       if (type === 'anime') {
         const { searchAnime } = await import('../lib/anime-meta.js');

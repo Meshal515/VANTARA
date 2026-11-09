@@ -82,3 +82,6 @@
 @media (min-width:700px){.v35 .ul-peek{grid-template-columns:repeat(4,minmax(0,150px));gap:16px}}
 .v35 .ul-imgbox{position:absolute;inset:0;display:block}
 .v35 .ul-imgbox > img{width:100%;height:100%;object-fit:cover;display:block}
+/* صورة محمّل القشرة (أغلفة المانجا) بلا صنف «in»: قاعدة التلاشي أعلاه كانت تبقيها شفافة 0 فيبدو الغلاف فارغًا
+ * (الصورة محمّلة لكنها لا تُرى). المحمّل يظهرها بنفسه حين تكتمل */
+.v35 .ul .ul-imgbox img { opacity: 1; transition: none; }

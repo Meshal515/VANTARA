@@ -1502,15 +1502,13 @@ export function createCinema(deps) {
   async function paintSources(m, season) {
     const host = q('cinemaSources');
     if (!host) return;
-    if (!engine.available()) {
-      host.replaceChildren(el('span', null, 'التشغيل من المصادر العربية داخل تطبيق أندرويد'));
-      host.dataset.state = 'web';
-      return;
-    }
-    // البحث بلا سطر يظهر ويختفي: هيكل بمقاس السطر النهائي في مكانه المحجوز (cinema.css)
+    // قرار المالك (9 نوفمبر): صفحة العمل لا تعرض حالة المصادر إطلاقًا (لا هيكل تحميل، ولا «متاح عبر»، ولا
+    // ملاحظة الويب) كما في الأنمي؛ حالتها في ورقة السيرفرات عند التشغيل. السطر فارغ فيختفي (:empty)،
+    // ولا يظهر إلا ما يُختار فعلًا: النتائج القريبة وفحص المطوّر
+    host.replaceChildren();
+    if (!engine.available()) { host.dataset.state = 'web'; return; }
     host.dataset.state = 'loading';
     host.setAttribute('aria-busy', 'true');
-    host.replaceChildren(el('span', 'cn-sources-skel'));
     const found = await locate(m, season);
     host.removeAttribute('aria-busy');
     if (q('cinemaSources') !== host || state.detail?.id !== m.id || (m.type === 'series' && state.season !== season)) return;
@@ -1541,25 +1539,6 @@ export function createCinema(deps) {
       return;
     }
     host.dataset.state = 'found';
-    // السطر نفسه يكبر مع كل مصدر يرد، ويقول «جاهز للتشغيل» لحظة يجهز أول سيرفر
-    const line = el('span');
-    host.replaceChildren(el('i', 'cn-dot'), line);
-    const h = state.works.get(playKey(m, season));
-    const paint = () => {
-      if (!line.isConnected) return false;
-      const names = [...new Set(found.copies.map((c) => SOURCE_NAMES[c.sourceId] ?? c.sourceId))];
-      const w = state.warm?.key === playKey(m, season) ? state.warm : null;
-      const ready = w ? w.routes.filter((r) => r.state === 'READY' && r.probed === true).length : 0;
-      line.textContent = `مترجم · متاح عبر ${names.join('، ')}${ready ? ` · جاهز للتشغيل (${ready})` : ''}`;
-      return true;
-    };
-    paint();
-    const offCopies = h?.onCopies?.(() => paint() || offCopies?.());
-    const w = state.warm;
-    if (w?.key === playKey(m, season)) {
-      const listener = () => paint() || w.listeners.delete(listener);
-      w.listeners.add(listener);
-    }
   }
 
   /** تجهيز ما ستشاهده من هذه الصفحة: الفيلم، أو حلقة المتابعة في موسمها الظاهر. */

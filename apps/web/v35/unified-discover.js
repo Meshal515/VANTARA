@@ -22,7 +22,8 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   try { const v = storage?.getItem(KEY); if (DISCOVER_TYPES.some(([k]) => k === v)) type = v; } catch { /* */ }
   let host = null, overlay = null, token = 0;
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
-  const img = (src, cls) => { const i = el('img', cls); i.alt = ''; i.loading = 'lazy'; i.decoding = 'async'; i.onload = () => i.classList.add('in'); if (src) i.src = src; return i; };
+  // صورة في ذاكرة المتصفح تظهر فورًا (لا تتلاشى من جديد مع كل رسم)، والفاشلة تُزال فلا يبقى إطار مكسور
+  const img = (src, cls) => { const i = el('img', cls); i.alt = ''; i.loading = 'lazy'; i.decoding = 'async'; i.onload = () => i.classList.add('in'); i.onerror = () => i.remove(); if (src) i.src = src; if (i.complete && i.naturalWidth) i.classList.add('in'); return i; };
 
   function poster(item, t) {
     const c = card(item, t);
