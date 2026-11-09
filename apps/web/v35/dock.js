@@ -596,7 +596,17 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const squares = [...sw.querySelectorAll('.dock-sq')];
   const navs = [...bar.querySelectorAll('.dock-cap--nav .nav')];
   const capOf = (page) => caps.find((c) => c.querySelector(`.nav[data-page="${page}"]`)) ?? null;
-  const indOf = (cap) => cap?.querySelector('.cap-ind') ?? null;
+  // توحيد المحتوى: الشريط سطح واحد متصل، ومؤشر واحد على مستواه ينزلق بين الوجهات الأربع
+  // (بدل «انكماش هنا وكبر هناك» الذي صُمّم للكبسولات المنفصلة)
+  let barInd = bar.querySelector(':scope > .dock-ind');
+  if (!barInd && bar.ownerDocument) {
+    barInd = bar.ownerDocument.createElement('span');
+    barInd.className = 'dock-ind';
+    barInd.setAttribute('aria-hidden', 'true');
+    bar.prepend(barInd);
+  }
+  const unified = () => Boolean(bar.closest?.('[data-content="unified"]'));
+  const indOf = (cap) => (cap === bar ? barInd : cap?.querySelector('.cap-ind') ?? null);
   let open = false, section = current, dragged = false, activePage = null;
   const indState = new Map(); // cap → { x, anims, path, start }
 
@@ -635,6 +645,16 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     const r = nav.getBoundingClientRect();
     return r.left - c.left - (cap.clientLeft || 0) + r.width / 2;
   };
+  /** مركز الوجهة على مستوى الشريط كله (للمؤشر الواحد في توحيد المحتوى). */
+  const barCenter = (nav) => {
+    const b = bar.getBoundingClientRect();
+    const r = nav.getBoundingClientRect();
+    return r.left - b.left + r.width / 2 + inkOffset(nav)[0];
+  };
+  /** مجال المؤشر: الشريط كله في التوحيد، وإلا كبسولة الوجهة. */
+  const zoneOf = (page) => (unified() ? bar : capOf(page));
+  const centerIn = (zone, nav) => (zone === bar ? barCenter(nav) : slotCenter(nav));
+  const slotsIn = (zone) => (zone === bar ? navs : [...zone.querySelectorAll('.nav')]);
   const IND = 40;
   const indTransform = (x, v = 0, s = 1, maxSx = Infinity) => {
     let { sx, sy } = stretchOf(v);
@@ -709,6 +729,32 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   };
   const moveIndicator = (page) => {
     const nav = navs.find((n) => n.dataset.page === page);
+    if (unified() && barInd) {
+      activePage = nav ? page : null;
+      for (const c of caps) {
+        haltInd(c);
+        indOf(c).style.opacity = '0';
+        stateOf(c).shown = false;
+      }
+      if (!nav) {
+        haltInd(bar);
+        barInd.style.opacity = '0';
+        stateOf(bar).shown = false;
+        return;
+      }
+      barInd.style.top = `calc(50% - 20px + ${inkOffset(nav)[1].toFixed(2)}px)`;
+      const x1 = barCenter(nav);
+      // أول ظهور يوضع بلا حركة؛ بعده انزلاق بنابض من الموضع والسرعة الحاليين، مهما بعدت الوجهة
+      if (!stateOf(bar).shown) showInd(bar, x1);
+      else slide(bar, x1, pendingV);
+      pendingV = 0;
+      return;
+    }
+    if (barInd && stateOf(bar).shown) {
+      haltInd(bar);
+      barInd.style.opacity = '0';
+      stateOf(bar).shown = false;
+    }
     const toCap = nav ? capOf(page) : null;
     const fromCap = activePage ? capOf(activePage) : null;
     activePage = nav ? page : null;
@@ -837,8 +883,11 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   let scrub = null, scrubbed = false;
   for (const cap of caps) {
     cap.addEventListener('pointerdown', (e) => {
-      if (open || e.button > 0 || !activePage || capOf(activePage) !== cap) return;
-      scrub = { cap, id: e.pointerId, x: e.clientX, on: false, track: [] };
+      if (open || e.button > 0 || !activePage) return;
+      // في التوحيد السحب على الشريط كله؛ وإلا داخل كبسولة الوجهة الحالية وحدها
+      const zone = zoneOf(activePage);
+      if (zone !== bar && zone !== cap) return;
+      scrub = { cap: zone, id: e.pointerId, x: e.clientX, on: false, track: [] };
       scrubbed = false;
     });
   }
@@ -852,8 +901,9 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       bar.classList.add('scrubbing');
     }
     const cap = scrub.cap;
-    const slots = [...cap.querySelectorAll('.nav')];
-    const centers = slots.map(slotCenter);
+    const slots = slotsIn(cap);
+    const center = (n) => centerIn(cap, n);
+    const centers = slots.map(center);
     const lo = Math.min(...centers), hi = Math.max(...centers);
     const capW = cap.getBoundingClientRect().width;
     const edge = IND / 2 + 3; // الدائرة كاملة داخل كبسولتها دائمًا
@@ -869,7 +919,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     // التمطّط يصغر قرب الحافة كي لا تتجاوزها الدائرة
     const room = (2 * Math.min(x, capW - x) - 6) / IND;
     indOf(cap).style.transform = indTransform(x, scrub.v, 1, room);
-    const near = slots.reduce((a, b) => (Math.abs(slotCenter(b) - x) < Math.abs(slotCenter(a) - x) ? b : a));
+    const near = slots.reduce((a, b) => (Math.abs(center(b) - x) < Math.abs(center(a) - x) ? b : a));
     for (const n of slots) n.classList.toggle('near', n === near);
   });
   const endScrub = (e) => {
@@ -878,21 +928,22 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     scrub = null;
     if (!s.on) return;
     bar.classList.remove('scrubbing');
-    const slots = [...s.cap.querySelectorAll('.nav')];
+    const slots = slotsIn(s.cap);
+    const center = (n) => centerIn(s.cap, n);
     for (const n of slots) n.classList.remove('near');
     if (e.type === 'pointercancel') {
       // إيماءة قطعها النظام: لا تنقّل، والدائرة ترجع لمكانها، ولا تُبتلع اللمسة التالية
       scrubbed = false;
       const nav = navs.find((n) => n.dataset.page === activePage);
-      if (nav) slide(s.cap, slotCenter(nav));
+      if (nav) slide(s.cap, center(nav));
       return;
     }
     const v = s.v ?? 0;
     const x = (stateOf(s.cap).x ?? 0) + (Math.abs(v) > 1.1 ? v * 40 : 0);
-    const target = slots.reduce((a, b) => (Math.abs(slotCenter(b) - x) < Math.abs(slotCenter(a) - x) ? b : a));
+    const target = slots.reduce((a, b) => (Math.abs(center(b) - x) < Math.abs(center(a) - x) ? b : a));
     pendingV = Math.max(-3, Math.min(3, v));
     haptic();
-    if (target.dataset.page === activePage) slide(s.cap, slotCenter(target), pendingV), (pendingV = 0);
+    if (target.dataset.page === activePage) slide(s.cap, center(target), pendingV), (pendingV = 0);
     else onNavigate?.(target.dataset.page);
   };
   bar.addEventListener('pointerup', endScrub);
@@ -950,9 +1001,10 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   globalThis.addEventListener?.('resize', () => {
     if (activePage) {
       const nav = navs.find((n) => n.dataset.page === activePage);
-      const cap = capOf(activePage);
-      haltInd(cap);
-      showInd(cap, slotCenter(nav));
+      const zone = zoneOf(activePage);
+      if (!nav || !zone) return;
+      haltInd(zone);
+      showInd(zone, centerIn(zone, nav));
     }
   });
   mark();
@@ -983,8 +1035,8 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     },
     repaint() {
       if (!activePage) return;
-      const cap = capOf(activePage);
-      if (!stateOf(cap).shown) {
+      const cap = zoneOf(activePage);
+      if (cap && !stateOf(cap).shown) {
         const page = activePage;
         activePage = null;
         moveIndicator(page);

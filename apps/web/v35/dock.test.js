@@ -384,6 +384,32 @@ describe('split floating navigation', () => {
     expect(xOfInd(indR)).toBeCloseTo(28);
   });
 
+  it('توحيد المحتوى: شريط واحد ومؤشر واحد ينزلق مباشرة من اكتشف إلى الأصدقاء، بلا اختفاء وظهور', () => {
+    const { dock, calls } = mount();
+    const bar = document.querySelector('#bar');
+    const wrap = document.createElement('div');
+    wrap.dataset.content = 'unified';
+    document.body.append(wrap);
+    wrap.append(bar);
+    const ind = bar.querySelector(':scope > .dock-ind');
+    expect(ind).toBeTruthy();
+    const barCalls = [];
+    ind.animate = (keys, opts) => (barCalls.push({ keys, opts }), { cancel() {} });
+    dock.activate('discover');
+    expect(xOfInd(ind)).toBeCloseTo(252); // مركز اكتشف على مستوى الشريط كله
+    expect(ind.style.opacity).toBe('1');
+    calls.length = 0;
+    dock.activate('majlis');
+    expect(calls).toHaveLength(0); // مؤشرات الكبسولات لا تتحرك
+    expect(barCalls).toHaveLength(1);
+    const xs = barCalls[0].keys.map((k) => Number(/translate3d\((-?[\d.]+)px/.exec(k.transform)[1]) + 20);
+    expect(xs[0]).toBeCloseTo(252);
+    expect(xs.at(-1)).toBeCloseTo(28);
+    expect(barCalls[0].keys.every((k) => k.opacity == null)).toBe(true); // انزلاق لا تلاشٍ
+    for (const c of document.querySelectorAll('.cap-ind')) expect(c.style.opacity).toBe('0');
+    expect(xOfInd(ind)).toBeCloseTo(28);
+  });
+
   it('between capsules the old circle shrinks in place and the new one grows in place, overlapping in time', () => {
     const { dock, calls, indR, indL } = mount();
     dock.activate('discover');
