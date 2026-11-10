@@ -101,13 +101,30 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   page.scrollTop = previousScroll + offset;
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
-  // When returning to a saved unified modal, keep this work opaque until
-  // the modal has completely faded back in; never reveal Home between them.
-  const frames = hold ? [{opacity:1},{opacity:1}] : depth ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }] : [{opacity:visual?.opacity ?? 1},{opacity:0}];
-  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
+  const cleanup = () => {
     unpin(); page.classList.remove('page-out','page-depth'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
-  });
+  };
+  // A fixed-duration "hold" used to expire before the modal fade finished.
+  // Hold the old page until the actual handoff completion; the caller releases
+  // it on animation.finish, cancellation, reduced-motion or a newer navigation.
+  if (hold) {
+    let done = false;
+    const release = () => {
+      if (done) return;
+      done = true;
+      running.delete(release);
+      if (active.get(page) === release) active.delete(page);
+      cleanup();
+    };
+    running.add(release);
+    active.set(page, release);
+    return release;
+  }
+  const frames = depth
+    ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }]
+    : [{opacity:visual?.opacity ?? 1},{opacity:0}];
+  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
 }
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
