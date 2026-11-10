@@ -139,7 +139,9 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
         const b = el('button', 'us-rank-row'); b.type = 'button';
         const n = el('span', 'us-rank-n', String(i + 1));
         const art = el('span', 'us-rank-art');
-        if (c.cover) { const im = el('img', 'us-img'); im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.onload = () => im.classList.add('in'); im.src = c.cover; art.append(im); }
+        const missing = () => { const placeholder = el('span', 'us-art-missing'); placeholder.setAttribute('aria-hidden', 'true'); placeholder.innerHTML = glyph('image', { size: 20 }); art.replaceChildren(placeholder); };
+        if (c.cover) { const im = el('img', 'us-img'); im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.onload = () => im.classList.add('in'); im.onerror = missing; im.src = c.cover; art.append(im); }
+        else missing();
         const tx = el('span', 'us-rank-tx');
         tx.append(txt('b', 'us-t1', c.title || 'عمل'), txt('span', 'us-t2', [group === 'cinema' ? null : KIND[group], c.sub].filter(Boolean).join(' · ')));
         b.append(n, art, tx);

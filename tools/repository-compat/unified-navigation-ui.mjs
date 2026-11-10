@@ -10,7 +10,7 @@ const {chromium}=await import(path.isAbsolute(modulePath)?pathToFileURL(modulePa
 const repo=process.argv[2]||process.cwd();
 const phase=process.env.WORK_MOTION_PHASE||'after';
 const root=path.join(repo,'apps/web'),out=process.env.VANTARA_UI_EVIDENCE||'/workspace/evidence/work-motion-20261108/'+phase;await mkdir(out,{recursive:true});
-const css=['styles.css','v35/unified-view.css','v35/core.css','v35.css','v35/reader.css','v35/majlis.css','v35/social.css','v35/profile.css','v35/anime.css','v35/cinema.css','v35/server-sheet.css','v35/manga.css','v35/rafiq.css','v35/wide.css','v35/addons.css','v35/addons-v7.css','v35/together.css'];
+const css=['styles.css','v35/unified-view.css','v35/unified-search.css','v35/core.css','v35.css','v35/reader.css','v35/majlis.css','v35/social.css','v35/profile.css','v35/anime.css','v35/cinema.css','v35/server-sheet.css','v35/manga.css','v35/rafiq.css','v35/wide.css','v35/addons.css','v35/addons-v7.css','v35/together.css'];
 const server=createServer(async(req,res)=>{try{let p=new URL(req.url,'http://local').pathname;if(p==='/qa-poster'){try{const b=await readFile(process.env.VANTARA_WORK_MOTION_POSTER||'/workspace/evidence/visual-ui-20261103/poster.img');res.setHeader('Content-Type','image/jpeg');return res.end(b)}catch{res.setHeader('Content-Type','image/svg+xml');return res.end('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><rect width="300" height="450" fill="#28354a"/><circle cx="150" cy="160" r="70" fill="#bdc9dd"/></svg>')}}if(p==='/__ui'){res.setHeader('Content-Type','text/html');return res.end('<html dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+css.map(p=>`<link rel="stylesheet" href="/${p}">`).join('')+'<body></body></html>')}res.setHeader('Content-Type',p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'application/octet-stream');const file=p.slice(1);if(phase==='before'&&baselineFiles.has(file)){if(!fileCache.has(file))fileCache.set(file,execFileSync('git',['show','e73cc6be:apps/web/'+file],{cwd:repo}));return res.end(fileCache.get(file))}res.end(await readFile(root+p));}catch{res.statusCode=404;res.end()}}).listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
 const browser=await chromium.launch({executablePath:process.env.VANTARA_CHROMIUM||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
 const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
@@ -140,6 +140,19 @@ try {
  await page.waitForTimeout(300);
  if(actionArtworkRequests<2) throw Error('Failed genre artwork was never retried: '+actionArtworkRequests);
  await page.waitForFunction(()=>{const image=document.querySelector('.ud-genres .ud-genre:first-child img');return image?.complete && image.naturalWidth>0;},null,{timeout:3000}).catch(async error=>{throw Error('Artwork not visible: '+JSON.stringify(await page.locator('.ud-genres .ud-genre').first().evaluate(n=>n.outerHTML))+' '+error.message);});
+ await page.evaluate(async()=>{
+   const {createUnifiedSearch}=await import('/v35/unified-search.js');const {glyph}=await import('/v35/icons.js');
+   const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+   window.__missingOpened=false;
+   window.__searchFixture=createUnifiedSearch({el,glyph,engines:{},open:()=>{window.__missingOpened=true;},card:()=>({title:'Missing cover',cover:'/missing-image.jpg'}),mount:n=>document.body.append(n),trending:()=>[{item:{id:1},group:'anime'}]});
+   window.__searchFixture.open();
+ });
+ await page.locator('.us-page .us-art-missing svg').waitFor();
+ const placeholder=await page.locator('.us-page .us-art-missing').boundingBox();
+ if(!placeholder || placeholder.width<=0 || placeholder.height<=0) throw Error('Missing cover placeholder has no visible size');
+ await page.locator('.us-page .us-rank-row').click();
+ if(!await page.evaluate(()=>window.__missingOpened)) throw Error('Missing-cover row did not open');
+ await page.evaluate(()=>window.__searchFixture.close());
  if (errors.length) throw Error('JavaScript errors: '+JSON.stringify(errors));
  console.log('PASS: 9 recent-card back cycles; invalid work rejected and valid work restores origin');
 } finally {await browser.close();server.close();}

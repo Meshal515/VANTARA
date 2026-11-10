@@ -47,6 +47,7 @@
 .us-rank-row{display:flex;align-items:center;gap:14px;width:100%;padding:8px 0;text-align:start}
 .us-rank-n{flex:none;width:22px;font-size:20px;font-weight:800;color:var(--accent,#8f5cff);font-variant-numeric:tabular-nums;text-align:center}
 .us-rank-art{flex:none;width:52px;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:#16141b}
+.us-art-missing{display:grid;place-items:center;width:100%;height:100%;color:var(--text-4,#777283)}
 .us-rank-tx{flex:1;min-width:0;display:grid;gap:3px}
 .us-rank-tx .us-t1{margin:0;font-size:14.5px;height:20px;line-height:20px}
 .us-rank-row:active{opacity:.6}
