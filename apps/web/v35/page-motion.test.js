@@ -148,6 +148,7 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     const work=page({top:0,left:0,width:390,height:2500});
     const release=pageOut(work,{depth:true,hold:true,doc:doc()});
     expect(work.classes.has('page-out')).toBe(true);
+    expect(work.classes.has('page-held')).toBe(true);
     expect(work.animate).not.toHaveBeenCalled();
     const origin=page();
     const onComplete=vi.fn(() => release());
@@ -162,6 +163,7 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     expect(origin.style.opacity).toBe('');
     expect(origin.style.transition).toBe('');
     expect(work.classes.has('page-out')).toBe(false);
+    expect(work.classes.has('page-held')).toBe(false);
     release(); // idempotent after interrupted/finished transitions
   });
   it('keeps the outgoing work visible beyond 400ms if the modal completion is delayed', () => {
@@ -180,7 +182,8 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     const {readFileSync}=await import('node:fs');
     const css=readFileSync(new URL('./core.css', import.meta.url), 'utf8');
     expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*display:\s*block/);
-    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*z-index:\s*70/);
+    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*z-index:\s*5/);
+    expect(css).toMatch(/\.v35 \.page\.page-out\.page-held\s*\{[^}]*background:\s*var\(--bg/);
   });
   it('outgoing modal uses the existing fade and interrupts cleanly', () => {
     const modal=page();
