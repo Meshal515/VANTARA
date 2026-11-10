@@ -362,6 +362,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function seriesItem(u) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
+    a.dataset.updateKey = `series:${u.x.id}`;
     const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
     const line = el('span', 'uv-t2');
     line.append(el('em', null, `م${u.season} ح${u.episode}`), document.createTextNode(` · ${ago(u.released, now())}`));
@@ -371,6 +372,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function movieItem(u) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
+    a.dataset.updateKey = `movie:${u.x.id}`;
     const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
     const line = el('span', 'uv-t2');
     // An availability event is NOT proof that a film premiered today.
@@ -381,6 +383,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function updItem(w) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
+    a.dataset.updateKey = `manga:${w.raw?.id ?? w.title}`;
     const art = fill(el('span', 'uv-art'), w, 'manga', w.cover, w.title);
     const ch = w._latestChapter?.chapterNumber;
     const line = el('span', 'uv-t2');
@@ -455,24 +458,35 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     b.onclick = go;
     return b;
   }
+  const previewMix = (...lists) => {
+    const out = [];
+    for (let i = 0; i < 3; i++) for (const [list, kind] of lists) if (list?.[i]) out.push([list[i], kind]);
+    return out;
+  };
+  function browseUpdatesDoor() {
+    const manga = data.mangaUpdates?.() ?? [];
+    const series = data.seriesUpdates?.() ?? [];
+    const movies = data.movieUpdates?.() ?? [];
+    const count = manga.length + series.length + movies.length;
+    const door = browseDoor('آخر التحديثات', count ? `${count} تحديثًا` : 'فصول وحلقات وأفلام',
+      previewMix([manga, 'manga'], [series.map((u) => u.x), 'cinema'], [movies.map((u) => u.x), 'cinema']),
+      () => openSub('updates'));
+    door.dataset.uvDoor = 'updates';
+    return door;
+  }
   function browseSection() {
     const a = data.animeHome?.() ?? null;
     const c = data.cinema?.() ?? null;
     const manga = data.mangaPopular?.() ?? [];
-    const mix = (...lists) => { const out = []; for (let i = 0; i < 3; i++) for (const [l, kind] of lists) if (l?.[i]) out.push([l[i], kind]); return out; };
-    const series = data.seriesUpdates?.() ?? [];
-    const recent = data.mangaUpdates?.() ?? [];
-    const movies = data.movieUpdates?.() ?? [];
     const genres = new Set([...(a?.trending ?? []), ...(c?.movie ?? []), ...(c?.series ?? [])].flatMap((x) => x?.genres ?? []));
     const s = el('section', 'uv-browse');
     s.append(head('تصفّح'));
     const grid = el('nav', 'uv-doors'); grid.setAttribute('aria-label', 'تصفّح كل الأعمال');
-    const updCount = recent.length + series.length + movies.length;
     grid.append(
-      browseDoor('آخر التحديثات', updCount ? `${updCount} تحديثًا` : 'فصول وحلقات وأفلام', mix([recent, 'manga'], [series.map((u) => u.x ?? u.item ?? u), 'cinema'], [movies.map((u) => u.x), 'cinema']), () => openSub('updates')),
-      browseDoor('الرائج', 'الأنواع الثلاثة', mix([a?.trending, 'anime'], [manga, 'manga'], [c?.series, 'cinema']), () => openSub('trending')),
-      browseDoor('التصنيفات', 'لكل نوع', mix([c?.movie, 'cinema'], [a?.trending?.slice(3), 'anime'], [manga.slice(3), 'manga']), () => (open.categories ? open.categories() : open.browse('anime'))),
-      browseDoor('كل الأعمال', 'الأشهر', mix([c?.series?.slice(3), 'cinema'], [manga.slice(6), 'manga'], [a?.trending?.slice(6), 'anime']), () => (open.discover ? open.discover() : open.browse('anime'))),
+      browseUpdatesDoor(),
+      browseDoor('الرائج', 'الأنواع الثلاثة', previewMix([a?.trending, 'anime'], [manga, 'manga'], [c?.series, 'cinema']), () => openSub('trending')),
+      browseDoor('التصنيفات', 'لكل نوع', previewMix([c?.movie, 'cinema'], [a?.trending?.slice(3), 'anime'], [manga.slice(3), 'manga']), () => (open.categories ? open.categories() : open.browse('anime'))),
+      browseDoor('كل الأعمال', 'الأشهر', previewMix([c?.series?.slice(3), 'cinema'], [manga.slice(6), 'manga'], [a?.trending?.slice(6), 'anime']), () => (open.discover ? open.discover() : open.browse('anime'))),
     );
     s.append(grid);
     return s;
@@ -480,21 +494,30 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
 
   /* ───── الرئيسية ───── */
   // البنر و«تصفّح» يُبنيان مع الصفحة؛ تغيير الفلتر يعيد ما تحت الفلتر وحده (لا يهدم البنر ولا الشريط)
+  function renderUpdatesSection() {
+    if (st.filter === 'anime') return null;
+    const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'cinema' : st.upd;
+    const list = updates(allow);
+    const s = el('section', 'uv-sec');
+    s.dataset.uvRole = 'updates';
+    s.append(head('آخر التحديثات', () => openSub('updates')));
+    if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; repaintBody(); }));
+    if (!list.length) s.append(el('p', 'uv-none', 'لا تحديثات موثّقة حاليًا'));
+    else {
+      const r = rail();
+      list.slice(0, 12).forEach((u) => r.append(u.node()));
+      s.append(r);
+    }
+    return s;
+  }
   function renderBody() {
     const body = el('div', 'uv-body');
     const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter));
     if (cont.length) body.append(recentSection(cont));
 
     if (st.filter === 'all' || st.filter === 'anime') body.append(airSchedule(data.animeHome()?.week));
-    // أحدث أحداث الفصل والحلقة وتوفّر الفيلم فقط، من مصادرها الموثوقة.
-    if (st.filter !== 'anime') {
-      const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'cinema' : st.upd;
-      const list = updates(allow);
-      const s = el('section', 'uv-sec'); s.append(head('آخر التحديثات', () => openSub('updates')));
-      if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; repaintBody(); }));
-      if (!list.length) s.append(el('p', 'uv-none', 'لا تحديثات موثّقة حاليًا')); else { const r = rail(); list.slice(0, 12).forEach((u) => r.append(u.node())); s.append(r); }
-      body.append(s);
-    }
+    const updateSection = renderUpdatesSection();
+    if (updateSection) body.append(updateSection);
     for (const [t, list, kind, go] of trendRows()) {
       const s = el('section', 'uv-sec'); s.append(head(t, () => open.browse(sectionOf(kind))));
       if (!list?.length) s.append(skRail(4, 120, 180)); else { const r = rail(); list.slice(0, 12).forEach((x) => r.append(poster(x, kind, () => go(x)))); s.append(r); }
@@ -510,6 +533,37 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     if (passes('movie', filter)) rows.push(['أفلام', data.cinema()?.movie, 'movie', (x) => open.cinema(x)]);
     return rows;
   }
+  // Live update feeds must not remount hero, trending rails, dock, or navigation.
+  // Only the update door, update shelf and an open Updates modal are reconciled.
+  function refreshUpdates() {
+    if (!host?.isConnected) return;
+    const previousDoor = host.querySelector('[data-uv-door="updates"]');
+    if (previousDoor) previousDoor.replaceWith(browseUpdatesDoor());
+    const previous = host.querySelector('[data-uv-role="updates"]');
+    const next = renderUpdatesSection();
+    if (previous && next) {
+      const existing = new Map([...previous.querySelectorAll('.uv-up[data-update-key]')]
+        .map((card) => [card.dataset.updateKey, card]));
+      const nextRail = next.querySelector('.uv-rail');
+      const oldRail = previous.querySelector('.uv-rail');
+      for (const card of [...(nextRail?.querySelectorAll('.uv-up[data-update-key]') ?? [])]) {
+        const reused = existing.get(card.dataset.updateKey);
+        if (!reused) continue;
+        const oldMeta = reused.querySelector('.uv-t2'), newMeta = card.querySelector('.uv-t2');
+        if (oldMeta && newMeta && oldMeta.textContent !== newMeta.textContent) oldMeta.replaceWith(newMeta);
+        reused.onclick = card.onclick;
+        card.replaceWith(reused);
+      }
+      const scroll = oldRail?.scrollLeft ?? 0;
+      previous.replaceWith(next);
+      if (nextRail) nextRail.scrollLeft = scroll;
+    } else if (next && !previous) {
+      host.querySelector('.uv-body')?.append(next);
+    } else if (previous && !next) previous.remove();
+    if (overlay?.isConnected && st.sub === 'updates' && !suspended) paintSub();
+    lastSig = signature();
+  }
+
   function repaintBody() {
     const old = host?.querySelector('.uv-body');
     if (!old) return render();
@@ -685,6 +739,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       render();
     },
     back: closeSub,
+    refreshUpdates,
     suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay,
     destroy() { stop(); if (!discardSuspended()) closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
   };

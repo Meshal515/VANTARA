@@ -269,4 +269,43 @@ describe('unified latest updates are verified releases, not catalogue listings',
       expect(root.textContent).not.toContain('999');
     } finally {view.destroy();vi.unstubAllGlobals();}
   });
+  it('refreshes only the update shelf without replacing hero, other rails, or the old cover DOM', () => {
+    const {view,root,next}=make();
+    try {
+      view.mount(root);
+      const hero=root.querySelector('.uv-hero');
+      const browse=root.querySelector('.uv-browse');
+      const main=root.querySelector('.uv-body');
+      const trendDoor=[...root.querySelectorAll('.uv-door')].find(x=>x.textContent.includes('الرائج'));
+      const original=[...root.querySelectorAll('.uv-body .uv-up')].find(x=>x.textContent.includes('RECORDED MANGA'));
+      expect(original).toBeTruthy();
+      next();
+      view.refreshUpdates();
+      const revised=[...root.querySelectorAll('.uv-body .uv-up')].find(x=>x.textContent.includes('RECORDED MANGA'));
+      expect(revised).toBe(original);
+      expect(revised.textContent).toContain('الفصل 126');
+      expect(root.querySelector('.uv-hero')).toBe(hero);
+      expect(root.querySelector('.uv-browse')).toBe(browse);
+      expect(root.querySelector('.uv-body')).toBe(main);
+      expect([...root.querySelectorAll('.uv-door')].find(x=>x.textContent.includes('الرائج'))).toBe(trendDoor);
+    } finally {view.destroy();vi.unstubAllGlobals();}
+  });
+
+  it('keeps the updates modal itself and its scroll when a later chapter arrives', () => {
+    const {view,root,document,next}=make();
+    try {
+      view.mount(root);
+      const door=root.querySelector('[data-uv-door="updates"]');
+      door.onclick();
+      const modal=document.querySelector('.uv-page');
+      expect(modal).toBeTruthy();
+      modal.scrollTop=320;
+      next();
+      view.refreshUpdates();
+      expect(document.querySelector('.uv-page')).toBe(modal);
+      expect(modal.scrollTop).toBe(320);
+      expect(modal.textContent).toContain('الفصل 126');
+    } finally {view.destroy();vi.unstubAllGlobals();}
+  });
+
 });

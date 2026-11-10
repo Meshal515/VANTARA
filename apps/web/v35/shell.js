@@ -4148,7 +4148,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const groups = await latestGroups('manga', 14, canonicalEventWorks).catch(() => null);
     if (!groups?.length) return;
     state.home.updates = groups.map(workOfEvent);
-    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refresh({ ifChanged: true });
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refreshUpdates();
     else if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
   }
 
@@ -6610,7 +6610,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       .then(([movie, series]) => {
         unifiedData.cinema = { movie, series };
         unifiedView.refresh();
-        return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refresh(); });
+        return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refreshUpdates(); });
       }).catch(() => {});
   }
   /** تحديثات الأفلام المؤكدة من Update Engine نفسه؛ لا نستنتجها من ترتيب Cinemeta. */
@@ -6628,7 +6628,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         at: g.at,
         publishedAt: g.publishedAt ?? null,
       }));
-    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refresh({ ifChanged: true });
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refreshUpdates();
   }
 
   let unifiedMounted = false;
