@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { createUnifiedView } from './unified-view.js';
 import { createUnifiedDiscover } from './unified-discover.js';
@@ -196,5 +196,77 @@ describe('D-029: internal unified category tabs retain their persistent chrome',
       expect(body.querySelector('.uv-tabs')).toBe(tabs);
       expect(manga.classList.contains('on')).toBe(true);
     }finally{view.destroy();}
+  });
+});
+
+describe('unified latest updates are verified releases, not catalogue listings', () => {
+  const NOW = Date.UTC(2026, 10, 10, 9, 0);
+  const make = () => {
+    const {document} = parseHTML('<html><body><div class="v35"><div id="allHome"></div></div></body></html>');
+    const el=(tag,cls,value)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(value!=null)n.textContent=value;return n;};
+    let chapter=125;
+    const data={
+      continue:()=>[],animeHome:()=>({trending:[],week:[]}),cinema:()=>({movie:[],series:[]}),
+      mangaPopular:()=>[],
+      // A catalogue addition is NOT a new chapter and must never enter Updates.
+      mangaRecent:()=>[{title:'CATALOGUE ONLY',_updateAt:NOW-1000,_latestChapter:{chapterNumber:999}}],
+      mangaUpdates:()=>[{title:'RECORDED MANGA',cover:null,_updateAt:NOW-3600000,_updatePublishedAt:0,_newCount:3,
+        _latestChapter:{chapterNumber:chapter},raw:{id:'ext:recorded'}}],
+      seriesUpdates:()=>[{x:{id:'tt02',type:'series',title:'SERIES',poster:null},season:2,episode:7,released:NOW-7200000}],
+      movieUpdates:()=>[{x:{id:'tt03',type:'movie',title:'MOVIE',poster:null},at:NOW-1800000,publishedAt:NOW-86400000}],
+    };
+    vi.stubGlobal('document',document);
+    vi.stubGlobal('localStorage',{getItem:()=>JSON.stringify('all'),setItem:()=>{}});
+    const root=document.getElementById('allHome');
+    const view=createUnifiedView({el,glyph:()=>'',data,now:()=>NOW,reducedMotion:()=>true,
+      open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}}});
+    return {view,root,document,next:()=>{chapter=126;}};
+  };
+
+  it('shows chapter with additional count and observation time, episode number and verified movie event', () => {
+    const {view,root,document}=make();
+    try {
+      view.mount(root);
+      const door=[...root.querySelectorAll('.uv-door')].find(x=>x.textContent.includes('آخر التحديثات'));
+      expect(door).toBeTruthy();
+      expect(door.textContent).toContain('3 تحديثات');
+      door.onclick();
+      const modal=document.querySelector('.uv-page');
+      expect(modal).toBeTruthy();
+      expect(modal.querySelectorAll('.uv-up')).toHaveLength(3);
+      expect(modal.textContent).toContain('الفصل 125 +2');
+      expect(modal.textContent).toContain('رُصد قبل ساعة');
+      expect(modal.textContent).toContain('م2 ح7');
+      expect(modal.textContent).toContain('MOVIE');
+      expect(modal.textContent).not.toContain('CATALOGUE ONLY');
+      const movie=[...modal.querySelectorAll('.uv-tabs button')].find(b=>b.textContent==='الأفلام');
+      expect(movie).toBeTruthy();
+      movie.onclick();
+      expect(modal.querySelectorAll('.uv-up')).toHaveLength(1);
+      expect(modal.textContent).toContain('فيلم');
+      expect(modal.textContent).toContain('رُصد قبل 30 دقيقة');
+      expect(modal.textContent).not.toContain('SERIES');
+    } finally {view.destroy();vi.unstubAllGlobals();}
+  });
+
+  it('repaints when a newly verified chapter replaces one with the same list length', () => {
+    const {view,root,next}=make();
+    try {
+      view.mount(root);
+      expect(root.textContent).toContain('الفصل 125');
+      next();
+      view.refresh({ifChanged:true});
+      expect(root.textContent).toContain('الفصل 126');
+      expect(root.textContent).not.toContain('الفصل 125');
+    } finally {view.destroy();vi.unstubAllGlobals();}
+  });
+
+  it('does not fabricate movie or manga releases from non-event catalogues', () => {
+    const {view,root}=make();
+    try {
+      view.mount(root);
+      expect(root.textContent).not.toContain('CATALOGUE ONLY');
+      expect(root.textContent).not.toContain('999');
+    } finally {view.destroy();vi.unstubAllGlobals();}
   });
 });

@@ -4148,7 +4148,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const groups = await latestGroups('manga', 14, canonicalEventWorks).catch(() => null);
     if (!groups?.length) return;
     state.home.updates = groups.map(workOfEvent);
-    if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refresh({ ifChanged: true });
+    else if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
   }
 
   async function loadMoreCollection() {
@@ -6515,7 +6516,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     navTo('discover');
   }
   // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
-  const unifiedData = { anime: null, cinema: null, series: null, logos: new Map(), asked: false };
+  const unifiedData = { anime: null, cinema: null, series: null, movieUpdates: [], logos: new Map(), asked: false };
   /** شعارات أنمي البنر من مصدر صفحة العمل نفسه (ani.zip ← metahub)، لأول سبعة رائجة فقط. */
   async function loadHeroLogos(trending) {
     const { loadAnimeArt } = await import('../lib/anime-art.js');
@@ -6539,7 +6540,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const mangaView = (w) => w && !isAdult(w) ? {
     title: titleOf(w), cover: w.coverImage?.extraLarge || w.coverImage?.large || w._work?.thumbnailUrl || null,
     color: w.coverImage?.color ?? null, genres: w.genres ?? [], score: w.averageScore ? w.averageScore / 10 : null,
-    chapters: w.chapters ?? null, _latestChapter: w._latestChapter ?? null, _updateAt: w._updateAt ?? null, raw: w,
+    chapters: w.chapters ?? null, _latestChapter: w._latestChapter ?? null, _updateAt: w._updateAt ?? null,
+    _updatePublishedAt: w._updatePublishedAt ?? 0, _newCount: w._newCount ?? 1, raw: w,
   } : null;
   const openManga = (w) => {
     suspendUnifiedOrigin();
@@ -6556,6 +6558,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       animeHome: () => unifiedData.anime,
       cinema: () => unifiedData.cinema,
       seriesUpdates: () => unifiedData.series,
+      movieUpdates: () => unifiedData.movieUpdates,
+      mangaUpdates: () => (state.home.updates ?? []).map(mangaView).filter(Boolean),
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
       // أغلفة المانجا بمحمّل الصور نفسه في قسم المانجا (ترويسات المصدر، البدائل، الغلاف الموحّد)
       cover: (node, x) => {
@@ -6609,6 +6613,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
         return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refresh(); });
       }).catch(() => {});
   }
+  /** تحديثات الأفلام المؤكدة من Update Engine نفسه؛ لا نستنتجها من ترتيب Cinemeta. */
+  let movieUpdatesAskedAt = 0;
+  async function refreshMovieUpdates() {
+    if (Date.now() - movieUpdatesAskedAt < 120_000) return;
+    movieUpdatesAskedAt = Date.now();
+    const groups = await latestGroups('cinema', 40).catch(() => null);
+    if (!groups) return; // Outage: preserve last verified events rather than showing false updates.
+    unifiedData.movieUpdates = groups
+      .filter((g) => g.kind === 'movie' && /^cinema:[^:]+$/.test(String(g.work ?? '')) && Number.isFinite(g.at) && g.at > 0)
+      .slice(0, 20)
+      .map((g) => ({
+        x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'movie' },
+        at: g.at,
+        publishedAt: g.publishedAt ?? null,
+      }));
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refresh({ ifChanged: true });
+  }
+
   let unifiedMounted = false;
   function renderAllHome({ ifChanged = false } = {}) {
     const host = q('allHome');
@@ -6618,6 +6640,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
     }
     loadUnifiedData();
+    void refreshHomeUpdates();
+    void refreshMovieUpdates();
     if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh({ ifChanged });
   }
 
