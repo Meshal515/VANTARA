@@ -229,7 +229,7 @@ describe('unified latest updates are verified releases, not catalogue listings',
       view.mount(root);
       const door=[...root.querySelectorAll('.uv-door')].find(x=>x.textContent.includes('آخر التحديثات'));
       expect(door).toBeTruthy();
-      expect(door.textContent).toContain('3 تحديثات');
+      expect(door.textContent).toContain('3 تحديثًا');
       door.onclick();
       const modal=document.querySelector('.uv-page');
       expect(modal).toBeTruthy();
