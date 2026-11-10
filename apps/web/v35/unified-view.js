@@ -66,6 +66,17 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   let host = null, silk = null, silkWrap = null, timer = 0, overlay = null, suspended = false, suspendedScroll = 0;
   const savedBodies = new Map();
   const bodyKey = () => `${st.filter}:${st.filter === 'all' ? st.upd : ''}`;
+  const trendIdentities = new WeakMap();
+  let nextTrendIdentity = 0;
+  const trendFingerprint = (list) => JSON.stringify((list ?? []).slice(0, 12).map((item) => {
+    const source = item?.raw ?? item;
+    let identity = null;
+    if (source && typeof source === 'object') {
+      if (!trendIdentities.has(source)) trendIdentities.set(source, ++nextTrendIdentity);
+      identity = trendIdentities.get(source);
+    }
+    return [identity, item?.title, item?.poster, item?.cover, item?.score, item?.rating, item?.year, item?.chapters];
+  }));
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
   const img = (src, cls, alt = '') => {
@@ -517,7 +528,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     }
     return s;
   }
-  function renderBody() {
+  function renderBody(previousBody = null, retainedScrolls = []) {
     const body = el('div', 'uv-body');
     const cont = (data.continue() ?? []).filter((it) => passes(it.kind ?? it.section, st.filter));
     if (cont.length) body.append(recentSection(cont));
@@ -526,7 +537,14 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const updateSection = renderUpdatesSection();
     if (updateSection) body.append(updateSection);
     for (const [t, list, kind, go] of trendRows()) {
+      const fingerprint = trendFingerprint(list);
+      const previous = [...(previousBody?.children ?? [])].find(node => node.dataset.uvTrend === kind);
+      if (previous?.dataset.uvFingerprint === fingerprint) {
+        for (const rail of previous.querySelectorAll('.uv-rail')) retainedScrolls.push([rail, rail.scrollLeft]);
+        body.append(previous); continue;
+      }
       const s = el('section', 'uv-sec'); s.append(head(t, () => open.browse(sectionOf(kind))));
+      s.dataset.uvTrend = kind; s.dataset.uvFingerprint = fingerprint;
       if (!list?.length) s.append(skRail(4, 120, 180)); else { const r = rail(); list.slice(0, 12).forEach((x) => r.append(poster(x, kind, () => go(x)))); s.append(r); }
       body.append(s);
     }
@@ -576,11 +594,13 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const old = host?.querySelector('.uv-body');
     if (!old) return render();
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
-    savedBodies.set(previousKey, { node: old, y });
+    const rails = [...old.querySelectorAll('.uv-rail')].map(rail => [rail, rail.scrollLeft]);
+    savedBodies.set(previousKey, { node: old, y, rails });
     const key = bodyKey();
     const saved = savedBodies.get(key);
     savedBodies.delete(key);
     old.replaceWith(saved?.node ?? renderBody());
+    for (const [rail, left] of saved?.rails ?? []) rail.scrollLeft = left;
     lastSig = signature();
     host.ownerDocument.defaultView?.scrollTo?.(0, saved?.y ?? y);
   }
@@ -589,6 +609,8 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     savedBodies.clear();
     lastSig = signature();
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
+    const previousBody = host.querySelector('.uv-body');
+    const retainedScrolls = [];
     const page = el('div', 'uv');
     page.append(renderHero(), browseSection());
     const t = tabs(st.filter, UNIFIED_FILTERS, (k) => {
@@ -598,8 +620,9 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       for (const b of t.children) { const on = b.textContent === UNIFIED_FILTERS.find(([x]) => x === k)[1]; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
       repaintBody(previous);
     });
-    page.append(t, renderBody());
+    page.append(t, renderBody(previousBody, retainedScrolls));
     host.replaceChildren(page);
+    for (const [rail, left] of retainedScrolls) rail.scrollLeft = left;
     ensureSilk();
     host.ownerDocument.defaultView?.scrollTo?.(0, y);
   }

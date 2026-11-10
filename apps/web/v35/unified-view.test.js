@@ -472,3 +472,22 @@ it('retains the first card while loading fifty catalogue pages without duplicate
   expect(root.querySelector('.uv-grid button')).toBe(first);
   expect(root.querySelector('[data-ud-more]')).toBeNull();view.back();
 });
+
+it('keeps loaded manga cards and horizontal scroll when anime data arrives', () => {
+  const {document}=parseHTML('<html><body><div id="allHome"></div></body></html>');
+  const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+  let anime=null, manga={id:'m1',title:'Manga',cover:'/manga'};const openManga=vi.fn();
+  const view=createUnifiedView({el,glyph:()=>'',data:{continue:()=>[],animeHome:()=>anime,cinema:()=>({movie:[],series:[]}),mangaPopular:()=>[manga],mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[]},open:{browse:()=>{},anime:()=>{},manga:openManga,cinema:()=>{}},reducedMotion:()=>true});
+  try {
+    const host=document.getElementById('allHome');view.mount(host);
+    const section=[...host.querySelectorAll('.uv-body .uv-sec')].find(n=>n.querySelector('h2')?.textContent==='المانجا الرائجة');
+    const card=section.querySelector('.uv-po'),rail=section.querySelector('.uv-rail');rail.scrollLeft=170;
+    anime={trending:[{id:1,title:'Anime',poster:'/anime'}]};view.refresh();
+    const next=[...host.querySelectorAll('.uv-body .uv-sec')].find(n=>n.querySelector('h2')?.textContent==='المانجا الرائجة');
+    expect(next.querySelector('.uv-po')===card).toBe(true);expect(next.querySelector('.uv-rail').scrollLeft).toBe(170);
+    expect(host.textContent).toContain('Anime');
+    manga={id:'m1',title:'Updated manga',cover:'/new'};view.refresh();
+    const updated=[...host.querySelectorAll('.uv-body .uv-sec')].find(n=>n.querySelector('h2')?.textContent==='المانجا الرائجة').querySelector('.uv-po');
+    expect(updated===card).toBe(false);updated.click();expect(openManga).toHaveBeenCalledWith(manga);
+  } finally {view.destroy();}
+});

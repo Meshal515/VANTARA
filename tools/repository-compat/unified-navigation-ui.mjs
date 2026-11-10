@@ -100,13 +100,14 @@ try {
  await page.waitForFunction(()=>!document.querySelector('.uv-page'));
  const scrollState=await page.evaluate(()=>{
    const body=document.querySelector('.uv-body'); body.style.minHeight='4000px';
+   const rail=body.querySelector('.uv-rail');rail.style.width='100px';rail.scrollLeft=-50;const horizontal=rail.scrollLeft;
    window.scrollTo(0,1800); const initial=window.scrollY;
    const tabs=[...document.querySelectorAll('.uv > .uv-tabs button')];
    tabs.find(x=>x.textContent==='المانجا').click();
    tabs.find(x=>x.textContent==='الكل').click();
-   return {same:document.querySelector('.uv-body')===body,before:initial,after:window.scrollY};
+   return {same:document.querySelector('.uv-body')===body,before:initial,after:window.scrollY,horizontal,restoredHorizontal:rail.scrollLeft};
  });
- if (!scrollState.same || Math.abs(scrollState.after-scrollState.before)>1) throw Error('Filter state was lost: '+JSON.stringify(scrollState));
+ if (!scrollState.same || Math.abs(scrollState.after-scrollState.before)>1 || scrollState.horizontal===0 || scrollState.horizontal!==scrollState.restoredHorizontal) throw Error('Filter state was lost: '+JSON.stringify(scrollState));
  const cycles=Number(process.env.VANTARA_UNIFIED_STRESS_CYCLES||0);
  if(cycles>0) {
    const pressure=await page.evaluate(async cycles=>{
@@ -153,6 +154,18 @@ try {
  await page.locator('.us-page .us-rank-row').click();
  if(!await page.evaluate(()=>window.__missingOpened)) throw Error('Missing-cover row did not open');
  await page.evaluate(()=>window.__searchFixture.close());
+ const asyncRetention=await page.evaluate(async()=>{
+   const {createUnifiedView}=await import('/v35/unified-view.js');const {glyph}=await import('/v35/icons.js');
+   const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+   const parent=el('div','v35'),host=el('div');parent.append(host);document.body.append(parent);
+   let anime=null;const manga=Array.from({length:12},(_,i)=>({id:'m'+i,title:'Manga '+i,cover:'/qa-poster'}));
+   const view=createUnifiedView({el,glyph,data:{continue:()=>[],animeHome:()=>anime,cinema:()=>({movie:[],series:[]}),mangaPopular:()=>manga,mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[]},open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}},reducedMotion:()=>true});
+   view.mount(host);const row=host.querySelector('[data-uv-trend="manga"]'),card=row.querySelector('.uv-po'),rail=row.querySelector('.uv-rail');
+   rail.scrollLeft=-100;const before=rail.scrollLeft;anime={trending:[{id:1,title:'New anime',poster:'/qa-poster'}]};view.refresh();
+   const next=host.querySelector('[data-uv-trend="manga"]');const result={same:next.querySelector('.uv-po')===card,before,after:next.querySelector('.uv-rail').scrollLeft,anime:host.textContent.includes('New anime')};
+   view.destroy();parent.remove();return result;
+ });
+ if(!asyncRetention.same || asyncRetention.before!==asyncRetention.after || !asyncRetention.anime) throw Error('Async data replaced an unchanged trend rail: '+JSON.stringify(asyncRetention));
  if (errors.length) throw Error('JavaScript errors: '+JSON.stringify(errors));
  console.log('PASS: 9 recent-card back cycles; invalid work rejected and valid work restores origin');
 } finally {await browser.close();server.close();}
