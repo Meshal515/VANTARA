@@ -144,20 +144,41 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     expect(cinema.anims[1].frames).toEqual([{opacity:1},{opacity:0}]);
     expect(cinema.classes.has('page-depth')).toBe(false);
   });
-  it('holds the outgoing work opaque while fading the saved modal back in', () => {
+  it('holds outgoing work until the saved modal finishes fading in, not a separate timer', () => {
     const work=page({top:0,left:0,width:390,height:2500});
-    pageOut(work,{depth:true,hold:true,doc:doc()});
-    expect(work.anims[0].frames).toEqual([{opacity:1},{opacity:1}]);
+    const release=pageOut(work,{depth:true,hold:true,doc:doc()});
+    expect(work.classes.has('page-out')).toBe(true);
+    expect(work.animate).not.toHaveBeenCalled();
     const origin=page();
-    const onComplete=vi.fn();
+    const onComplete=vi.fn(() => release());
     handoffSurface(origin,{enter:true,onComplete,doc:doc()});
     expect(origin.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
     expect(origin.anims[0].opts.duration).toBe(400);
     expect(origin.style.opacity).toBe('0');
+    expect(work.classes.has('page-out')).toBe(true);
     finishPageMotion();
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(origin.style.opacity).toBe('');
     expect(work.classes.has('page-out')).toBe(false);
+    release(); // idempotent after interrupted/finished transitions
+  });
+  it('keeps the outgoing work visible beyond 400ms if the modal completion is delayed', () => {
+    vi.useFakeTimers();
+    try {
+      const work=page({top:0,left:0,width:390,height:2500});
+      const release=pageOut(work,{hold:true,doc:doc()});
+      vi.advanceTimersByTime(1200);
+      expect(work.classes.has('page-out')).toBe(true);
+      release();
+      expect(work.classes.has('page-out')).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {vi.useRealTimers();}
+  });
+  it('keeps a non-active outgoing page painted via the base page CSS', async () => {
+    const {readFileSync}=await import('node:fs');
+    const css=readFileSync(new URL('./core.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\\.v35 \\.page\\.page-out\\s*\\{[^}]*display:\\s*block/);
+    expect(css).toMatch(/\\.v35 \\.page\\.page-out\\s*\\{[^}]*z-index:\\s*70/);
   });
   it('outgoing modal uses the existing fade and interrupts cleanly', () => {
     const modal=page();
