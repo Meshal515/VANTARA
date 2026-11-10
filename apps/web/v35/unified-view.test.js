@@ -135,6 +135,7 @@ describe('D-027/D-028: unified All Works stays opaque and reuses category result
     view.openAll('anime');await tick();
     const modal=root.querySelector('.uv-page');
     expect(modal.querySelector('.uv-grid').textContent).toContain('anime title');
+    const animeCard=modal.querySelector('.uv-grid > button');
     modal.scrollTop=287;
     modal.querySelectorAll('[role=tab]')[1].onclick();
     expect(root.querySelector('.uv-page')).toBe(modal);
@@ -144,6 +145,7 @@ describe('D-027/D-028: unified All Works stays opaque and reuses category result
     expect(modal.querySelector('.uv-grid').textContent).toContain('manga title');
     modal.querySelectorAll('[role=tab]')[0].onclick();
     expect(modal.querySelector('.uv-grid').textContent).toContain('anime title');
+    expect(modal.querySelector('.uv-grid > button')).toBe(animeCard);
     expect(modal.querySelector('.uv-grid').children).toHaveLength(1);
     expect(modal.scrollTop).toBe(287);
     expect(calls).toEqual(['anime','manga']);
