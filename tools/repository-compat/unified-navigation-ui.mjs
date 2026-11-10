@@ -14,13 +14,21 @@ const css=['styles.css','v35/unified-view.css','v35/core.css','v35.css','v35/rea
 const server=createServer(async(req,res)=>{try{let p=new URL(req.url,'http://local').pathname;if(p==='/qa-poster'){try{const b=await readFile(process.env.VANTARA_WORK_MOTION_POSTER||'/workspace/evidence/visual-ui-20261103/poster.img');res.setHeader('Content-Type','image/jpeg');return res.end(b)}catch{res.setHeader('Content-Type','image/svg+xml');return res.end('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><rect width="300" height="450" fill="#28354a"/><circle cx="150" cy="160" r="70" fill="#bdc9dd"/></svg>')}}if(p==='/__ui'){res.setHeader('Content-Type','text/html');return res.end('<html dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+css.map(p=>`<link rel="stylesheet" href="/${p}">`).join('')+'<body></body></html>')}res.setHeader('Content-Type',p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'application/octet-stream');const file=p.slice(1);if(phase==='before'&&baselineFiles.has(file)){if(!fileCache.has(file))fileCache.set(file,execFileSync('git',['show','e73cc6be:apps/web/'+file],{cwd:repo}));return res.end(fileCache.get(file))}res.end(await readFile(root+p));}catch{res.statusCode=404;res.end()}}).listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
 const browser=await chromium.launch({executablePath:process.env.VANTARA_CHROMIUM||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
 const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-let actionArtworkRequests=0;
+let actionArtworkRequests=0, cataloguePageTwoRequests=0;
 await page.route('**/*',async route=>{
  const u=route.request().url();if(u.startsWith('http://127.0.0.1:'))return route.continue();
  if(u.includes('graphql.anilist.co') && JSON.parse(route.request().postData()||'{}').variables?.genre==='Action') {
    actionArtworkRequests++;
    if(actionArtworkRequests===1) return route.fulfill({status:503,json:{errors:[{message:'offline'}]}});
    return route.fulfill({json:{data:{Page:{media:[{id:1,title:{romaji:'Action'},bannerImage:origin+'/qa-poster?action=1'}]}}}});
+ }
+ if(u.includes('graphql.anilist.co')) {
+   const request=JSON.parse(route.request().postData()||'{}');
+   if(request.query?.includes('media(type: ANIME, search:') && !request.variables?.genre) {
+     const second=request.variables.page===2;if(second) cataloguePageTwoRequests++;
+     const media=second?[{id:100,title:{romaji:'Next QA'}}]:[{id:0,title:{romaji:'Invalid QA'}},{id:120377,title:{romaji:'Valid QA'}}];
+     return route.fulfill({json:{data:{Page:{media,pageInfo:{hasNextPage:!second}}}}});
+   }
  }
  if(u.includes('graphql.anilist.co'))return route.fulfill({json:{data:{Page:{media:[{id:0,title:{romaji:'Invalid QA'},coverImage:{large:origin+'/qa-poster'}},{id:120377,title:{romaji:'Valid QA'},coverImage:{large:origin+'/qa-poster'}}],pageInfo:{hasNextPage:false}},Media:{id:120377,type:'ANIME',title:{romaji:'قصة الاختبار'},coverImage:{large:origin+'/qa-poster'},bannerImage:origin+'/qa-poster',format:'TV',status:'FINISHED',episodes:148,duration:24,genres:['Action'],description:'قصة الاختبار',relations:{edges:[]},characters:{edges:[]},recommendations:{nodes:[]},streamingEpisodes:[]}}}});
  if(u.includes('v3-cinemeta.strem.io/meta/'))return route.fulfill({json:{meta:{id:'tt12590266',type:'movie',name:'قصة الاختبار',poster:origin+'/qa-poster',background:origin+'/qa-poster',description:'قصة الاختبار',runtime:'24 min',genres:['Action']}}});
@@ -77,6 +85,8 @@ try {
  await page.evaluate(()=>window.__shell.handleBack());
  await page.waitForFunction(()=>!document.querySelector('.page-out,.page-in'));
  await page.locator('.uv-door').filter({hasText:'كل الأعمال'}).click();
+ await page.getByRole('button',{name:'Next QA',exact:true}).waitFor();
+ if(cataloguePageTwoRequests!==1) throw Error('Duplicate page requests: '+cataloguePageTwoRequests);
  await page.locator('.uv-page .uv-po').filter({hasText:'Invalid QA'}).click();
  const invalid=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));
  if(invalid.pointerEvents==='none'||invalid.visible==='hidden') throw Error('Invalid work left its origin suspended: '+JSON.stringify(invalid));

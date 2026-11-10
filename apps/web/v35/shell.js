@@ -3965,13 +3965,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mount: (node) => root.append(node),
     genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
       .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genrePins.get(`${type}:${en}`) ?? pinGenre(`${type}:${en}`, genreCover(type, en, used)) }))(new Set())),
-    results: async (type, genre) => {
+    results: async (type, genre, page = 1) => {
       if (type === 'anime') {
         const { searchAnime } = await import('../lib/anime-meta.js');
-        return (await searchAnime(genre ? { genre } : {}))?.items ?? [];
+        return searchAnime({ ...(genre ? { genre } : {}), page });
       }
       if (type === 'manga') {
-        return (await (genre ? fetchMangaGenre(genre) : fetchMangaPopular())).items;
+        const result = await (genre ? fetchMangaGenre(genre, { page }) : fetchMangaPopular({ page }));
+        return { items: result.items, hasNext: result.hasNextPage };
       }
       const { catalog } = await import('../lib/cinema-meta.js');
       const [movie, series] = await Promise.all([catalog('movie', 'top', { genre: genre ?? '' }), catalog('series', 'top', { genre: genre ?? '' })]);

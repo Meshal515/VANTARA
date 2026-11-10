@@ -29,21 +29,40 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   const resultCache = new Map();
   const pending = new Map();
   const scrollByKey = new Map();
+  let moreObserver = null, observedMore = null;
+  const stopMore = (node = null) => {
+    if (node && node !== observedMore) return;
+    moreObserver?.disconnect(); moreObserver = null; observedMore = null;
+  };
+  const watchMore = (node) => {
+    stopMore();
+    if (!node || suspended || !globalThis.IntersectionObserver) return;
+    moreObserver = new IntersectionObserver((entries) => {
+      if (observedMore === node && !suspended && node.isConnected && entries.some(e => e.isIntersecting)) node.click();
+    }, { root: overlay, rootMargin: '200px' });
+    observedMore = node;
+    moreObserver.observe(node);
+  };
   let activeKey = null;
   const resultKey = (g, t) => t + ':' + (g.id ?? '__all__');
-  const remember = (key, list) => {
+  const normalizeResults = (result) => Array.isArray(result)
+    ? { items: result, hasNext: false }
+    : { items: Array.isArray(result?.items) ? result.items : [], hasNext: Boolean(result?.hasNext ?? result?.hasNextPage) };
+  const remember = (key, result) => {
     resultCache.delete(key);
-    resultCache.set(key, { list, at: Date.now() });
+    const entry = { list: result.items, hasNext: result.hasNext, page: 1, at: Date.now(), loading: false };
+    resultCache.set(key, entry);
     while (resultCache.size > RESULT_LIMIT) {
       const oldest = resultCache.keys().next().value;
       resultCache.delete(oldest);
       scrollByKey.delete(oldest);
     }
+    return entry;
   };
   const requestResults = (key, t, g) => {
     if (!pending.has(key)) {
-      const p = Promise.resolve().then(() => results(t, g.id))
-        .then((list) => { const items = Array.isArray(list) ? list : []; remember(key, items); return items; })
+      const p = Promise.resolve().then(() => results(t, g.id, 1))
+        .then((result) => remember(key, normalizeResults(result)))
         .finally(() => { if (pending.get(key) === p) pending.delete(key); });
       pending.set(key, p);
     }
@@ -85,6 +104,7 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
    * بلمسة. المانجا تفتح صفحة مجموعتها (فلتر التصنيف في المصادر) لأنها تُجلب من محرّك التطبيق.
    */
   function openGenre(g, t = type) {
+    stopMore();
     const key = resultKey(g, t);
     const mine = ++token;
     if (overlay && !suspended && activeKey) scrollByKey.set(activeKey, overlay.scrollTop || 0);
@@ -116,28 +136,56 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
     const grid = (valid && cached.grid) || el('div', 'uv-grid');
     page.replaceChildren(top, seg, grid);
     page.scrollTop = scrollByKey.get(key) ?? 0;
-    const present = (items, animate = false) => {
+    const bindMore = (entry) => {
+      const more = el('button', 'us-more', 'تحميل المزيد'); more.type = 'button'; more.dataset.udMore = '';
+      entry.updateMore = (rearm = false) => {
+        if (!entry.hasNext) { stopMore(more); more.remove(); return; }
+        more.textContent = entry.loading ? 'جارٍ التحميل…' : entry.failed ? 'أعد المحاولة' : 'تحميل المزيد';
+        more.setAttribute('aria-busy', String(entry.loading));
+        if (rearm && !entry.failed && entry.autoContinue !== false && more.isConnected) watchMore(more);
+      };
+      more.onclick = () => {
+        if (entry.loading || !entry.hasNext) return;
+        entry.loading = true; entry.failed = false; entry.updateMore();
+        void Promise.resolve().then(() => results(t, g.id, entry.page + 1)).then((raw) => {
+          if (resultCache.get(key) !== entry) return;
+          const next = normalizeResults(raw);
+          const seen = new Set(entry.list.filter(x => x?.id != null).map(x => String(x.id)));
+          const added = next.items.filter(x => x?.id == null || (!seen.has(String(x.id)) && seen.add(String(x.id))));
+          entry.list.push(...added);
+          entry.autoContinue = added.length > 0;
+          if (added.length) entry.grid.querySelector('.uv-none')?.remove();
+          entry.grid.append(...added.map(x => poster(x, t)));
+          entry.page++; entry.hasNext = next.hasNext;
+        }, () => { entry.failed = true; }).finally(() => { entry.loading = false; entry.updateMore?.(true); });
+      };
+      if (entry.hasNext) { page.append(more); watchMore(more); }
+      entry.updateMore();
+    };
+    const present = (entry, animate = false) => {
       if (page !== overlay || mine !== token) return;
-      grid.replaceChildren(...items.map((x) => poster(x, t)));
+      grid.replaceChildren(...entry.list.map((x) => poster(x, t)));
       if (!grid.childElementCount) grid.append(el('p', 'uv-none', 'لا أعمال في هذا التصنيف الآن'));
       else if (animate) stripIn([...grid.children].slice(0, 9));
-      const entry = resultCache.get(key);
-      if (entry) entry.grid = grid;
+      entry.grid = grid;
+      bindMore(entry);
       page.scrollTop = scrollByKey.get(key) ?? 0;
     };
     if (valid) {
       // D-028: no new skeletons or catalogue requests on returning to a loaded type.
       resultCache.delete(key);
       resultCache.set(key, cached);
-      if (!cached.grid) present(cached.list);
+      if (!cached.grid) present(cached);
+      else bindMore(cached);
       return;
     }
     for (let i = 0; i < 9; i++) { const p = el('div', 'uv-po'); p.append(el('i', 'uv-art')); grid.append(p); }
-    void requestResults(key, t, g).then((list) => present(list, true),
+    void requestResults(key, t, g).then((entry) => present(entry, true),
       () => { if (page === overlay && mine === token) grid.replaceWith(el('p', 'uv-none', 'تعذّر الجلب، حاول بعد قليل')); });
   }
   function closeGenre() {
     if (!overlay || suspended) return false;
+    stopMore();
     const o = overlay;
     if (activeKey) scrollByKey.set(activeKey, o.scrollTop || 0);
     overlay = null; activeKey = null; token++;
@@ -148,6 +196,7 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
 
   function suspend() {
     if (!overlay || suspended) return false;
+    stopMore();
     suspended = true;
     suspendedScroll = overlay.scrollTop || 0;
     overlay.style.pointerEvents = 'none';
@@ -165,10 +214,12 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
     overlay.style.pointerEvents = '';
     overlay.removeAttribute('aria-hidden');
     overlay.scrollTop = suspendedScroll;
+    watchMore(overlay.querySelector('[data-ud-more]'));
     return true;
   }
   function discardSuspended() {
     if (!suspended) return false;
+    stopMore();
     overlay?.remove();
     overlay = null; activeKey = null; suspended = false; token++;
     return true;
