@@ -26,3 +26,20 @@ it('in-app motion off disables shared GSAP list motion', async () => {
     expect(gsap.fromTo).not.toHaveBeenCalled();
   }finally{globalThis.document=before;}
 });
+
+it('runs the original GSAP cover entrance once for a reused DOM card', async () => {
+  const {stripIn}=await import('./motion.js');
+  gsap.fromTo.mockClear();
+  gsap.killTweensOf.mockClear();
+  const a={style:{},isConnected:true}, b={style:{},isConnected:true};
+  stripIn([a,b]); stripIn([a,b]);
+  expect(gsap.fromTo).toHaveBeenCalledTimes(1);
+  expect(gsap.fromTo.mock.calls[0][0]).toEqual([a,b]);
+  expect(gsap.fromTo.mock.calls[0][2]).toMatchObject({duration:0.4,stagger:0.04});
+  stripIn([{style:{},isConnected:false}]);
+  expect(gsap.fromTo).toHaveBeenCalledTimes(1);
+  const c={style:{},isConnected:true};
+  stripIn([a,c]);
+  expect(gsap.fromTo).toHaveBeenCalledTimes(2);
+  expect(gsap.fromTo.mock.calls[1][0]).toEqual([c]);
+});

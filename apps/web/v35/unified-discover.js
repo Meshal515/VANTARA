@@ -222,5 +222,5 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   }
   /** «كل الأعمال» بنوع الاكتشاف الحالي (الأنمي افتراضيًا). */
   const openAll = (t = type) => openGenre({ id: null, label: 'كل الأعمال' }, t);
-  return { render, back: closeGenre, openAll, openGenre, suspend, hideSuspended, resume, discardSuspended, state: () => ({ type, suspended }) };
+  return { render, back: closeGenre, openAll, openGenre, suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay, state: () => ({ type, suspended }) };
 }

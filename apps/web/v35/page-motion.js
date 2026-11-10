@@ -80,9 +80,11 @@ function captureFixed(page, r) {
     };
   };
 }
-export function pageOut(page, { depth = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
+export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
+  // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
+  if (page.id === 'cinema' || hold) depth = false;
   const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
@@ -99,7 +101,9 @@ export function pageOut(page, { depth = false, visual = null, scrollTop = 0, doc
   page.scrollTop = previousScroll + offset;
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
-  const frames = depth ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }] : [{opacity:visual?.opacity ?? 1},{opacity:0}];
+  // When returning to a saved unified modal, keep this work opaque until
+  // the modal has completely faded back in; never reveal Home between them.
+  const frames = hold ? [{opacity:1},{opacity:1}] : depth ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }] : [{opacity:visual?.opacity ?? 1},{opacity:0}];
   track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
     unpin(); page.classList.remove('page-out','page-depth'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
@@ -147,6 +151,24 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
   const frames = depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}] : [{opacity:0},{opacity:1}];
   track(page, page.animate(frames,{duration:MS,easing:EASE,fill:'both'}), () => {
     page.classList.remove('page-in','page-depth'); restore(); restoreViewport();
+  });
+}
+
+/**
+ * Unified subpages stay mounted above a work page. Transition that same
+ * subpage to/from the work with the EXISTING page-motion timing and easing.
+ * No clone, independently programmed curve, or reveal of the underlying Home.
+ */
+export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
+  active.get(node)?.();
+  if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
+  const restore = save(node, ['opacity']);
+  // Stage the restored modal as transparent within the SAME JS turn as resume().
+  if (enter) node.style.opacity = '0';
+  const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
+  track(node, node.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
+    restore();
+    onComplete();
   });
 }
 

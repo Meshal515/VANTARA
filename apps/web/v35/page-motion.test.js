@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bindTabMotion, finishPageMotion, pageIn, pageOut } from './page-motion.js';
+import { bindTabMotion, finishPageMotion, handoffSurface, pageIn, pageOut } from './page-motion.js';
 
 afterEach(() => { finishPageMotion(); vi.unstubAllGlobals(); });
 
@@ -130,5 +130,43 @@ describe('work detail depth transition, with stationary contents', () => {
       for(let i=0;i<50;i++){pageIn(a,{depth:true,doc:doc()});finishPageMotion();}
       expect(vi.getTimerCount()).toBe(0);
     } finally {vi.useRealTimers();}
+  });
+});
+
+describe('work/unified handoff uses the existing 400ms page motion', () => {
+  it('cinema exits with exactly the same in-place fade as entrance', () => {
+    const cinema=page({top:0,left:0,width:390,height:2600});
+    cinema.id='cinema';
+    pageIn(cinema,{depth:true,doc:doc()});
+    finishPageMotion();
+    pageOut(cinema,{depth:true,doc:doc()});
+    expect(cinema.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
+    expect(cinema.anims[1].frames).toEqual([{opacity:1},{opacity:0}]);
+    expect(cinema.classes.has('page-depth')).toBe(false);
+  });
+  it('holds the outgoing work opaque while fading the saved modal back in', () => {
+    const work=page({top:0,left:0,width:390,height:2500});
+    pageOut(work,{depth:true,hold:true,doc:doc()});
+    expect(work.anims[0].frames).toEqual([{opacity:1},{opacity:1}]);
+    const origin=page();
+    const onComplete=vi.fn();
+    handoffSurface(origin,{enter:true,onComplete,doc:doc()});
+    expect(origin.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
+    expect(origin.anims[0].opts.duration).toBe(400);
+    expect(origin.style.opacity).toBe('0');
+    finishPageMotion();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(origin.style.opacity).toBe('');
+    expect(work.classes.has('page-out')).toBe(false);
+  });
+  it('outgoing modal uses the existing fade and interrupts cleanly', () => {
+    const modal=page();
+    const onComplete=vi.fn();
+    handoffSurface(modal,{doc:doc(),onComplete});
+    expect(modal.anims[0].frames).toEqual([{opacity:1},{opacity:0}]);
+    expect(modal.anims[0].opts.duration).toBe(400);
+    handoffSurface(modal,{enter:true,doc:doc()});
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(modal.anims[0].cancel).toHaveBeenCalledOnce();
   });
 });

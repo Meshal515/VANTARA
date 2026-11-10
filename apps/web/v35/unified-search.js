@@ -233,5 +233,5 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
     page?.remove(); page = null; suspended = false;
     return true;
   }
-  return { open: openPage, close, suspend, hideSuspended, resume, discardSuspended, isOpen: () => Boolean(page?.isConnected && !suspended), search, state: () => ({ query, filter, groups, suspended }) };
+  return { open: openPage, close, suspend, hideSuspended, resume, discardSuspended, motionNode: () => page, isOpen: () => Boolean(page?.isConnected && !suspended), search, state: () => ({ query, filter, groups, suspended }) };
 }

@@ -648,7 +648,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       render();
     },
     back: closeSub,
-    suspend, hideSuspended, resume, discardSuspended,
+    suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay,
     destroy() { stop(); if (!discardSuspended()) closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
   };
 }

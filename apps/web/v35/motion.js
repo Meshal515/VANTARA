@@ -55,10 +55,19 @@ export function revealIn(container, delay = 0) {
 }
 
 /** بطاقات شريط جديد: تنزلق من جهة البداية بتتابع سريع. */
+// New covers enter exactly once per DOM identity. Reusing cards after back
+// or cache reconciliation must not restart their original GSAP entrance.
+// WeakSet does not keep detached cards alive after navigation.
+const enteredCards = new WeakSet();
 export function stripIn(cards) {
   const g = live();
-  if (!g || !cards.length) return;
-  g.fromTo(cards, { x: -12 }, { x: 0, duration: 0.4, ease: EASE.out, stagger: 0.04, clearProps: 'transform' });
+  if (!g || !cards?.length) return;
+  const fresh = cards.filter((node) => node && typeof node === 'object' && node.isConnected !== false && !enteredCards.has(node));
+  if (!fresh.length) return;
+  for (const node of fresh) enteredCards.add(node);
+  g.killTweensOf(fresh);
+  // Keep the EXACT original anime/cinema curve, travel and stagger.
+  g.fromTo(fresh, { x: -12 }, { x: 0, duration: 0.4, ease: EASE.out, stagger: 0.04, clearProps: 'transform' });
 }
 
 /** البانر: صورة تتقدّم ببطء (Ken Burns) ونص يصعد سطرًا سطرًا. */

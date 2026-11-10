@@ -63,7 +63,7 @@ import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -5140,6 +5140,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const from = currentPage();
     // An overlay owns the visual transition; do not animate Home beneath the old subpage.
     const unifiedHandoff = Boolean(unifiedReturn && WORK_PAGES.has(id) && from !== id);
+    const unifiedRestore = Boolean(unifiedReturn && !push && id === unifiedReturn.page && WORK_PAGES.has(from));
     if (unifiedReturn && push && MAIN_PAGES.includes(id) && id !== from) {
       unifiedSurfaces()[unifiedReturn.kind]?.discardSuspended?.();
       unifiedReturn = null;
@@ -5161,7 +5162,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
-    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll });
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     playDockMotion();
@@ -5246,7 +5247,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
-    if (!sectionSwitch && !unifiedHandoff && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
         if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
       };
@@ -5255,8 +5256,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (unifiedHandoff) {
       const handoff = unifiedReturn;
-      requestAnimationFrame(() => {
-        if (unifiedReturn === handoff && currentPage() === id) unifiedSurfaces()[handoff.kind]?.hideSuspended?.();
+      // The work page is already active underneath an opaque origin modal.
+      // Fade the EXISTING origin instead of removing it on the next frame.
+      queueMicrotask(() => {
+        if (unifiedReturn !== handoff || currentPage() !== id) return;
+        const surface = unifiedSurfaces()[handoff.kind];
+        handoffSurface(surface?.motionNode?.(), {
+          onComplete: () => {
+            if (unifiedReturn === handoff) surface?.hideSuspended?.();
+          },
+        });
       });
     }
   }
@@ -5347,7 +5356,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (prev) {
       showPage(prev, { push: false });
       if (unifiedReturn && prev === unifiedReturn.page && root.dataset.content === 'unified') {
-        unifiedSurfaces()[unifiedReturn.kind]?.resume?.();
+        const surface = unifiedSurfaces()[unifiedReturn.kind];
+        // showPage holds the outgoing work opaque while this origin fades in.
+        surface?.resume?.();
+        handoffSurface(surface?.motionNode?.(), {enter:true});
         unifiedReturn = null;
       }
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
