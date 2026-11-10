@@ -97,6 +97,26 @@ try {
    return {same:document.querySelector('.uv-body')===body,before:initial,after:window.scrollY};
  });
  if (!scrollState.same || Math.abs(scrollState.after-scrollState.before)>1) throw Error('Filter state was lost: '+JSON.stringify(scrollState));
+ const cycles=Number(process.env.VANTARA_UNIFIED_STRESS_CYCLES||0);
+ if(cycles>0) {
+   const pressure=await page.evaluate(async cycles=>{
+     let seed=94721;
+     for(let i=0;i<cycles;i++) {
+       seed=(seed*16807)%2147483647;
+       const cards=[...document.querySelectorAll('.uv-rv')], card=cards[seed%cards.length];
+       if(!card) throw Error('missing card at '+i);
+       card.click();await Promise.resolve();
+       const work=document.querySelector('.page.active')?.id;
+       if(!['detail','anime','cinema'].includes(work)) throw Error('wrong work at '+i+': '+work);
+       window.__shell.handleBack();await Promise.resolve();
+       const active=[...document.querySelectorAll('.page.active')];
+       if(active.length!==1||active[0].id!=='home') throw Error('wrong return at '+i+': '+active.map(n=>n.id));
+       await new Promise(resolve=>setTimeout(resolve,16));
+     }
+     return {steps:cycles*2};
+   },cycles);
+   console.log('Directed pressure:',JSON.stringify(pressure));
+ }
  await page.evaluate(()=>window.__shell.showPage('discover'));
  await page.waitForSelector('.ud-genres .ud-genre');
  await page.waitForFunction(()=>document.querySelector('.ud-genres .ud-genre'));
