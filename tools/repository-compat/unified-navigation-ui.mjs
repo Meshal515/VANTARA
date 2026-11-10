@@ -112,8 +112,13 @@ try {
  if(duringFade.workDisplay==='none'||!Number.isFinite(duringFade.modalOpacity)||
     duringFade.modalOpacity>=0.99) throw Error('Return compositor leaked Home mid-fade: '+JSON.stringify(duringFade));
  await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
- const restored=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));
- if(restored.pointerEvents==='none'||restored.visible==='hidden') throw Error('Valid work did not restore origin: '+JSON.stringify(restored));
+ const restored=await page.locator('.uv-page').evaluate(n=>({
+   pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility,
+   opacity:Number(getComputedStyle(n).opacity),
+   outgoingDisplay:getComputedStyle(document.querySelector('#anime')).display,
+ }));
+ if(restored.pointerEvents==='none'||restored.visible==='hidden'||restored.opacity<0.99||restored.outgoingDisplay!=='none')
+   throw Error('Valid work did not return to a fully opaque origin (double fade): '+JSON.stringify(restored));
  await page.evaluate(()=>window.__shell.handleBack());
  await page.waitForFunction(()=>!document.querySelector('.uv-page'));
  const scrollState=await page.evaluate(()=>{
