@@ -248,6 +248,7 @@ html,
 .v35 .page.page-out {
   display: block;
   z-index: 70; /* below unified modal (80), above the underlying Home */
+  background: var(--bg, #09080c);
   pointer-events: none;
 }
 /* الصفحتان هما طرفا حركة الطبقات نفسها، بحجم الشاشة وتحت الشريط. */
