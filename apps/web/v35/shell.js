@@ -5190,7 +5190,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
-    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
+    const releaseHeldPage = outgoing ? pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll }) : null;
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     playDockMotion();
@@ -5296,6 +5296,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
       });
     }
+    // The caller of Back releases the held work only once the saved modal is opaque.
+    return unifiedRestore ? releaseHeldPage : null;
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -5382,13 +5384,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const prev = state.stack.pop();
     if (prev) {
-      showPage(prev, { push: false });
+      const releaseHeldPage = showPage(prev, { push: false });
       if (unifiedReturn && prev === unifiedReturn.page && root.dataset.content === 'unified') {
         const surface = unifiedSurfaces()[unifiedReturn.kind];
-        // showPage holds the outgoing work opaque while this origin fades in.
-        surface?.resume?.();
-        handoffSurface(surface?.motionNode?.(), {enter:true});
+        // Keep the leaving work painted until the original subpage is fully
+        // opaque. Never reveal Home in an intermediate compositor frame.
+        if (surface?.resume?.()) {
+          handoffSurface(surface.motionNode?.(), {
+            enter: true,
+            onComplete: () => releaseHeldPage?.(),
+          });
+        } else {
+          releaseHeldPage?.();
+        }
         unifiedReturn = null;
+      } else {
+        releaseHeldPage?.();
       }
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
       return true;
