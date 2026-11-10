@@ -48,6 +48,12 @@ try {
      if(state.active!=='home'||state.transient) throw Error(name+' '+JSON.stringify(state));
    }
  }
+ await page.evaluate(()=>{window.__originBody=document.querySelector('.uv-body');});
+ await page.locator('.uv-rv').filter({hasText:'Anime QA'}).first().click();
+ const retained=await page.evaluate(()=>window.__originBody===document.querySelector('.uv-body'));
+ if(!retained) throw Error('Opening an anime rebuilt the unified home');
+ await page.evaluate(()=>window.__shell.handleBack());
+ await page.waitForFunction(()=>!document.querySelector('.page-out,.page-in'));
  await page.locator('.uv-door').filter({hasText:'كل الأعمال'}).click();
  await page.locator('.uv-page .uv-po').filter({hasText:'Invalid QA'}).click();
  const invalid=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));

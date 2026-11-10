@@ -6442,7 +6442,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (shared) {
       shared.hidden = !all;
       // خارج الرئيسية (الإعدادات): البناء يؤجَّل لحين الرجوع إليها (showPage يرسمها)، فلا يثقل اللمسة
-      if (all && currentPage() === 'home') renderAllHome();
+      if (all && currentPage() === 'home') renderAllHome({ ifChanged: true });
     }
   }
 
