@@ -242,6 +242,14 @@ html,
 .v35 .page.active {
   display: block;
 }
+/* A leaving work page must remain painted throughout the return handoff.
+   The nav removes .active synchronously; without this rule .page {display:none}
+   exposed Home through the fading unified Updates modal. */
+.v35 .page.page-out {
+  display: block;
+  z-index: 70; /* below unified modal (80), above the underlying Home */
+  pointer-events: none;
+}
 /* الصفحتان هما طرفا حركة الطبقات نفسها، بحجم الشاشة وتحت الشريط. */
 .v35 .page.page-leaving,
 .v35 .page.section-page-layer {
