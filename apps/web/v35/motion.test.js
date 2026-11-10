@@ -14,3 +14,15 @@ it('makes the destination visible synchronously even if animation frames never r
   expect(called).toBe(1);
   expect(gsap.fromTo).toHaveBeenCalled();
 });
+
+it('in-app motion off disables shared GSAP list motion', async () => {
+  const {stripIn,reduced}=await import('./motion.js');
+  const before=globalThis.document;
+  try {
+    globalThis.document={documentElement:{dataset:{motion:'off'}}};
+    gsap.fromTo.mockClear();
+    expect(reduced()).toBe(true);
+    stripIn([{style:{}}]);
+    expect(gsap.fromTo).not.toHaveBeenCalled();
+  }finally{globalThis.document=before;}
+});

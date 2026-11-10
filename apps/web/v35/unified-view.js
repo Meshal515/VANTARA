@@ -533,7 +533,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     if (!overlay || suspended) return false;
     const o = overlay; overlay = null; st.sub = null;
     o.classList.remove('in');
-    setTimeout(() => o.remove(), reducedMotion() ? 0 : 260);
+    setTimeout(() => o.remove(), reducedMotion() ? 0 : 400);
     return true;
   }
   function suspend() {
@@ -602,7 +602,22 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       updates(st.subTab).forEach((u) => grid.append(u.node()));
       body.append(grid);
     }
-    overlay.replaceChildren(top, body);
+    // D-029: preserve the tab host and header so the global tab animation
+    // targets the NEW content after a tab switch instead of a detached node.
+    const previous = overlay.querySelector('.uv-pbody');
+    const oldBar = previous?.querySelector('.uv-tabs');
+    const newBar = body.querySelector('.uv-tabs');
+    if (previous && oldBar && newBar && overlay.querySelector('.uv-ptop h1')?.textContent === top.querySelector('h1')?.textContent) {
+      for (const button of oldBar.children) {
+        const on = [...newBar.children].some((b) => b.classList.contains('on') && b.textContent === button.textContent);
+        button.classList.toggle('on', on);
+        button.setAttribute('aria-selected', String(on));
+      }
+      newBar.replaceWith(oldBar);
+      previous.replaceChildren(...body.children);
+    } else {
+      overlay.replaceChildren(top, body);
+    }
   }
 
   /** بصمة رخيصة لما يُعرض: الفلتر و«تابع» بتقدّمه وأطوال القوائم. */

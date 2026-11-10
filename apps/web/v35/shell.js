@@ -62,7 +62,7 @@ import { momentRange, momentStart, repositories as animeRepositories, withPhaseD
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
-import { heroSlideIn } from './motion.js';
+import { heroSlideIn, stripIn } from './motion.js';
 import { bindTabMotion, fadeIn, finishPageMotion, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
@@ -4179,6 +4179,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
       } else {
         renderGrid(q('collectionGrid'), state.collection.items);
+        if (page === 1) stripIn([...q('collectionGrid').children].slice(0, 9));
       }
       btn.hidden = !state.collection.hasNext;
     } catch {

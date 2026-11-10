@@ -329,7 +329,7 @@ for (const path of ['apps/web/lib/account-store.js', 'apps/web/lib/account-store
 // Manga home redesign (owner-approved mockup): the wide AniList banner for the «finished» pick.
 for (const path of ['apps/web/lib/manga-meta.js']) seams.add(path);
 // Inner page motion (owner request): shared work cover and sub-page fade; section switching untouched.
-for (const path of ['apps/web/v35/motion.js', 'apps/web/v35/page-motion.js', 'apps/web/v35/page-motion.test.js', 'apps/web/v35/core.css']) seams.add(path);
+for (const path of ['apps/web/v35/motion.js', 'apps/web/v35/motion.test.js', 'apps/web/v35/page-motion.js', 'apps/web/v35/page-motion.test.js', 'apps/web/v35/core.css']) seams.add(path);
 // Anime home redesign (owner-approved mockup): today banner, continue watching, weekly schedule.
 for (const path of ['apps/web/v35/anime-today.js', 'apps/web/v35/anime-today.test.js', 'apps/web/v35/anime.js', 'apps/web/v35/anime.css', 'apps/web/v35/manga.css', 'apps/web/v35/shell.js', 'apps/web/v35/markup.js']) seams.add(path);
 // Library open blocked ~0.5s: the alias table was re-prepared for every canonical index (pure memoization, same results).

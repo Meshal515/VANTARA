@@ -7,6 +7,8 @@
  * البطاقات من نظام البطاقات الموحد (cards.css).
  */
 
+import { stripIn } from './motion.js';
+
 export const DISCOVER_TYPES = Object.freeze([['anime', 'أنمي'], ['manga', 'مانجا'], ['cinema', 'سينما']]);
 const KIND = { anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 
@@ -21,6 +23,32 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   let type = 'anime';
   try { const v = storage?.getItem(KEY); if (DISCOVER_TYPES.some(([k]) => k === v)) type = v; } catch { /* */ }
   let host = null, overlay = null, token = 0, suspended = false, suspendedScroll = 0;
+  // Bounded result cache, intentionally separate from the browser's image-byte cache.
+  const RESULT_TTL = 5 * 60_000;
+  const RESULT_LIMIT = 12;
+  const resultCache = new Map();
+  const pending = new Map();
+  const scrollByKey = new Map();
+  let activeKey = null;
+  const resultKey = (g, t) => t + ':' + (g.id ?? '__all__');
+  const remember = (key, list) => {
+    resultCache.delete(key);
+    resultCache.set(key, { list, at: Date.now() });
+    while (resultCache.size > RESULT_LIMIT) {
+      const oldest = resultCache.keys().next().value;
+      resultCache.delete(oldest);
+      scrollByKey.delete(oldest);
+    }
+  };
+  const requestResults = (key, t, g) => {
+    if (!pending.has(key)) {
+      const p = Promise.resolve().then(() => results(t, g.id))
+        .then((list) => { const items = Array.isArray(list) ? list : []; remember(key, items); return items; })
+        .finally(() => { if (pending.get(key) === p) pending.delete(key); });
+      pending.set(key, p);
+    }
+    return pending.get(key);
+  };
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
   // صورة في ذاكرة المتصفح تظهر فورًا (لا تتلاشى من جديد مع كل رسم)، والفاشلة تُزال فلا يبقى إطار مكسور
   const img = (src, cls) => { const i = el('img', cls); i.alt = ''; i.loading = 'lazy'; i.decoding = 'async'; i.onload = () => i.classList.add('in'); i.onerror = () => i.remove(); if (src) i.src = src; if (i.complete && i.naturalWidth) i.classList.add('in'); return i; };
@@ -57,10 +85,23 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
    * بلمسة. المانجا تفتح صفحة مجموعتها (فلتر التصنيف في المصادر) لأنها تُجلب من محرّك التطبيق.
    */
   function openGenre(g, t = type) {
+    const key = resultKey(g, t);
     const mine = ++token;
-    overlay?.remove();
-    suspended = false;
-    overlay = el('div', 'uv-page'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
+    if (overlay && !suspended && activeKey) scrollByKey.set(activeKey, overlay.scrollTop || 0);
+    // D-027: keep the same opaque overlay while switching types. Removing it
+    // before a new overlay's fade exposes the underlying unified Home.
+    if (!overlay || suspended) {
+      overlay?.remove();
+      suspended = false;
+      const page = el('div', 'uv-page');
+      page.setAttribute('role', 'dialog');
+      page.setAttribute('aria-modal', 'true');
+      overlay = page;
+      mount(page);
+      requestAnimationFrame(() => { if (overlay === page) page.classList.add('in'); });
+    }
+    activeKey = key;
+    const page = overlay;
     const top = el('div', 'uv-ptop');
     const back = el('button', 'uv-back'); back.type = 'button'; back.setAttribute('aria-label', 'رجوع'); back.innerHTML = glyph('back', { size: 24 }); back.onclick = closeGenre;
     top.append(back, el('h1', null, g.label));
@@ -71,21 +112,33 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
       seg.append(b);
     }
     const grid = el('div', 'uv-grid');
-    for (let i = 0; i < 9; i++) { const p = el('div', 'uv-po'); p.append(el('i', 'uv-art')); grid.append(p); }
-    overlay.append(top, seg, grid);
-    mount(overlay);
-    requestAnimationFrame(() => overlay?.classList.add('in'));
-    void Promise.resolve(results(t, g.id)).then((list) => {
-      if (mine !== token || !overlay) return;
-      grid.replaceChildren(...(list ?? []).map((x) => poster(x, t)));
+    page.replaceChildren(top, seg, grid);
+    page.scrollTop = scrollByKey.get(key) ?? 0;
+    const present = (items, animate = false) => {
+      if (page !== overlay || mine !== token) return;
+      grid.replaceChildren(...items.map((x) => poster(x, t)));
       if (!grid.childElementCount) grid.replaceWith(el('p', 'uv-none', 'لا أعمال في هذا التصنيف الآن'));
-    }, () => { if (mine === token && overlay) grid.replaceWith(el('p', 'uv-none', 'تعذّر الجلب، حاول بعد قليل')); });
+      else if (animate) stripIn([...grid.children].slice(0, 9));
+    };
+    const cached = resultCache.get(key);
+    if (cached && Date.now() - cached.at < RESULT_TTL) {
+      // D-028: no new skeletons or catalogue requests on returning to a loaded type.
+      resultCache.delete(key);
+      resultCache.set(key, cached);
+      present(cached.list);
+      return;
+    }
+    for (let i = 0; i < 9; i++) { const p = el('div', 'uv-po'); p.append(el('i', 'uv-art')); grid.append(p); }
+    void requestResults(key, t, g).then((list) => present(list, true),
+      () => { if (page === overlay && mine === token) grid.replaceWith(el('p', 'uv-none', 'تعذّر الجلب، حاول بعد قليل')); });
   }
   function closeGenre() {
     if (!overlay || suspended) return false;
-    const o = overlay; overlay = null; token++;
+    const o = overlay;
+    if (activeKey) scrollByKey.set(activeKey, o.scrollTop || 0);
+    overlay = null; activeKey = null; token++;
     o.classList.remove('in');
-    setTimeout(() => o.remove(), 260);
+    setTimeout(() => o.remove(), 400);
     return true;
   }
 
@@ -113,7 +166,7 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   function discardSuspended() {
     if (!suspended) return false;
     overlay?.remove();
-    overlay = null; suspended = false; token++;
+    overlay = null; activeKey = null; suspended = false; token++;
     return true;
   }
 

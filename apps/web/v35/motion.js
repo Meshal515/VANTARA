@@ -8,7 +8,7 @@
 import { gsap as GSAP } from '../vendor/gsap.esm.js';
 
 const gsap = () => GSAP ?? null;
-export const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+export const reduced = () => globalThis.document?.documentElement?.dataset?.motion === 'off' || (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 const live = () => (reduced() ? null : gsap());
 
 export const EASE = { out: 'expo.out', soft: 'power3.out', spring: 'back.out(1.6)', inOut: 'power2.inOut' };

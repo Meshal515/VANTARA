@@ -174,7 +174,7 @@ export function bindTabMotion(root, { doc = globalThis.document } = {}) {
     requestAnimationFrame(() => {
       // المعالج قد يعيد بناء الشريط: ما بعد موضعه في الحاوية نفسها هو المحتوى
       const nodes = host.isConnected ? [...host.children].slice(index + 1).filter((n) => !n.matches('[role="tablist"]') && !n.querySelector('[role="tablist"]')) : [];
-      for (const n of nodes.slice(0, 4)) n.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: EASE_IN });
+      for (const n of nodes.slice(0, 4)) n.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: MS, easing: EASE_IN });
     });
   }, true);
 }

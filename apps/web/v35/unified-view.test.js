@@ -98,7 +98,7 @@ describe('unified modal lifecycle: work must not appear behind a blocking page',
     });
     view.render(root);
     root.querySelector('.ud-genre').onclick();
-    await Promise.resolve(); await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(requested).toEqual([['manga','Drama']]);
     const modal=root.querySelector('.uv-page'),poster=modal.querySelector('.uv-po');
     expect(poster).toBeTruthy();
@@ -112,5 +112,89 @@ describe('unified modal lifecycle: work must not appear behind a blocking page',
     view.resume();
     expect(modal.scrollTop).toBe(220);
     expect(modal.isConnected).toBe(true);
+  });
+});
+
+describe('D-027/D-028: unified All Works stays opaque and reuses category results', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  function setup(results) {
+    const { document } = parseHTML('<html><body><div class="v35"><div id="area"></div></div></body></html>');
+    const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className=cls; if(txt!=null)n.textContent=txt;return n; };
+    const root=document.querySelector('.v35');
+    const view=createUnifiedDiscover({ el,glyph:()=>'', genres:()=>[], results,
+      card:(it)=>({title:it.title,cover:null}), open:()=>{},
+      openMangaGenre:()=>{},openSearch:()=>{}, trending:()=>[],
+      mount:(node)=>root.append(node),
+      storage:{getItem:()=> 'anime',setItem:()=>{}},
+    });
+    return {root,view};
+  }
+  it('keeps the identical modal, cached cards and per-tab scroll without repeat requests', async () => {
+    const calls=[];
+    const {root,view}=setup(async(type)=>{calls.push(type);return [{title:type+' title'}];});
+    view.openAll('anime');await tick();
+    const modal=root.querySelector('.uv-page');
+    expect(modal.querySelector('.uv-grid').textContent).toContain('anime title');
+    modal.scrollTop=287;
+    modal.querySelectorAll('[role=tab]')[1].onclick();
+    expect(root.querySelector('.uv-page')).toBe(modal);
+    expect(root.querySelectorAll('.uv-page')).toHaveLength(1);
+    expect(modal.classList.contains('in')).toBe(true);
+    await tick();
+    expect(modal.querySelector('.uv-grid').textContent).toContain('manga title');
+    modal.querySelectorAll('[role=tab]')[0].onclick();
+    expect(modal.querySelector('.uv-grid').textContent).toContain('anime title');
+    expect(modal.querySelector('.uv-grid').children).toHaveLength(1);
+    expect(modal.scrollTop).toBe(287);
+    expect(calls).toEqual(['anime','manga']);
+    expect(view.back()).toBe(true);
+  });
+  it('suppresses stale responses and shares in-flight requests, and retries network errors', async () => {
+    let resolveAnime, animeCalls=0, mangaCalls=0;
+    const {root,view}=setup((type)=>{
+      if(type==='anime'){animeCalls++;return new Promise(resolve=>{resolveAnime=resolve;});}
+      mangaCalls++;return mangaCalls===1?Promise.reject(new Error('offline')):Promise.resolve([{title:'Manga'}]);
+    });
+    view.openAll('anime');await tick();
+    const modal=root.querySelector('.uv-page');
+    modal.querySelectorAll('[role=tab]')[1].onclick();await tick();
+    expect(modal.textContent).toContain('تعذّر');
+    modal.querySelectorAll('[role=tab]')[0].onclick();await tick();
+    expect(animeCalls).toBe(1);
+    modal.querySelectorAll('[role=tab]')[1].onclick();await tick();
+    expect(modal.querySelector('.uv-grid').textContent).toContain('Manga');
+    resolveAnime([{title:'Late Anime'}]);await tick();
+    expect(modal.querySelector('.uv-grid').textContent).not.toContain('Late Anime');
+    modal.querySelectorAll('[role=tab]')[0].onclick();
+    expect(modal.querySelector('.uv-grid').textContent).toContain('Late Anime');
+    expect(animeCalls).toBe(1);
+    expect(mangaCalls).toBe(2);
+  });
+});
+
+describe('D-029: internal unified category tabs retain their persistent chrome', () => {
+  it('keeps identical modal, title, tab bar and parent when filtering Trending', () => {
+    const {document}=parseHTML('<html><body><div class="v35"><div id="allHome"></div></div></body></html>');
+    const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+    const view=createUnifiedView({
+      el,glyph:()=>'', data:{
+        continue:()=>[],animeHome:()=>({trending:[{id:1,title:'Anime',poster:'https://a'}]}),
+        cinema:()=>({movie:[{id:2,title:'Movie',poster:'https://b'}],series:[]}),
+        mangaPopular:()=>[],mangaRecent:()=>[],seriesUpdates:()=>[],
+      },open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}},reducedMotion:()=>true,
+    });
+    const home=document.getElementById('allHome');
+    try{
+      view.mount(home);
+      [...home.querySelectorAll('.uv-door')].find(x=>x.textContent.includes('الرائج')).onclick();
+      const modal=document.querySelector('.uv-page');
+      const head=modal.querySelector('.uv-ptop'),body=modal.querySelector('.uv-pbody'),tabs=body.querySelector('.uv-tabs');
+      const manga=[...tabs.children].find(x=>x.textContent==='المانجا');manga.onclick();
+      expect(document.querySelector('.uv-page')).toBe(modal);
+      expect(modal.querySelector('.uv-ptop')).toBe(head);
+      expect(modal.querySelector('.uv-pbody')).toBe(body);
+      expect(body.querySelector('.uv-tabs')).toBe(tabs);
+      expect(manga.classList.contains('on')).toBe(true);
+    }finally{view.destroy();}
   });
 });
