@@ -179,8 +179,8 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
 export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
-  const priorOpacity = node.style.opacity;
-  const priorTransition = node.style.transition;
+  const priorOpacity = node.style.opacity ?? '';
+  const priorTransition = node.style.transition ?? '';
   // .uv-page has its own 400ms CSS opacity transition. Do not let a second
   // transition replay from zero when the Web Animation is cancelled/restored.
   node.style.transition = 'none';
