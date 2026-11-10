@@ -155,10 +155,12 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     expect(origin.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
     expect(origin.anims[0].opts.duration).toBe(400);
     expect(origin.style.opacity).toBe('0');
+    expect(origin.style.transition).toBe('none'); // CSS fade must not race WAAPI
     expect(work.classes.has('page-out')).toBe(true);
     finishPageMotion();
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(origin.style.opacity).toBe('');
+    expect(origin.style.transition).toBe('');
     expect(work.classes.has('page-out')).toBe(false);
     release(); // idempotent after interrupted/finished transitions
   });
