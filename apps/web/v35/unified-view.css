@@ -6,6 +6,27 @@
 .v35 .uv-t2{display:block;font-size:12.5px;font-weight:500;line-height:18px;color:var(--uv-t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .v35 .uv-t2 em{font-style:normal;color:var(--text-1,#f2f1f5)}
 
+/* Verified updates: separate release unit and relative time instead of
+   clipping both into the old one-line .uv-t2 on narrow 3-column layouts. */
+.v35 .uv-up .uv-t1,.uv-page .uv-up .uv-t1{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  white-space:normal;overflow:hidden;min-height:40px
+}
+.v35 .uv-up .uv-update-meta,.uv-page .uv-up .uv-update-meta{
+  display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+  min-height:38px;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip
+}
+.v35 .uv-up .uv-update-unit,.uv-page .uv-up .uv-update-unit{
+  display:block;max-width:100%;color:var(--text-1,#f2f1f5);
+  font-weight:600;line-height:17px;white-space:normal;overflow-wrap:break-word
+}
+.v35 .uv-up .uv-update-when,.uv-page .uv-up .uv-update-when{
+  display:block;max-width:100%;font-size:12px;line-height:17px;
+  font-weight:500;color:var(--uv-t2,var(--text-3,#8f8b9c));
+  white-space:normal;overflow-wrap:break-word
+}
+
+
 /* البنر */
 .v35 .uv-hero{position:relative;isolation:isolate;padding-top:12px;overflow:hidden}
 .v35 .uv-silk{position:absolute;inset:0;z-index:-2;background:#02010a;-webkit-mask-image:linear-gradient(180deg,#000 62%,transparent);mask-image:linear-gradient(180deg,#000 62%,transparent)}
