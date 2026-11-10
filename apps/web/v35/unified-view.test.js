@@ -458,3 +458,17 @@ it('ignores an observer callback queued before switching catalogue type', async 
     view.back();
   } finally {vi.unstubAllGlobals();}
 });
+
+it('retains the first card while loading fifty catalogue pages without duplicates', async () => {
+  const {document}=parseHTML('<html><body><div class="v35"></div></body></html>');const root=document.querySelector('.v35');
+  const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+  const results=vi.fn(async(_type,_genre,page)=>({items:[{id:String(page),title:'Work '+page}],hasNext:page<50}));
+  const view=createUnifiedDiscover({el,glyph:()=>'',genres:()=>[],results,card:x=>({title:x.title}),open:()=>{},openMangaGenre:()=>{},openSearch:()=>{},trending:()=>[],mount:n=>root.append(n),storage:{getItem:()=> 'manga',setItem:()=>{}}});
+  const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+  view.openAll('manga');await tick();const first=root.querySelector('.uv-grid button');
+  for(let page=2;page<=50;page++){root.querySelector('[data-ud-more]').click();await tick();}
+  expect(results).toHaveBeenCalledTimes(50);
+  expect(root.querySelectorAll('.uv-grid button')).toHaveLength(50);
+  expect(root.querySelector('.uv-grid button')).toBe(first);
+  expect(root.querySelector('[data-ud-more]')).toBeNull();view.back();
+});
