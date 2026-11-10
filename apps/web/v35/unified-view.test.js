@@ -311,3 +311,58 @@ describe('unified latest updates are verified releases, not catalogue listings',
   });
 
 });
+
+it('restores each home filter with its original cards and scroll positions', () => {
+  const {document}=parseHTML('<html><body><div id="allHome"></div></body></html>');
+  const win=document.defaultView;
+  let y=0;
+  Object.defineProperty(win, 'scrollY', {configurable:true,get:()=>y});
+  win.scrollTo=(_x, top)=>{y=top;};
+  const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+  const view=createUnifiedView({el,glyph:()=>'',data:{continue:()=>[],animeHome:()=>({trending:[{id:1,title:'Anime',poster:'a'}]}),cinema:()=>({movie:[],series:[]}),mangaPopular:()=>[{title:'Manga',cover:'m'}],mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[]},open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}},reducedMotion:()=>true});
+  try {
+    const host=document.getElementById('allHome');view.mount(host);
+    const body=host.querySelector('.uv-body'), card=body.querySelector('.uv-po'), rail=body.querySelector('.uv-rail');
+    rail.scrollLeft=175;y=1900;
+    const filter=(label)=>[...host.querySelectorAll('.uv > .uv-tabs button')].find(b=>b.textContent===label).onclick();
+    filter('المانجا'); y=150; view.refreshUpdates();
+    filter('الكل');
+    expect(host.querySelector('.uv-body')).toBe(body);
+    expect(host.querySelector('.uv-body .uv-po')).toBe(card);
+    expect(host.querySelector('.uv-body .uv-rail').scrollLeft).toBe(175);
+    expect(y).toBe(1900);
+  } finally {view.destroy();}
+});
+
+it('uses artwork arriving after the fallback deadline on the next schedule render', async () => {
+  vi.useFakeTimers();
+  const {document}=parseHTML('<html><body><div id="allHome"></div></body></html>');
+  const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+  let resolveArt;
+  const animeArt=vi.fn(()=>new Promise(r=>{resolveArt=r;}));
+  const view=createUnifiedView({el,glyph:()=>'',now:()=>NOW,data:{continue:()=>[],animeHome:()=>({trending:[],week:[{id:17,title:'Episode',episode:1,airingAt:NOW+1000,banner:'/fallback'}]}),animeArt,cinema:()=>({movie:[],series:[]}),mangaPopular:()=>[],mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[]},open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}},reducedMotion:()=>true});
+  try {
+    const host=document.getElementById('allHome');view.mount(host);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(host.querySelector('.uv-slot-img').getAttribute('src')).toBe('/fallback');
+    resolveArt({fanart:'/late-art'});await vi.advanceTimersByTimeAsync(0);
+    view.refresh();await vi.advanceTimersByTimeAsync(0);
+    expect(host.querySelector('.uv-slot-img').getAttribute('src')).toBe('/late-art');
+    expect(animeArt).toHaveBeenCalledTimes(1);
+  } finally {view.destroy();vi.useRealTimers();}
+});
+
+it('retries schedule artwork after a failed request', async () => {
+  vi.useFakeTimers();
+  const {document}=parseHTML('<html><body><div id="allHome"></div></body></html>');
+  const el=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+  const animeArt=vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue({fanart:'/recovered'});
+  const view=createUnifiedView({el,glyph:()=>'',now:()=>NOW,data:{continue:()=>[],animeHome:()=>({trending:[],week:[{id:17,title:'Episode',episode:1,airingAt:NOW+1000,banner:'/fallback'}]}),animeArt,cinema:()=>({movie:[],series:[]}),mangaPopular:()=>[],mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[]},open:{browse:()=>{},anime:()=>{},manga:()=>{},cinema:()=>{}},reducedMotion:()=>true});
+  try {
+    const host=document.getElementById('allHome');view.mount(host);await vi.advanceTimersByTimeAsync(0);
+    expect(host.querySelector('.uv-slot-img').getAttribute('src')).toBe('/fallback');
+    view.refresh();await vi.advanceTimersByTimeAsync(0);
+    expect(host.querySelector('.uv-slot-img').getAttribute('src')).toBe('/recovered');
+    expect(animeArt).toHaveBeenCalledTimes(2);
+  } finally {view.destroy();vi.useRealTimers();}
+});

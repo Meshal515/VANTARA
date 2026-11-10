@@ -64,6 +64,8 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   const gen = (list) => (list ?? []).slice(0, 2).map(genreAr).join('، ');
   const st = { filter: readFilter(), hero: 0, day: 0, sub: null, subTab: 'all', upd: 'all', airDay: null, airScrolled: false };
   let host = null, silk = null, silkWrap = null, timer = 0, overlay = null, suspended = false, suspendedScroll = 0;
+  const savedBodies = new Map();
+  const bodyKey = () => `${st.filter}:${st.filter === 'all' ? st.upd : ''}`;
 
   const txt = (tag, cls, s) => { const n = el(tag, cls, s ?? ''); if (s && /[A-Za-z]/.test(s)) n.dir = 'auto'; return n; };
   const img = (src, cls, alt = '') => {
@@ -262,12 +264,17 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const tail = [e.banner, e.poster];
     if (!data.animeArt) return show(tail);
     if (!slotArt.has(e.id)) {
-      slotArt.set(e.id, Promise.race([
-        Promise.resolve(data.animeArt(e.id)).catch(() => null),
-        new Promise((r) => setTimeout(() => r(null), 4000)),
-      ]));
+      const request = Promise.resolve().then(() => data.animeArt(e.id)).catch(() => null).then((art) => {
+        if (!art && slotArt.get(e.id) === request) slotArt.delete(e.id);
+        return art;
+      });
+      slotArt.set(e.id, request);
+      while (slotArt.size > 100) slotArt.delete(slotArt.keys().next().value);
     }
-    void slotArt.get(e.id).then((art) => {
+    let deadline;
+    const fallback = new Promise((resolve) => { deadline = setTimeout(() => resolve(null), 4000); });
+    void Promise.race([slotArt.get(e.id), fallback]).then((art) => {
+      clearTimeout(deadline);
       const list = [];
       if (/^tt\d+$/.test(art?.imdb ?? '')) list.push(`https://images.metahub.space/background/medium/${art.imdb}/img`);
       list.push(art?.fanart);
@@ -501,7 +508,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const s = el('section', 'uv-sec');
     s.dataset.uvRole = 'updates';
     s.append(head('آخر التحديثات', () => openSub('updates')));
-    if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { st.upd = k; repaintBody(); }));
+    if (st.filter === 'all') s.append(updTabs(st.upd, (k) => { const previous = bodyKey(); st.upd = k; repaintBody(previous); }));
     if (!list.length) s.append(el('p', 'uv-none', 'لا تحديثات موثّقة حاليًا'));
     else {
       const r = rail();
@@ -537,6 +544,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   // Only the update door, update shelf and an open Updates modal are reconciled.
   function refreshUpdates() {
     if (!host?.isConnected) return;
+    if (signature() !== lastSig) savedBodies.clear();
     const previousDoor = host.querySelector('[data-uv-door="updates"]');
     if (previousDoor) previousDoor.replaceWith(browseUpdatesDoor());
     const previous = host.querySelector('[data-uv-role="updates"]');
@@ -564,25 +572,31 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     lastSig = signature();
   }
 
-  function repaintBody() {
+  function repaintBody(previousKey = bodyKey()) {
     const old = host?.querySelector('.uv-body');
     if (!old) return render();
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
-    old.replaceWith(renderBody());
+    savedBodies.set(previousKey, { node: old, y });
+    const key = bodyKey();
+    const saved = savedBodies.get(key);
+    savedBodies.delete(key);
+    old.replaceWith(saved?.node ?? renderBody());
     lastSig = signature();
-    host.ownerDocument.defaultView?.scrollTo?.(0, y);
+    host.ownerDocument.defaultView?.scrollTo?.(0, saved?.y ?? y);
   }
   function render() {
     if (!host) return;
+    savedBodies.clear();
     lastSig = signature();
     const y = host.ownerDocument.defaultView?.scrollY ?? 0;
     const page = el('div', 'uv');
     page.append(renderHero(), browseSection());
     const t = tabs(st.filter, UNIFIED_FILTERS, (k) => {
       if (k === st.filter) return;
+      const previous = bodyKey();
       st.filter = k; writeFilter(k);
       for (const b of t.children) { const on = b.textContent === UNIFIED_FILTERS.find(([x]) => x === k)[1]; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
-      repaintBody();
+      repaintBody(previous);
     });
     page.append(t, renderBody());
     host.replaceChildren(page);
@@ -741,6 +755,6 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     back: closeSub,
     refreshUpdates,
     suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay,
-    destroy() { stop(); if (!discardSuspended()) closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
+    destroy() { stop(); savedBodies.clear(); if (!discardSuspended()) closeSub(); silk?.destroy?.(); silk = null; silkWrap = null; host = null; },
   };
 }
