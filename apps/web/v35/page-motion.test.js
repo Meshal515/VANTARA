@@ -177,8 +177,8 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
   it('keeps a non-active outgoing page painted via the base page CSS', async () => {
     const {readFileSync}=await import('node:fs');
     const css=readFileSync(new URL('./core.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\\.v35 \\.page\\.page-out\\s*\\{[^}]*display:\\s*block/);
-    expect(css).toMatch(/\\.v35 \\.page\\.page-out\\s*\\{[^}]*z-index:\\s*70/);
+    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*display:\s*block/);
+    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*z-index:\s*70/);
   });
   it('outgoing modal uses the existing fade and interrupts cleanly', () => {
     const modal=page();
