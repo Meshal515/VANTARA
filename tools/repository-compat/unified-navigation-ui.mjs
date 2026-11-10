@@ -36,6 +36,12 @@ await page.evaluate(async()=>{
 });
 try {
  await page.waitForSelector('.uv-rv');
+ await page.evaluate(()=>{
+   const add=window.addEventListener.bind(window),remove=window.removeEventListener.bind(window);
+   window.__scrollListeners={touchstart:new Set(),wheel:new Set()};
+   window.addEventListener=(type,fn,opts)=>{if(window.__scrollListeners[type]&&fn?.name==='stop')window.__scrollListeners[type].add(fn);return add(type,fn,opts);};
+   window.removeEventListener=(type,fn,opts)=>{if(window.__scrollListeners[type]&&fn?.name==='stop')window.__scrollListeners[type].delete(fn);return remove(type,fn,opts);};
+ });
  for (const name of ['Anime QA','Cinema QA','Manga QA']) {
    for (const delay of [0,50,500]) {
      const card=page.locator('.uv-rv').filter({hasText:name}).first(); await card.click();
@@ -48,6 +54,22 @@ try {
      if(state.active!=='home'||state.transient) throw Error(name+' '+JSON.stringify(state));
    }
  }
+ const retainedListeners=await page.evaluate(()=>window.__scrollListeners.touchstart.size+window.__scrollListeners.wheel.size);
+ if(retainedListeners) throw Error('Scroll restoration retained input listeners: '+retainedListeners);
+ const interrupted=await page.evaluate(()=>{
+   document.querySelector('.uv-rv').click();window.__shell.handleBack();
+   const before=window.__scrollListeners.touchstart.size+window.__scrollListeners.wheel.size;
+   window.dispatchEvent(new Event('wheel'));
+   return {before,after:window.__scrollListeners.touchstart.size+window.__scrollListeners.wheel.size};
+ });
+ if(interrupted.before!==2||interrupted.after!==0) throw Error('Input did not cancel scroll restoration: '+JSON.stringify(interrupted));
+ await page.waitForFunction(()=>!document.querySelector('.page-out,.page-in'));
+ const paused=await page.evaluate(()=>{
+   document.querySelector('.uv-rv').click();window.__shell.handleBack();window.__shell.pause();
+   const count=window.__scrollListeners.touchstart.size+window.__scrollListeners.wheel.size;
+   window.__shell.resume();return count;
+ });
+ if(paused) throw Error('Pausing shell retained scroll listeners: '+paused);
  await page.evaluate(()=>{window.__originBody=document.querySelector('.uv-body');});
  await page.locator('.uv-rv').filter({hasText:'Anime QA'}).first().click();
  const retained=await page.evaluate(()=>window.__originBody===document.querySelector('.uv-body'));

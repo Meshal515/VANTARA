@@ -5133,18 +5133,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // في الذاكرة بعناصرها المحمّلة وفلاترها؛ كان showPage يصعد للأعلى دائمًا فيضيع المكان)
   const scrollOf = new Map();
   let scrollRestore = 0;
+  let scrollRestoreCleanup = null;
   function restoreScroll(top) {
+    scrollRestoreCleanup?.();
     const run = ++scrollRestore;
     window.scrollTo({ top, behavior: 'instant' });
     // صفحة تُرسم بعد الإظهار (المكتبة، الرئيسية): نعيد المحاولة حين يكتمل طولها، ما لم يلمس المستخدم
     let touched = false;
-    const stop = () => { touched = true; };
+    const timers = [];
+    const cleanup = () => {
+      removeEventListener('touchstart', stop);
+      removeEventListener('wheel', stop);
+      for (const timer of timers) clearTimeout(timer);
+      if (scrollRestoreCleanup === cleanup) scrollRestoreCleanup = null;
+    };
+    const stop = () => { touched = true; cleanup(); };
+    scrollRestoreCleanup = cleanup;
     addEventListener('touchstart', stop, { once: true, passive: true });
     addEventListener('wheel', stop, { once: true, passive: true });
-    for (const wait of [0, 120, 400]) setTimeout(() => {
-      if (run !== scrollRestore || touched || Math.abs(window.scrollY - top) < 2) return;
-      window.scrollTo({ top, behavior: 'instant' });
-    }, wait);
+    for (const wait of [0, 120, 400]) timers.push(setTimeout(() => {
+      if (run === scrollRestore && !touched && Math.abs(window.scrollY - top) >= 2) window.scrollTo({ top, behavior: 'instant' });
+      if (wait === 400) cleanup();
+    }, wait));
   }
   let pageMotionRequest = 0;
   const WORK_PAGES = new Set(['detail', 'anime', 'cinema']);
@@ -5260,7 +5270,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintRail();
     // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
-    else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
+    else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
@@ -7209,6 +7219,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openProfile,
     handleBack,
     pause() {
+      scrollRestore++; scrollRestoreCleanup?.();
       savedScroll = window.scrollY;
       majlis.hide();
       clearInterval(state.heroTimer);
@@ -7230,6 +7241,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      scrollRestore++; scrollRestoreCleanup?.();
       mangaDepth?.destroy();
       ++pageMotionRequest;
       finishPageMotion();
