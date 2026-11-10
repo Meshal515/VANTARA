@@ -34,6 +34,7 @@ it('runs the original GSAP cover entrance once for a reused DOM card', async () 
   const a={style:{},isConnected:true}, b={style:{},isConnected:true};
   stripIn([a,b]); stripIn([a,b]);
   expect(gsap.fromTo).toHaveBeenCalledTimes(1);
+  expect(gsap.killTweensOf).not.toHaveBeenCalled();
   expect(gsap.fromTo.mock.calls[0][0]).toEqual([a,b]);
   expect(gsap.fromTo.mock.calls[0][2]).toMatchObject({duration:0.4,stagger:0.04});
   stripIn([{style:{},isConnected:false}]);

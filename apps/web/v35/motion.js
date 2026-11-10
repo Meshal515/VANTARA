@@ -65,7 +65,7 @@ export function stripIn(cards) {
   const fresh = cards.filter((node) => node && typeof node === 'object' && node.isConnected !== false && !enteredCards.has(node));
   if (!fresh.length) return;
   for (const node of fresh) enteredCards.add(node);
-  g.killTweensOf(fresh);
+  // Do NOT kill other independent tweens (tap feedback, etc.) on a new card.
   // Keep the EXACT original anime/cinema curve, travel and stagger.
   g.fromTo(fresh, { x: -12 }, { x: 0, duration: 0.4, ease: EASE.out, stagger: 0.04, clearProps: 'transform' });
 }
