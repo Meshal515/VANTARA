@@ -111,21 +111,25 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
       b.onclick = () => { if (k !== t) openGenre(g, k); };
       seg.append(b);
     }
-    const grid = el('div', 'uv-grid');
+    const cached = resultCache.get(key);
+    const valid = cached && Date.now() - cached.at < RESULT_TTL;
+    const grid = (valid && cached.grid) || el('div', 'uv-grid');
     page.replaceChildren(top, seg, grid);
     page.scrollTop = scrollByKey.get(key) ?? 0;
     const present = (items, animate = false) => {
       if (page !== overlay || mine !== token) return;
       grid.replaceChildren(...items.map((x) => poster(x, t)));
-      if (!grid.childElementCount) grid.replaceWith(el('p', 'uv-none', 'لا أعمال في هذا التصنيف الآن'));
+      if (!grid.childElementCount) grid.append(el('p', 'uv-none', 'لا أعمال في هذا التصنيف الآن'));
       else if (animate) stripIn([...grid.children].slice(0, 9));
+      const entry = resultCache.get(key);
+      if (entry) entry.grid = grid;
+      page.scrollTop = scrollByKey.get(key) ?? 0;
     };
-    const cached = resultCache.get(key);
-    if (cached && Date.now() - cached.at < RESULT_TTL) {
+    if (valid) {
       // D-028: no new skeletons or catalogue requests on returning to a loaded type.
       resultCache.delete(key);
       resultCache.set(key, cached);
-      present(cached.list);
+      if (!cached.grid) present(cached.list);
       return;
     }
     for (let i = 0; i < 9; i++) { const p = el('div', 'uv-po'); p.append(el('i', 'uv-art')); grid.append(p); }
