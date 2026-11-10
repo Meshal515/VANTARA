@@ -96,13 +96,14 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const restore = save(page, ['position','top','left','width','height','minHeight','overflow','transformOrigin']);
   const origin = depth ? (visual?.origin || originOf(page, r, offset)) : null;
   page.classList.add('page-out');
+  if (hold) page.classList.add('page-held');
   if (depth) page.classList.add('page-depth');
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
   const cleanup = () => {
-    unpin(); page.classList.remove('page-out','page-depth'); restore(); page.scrollTop = previousScroll;
+    unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
   };
   // A fixed-duration "hold" used to expire before the modal fade finished.
