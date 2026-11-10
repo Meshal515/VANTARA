@@ -215,7 +215,12 @@ export function createUnifiedLibrary({ el, glyph, shelves, open, discover, cover
       sec.append(grid);
       page.append(sec);
     }
-    host.replaceChildren(page);
+    // Keep the stable page host connected across type/shelf changes. The shared
+    // bindTabMotion controller resolves the new children on the next frame;
+    // replacing the whole .ul element disconnected its captured host.
+    const previous = host.querySelector(':scope > .ul');
+    if (previous) previous.replaceChildren(...page.children);
+    else host.replaceChildren(page);
     // إعادة الرسم (تحديث فوري من المزامنة) لا تقفز بالصفحة
     if (y) host.ownerDocument?.defaultView?.scrollTo({ top: y, behavior: 'instant' });
   }

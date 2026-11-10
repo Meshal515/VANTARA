@@ -182,3 +182,30 @@ describe('مكتبات الأقسام تستعمل الأسماء الموحدة
     expect(src('./shell.js')).toContain('LIBRARY_TABS.map((t) => [KEY[t.id], t.label])');
   });
 });
+
+describe('one animation host for library filters without redesigning cards',()=>{
+  it('retains the SAME outer page when switching content type and shelf',()=>{
+    const {document}=parseHTML('<html><body><div id="lib"></div></body></html>');
+    const el=(name,cls,txt)=>{const n=document.createElement(name);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n;};
+    const entries=[
+      {section:'manga',ref:'manga:a',title:'One',cover:'https://example.org/m.jpg',at:5,view:{viewed_at:5,chapter_label:'23'}},
+      {section:'anime',ref:'anime:123',title:'Two',cover:'https://example.org/a.jpg',at:4,view:{viewed_at:4,chapter_label:'10'}},
+    ];
+    const shelves=()=>({all:entries,following:entries,recent:entries,later:[],favorite:[],completed:[]});
+    const lib=createUnifiedLibrary({el,glyph:()=>'',shelves,open:()=>{},discover:()=>{},storage:{getItem:()=>null,setItem:()=>{}}});
+    const host=document.getElementById('lib');
+    lib.render(host);
+    const page=host.querySelector('.ul');
+    expect(page).not.toBeNull();
+    const anime=[...host.querySelectorAll('.ul-types button')].find(n=>n.textContent==='أنمي');
+    anime.onclick();
+    expect(host.querySelector('.ul')).toBe(page);
+    expect(host.querySelectorAll('.ul-card')).toHaveLength(1);
+    expect(host.textContent).toContain('Two');
+    const recent=[...host.querySelectorAll('.ul-shelf')].find(n=>n.textContent.includes('آخر المشاهدات'));
+    recent.onclick();
+    expect(host.querySelector('.ul')).toBe(page);
+    expect(host.querySelectorAll('.ul-recent')).toHaveLength(1);
+  });
+});
+

@@ -1,6 +1,6 @@
 import { parseHTML } from 'linkedom';
-import { afterEach, expect, it, vi } from 'vitest';
-import { LOOK_IDS, heroPlan, renderLook } from './work-looks.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LOOK_IDS, heroPlan, renderLook, lookMotion } from './work-looks.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -233,4 +233,12 @@ it('every look shows a side «seen» button per episode that toggles without pla
     expect(btn().getAttribute('aria-pressed'), look).toBe('false');
     expect(c.seen(2), look).toBe(false);
   }
+});
+
+describe('scroll-linked depth respects both app and OS reduced motion',()=>{
+  it('generated animation selectors are disabled when in-app motion is off',()=>{
+    const css=lookMotion('card',{hero:null,dims:{span:450,vh:844}}).css();
+    expect(css).toContain('animation-timeline:scroll(root block)');
+    expect(css).toContain("html:not([data-motion='off'])");
+  });
 });

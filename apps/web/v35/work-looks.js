@@ -299,7 +299,7 @@ export function lookMotion(look, { hero, dims }) {
     const to = layerValue(l, 1, span);
     const sel = l.at === 'self' ? `.v35 .aw[data-style='${look}'] > .aw-hero` : `.v35 .aw[data-style='${look}'] ${l.sel}`;
     return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}to{transform:${to.transform};opacity:${to.opacity}}}
-${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;
+html:not([data-motion='off']) ${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;
   }).join('\n')}}}`;
   return { layers, css };
 }
