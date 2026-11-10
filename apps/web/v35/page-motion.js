@@ -94,7 +94,7 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const offset = Math.max(0, -r.top);
   const previousScroll = page.scrollTop || 0;
   const restore = save(page, ['position','top','left','width','height','minHeight','overflow','transformOrigin']);
-  const origin = visual?.origin || originOf(page, r, offset);
+  const origin = depth ? (visual?.origin || originOf(page, r, offset)) : null;
   page.classList.add('page-out');
   if (depth) page.classList.add('page-depth');
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
