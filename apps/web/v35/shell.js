@@ -2948,7 +2948,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openAnimeRef(ref, { title = null, cover = null, chapter = null, play = false } = {}) {
     const rawId = ref.slice('anime:'.length);
     const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
-    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
+    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا الأنمي'); }
     closeSheet();
     if (root.dataset.section !== 'anime') {
       writeSection('anime');
@@ -2965,7 +2965,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
   function openCinemaRef(ref, { title = null, cover = null, playAt = null, type = null } = {}) {
     const [, id, season] = ref.split(':');
-    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
+    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا العمل'); }
     closeSheet();
     if (root.dataset.section !== 'cinema') {
       writeSection('cinema');
@@ -3856,6 +3856,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   let unifiedReturn = null;
   const unifiedSurfaces = () => ({ discover: unifiedDiscover, view: unifiedView, search: unifiedSearch });
+  function resumeRejectedUnifiedOrigin() {
+    if (!unifiedReturn) return;
+    unifiedSurfaces()[unifiedReturn.kind]?.resume?.();
+    unifiedReturn = null;
+  }
   /** Keep subpage DOM + its scroll when entering a work, instead of revealing Home beneath it. */
   function suspendUnifiedOrigin() {
     if (root.dataset.content !== 'unified' || unifiedReturn) return false;
@@ -3911,12 +3916,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function genreArt(type, en) {
     const key = `${type}:${en}`;
     if (genrePins.has(key)) return Promise.resolve(genrePins.get(key));
-    if (!genreArtCache.has(key)) {
+    const cached = genreArtCache.get(key);
+    if (cached?.promise) return cached.promise;
+    if (cached?.retryAt > Date.now()) return Promise.resolve(null);
+    {
       const pick = (list, field) => {
         for (const x of list ?? []) { const src = x?.[field]; if (src && !genreArtUsed.has(src)) { genreArtUsed.add(src); return src; } }
         return null;
       };
-      genreArtCache.set(key, (async () => {
+      const entry = {};
+      entry.promise = (async () => {
         if (type === 'anime') {
           const { searchAnime } = await import('../lib/anime-meta.js');
           return pick((await searchAnime({ genre: en }))?.items, 'banner');
@@ -3939,9 +3948,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
         const media = (await res.json())?.data?.Page?.media ?? [];
         return pick(media.map((m) => ({ src: m.bannerImage })), 'src') ?? pick(media.map((m) => ({ src: m.coverImage?.large })), 'src');
-      })().then((src) => pinGenre(key, src), () => null));
+      })().then((src) => pinGenre(key, src), () => null).then((src) => {
+        if (genreArtCache.get(key) === entry) {
+          if (src) genreArtCache.delete(key);
+          else { entry.promise = null; entry.retryAt = Date.now() + 30_000; }
+        }
+        return src;
+      });
+      genreArtCache.set(key, entry);
+      return entry.promise;
     }
-    return genreArtCache.get(key);
   }
   const unifiedDiscover = createUnifiedDiscover({
     el, glyph,
@@ -3949,13 +3965,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     mount: (node) => root.append(node),
     genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
       .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genrePins.get(`${type}:${en}`) ?? pinGenre(`${type}:${en}`, genreCover(type, en, used)) }))(new Set())),
-    results: async (type, genre) => {
+    results: async (type, genre, page = 1) => {
       if (type === 'anime') {
         const { searchAnime } = await import('../lib/anime-meta.js');
-        return (await searchAnime(genre ? { genre } : {}))?.items ?? [];
+        return searchAnime({ ...(genre ? { genre } : {}), page });
       }
       if (type === 'manga') {
-        return (await (genre ? fetchMangaGenre(genre) : fetchMangaPopular())).items;
+        const result = await (genre ? fetchMangaGenre(genre, { page }) : fetchMangaPopular({ page }));
+        return { items: result.items, hasNext: result.hasNextPage };
       }
       const { catalog } = await import('../lib/cinema-meta.js');
       const [movie, series] = await Promise.all([catalog('movie', 'top', { genre: genre ?? '' }), catalog('series', 'top', { genre: genre ?? '' })]);
@@ -5117,18 +5134,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // في الذاكرة بعناصرها المحمّلة وفلاترها؛ كان showPage يصعد للأعلى دائمًا فيضيع المكان)
   const scrollOf = new Map();
   let scrollRestore = 0;
+  let scrollRestoreCleanup = null;
   function restoreScroll(top) {
+    scrollRestoreCleanup?.();
     const run = ++scrollRestore;
     window.scrollTo({ top, behavior: 'instant' });
     // صفحة تُرسم بعد الإظهار (المكتبة، الرئيسية): نعيد المحاولة حين يكتمل طولها، ما لم يلمس المستخدم
     let touched = false;
-    const stop = () => { touched = true; };
+    const timers = [];
+    const cleanup = () => {
+      removeEventListener('touchstart', stop);
+      removeEventListener('wheel', stop);
+      for (const timer of timers) clearTimeout(timer);
+      if (scrollRestoreCleanup === cleanup) scrollRestoreCleanup = null;
+    };
+    const stop = () => { touched = true; cleanup(); };
+    scrollRestoreCleanup = cleanup;
     addEventListener('touchstart', stop, { once: true, passive: true });
     addEventListener('wheel', stop, { once: true, passive: true });
-    for (const wait of [0, 120, 400]) setTimeout(() => {
-      if (run !== scrollRestore || touched || Math.abs(window.scrollY - top) < 2) return;
-      window.scrollTo({ top, behavior: 'instant' });
-    }, wait);
+    for (const wait of [0, 120, 400]) timers.push(setTimeout(() => {
+      if (run === scrollRestore && !touched && Math.abs(window.scrollY - top) >= 2) window.scrollTo({ top, behavior: 'instant' });
+      if (wait === 400) cleanup();
+    }, wait));
   }
   let pageMotionRequest = 0;
   const WORK_PAGES = new Set(['detail', 'anime', 'cinema']);
@@ -5244,7 +5271,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintRail();
     // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
-    else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
+    else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
@@ -6426,7 +6453,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (shared) {
       shared.hidden = !all;
       // خارج الرئيسية (الإعدادات): البناء يؤجَّل لحين الرجوع إليها (showPage يرسمها)، فلا يثقل اللمسة
-      if (all && currentPage() === 'home') renderAllHome();
+      if (all && currentPage() === 'home') renderAllHome({ ifChanged: true });
     }
   }
 
@@ -7193,6 +7220,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openProfile,
     handleBack,
     pause() {
+      scrollRestore++; scrollRestoreCleanup?.();
       savedScroll = window.scrollY;
       majlis.hide();
       clearInterval(state.heroTimer);
@@ -7214,6 +7242,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      scrollRestore++; scrollRestoreCleanup?.();
       mangaDepth?.destroy();
       ++pageMotionRequest;
       finishPageMotion();

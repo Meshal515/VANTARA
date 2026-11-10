@@ -56,3 +56,14 @@ describe('البحث الموحد', () => {
     expect(page.querySelector('.us-sec[data-group="manga"] .us-none').textContent).toBe('لا نتائج');
   });
 });
+
+it('shows a placeholder and keeps the trending row usable when its cover fails', () => {
+  const opened=[];
+  const s=createUnifiedSearch({el,glyph:()=>'<svg></svg>',engines:{},open:(item,group)=>opened.push([item.id,group]),card:()=>({title:'Work',cover:'/missing'}),mount:n=>document.body.append(n),trending:()=>[{item:{id:7},group:'anime'}]});
+  s.open();
+  const row=[...document.querySelectorAll('.us-page .us-rank-row')].at(-1);
+  row.querySelector('img').dispatchEvent(new document.defaultView.Event('error'));
+  expect(row.querySelector('.us-art-missing')).not.toBeNull();
+  expect(row.querySelector('img')).toBeNull();row.click();expect(opened).toEqual([[7,'anime']]);
+  s.close();
+});
