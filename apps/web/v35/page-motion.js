@@ -179,12 +179,20 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
 export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
-  const restore = save(node, ['opacity']);
+  const priorOpacity = node.style.opacity;
+  const priorTransition = node.style.transition;
+  // .uv-page has its own 400ms CSS opacity transition. Do not let a second
+  // transition replay from zero when the Web Animation is cancelled/restored.
+  node.style.transition = 'none';
   // Stage the restored modal as transparent within the SAME JS turn as resume().
   if (enter) node.style.opacity = '0';
   const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
   track(node, node.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
-    restore();
+    node.style.opacity = priorOpacity;
+    // Commit the final opacity before enabling CSS transitions again.
+    // Otherwise a finished animation visibly jumps into another 400ms fade.
+    void node.offsetWidth;
+    node.style.transition = priorTransition;
     onComplete();
   });
 }
