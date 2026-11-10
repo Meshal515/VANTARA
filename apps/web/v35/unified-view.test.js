@@ -239,6 +239,19 @@ describe('unified latest updates are verified releases, not catalogue listings',
       expect(modal.textContent).toContain('الفصل 125 +2');
       expect(modal.textContent).toContain('رُصد قبل ساعة');
       expect(modal.textContent).toContain('م2 ح7');
+      // On a 3-column Android grid, units and timestamps must be independent
+      // elements: the old single-line .uv-t2 hid the relative time with ellipsis.
+      const mangaCard = modal.querySelector('[data-update-key="manga:ext:recorded"]');
+      expect([...mangaCard.querySelector('.uv-update-meta').children].map(node => node.className))
+        .toEqual(['uv-update-unit', 'uv-update-when']);
+      expect(mangaCard.querySelector('.uv-update-unit').textContent).toBe('الفصل 125 +2');
+      expect(mangaCard.querySelector('time.uv-update-when').textContent).toBe('رُصد قبل ساعة');
+      const seriesCard = modal.querySelector('[data-update-key="series:tt02"]');
+      expect(seriesCard.querySelector('.uv-update-unit').textContent).toBe('م2 ح7');
+      expect(seriesCard.querySelector('time.uv-update-when').textContent).toBe('قبل 2 س');
+      const movieCard = modal.querySelector('[data-update-key="movie:tt03"]');
+      expect(movieCard.querySelector('.uv-update-unit').textContent).toBe('فيلم');
+      expect(movieCard.querySelector('time.uv-update-when').textContent).toBe('رُصد قبل 30 دقيقة');
       expect(modal.textContent).toContain('MOVIE');
       expect(modal.textContent).not.toContain('CATALOGUE ONLY');
       const movie=[...modal.querySelectorAll('.uv-tabs button')].find(b=>b.textContent==='الأفلام');
