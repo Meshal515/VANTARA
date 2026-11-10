@@ -242,15 +242,6 @@ html,
 .v35 .page.active {
   display: block;
 }
-/* A leaving work page must remain painted throughout the return handoff.
-   The nav removes .active synchronously; without this rule .page {display:none}
-   exposed Home through the fading unified Updates modal. */
-.v35 .page.page-out {
-  display: block;
-  z-index: 70; /* below unified modal (80), above the underlying Home */
-  background: var(--bg, #09080c);
-  pointer-events: none;
-}
 /* الصفحتان هما طرفا حركة الطبقات نفسها، بحجم الشاشة وتحت الشريط. */
 .v35 .page.page-leaving,
 .v35 .page.section-page-layer {
@@ -3733,6 +3724,11 @@ html[data-motion='off'] .v35 .dock-scrim {
   z-index: 5;
   pointer-events: none;
   contain: layout paint;
+}
+/* The saved unified subpage crossfades above this held, opaque work surface.
+   The ordinary outgoing-page stacking and animation stay untouched. */
+.v35 .page.page-out.page-held {
+  background: var(--bg, #09080c);
 }
 /* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
 .v35 .page.page-in {
