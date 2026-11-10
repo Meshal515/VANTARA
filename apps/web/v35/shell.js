@@ -3916,12 +3916,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function genreArt(type, en) {
     const key = `${type}:${en}`;
     if (genrePins.has(key)) return Promise.resolve(genrePins.get(key));
-    if (!genreArtCache.has(key)) {
+    const cached = genreArtCache.get(key);
+    if (cached?.promise) return cached.promise;
+    if (cached?.retryAt > Date.now()) return Promise.resolve(null);
+    {
       const pick = (list, field) => {
         for (const x of list ?? []) { const src = x?.[field]; if (src && !genreArtUsed.has(src)) { genreArtUsed.add(src); return src; } }
         return null;
       };
-      genreArtCache.set(key, (async () => {
+      const entry = {};
+      entry.promise = (async () => {
         if (type === 'anime') {
           const { searchAnime } = await import('../lib/anime-meta.js');
           return pick((await searchAnime({ genre: en }))?.items, 'banner');
@@ -3944,9 +3948,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
         const media = (await res.json())?.data?.Page?.media ?? [];
         return pick(media.map((m) => ({ src: m.bannerImage })), 'src') ?? pick(media.map((m) => ({ src: m.coverImage?.large })), 'src');
-      })().then((src) => pinGenre(key, src), () => null));
+      })().then((src) => pinGenre(key, src), () => null).then((src) => {
+        if (genreArtCache.get(key) === entry) {
+          if (src) genreArtCache.delete(key);
+          else { entry.promise = null; entry.retryAt = Date.now() + 30_000; }
+        }
+        return src;
+      });
+      genreArtCache.set(key, entry);
+      return entry.promise;
     }
-    return genreArtCache.get(key);
   }
   const unifiedDiscover = createUnifiedDiscover({
     el, glyph,
