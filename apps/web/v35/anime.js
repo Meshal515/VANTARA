@@ -578,8 +578,10 @@ export function createAnime(deps) {
         target.classList.add('flash');
         setTimeout(() => target.classList.remove('flash'), 2600);
       }
-      if (target && focusEpisodes) target.scrollIntoView({ block: 'center' });
-      else if (window.scrollY > 0 && !userScrolled) window.scrollTo?.({ top: 0, behavior: 'instant' });
+      if (deps.currentPage() === 'anime') {
+        if (target && focusEpisodes) target.scrollIntoView({ block: 'center' });
+        else if (window.scrollY > 0 && !userScrolled) window.scrollTo?.({ top: 0, behavior: 'instant' });
+      }
       // عناوين الحلقات من MAL: تُكتب في صفوفها، لا تُعاد القائمة
       void fetchMalEpisodes(full.idMal)
         .then(({ titles }) => {

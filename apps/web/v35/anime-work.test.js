@@ -264,3 +264,20 @@ it('updates the mounted work diagnostics without moving the card or clearing eng
   expect(root.querySelector('#animeSources').hidden).toBe(true);
   expect(root.querySelector('.wl-stage3d')).toBe(cover);
 });
+
+it('does not move the origin scroll when anime metadata arrives after back', async () => {
+  const { anime, deps, window }=setup();
+  let resolveDetail, current='anime';
+  deps.currentPage=()=>current;
+  const originalFetch=globalThis.fetch;
+  vi.stubGlobal('fetch',vi.fn((url,init)=>{
+    if(String(url).includes('graphql.anilist.co') && JSON.parse(init.body).query.includes('Media(id:'))
+      return new Promise(resolve=>{resolveDetail=()=>resolve({ok:true,json:async()=>({data:{Media:DETAIL}})});});
+    return originalFetch(url,init);
+  }));
+  const scroll=vi.fn();window.scrollTo=scroll;
+  const opening=anime.openAnime({id:DETAIL.id,title:'Anime'});
+  current='home';window.scrollY=1200;scroll.mockClear();
+  resolveDetail();await opening;
+  expect(scroll).not.toHaveBeenCalled();
+});

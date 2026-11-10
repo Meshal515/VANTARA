@@ -2948,7 +2948,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openAnimeRef(ref, { title = null, cover = null, chapter = null, play = false } = {}) {
     const rawId = ref.slice('anime:'.length);
     const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
-    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
+    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا الأنمي'); }
     closeSheet();
     if (root.dataset.section !== 'anime') {
       writeSection('anime');
@@ -2965,7 +2965,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
   function openCinemaRef(ref, { title = null, cover = null, playAt = null, type = null } = {}) {
     const [, id, season] = ref.split(':');
-    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
+    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا العمل'); }
     closeSheet();
     if (root.dataset.section !== 'cinema') {
       writeSection('cinema');
@@ -3856,6 +3856,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   let unifiedReturn = null;
   const unifiedSurfaces = () => ({ discover: unifiedDiscover, view: unifiedView, search: unifiedSearch });
+  function resumeRejectedUnifiedOrigin() {
+    if (!unifiedReturn) return;
+    unifiedSurfaces()[unifiedReturn.kind]?.resume?.();
+    unifiedReturn = null;
+  }
   /** Keep subpage DOM + its scroll when entering a work, instead of revealing Home beneath it. */
   function suspendUnifiedOrigin() {
     if (root.dataset.content !== 'unified' || unifiedReturn) return false;

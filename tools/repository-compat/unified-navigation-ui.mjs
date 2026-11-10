@@ -16,7 +16,7 @@ const browser=await chromium.launch({executablePath:process.env.VANTARA_CHROMIUM
 const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
 await page.route('**/*',async route=>{
  const u=route.request().url();if(u.startsWith('http://127.0.0.1:'))return route.continue();
- if(u.includes('graphql.anilist.co'))return route.fulfill({json:{data:{Media:{id:120377,type:'ANIME',title:{romaji:'قصة الاختبار'},coverImage:{large:origin+'/qa-poster'},bannerImage:origin+'/qa-poster',format:'TV',status:'FINISHED',episodes:148,duration:24,genres:['Action'],description:'قصة الاختبار',relations:{edges:[]},characters:{edges:[]},recommendations:{nodes:[]},streamingEpisodes:[]}}}});
+ if(u.includes('graphql.anilist.co'))return route.fulfill({json:{data:{Page:{media:[{id:0,title:{romaji:'Invalid QA'},coverImage:{large:origin+'/qa-poster'}},{id:120377,title:{romaji:'Valid QA'},coverImage:{large:origin+'/qa-poster'}}],pageInfo:{hasNextPage:false}},Media:{id:120377,type:'ANIME',title:{romaji:'قصة الاختبار'},coverImage:{large:origin+'/qa-poster'},bannerImage:origin+'/qa-poster',format:'TV',status:'FINISHED',episodes:148,duration:24,genres:['Action'],description:'قصة الاختبار',relations:{edges:[]},characters:{edges:[]},recommendations:{nodes:[]},streamingEpisodes:[]}}}});
  if(u.includes('v3-cinemeta.strem.io/meta/'))return route.fulfill({json:{meta:{id:'tt12590266',type:'movie',name:'قصة الاختبار',poster:origin+'/qa-poster',background:origin+'/qa-poster',description:'قصة الاختبار',runtime:'24 min',genres:['Action']}}});
  return route.abort();
 });
@@ -34,13 +34,35 @@ try {
    for (const delay of [0,50,500]) {
      const card=page.locator('.uv-rv').filter({hasText:name}).first(); await card.click();
      if(delay) await page.waitForTimeout(delay);
-     await page.evaluate(()=>window.__shell.handleBack());
+     if (delay === 500) await page.locator('.page.active [data-act="goBack"], .page.active [data-act="backFromDetail"]').first().click();
+     else await page.evaluate(()=>window.__shell.handleBack());
      await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
      await page.waitForTimeout(700);
      const state=await page.evaluate(()=>({active:document.querySelector('.page.active')?.id, transient:document.querySelectorAll('.page-out,.page-in').length}));
      if(state.active!=='home'||state.transient) throw Error(name+' '+JSON.stringify(state));
    }
  }
+ await page.locator('.uv-door').filter({hasText:'كل الأعمال'}).click();
+ await page.locator('.uv-page .uv-po').filter({hasText:'Invalid QA'}).click();
+ const invalid=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));
+ if(invalid.pointerEvents==='none'||invalid.visible==='hidden') throw Error('Invalid work left its origin suspended: '+JSON.stringify(invalid));
+ await page.getByRole('button',{name:'Valid QA',exact:true}).click();
+ await page.waitForSelector('#anime.active');
+ await page.evaluate(()=>window.__shell.handleBack());
+ await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
+ const restored=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));
+ if(restored.pointerEvents==='none'||restored.visible==='hidden') throw Error('Valid work did not restore origin: '+JSON.stringify(restored));
+ await page.evaluate(()=>window.__shell.handleBack());
+ await page.waitForFunction(()=>!document.querySelector('.uv-page'));
+ const scrollState=await page.evaluate(()=>{
+   const body=document.querySelector('.uv-body'); body.style.minHeight='4000px';
+   window.scrollTo(0,1800); const initial=window.scrollY;
+   const tabs=[...document.querySelectorAll('.uv > .uv-tabs button')];
+   tabs.find(x=>x.textContent==='المانجا').click();
+   tabs.find(x=>x.textContent==='الكل').click();
+   return {same:document.querySelector('.uv-body')===body,before:initial,after:window.scrollY};
+ });
+ if (!scrollState.same || Math.abs(scrollState.after-scrollState.before)>1) throw Error('Filter state was lost: '+JSON.stringify(scrollState));
  if (errors.length) throw Error('JavaScript errors: '+JSON.stringify(errors));
- console.log('PASS: unified recent cards, 3 types, immediate/50ms/500ms back, 9 cycles');
+ console.log('PASS: 9 recent-card back cycles; invalid work rejected and valid work restores origin');
 } finally {await browser.close();server.close();}
