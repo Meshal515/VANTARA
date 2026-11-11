@@ -5,6 +5,19 @@ const MS = 400;
 const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 const EASE_IN = EASE;
 const DEPTH = 0.985;
+// The marquee returns through the opaque work background, not through a
+// simultaneous 50/50 blend of the poster and unified update cards.
+const MARQUEE_HANDOFF_SPLIT = 0.38;
+const marqueeExitFrames = [
+  { opacity: 1, offset: 0 },
+  { opacity: 0, offset: MARQUEE_HANDOFF_SPLIT },
+  { opacity: 0, offset: 1 },
+];
+const marqueeEnterFrames = [
+  { opacity: 0, offset: 0 },
+  { opacity: 0, offset: MARQUEE_HANDOFF_SPLIT },
+  { opacity: 1, offset: 1 },
+];
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -80,12 +93,48 @@ function captureFixed(page, r) {
     };
   };
 }
-export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document, onComplete = () => {} } = {}) {
+/** Keep the wide-strip hero at its exact viewport pixels while converting the
+ * departing cinema page to a fixed compositor surface. No other cinema looks
+ * or anime/manga work pages use this path. */
+function freezeMarqueeFrame(page) {
+  const detail = page.querySelector?.(".cn-detail[data-style='marquee']");
+  const art = detail?.querySelector?.('.cn-detail-art');
+  if (!art?.getBoundingClientRect) return null;
+  const image = art.querySelector?.('.cn-img');
+  const before = art.getBoundingClientRect();
+  const priorTop = detail.style.top;
+  const priorImageTransform = detail.style.getPropertyValue('--cn-exit-img-transform');
+  const computedImageTransform = image ? globalThis.getComputedStyle?.(image)?.transform : null;
+  detail.style.setProperty('--cn-exit-img-transform', computedImageTransform || 'none');
+  return {
+    detail,
+    image,
+    stabilize() {
+      // pageOut changes the containing block and transfers root scroll into the
+      // fixed page. Offset that resulting layout delta before the first frame.
+      const after = art.getBoundingClientRect();
+      const delta = before.top - after.top;
+      if (Number.isFinite(delta) && Math.abs(delta) > 0.25) {
+        detail.style.top = `${(parseFloat(priorTop) || 0) + delta}px`;
+      }
+    },
+    restore() {
+      detail.style.top = priorTop;
+      if (priorImageTransform) detail.style.setProperty('--cn-exit-img-transform', priorImageTransform);
+      else detail.style.removeProperty('--cn-exit-img-transform');
+    },
+  };
+}
+export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document, onComplete = () => {}, marqueeExit = false } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) { onComplete(); return; }
   // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
   if (page.id === 'cinema' || hold) depth = false;
-  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
+  const marquee = marqueeExit && page.id === 'cinema' ? freezeMarqueeFrame(page) : null;
+  // This image's CSS scroll animation is superseded by the sampled exit
+  // matrix; do not pause it and later attempt to restart a canceled animation.
+  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a =>
+    a.effect?.target !== page && a.effect?.target !== marquee?.image && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
   const bindFixed = captureFixed(page,r);
@@ -100,10 +149,16 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   if (depth) page.classList.add('page-depth');
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
+  marquee?.stabilize();
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
+  // Animate only marquee contents: the page's opaque black background stays
+  // painted, so the underlying Home cannot ghost through the exit.
+  const marqueeFade = marquee?.detail?.animate?.(marqueeExitFrames, {duration:MS,easing:EASE,fill:'both'});
   const cleanup = () => {
+    marqueeFade?.cancel();
     unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
+    marquee?.restore();
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
     onComplete();
   };
@@ -126,7 +181,7 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const frames = depth
     ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }]
     : [{opacity:visual?.opacity ?? 1},{opacity:0}];
-  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
+  track(page, marqueeFade || page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
 }
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
@@ -153,7 +208,7 @@ function viewportWork(page, doc) {
     if (page.classList.contains('active')) globalThis.scrollTo?.({top:y,behavior:'instant'});
   };
 }
-export function pageIn(page, { depth = false, doc = globalThis.document } = {}) {
+export function pageIn(page, { depth = false, doc = globalThis.document, throughBlack = false } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   // Cinema's wide hero must not be put in a temporary fixed, scrollable viewport:
@@ -167,7 +222,9 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
     page.classList.add('page-depth');
   }
   page.classList.add('page-in');
-  const frames = depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}] : [{opacity:0},{opacity:1}];
+  const frames = throughBlack && !depth ? marqueeEnterFrames
+    : depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}]
+    : [{opacity:0},{opacity:1}];
   track(page, page.animate(frames,{duration:MS,easing:EASE,fill:'both'}), () => {
     page.classList.remove('page-in','page-depth'); restore(); restoreViewport();
   });
@@ -178,7 +235,7 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
  * subpage to/from the work with the EXISTING page-motion timing and easing.
  * No clone, independently programmed curve, or reveal of the underlying Home.
  */
-export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
+export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}, throughBlack = false} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
   const priorOpacity = node.style.opacity ?? '';
@@ -188,7 +245,7 @@ export function handoffSurface(node, {enter = false, doc = globalThis.document, 
   node.style.transition = 'none';
   // Stage the restored modal as transparent within the SAME JS turn as resume().
   if (enter) node.style.opacity = '0';
-  const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
+  const frames = enter ? (throughBlack ? marqueeEnterFrames : [{opacity:0},{opacity:1}]) : [{opacity:1},{opacity:0}];
   track(node, node.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
     node.style.opacity = priorOpacity;
     // Commit the final opacity before enabling CSS transitions again.

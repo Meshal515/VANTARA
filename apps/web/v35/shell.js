@@ -5189,6 +5189,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
+    // Marquee is the only cinema style with a top-offset wide strip and a
+    // root-scroll-driven image. Do not change any other cinema work style.
+    const marqueeExit = from === 'cinema'
+      && Boolean(outgoing?.querySelector?.(".cn-detail[data-style='marquee']"));
     // Keep the outgoing work's existing pixels stable throughout its fade.
     // Heavy Home updates must not reflow the compositor's source.
     const deferHomePaint = id === 'home' && WORK_PAGES.has(from)
@@ -5206,7 +5210,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     finishPageMotion();
     const releaseHeldPage = outgoing ? pageOut(outgoing, {
       depth: WORK_PAGES.has(from), hold: unifiedRestore, visual,
-      scrollTop: sourceScroll, onComplete: onWorkExit,
+      scrollTop: sourceScroll, onComplete: onWorkExit, marqueeExit,
     }) : null;
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
@@ -5295,7 +5299,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
     if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
-        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
+        if (request === pageMotionRequest && currentPage() === id) {
+          pageMotionIn(q(id), { depth: WORK_PAGES.has(id), throughBlack: marqueeExit && MAIN_PAGES.includes(id) });
+        }
       };
       if (WORK_PAGES.has(id)) queueMicrotask(enter);
       else enter();
@@ -5402,6 +5408,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const prev = state.stack.pop();
     if (prev) {
+      const marqueeReturn = currentPage() === 'cinema'
+        && Boolean(q('cinema')?.querySelector?.(".cn-detail[data-style='marquee']"));
       const releaseHeldPage = showPage(prev, { push: false });
       if (unifiedReturn && prev === unifiedReturn.page && root.dataset.content === 'unified') {
         const surface = unifiedSurfaces()[unifiedReturn.kind];
@@ -5410,6 +5418,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (surface?.resume?.()) {
           handoffSurface(surface.motionNode?.(), {
             enter: true,
+            throughBlack: marqueeReturn,
             onComplete: () => releaseHeldPage?.(),
           });
         } else {
