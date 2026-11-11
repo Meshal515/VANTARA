@@ -256,11 +256,19 @@ describe('cinema wide-strip-only pixel-stable Back', () => {
     movie.id = 'cinema';
     const img = {};
     const props = new Map();
+    const fades = [];
+    const fade = vi.fn((frames, opts) => {
+      const animation = {frames,opts,cancel:vi.fn(),finished:new Promise(()=>{})};
+      fades.push(animation);
+      return animation;
+    });
     const art = {
       getBoundingClientRect: () => ({top: movie.style.position === 'fixed' ? 144 : 92}),
       querySelector: () => img,
+      animate: fade,
     };
-    const fades = [];
+    const body = {animate: fade};
+    const bar = {animate: fade};
     const detail = {
       style: {
         top: '',
@@ -268,12 +276,12 @@ describe('cinema wide-strip-only pixel-stable Back', () => {
         setProperty: (k,v) => props.set(k,v),
         removeProperty: (k) => props.delete(k),
       },
-      querySelector: () => art,
-      animate: vi.fn((frames, opts) => {
-        const animation = {frames,opts,cancel:vi.fn(),finished:new Promise(()=>{})};
-        fades.push(animation);
-        return animation;
-      }),
+      querySelector: (selector) => ({
+        '.cn-detail-art': art,
+        '.cn-detail-body': body,
+        '.cn-detail-bar': bar,
+      })[selector] || null,
+      animate: vi.fn(),
     };
     movie.querySelector = () => detail;
     movie.querySelectorAll = () => [];
@@ -281,14 +289,20 @@ describe('cinema wide-strip-only pixel-stable Back', () => {
     const release = pageOut(movie,{hold:true,marqueeExit:true,doc:doc()});
     expect(detail.style.top).toBe('-52px');
     expect(props.get('--cn-exit-img-transform')).toBe('matrix(1, 0, 0, 1, 0, 18)');
+    expect(fades).toHaveLength(3);
     expect(fades[0].frames).toEqual([
       {opacity:1,offset:0},{opacity:0,offset:0.38},{opacity:0,offset:1},
     ]);
+    expect(fades[1].frames).toEqual(fades[0].frames);
+    expect(fades[2].frames).toEqual([
+      {opacity:1,offset:0},{opacity:1,offset:0.7},{opacity:0,offset:1},
+    ]);
+    expect(detail.animate).not.toHaveBeenCalled(); // do not fade Back controls with the entire page
     expect(movie.animate).not.toHaveBeenCalled();
     release();
     expect(detail.style.top).toBe('');
     expect(props.has('--cn-exit-img-transform')).toBe(false);
-    expect(fades[0].cancel).toHaveBeenCalledTimes(1);
+    for (const animation of fades) expect(animation.cancel).toHaveBeenCalledTimes(1);
   });
 
   it('does not use the marquee exit for another cinema work style', () => {
@@ -315,6 +329,8 @@ describe('cinema wide-strip-only pixel-stable Back', () => {
     const css=readFileSync(new URL('./cinema.css',import.meta.url),'utf8');
     expect(css).toMatch(/\.cn-detail\[data-style='marquee'\] \.cn-detail-art\s*\{\s*aspect-ratio:\s*2\.39\s*\/\s*1/);
     expect(css).toContain("#cinema.page-out .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img");
+    expect(css).toContain(".v35:has(#cinema.page-out .cn-detail[data-style='marquee']) #home");
+    expect(css).not.toContain(".v35:has(#cinema.page-out) #home");
     const shell=readFileSync(new URL('./shell.js',import.meta.url),'utf8');
     expect(shell).toContain("const marqueeExit = from === 'cinema'");
     expect(shell).toContain("throughBlack: marqueeReturn");
