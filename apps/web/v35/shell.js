@@ -63,7 +63,7 @@ import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, motionReduced, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -5189,8 +5189,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
+    // Anime already relies on one 400ms compositor lifecycle. The unified home
+    // used to rebuild synchronously on Back, during that very fade (cinema and
+    // manga especially), stealing frames and exposing the dock. Refresh only
+    // after the exiting page has really settled; there is no second timer.
+    const needsUnifiedHomeRefresh = id === 'home' && from !== 'home' && root.dataset.content === 'unified';
+    const deferUnifiedHomeRefresh = needsUnifiedHomeRefresh && Boolean(outgoing?.animate) && !motionReduced();
+    const refreshUnifiedHomeOnce = () => {
+      if (deferUnifiedHomeRefresh && request === pageMotionRequest && currentPage() === id)
+        renderAllHome({ ifChanged: true });
+    };
     finishPageMotion();
-    const releaseHeldPage = outgoing ? pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll }) : null;
+    const releaseHeldPage = outgoing ? pageOut(outgoing, {
+      depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll,
+      onComplete: refreshUnifiedHomeOnce,
+    }) : null;
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     playDockMotion();
@@ -5231,7 +5244,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
     // الرئيسية الموحدة لا تُبنى من جديد عند الرجوع إلا إن تغيّرت بياناتها (كانت تُبنى كل مرة: تضيع مواضع
     // الشرائط وتُفكّ الصور من جديد، فيبدو التطبيق كأنه يعيد التحميل)
-    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') afterDock(() => renderAllHome({ ifChanged: true }));
+    if (needsUnifiedHomeRefresh && !deferUnifiedHomeRefresh) afterDock(() => renderAllHome({ ifChanged: true }));
     if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch && root.dataset.content !== 'unified') {
       afterDock(() => {
         if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
