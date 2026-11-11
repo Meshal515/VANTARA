@@ -760,6 +760,11 @@ html,
 .v35 .dock[hidden] {
   display: none;
 }
+/* Only the exiting work or a unified overlay owns the frame during Back. */
+.v35:has(#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page) .dock {
+  visibility: hidden;
+  pointer-events: none;
+}
 /* لوحة المفاتيح تقصّر الشاشة: الشريط مثبّت في مكانه أسفل الشاشة الكاملة (تحت اللوحة) لا يصعد فوقها */
 .v35 .dock {
   translate: 0 var(--kb-shift, 0px);

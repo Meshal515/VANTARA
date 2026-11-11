@@ -77,6 +77,26 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
 });
 
 
+describe('work exit lifecycle', () => {
+  it('invokes the same exit completion exactly once after interruption', () => {
+    const work = page();
+    const done = vi.fn();
+    pageOut(work, { doc: doc(), onComplete: done });
+    expect(done).not.toHaveBeenCalled();
+    finishPageMotion();
+    expect(done).toHaveBeenCalledTimes(1);
+    finishPageMotion();
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+  it('completes immediately with reduced motion', () => {
+    const work = page();
+    const done = vi.fn();
+    pageOut(work, { doc: doc('off'), onComplete: done });
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(work.animate).not.toHaveBeenCalled();
+  });
+});
+
 describe('cinema detail jump regression', () => {
   it('Dexter and marquee use an in-place fade, never a temporary fixed viewport or scroll restore', () => {
     const movie = page({top: 0, left: 0, width: 390, height: 2400});

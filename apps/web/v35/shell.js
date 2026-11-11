@@ -63,7 +63,7 @@ import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, motionReduced, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -1588,7 +1588,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
     };
     const show = (full, { settled }) => {
-      if (state.current?.id !== work.id || currentPage() === 'reader') return;
+      if (state.current?.id !== work.id || currentPage() !== 'detail') return;
       if (!full._chapters?.length && !settled) return;
       const first = !state.current?._chapters;
       state.current = full;
@@ -1605,7 +1605,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     try {
       const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar' });
-      if (state.current?.id !== work.id) return;
+      if (state.current?.id !== work.id || currentPage() !== 'detail') return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
@@ -5189,8 +5189,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
+    // Keep the outgoing work's existing pixels stable throughout its fade.
+    // Heavy Home updates must not reflow the compositor's source.
+    const deferHomePaint = id === 'home' && WORK_PAGES.has(from)
+      && Boolean(outgoing?.animate) && !motionReduced();
+    const onWorkExit = () => {
+      if (!deferHomePaint || request !== pageMotionRequest || currentPage() !== id) return;
+      if (root.dataset.content === 'unified') renderAllHome({ ifChanged: true });
+      else if (root.dataset.section === 'manga' && !sectionSwitch) {
+        for (const snapshot of homeSnapshots.values()) snapshot.refresh();
+        refreshFriendsHero();
+        renderHome();
+        void refreshHomeUpdates();
+      }
+    };
     finishPageMotion();
-    const releaseHeldPage = outgoing ? pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll }) : null;
+    const releaseHeldPage = outgoing ? pageOut(outgoing, {
+      depth: WORK_PAGES.has(from), hold: unifiedRestore, visual,
+      scrollTop: sourceScroll, onComplete: onWorkExit,
+    }) : null;
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     q('bottomNav').hidden = !MAIN_PAGES.includes(id);
     playDockMotion();
@@ -5204,12 +5221,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       else n.removeAttribute('aria-current');
     });
     if (!dockFirst) dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
-    q('detailTop').classList.remove('collapsed');
+    if (id === 'detail') q('detailTop').classList.remove('collapsed');
     if (id !== 'detail') {
       closeDetailMenu();
       exitMarkMode();
     }
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
+    if (from === 'cinema' && id !== 'cinema') cinema.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
     // خلل «إعادة رسم الشريط السفلي» (8 نوفمبر): رسم الصفحة الثقيلة (40–110ms على جوال متوسط) كان يجري في
@@ -5231,8 +5249,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
     // الرئيسية الموحدة لا تُبنى من جديد عند الرجوع إلا إن تغيّرت بياناتها (كانت تُبنى كل مرة: تضيع مواضع
     // الشرائط وتُفكّ الصور من جديد، فيبدو التطبيق كأنه يعيد التحميل)
-    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') afterDock(() => renderAllHome({ ifChanged: true }));
-    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch && root.dataset.content !== 'unified') {
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified' && !deferHomePaint) afterDock(() => renderAllHome({ ifChanged: true }));
+    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch && root.dataset.content !== 'unified' && !deferHomePaint) {
       afterDock(() => {
         if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
         void refreshHomeUpdates();

@@ -568,7 +568,7 @@
   }
   /* زر الرجوع ثابت مستقل عن طبقة الصورة المتحركة. لا نترك حاويته
      pointer-events:none ثم نطلب من الأبناء إصلاح اللمس داخل WebView. */
-  .v35 #cinema.active .cn-detail-bar {
+  .v35 #cinema:is(.active,.page-out) .cn-detail-bar {
     position: fixed;
     inset-inline: 0;
     top: 0;

@@ -929,53 +929,53 @@
  * Each look has its own spatial mechanic. No layout properties are animated;
  * all transforms are compositor-friendly and scoped to the active detail page.
  */
-.v35 #detail.mw.active[data-scroll-depth='on'] {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'] {
   --mw-scroll-depth: 0;
 }
 /* الصفحة: غلاف يتراجع داخل العمق، والنص يبقى واضحًا ثابت الموضع. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='page'] .mw-head {
   perspective: 900px;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head .mw-cover {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='page'] .mw-head .mw-cover {
   transform: translate3d(0, calc(var(--mw-scroll-depth) * -18px), calc(var(--mw-scroll-depth) * -220px))
     rotateY(calc(var(--mw-scroll-depth) * -10deg));
   backface-visibility: hidden;
   will-change: transform;
 }
 /* المعرض: الغلاف يميل للخلف كصفحة في مساحة ثلاثية الأبعاد. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='gallery'] .mw-stage {
   perspective: 1000px;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage .mw-cover {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='gallery'] .mw-stage .mw-cover {
   transform: translate3d(0, calc(var(--mw-scroll-depth) * -22px), calc(var(--mw-scroll-depth) * -175px))
     rotateX(calc(var(--mw-scroll-depth) * 13deg));
   backface-visibility: hidden;
   will-change: transform;
 }
 /* الملف: البنر يتحرك في مستوى أعمق، والغلاف في المقدمة دون تعتيم الصورة. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-ban > img {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='profile'] .mw-ban > img {
   transform: translate3d(0, calc(var(--mw-scroll-depth) * 22px), 0) scale(1.06);
   will-change: transform;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='profile'] .mw-idrow {
   perspective: 900px;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow .mw-cover {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='profile'] .mw-idrow .mw-cover {
   transform: translate3d(0, calc(var(--mw-scroll-depth) * -12px), calc(var(--mw-scroll-depth) * 90px))
     rotateY(calc(var(--mw-scroll-depth) * 7deg));
   backface-visibility: hidden;
   will-change: transform;
 }
 /* من حيث وقفت: الرقم يقترب تدريجيًا والغلاف يتراجع؛ بقية الأزرار لا تتحرك. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-resume,
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='resume'] .mw-resume,
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='resume'] .mw-ident {
   perspective: 900px;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-big {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='resume'] .mw-big {
   transform: translate3d(0, calc(var(--mw-scroll-depth) * -8px), calc(var(--mw-scroll-depth) * 70px));
   will-change: transform;
 }
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident .mw-cover {
+.v35 #detail.mw:is(.active,.page-out)[data-scroll-depth='on'][data-look='resume'] .mw-ident .mw-cover {
   transform: translate3d(0, 0, calc(var(--mw-scroll-depth) * -130px))
     rotateY(calc(var(--mw-scroll-depth) * -11deg));
   backface-visibility: hidden;
