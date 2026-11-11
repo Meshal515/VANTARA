@@ -49,6 +49,26 @@ describe('page fade (owner: nothing moves; 400ms fade in, the leaving page fades
     expect(a.animate).not.toHaveBeenCalled();
     expect(b.animate).not.toHaveBeenCalled();
   });
+  it('exit completion is driven by the same animation as anime, never an independent home refresh timer', () => {
+    const work = page({top:0,left:0,width:390,height:2000});
+    const settled = vi.fn();
+    pageOut(work, {depth:true,doc:doc(),onComplete:settled});
+    expect(settled).not.toHaveBeenCalled();
+    expect(work.classes.has('page-out')).toBe(true);
+    finishPageMotion();
+    expect(work.classes.has('page-out')).toBe(false);
+    expect(settled).toHaveBeenCalledTimes(1);
+    finishPageMotion();
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+  it('exiting with motion disabled finishes synchronously (no stranded refresh)', () => {
+    const settled = vi.fn();
+    const work = page();
+    pageOut(work, {doc:doc('off'),onComplete:settled});
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(work.animate).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('tabs inside a page (one rule for all of VANTARA)', () => {

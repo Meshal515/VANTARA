@@ -56,10 +56,25 @@ try {
      if(delay) await page.waitForTimeout(delay);
      if (delay === 500) await page.locator('.page.active [data-act="goBack"], .page.active [data-act="backFromDetail"]').first().click();
      else await page.evaluate(()=>window.__shell.handleBack());
+     // The dock may become logically active on Home before the old work exits.
+     // Its computed visibility must still be blocked for every work kind.
+     const duringExit=await page.evaluate(()=>{
+       const departing=document.querySelector('#detail.page-out,#anime.page-out,#cinema.page-out');
+       const dock=document.querySelector('#bottomNav');
+       return {departing:departing?.id??null,display:dock?getComputedStyle(dock).display:null,
+         visibility:dock?getComputedStyle(dock).visibility:null};
+     });
+     if(duringExit.departing && duringExit.display!=='none' && duringExit.visibility!=='hidden')
+       throw Error('Dock leaked through '+name+' exit: '+JSON.stringify(duringExit));
      await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
      await page.waitForTimeout(700);
-     const state=await page.evaluate(()=>({active:document.querySelector('.page.active')?.id, transient:document.querySelectorAll('.page-out,.page-in').length}));
-     if(state.active!=='home'||state.transient) throw Error(name+' '+JSON.stringify(state));
+     const state=await page.evaluate(()=>{
+       const dock=document.querySelector('#bottomNav');
+       return {active:document.querySelector('.page.active')?.id,
+         transient:document.querySelectorAll('.page-out,.page-in').length,
+         dock:dock?getComputedStyle(dock).visibility:null};
+     });
+     if(state.active!=='home'||state.transient||state.dock!=='visible') throw Error(name+' '+JSON.stringify(state));
    }
  }
  const retainedListeners=await page.evaluate(()=>window.__scrollListeners.touchstart.size+window.__scrollListeners.wheel.size);
@@ -108,9 +123,11 @@ try {
  }
  await page.waitForTimeout(120);
  const duringFade=await page.evaluate(()=>({workDisplay:getComputedStyle(document.querySelector('#anime')).display,
-   modalOpacity:Number(getComputedStyle(document.querySelector('.uv-page')).opacity)}));
+   modalOpacity:Number(getComputedStyle(document.querySelector('.uv-page')).opacity),
+   dockVisibility:getComputedStyle(document.querySelector('#bottomNav')).visibility}));
  if(duringFade.workDisplay==='none'||!Number.isFinite(duringFade.modalOpacity)||
-    duringFade.modalOpacity>=0.99) throw Error('Return compositor leaked Home mid-fade: '+JSON.stringify(duringFade));
+    duringFade.modalOpacity>=0.99||duringFade.dockVisibility!=='hidden')
+   throw Error('Return compositor leaked Home or dock mid-fade: '+JSON.stringify(duringFade));
  await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
  const restored=await page.locator('.uv-page').evaluate(n=>({
    pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility,
@@ -121,6 +138,7 @@ try {
    throw Error('Valid work did not return to a fully opaque origin (double fade): '+JSON.stringify(restored));
  await page.evaluate(()=>window.__shell.handleBack());
  await page.waitForFunction(()=>!document.querySelector('.uv-page'));
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('#bottomNav')).visibility==='visible');
  const scrollState=await page.evaluate(()=>{
    const body=document.querySelector('.uv-body'); body.style.minHeight='4000px';
    const rail=body.querySelector('.uv-rail');rail.style.width='100px';rail.scrollLeft=-50;const horizontal=rail.scrollLeft;

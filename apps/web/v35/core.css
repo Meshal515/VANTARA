@@ -760,6 +760,14 @@ html,
 .v35 .dock[hidden] {
   display: none;
 }
+/* The destination tab must not paint through an outgoing work surface or a
+   blocking unified subpage. The DOM that owns the transition is the only
+   source of truth; the dock reappears automatically once that surface exits.
+   This is shared by manga, anime and cinema without changing their motion. */
+.v35:has(#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page) .dock {
+  visibility: hidden;
+  pointer-events: none;
+}
 /* لوحة المفاتيح تقصّر الشاشة: الشريط مثبّت في مكانه أسفل الشاشة الكاملة (تحت اللوحة) لا يصعد فوقها */
 .v35 .dock {
   translate: 0 var(--kb-shift, 0px);

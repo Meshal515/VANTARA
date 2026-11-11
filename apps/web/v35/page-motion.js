@@ -80,9 +80,9 @@ function captureFixed(page, r) {
     };
   };
 }
-export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
+export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document, onComplete = () => {} } = {}) {
   active.get(page)?.();
-  if (!page?.animate || motionReduced(doc)) return;
+  if (!page?.animate || motionReduced(doc)) { onComplete(); return; }
   // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
   if (page.id === 'cinema' || hold) depth = false;
   const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
@@ -105,6 +105,7 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const cleanup = () => {
     unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
+    onComplete(); // Same compositor completion as anime, never an unrelated timer.
   };
   // A fixed-duration "hold" used to expire before the modal fade finished.
   // Hold the old page until the actual handoff completion; the caller releases
