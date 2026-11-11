@@ -2099,6 +2099,17 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
   --hero-span: 42vw;
 }
 .v35 .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img { width: 100%; height: 100%; object-fit: cover; }
+/* Marquee Back only: keep the scroll-driven hero at its last visible matrix.
+   The root scroll is restored during navigation, but must not drive the
+   departing wide-strip image or expose the previous page through its alpha. */
+.v35 #cinema.page-out:has(.cn-detail[data-style='marquee']) {
+  background: var(--bg, #09080c);
+}
+.v35 #cinema.page-out .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img {
+  animation: none !important;
+  transform: var(--cn-exit-img-transform, none) !important;
+  transition: none !important;
+}
 .v35 .cn-detail[data-style='marquee'] .cn-detail-art::after { display: none; }
 .v35 .cn-detail[data-style='marquee'] .cn-detail-body { padding-top: 30px; text-align: center; }
 .v35 .cn-detail[data-style='marquee'] .cn-detail-mark { justify-content: center; height: 60px; }
