@@ -216,3 +216,36 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     expect(modal.anims[0].cancel).toHaveBeenCalledOnce();
   });
 });
+
+describe('outgoing work visuals stay mounted and unchanged', () => {
+  it('keeps all four manga scroll depth looks active throughout page-out', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(new URL('./manga.css', import.meta.url), 'utf8');
+    const selector = "#detail.mw:is(.active,.page-out)[data-scroll-depth='on']";
+    expect(css.split(selector).length - 1).toBeGreaterThanOrEqual(8);
+    expect(css).not.toContain("#detail.mw.active[data-scroll-depth='on']");
+    const depth = readFileSync(new URL('./manga-work.js', import.meta.url), 'utf8');
+    expect(depth).toContain("if (page.classList.contains('page-out')) return;");
+  });
+
+  it('keeps the cinema bar fixed and invalidates stale metadata before Back', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(new URL('./cinema.css', import.meta.url), 'utf8');
+    const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
+    const cinema = readFileSync(new URL('./cinema.js', import.meta.url), 'utf8');
+    expect(css).toContain("#cinema:is(.active,.page-out) .cn-detail-bar");
+    expect(shell).toContain("if (from === 'cinema' && id !== 'cinema') cinema.leaveDetail()");
+    expect(cinema).toContain("leaveDetail: () => { state.token++; }");
+  });
+
+  it('leaves hidden manga detail alone and paints Home only after exit', async () => {
+    const { readFileSync } = await import('node:fs');
+    const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
+    const core = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
+    expect(shell).toContain("if (state.current?.id !== work.id || currentPage() !== 'detail') return;");
+    expect(shell).toContain("const deferHomePaint = id === 'home'");
+    expect(shell).toContain('scrollTop: sourceScroll, onComplete: onWorkExit');
+    expect(shell).toContain("if (id === 'detail') q('detailTop').classList.remove('collapsed')");
+    expect(core).toContain("#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page");
+  });
+});
