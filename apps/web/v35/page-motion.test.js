@@ -249,3 +249,74 @@ describe('outgoing work visuals stay mounted and unchanged', () => {
     expect(core).toContain("#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page");
   });
 });
+
+describe('cinema wide-strip-only pixel-stable Back', () => {
+  it('freezes the marquee image matrix and compensates its actual viewport delta', () => {
+    const movie = page({top:0,left:0,width:390,height:2500});
+    movie.id = 'cinema';
+    const img = {};
+    const props = new Map();
+    const art = {
+      getBoundingClientRect: () => ({top: movie.style.position === 'fixed' ? 144 : 92}),
+      querySelector: () => img,
+    };
+    const fades = [];
+    const detail = {
+      style: {
+        top: '',
+        getPropertyValue: (k) => props.get(k) || '',
+        setProperty: (k,v) => props.set(k,v),
+        removeProperty: (k) => props.delete(k),
+      },
+      querySelector: () => art,
+      animate: vi.fn((frames, opts) => {
+        const animation = {frames,opts,cancel:vi.fn(),finished:new Promise(()=>{})};
+        fades.push(animation);
+        return animation;
+      }),
+    };
+    movie.querySelector = () => detail;
+    movie.querySelectorAll = () => [];
+    vi.stubGlobal('getComputedStyle', () => ({transform:'matrix(1, 0, 0, 1, 0, 18)'}));
+    const release = pageOut(movie,{hold:true,marqueeExit:true,doc:doc()});
+    expect(detail.style.top).toBe('-52px');
+    expect(props.get('--cn-exit-img-transform')).toBe('matrix(1, 0, 0, 1, 0, 18)');
+    expect(fades[0].frames).toEqual([
+      {opacity:1,offset:0},{opacity:0,offset:0.38},{opacity:0,offset:1},
+    ]);
+    expect(movie.animate).not.toHaveBeenCalled();
+    release();
+    expect(detail.style.top).toBe('');
+    expect(props.has('--cn-exit-img-transform')).toBe(false);
+    expect(fades[0].cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not use the marquee exit for another cinema work style', () => {
+    const movie=page({top:0,left:0,width:390,height:2200});
+    movie.id='cinema';
+    movie.querySelector=() => null;
+    pageOut(movie,{marqueeExit:true,doc:doc()});
+    expect(movie.anims[0].frames).toEqual([{opacity:1},{opacity:0}]);
+  });
+
+  it('does not reveal the unified update grid while marquee is still visible', () => {
+    const origin=page();
+    handoffSurface(origin,{enter:true,throughBlack:true,doc:doc()});
+    expect(origin.anims[0].frames).toEqual([
+      {opacity:0,offset:0},{opacity:0,offset:0.38},{opacity:1,offset:1},
+    ]);
+    const home=page();
+    pageIn(home,{throughBlack:true,doc:doc()});
+    expect(home.anims[0].frames).toEqual(origin.anims[0].frames);
+  });
+
+  it('keeps the existing cinema wide-strip size and scopes the freeze to page-out', async () => {
+    const {readFileSync}=await import('node:fs');
+    const css=readFileSync(new URL('./cinema.css',import.meta.url),'utf8');
+    expect(css).toMatch(/\.cn-detail\[data-style='marquee'\] \.cn-detail-art\s*\{\s*aspect-ratio:\s*2\.39\s*\/\s*1/);
+    expect(css).toContain("#cinema.page-out .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img");
+    const shell=readFileSync(new URL('./shell.js',import.meta.url),'utf8');
+    expect(shell).toContain("const marqueeExit = from === 'cinema'");
+    expect(shell).toContain("throughBlack: marqueeReturn");
+  });
+});
