@@ -18,6 +18,13 @@ const marqueeEnterFrames = [
   { opacity: 0, offset: MARQUEE_HANDOFF_SPLIT },
   { opacity: 1, offset: 1 },
 ];
+// Unlike the artwork/body, the cinema Back controls should stay visible
+// until the returning updates surface is ready to cover them.
+const marqueeBarExitFrames = [
+  { opacity: 1, offset: 0 },
+  { opacity: 1, offset: 0.7 },
+  { opacity: 0, offset: 1 },
+];
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -101,6 +108,8 @@ function freezeMarqueeFrame(page) {
   const art = detail?.querySelector?.('.cn-detail-art');
   if (!art?.getBoundingClientRect) return null;
   const image = art.querySelector?.('.cn-img');
+  const body = detail.querySelector?.('.cn-detail-body');
+  const bar = detail.querySelector?.('.cn-detail-bar');
   const before = art.getBoundingClientRect();
   const priorTop = detail.style.top;
   const priorImageTransform = detail.style.getPropertyValue('--cn-exit-img-transform');
@@ -108,6 +117,9 @@ function freezeMarqueeFrame(page) {
   detail.style.setProperty('--cn-exit-img-transform', computedImageTransform || 'none');
   return {
     detail,
+    art,
+    body,
+    bar,
     image,
     stabilize() {
       // pageOut changes the containing block and transfers root scroll into the
@@ -152,11 +164,17 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   marquee?.stabilize();
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
-  // Animate only marquee contents: the page's opaque black background stays
-  // painted, so the underlying Home cannot ghost through the exit.
-  const marqueeFade = marquee?.detail?.animate?.(marqueeExitFrames, {duration:MS,easing:EASE,fill:'both'});
+  // Fade the hero/body separately from the fixed Back controls. Previously
+  // fading .cn-detail itself made the controls vanish in the first 152ms,
+  // even though the original update list had not yet returned.
+  const fadeOptions = {duration:MS,easing:EASE,fill:'both'};
+  const marqueeFades = marquee ? [
+    marquee.art?.animate?.(marqueeExitFrames, fadeOptions),
+    marquee.body?.animate?.(marqueeExitFrames, fadeOptions),
+    marquee.bar?.animate?.(marqueeBarExitFrames, fadeOptions),
+  ].filter(Boolean) : [];
   const cleanup = () => {
-    marqueeFade?.cancel();
+    for (const fade of marqueeFades) fade.cancel();
     unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
     marquee?.restore();
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
@@ -181,7 +199,7 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const frames = depth
     ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }]
     : [{opacity:visual?.opacity ?? 1},{opacity:0}];
-  track(page, marqueeFade || page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
+  track(page, marqueeFades[0] || page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
 }
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
