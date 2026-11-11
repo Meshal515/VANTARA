@@ -92,10 +92,33 @@ try {
  if(invalid.pointerEvents==='none'||invalid.visible==='hidden') throw Error('Invalid work left its origin suspended: '+JSON.stringify(invalid));
  await page.getByRole('button',{name:'Valid QA',exact:true}).click();
  await page.waitForSelector('#anime.active');
- await page.evaluate(()=>window.__shell.handleBack());
+ const handoff=await page.evaluate(()=>{
+   window.__shell.handleBack();
+   const work=document.querySelector('#anime');
+   const modal=document.querySelector('.uv-page');
+   return {active:document.querySelector('.page.active')?.id,
+     workClass:work?.className,workDisplay:work?getComputedStyle(work).display:null,
+     workZ:work?Number(getComputedStyle(work).zIndex):null,
+     modalVisible:modal?getComputedStyle(modal).visibility:null,
+     modalZ:modal?Number(getComputedStyle(modal).zIndex):null};
+ });
+ if(handoff.active!=='home'||handoff.workDisplay==='none'||!handoff.workClass.includes('page-out')||
+    handoff.modalVisible!=='visible'||!(handoff.modalZ>handoff.workZ)) {
+   throw Error('Returning work disappeared before unified modal became opaque: '+JSON.stringify(handoff));
+ }
+ await page.waitForTimeout(120);
+ const duringFade=await page.evaluate(()=>({workDisplay:getComputedStyle(document.querySelector('#anime')).display,
+   modalOpacity:Number(getComputedStyle(document.querySelector('.uv-page')).opacity)}));
+ if(duringFade.workDisplay==='none'||!Number.isFinite(duringFade.modalOpacity)||
+    duringFade.modalOpacity>=0.99) throw Error('Return compositor leaked Home mid-fade: '+JSON.stringify(duringFade));
  await page.waitForFunction(() => !document.querySelector('.page-out,.page-in'), null, {timeout:5000});
- const restored=await page.locator('.uv-page').evaluate(n=>({pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility}));
- if(restored.pointerEvents==='none'||restored.visible==='hidden') throw Error('Valid work did not restore origin: '+JSON.stringify(restored));
+ const restored=await page.locator('.uv-page').evaluate(n=>({
+   pointerEvents:n.style.pointerEvents,visible:getComputedStyle(n).visibility,
+   opacity:Number(getComputedStyle(n).opacity),
+   outgoingDisplay:getComputedStyle(document.querySelector('#anime')).display,
+ }));
+ if(restored.pointerEvents==='none'||restored.visible==='hidden'||restored.opacity<0.99||restored.outgoingDisplay!=='none')
+   throw Error('Valid work did not return to a fully opaque origin (double fade): '+JSON.stringify(restored));
  await page.evaluate(()=>window.__shell.handleBack());
  await page.waitForFunction(()=>!document.querySelector('.uv-page'));
  const scrollState=await page.evaluate(()=>{

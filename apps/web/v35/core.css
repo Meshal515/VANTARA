@@ -3725,6 +3725,11 @@ html[data-motion='off'] .v35 .dock-scrim {
   pointer-events: none;
   contain: layout paint;
 }
+/* The saved unified subpage crossfades above this held, opaque work surface.
+   The ordinary outgoing-page stacking and animation stay untouched. */
+.v35 .page.page-out.page-held {
+  background: var(--bg, #09080c);
+}
 /* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
 .v35 .page.page-in {
   position: relative;

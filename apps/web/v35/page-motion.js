@@ -94,20 +94,38 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const offset = Math.max(0, -r.top);
   const previousScroll = page.scrollTop || 0;
   const restore = save(page, ['position','top','left','width','height','minHeight','overflow','transformOrigin']);
-  const origin = visual?.origin || originOf(page, r, offset);
+  const origin = depth ? (visual?.origin || originOf(page, r, offset)) : null;
   page.classList.add('page-out');
+  if (hold) page.classList.add('page-held');
   if (depth) page.classList.add('page-depth');
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
-  // When returning to a saved unified modal, keep this work opaque until
-  // the modal has completely faded back in; never reveal Home between them.
-  const frames = hold ? [{opacity:1},{opacity:1}] : depth ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }] : [{opacity:visual?.opacity ?? 1},{opacity:0}];
-  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
-    unpin(); page.classList.remove('page-out','page-depth'); restore(); page.scrollTop = previousScroll;
+  const cleanup = () => {
+    unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
-  });
+  };
+  // A fixed-duration "hold" used to expire before the modal fade finished.
+  // Hold the old page until the actual handoff completion; the caller releases
+  // it on animation.finish, cancellation, reduced-motion or a newer navigation.
+  if (hold) {
+    let done = false;
+    const release = () => {
+      if (done) return;
+      done = true;
+      running.delete(release);
+      if (active.get(page) === release) active.delete(page);
+      cleanup();
+    };
+    running.add(release);
+    active.set(page, release);
+    return release;
+  }
+  const frames = depth
+    ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }]
+    : [{opacity:visual?.opacity ?? 1},{opacity:0}];
+  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
 }
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
@@ -162,12 +180,20 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
 export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
-  const restore = save(node, ['opacity']);
+  const priorOpacity = node.style.opacity ?? '';
+  const priorTransition = node.style.transition ?? '';
+  // .uv-page has its own 400ms CSS opacity transition. Do not let a second
+  // transition replay from zero when the Web Animation is cancelled/restored.
+  node.style.transition = 'none';
   // Stage the restored modal as transparent within the SAME JS turn as resume().
   if (enter) node.style.opacity = '0';
   const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
   track(node, node.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
-    restore();
+    node.style.opacity = priorOpacity;
+    // Commit the final opacity before enabling CSS transitions again.
+    // Otherwise a finished animation visibly jumps into another 400ms fade.
+    void node.offsetWidth;
+    node.style.transition = priorTransition;
     onComplete();
   });
 }

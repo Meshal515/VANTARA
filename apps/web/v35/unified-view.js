@@ -378,12 +378,24 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
         .map((u) => ({ at: u.at, node: () => movieItem(u) }));
     return [...manga, ...series, ...movies].sort((a, b) => b.at - a.at);
   }
+  // Two dedicated lines: release unit first, then the complete relative time.
+  // Do not place both in a single ellipsized text node on narrow Android screens.
+  function updateMeta(unit, when, at) {
+    const line = el('span', 'uv-t2 uv-update-meta');
+    if (unit) line.append(el('span', 'uv-update-unit', unit));
+    if (when) {
+      const time = el('time', 'uv-update-when', when);
+      const date = new Date(at);
+      if (Number.isFinite(date.getTime())) time.dateTime = date.toISOString();
+      line.append(time);
+    }
+    return line;
+  }
   function seriesItem(u) {
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
     a.dataset.updateKey = `series:${u.x.id}`;
     const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
-    const line = el('span', 'uv-t2');
-    line.append(el('em', null, `م${u.season} ح${u.episode}`), document.createTextNode(` · ${ago(u.released, now())}`));
+    const line = updateMeta(`م${u.season} ح${u.episode}`, ago(u.released, now()), u.released);
     a.append(art, txt('b', 'uv-t1', u.x.title), line);
     a.onclick = () => open.cinema(u.x);
     return a;
@@ -392,9 +404,8 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const a = el('button', 'uv-po uv-up'); a.type = 'button';
     a.dataset.updateKey = `movie:${u.x.id}`;
     const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
-    const line = el('span', 'uv-t2');
     // An availability event is NOT proof that a film premiered today.
-    line.append(el('em', null, 'فيلم'), document.createTextNode(` · رُصد ${agoAr(u.at, now())}`));
+    const line = updateMeta('فيلم', `رُصد ${agoAr(u.at, now())}`, u.at);
     a.append(art, txt('b', 'uv-t1', u.x.title), line);
     a.onclick = () => open.cinema(u.x);
     return a;
@@ -404,17 +415,12 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     a.dataset.updateKey = `manga:${w.raw?.id ?? w.title}`;
     const art = fill(el('span', 'uv-art'), w, 'manga', w.cover, w.title);
     const ch = w._latestChapter?.chapterNumber;
-    const line = el('span', 'uv-t2');
-    if (ch != null) {
-      const extra = Number.isInteger(w._newCount) && w._newCount > 1 ? ` +${w._newCount - 1}` : '';
-      line.append(el('em', null, `الفصل ${ch}${extra}`));
-    }
-    if (w._updateAt) {
-      const when = w._updatePublishedAt > 0
-        ? agoAr(w._updateAt, now())
-        : `رُصد ${agoAr(w._updateAt, now())}`;
-      line.append(document.createTextNode(`${ch != null ? ' · ' : ''}${when}`));
-    }
+    const extra = Number.isInteger(w._newCount) && w._newCount > 1 ? ` +${w._newCount - 1}` : '';
+    const unit = ch != null ? `الفصل ${ch}${extra}` : '';
+    const when = w._updateAt
+      ? (w._updatePublishedAt > 0 ? agoAr(w._updateAt, now()) : `رُصد ${agoAr(w._updateAt, now())}`)
+      : '';
+    const line = updateMeta(unit, when, w._updateAt);
     a.append(art, txt('b', 'uv-t1', w.title), line);
     a.onclick = () => open.manga(w);
     return a;
