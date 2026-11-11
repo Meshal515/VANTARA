@@ -108,6 +108,7 @@ function freezeMarqueeFrame(page) {
   detail.style.setProperty('--cn-exit-img-transform', computedImageTransform || 'none');
   return {
     detail,
+    image,
     stabilize() {
       // pageOut changes the containing block and transfers root scroll into the
       // fixed page. Offset that resulting layout delta before the first frame.
@@ -130,7 +131,10 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
   if (page.id === 'cinema' || hold) depth = false;
   const marquee = marqueeExit && page.id === 'cinema' ? freezeMarqueeFrame(page) : null;
-  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
+  // This image's CSS scroll animation is superseded by the sampled exit
+  // matrix; do not pause it and later attempt to restart a canceled animation.
+  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a =>
+    a.effect?.target !== page && a.effect?.target !== marquee?.image && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
   const bindFixed = captureFixed(page,r);
