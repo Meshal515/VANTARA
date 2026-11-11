@@ -200,6 +200,8 @@ export function mountMangaScrollDepth(root, win = window, doc = document) {
   const paint = () => {
     frame = null;
     if (disposed) return;
+    // Root scroll belongs to the destination during Back: keep the last frame.
+    if (page.classList.contains('page-out')) return;
     const enabled = page.isConnected && page.classList.contains('active')
       && root.dataset.section === 'manga' && !reduced?.matches && !doc.hidden;
     if (!enabled) {
