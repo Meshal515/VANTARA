@@ -2105,6 +2105,12 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
 .v35 #cinema.page-out:has(.cn-detail[data-style='marquee']) {
   background: var(--bg, #09080c);
 }
+/* During only the wide-strip Back, the original Home is not the destination:
+   the suspended "Latest updates" overlay is. Keep its hero/text from bleeding
+   through any area above the clipped outgoing cinema viewport. */
+.v35:has(#cinema.page-out .cn-detail[data-style='marquee']) #home {
+  visibility: hidden;
+}
 .v35 #cinema.page-out .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img {
   animation: none !important;
   transform: var(--cn-exit-img-transform, none) !important;
