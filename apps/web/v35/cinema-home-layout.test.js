@@ -95,7 +95,7 @@ describe('ترويسات السينما على الجوال: لمس ثابت ر�
     expect(rule('.v35 .cn-hero-alt')).toMatch(/margin-top:\s*0/);
   });
   it('شريط الرجوع ثابت في الشاشة، ويستقبل اللمس من الحاوية نفسها', () => {
-    const bar = rule('.v35 #cinema.active .cn-detail-bar');
+    const bar = rule('.v35 #cinema:is(.active,.page-out) .cn-detail-bar');
     expect(bar).toMatch(/position:\s*fixed/);
     expect(bar).toMatch(/z-index:\s*100/);
     expect(bar).toMatch(/pointer-events:\s*auto/);
