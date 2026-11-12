@@ -1122,7 +1122,7 @@ export function openSmartReader(deps, ctx) {
     const readMs = Object.values(seg.pageMs).reduce((sum, ms) => sum + ms, 0);
     const ratio = seg.pages.length ? Object.entries(seg.pageMs).filter(([page, ms]) => Number(page) >= 0 && Number(page) < seg.pages.length && ms >= 500).length / seg.pages.length : 0;
     // معظم الصفحات مع وقت قراءة فعلي؛ السجل له حد مستقل.
-    if (shouldAutoMark({ ratio: progressRatio, alreadyRead: seg.marked })) {
+    if (shouldAutoMark({ ratio: progressRatio, alreadyRead: seg.marked, readMs, pages: seg.pages.length })) {
       seg.marked = true;
       markChapter(sync, ref, seg.row, true);
     }
