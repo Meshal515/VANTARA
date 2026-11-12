@@ -2078,12 +2078,12 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
 
 /* ════ الشريط العريض ════ */
 .v35 .cn-detail[data-style='marquee'] .cn-detail-art {
-  aspect-ratio: 2.39 / 1;
+  /* بنسبة البنر نفسه (خلفيات العمل 1920×1080): كان 2.39 يقص 25.7% من ارتفاعه (#323، قرار المالك) */
+  aspect-ratio: 16 / 9;
   /* Keep artwork below the fixed controls without black letterbox shadows. */
   margin-top: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
   background: var(--bg);
   box-shadow: none;
-  --hero-span: 42vw;
 }
 .v35 .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img { width: 100%; height: 100%; object-fit: cover; }
 .v35 .cn-detail[data-style='marquee'] .cn-detail-art::after { display: none; }
@@ -2181,3 +2181,24 @@ html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none;
 .v35 .cn-detail[data-style='premiere'] .cn-ep-row { grid-template-columns: 1fr; gap: 10px; padding: 0; }
 .v35 .cn-detail[data-style='premiere'] .cn-ep-over { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .v35 .cn-detail[data-style='premiere'] .cn-ep-seen { top: 10px; inset-inline-start: 10px; }
+
+/* ════ المسلسل أولًا (#323): المواسم شريط لقطات حادة بتقدّم كل موسم، والبحث والترتيب في رأس الحلقات ════ */
+.v35 .cn-detail[data-style='series'] .cn-sf-seasons { margin: 26px 0 8px; }
+.v35 .cn-sf-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 12px; }
+.v35 .cn-sf-head h2 { margin: 0; font-size: 20px; font-weight: 800; }
+.v35 .cn-sf-head span { font-size: 12.5px; color: var(--text-3); }
+.v35 .cn-sf-rail { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; margin-inline: calc(-1 * var(--cn-gutter, 16px)); padding: 2px var(--cn-gutter, 16px) 4px; scroll-snap-type: x proximity; }
+.v35 .cn-sf-rail::-webkit-scrollbar { display: none; }
+.v35 .cn-sf-season { flex: none; width: 150px; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; text-align: start; cursor: pointer; scroll-snap-align: start; }
+.v35 .cn-sf-art { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: var(--look-r, 4px); overflow: hidden; background: var(--surface-1); }
+.v35 .cn-sf-art .cn-img { width: 100%; height: 100%; object-fit: cover; }
+.v35 .cn-sf-bar { position: absolute; inset: auto 0 0 0; height: 3px; background: rgba(255, 255, 255, 0.18); }
+.v35 .cn-sf-bar i { display: block; height: 100%; background: var(--accent); }
+.v35 .cn-sf-season b { display: block; margin-top: 9px; font-size: 14px; font-weight: 800; }
+.v35 .cn-sf-season > span:last-child { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.v35 .cn-sf-season.active .cn-sf-art { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v35 .cn-detail[data-style='series'] .cn-eps-head { display: flex; align-items: center; gap: 10px; }
+.v35 .cn-sf-tools { display: flex; align-items: center; gap: 2px; margin-inline-start: auto; }
+.v35 .cn-sf-tools .icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: none; color: var(--text-2); }
+.v35 .cn-sf-find { width: min(220px, 52vw); height: 38px; padding: 0 12px; border: 0; border-radius: var(--look-r, 4px); background: var(--surface-1); color: var(--text-1); font: inherit; font-size: 14px; }
+.v35 .cn-detail[data-style='series'] .cn-detail-art { aspect-ratio: 16 / 9; }

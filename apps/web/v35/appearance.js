@@ -99,7 +99,8 @@ export const CINEMA_WORK_STYLES = Object.freeze([
   { id: 'current', name: 'الأساسي', note: 'الخلفية والمعلومات تحتها' },
   { id: 'premiere', name: 'العرض الأول', note: 'الخلفية شاشة كاملة والتشغيل عليها' },
   { id: 'poster', name: 'الملصق', note: 'ملصق العمل في أجواء خلفيته' },
-  { id: 'marquee', name: 'الشريط العريض', note: 'إطار 2.39 وكريدت العمل' },
+  { id: 'marquee', name: 'الشريط العريض', note: 'البنر كاملًا بلا قص وكريدت العمل' },
+  { id: 'series', name: 'المسلسل أولًا', note: 'المواسم بلقطاتها وتقدّم كل موسم قبل القصة' },
 ]);
 
 const STYLE_SETS = { manga: MANGA_WORK_STYLES, anime: WORK_STYLES, cinema: CINEMA_WORK_STYLES };

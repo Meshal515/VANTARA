@@ -18,7 +18,9 @@ describe('أنماط المانجا والسينما ولون العلامة', (
     expect(workStyleOf('manga', { style: { manga: 'core' } })).toBe('page');
     expect(workStyleOf('anime', { style: { manga: 'gallery', anime: 'episode' } })).toBe('episode');
     expect(workStyleOf('anime', { style: { anime: 'page' } })).toBe('core');
-    expect(stylesOf('cinema').map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee']);
+    // قرار المالك 12 نوفمبر (#323): يُضاف «المسلسل أولًا»
+    expect(stylesOf('cinema').map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee', 'series']);
+    expect(workStyleOf('cinema', { style: { cinema: 'series' } })).toBe('series');
     expect(workStyleOf('cinema', { style: { cinema: 'marquee' } })).toBe('marquee');
     expect(workStyleOf('cinema', { style: { cinema: 'core' } })).toBe('current');
     expect(workStyleOf('cinema', { style: {} })).toBe('current');

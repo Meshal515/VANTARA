@@ -1930,6 +1930,11 @@ export function createCinema(deps) {
       body.append(el('div', 'cn-skel cn-skel-btn'), el('div', 'cn-skel cn-skel-line'), el('div', 'cn-skel cn-skel-line short'));
     }
 
+    // «المسلسل أولًا»: المواسم والحلقات قبل القصة
+    if (look === 'series' && m.type === 'series') {
+      const about = body.querySelector('.cn-about'), eps = body.querySelector('#cinemaEpisodes');
+      if (about && eps) eps.after(about);
+    }
     wrap.append(bar, art, body);
     page.replaceChildren(wrap);
     unbindHero?.();
@@ -2028,6 +2033,7 @@ export function createCinema(deps) {
       host.replaceChildren(el('p', 'cn-note', 'لا حلقات معروفة لهذا المسلسل بعد.'));
       return;
     }
+    const seriesFirst = workStyleOf('cinema') === 'series' && m.type === 'series';
     const head = el('header', 'cn-eps-head');
     head.append(el('h2', null, 'الحلقات'));
     // قاعدة التطبيق: زر واحد باسم الموسم يفتح قائمة المواسم (في كل الأنماط)
@@ -2042,7 +2048,11 @@ export function createCinema(deps) {
     const aired = season.episodes.filter((e) => !(e.released && e.released > now)).length;
     const counter = el('p', 'cn-eps-count', `شاهدت ${seasonSeen(m, season)} من ${aired || season.episodes.length}`);
     const list = el('ol', 'cn-eps');
-    for (const e of season.episodes) {
+    // «المسلسل أولًا»: البحث في الحلقات وترتيبها (مطلوبان في كل نمط جديد)
+    const query = seriesFirst ? (state.epQuery ?? '').trim().toLowerCase() : '';
+    const ordered = seriesFirst && state.epNewestFirst ? [...season.episodes].reverse() : season.episodes;
+    const shown = query ? ordered.filter((e) => String(e.n) === query || (e.title ?? '').toLowerCase().includes(query)) : ordered;
+    for (const e of shown) {
       const raw = watched[`${season.n}:${e.n}`];
       const seen = epSeen(m, season.n, e.n, watched);
       const rec = raw ? { ...raw, done: seen } : seen ? { position: 0, duration: 0, done: true } : null;
@@ -2104,9 +2114,67 @@ export function createCinema(deps) {
       const fresh = list.querySelector(`.cn-ep-over.cn-pending[data-overview="${CSS.escape(old.dataset.overview)}"]`);
       if (fresh) { fresh.textContent = old.textContent; fresh.classList.remove('cn-pending'); }
     }
-    host.replaceChildren(head, counter, list);
+    if (seriesFirst) {
+      head.append(seriesTools(m, host));
+      if (query && !shown.length) list.append(el('li', 'cn-note', 'لا حلقة بهذا الاسم أو الرقم في هذا الموسم.'));
+      host.replaceChildren(seasonRail(m, host, seasons, season), head, counter, list);
+    } else host.replaceChildren(head, counter, list);
     host.dataset.painted = '1';
     if (first) stripIn([...list.children].slice(0, 6));
+  }
+
+  /**
+   * «المسلسل أولًا»: المواسم شريط لقطات حادة بتقدّم كل موسم، قبل الحلقات. لمسة الموسم تبدّل الحلقات تحته
+   * (نفس عمل قائمة المواسم: الحلقات، والتعريب، والمصادر).
+   */
+  function seasonRail(m, host, seasons, current) {
+    const wrap = el('section', 'cn-sf-seasons');
+    const total = seasons.reduce((n, x) => n + x.episodes.length, 0);
+    const title = el('header', 'cn-sf-head');
+    title.append(el('h2', null, 'المواسم'), el('span', null, `${seasons.filter((x) => x.n !== 0).length} مواسم · ${total} حلقة`));
+    const rail = el('div', 'cn-sf-rail');
+    for (const x of seasons) {
+      const seen = seasonSeen(m, x);
+      const ratio = x.episodes.length ? seen / x.episodes.length : 0;
+      const b = button(`cn-sf-season${x.n === current.n ? ' active' : ''}`, '', () => {
+        if (x.n === state.season) return;
+        state.season = x.n;
+        state.epQuery = '';
+        renderEpisodes(host, m);
+        void arabize(m, x.n);
+        void paintSources(m, x.n);
+      }, x.n === 0 ? 'إضافات' : `الموسم ${x.n}`);
+      const art = el('span', 'cn-sf-art');
+      const e1 = x.episodes[0];
+      art.append(image(e1?.thumbHd ?? e1?.thumb ?? m.background ?? m.poster, 'cn-img', { fallback: [m.background ?? m.poster].filter(Boolean) }));
+      const bar = el('span', 'cn-sf-bar'); const fill = el('i'); fill.style.width = `${(ratio * 100).toFixed(1)}%`; bar.append(fill); art.append(bar);
+      b.append(art, el('b', null, x.n === 0 ? 'إضافات' : `الموسم ${x.n}`), el('span', null, ratio >= 1 ? 'شاهدته' : seen ? `${seen} من ${x.episodes.length}` : `${x.episodes.length} حلقات`));
+      if (x.n === current.n) b.setAttribute('aria-current', 'true');
+      rail.append(b);
+    }
+    wrap.append(title, rail);
+    requestAnimationFrame(() => rail.querySelector('.active')?.scrollIntoView?.({ inline: 'center', block: 'nearest' }));
+    return wrap;
+  }
+
+  /** البحث (اسم الحلقة أو رقمها) والترتيب في رأس الحلقات. */
+  function seriesTools(m, host) {
+    const tools = el('div', 'cn-sf-tools');
+    const find = button('icon-btn', glyph('search', { size: 20 }), () => {
+      const box = el('input', 'cn-sf-find');
+      box.type = 'search'; box.placeholder = 'ابحث بالاسم أو الرقم'; box.value = state.epQuery ?? '';
+      box.setAttribute('aria-label', 'ابحث في الحلقات');
+      box.oninput = () => { state.epQuery = box.value; const at = box.selectionStart; renderEpisodes(host, m); const again = host.querySelector('.cn-sf-find'); again?.focus(); again?.setSelectionRange?.(at, at); };
+      tools.replaceChildren(box);
+      box.focus();
+    }, 'ابحث في الحلقات');
+    const order = button('icon-btn', glyph('sort', { size: 20 }), () => { state.epNewestFirst = !state.epNewestFirst; renderEpisodes(host, m); }, state.epNewestFirst ? 'الأقدم أولًا' : 'الأحدث أولًا');
+    if (state.epQuery) {
+      const box = el('input', 'cn-sf-find'); box.type = 'search'; box.value = state.epQuery; box.setAttribute('aria-label', 'ابحث في الحلقات');
+      box.oninput = () => { state.epQuery = box.value; const at = box.selectionStart; renderEpisodes(host, m); const again = host.querySelector('.cn-sf-find'); again?.focus(); again?.setSelectionRange?.(at, at); };
+      tools.append(box, order);
+    } else tools.append(find, order);
+    return tools;
   }
 
   // ───────────── التشغيل ─────────────
