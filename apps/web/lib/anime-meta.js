@@ -16,13 +16,20 @@ const CARD = `id idMal title { romaji english native } coverImage { extraLarge l
   genres averageScore popularity episodes duration format status season seasonYear isAdult
   nextAiringEpisode { episode airingAt } studios(isMain: true) { nodes { name } }`;
 
+/**
+ * جدول الأسبوع كاملًا (#323 O-1): كان 40 حلقة للأيام السبعة الماضية و50 للقادمة، والأسبوع الحقيقي نحو 120
+ * في كل جهة (قِيس من AniList في 12 نوفمبر 2026)، فتغطي يومين أو ثلاثة حول «الآن» والبقية فارغة. ثلاث صفحات
+ * من 50 لكل جهة في الطلب نفسه (حد AniList للصفحة 50).
+ */
+const SCHEDULE_PAGES = [1, 2, 3];
+const schedules = (data, alias) => SCHEDULE_PAGES.flatMap((n) => data?.[`${alias}${n}`]?.airingSchedules ?? data?.[alias]?.airingSchedules ?? []).filter((e, i, all) => all.findIndex((x) => x.airingAt === e.airingAt && x.media?.id === e.media?.id && x.episode === e.episode) === i);
 const HOME_QUERY = `query ($season: MediaSeason, $year: Int, $from: Int, $to: Int, $until: Int) {
   trending: Page(perPage: 14) { media(type: ANIME, sort: TRENDING_DESC, isAdult: false) { ${CARD} description(asHtml: false) } }
   season: Page(perPage: 10) { media(type: ANIME, season: $season, seasonYear: $year, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   popular: Page(perPage: 18) { media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   top: Page(perPage: 18) { media(type: ANIME, sort: SCORE_DESC, isAdult: false, popularity_greater: 40000) { ${CARD} } }
-  schedule: Page(perPage: 40) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { ${CARD} } } }
-  upcoming: Page(perPage: 50) { airingSchedules(airingAt_greater: $to, airingAt_lesser: $until, sort: TIME) { episode airingAt media { ${CARD} } } }
+  ${SCHEDULE_PAGES.map((n) => `schedule${n}: Page(page: ${n}, perPage: 50) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { ${CARD} } } }`).join('\n  ')}
+  ${SCHEDULE_PAGES.map((n) => `upcoming${n}: Page(page: ${n}, perPage: 50) { airingSchedules(airingAt_greater: $to, airingAt_lesser: $until, sort: TIME) { episode airingAt media { ${CARD} } } }`).join('\n  ')}
 }`;
 
 const DETAIL_QUERY = `query ($id: Int) {
@@ -156,8 +163,8 @@ export function parseHome(data) {
     season: list(data?.season),
     popular: list(data?.popular),
     top: list(data?.top),
-    latest: latestEpisodes(data?.schedule?.airingSchedules),
-    week: airingWeek(data?.schedule?.airingSchedules, data?.upcoming?.airingSchedules),
+    latest: latestEpisodes(schedules(data, 'schedule')),
+    week: airingWeek(schedules(data, 'schedule'), schedules(data, 'upcoming')),
   };
 }
 

@@ -94,3 +94,14 @@ describe('اكتشف: الفلاتر إلى متغيّرات AniList', () => {
     expect(d.relations.map((r) => r.id)).toEqual([13]);
   });
 });
+
+// #323 O-1: الأسبوع الحقيقي ~120 حلقة لكل جهة، والطلب كان صفحة 40 وصفحة 50 فيفرغ ما بعد يومين أو ثلاثة
+describe('weekly schedule spans the whole week (several pages)', () => {
+  const page = (from, n) => ({ airingSchedules: Array.from({ length: n }, (_, i) => ({ episode: 1, airingAt: from + i * 3600, media: { id: from + i, title: { english: `S${from + i}` }, coverImage: { large: 'x' }, popularity: 5000 } })) });
+  it('merges every schedule and upcoming page, without duplicates', () => {
+    const t = 1_800_000_000;
+    const home = parseHome({ schedule1: page(t - 300 * 3600, 50), schedule2: page(t - 250 * 3600, 50), schedule3: page(t - 200 * 3600, 20), upcoming1: page(t, 50), upcoming2: page(t + 50 * 3600, 50), upcoming3: { airingSchedules: page(t + 50 * 3600, 50).airingSchedules.slice(0, 5) } });
+    expect(home.week).toHaveLength(220);
+    expect(home.latest.length).toBeGreaterThan(40);
+  });
+});
