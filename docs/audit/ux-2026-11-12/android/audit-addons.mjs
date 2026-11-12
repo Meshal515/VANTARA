@@ -203,7 +203,10 @@ try {
   report.device = { abi: adb('shell', 'getprop', 'ro.product.cpu.abilist'), sdk: adb('shell', 'getprop', 'ro.build.version.sdk'), webview: await js('navigator.userAgent') };
   await step('mount', async () => { await freshMount({ section: 'anime' }); await delay(4000); return true; });
 
+  const PART = process.env.AUDIT_PART || 'all';
+  const wantAddons = PART !== 'sheets', wantSheets = PART !== 'addons';
   // ───── A. قائمة الإضافات قبل تثبيت أي شيء ─────
+  if (wantAddons) {
   await step('addons-first-open', async () => {
     const ms = await openAddons();
     const s0 = await js(ADDONS_STATE);
@@ -217,6 +220,7 @@ try {
     return r;
   });
 
+  }
   // تثبيت عبر الجسور (كما في رحلات Debug) ثم الحكم على ما تعرضه القائمة
   const installed = await step('install-sources', () => js(`(async()=>{const out={};
     await ${VR}.setProfile({profile:'local'});await ${VR}.addRepository({url:${JSON.stringify(CS_REPO)}});
@@ -226,6 +230,7 @@ try {
     const rk=idx.find(r=>r.name==='Rocks Manga');if(rk){try{await E.installExtension({repo:${JSON.stringify(KEIYOUSHI)},pkg:rk.pkg});out.manga='Rocks Manga'}catch(e){out.manga='✗ '+e.message}}
     return out})()`, 600000), 660000);
 
+  if (wantAddons) {
   await step('addons-after-install', async () => {
     await js(`window.__shell.showPage('home')`); await delay(1500);
     const ms = await openAddons();
@@ -295,6 +300,7 @@ try {
     return { name, dialog, rowsBefore: n0, rowsAfterCancel: n1 };
   });
 
+  }
   // ───── B. ورقة السيرفرات: أنمي من AniList ─────
   await js(`window.__shell.showPage('home')`); await delay(1500);
   const openWatch = async (ref, title) => {
@@ -306,12 +312,12 @@ try {
     await until(`document.querySelector('.an-pick-best, .an-srv-status')`, 'server sheet', 30000);
     return Date.now() - t;
   };
-  await step('sheet-frieren', async () => {
+  if (wantSheets) await step('sheet-frieren', async () => {
     const openMs = await openWatch('anime:154587', 'Frieren');
     return { sheetOpenMs: openMs, ...(await sampleSheet('sheet-frieren', 45)) };
   });
   // إغلاق الورقة وفتحها من جديد: هل يُعاد التجهيز من الصفر أم تُستعاد الجلسة؟
-  await step('sheet-reopen', async () => {
+  if (wantSheets) await step('sheet-reopen', async () => {
     await js(`window.__shell.handleBack()`); await delay(1500);
     const t = Date.now();
     await js(`document.querySelector('#anime.active .aw-still-play')?.click()`);
@@ -319,7 +325,7 @@ try {
     return { sheetOpenMs: Date.now() - t, ...(await sampleSheet('sheet-reopen', 15)) };
   });
   // إغلاق أثناء التجهيز (بعد ثانيتين) على عمل آخر ثم فتح عمل ثالث: لا جلسات معلّقة ولا صفوف من عمل سابق
-  await step('sheet-close-midway', async () => {
+  if (wantSheets) await step('sheet-close-midway', async () => {
     await js(`window.__shell.handleBack()`); await delay(800);
     await js(`window.__shell.handleBack()`); await delay(1500);
     await openWatch('anime:21', 'One Piece');
@@ -332,7 +338,7 @@ try {
     return { midRowsOnePiece: mid.rows?.length ?? 0, midStatus: mid.status, jjk: s };
   });
   // ───── C. ورقة السينما: مسلسل بلا إضافات Stremio ─────
-  await step('sheet-cinema', async () => {
+  if (wantSheets) await step('sheet-cinema', async () => {
     await js(`window.__shell.showPage('home')`); await delay(1000);
     await js(`window.__shell.openCinemaRef('cinema:tt0903747',{title:'Breaking Bad',type:'series'})`);
     await until(`document.querySelector('#cinemaPlay')`, 'cinema play', 90000);
@@ -342,7 +348,7 @@ try {
     return sampleSheet('sheet-cinema', 20);
   });
   // فتح وإغلاق القائمة 10 مرات: زمن الفتح، العناصر، الأخطاء
-  await step('addons-reopen-x10', async () => {
+  if (wantAddons) await step('addons-reopen-x10', async () => {
     const times = [], nodes = [];
     for (let i = 0; i < 10; i++) {
       await js(`window.__shell.showPage('home')`); await delay(800);
@@ -353,7 +359,7 @@ try {
   });
 
   // تشغيل «الأفضل»: هل يفتح المشغل الأصلي ويبقى؟ وماذا يظهر بعد الرجوع منه؟
-  await step('sheet-play-best', async () => {
+  if (wantSheets) await step('sheet-play-best', async () => {
     await js(`window.__shell.showPage('home')`); await delay(1500);
     await openWatch('anime:154587', 'Frieren');
     const ok = await until(`document.querySelector('.an-pick-best') && !document.querySelector('.an-pick-best').disabled`, 'best enabled', 60000).catch(() => null);
