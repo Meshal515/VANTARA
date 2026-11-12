@@ -359,7 +359,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   function dayName(d) { return d === -1 ? 'أمس' : d === 0 ? 'اليوم' : d === 1 ? 'غدًا' : DAYS_AR[new Date(now() + 3 * 3600_000 + d * 86_400_000).getUTCDay()]; }
 
   /* ───── آخر التحديثات: أحداث Update Engine الحقيقية، لا أحدث عناصر الكتالوج ───── */
-  const UPD = [['all', 'الكل'], ['manga', 'المانجا'], ['series', 'المسلسلات'], ['movie', 'الأفلام']];
+  const UPD = [['all', 'الكل'], ['manga', 'المانجا'], ['anime', 'الأنمي'], ['series', 'المسلسلات'], ['movie', 'الأفلام']];
   function updTabs(cur, onPick) {
     const d = el('div', 'uv-days');
     for (const [k, l] of UPD) { const b = el('button', cur === k ? 'on' : '', l); b.type = 'button'; b.onclick = () => onPick(k); d.append(b); }
@@ -368,16 +368,20 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   function updates(kind) {
     // No catalogue fallback: an item can be newly listed without a newly
     // published chapter. Only Update Engine's recorded release events count.
-    const manga = kind === 'series' || kind === 'movie' || kind === 'cinema' ? []
+    const manga = kind === 'series' || kind === 'movie' || kind === 'cinema' || kind === 'anime' ? []
       : (data.mangaUpdates?.() ?? []).filter((w) => Number.isFinite(w._updateAt) && w._updateAt > 0)
         .map((w) => ({ at: w._updateAt, node: () => updItem(w) }));
-    const series = kind === 'manga' || kind === 'movie' ? []
+    const series = kind === 'manga' || kind === 'movie' || kind === 'anime' ? []
       : (data.seriesUpdates?.() ?? []).filter((u) => Number.isFinite(u.released) && u.released > 0)
         .map((u) => ({ at: u.released, node: () => seriesItem(u) }));
-    const movies = kind === 'manga' || kind === 'series' ? []
+    const movies = kind === 'manga' || kind === 'series' || kind === 'anime' ? []
       : (data.movieUpdates?.() ?? []).filter((u) => Number.isFinite(u.at) && u.at > 0 && u.x?.id)
         .map((u) => ({ at: u.at, node: () => movieItem(u) }));
-    return [...manga, ...series, ...movies].sort((a, b) => b.at - a.at);
+    // حلقات الأنمي من أحداث Update Engine نفسها التي تقرؤها صفحة «آخر تحديثات الأنمي» (#323 U-03)
+    const anime = kind !== 'all' && kind !== 'anime' ? []
+      : (data.animeUpdates?.() ?? []).filter((u) => Number.isFinite(u.at) && u.at > 0 && u.x?.id != null)
+        .map((u) => ({ at: u.at, node: () => animeItem(u) }));
+    return [...manga, ...anime, ...series, ...movies].sort((a, b) => b.at - a.at);
   }
   // Two dedicated lines: release unit first, then the complete relative time.
   // Do not place both in a single ellipsized text node on narrow Android screens.
@@ -399,6 +403,16 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const line = updateMeta(`م${u.season} ح${u.episode}`, ago(u.released, now()), u.released);
     a.append(art, txt('b', 'uv-t1', u.x.title), line);
     a.onclick = () => open.cinema(u.x);
+    return a;
+  }
+  function animeItem(u) {
+    const a = el('button', 'uv-po uv-up'); a.type = 'button';
+    a.dataset.updateKey = `anime:${u.x.id}`;
+    const art = el('span', 'uv-art'); art.append(img(u.x.poster, 'uv-img', u.x.title));
+    const extra = Number.isInteger(u.more) && u.more > 1 ? ` +${u.more - 1}` : '';
+    const line = updateMeta(u.episode != null ? `الحلقة ${u.episode}${extra}` : '', ago(u.at, now()), u.at);
+    a.append(art, txt('b', 'uv-t1', u.x.title), line);
+    a.onclick = () => open.anime(u.x);
     return a;
   }
   function movieItem(u) {
@@ -492,9 +506,10 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     const manga = data.mangaUpdates?.() ?? [];
     const series = data.seriesUpdates?.() ?? [];
     const movies = data.movieUpdates?.() ?? [];
-    const count = manga.length + series.length + movies.length;
+    const anime = data.animeUpdates?.() ?? [];
+    const count = manga.length + anime.length + series.length + movies.length;
     const door = browseDoor('آخر التحديثات', count ? `${count} تحديثًا` : 'فصول وحلقات وأفلام',
-      previewMix([manga, 'manga'], [series.map((u) => u.x), 'cinema'], [movies.map((u) => u.x), 'cinema']),
+      previewMix([manga, 'manga'], [anime.map((u) => u.x), 'anime'], [series.map((u) => u.x), 'cinema'], [movies.map((u) => u.x), 'cinema']),
       () => openSub('updates'));
     door.dataset.uvDoor = 'updates';
     return door;
@@ -520,8 +535,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   /* ───── الرئيسية ───── */
   // البنر و«تصفّح» يُبنيان مع الصفحة؛ تغيير الفلتر يعيد ما تحت الفلتر وحده (لا يهدم البنر ولا الشريط)
   function renderUpdatesSection() {
-    if (st.filter === 'anime') return null;
-    const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'cinema' : st.upd;
+    const allow = st.filter === 'manga' ? 'manga' : st.filter === 'cinema' ? 'cinema' : st.filter === 'anime' ? 'anime' : st.upd;
     const list = updates(allow);
     const s = el('section', 'uv-sec');
     s.dataset.uvRole = 'updates';
@@ -768,7 +782,9 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
       .map((u) => `${u.x?.id}:${u.season}:${u.episode}:${u.released}`).join(';');
     const films = (data.movieUpdates?.() ?? []).slice(0, 24)
       .map((u) => `${u.x?.id}:${u.at}`).join(';');
-    return [st.filter, cont, n(a?.week), n(a?.trending), n(c?.movie), n(c?.series), chapters, episodes, films, n(data.mangaPopular?.())].join('|');
+    const animeEps = (data.animeUpdates?.() ?? []).slice(0, 24)
+      .map((u) => `${u.x?.id}:${u.episode}:${u.at}`).join(';');
+    return [st.filter, cont, n(a?.week), n(a?.trending), n(c?.movie), n(c?.series), chapters, episodes, films, animeEps, n(data.mangaPopular?.())].join('|');
   }
 
   function start() {

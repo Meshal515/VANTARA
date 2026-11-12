@@ -6738,26 +6738,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     navTo('discover');
   }
   // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
-  const unifiedData = { anime: null, cinema: null, series: null, movieUpdates: [], logos: new Map(), asked: false };
+  const unifiedData = { anime: null, cinema: null, series: [], movieUpdates: [], animeUpdates: [], logos: new Map(), asked: false };
   /** شعارات أنمي البنر من مصدر صفحة العمل نفسه (ani.zip ← metahub)، لأول سبعة رائجة فقط. */
   async function loadHeroLogos(trending) {
     const { loadAnimeArt } = await import('../lib/anime-art.js');
     await Promise.all((trending ?? []).slice(0, 7).map((x) => loadAnimeArt(x.id).then((art) => { if (art?.logo) unifiedData.logos.set(x.id, art.logo); }).catch(() => {})));
-  }
-  /** آخر حلقة نزلت لأشهر المسلسلات (Cinemeta): أربع طلبات معًا، وما نزل في آخر 45 يومًا فقط. */
-  async function loadSeriesUpdates(series) {
-    const { detail } = await import('../lib/cinema-meta.js');
-    const now = Date.now(), out = [];
-    const list = (series ?? []).slice(0, 16);
-    for (let i = 0; i < list.length; i += 4) {
-      const got = await Promise.all(list.slice(i, i + 4).map((x) => detail('series', x.id).then((d) => [x, d]).catch(() => [x, null])));
-      for (const [x, d] of got) {
-        let best = null;
-        for (const s of d?.seasons ?? []) if (s.n > 0) for (const e of s.episodes) if (e.released && e.released <= now && (!best || e.released > best.released)) best = { season: s.n, episode: e.n, released: e.released };
-        if (best && now - best.released < 45 * 86_400_000) out.push({ x, ...best });
-      }
-    }
-    return out.sort((a, b) => b.released - a.released);
   }
   const mangaView = (w) => w && !isAdult(w) ? {
     title: titleOf(w), cover: w.coverImage?.extraLarge || w.coverImage?.large || w._work?.thumbnailUrl || null,
@@ -6781,6 +6766,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       cinema: () => unifiedData.cinema,
       seriesUpdates: () => unifiedData.series,
       movieUpdates: () => unifiedData.movieUpdates,
+      animeUpdates: () => unifiedData.animeUpdates,
       mangaUpdates: () => (state.home.updates ?? []).map(mangaView).filter(Boolean),
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
       // أغلفة المانجا بمحمّل الصور نفسه في قسم المانجا (ترويسات المصدر، البدائل، الغلاف الموحّد)
@@ -6834,7 +6820,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
         unifiedData.cinema = { movie, series };
         unifiedView.refresh();
         unifiedDiscover.refreshTrending();
-        return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refreshUpdates(); });
       }).catch(() => {});
   }
   /** تحديثات الأفلام المؤكدة من Update Engine نفسه؛ لا نستنتجها من ترتيب Cinemeta. */
@@ -6842,16 +6827,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function refreshMovieUpdates() {
     if (Date.now() - movieUpdatesAskedAt < 120_000) return;
     movieUpdatesAskedAt = Date.now();
-    const groups = await latestGroups('cinema', 40).catch(() => null);
-    if (!groups) return; // Outage: preserve last verified events rather than showing false updates.
-    unifiedData.movieUpdates = groups
-      .filter((g) => g.kind === 'movie' && /^cinema:[^:]+$/.test(String(g.work ?? '')) && Number.isFinite(g.at) && g.at > 0)
-      .slice(0, 20)
-      .map((g) => ({
-        x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'movie' },
-        at: g.at,
-        publishedAt: g.publishedAt ?? null,
-      }));
+    // المصدر نفسه الذي يقرؤه قسما السينما والأنمي (#323 U-03/O-1): حلقات المسلسلات كانت تُستنتج من أول 16
+    // مسلسلًا في كتالوج Cinemeta «top» (أشهرها عالميًا لا ما رصده Update Engine)، والأنمي غائب كليًا.
+    const [groups, animeGroups] = await Promise.all([latestGroups('cinema', 60).catch(() => null), latestGroups('anime', 60).catch(() => null)]);
+    const real = (g) => Number.isFinite(g.at) && g.at > 0;
+    if (groups) { // Outage: preserve last verified events rather than showing false updates.
+      unifiedData.movieUpdates = groups
+        .filter((g) => g.kind === 'movie' && /^cinema:[^:]+$/.test(String(g.work ?? '')) && real(g))
+        .slice(0, 30)
+        .map((g) => ({
+          x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'movie' },
+          at: g.at,
+          publishedAt: g.publishedAt ?? null,
+        }));
+      unifiedData.series = groups
+        .filter((g) => g.kind === 'episode' && /^cinema:/.test(String(g.work ?? '')) && real(g) && Number.isFinite(g.high))
+        .slice(0, 30)
+        .map((g) => ({ x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'series' }, season: g.season ?? 1, episode: g.high, released: g.at }));
+    }
+    if (animeGroups) {
+      unifiedData.animeUpdates = animeGroups
+        .filter((g) => g.kind === 'episode' && /^anime:\d+$/.test(String(g.work ?? '')) && real(g))
+        .slice(0, 30)
+        .map((g) => ({ x: { id: Number(String(g.work).slice('anime:'.length)), title: g.title, poster: g.cover }, episode: g.high, more: g.events?.length ?? 1, at: g.at }));
+    }
     if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refreshUpdates();
   }
 

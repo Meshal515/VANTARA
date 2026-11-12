@@ -264,6 +264,35 @@ describe('unified latest updates are verified releases, not catalogue listings',
     } finally {view.destroy();vi.unstubAllGlobals();}
   });
 
+  // #323 U-03: «فصول وحلقات وأفلام» بلا حلقات أنمي؛ الآن أحداث Update Engine للأنمي بتبويب «الأنمي»
+  it('anime episodes from the Update Engine appear in «all» and under their own tab (U-03)', () => {
+    const {view,root,document}=make();
+    const original=view;
+    try {
+      // نفس الإعداد مع أحداث أنمي
+      original.destroy();
+      const {document:doc}=parseHTML('<html><body><div class="v35"><div id="allHome"></div></div></body></html>');
+      const el=(tag,cls,value)=>{const n=doc.createElement(tag);if(cls)n.className=cls;if(value!=null)n.textContent=value;return n;};
+      vi.stubGlobal('document',doc);
+      vi.stubGlobal('localStorage',{getItem:()=>JSON.stringify('all'),setItem:()=>{}});
+      const opened=[];
+      const v=createUnifiedView({el,glyph:()=>'',now:()=>NOW,reducedMotion:()=>true,
+        data:{continue:()=>[],animeHome:()=>({trending:[],week:[]}),cinema:()=>({movie:[],series:[]}),mangaPopular:()=>[],mangaRecent:()=>[],mangaUpdates:()=>[],seriesUpdates:()=>[],movieUpdates:()=>[],
+          animeUpdates:()=>[{x:{id:154587,title:'Frieren',poster:null},episode:12,more:2,at:NOW-3600000}]},
+        open:{browse:()=>{},anime:(x)=>opened.push(x.id),manga:()=>{},cinema:()=>{}}});
+      const host=doc.getElementById('allHome');
+      v.mount(host);
+      const card=host.querySelector('[data-update-key="anime:154587"]');
+      expect(card).toBeTruthy();
+      expect(card.querySelector('.uv-update-unit').textContent).toBe('الحلقة 12 +1');
+      card.onclick();
+      expect(opened).toEqual([154587]);
+      const tab=[...host.querySelectorAll('.uv-days button')].find(b=>b.textContent==='الأنمي');
+      expect(tab).toBeTruthy();
+      v.destroy();
+    } finally {vi.unstubAllGlobals();}
+  });
+
   it('repaints when a newly verified chapter replaces one with the same list length', () => {
     const {view,root,next}=make();
     try {
