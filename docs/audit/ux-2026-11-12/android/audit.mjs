@@ -207,7 +207,7 @@ try {
     const NUMS = `[...document.querySelectorAll('#detail .mw-ch-open, #detail .mw-cell-open')].map(b=>({b,n:parseFloat((b.querySelector('.n,.mw-cell-n')?.textContent||'').replace(/[^0-9.]/g,''))})).filter(x=>Number.isFinite(x.n))`;
     const openChapter = (which) => js(`(()=>{const l=${NUMS};if(!l.length)throw new Error('no chapter buttons');l.sort((a,b)=>a.n-b.n);const x=${which === 'oldest' ? 'l[0]' : 'l[l.length-1]'};x.b.click();return x.n})()`);
     const readToEnd = async () => {
-      await until(`document.querySelector('#rdScroll img')`, 'reader pages', 180000);
+      await waitPages();
       let last = -1;
       for (let i = 0; i < 80; i++) {
         const h = await js(`(()=>{const s=document.querySelector('#rdScroll');s.scrollTop=s.scrollHeight;return s.scrollHeight})()`);
@@ -218,9 +218,27 @@ try {
       await delay(7000);
     };
     const exitReader = async () => { await js(`window.__reader?.handleBack()`); await delay(2500); };
+    const waitPages = async () => {
+      const t = Date.now();
+      for (; Date.now() - t < 150000; await delay(500)) {
+        const st = await js(`(()=>{const e=document.querySelector('.rd-error');if(e)return {error:e.innerText.replace(/\\s+/g,' ').slice(0,200),alt:Boolean([...e.querySelectorAll('button')].some(b=>/مصدر آخر/.test(b.textContent)))};return document.querySelector('#rdScroll img')?{ok:true}:null})()`).catch(() => null);
+        if (st?.ok) return Date.now() - t;
+        if (st?.error) { await shot('reader-error-' + Date.now()); await exitReader(); throw new Error(`reader error after ${Date.now() - t} ms: ${st.error} | «مصدر آخر» offered: ${st.alt}`); }
+      }
+      await exitReader();
+      throw new Error('no pages and no error after 150 s');
+    };
     const cta = () => js(`(document.querySelector('#readCtaLabel')?.textContent||'')+' | '+(document.querySelector('#readCtaSub')?.textContent||'')`);
 
     if (opened) {
+      // انتظر ردود كل المصادر، ثم ثبّت مصدرًا واحدًا (غير Dilar) لاختبارات القارئ
+      await step('manga-sources-settle', async () => {
+        await delay(40000);
+        const chips = await js(`[...document.querySelectorAll('#detail .source-chip')].map(b=>b.innerText.replace(/\\s+/g,' ').trim())`);
+        const picked = await js(`(()=>{const b=[...document.querySelectorAll('#detail .source-chip')].find(b=>b.innerText.includes(${JSON.stringify(manga.name)}));if(!b)return null;b.click();return b.innerText.replace(/\\s+/g,' ').trim()})()`);
+        await delay(3000);
+        return { chips, picked, cta: await cta(), stats: await js(`document.querySelector('#detailStats')?.innerText.replace(/\\s+/g,' ')`), footer: await js(`document.querySelector('#chapterCount')?.textContent||''`) };
+      });
       // U-07 / U-08: قارئ مفتوح بلا تفاعل 30 ثانية، مع سجل مواضع لمستخدم قرأ 400 فصل
       await step('reader-idle-writes', async () => {
         await js(`(()=>{const all={};for(let i=0;i<400;i++){const pm={};for(let p=0;p<60;p++)pm[p]=900+p;all['seed'+i+'#n:'+i]={sourceId:'x',pages:60,page:59,ratio:1,pageMs:pm,at:Date.now()-i*1000}}
@@ -230,7 +248,7 @@ try {
           Storage.prototype.setItem=function(k,v){const t=performance.now();const r=s.call(this,k,v);if(k==='vantara.reader.positions.qa')__pos.set.push(performance.now()-t);return r};
           return localStorage.getItem('vantara.reader.positions.qa').length})()`);
         const n = await openChapter('oldest');
-        await until(`document.querySelector('#rdScroll img')`, 'reader pages', 180000);
+        await waitPages();
         await delay(4000);
         const before = await js(`({ops:__ops.filter(o=>o.kind==='progress.set').length,long:__long.length})`);
         await delay(30000);
@@ -248,7 +266,7 @@ try {
         await readToEnd(); await exitReader();
         trail.push(`after finishing newest (${newest}): ` + await cta());
         const oldest = await openChapter('oldest');
-        await until(`document.querySelector('#rdScroll img')`, 'reader pages', 180000);
+        await waitPages();
         await delay(8000);
         await exitReader();
         const final = await cta();
