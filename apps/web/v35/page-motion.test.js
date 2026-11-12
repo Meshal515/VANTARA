@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { MOTION, bindTabMotion, dockIn, dockOut, finishPageMotion, handoffSurface, motionUnits, pageIn, pageOut } from './page-motion.js';
+import { MOTION, WORK_READY_MS, bindTabMotion, dockIn, dockOut, finishPageMotion, handoffSurface, motionUnits, pageIn, pageOut, readyGate, settleIn, veil } from './page-motion.js';
 
 afterEach(() => { finishPageMotion(); vi.unstubAllGlobals(); });
 
@@ -152,31 +152,68 @@ describe('work detail depth transition: the content pushes, the page and its fix
   });
 });
 
-describe('work/unified handoff uses the same page motion', () => {
-  it('holds the outgoing work opaque while fading the saved modal back in', () => {
-    const work=page({top:0,left:0,width:390,height:2500});
-    pageOut(work,{depth:true,hold:true,doc:doc()});
-    expect(work.anims[0].frames).toEqual([{opacity:1},{opacity:1}]);
-    const origin=page();
-    const onComplete=vi.fn();
-    handoffSurface(origin,{enter:true,onComplete,doc:doc()});
-    expect(origin.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
-    expect(origin.anims[0].opts.duration).toBe(MOTION.ms);
-    expect(origin.style.opacity).toBe('0');
+describe('الموحد يتبع العقد نفسه: الطبقة الفرعية تخرج وتدخل كأي صفحة', () => {
+  it('الرجوع إلى الطبقة: العمل يغادر بتلاشٍ وتراجع (لا يُمسَك معتمًا)، والطبقة تدخل بتلاشٍ واندفاع', () => {
+    const work = page({ top: 0, left: 0, width: 390, height: 2500 });
+    pageOut(work, { depth: true, doc: doc() });
+    expect(work.anims[0].frames).toEqual([{ opacity: 1 }, { opacity: 0 }]);
+    const origin = page();
+    const onComplete = vi.fn();
+    handoffSurface(origin, { enter: true, onComplete, doc: doc() });
+    expect(origin.anims[0].frames).toEqual([{ opacity: 0, scale: String(MOTION.push) }, { opacity: 1, scale: '1' }]);
+    expect(origin.anims[0].opts).toMatchObject({ duration: MOTION.ms, easing: MOTION.enter });
     finishPageMotion();
     expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(origin.style.opacity).toBe('');
     expect(work.classes.has('page-out')).toBe(false);
   });
-  it('outgoing modal uses the existing fade and interrupts cleanly', () => {
-    const modal=page();
-    const onComplete=vi.fn();
-    handoffSurface(modal,{doc:doc(),onComplete});
-    expect(modal.anims[0].frames).toEqual([{opacity:1},{opacity:0}]);
-    expect(modal.anims[0].opts.duration).toBe(MOTION.ms);
-    handoffSurface(modal,{enter:true,doc:doc()});
+  it('فتح عمل من الطبقة: تخرج بتلاشٍ وتراجع، وتُقاطَع نظيفًا', () => {
+    const modal = page();
+    const onComplete = vi.fn();
+    handoffSurface(modal, { doc: doc(), onComplete });
+    expect(modal.anims[0].frames).toEqual([{ opacity: 1, scale: '1' }, { opacity: 0, scale: String(MOTION.push) }]);
+    expect(modal.anims[0].opts).toMatchObject({ duration: MOTION.ms, easing: MOTION.exit });
+    handoffSurface(modal, { enter: true, doc: doc() });
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(modal.anims[0].cancel).toHaveBeenCalledOnce();
+  });
+  it('الرئيسية تحت الطبقة العائدة محجوبة طوال دخولها (لا صفحة ثالثة ظاهرة)', () => {
+    const home = page();
+    veil(home, { doc: doc() });
+    expect(home.anims[0].frames).toEqual([{ opacity: 0 }, { opacity: 0 }]);
+    expect(home.anims[0].opts.duration).toBe(MOTION.ms);
+  });
+});
+
+// بوابة الجاهزية: الانتقال كله ينتظر أساس صفحة العمل أو المهلة، ثم يبدأ دفعة واحدة من إطاره الأول
+describe('بوابة جاهزية صفحة العمل', () => {
+  const playable = () => { const p = page(); p.animate = vi.fn((frames, opts) => { const a = { frames, opts, cancel: vi.fn(), pause: vi.fn(), play: vi.fn(), finished: new Promise(() => {}) }; p.anims.push(a); return a; }); return p; };
+  it('المغادرة والداخلة متوقفتان على إطارهما الأول حتى تُعلن الجاهزية، ثم تبدآن معًا', async () => {
+    const g = readyGate(10_000);
+    const a = playable(), b = playable();
+    pageOut(a, { gate: g.promise, doc: doc() }); pageIn(b, { gate: g.promise, doc: doc() });
+    expect(a.anims[0].pause).toHaveBeenCalled(); expect(b.anims[0].pause).toHaveBeenCalled();
+    expect(a.anims[0].play).not.toHaveBeenCalled(); expect(b.anims[0].play).not.toHaveBeenCalled();
+    expect(g.opened).toBe(false);
+    g.ready();
+    await g.promise;
+    await Promise.resolve();
+    expect(g.opened).toBe(true);
+    expect(a.anims[0].play).toHaveBeenCalled(); expect(b.anims[0].play).toHaveBeenCalled();
+  });
+  it('المهلة تفتح البوابة إن تأخر القسم', async () => {
+    vi.useFakeTimers();
+    try {
+      const g = readyGate(WORK_READY_MS);
+      vi.advanceTimersByTime(WORK_READY_MS);
+      expect(await g.promise).toBe('deadline');
+      expect(g.opened).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+  it('المحتوى المتأخر يظهر بتلاشٍ في مكانه لا دفعة ولا حركة موضع', () => {
+    const n = page();
+    settleIn(n, { doc: doc() });
+    expect(n.anims[0].frames).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+    expect(JSON.stringify(n.anims[0].frames)).not.toMatch(/transform|translate|scale/);
   });
 });
 

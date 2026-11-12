@@ -8,6 +8,7 @@
  *
  * العرض فقط: لا يكتب في المكتبة ولا التقدم. البيانات تأتي من `data` (القشرة تملكها).
  */
+import { layerIn, layerOut } from './page-motion.js';
 import { createSilk } from '../lib/silk.js';
 import { paletteFromAccent } from '../lib/silk-palette.js';
 import { agoAr } from './updates-view.js';
@@ -653,13 +654,15 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     overlay = el('div', 'uv-page'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
     paintSub();
     (host.closest('.v35') ?? host.ownerDocument.body).append(overlay);
-    requestAnimationFrame(() => overlay?.classList.add('in'));
+    // الطبقة صفحة بعقد الحركة نفسه: تلاشٍ واندفاع للداخل (page-motion.js)
+    overlay.classList.add('in');
+    layerIn(overlay);
   }
   function closeSub() {
     if (!overlay || suspended) return false;
     const o = overlay; overlay = null; st.sub = null;
     o.classList.remove('in');
-    setTimeout(() => o.remove(), reducedMotion() ? 0 : 400);
+    layerOut(o, () => o.remove());
     return true;
   }
   function suspend() {

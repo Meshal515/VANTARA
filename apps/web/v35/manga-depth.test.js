@@ -28,9 +28,11 @@ describe('manga scroll depth lives in the shared depth table', () => {
     expect(css).toContain("html:not([data-motion='off'])");
     expect(css).toContain('prefers-reduced-motion: no-preference');
   });
-  it('the depth layer is not the element that carries the entry animation', () => {
-    const css = readFileSync(new URL('./manga.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\[data-look='gallery'\] \.mw-cover \{ animation: mw-d-gallery/);
+  it('no per-look entry animation: enter/exit belong to page-motion.js alone (owner contract)', () => {
+    const css = readFileSync(new URL('./manga.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    // كانت mw-d-* تميل الغلاف وتهبطه وتصغّره فوق الحركة الموحدة فيتمدد أثناء الدخول (مقيس: aspect في المعرض والملف)
+    expect(css).not.toMatch(/mw-d-(page|gallery|profile|fade)/);
+    expect(css).not.toMatch(/\.mw-cover \{[^}]*animation:/);
     expect(DEPTH_SPECS.manga.gallery[0].sel).toBe('.mw-stage > .mw-lift');
     expect(css).not.toContain('--mw-scroll-depth');
     expect(css).not.toContain('data-scroll-depth');

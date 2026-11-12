@@ -567,7 +567,11 @@ export function createAnime(deps) {
       state.detail = full;
       if (!isMovie(full) && full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
       if (episode) state.episodeRange = Math.floor((episode - 1) / EP_PAGE);
+      // وصلت التفاصيل والصفحة ظاهرة (بدأ الانتقال بالمهلة): المحتوى الجديد يظهر بتلاشٍ في مكانه لا دفعة
+      const late = deps.workShown?.() ?? false;
       fillWork(full);
+      if (late && state.view?.id === m.id) deps.settleIn?.(state.view.body);
+      if (state.view?.id === m.id) { state.view.filled = true; settleWork(state.view); }
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
       if (episode && (position != null || play)) playEpisode(full, episode, { position, clip });
@@ -760,6 +764,13 @@ export function createAnime(deps) {
     },
   };
 
+  /** أساس صفحة العمل جاهز (التفاصيل مرسومة والبطل محسوم): يبدأ انتقال الدخول الآن لا عند المهلة. */
+  function settleWork(v) {
+    if (v && state.view === v && v.filled && v.heroShown && !v.settled) {
+      v.settled = true;
+      deps.workReady?.();
+    }
+  }
   function paintHero(m) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
@@ -838,7 +849,9 @@ export function createAnime(deps) {
     load.candidates = candidates;
     load.artKnown = Boolean(art) || Boolean(v.artDone);
     const shownRank = load.shown?.target === target ? load.shown.rank : Infinity;
-    const usable = c => c.rank < shownRank && !load.tried.has(c.src);
+    // ما ظهر لا يُستبدل بصورة أخرى أمام العين (قرار المالك). الاستثناء: دقة أعلى للقطة الحلقة نفسها
+    const locked = load.shown?.target === target && load.shown.kind !== 'still';
+    const usable = c => !locked && c.rank < shownRank && !load.tried.has(c.src) && (!load.shown || load.shown.target !== target || c.kind === 'still');
     const alive = () => state.view === v && v.heroLoad === load && !load.disposed && load.target === target && targetOf(current()) === target;
     const refresh = () => { if (state.view === v && !load.disposed) paintHero(current()); };
 
@@ -875,6 +888,7 @@ export function createAnime(deps) {
       });
       if (v.lw) paintLook(current());
       for (const pending of [...load.active.values()]) if (pending.rank >= pick.rank) pending.cancel();
+      settleWork(v);
       refresh();
     }
     // المُمسَك يُعرض متى حُسم (فشل الأفضل، وصل الفن، أو مضت المهلة)

@@ -8,6 +8,8 @@
  * العرض فقط؛ الفتح والبحث من القشرة.
  */
 
+import { layerIn, layerOut } from './page-motion.js';
+
 export const SEARCH_GROUPS = Object.freeze([
   Object.freeze({ id: 'anime', label: 'أنمي' }),
   Object.freeze({ id: 'manga', label: 'مانجا' }),
@@ -198,7 +200,7 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
     if (!page) build();
     if (!page.isConnected) mount(page);
     if (!query) paintResults(); // الرائج والسجل بآخر حالهما في كل فتح
-    requestAnimationFrame(() => page.classList.add('in'));
+    if (!page.classList.contains('in')) { page.classList.add('in'); layerIn(page); }
     if (initial) { input.value = initial; void search(initial); }
     setTimeout(() => input?.focus(), 60);
   }
@@ -206,7 +208,7 @@ export function createUnifiedSearch({ el, glyph, engines, open, card, mount, deb
     if (!page?.isConnected || suspended) return false;
     page.classList.remove('in');
     const p = page;
-    setTimeout(() => p.remove(), 260);
+    layerOut(p, () => p.remove());
     return true;
   }
   function suspend() {

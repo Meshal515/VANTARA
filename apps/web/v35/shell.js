@@ -65,7 +65,7 @@ import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/ma
 import { cachedArt, rememberArt, resolveArt } from '../lib/manga-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -1831,7 +1831,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.alt = '';
         img.decoding = 'async';
         img.classList.add('img-fade');
-        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); };
+        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
+        // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
+        img.onload = () => { if (live()) workReady(); };
         img.src = art.cover;
         cover.replaceChildren(img);
         shownCovers.set(ref, art.cover);
@@ -2726,7 +2728,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       parts.push(more);
     }
-    q('chapterPanel').replaceChildren(...parts);
+    const panel = q('chapterPanel');
+    // أول فصول تحل محل الهيكل والصفحة ظاهرة: تظهر في مكانه بتلاشٍ واحد، لا دفعة
+    const fromSkeleton = Boolean(panel.querySelector(':scope > [aria-busy="true"]'));
+    panel.replaceChildren(...parts);
+    if (fromSkeleton && currentPage() === 'detail') settleIn(panel);
   }
   // ── «علّم فصول»: وضع تحديد فوق القائمة أو الشبكة في الأنماط الأربعة ──
   // لمسة الفصل تحدّده بدل أن تفتحه؛ والشريط السفلي: مقروء، غير مقروء، كل ما قبله، ما بينهما.
@@ -5232,6 +5238,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }, wait));
   }
   let pageMotionRequest = 0;
+  /** القسم يعلن أن أساس صفحة العمل جاهز (البيانات والغلاف المحسوم): يبدأ الانتقال الآن لا عند المهلة. */
+  function workReady() {
+    state.workGate?.ready();
+  }
+  /** الانتقال بدأ قبل أن يكتمل أساس الصفحة (المهلة): ما يصل الآن يظهر بتلاشٍ في مكانه (settleIn). */
+  const workShown = () => !state.workGate || state.workGate.opened;
   const WORK_PAGES = new Set(['detail', 'anime', 'cinema']);
   function showPage(id, { push = true, sectionSwitch = false, sourceScroll = null } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
@@ -5264,7 +5276,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
-    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
+    // دخول صفحة عمل: الانتقال كله (خروج السابقة ودخولها) ينتظر جاهزية أساسها أو المهلة، فلا تُرى نصف مبنية
+    state.workGate?.ready();
+    const gate = WORK_PAGES.has(id) && from !== id && push && !sectionSwitch && !unifiedRestore ? readyGate() : null;
+    state.workGate = gate;
+    // رجوع إلى طبقة الموحد: العمل يغادر بالعقد نفسه (لا يُمسَك معتمًا)، والرئيسية تحت الطبقة محجوبة حتى تكتمل
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll, gate: gate?.promise });
+    if (unifiedRestore) veil(q(id));
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     const nav = q('bottomNav');
     if (MAIN_PAGES.includes(id)) {
@@ -5355,9 +5373,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
-    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+    if (!sectionSwitch && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
-        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
+        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id), gate: gate?.promise });
       };
       if (WORK_PAGES.has(id)) queueMicrotask(enter);
       else enter();
@@ -5370,6 +5388,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (unifiedReturn !== handoff || currentPage() !== id) return;
         const surface = unifiedSurfaces()[handoff.kind];
         handoffSurface(surface?.motionNode?.(), {
+          gate: gate?.promise,
           onComplete: () => {
             if (unifiedReturn === handoff) surface?.hideSuspended?.();
           },
@@ -7090,7 +7109,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
-    root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     playableSources, addSource,
     // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
     warmToday: true,
@@ -7128,7 +7147,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
-    root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, currentPage, readKv, writeKv, sync,
     playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
     openWorkOptions: (target) => openWorkOptions(target),

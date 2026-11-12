@@ -111,6 +111,9 @@ export async function launch({ unified = false, section = 'manga', viewport = { 
   const live = net === 'live';
   const browser = await chromium.launch({ args: ['--no-sandbox'], proxy: live && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } : undefined });
   const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true, hasTouch: mobile, isMobile: mobile, deviceScaleFactor: 1, locale: 'ar-SA', ...(record ? { recordVideo: { dir: record, size: viewport } } : {}) });
+  // NO_WEBGL=1: متصفح القياس يرسم WebGL برمجيًا (SwiftShader) فتثقل خلفية silk كل إطار ثقلًا لا يوجد على جهاز
+  // حقيقي. يُعطَّل لقياس انتقالات التطبيق نفسه، ويُذكر ذلك في التقرير.
+  if (process.env.NO_WEBGL) await context.addInitScript(() => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return /webgl/.test(t) ? null : g.call(this, t, ...a); }; });
   const page = await context.newPage();
   const log = { errors: [], console: [], requests: [] };
   page.on('pageerror', (e) => { if (!/محرّك الإضافات غير متاح/.test(e.message)) log.errors.push(String(e.stack || e).slice(0, 700)); });

@@ -7,6 +7,7 @@
  * البطاقات من نظام البطاقات الموحد (cards.css).
  */
 
+import { layerIn, layerOut } from './page-motion.js';
 import { stripIn } from './motion.js';
 
 export const DISCOVER_TYPES = Object.freeze([['anime', 'أنمي'], ['manga', 'مانجا'], ['cinema', 'سينما']]);
@@ -118,7 +119,8 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
       page.setAttribute('aria-modal', 'true');
       overlay = page;
       mount(page);
-      requestAnimationFrame(() => { if (overlay === page) page.classList.add('in'); });
+      page.classList.add('in');
+      layerIn(page);
     }
     activeKey = key;
     const page = overlay;
@@ -190,7 +192,7 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
     if (activeKey) scrollByKey.set(activeKey, o.scrollTop || 0);
     overlay = null; activeKey = null; token++;
     o.classList.remove('in');
-    setTimeout(() => o.remove(), 400);
+    layerOut(o, () => o.remove());
     return true;
   }
 

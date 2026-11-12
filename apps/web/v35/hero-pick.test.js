@@ -8,7 +8,7 @@ import { episodeStill } from '../lib/anime-art.js';
 const source = readFileSync(new URL('./anime.js', import.meta.url), 'utf8');
 const a = source.indexOf('  function paintHero(');
 const b = source.indexOf('  async function seriesBackdrop(', a);
-const make = new Function('state', 'artOf', 'resumePoint', 'heroPlan', 'episodeStill', 'heroMemory', 'seriesBackdrop', 'paintLook', `${source.slice(a, b)}; return paintHero;`);
+const make = new Function('state', 'artOf', 'resumePoint', 'heroPlan', 'episodeStill', 'heroMemory', 'seriesBackdrop', 'paintLook', 'settleWork', `${source.slice(a, b)}; return paintHero;`);
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function setup({ look = 'core', banner = 'https://img/banner.jpg', poster = 'https://img/poster.jpg', remembered = null } = {}) {
@@ -23,7 +23,7 @@ function setup({ look = 'core', banner = 'https://img/banner.jpg', poster = 'htt
   const v = { id: 1, look, artSettled: true, artDone: false, heroTried: new Set(), heroRank: Infinity, heroShownRank: Infinity, hero: document.querySelector('.aw-hero'), bg: document.querySelector('.aw-bg') };
   let art = null;
   const state = { detail: m, view: v };
-  const paint = make(state, () => art, () => ({ episode: 1 }), (name) => ({ episodeStill: name === 'episode', posterFallback: name !== 'episode', ambient: name !== 'episode' }), episodeStill, { get: (id) => memory.get(id) ?? null, set: (id, src) => memory.set(id, src) }, async () => null, () => {});
+  const paint = make(state, () => art, () => ({ episode: 1 }), (name) => ({ episodeStill: name === 'episode', posterFallback: name !== 'episode', ambient: name !== 'episode' }), episodeStill, { get: (id) => memory.get(id) ?? null, set: (id, src) => memory.set(id, src) }, async () => null, () => {}, () => {});
   const shown = () => [...v.bg.querySelectorAll('.aw-bg-img')].map((i) => i.src);
   return { made, m, v, memory, shown, paint: () => paint(m), art(value) { art = value; v.artDone = true; } };
 }

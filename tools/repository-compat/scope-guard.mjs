@@ -364,6 +364,8 @@ for (const path of ['apps/web/index.html', 'apps/web/v35/experience.css', 'apps/
 // (حلّ محل anime-depth.js)، حذف «مباشر»، وأدوات الفحص والتصميم. مسارات محددة بالاسم، لا سماح عام.
 for (const path of [".github/workflows/audit-emulator.yml", ".github/workflows/design-capture.yml", ".github/workflows/vendor-agent-skills.yml", "android/app/src/main/kotlin/com/vantara/plugins/ChapterNumbers.kt", "android/app/src/test/java/com/vantara/plugins/ChapterNumbersTest.kt", "apps/web/lib/catalog.test.js", "apps/web/v35/anime-episodes-art.test.js", "apps/web/v35/depth.js", "apps/web/v35/depth.test.js", "apps/web/v35/looks/work-cinema-series-ipad.webp", "apps/web/v35/looks/work-cinema-series-pc.webp", "apps/web/v35/looks/work-cinema-series-phone.webp", "apps/web/v35/looks/work-manga-webtoon-ipad.webp", "apps/web/v35/looks/work-manga-webtoon-pc.webp", "apps/web/v35/looks/work-manga-webtoon-phone.webp", "apps/web/v35/reader-progress-writes.test.js", "apps/web/v35/reading.js", "apps/web/v35/reading.test.js", "services/sync-worker/src/accounts.integration.test.ts", "services/sync-worker/src/collectors.integration.test.ts", "tools/vendor_agent_skills.py"]) seams.add(path);
 for (const path of ["apps/web/v35/anime-depth.js", "apps/web/v35/anime-depth.test.js"]) removed.add(path);
+// #323 (12 نوفمبر، أمر المالك): قرار فن العمل الواحد (الغلاف والبنر) لكل الشاشات. ملفان بالاسم.
+for (const path of ["apps/web/lib/art.js", "apps/web/lib/art.test.js"]) seams.add(path);
 // أغلفة المانجا وبنراتها من المصدر الرئيسي (قرار المالك، 12 نوفمبر)
 for (const path of ["apps/web/lib/manga-art.js", "apps/web/lib/manga-art.test.js"]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];

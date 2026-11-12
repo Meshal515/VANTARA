@@ -1573,7 +1573,14 @@ export function createCinema(deps) {
     if (full.type === 'series' && !full.seasons?.some((s) => s.n === state.season)) state.season = full.seasons?.find((s) => s.n !== 0)?.n ?? full.seasons?.[0]?.n ?? 1;
     state.detail = full;
     senseSeries(full);
+    // وصلت التفاصيل والصفحة ظاهرة (بدأ الانتقال بالمهلة): المحتوى الجديد يظهر بتلاشٍ في مكانه لا دفعة
+    const late = deps.workShown?.() ?? false;
     renderDetail(full);
+    if (late) deps.settleIn?.(q('cinemaBody'));
+    // أساس الصفحة جاهز حين تُرسم التفاصيل وتُحمَّل خلفيتها المحسومة: يبدأ الانتقال
+    const hero = q('cinema')?.querySelector('.cn-detail-art .cn-img');
+    if (!hero || (hero.complete && hero.naturalWidth)) deps.workReady?.();
+    else { hero.addEventListener('load', () => deps.workReady?.(), { once: true }); hero.addEventListener('error', () => deps.workReady?.(), { once: true }); }
     if (playAt) play(full, full.type === 'series' ? (playAt.season ?? 1) : null, playAt.episode ?? 1, 0);
     else if (autoplay) {
       const r = resumePoint(full);

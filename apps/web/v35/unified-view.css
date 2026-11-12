@@ -105,8 +105,8 @@
 @media (prefers-reduced-motion:reduce){.v35 .uv-sk{animation:none}.v35 .uv-rc,.v35 .uv-hi{transition:opacity .2s!important;transform:none!important}}
 
 /* الصفحات الفرعية: فوق الشاشة، بلا الشريط العلوي */
-.v35-page-host .uv-page,.uv-page{position:fixed;inset:0;z-index:80;overflow-y:auto;background:var(--bg,#09080c);color:var(--text-1,#f2f1f5);opacity:0;transition:opacity .4s cubic-bezier(.4,0,.2,1);font-family:inherit;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 32px)}
-.uv-page.in{opacity:1}
+.v35-page-host .uv-page,.uv-page{position:fixed;inset:0;z-index:80;overflow-y:auto;background:var(--bg,#09080c);color:var(--text-1,#f2f1f5);font-family:inherit;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 32px)}
+/* .in علامة فتح فقط: الدخول والخروج من page-motion.js (layerIn/layerOut) بعقد الحركة الواحد */
 .uv-page button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .uv-ptop{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;height:calc(env(safe-area-inset-top,0px) + 60px);padding:env(safe-area-inset-top,0px) 8px 0;background:var(--bg,#09080c)}
 .uv-ptop h1{font-size:22px;font-weight:800;margin:0}

@@ -1559,25 +1559,8 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 /* «آخر التحديثات» أطول عناوين «تصفّح»: مقاس أبواب تصفّح كلها 14px فيتسع للبطاقة ولا يدخل في المروحة */
 .v35 #mangaHome .shortcut-label { font-size: 14px; max-width: 100%; }
 
-/* ═══ عمق ثلاثي الأبعاد لأنماط صفحة عمل المانجا (9 نوفمبر) ═══
- * حركة دخول عند فتح العمل، لا حركة مربوطة بالتمرير: أي حركة مربوطة بالتمرير بلا تسليم collapse-hero تحبس
- * الانزلاق في WebView 153–156 وتعيد الاهتزاز. خصائص منفصلة (rotate/scale/translate) فلا تمسح transform
- * العنصر، وbackwards فلا يبقى شيء بعد انتهائها. لكل نمط عمقه:
- *   الصفحة: الغلاف يميل من العمق ويستقيم · المعرض: الغلاف يصعد من خلف المسرح · الملف: البنر يقترب ببطء
- *   من حيث وقفت: بلا عمق (المحتوى أولًا)، تلاشٍ قصير فقط */
-.v35 #detail :has(> .mw-cover) { perspective: 900px; }
-@media (prefers-reduced-motion: no-preference) {
-  .v35 #detail[data-look='page'] .mw-cover { animation: mw-d-page 0.62s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: 50% 100%; }
-  .v35 #detail[data-look='gallery'] .mw-cover { animation: mw-d-gallery 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: 50% 90%; }
-  .v35 #detail[data-look='profile'] .mw-ban > img.ready { animation: mw-d-profile 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
-  .v35 #detail[data-look='profile'] .mw-cover { animation: mw-d-page 0.6s 0.08s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: 50% 100%; }
-  .v35 #detail[data-look='resume'] .mw-cover { animation: mw-d-fade 0.3s ease-out backwards; }
-}
-@keyframes mw-d-page { from { rotate: x 16deg; scale: 0.9; translate: 0 14px; opacity: 0; } }
-@keyframes mw-d-gallery { from { rotate: x 22deg; scale: 0.82; translate: 0 34px; opacity: 0; } }
-@keyframes mw-d-profile { from { scale: 1.12; opacity: 0; } }
-@keyframes mw-d-fade { from { opacity: 0; } }
-html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: none !important; }
+/* حركات دخول الغلاف الخاصة بكل نمط (mw-d-*: ميلان 22°، نزول 34px، تصغير 82%) حُذفت: كانت تعمل فوق عقد
+ * الحركة الموحد فيتمدد الغلاف ويهبط أثناء الدخول. الدخول والخروج لكل الأنماط من page-motion.js وحده. */
 
 /* بلوكات «من حيث وقفت»: أكبر، بمقاس موحّد مهما طال الرقم (حتى 11111 والعشري 1234.5) بلا قص ولا تداخل */
 .v35 #detail .mw-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

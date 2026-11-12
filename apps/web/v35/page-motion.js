@@ -28,7 +28,11 @@ export function pageMotionState(page) {
   const scale = first ? Number.parseFloat(globalThis.getComputedStyle(first).scale) : NaN;
   return { opacity: Number(css.opacity), scale: Number.isFinite(scale) ? scale : 1, origin: push?.origin ?? null, scrollTop: globalThis.scrollY || 0 };
 }
-function track(page, animations, restore) {
+/**
+ * دورة حياة انتقال واحدة: تبدأ الحركة حين تفتح `gate` (أو فورًا بلا بوابة)، وتنتهي بانتهاء أول حركة أو
+ * بمقاطعة finishPageMotion، فتُعاد الصفحة كما كانت. الحارس الزمني يبدأ مع التشغيل لا مع التجهيز.
+ */
+function track(page, animations, restore, gate = null) {
   let done = false;
   let guard;
   const stop = () => {
@@ -42,8 +46,30 @@ function track(page, animations, restore) {
     restore();
   };
   running.add(stop); active.set(page, stop);
-  guard = setTimeout(stop, MS + 150);
-  animations[0].finished?.then(stop, stop);
+  const go = () => {
+    if (done) return;
+    for (const a of animations) a.play?.();
+    guard = setTimeout(stop, MS + 150);
+    animations[0].finished?.then(stop, stop);
+  };
+  if (!gate) return go();
+  // مجهّزة ومتوقفة على إطارها الأول: المغادرة معتمة كما هي والداخلة شفافة، إلى أن تجهز الداخلة
+  for (const a of animations) a.pause?.();
+  gate.then(go, go);
+}
+
+/**
+ * بوابة جاهزية صفحة العمل: تفتح حين يعلن القسم أن أساس الصفحة جاهز (البيانات والغلاف المحسوم)، أو عند
+ * المهلة أيهما أسبق. الانتقال لا يبدأ على صفحة نصف مبنية تكتمل أمام العين.
+ */
+export const WORK_READY_MS = 280;
+export function readyGate(ms = WORK_READY_MS) {
+  let resolve;
+  const gate = { opened: false };
+  const promise = new Promise((r) => { resolve = r; });
+  const open = (why) => { if (gate.opened) return; gate.opened = true; resolve(why); };
+  const timer = setTimeout(() => open('deadline'), ms);
+  return Object.assign(gate, { promise, ready: () => { clearTimeout(timer); open('ready'); } });
 }
 const save = (page, props) => {
   const previous = Object.fromEntries(props.map(k => [k, page.style[k] ?? '']));
@@ -97,10 +123,9 @@ function push(page, o, from, to, timing) {
   return animations;
 }
 
-export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
+export function pageOut(page, { depth = false, visual = null, scrollTop = 0, gate = null, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
-  if (hold) depth = false;
   const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
@@ -115,46 +140,62 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   // بلا transform ولا contain عليها، فأشرطتها الثابتة تبقى على الشاشة كما هي دون أي تثبيت يدوي.
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
-  // When returning to a saved unified modal, keep this work opaque until
-  // the modal has completely faded back in; never reveal Home between them.
   const timing = {duration:MS,easing:EASE,fill:'both'};
-  const fade = page.animate(hold ? [{opacity:1},{opacity:1}] : [{opacity:visual?.opacity ?? 1},{opacity:0}], timing);
+  const fade = page.animate([{opacity:visual?.opacity ?? 1},{opacity:0}], timing);
   const pushed = depth ? push(page, origin, visual?.scale ?? 1, DEPTH, timing) : [];
   track(page, [fade, ...pushed], () => {
     page.classList.remove('page-out'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
-  });
+  }, gate);
 }
 /**
  * الصفحة الداخلة تبقى في تدفق المستند (لا تُثبَّت ولا تأخذ transform): تمرير الجذر وخطوطه الزمنية وأشرطتها
  * الثابتة تعمل من أول إطار. تتلاشى هي، ويندفع محتواها (motionUnits) من MOTION.push إلى حجمه.
  */
-export function pageIn(page, { depth = false, doc = globalThis.document } = {}) {
+export function pageIn(page, { depth = false, gate = null, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   page.classList.add('page-in');
   const timing = {duration:MS,easing:EASE_IN,fill:'both'};
   const fade = page.animate([{opacity:0},{opacity:1}], timing);
+  // نقطة الاندفاع تُقاس عند البدء لا عند التجهيز: الغلاف قد يُرسم في أثناء الانتظار
   const pushed = depth ? push(page, originOf(page), DEPTH, 1, timing) : [];
-  track(page, [fade, ...pushed], () => { page.classList.remove('page-in'); });
+  track(page, [fade, ...pushed], () => { page.classList.remove('page-in'); }, gate);
 }
 
 /**
- * Unified subpages stay mounted above a work page. Transition that same
- * subpage to/from the work with the EXISTING page-motion timing and easing.
- * No clone, independently programmed curve, or reveal of the underlying Home.
+ * محتوى وصل بعد أن ظهرت الصفحة (فصول، حلقات، مواسم): يظهر في مكانه المحجوز بتلاشٍ واحد بدل أن يظهر
+ * دفعة. لا حركة موضع؛ عنصر واحد لكل دفعة.
  */
-export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
+export function settleIn(node, { doc = globalThis.document } = {}) {
+  if (!node?.animate || motionReduced(doc)) return;
+  node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: EASE_IN });
+}
+
+/**
+ * صفحات الموحد الفرعية (الرائج، اكتشف، البحث) طبقة فوق الصفحات: تتبع العقد نفسه كأي صفحة. عند فتح عمل منها
+ * تخرج بتلاشٍ واندفاع للخلف، وعند الرجوع تدخل بتلاشٍ واندفاع للداخل، بالمدة والمنحنى نفسيهما وعلى بوابة
+ * الجاهزية نفسها. كانت تتلاشى فقط (بلا اندفاع) وصفحة العمل تحتها تظهر بلا حركة دخول.
+ */
+export function handoffSurface(node, {enter = false, gate = null, doc = globalThis.document, onComplete = () => {}} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
-  const restore = save(node, ['opacity']);
-  // Stage the restored modal as transparent within the SAME JS turn as resume().
-  if (enter) node.style.opacity = '0';
-  const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
-  track(node, [node.animate(frames, {duration:MS,easing:EASE,fill:'both'})], () => {
-    restore();
-    onComplete();
-  });
+  const frames = enter
+    ? [{ opacity: 0, scale: String(DEPTH) }, { opacity: 1, scale: '1' }]
+    : [{ opacity: 1, scale: '1' }, { opacity: 0, scale: String(DEPTH) }];
+  track(node, [node.animate(frames, { duration: MS, easing: enter ? EASE_IN : EASE, fill: 'both' })], onComplete, gate);
+}
+/** فتح طبقة فرعية (صفحات الموحد: آخر التحديثات، الجدول، اكتشف، البحث): العقد نفسه، تلاشٍ واندفاع للداخل. */
+export function layerIn(node, opts = {}) { handoffSurface(node, { ...opts, enter: true }); }
+/** إغلاقها: تلاشٍ واندفاع للخارج، ثم `done` (إزالتها). بلا حركة: فورًا. */
+export function layerOut(node, done = () => {}, opts = {}) { handoffSurface(node, { ...opts, onComplete: done }); }
+/**
+ * الرئيسية تحت طبقة الموحد العائدة: مخفية طوال دخول الطبقة ثم تظهر تحتها وقد صارت الطبقة معتمة. بلا هذا
+ * تُرى الرئيسية من خلال الطبقة وهي تتلاشى (صفحة ثالثة بين المغادرة والعائدة).
+ */
+export function veil(page, { doc = globalThis.document } = {}) {
+  if (!page?.animate || motionReduced(doc)) return;
+  track(page, [page.animate([{ opacity: 0 }, { opacity: 0 }], { duration: MS, fill: 'both' })], () => {});
 }
 
 /**
