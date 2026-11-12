@@ -383,17 +383,24 @@ test('every module the app imports at boot is precached by the service worker', 
   const roots = ['apps/web/app.js', 'apps/web/reader.js', 'apps/web/screens/accounts.js'];
   const missing = [];
 
-  for (const root of roots) {
-    const source = read(root);
-    const dir = root.slice(0, root.lastIndexOf('/'));
+  // كل شجرة الاستيراد الثابت لا المستوى الأول وحده (#323 U-01/U-11): shell.js يستورد source-home.js
+  // ولم يكن في القائمة، فلا يقلع التطبيق بلا شبكة والحارس أخضر لأنه لا يرى إلا استيرادات الجذور.
+  const seen = new Set();
+  const visit = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const source = read(file);
+    const dir = file.slice(0, file.lastIndexOf('/'));
     // المسار كما يراه المتصفح: `apps/web` هو جذر الموقع لا جزء من العنوان
     const webDir = dir === 'apps/web' ? '' : `${dir.slice('apps/web/'.length)}/`;
-    for (const match of source.matchAll(/^import[^'"]*['"](\.[^'"]+)['"]/gm)) {
-      const specifier = match[1];
+    for (const match of source.matchAll(/^\s*(?:import|export)\b[^'"]*?\bfrom\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gm)) {
+      const specifier = match[1] ?? match[2];
       const resolved = new URL(specifier, `https://x/${webDir}`).pathname;
-      if (!shell.has(resolved)) missing.push(`${root} → ${resolved}`);
+      if (!shell.has(resolved)) missing.push(`${file} → ${resolved}`);
+      visit(`apps/web${resolved}`);
     }
-  }
+  };
+  for (const root of roots) visit(root);
 
   assert.deepEqual(missing, [], `modules imported but not precached:\n${missing.join('\n')}`);
 });
