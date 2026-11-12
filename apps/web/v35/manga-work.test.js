@@ -18,7 +18,7 @@ describe('أنماط صفحة عمل المانجا', () => {
   it('كل نمط يبني العناصر التي يملؤها shell.js بمعرّفاتها مرة واحدة', () => {
     for (const look of MANGA_LOOKS) {
       const html = detailMarkup(look, { glyph, iconButton });
-      expect(html.match(/<button class="mw-cta"[\s\S]*?<\/button>/)?.[0], look).toContain('data-g="book"');
+      expect(html.match(/<button[^>]*id="readCta"[\s\S]*?<\/button>/)?.[0], look).toContain('data-g="book"');
       for (const id of ['detailTop', 'detailTools', 'detailMenu', 'detailScrim', 'detailCover', 'detailTitle', 'readCta', 'readCtaLabel', 'readCtaSub', 'libraryBtn', 'sourceRow', 'chapterPanel', 'chapterCount', 'chapterSort', 'description', 'moreToggle', 'infoGrid', 'detailStats', 'detailGenres', 'detailInsights']) {
         expect(html.split(`id="${id}"`).length - 1, `${look}: ${id}`).toBe(1);
       }
@@ -27,6 +27,10 @@ describe('أنماط صفحة عمل المانجا', () => {
     expect(detailMarkup('profile', { glyph, iconButton })).toContain('id="detailBanner"');
     expect(detailMarkup('gallery', { glyph, iconButton })).toContain('role="tablist"');
     expect(detailMarkup('page', { glyph, iconButton })).toContain('id="togetherBtn"');
+    // «كلاسيكي» = تخطيط Stable كما هو: الغلاف بجانب الاسم، والزر العريض، وثلاثة أزرار، وكتل STORY/CHAPTERS/DETAILS
+    const classic = detailMarkup('page', { glyph, iconButton });
+    for (const part of ['class="detail-head"', 'class="detail-quick"', 'STORY', 'CHAPTERS', 'DETAILS']) expect(classic).toContain(part);
+    expect(classic).not.toMatch(/mw-hero|depth/);
   });
 
   it('النطاقات كل 50، والبقية القصيرة تُضم لما قبلها (151–201)', () => {

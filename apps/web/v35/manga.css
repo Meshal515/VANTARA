@@ -1661,3 +1661,381 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
 .v35 #detail .mw-cell-open:active { opacity: 0.7; }
 @media (min-width: 700px) { .v35 #detail .mw-grid, .v35 #detail[data-look='resume'] .mw-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 
+
+/* ════ «كلاسيكي»: صفحة Stable كما هي (مولَّدة من main: core.css ثم manga.css بترتيب تحميلها)، بنطاق هذا النمط وحده، بلا عمق ════ */
+.v35.native-android #detail[data-look='page'] .detail-glow i {
+  filter: none !important;
+}
+.v35 #detail[data-look='page'] .detail-glow {
+  
+  display: none;
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 360px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.v35 #detail[data-look='page'] .detail-glow i {
+  position: absolute;
+  inset: -40px;
+  background-size: cover;
+  background-position: center 25%;
+  filter: blur(40px) saturate(1.3) brightness(0.45);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+.v35 #detail[data-look='page'] .detail-glow i.ready {
+  opacity: 1;
+}
+.v35 #detail[data-look='page'] .detail-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 9, 13, 0.2), var(--bg) 92%);
+}
+.v35 #detail[data-look='page'] .detail-head {
+  position: relative;
+  display: grid;
+  grid-template-columns: 124px 1fr;
+  gap: 16px;
+  align-items: end;
+  padding: 4px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .detail-cover {
+  position: relative;
+  aspect-ratio: 0.7;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.v35 #detail[data-look='page'] .detail-cover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.v35 #detail[data-look='page'] .detail-meta {
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.v35 #detail[data-look='page'] .detail-meta h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 780;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  unicode-bidi: plaintext;
+  text-align: right;
+}
+.v35 #detail[data-look='page'] .detail-sub {
+  margin-top: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.v35 #detail[data-look='page'] .detail-sub:empty {
+  display: none;
+}
+.v35 #detail[data-look='page'] .detail-cta {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 20px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .read-cta {
+  min-height: 52px;
+  justify-content: center;
+}
+.v35 #detail[data-look='page'] .read-cta small {
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  opacity: 0.8;
+}
+.v35 #detail[data-look='page'] .read-cta small::before {
+  content: '·';
+  margin-inline-end: 8px;
+}
+.v35 #detail[data-look='page'] .read-cta small:empty {
+  display: none;
+}
+.v35 #detail[data-look='page'] .detail-progress {
+  margin: 14px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .detail-progress[hidden] {
+  display: none;
+}
+.v35 #detail[data-look='page'] .progress-bar {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.v35 #detail[data-look='page'] .progress-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.v35 #detail[data-look='page'] .progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.v35 #detail[data-look='page'] .block {
+  padding: 26px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.v35 #detail[data-look='page'] .block-head h2 {
+  margin: 0;
+  font-size: var(--fs-title-sm);
+  font-weight: 750;
+}
+.v35 #detail[data-look='page'] .block-head .count {
+  color: var(--text-3);
+  font-weight: 500;
+  margin-inline-start: 6px;
+}
+.v35 #detail[data-look='page'] .source-switch {
+  padding: 12px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .source-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 0 var(--gutter);
+}
+.v35 #detail[data-look='page'] .source-row::-webkit-scrollbar {
+  display: none;
+}
+.v35 #detail[data-look='page'] .summary {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1.85;
+  unicode-bidi: plaintext;
+  text-align: right;
+  white-space: pre-line;
+}
+.v35 #detail[data-look='page'] .summary.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 #detail[data-look='page'] .more-toggle {
+  margin-top: 4px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+.v35 #detail[data-look='page'] .info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--line);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.v35 #detail[data-look='page'] .section-titles {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.v35 #detail[data-look='page'] .section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
+  line-height: 1;
+  color: var(--text-3);
+}
+.v35 #detail[data-look='page'] .section-eyebrow::before {
+  content: '';
+  width: 14px;
+  height: 2px;
+  background: var(--accent);
+}
+.v35 #detail[data-look='page'] .detail-head {
+  grid-template-columns: 46% minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  padding: 6px var(--gutter) 0;
+}
+.v35 #detail[data-look='page'] .detail-cover {
+  width: auto;
+  border-radius: var(--m-r);
+  box-shadow: 0 30px 56px -22px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.v35 #detail[data-look='page'] .detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-inline-start: 16px;
+  padding: 2px 0 2px;
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--line-strong);
+}
+.v35 #detail[data-look='page'] .detail-folio {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: auto;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.v35 #detail[data-look='page'] .detail-folio b {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  color: var(--paper);
+}
+.v35 #detail[data-look='page'] .detail-folio span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.v35 #detail[data-look='page'] .detail-kicker {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.v35 #detail[data-look='page'] .detail-kicker:empty {
+  display: none;
+}
+.v35 #detail[data-look='page'] .detail-meta h1 {
+  font-size: 22px;
+  line-height: 1.22;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--paper);
+  text-align: right;
+  -webkit-line-clamp: 4;
+}
+.v35 #detail[data-look='page'] .detail-sub {
+  margin-top: 0;
+  color: var(--text-3);
+}
+.v35 #detail[data-look='page'] .detail-sub > span + span::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--text-4);
+  vertical-align: middle;
+}
+.v35 #detail[data-look='page'] .detail-meta .chips {
+  display: none;
+}
+.v35 #detail[data-look='page'] #summaryBlock .section-eyebrow {
+  margin-bottom: 10px;
+}
+.v35 #detail[data-look='page'] .detail-cta {
+  grid-template-columns: 1fr;
+  padding-top: 22px;
+}
+.v35 #detail[data-look='page'] .read-cta {
+  min-height: 54px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+.v35 #detail[data-look='page'] .detail-quick {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px var(--gutter) 0;
+  border-block: 1px solid var(--line);
+}
+.v35 #detail[data-look='page'] .quick-btn {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.v35 #detail[data-look='page'] .quick-btn .icon {
+  width: 19px;
+  height: 19px;
+  flex: none;
+}
+.v35 #detail[data-look='page'] .quick-btn + .quick-btn {
+  border-inline-start: 1px solid var(--line);
+}
+.v35 #detail[data-look='page'] .quick-btn:active {
+  background: var(--surface-1);
+}
+.v35 #detail[data-look='page'] .quick-btn[aria-pressed='true'] {
+  color: var(--accent-text);
+}
+.v35 #detail[data-look='page'] .progress-bar {
+  height: 2px;
+  border-radius: 0;
+}
+.v35 #detail[data-look='page'] .progress-bar > i {
+  border-radius: 0;
+}
+.v35 #detail[data-look='page'] .block {
+  margin: 26px var(--gutter) 0;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--line);
+}
+.v35 #detail[data-look='page'] .block-head h2 {
+  font-size: 20px;
+  font-weight: 800;
+}
+.v35 #detail[data-look='page'] .block-head .count {
+  font-variant-numeric: tabular-nums;
+}
+.v35 #detail[data-look='page'] .info-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+@media (max-width: 370px) {
+.v35 #detail[data-look='page'] .detail-folio b {
+    font-size: 32px;
+}
+}
+/* شريط Stable كان في التدفق (sticky)؛ شريط Debug عائم فوق الصفحة: مكانه يُحجز فوق الرأس */
+.v35 #detail[data-look='page'] .detail-glow + .detail-head { margin-top: calc(var(--top-h) + var(--safe-top)); }

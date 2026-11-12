@@ -1650,7 +1650,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     page.dataset.look = look;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
-    mangaDepth = mountMangaScrollDepth(root);
+    // «كلاسيكي» بلا عمق تمرير (قرار المالك): صفحة Stable كما هي
+    mangaDepth = look === 'page' ? null : mountMangaScrollDepth(root);
     if (look === 'gallery') bindDetailTabs();
     paintDetailTools();
   }
@@ -1660,6 +1661,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const host = q('detailStats');
     if (!host) return;
     const n = w._chapters ? countMainChapters(w._chapters) : Number(w.chapters) || 0;
+    // «كلاسيكي»: عدد الفصول الصحيحة كبيرًا كرقم صفحة (Stable)
+    const folio = q('detailFolio');
+    if (folio) folio.replaceChildren(el('b', null, n ? String(n) : '—'), ...(n ? [el('span', null, n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا')] : []));
     const year = w.startDate?.year ?? null;
     const ref = String(w.id);
     // حقائق من عدة مصادر (lib/manga-facts.js): الحالة بالتصويت، والتقييم من AniList أو MAL؛ وما لا تقييم له

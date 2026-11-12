@@ -169,11 +169,33 @@ export function detailMarkup(look, { glyph, iconButton }) {
       `${story(true)}${genres}${info}</div>`
     );
   }
+  // «كلاسيكي» (المعرّف page محفوظ عند المستخدمين): صفحة Stable كما هي (قرار المالك، 12 نوفمبر):
+  // الغلاف وبجانبه الاسم والعدد، ثم «ابدأ القراءة» عريضًا وثلاثة أزرار، والمصادر، والتقدم، ثم STORY
+  // وCHAPTERS والمعلومات. بلا عمق تمرير. المعرّفات نفسها التي تملؤها القشرة لكل الأنماط.
+  const eyebrow = (t) => `<span class="section-eyebrow">${t}</span>`;
   return (
     bar +
-    `<div class="mw-hero">${amb()}<div class="mw-head">${cover}<div class="mw-id">${kick}${title}${who}${stats}</div></div></div>` +
-    `<div class="mw-wrap">${genres}${cta()}${quick3}${progress()}${story(true)}` +
-    `<section class="mw-chapters">${chead}${sources}${panel}</section>${info}</div>`
+    `<div class="detail-glow" aria-hidden="true"><img id="detailGlow" alt="" decoding="async"></div>` +
+    `<div class="detail-head" data-reveal><div class="detail-cover" id="detailCover"></div><div class="detail-meta">` +
+    `<div class="detail-folio" id="detailFolio" dir="ltr"></div><div class="detail-kicker" id="detailKicker"></div><h1 id="detailTitle" dir="auto" data-copyable>—</h1>` +
+    `<div class="detail-sub" id="detailWho" dir="auto"></div><div class="detail-sub" id="detailStats"></div>` +
+    `<div class="chips" id="detailGenres"></div></div></div>` +
+    `<div class="detail-cta" data-reveal><button class="btn btn-primary read-cta" type="button" id="readCta" data-act="readNow" disabled>` +
+    `${glyph('book')}<span id="readCtaLabel">جارٍ جمع الفصول</span><small id="readCtaSub" dir="auto"></small></button></div>` +
+    `<div class="detail-quick" data-reveal>` +
+    `<button class="quick-btn" type="button" id="libraryBtn" data-act="toggleLibraryCurrent" aria-pressed="false">${glyph('library')}<span>مكتبتي</span></button>` +
+    `<button class="quick-btn" type="button" id="laterBtn" data-act="toggleLaterCurrent" aria-pressed="false">${glyph('clock')}<span>لاحقًا</span></button>` +
+    `<button class="quick-btn" type="button" id="togetherBtn" data-act="readTogetherCurrent" aria-pressed="false">${glyph('users')}<span>مع أصدقائك</span></button></div>` +
+    `<div class="source-switch" id="sourcesBlock" hidden><div class="source-row" id="sourceRow" role="radiogroup" aria-label="المصدر"></div></div>` +
+    `<div class="detail-progress" id="detailProgress" hidden><div class="progress-bar"><i id="progressFill"></i></div>` +
+    `<div class="progress-row"><span id="progressText"></span><span class="mw-faint" id="progressNote"></span></div></div>` +
+    `<div class="block" id="summaryBlock">${eyebrow('STORY')}<p class="summary clamped" id="description" dir="auto"></p>` +
+    `<button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button></div>` +
+    `<div class="block"><div class="block-head"><div class="section-titles">${eyebrow('CHAPTERS')}<h2>الفصول<span class="count" id="chapterCount"></span></h2></div>` +
+    `<button class="icon-btn" type="button" id="chapterSort" data-act="flipChapterOrder" aria-label="عكس الترتيب">${glyph('sort')}</button></div>` +
+    `<div id="chapterPanel"></div></div>` +
+    `<div class="block">${insights}<div class="block-head"><div class="section-titles">${eyebrow('DETAILS')}<h2>معلومات</h2></div></div>` +
+    `<div class="info-grid" id="infoGrid"></div></div>`
   );
 }
 

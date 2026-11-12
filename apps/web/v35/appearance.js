@@ -85,7 +85,7 @@ export const WORK_STYLES = Object.freeze([
  * الأول هو الأساسي.
  */
 export const MANGA_WORK_STYLES = Object.freeze([
-  { id: 'page', name: 'الصفحة', note: 'الغلاف وعمود المعلومات' },
+  { id: 'page', name: 'كلاسيكي', note: 'صفحة Stable: الغلاف وبجانبه الاسم، ثم القصة والفصول' },
   { id: 'gallery', name: 'المعرض', note: 'الغلاف في الوسط وتبويبات' },
   { id: 'profile', name: 'الملف', note: 'صورة العمل العريضة وثلاثة أرقام' },
   { id: 'resume', name: 'من حيث وقفت', note: 'الفصل التالي أولًا وشبكة أرقام' },
