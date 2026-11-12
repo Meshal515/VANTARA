@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, mangaLook, MANGA_LOOKS, rowsForMark, rowsInGroup } from './manga-work.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, mangaLook, MANGA_LOOKS, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup } from './manga-work.js';
 import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters, _resetPending } from './reading.js';
 import { projectQueue } from '../lib/optimistic.js';
 
@@ -9,8 +9,8 @@ const row = (n) => ({ sourceId: 'pkg', number: n, chapter: { url: `/c/${n}`, nam
 const rows = (max) => Array.from({ length: max }, (_, i) => row(max - i));
 
 describe('أنماط صفحة عمل المانجا', () => {
-  it('الأربعة بمعرّفاتها المتفق عليها، وأي قيمة أخرى = «الصفحة»', () => {
-    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume']);
+  it('الستة بمعرّفاتها المتفق عليها، وأي قيمة أخرى = «كلاسيكي» (page)', () => {
+    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
     for (const id of MANGA_LOOKS) expect(mangaLook(id)).toBe(id);
     for (const id of ['core', 'platform', '', null, undefined]) expect(mangaLook(id)).toBe('page');
   });
@@ -120,5 +120,43 @@ describe('«علّم فصول»', () => {
     expect(clearChapterMarks(s, ref)).toBe(3);
     expect(s.queue[0]).toEqual({ kind: 'chapter.markMany', payload: { seriesRef: ref, read: false, all: true } });
     expect([1, 2, 3].some((n) => read(s, n))).toBe(false);
+  });
+});
+
+describe('«ويبتوني» و«مباشر»: البحث والخط الزمني وإيقاع الإصدار', () => {
+  const DAY = 86_400_000;
+  const ch = (n, name = '', day = 0) => ({ number: n, chapter: { name, scanlator: 'Team X', dateUpload: day * DAY } });
+  it('البحث برقم يطابق بداية الرقم، وبالأرقام العربية، وبالنص في الاسم', () => {
+    const rows = [ch(300, 'النهاية'), ch(30), ch(3), ch(12.5), ch(120)];
+    expect(matchChapters(rows, '30').map((r) => r.number)).toEqual([300, 30]);
+    expect(matchChapters(rows, '٣٠').map((r) => r.number)).toEqual([300, 30]);
+    expect(matchChapters(rows, '12').map((r) => r.number)).toEqual([12.5, 120]);
+    expect(matchChapters(rows, 'النهاية').map((r) => r.number)).toEqual([300]);
+    expect(matchChapters(rows, '  ')).toBe(rows);
+  });
+  it('الشهر بالعربية من تاريخ النشر، ولا شهر بلا تاريخ', () => {
+    expect(monthOf(Date.UTC(2026, 2, 26, 12))).toBe('مارس 2026');
+    expect(monthOf(0)).toBeNull();
+  });
+  it('إيقاع أسبوعي من الوسيط، والفصول في يوم واحد إصدار واحد', () => {
+    const now = 1000 * DAY;
+    const dates = [998, 998, 991, 984, 977, 970].map((d) => d * DAY);
+    expect(releaseBeat(dates, now)).toEqual({ days: 7, weekly: true, next: 1005 * DAY });
+  });
+  it('لا إيقاع لأقل من أربعة إصدارات، ولا «قادم» لعمل توقف', () => {
+    expect(releaseBeat([1, 2, 3].map((d) => d * DAY))).toBeNull();
+    const old = [100, 93, 86, 79].map((d) => d * DAY);
+    expect(releaseBeat(old, 1000 * DAY)?.next).toBeNull();
+  });
+  it('النمطان على هيكل «المعرض» مع البحث، و«ويبتوني» وحده بإيقاع الإصدار', () => {
+    for (const look of ['webtoon', 'direct']) {
+      const html = detailMarkup(look, { glyph, iconButton });
+      expect(html).toContain('id="detailTabs"');
+      expect(html.split('id="chapterSearch"').length - 1).toBe(1);
+      expect(html).not.toContain('id="chapterRanges"');
+    }
+    expect(detailMarkup('webtoon', { glyph, iconButton })).toContain('id="releaseBeat"');
+    expect(detailMarkup('direct', { glyph, iconButton })).not.toContain('id="releaseBeat"');
+    expect(detailMarkup('gallery', { glyph, iconButton })).not.toContain('id="chapterSearch"');
   });
 });

@@ -1,6 +1,8 @@
 /**
- * أنماط صفحة عمل المانجا الأربعة (إعدادات ← المظهر)، منقولة من النموذج الذي اعتمده المالك بقيمه:
- *   - page «الصفحة»: الغلاف 128px وبجانبه الاسم والمؤلفون والتقييم، ثم «اقرأ» عريضًا وثلاثة أفعال.
+ * أنماط صفحة عمل المانجا (إعدادات ← المظهر)، بقرارات المالك:
+ *   - page «كلاسيكي»: صفحة Stable كما هي، بلا عمق.
+ *   - webtoon «ويبتوني»: الفن طوليًا بنسبته، إيقاع الإصدار، والفصول خط زمني بالشهور.
+ *   - direct «مباشر»: رأس مدمج ثم الفصول فورًا.
  *   - gallery «المعرض»: الغلاف في الوسط بضوء من ألوانه، الزر بين دائرتين، وتبويبات.
  *   - profile «الملف»: صورة العمل العريضة والغلاف متداخل معها، ثلاثة أرقام، والفصول بنطاقات 50.
  *   - resume «من حيث وقفت»: رقم الفصل التالي كبيرًا، والفصول شبكة أرقام.
@@ -10,7 +12,10 @@
  */
 
 /** معرّفات متفق عليها مع إعدادات المظهر؛ الأول هو الأساسي. */
-export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume']);
+export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
+
+/** أنماط تبني على هيكل «المعرض» (الغلاف، الزر بين مربعين، وتبويبات) وتختلف بالـCSS وبعض المحتوى. */
+export const TABBED_LOOKS = Object.freeze(['gallery', 'webtoon', 'direct']);
 
 /** أي قيمة غير الأربعة (ومنها «core» قبل أن تعرف الإعدادات أنماط المانجا) = «الصفحة». */
 export const mangaLook = (id) => (MANGA_LOOKS.includes(id) ? id : 'page');
@@ -132,17 +137,23 @@ export function detailMarkup(look, { glyph, iconButton }) {
   // نشاطك ونشاط أصدقائك يصل من الشبكة متأخرًا: مكانه آخر الصفحة مع المعلومات فلا يدفع ما فوقه
   const info = `<section class="mw-info"><h2 class="mw-h">معلومات</h2>${insights}<div class="info-grid" id="infoGrid"></div></section>`;
 
-  if (L === 'gallery') {
+  if (TABBED_LOOKS.includes(L)) {
+    // «ويبتوني» و«مباشر» (قرار المالك، 12 نوفمبر): بحث في الفصول برقمه أو اسمه بدل النطاقات
+    const find = L === 'gallery' ? '' :
+      `<label class="mw-find">${glyph('search', { size: 16 })}<input type="search" id="chapterSearch" inputmode="search" enterkeyhint="search" ` +
+      `placeholder="ابحث برقم الفصل أو اسمه" aria-label="ابحث في الفصول" autocomplete="off"></label>`;
+    // «ويبتوني»: إيقاع الإصدار يُحسب من تواريخ الفصول (shell.js)، ويُخفى إن لم يكفِ ما يُحسب منه
+    const beat = L === 'webtoon' ? '<div class="wt-beat" id="releaseBeat" hidden></div>' : '';
     return (
       bar +
-      `<div class="mw-stage">${amb()}${cover}<div class="mw-center mw-wrap">${title}${stats}${genres}</div></div>` +
+      `<div class="mw-stage">${amb()}${cover}<div class="mw-center mw-wrap">${title}${stats}${genres}</div>${beat}</div>` +
       `<div class="mw-wrap mw-acts"><div class="mw-row">${square('libraryBtn', 'toggleLibraryCurrent', 'library', 'مكتبتي')}${cta()}` +
       `${square('togetherBtn', 'readTogetherCurrent', 'users', 'اقرأ مع أصدقائك')}</div>${progress()}</div>` +
       `<div class="mw-tabbed"><div class="mw-tabs" role="tablist" id="detailTabs">` +
       `<button type="button" role="tab" aria-selected="true" data-tab="chapters">الفصول</button>` +
       `<button type="button" role="tab" aria-selected="false" data-tab="about">عن العمل</button>` +
       `<button type="button" role="tab" aria-selected="false" data-tab="similar" id="similarTab" hidden>مشابهة</button></div>` +
-      `<div class="mw-wrap mw-tab" data-panel="chapters">${sources}` +
+      `<div class="mw-wrap mw-tab" data-panel="chapters">${sources}${find}` +
       `<div class="mw-shead mw-shead--bare"><span class="mw-count" id="chapterCount"></span><button class="mw-sort" type="button" id="chapterSort" data-act="flipChapterOrder">${glyph('sort', { size: 16 })}<span>الأحدث أولًا</span></button></div>` +
       `${panel}</div>` +
       `<div class="mw-wrap mw-tab" data-panel="about" hidden>${story(false)}${info}</div>` +
@@ -253,4 +264,43 @@ export function mountMangaScrollDepth(root, win = window, doc = document) {
       page.style.removeProperty('--mw-scroll-depth');
     },
   };
+}
+
+/**
+ * بحث الفصول («ويبتوني» و«مباشر»): رقم = الفصول التي يبدأ رقمها به (12 ← 12، 120، 12.5)، وأي نص آخر
+ * يُطابق اسم الفصل أو فريق الترجمة. يبحث في كل الصفوف لا في الدفعة المعروضة.
+ * @param {object[]} rows
+ * @param {string} query
+ */
+export function matchChapters(rows, query) {
+  const q = String(query ?? '').trim().replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  if (!q) return rows;
+  if (/^\d+(\.\d*)?$/.test(q)) return rows.filter((r) => Number.isFinite(Number(r?.number)) && String(Number(r.number)).startsWith(q));
+  const t = q.toLowerCase();
+  return rows.filter((r) => `${r?.chapter?.name ?? ''} ${r?.chapter?.scanlator ?? ''}`.toLowerCase().includes(t));
+}
+
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+/** «مارس 2026» لتاريخ نشر بالمللي ثانية، أو null بلا تاريخ. */
+export function monthOf(ms) {
+  const d = new Date(Number(ms));
+  return ms && Number.isFinite(d.getTime()) ? `${MONTHS_AR[d.getMonth()]} ${d.getFullYear()}` : null;
+}
+
+/**
+ * إيقاع الإصدار في «ويبتوني»: وسيط الفاصل بين آخر الفصول المؤرَّخة (بلا تكرار اليوم نفسه، فعدة فصول في
+ * يوم واحد إصدار واحد). يكفيه أربعة إصدارات. أسبوعي إن كان الوسيط 6–8 أيام. «القادم» = آخر إصدار + الوسيط،
+ * ولا يُعرض إن فات بأكثر من فاصلين (العمل متوقف غالبًا).
+ * @param {number[]} dates تواريخ نشر بالمللي ثانية
+ * @returns {{days:number, weekly:boolean, next:number|null}|null}
+ */
+export function releaseBeat(dates, now = Date.now()) {
+  const DAY = 86_400_000;
+  const days = [...new Set(dates.filter((d) => Number.isFinite(d) && d > 0).map((d) => Math.floor(d / DAY)))].sort((a, b) => b - a).slice(0, 9);
+  if (days.length < 4) return null;
+  const gaps = days.slice(1).map((d, i) => days[i] - d).sort((a, b) => a - b);
+  const mid = gaps[Math.floor(gaps.length / 2)];
+  if (!(mid >= 1) || mid > 60) return null;
+  const next = (days[0] + mid) * DAY;
+  return { days: mid, weekly: mid >= 6 && mid <= 8, next: next + 2 * mid * DAY < now ? null : next };
 }

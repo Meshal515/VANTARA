@@ -11,8 +11,8 @@ const node = () => {
 };
 
 describe('أنماط المانجا والسينما ولون العلامة', () => {
-  it('المانجا بأربعة أنماط متفق عليها أولها «الصفحة»، والأنمي كما هو، والسينما بأساسيها وثلاثة أنماط (قرار المالك، 9 نوفمبر)', () => {
-    expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume']);
+  it('المانجا بستة أنماط متفق عليها أولها «كلاسيكي» (page)، والأنمي كما هو، والسينما بأساسيها وثلاثة أنماط (قرار المالك، 9 نوفمبر)', () => {
+    expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
     expect(workStyleOf('manga', readAppearance(memory()))).toBe('page');
     expect(workStyleOf('manga', { style: { manga: 'gallery' } })).toBe('gallery');
     expect(workStyleOf('manga', { style: { manga: 'core' } })).toBe('page');

@@ -42,8 +42,8 @@ function fixture() {
 }
 
 describe('manga detail 3D scroll depth', () => {
-  it('keeps all four looks but does not change page enter/exit animation', () => {
-    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume']);
+  it('keeps every look but does not change page enter/exit animation', () => {
+    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
   });
 
   it('clamps and normalizes scroll without overshoot', () => {

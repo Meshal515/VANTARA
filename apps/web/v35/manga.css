@@ -808,22 +808,22 @@
 .v35 #detail[data-look='page'] .mw-chapters { margin-top: 28px; }
 
 /* ═══ 2. المعرض ═══ */
-.v35 #detail[data-look='gallery'] .mw-stage { position: relative; padding-top: calc(64px + var(--safe-top)); overflow: hidden; isolation: isolate; }
-.v35 #detail[data-look='gallery'] .mw-amb { inset: 0 -20px auto; height: 460px; z-index: -1; opacity: 0.5; }
-.v35 #detail[data-look='gallery'] .mw-amb img { filter: blur(4px) saturate(1.2); }
-.v35 #detail[data-look='gallery'] .mw-amb img.ready { opacity: 1; }
-.v35 #detail[data-look='gallery'] .mw-amb::after { background: linear-gradient(to top, var(--bg) 4%, transparent 70%); }
-.v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 190px; margin: 0 auto; border-radius: 12px; box-shadow: 0 24px 44px -16px rgba(0, 0, 0, 0.9); }
-.v35 #detail[data-look='gallery'] .mw-center { text-align: center; }
-.v35 #detail[data-look='gallery'] .mw-title { font-size: 24px; margin-top: 18px; text-align: center; }
-.v35 #detail[data-look='gallery'] .mw-stats { justify-content: center; margin-top: 8px; }
-.v35 #detail[data-look='gallery'] .mw-chips { justify-content: center; margin-top: 12px; }
-.v35 #detail[data-look='gallery'] .mw-acts { padding-top: 22px; }
-.v35 #detail[data-look='gallery'] .mw-progress { margin-top: 16px; }
-.v35 #detail[data-look='gallery'] .mw-progress-row { justify-content: center; }
-.v35 #detail[data-look='gallery'] .mw-tabbed { margin-top: 28px; }
-.v35 #detail[data-look='gallery'] .mw-tabs { display: flex; gap: 26px; margin: 0 var(--mw-side); border-bottom: 1px solid var(--line); }
-.v35 #detail[data-look='gallery'] .mw-tabs button {
+.v35 #detail[data-base='gallery'] .mw-stage { position: relative; padding-top: calc(64px + var(--safe-top)); overflow: hidden; isolation: isolate; }
+.v35 #detail[data-base='gallery'] .mw-amb { inset: 0 -20px auto; height: 460px; z-index: -1; opacity: 0.5; }
+.v35 #detail[data-base='gallery'] .mw-amb img { filter: blur(4px) saturate(1.2); }
+.v35 #detail[data-base='gallery'] .mw-amb img.ready { opacity: 1; }
+.v35 #detail[data-base='gallery'] .mw-amb::after { background: linear-gradient(to top, var(--bg) 4%, transparent 70%); }
+.v35 #detail[data-base='gallery'] .mw-stage .mw-cover { width: 190px; margin: 0 auto; border-radius: 12px; box-shadow: 0 24px 44px -16px rgba(0, 0, 0, 0.9); }
+.v35 #detail[data-base='gallery'] .mw-center { text-align: center; }
+.v35 #detail[data-base='gallery'] .mw-title { font-size: 24px; margin-top: 18px; text-align: center; }
+.v35 #detail[data-base='gallery'] .mw-stats { justify-content: center; margin-top: 8px; }
+.v35 #detail[data-base='gallery'] .mw-chips { justify-content: center; margin-top: 12px; }
+.v35 #detail[data-base='gallery'] .mw-acts { padding-top: 22px; }
+.v35 #detail[data-base='gallery'] .mw-progress { margin-top: 16px; }
+.v35 #detail[data-base='gallery'] .mw-progress-row { justify-content: center; }
+.v35 #detail[data-base='gallery'] .mw-tabbed { margin-top: 28px; }
+.v35 #detail[data-base='gallery'] .mw-tabs { display: flex; gap: 26px; margin: 0 var(--mw-side); border-bottom: 1px solid var(--line); }
+.v35 #detail[data-base='gallery'] .mw-tabs button {
   position: relative;
   min-height: 44px;
   padding: 0 0 11px;
@@ -837,12 +837,12 @@
   align-items: flex-end;
   cursor: pointer;
 }
-.v35 #detail[data-look='gallery'] .mw-tabs button[hidden] { display: none; }
-.v35 #detail[data-look='gallery'] .mw-tabs button[aria-selected='true'] { color: var(--text-1); }
-.v35 #detail[data-look='gallery'] .mw-tabs button[aria-selected='true']::after { content: ''; position: absolute; inset: auto 0 -1px 0; height: 2.5px; border-radius: 2px; background: var(--accent); }
-.v35 #detail[data-look='gallery'] .mw-tab { padding-top: 16px; }
-.v35 #detail[data-look='gallery'] .mw-shead--bare { align-items: center; }
-.v35 #detail[data-look='gallery'] .mw-info { margin-top: 28px; }
+.v35 #detail[data-base='gallery'] .mw-tabs button[hidden] { display: none; }
+.v35 #detail[data-base='gallery'] .mw-tabs button[aria-selected='true'] { color: var(--text-1); }
+.v35 #detail[data-base='gallery'] .mw-tabs button[aria-selected='true']::after { content: ''; position: absolute; inset: auto 0 -1px 0; height: 2.5px; border-radius: 2px; background: var(--accent); }
+.v35 #detail[data-base='gallery'] .mw-tab { padding-top: 16px; }
+.v35 #detail[data-base='gallery'] .mw-shead--bare { align-items: center; }
+.v35 #detail[data-base='gallery'] .mw-info { margin-top: 28px; }
 .v35 #detail .mw-similar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
 .v35 #detail .mw-similar .work-card { min-width: 0; }
 
@@ -994,10 +994,10 @@
   .v35 #detail[data-look='page'] .mw-head { grid-template-columns: 168px minmax(0, 1fr); gap: 22px; padding-top: calc(80px + var(--safe-top)); }
   .v35 #detail[data-look='page'] .mw-amb { height: 520px; }
   .v35 #detail[data-look='page'] .mw-title { font-size: 28px; }
-  .v35 #detail[data-look='gallery'] .mw-amb { height: 600px; }
-  .v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 240px; }
-  .v35 #detail[data-look='gallery'] .mw-title { font-size: 30px; }
-  .v35 #detail[data-look='gallery'] .mw-similar { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .v35 #detail[data-base='gallery'] .mw-amb { height: 600px; }
+  .v35 #detail[data-base='gallery'] .mw-stage .mw-cover { width: 240px; }
+  .v35 #detail[data-base='gallery'] .mw-title { font-size: 30px; }
+  .v35 #detail[data-base='gallery'] .mw-similar { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .v35 #detail[data-look='profile'] .mw-ban { height: calc(300px + var(--safe-top)); }
   .v35 #detail[data-look='profile'] .mw-idrow { margin-top: -100px; gap: 20px; }
   .v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex-basis: 150px; }
@@ -1022,10 +1022,10 @@
   .v35 #detail .mw-chs { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
   .v35 #detail .mw-ch + .mw-ch { border-top: 0; }
   .v35 #detail .mw-ch:nth-child(n + 3) { border-top: 1px solid var(--line); }
-  .v35 #detail[data-look='gallery'] .mw-stage .mw-cover { width: 262px; }
-  .v35 #detail[data-look='gallery'] .mw-acts,
-  .v35 #detail[data-look='gallery'] .mw-center { --mw-max: 640px; }
-  .v35 #detail[data-look='gallery'] .mw-similar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .v35 #detail[data-base='gallery'] .mw-stage .mw-cover { width: 262px; }
+  .v35 #detail[data-base='gallery'] .mw-acts,
+  .v35 #detail[data-base='gallery'] .mw-center { --mw-max: 640px; }
+  .v35 #detail[data-base='gallery'] .mw-similar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .v35 #detail[data-look='profile'] .mw-ban { height: calc(360px + var(--safe-top)); }
   .v35 #detail[data-look='profile'] .mw-idrow { margin-top: -120px; }
   .v35 #detail[data-look='profile'] .mw-idrow .mw-cover { flex-basis: 180px; }
@@ -2039,3 +2039,151 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
 }
 /* شريط Stable كان في التدفق (sticky)؛ شريط Debug عائم فوق الصفحة: مكانه يُحجز فوق الرأس */
 .v35 #detail[data-look='page'] .detail-glow + .detail-head { margin-top: calc(var(--top-h) + var(--safe-top)); }
+
+/* ════ بحث الفصول («ويبتوني» و«مباشر»): بدل النطاقات، يبحث في كل الصفوف ════ */
+.v35 #detail .mw-find {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  margin: 12px 0 2px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.v35 #detail .mw-find input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.v35 #detail .mw-find:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.v35 #detail .mw-find-empty { margin: 28px 0; text-align: center; color: var(--text-3); font-size: 14px; }
+
+/* ════ «ويبتوني» (قرار المالك، 12 نوفمبر): لغة المانجا كما هي، والفن طوليًا بنسبته بلا قص، والفصول خط زمني ════ */
+.v35 #detail[data-look='webtoon'] .mw-amb { display: none; }
+.v35 #detail[data-look='webtoon'] .mw-stage { padding-top: 0; }
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover {
+  width: 100%;
+  max-height: 150vw;
+  aspect-ratio: auto;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* الغلاف بنسبته كاملًا: لا قص ولا تمدد */
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover > img { position: static; height: auto; max-height: 150vw; object-fit: contain; }
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 16%, rgba(8, 7, 12, 0) 50%, rgba(8, 7, 12, 0.86) 82%, var(--bg) 100%);
+}
+.v35 #detail[data-look='webtoon'] .mw-center { position: relative; z-index: 2; margin-top: -150px; padding-bottom: 4px; }
+.v35 #detail[data-look='webtoon'] .mw-title { font-size: 32px; letter-spacing: -0.01em; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.55); }
+.v35 #detail[data-look='webtoon'] .mw-chip { background: rgba(255, 255, 255, 0.13); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.v35 #detail .wt-beat {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: max-content;
+  max-width: calc(100% - 40px);
+  margin: 14px auto 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(74, 222, 128, 0.1);
+  color: #c9f7da;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.v35 #detail .wt-beat[hidden] { display: none; }
+.v35 #detail .wt-beat i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.18); }
+.v35 #detail[data-look='webtoon'] .mw-acts { margin-top: 20px; }
+/* الفصول: خط واحد، الرقم عقدة عليه، والشهور محطات */
+.v35 #detail[data-look='webtoon'] .mw-chs { position: relative; }
+.v35 #detail[data-look='webtoon'] .mw-chs::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 0;
+  inset-inline-start: 21px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(var(--accent), rgba(143, 92, 255, 0.12) 70%, transparent);
+}
+.v35 #detail[data-look='webtoon'] .mw-ch { position: relative; border: 0; }
+.v35 #detail[data-look='webtoon'] .mw-ch .mw-ch-open { gap: 14px; }
+.v35 #detail[data-look='webtoon'] .mw-ch .n {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 2px rgba(143, 92, 255, 0.55);
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.v35 #detail[data-look='webtoon'] .mw-ch.wt-new .n { background: var(--accent); box-shadow: 0 0 0 5px rgba(143, 92, 255, 0.18); color: #fff; }
+.v35 #detail .wt-tag { margin-inline-start: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(143, 92, 255, 0.18); color: #cbb6ff; font-size: 10.5px; font-weight: 800; vertical-align: 2px; }
+.v35 #detail .wt-month {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 26px 0 8px;
+  padding-inline-start: 58px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-1);
+}
+.v35 #detail .wt-month::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 14px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 4px;
+  transform: rotate(45deg);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+.v35 #detail .wt-month small { font-size: 12px; font-weight: 600; color: var(--text-4); }
+
+/* ════ «مباشر» (قرار المالك، 12 نوفمبر): رأس مدمج في سطر واحد ثم الفصول فورًا ════ */
+.v35 #detail[data-look='direct'] .mw-amb { height: 300px; opacity: 0.55; }
+.v35 #detail[data-look='direct'] .mw-stage {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 16px;
+  align-items: end;
+  padding: calc(var(--safe-top) + 74px) var(--mw-side) 0;
+}
+.v35 #detail[data-look='direct'] .mw-stage .mw-cover { width: 96px; margin: 0; border-radius: 12px; grid-row: 1; }
+.v35 #detail[data-look='direct'] .mw-center { grid-row: 1; margin: 0; padding: 0; text-align: start; }
+.v35 #detail[data-look='direct'] .mw-title { margin: 0 0 6px; font-size: 24px; text-align: start; }
+.v35 #detail[data-look='direct'] .mw-stats,
+.v35 #detail[data-look='direct'] .mw-chips { justify-content: flex-start; }
+.v35 #detail[data-look='direct'] .mw-chips { margin-top: 8px; }
+.v35 #detail[data-look='direct'] .mw-chip { height: 26px; padding: 0 10px; font-size: 12px; }
+.v35 #detail[data-look='direct'] .mw-chip:nth-child(n + 3) { display: none; }
+.v35 #detail[data-look='direct'] .mw-acts { margin-top: 18px; }
+.v35 #detail[data-look='direct'] .mw-tabs { margin-top: 14px; }

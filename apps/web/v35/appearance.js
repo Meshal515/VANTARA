@@ -89,6 +89,8 @@ export const MANGA_WORK_STYLES = Object.freeze([
   { id: 'gallery', name: 'المعرض', note: 'الغلاف في الوسط وتبويبات' },
   { id: 'profile', name: 'الملف', note: 'صورة العمل العريضة وثلاثة أرقام' },
   { id: 'resume', name: 'من حيث وقفت', note: 'الفصل التالي أولًا وشبكة أرقام' },
+  { id: 'webtoon', name: 'ويبتوني', note: 'الفن طوليًا، وإيقاع الإصدار، والفصول بالشهور' },
+  { id: 'direct', name: 'مباشر', note: 'رأس مدمج ثم الفصول فورًا' },
 ]);
 
 /**

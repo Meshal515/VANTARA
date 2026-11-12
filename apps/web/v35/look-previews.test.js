@@ -23,7 +23,7 @@ describe('لقطات المعاينة الحقيقية', () => {
     expect(CINEMA_WORK_STYLES.map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee', 'series']);
     expect(all).toContain(homePreview('cinema', 'phone'));
     expect(all).toContain(homePreview('unified', 'phone'));
-    expect(all).toHaveLength(3 * (3 + 4 + 5 + 5) + 3);
+    expect(all).toHaveLength(3 * (3 + 6 + 5 + 5) + 3);
   });
 
   it('لا لقطة يتيمة في المجلد: كل ملف له نمط أو رئيسية', () => {

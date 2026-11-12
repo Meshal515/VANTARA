@@ -24,7 +24,7 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, mountMangaScrollDepth, rowsForMark, rowsInGroup } from './manga-work.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, mountMangaScrollDepth, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -1648,14 +1648,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const page = q('detail');
     const look = mangaLook(workStyleOf('manga'));
     page.dataset.look = look;
+    // «ويبتوني» و«مباشر» يبنيان على أساس «المعرض» (data-base) ويختلفان بقواعدهما
+    if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
+    else delete page.dataset.base;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
-    // «كلاسيكي» بلا عمق تمرير (قرار المالك): صفحة Stable كما هي
-    mangaDepth = look === 'page' ? null : mountMangaScrollDepth(root);
-    if (look === 'gallery') bindDetailTabs();
+    state.chapterQuery = '';
+    // بلا عمق تمرير: «كلاسيكي» (Stable كما هي)، والنمطان الجديدان إلى أن يُصمَّم عمقهما (قرار المالك)
+    mangaDepth = ['page', 'webtoon', 'direct'].includes(look) ? null : mountMangaScrollDepth(root);
+    if (TABBED_LOOKS.includes(look)) bindDetailTabs();
+    bindChapterSearch();
     paintDetailTools();
   }
   const lookIs = (look) => state.detailLook === look;
+  function bindChapterSearch() {
+    const input = q('chapterSearch');
+    if (!input) return;
+    let timer = null;
+    input.oninput = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        state.chapterQuery = input.value;
+        if (state.current?._chapters) renderChapters(state.current);
+      }, 120);
+    };
+  }
   /** «★ 8.4 · 201 فصلًا · 2018» (أو ثلاثة أرقام كبيرة في «الملف»). التقييم من AniList حين يُعرف. */
   function paintStats(w) {
     const host = q('detailStats');
@@ -2558,7 +2575,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const did = readCount ? `قرأت ${readCount} من ${total}` : 'لم تبدأ بعد';
     let note = '';
     let text = did;
-    if (lookIs('gallery')) text = readCount && left ? `${did} · باقي ${countLabel(left, 'chapter')}` : did;
+    if (TABBED_LOOKS.includes(state.detailLook)) text = readCount && left ? `${did} · باقي ${countLabel(left, 'chapter')}` : did;
     else if (lookIs('resume')) note = left ? `باقي ${countLabel(left, 'chapter')}` : 'قرأته كله';
     else {
       const at = readCount ? lastReadAt(String(w.id)) : 0;
@@ -2649,7 +2666,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const ranged = lookIs('profile') || lookIs('resume');
     const { groups, at } = ranged ? paintRanges(w, rows, next) : { groups: [], at: 0 };
-    const shown = ranged ? rowsInGroup(rows, groups, at) : rows.slice(0, state.chapterShown);
+    // البحث يشمل كل الصفوف لا الدفعة المعروضة: الفصل 300 من 2000 يظهر فورًا
+    const pool = state.chapterQuery ? matchChapters(rows, state.chapterQuery) : rows;
+    if (state.chapterQuery && !pool.length) parts.push(el('p', 'mw-find-empty', 'لا فصل بهذا الرقم أو الاسم'));
+    const shown = ranged ? rowsInGroup(rows, groups, at) : pool.slice(0, state.chapterShown);
+    if (lookIs('webtoon')) paintReleaseBeat(w, rows);
     const fragment = document.createDocumentFragment();
     if (lookIs('resume')) {
       const grid = el('div', 'mw-grid');
@@ -2658,11 +2679,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
       parts.push(grid);
     } else {
       const list = el('div', 'mw-chs');
-      for (const r of shown) fragment.append(chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
+      // «ويبتوني»: الفصول خط زمني، والشهر محطة عليه بعدد فصوله المعروضة
+      const timeline = lookIs('webtoon');
+      let month = null, head = null, inMonth = 0;
+      const closeMonth = () => { if (head) head.append(el('small', null, countLabel(inMonth, 'chapter'))); };
+      for (const r of shown) {
+        if (timeline) {
+          const m = monthOf(r.chapter?.dateUpload);
+          if (m && m !== month) { closeMonth(); head = el('div', 'wt-month', m); fragment.append(head); month = m; inMonth = 0; }
+          inMonth++;
+        }
+        const row = chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey);
+        if (timeline && Date.now() - Number(r.chapter?.dateUpload) < 14 * 86_400_000) {
+          row.classList.add('wt-new');
+          row.querySelector('.t > b')?.append(el('span', 'wt-tag', 'جديد'));
+        }
+        fragment.append(row);
+      }
+      if (timeline) closeMonth();
       list.append(fragment);
       parts.push(list);
     }
-    const rest = ranged ? 0 : rows.length - state.chapterShown;
+    const rest = ranged ? 0 : pool.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
       more.type = 'button';
@@ -2790,6 +2828,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return { eye, paint };
   }
   /** صف فصل كما في النموذج: الرقم كبيرًا، ثم «الفصل N» (أو عنوانه) وتاريخه، ثم حالته. */
+  /** «ويبتوني»: «يصدر أسبوعيًا · القادم 8 أبريل» من تواريخ الفصول الصحيحة، للعمل المستمر وحده. */
+  function paintReleaseBeat(w, rows) {
+    const host = q('releaseBeat');
+    if (!host) return;
+    const done = /FINISHED|CANCELLED|COMPLETED/i.test(String(state.detailFacts?.status ?? w.status ?? ''));
+    const beat = done ? null : releaseBeat(mainChapters(rows).map((r) => Number(r.chapter?.dateUpload)));
+    host.hidden = !beat;
+    if (!beat) return;
+    const when = beat.next ? new Date(beat.next).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { day: 'numeric', month: 'long' }) : null;
+    const every = beat.weekly ? 'أسبوعيًا' : `كل ~${countLabel(beat.days, 'day')}`;
+    host.replaceChildren(el('i'), el('span', null, `يصدر ${every}${when ? ` · القادم ${when}` : ''}`));
+  }
   function chapterRow(w, r, isRead, isNext) {
     const row = el('div', `mw-ch${isNext ? ' here' : ''}`);
     const open = el('button', 'mw-ch-open');
