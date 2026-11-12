@@ -114,10 +114,21 @@ const MOUNT = (opts) => `(async()=>{
         exit:()=>{root.replaceChildren(window.__shell.root);window.__shell.resume();window.__reader=null},friends:()=>[],together:null,sendFrame:()=>{},report:async()=>({}),setReading:()=>{},immersive:()=>{}},target)}},{page:'home'});
   return true})()`;
 async function freshMount(opts) {
-  await command('Page.reload', { ignoreCache: false });
-  await delay(4000);
-  for (let n = 0; n < 60 && !(await js('Boolean(window.Capacitor?.Plugins?.ExtensionEngine && document.querySelector("#root"))').catch(() => false)); n++) await delay(1000);
-  await js(MOUNT(opts), 120000);
+  // التطبيق قد يعيد تحميل صفحته مرة عند أول إقلاع: نعيد التركيب إن مات سياق الصفحة أثناءه
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await command('Page.reload', { ignoreCache: false });
+      await delay(4000 + attempt * 2000);
+      for (let n = 0; n < 60 && !(await js('Boolean(window.Capacitor?.Plugins?.ExtensionEngine && document.querySelector("#root"))').catch(() => false)); n++) await delay(1000);
+      await js(MOUNT(opts), 120000);
+      await delay(1500);
+      if (await js('Boolean(window.__shell && window.__sync)').catch(() => false)) return;
+      throw new Error('shell not mounted after reload');
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      console.log(`freshMount retry ${attempt}: ${String(error.message).slice(0, 120)}`);
+    }
+  }
 }
 
 const EE = 'Capacitor.Plugins.ExtensionEngine', AE = 'Capacitor.Plugins.AnimeEngine', VR = 'Capacitor.Plugins.VantaraRuntime';
@@ -187,8 +198,7 @@ async function sampleSheet(label, seconds) {
 try {
   await connect();
   report.device = { abi: adb('shell', 'getprop', 'ro.product.cpu.abilist'), sdk: adb('shell', 'getprop', 'ro.build.version.sdk'), webview: await js('navigator.userAgent') };
-  await freshMount({ section: 'anime' });
-  await delay(4000);
+  await step('mount', async () => { await freshMount({ section: 'anime' }); await delay(4000); return true; });
 
   // ───── A. قائمة الإضافات قبل تثبيت أي شيء ─────
   await step('addons-first-open', async () => {
