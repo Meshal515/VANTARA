@@ -1,0 +1,74 @@
+/* ═══ المانجا: ثلاث تجارب فوق صفحة الجهاز الحقيقية (نسخة DOM)، والأساس «المعرض» كما هو ═══ */
+/* ── مشترك للموحد: بلا حاويات ── */
+#detail[data-v=unified] :is(.aw-tools) { background: none !important; backdrop-filter: none !important; box-shadow: none !important; }
+#detail[data-v=unified] .aw-tool, #detail[data-v=unified] .icon-btn { background: none !important; filter: drop-shadow(0 1px 8px rgba(0,0,0,.55)); }
+#detail[data-v=unified] .mw-amb { display: none !important; }
+#detail[data-v=unified] .mw-stage { position: relative; padding: 0 !important; margin: 0 !important; }
+#detail[data-v=unified] .mw-cover { width: 100% !important; max-width: none !important; height: min(125vw, 560px) !important; margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; transform: none !important; }
+#detail[data-v=unified] .mw-cover img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; border-radius: 0 !important; }
+#detail[data-v=unified] .u-fade { position: absolute; inset: 0 0 auto 0; height: min(125vw, 560px); pointer-events: none; z-index: 1; background: linear-gradient(180deg, rgba(8,7,12,.55) 0, rgba(8,7,12,0) 22%, rgba(8,7,12,0) 46%, rgba(8,7,12,.8) 80%, var(--bg) 100%); }
+#detail[data-v=unified] .mw-center { position: relative; z-index: 2; margin-top: -150px !important; text-align: start !important; align-items: flex-start !important; padding-inline: 20px !important; }
+#detail[data-v=unified] .mw-title { font-size: 34px !important; line-height: 1.1; text-align: start !important; text-shadow: 0 4px 24px rgba(0,0,0,.5); }
+#detail[data-v=unified] .mw-stats { justify-content: flex-start !important; column-gap: 14px; font-size: 13px; color: var(--text-2); }
+#detail[data-v=unified] .mw-chips { justify-content: flex-start !important; gap: 0 12px !important; margin-top: 4px; }
+#detail[data-v=unified] .mw-chip { background: none !important; padding: 0 !important; height: auto !important; color: var(--text-3) !important; font-size: 13px !important; }
+#detail[data-v=unified] .mw-acts { padding-inline: 20px !important; margin-top: 22px !important; }
+#detail[data-v=unified] .mw-square { background: none !important; box-shadow: none !important; width: 44px !important; }
+#detail[data-v=unified] .mw-cta { border-radius: 14px !important; height: 54px !important; min-height: 54px !important; }
+#detail[data-v=unified] .mw-cta .mw-go { background: none !important; }
+#detail[data-v=unified] .mw-progress.u-empty { display: none !important; }
+#detail[data-v=unified] .mw-tabs { margin-top: 26px !important; }
+/* المصادر والأجزاء: لسان مواسم الأنمي نفسه، نص وخط تحت الحالي */
+#detail[data-v=unified] .mw-src-row { gap: 22px !important; }
+#detail[data-v=unified] .source-chip { position: relative; background: none !important; box-shadow: none !important; padding: 6px 0 9px !important; height: auto !important; border-radius: 0 !important; color: var(--text-3) !important; font-size: 14px !important; font-weight: 650; }
+#detail[data-v=unified] .source-chip b { font-size: 11px !important; color: var(--text-4) !important; opacity: 1 !important; margin-inline-start: 4px; }
+#detail[data-v=unified] .source-chip[aria-checked='true'] { color: var(--text-1) !important; }
+#detail[data-v=unified] .source-chip[aria-checked='true']::after { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+#detail[data-v=unified] .source-chip--all svg { display: none; }
+#detail[data-v=unified] .mw-ranges button { background: none !important; padding: 6px 0 9px !important; border-radius: 0 !important; color: var(--text-3) !important; }
+#detail[data-v=unified] .mw-ranges button.on { color: var(--text-1) !important; box-shadow: inset 0 -2px var(--accent) !important; }
+
+/* ── ويبتوني: لغة المانجا كما هي (الأزرار والشرائح والبنفسجي)، والفن طوليًا والفصول خطًا زمنيًا بالشهور ── */
+#detail[data-v=webtoon] .mw-amb { display: none !important; }
+#detail[data-v=webtoon] .mw-stage { position: relative; padding: 0 !important; margin: 0 !important; }
+#detail[data-v=webtoon] .mw-cover { width: 100% !important; max-width: none !important; height: min(150vw, 640px) !important; margin: 0 !important; border-radius: 0 0 28px 28px !important; overflow: hidden; box-shadow: none !important; transform: none !important; }
+#detail[data-v=webtoon] .mw-cover img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 12%; border-radius: 0 !important; }
+#detail[data-v=webtoon] .u-fade { position: absolute; inset: 0 0 auto 0; height: min(150vw, 640px); border-radius: 0 0 28px 28px; pointer-events: none; z-index: 1; background: linear-gradient(180deg, rgba(8,7,12,.5) 0, rgba(8,7,12,0) 18%, rgba(8,7,12,0) 52%, rgba(8,7,12,.92) 100%); }
+#detail[data-v=webtoon] .mw-center { position: relative; z-index: 2; margin-top: -178px !important; padding-bottom: 8px; }
+#detail[data-v=webtoon] .mw-title { font-size: 32px !important; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
+#detail[data-v=webtoon] .mw-chip { background: rgba(255,255,255,.14) !important; backdrop-filter: blur(10px); }
+#detail[data-v=webtoon] .mw-acts { margin-top: 22px !important; }
+.wt-cadence { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 12px 0 0; font-size: 12.5px; color: var(--text-3); }
+.wt-cadence b { color: var(--accent-text, #b9a0ff); font-weight: 700; }
+.wt-cadence i { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 4px rgba(74,222,128,.15); }
+#detail[data-v=webtoon] .mw-chs { position: relative; }
+#detail[data-v=webtoon] .mw-chs::before { content: ''; position: absolute; inset-block: 0; inset-inline-start: 23px; width: 2px; background: linear-gradient(var(--accent), rgba(143,92,255,.08)); border-radius: 2px; }
+.wt-month { position: relative; display: flex; align-items: center; gap: 12px; margin: 22px 0 6px; padding-inline-start: 48px; font-size: 13px; font-weight: 800; color: var(--text-1); }
+.wt-month::before { content: ''; position: absolute; inset-inline-start: 17px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 3px var(--accent); }
+.wt-month small { font-weight: 600; color: var(--text-4); }
+#detail[data-v=webtoon] .mw-ch .n { min-width: 48px; text-align: center; font-size: 15px !important; color: var(--text-3); }
+
+/* ── مباشر: شريط واحد مدمج ثم الفصول فورًا ── */
+#detail[data-v=direct] .mw-amb { opacity: .55; height: 300px !important; }
+#detail[data-v=direct] .mw-stage { display: grid !important; grid-template-columns: 96px 1fr; gap: 16px; align-items: end; padding: calc(var(--safe-top, 0px) + 74px) 20px 0 !important; min-height: 0 !important; height: auto !important; }
+#detail[data-v=direct] .mw-cover { width: 96px !important; height: 144px !important; margin: 0 !important; border-radius: 12px !important; transform: none !important; grid-row: 1; }
+#detail[data-v=direct] .mw-cover img { border-radius: 12px !important; }
+#detail[data-v=direct] .mw-center { text-align: start !important; align-items: flex-start !important; padding: 0 !important; margin: 0 !important; grid-row: 1; }
+#detail[data-v=direct] .mw-title { font-size: 24px !important; text-align: start !important; margin: 0 0 6px !important; }
+#detail[data-v=direct] .mw-stats { justify-content: flex-start !important; }
+#detail[data-v=direct] .mw-chips { justify-content: flex-start !important; margin-top: 8px !important; }
+#detail[data-v=direct] .mw-chip { height: 26px !important; font-size: 12px !important; padding: 0 10px !important; }
+#detail[data-v=direct] .mw-chip:nth-child(n+3) { display: none; }
+#detail[data-v=direct] .mw-acts { margin-top: 18px !important; }
+#detail[data-v=direct] .mw-progress.u-empty { display: none !important; }
+#detail[data-v=direct] .mw-tabs { margin-top: 14px !important; }
+#detail[data-v=unified] .mw-cta { flex: 1 1 auto !important; max-width: none !important; }
+#detail[data-v=unified] .mw-row { gap: 6px !important; }
+#detail[data-v=webtoon] .mw-chs::before { inset-inline-start: 17px; }
+.wt-month { padding-inline-start: 44px; }
+.wt-month::before { inset-inline-start: 11px; }
+#detail[data-v=webtoon] .mw-ch { padding-inline-start: 36px; }
+#detail[data-v=unified] .mw-row { display: flex !important; width: 100% !important; max-width: none !important; }
+#detail[data-v=unified] .mw-row > .mw-cta { flex: 1 1 0 !important; width: auto !important; min-width: 0 !important; }
+#detail[data-v=unified] .mw-acts { width: auto !important; max-width: none !important; }
+#detail[data-v=unified] .mw-row > .mw-square { flex: 0 0 44px !important; width: 44px !important; }
