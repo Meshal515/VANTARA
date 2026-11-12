@@ -254,55 +254,8 @@ export function renderLook(look, host, c, { center = true } = {}) {
  * - شاشة السينما: الشاشة ترجع للخلف بعيدًا وتنزل قليلًا وتبهت (لا تنطوي كالأساسي)، والغلاف يرتفع.
  * - الحلقة أولًا: اللقطة تبتعد قليلًا وتبهت، وعنوان الحلقة يخفت.
  */
-const LOOK_MOTION = {
-  platform: [
-    { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.35], s: [1, 1.05], o: [1, 0.4] },
-    { sel: '.wl-htxt', range: [0, 0.4], y: [0, -20], o: [1, 0] },
-  ],
-  card: [
-    { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.25] },
-    { sel: '.wl-stage3d > .wl-card', range: [0, 0.45], p: 900, y: [0, -24], z: [0, 30], rx: [6, 0], ry: [-18, 0] },
-  ],
-  screen: [
-    { sel: '.aw-hero', at: 'self', range: [0, 0.6], p: 1000, y: [0, 40], z: [0, -260], rx: [0, 4], s: [1, 0.92], o: [1, 0.15] },
-    { sel: '.wl-top .wl-cover', range: [0, 0.38], y: [0, -16] },
-  ],
-  episode: [
-    { sel: '.aw-hero', at: 'self', range: [0, 0.4], p: 900, y: [0, 30], z: [0, -60], rx: [0, 7], s: [1, 0.95], o: [1, 0.3] },
-    { sel: '.wl-now', range: [0, 0.4], o: [1, 0.4] },
-  ],
-};
-
-const lerpN = (a, b, t) => a + (b - a) * t;
-function layerValue(l, t, span) {
-  const k = l.span ? span : 1;
-  const v = (pair, d) => (pair ? lerpN(pair[0], pair[1], t) : d);
-  const transform = `perspective(${l.p ?? 1000}px) translate3d(0px, ${(v(l.y, 0) * k).toFixed(1)}px, ${v(l.z, 0).toFixed(1)}px) rotateX(${v(l.rx, 0).toFixed(2)}deg) rotateY(${v(l.ry, 0).toFixed(2)}deg) scale(${v(l.s, 1).toFixed(4)})`;
-  return { transform, opacity: l.o ? v(l.o, 1) : 1 };
-}
-
-/**
- * طبقات collapse-hero لنمط، وقواعد CSS المطابقة لها (تُحقن في <style id="wl-motion">).
- * span = ارتفاع البطل بالبكسل، vh = ارتفاع الشاشة؛ المدى بالبكسل كي يطابق مسار JS حرفيًا.
- */
-export function lookMotion(look, { hero, dims }) {
-  const spec = LOOK_MOTION[look] ?? [];
-  const nodeOf = (l) => () => (l.at === 'self' ? hero : l.at === 'hero' ? hero?.querySelector(l.sel) : hero?.closest('.aw')?.querySelector(l.sel));
-  // الأبعاد تُقرأ في كل مرة: البطل يتغيّر ارتفاعه حين تصل صورته، فيُعاد توليد CSS بالأرقام نفسها
-  const rangeOf = (l) => (l.span ? [0, dims.span] : l.range.map((r) => Math.round(r * dims.vh)));
-  const layers = spec.map((l) => ({ node: nodeOf(l), range: () => rangeOf(l), at: (t) => layerValue(l, t, dims.span) }));
-  const css = () => `@supports (animation-timeline: scroll()){@media (prefers-reduced-motion: no-preference){${spec.map((l, i) => {
-    const span = dims.span;
-    const name = `wl-${look}-${i}`;
-    const [a, b] = rangeOf(l);
-    const from = layerValue(l, 0, span);
-    const to = layerValue(l, 1, span);
-    const sel = l.at === 'self' ? `.v35 .aw[data-style='${look}'] > .aw-hero` : `.v35 .aw[data-style='${look}'] ${l.sel}`;
-    return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}to{transform:${to.transform};opacity:${to.opacity}}}
-html:not([data-motion='off']) ${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;
-  }).join('\n')}}}`;
-  return { layers, css };
-}
+// العمق مع التمرير لكل الأنماط في ملف واحد (depth.js)؛ الأسماء نفسها تُصدَّر من هنا كما كانت
+export { lookMotion } from './depth.js';
 
 /**
  * ما لا يُربط بموضع التمرير: شريط «تابع» الصغير في «الحلقة أولًا» يظهر بانتقال بعد البطل (عنصر
