@@ -2974,12 +2974,26 @@ export function createAnime(deps) {
       if (!items.length) nodes.push(emptyBox('clock', 'لا مشاهدات بعد', 'أول حلقة تشاهدها تظهر هنا بتقدّمها.'));
       else {
         nodes.push(
-          button('an-clear', 'مسح الكل', () => {
-            saveWatch({});
-            if (signedIn()) for (const w of items) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
-            renderLibrary();
-            toast('مُسح سجل المشاهدة');
-          }),
+          // لمسة واحدة كانت تمسح السجل كله ومواضعه بلا رجعة (#323 U-04): تأكيد بنفس ورقة الخطر في التطبيق
+          button('an-clear', 'مسح الكل', () => deps.openSheet((body) => {
+            body.append(el('h3', null, 'تمسح سجل المشاهدة؟'), el('p', null, `ينمسح ${items.length === 1 ? 'عمل واحد' : `${items.length} أعمال`} من «آخر المشاهدات» ومواضع توقّفك فيها. ما تقدر ترجعها.`));
+            const actions = el('div', 'sheet-actions');
+            const cancel = el('button', 'btn btn-secondary', 'لا، خلّه');
+            cancel.type = 'button';
+            cancel.onclick = () => deps.closeSheet();
+            const go = el('button', 'btn btn-danger', 'امسح الكل');
+            go.type = 'button';
+            go.dataset.key = 'confirm-clear';
+            go.onclick = () => {
+              deps.closeSheet();
+              saveWatch({});
+              if (signedIn()) for (const w of items) deps.sync.enqueue('view.remove', { seriesRef: `anime:${w.id}` });
+              renderLibrary();
+              toast('مُسح سجل المشاهدة');
+            };
+            actions.append(cancel, go);
+            body.append(actions);
+          })),
         );
         const list = el('div', 'an-hc-list');
         list.append(...items.map(historyCard));
