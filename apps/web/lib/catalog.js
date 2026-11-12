@@ -162,6 +162,16 @@ export function parseChapterNumber(name) {
 }
 
 /**
+ * رقم مرّ بـFloat في المحرك الأصلي (356.1f ← 356.1000061035156) يعود لما كتبه المصدر (#323 U-28).
+ * لا يمس إلا قيمة هي Float32 بالضبط وفيها ذيل عشري طويل؛ 356.1 وأمثاله من نص المصدر تبقى كما هي.
+ */
+export function fromFloat32(n) {
+	if (!Number.isFinite(n) || Number.isInteger(n) || Math.fround(n) !== n) return n;
+	const short = Number(n.toPrecision(7));
+	return Math.fround(short) === n ? short : n;
+}
+
+/**
  * رقم الفصل: ما قاله المصدر، وإلا ما يُقرأ من الاسم.
  *
  * `chapterNumber` يصل ‎-1 حين لا يضبطه المحلّل، وهي القيمة الافتراضية في
@@ -169,7 +179,7 @@ export function parseChapterNumber(name) {
  */
 export function chapterNumberOf(chapter) {
 	const given = Number(chapter?.chapterNumber);
-	if (Number.isFinite(given) && given >= 0) return given;
+	if (Number.isFinite(given) && given >= 0) return fromFloat32(given);
 	return parseChapterNumber(chapter?.name);
 }
 
@@ -776,6 +786,7 @@ export default {
 	normalizeTitle,
 	parseChapterNumber,
 	chapterNumberOf,
+	fromFloat32,
 	gather,
 	createWorkIndex,
 	groupWorks,

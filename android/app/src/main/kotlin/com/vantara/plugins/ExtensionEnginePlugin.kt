@@ -1153,7 +1153,7 @@ class ExtensionEnginePlugin : Plugin() {
         .put("url", url)
         .put("name", name)
         .put("dateUpload", date_upload)
-        .put("chapterNumber", chapter_number.toDouble())
+        .put("chapterNumber", ChapterNumbers.forJs(chapter_number))
         .put("scanlator", scanlator)
         .put("memo", json.encodeToString(JsonObject.serializer(), memo))
 
