@@ -16,6 +16,7 @@ mkdirSync(out, { recursive: true });
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
 const report = { started: new Date().toISOString(), steps: {} };
 const save = () => writeFileSync(`${out}/audit.json`, JSON.stringify(report, null, 2) + '\n');
+setTimeout(() => { report.fatal = 'global watchdog: 35 min'; save(); process.exit(2); }, 35 * 60000).unref();
 
 // ── CDP ──
 let socket, seq = 0;
@@ -42,7 +43,7 @@ async function connect() {
   await command('Runtime.enable');
   await command('Page.enable');
 }
-const command = (method, params = {}, ms = 240000) => new Promise((resolve, reject) => {
+const command = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => {
   const id = ++seq;
   const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, ms);
   pending.set(id, { resolve, reject, timer });
@@ -60,10 +61,12 @@ const until = async (expr, label, ms = 60000) => {
 async function shot(name) {
   try { const s = await command('Page.captureScreenshot', { format: 'png' }, 30000); writeFileSync(`${out}/${name}.png`, Buffer.from(s.data, 'base64')); } catch {}
 }
-async function step(name, fn) {
+const STEP_CAP_MS = Number(process.env.AUDIT_STEP_CAP_MS || 240000);
+async function step(name, fn, cap = STEP_CAP_MS) {
   const t = Date.now();
   try {
-    const value = await fn();
+    let timer;
+    const value = await Promise.race([fn(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`step cap ${cap} ms exceeded`)), cap); })]).finally(() => clearTimeout(timer));
     report.steps[name] = { result: 'PASS', ms: Date.now() - t, value };
   } catch (error) {
     report.steps[name] = { result: 'FAIL', ms: Date.now() - t, error: String(error?.message || error).slice(0, 1200) };
@@ -221,7 +224,7 @@ try {
     for(const name of ${JSON.stringify(ANIME_CANDIDATES)}){const row=rows.find(r=>r.internalName===name);if(!row)continue;try{await ${VR}.install({url:${JSON.stringify(CS_REPO)},pkg:row.pkg});out.cs.push(name)}catch(e){out.cs.push(name+' ✗ '+String(e.message).slice(0,60))}}
     const E=${EE};await E.addRepo({url:${JSON.stringify(KEIYOUSHI)}});const idx=(await E.repoIndex({url:${JSON.stringify(KEIYOUSHI)}})).extensions;out.keiyoushiExtensions=idx.length;
     const rk=idx.find(r=>r.name==='Rocks Manga');if(rk){try{await E.installExtension({repo:${JSON.stringify(KEIYOUSHI)},pkg:rk.pkg});out.manga='Rocks Manga'}catch(e){out.manga='✗ '+e.message}}
-    return out})()`, 600000));
+    return out})()`, 600000), 660000);
 
   await step('addons-after-install', async () => {
     await js(`window.__shell.showPage('home')`); await delay(1500);
@@ -292,17 +295,6 @@ try {
     return { name, dialog, rowsBefore: n0, rowsAfterCancel: n1 };
   });
 
-  // فتح وإغلاق القائمة 10 مرات: زمن الفتح، العناصر، الأخطاء
-  await step('addons-reopen-x10', async () => {
-    const times = [], nodes = [];
-    for (let i = 0; i < 10; i++) {
-      await js(`window.__shell.showPage('home')`); await delay(800);
-      times.push(await openAddons()); await delay(700);
-      nodes.push(await js('document.getElementsByTagName("*").length'));
-    }
-    return { openMs: times, nodes, errors: await js('window.__errors.slice(0,5)') };
-  });
-
   // ───── B. ورقة السيرفرات: أنمي من AniList ─────
   await js(`window.__shell.showPage('home')`); await delay(1500);
   const openWatch = async (ref, title) => {
@@ -339,8 +331,31 @@ try {
     const s = await sampleSheet('sheet-jjk', 25);
     return { midRowsOnePiece: mid.rows?.length ?? 0, midStatus: mid.status, jjk: s };
   });
+  // ───── C. ورقة السينما: مسلسل بلا إضافات Stremio ─────
+  await step('sheet-cinema', async () => {
+    await js(`window.__shell.showPage('home')`); await delay(1000);
+    await js(`window.__shell.openCinemaRef('cinema:tt0903747',{title:'Breaking Bad',type:'series'})`);
+    await until(`document.querySelector('#cinemaPlay')`, 'cinema play', 90000);
+    await delay(2000);
+    await js(`document.querySelector('#cinemaPlay').click()`);
+    await delay(1000);
+    return sampleSheet('sheet-cinema', 20);
+  });
+  // فتح وإغلاق القائمة 10 مرات: زمن الفتح، العناصر، الأخطاء
+  await step('addons-reopen-x10', async () => {
+    const times = [], nodes = [];
+    for (let i = 0; i < 10; i++) {
+      await js(`window.__shell.showPage('home')`); await delay(800);
+      times.push(await openAddons()); await delay(700);
+      nodes.push(await js('document.getElementsByTagName("*").length'));
+    }
+    return { openMs: times, nodes, errors: await js('window.__errors.slice(0,5)') };
+  });
+
   // تشغيل «الأفضل»: هل يفتح المشغل الأصلي ويبقى؟ وماذا يظهر بعد الرجوع منه؟
   await step('sheet-play-best', async () => {
+    await js(`window.__shell.showPage('home')`); await delay(1500);
+    await openWatch('anime:154587', 'Frieren');
     const ok = await until(`document.querySelector('.an-pick-best') && !document.querySelector('.an-pick-best').disabled`, 'best enabled', 60000).catch(() => null);
     if (ok === null) throw new Error('«شغّل الأفضل» never enabled');
     const label = await js(`document.querySelector('.an-pick-best').textContent.trim()`);
@@ -357,18 +372,8 @@ try {
     const after = /PlayerActivity/.test(topActivity()) ? 'still player' : await js(`({active:document.querySelector('.page.active')?.id,sheetOpen:Boolean(document.querySelector('.an-pick-best')),toast:document.querySelector('#toast,.toast')?.textContent||''})`).catch((e) => String(e.message));
     await shot('after-player-back');
     return { best: label, playerOpened: player, playerOpenMs: player ? openedMs : null, stillPlayingAfter15s: still, afterBack: after };
-  });
+  }, 300000);
 
-  // ───── C. ورقة السينما: مسلسل بلا إضافات Stremio ─────
-  await step('sheet-cinema', async () => {
-    await js(`window.__shell.showPage('home')`); await delay(1000);
-    await js(`window.__shell.openCinemaRef('cinema:tt0903747',{title:'Breaking Bad',type:'series'})`);
-    await until(`document.querySelector('#cinemaPlay')`, 'cinema play', 90000);
-    await delay(2000);
-    await js(`document.querySelector('#cinemaPlay').click()`);
-    await delay(1000);
-    return sampleSheet('sheet-cinema', 20);
-  });
 } catch (error) {
   report.fatal = String(error?.stack || error).slice(0, 1500);
   console.log('FATAL', report.fatal);
