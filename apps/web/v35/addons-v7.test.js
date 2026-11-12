@@ -754,3 +754,18 @@ it('quick install of a CloudStream repository row follows its declared tvTypes (
   expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_anime4up','anime');
   view.close();
 });
+
+// #323 U-35 (حالة حدّية): موقع أفلام عام يعلن Anime بين أنواعه (Mycima/Egydead) ليس إضافة أنمي
+it('a mixed general site that also lists Anime installs to cinema; a mostly-anime site stays anime', async()=>{
+  setup();const install=vi.fn(async()=>{});
+  const api={list:async()=>({repos:[{name:'Arabic Repo',url:'https://repo.example/repo.json'}],installed:[]}),
+    extensions:async()=>[{name:'Mycima',pkg:'cs3_mycima',tvTypes:['Movie','TvSeries','Anime','AsianDrama']},{name:'AnimeSite',pkg:'cs3_animesite',tvTypes:['Anime','AnimeMovie','OVA','Movie']}],install};
+  const view=renderV7Addons({registry:registry(),cloudstreamRepositories:api});await tick();browse(view);await tick();
+  const rows=[...view.querySelectorAll('.v7-row')];
+  const row=name=>rows.find(r=>r.querySelector('.v7-name')?.textContent===name);
+  row('Mycima').querySelector('.v7-flip').click();await tick();
+  row('AnimeSite').querySelector('.v7-flip').click();await tick();
+  expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_mycima','cinema');
+  expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_animesite','anime');
+  view.close();
+});

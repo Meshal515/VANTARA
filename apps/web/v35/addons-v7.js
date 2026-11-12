@@ -493,10 +493,13 @@ export function renderV7Addons({
   // نوع إضافة CloudStream من tvTypes التي يعلنها المستودع (نفس قاعدة PublishedRepoRegistrationTest):
   // Anime/AnimeMovie/OVA ← أنمي، وغيرها (Movie، TvSeries، AsianDrama…) ← سينما. كان كل صف «أنمي»
   // والتثبيت السريع يضع مواقع الأفلام في الأنمي (#323 U-35).
+  // موقع عام (Mycima/Egydead) قد يعلن Anime بين أفلامه ومسلسلاته؛ «أي Anime» كانت تضعه في الأنمي
+  // (التحذير نفسه في LiveRepositorySweepTest). الأغلبية تحكم، والتساوي للأنمي كما كان.
   const cloudstreamContent=item=>{
     const types=(Array.isArray(item?.tvTypes)?item.tvTypes:[]).map(t=>String(t).toLowerCase());
     if(!types.length)return undefined;
-    return types.some(t=>t==="anime"||t==="animemovie"||t==="ova")?"anime":"cinema";
+    const anime=types.filter(t=>t==="anime"||t==="animemovie"||t==="ova").length;
+    return anime&&anime>=types.length-anime?"anime":"cinema";
   };
   function nativeRecord(item,store,url){
     const local=localMetadata(item,store);
