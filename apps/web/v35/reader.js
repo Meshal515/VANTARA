@@ -88,8 +88,9 @@ function sharedPages(engine, row) {
       return list;
     });
     promise.catch(() => pageLists.delete(id));
-    remember(pageLists, id, promise, MAX_CACHED_LISTS);
   }
+  // LRU لا FIFO (#311 H-001): إعادة الاستعمال تنقل الفصل لآخر الترتيب، فالمقروء باستمرار لا يُطرد أولًا
+  remember(pageLists, id, promise, MAX_CACHED_LISTS);
   return promise;
 }
 
