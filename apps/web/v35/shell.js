@@ -7177,6 +7177,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   warmed.add(startSection);
   // الأقسام الثلاثة جاهزة قبل أول تبديل: تُرسم مرة في وقت فراغ بعد الإقلاع، ثم التبديل حركة طبقة فقط
   setTimeout(() => idle(() => {
+    // المحتوى الموحد يعرض واجهته هو والأقسام الثلاثة مخفية: لا تُرسم في الخلفية (#323 U-06؛ كان رسمها
+    // يقع أثناء التنقل في الموحد فيهبط الرجوع إلى 13 إطارًا). تُرسم عند أول دخول للقسم (beginSection).
+    if (root.dataset.content === 'unified') return;
     for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id)) renderSection(id);
     // Built is not laid out: a hidden section gets its first style and layout at the moment of the first switch
     // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
@@ -7188,8 +7191,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void q('home')?.offsetHeight; // the off-screen layout itself
     });
   }), 2500);
-  if (startSection === 'anime') anime.show();
-  if (startSection === 'cinema') cinema.show();
+  if (root.dataset.content !== 'unified') {
+    if (startSection === 'anime') anime.show();
+    if (startSection === 'cinema') cinema.show();
+  } else warmed.delete(startSection); // يُرسم عند أول دخول له لا في الإقلاع الموحد
 
   paintNotifyDots();
   refreshFriendsHero();
