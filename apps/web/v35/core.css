@@ -45,7 +45,11 @@
   --r-lg: 16px;
   --r-xl: 22px;
   --tap: 44px;
-  --nav-h: 64px;
+  --nav-h: 58px;
+  /* الشريط العائم: ارتفاعه وبعده عن الحافة، وما تحجزه الصفحات تحته */
+  --dock-gap: 20px;
+  --dock-side: 12px;
+  --dock-space: calc(var(--nav-h) + var(--dock-gap) + var(--safe-bottom));
   --top-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -65,6 +69,9 @@
   --dur-fast: 120ms;
   --dur: 200ms;
   --dur-slow: 320ms;
+  /* ظهور الأغلفة حين تصل (#323 D4): رمز واحد بعقد حركة الصفحات (MOTION في page-motion.js) */
+  --reveal-ms: 380ms;
+  --reveal-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* أسماء قديمة تستعملها طبقة الأصدقاء والملف إلى أن تُنقل */
   --surface: var(--surface-1);
@@ -229,7 +236,7 @@ html,
   position: relative;
   overflow-x: clip;
   background: var(--bg);
-  padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 12px);
+  padding-bottom: calc(var(--dock-space) + 16px);
 }
 .v35 .page {
   display: none;
@@ -237,6 +244,19 @@ html,
 }
 .v35 .page.active {
   display: block;
+}
+/* الصفحتان هما طرفا حركة الطبقات نفسها، بحجم الشاشة وتحت الشريط. */
+.v35 .page.page-leaving,
+.v35 .page.section-page-layer {
+  display: block;
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  pointer-events: none;
+  contain: layout paint;
+  will-change: transform;
 }
 @media (prefers-reduced-motion: reduce) {
   .v35 *,
@@ -328,7 +348,7 @@ html,
 }
 .v35 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .v35 .btn-primary:active {
@@ -385,7 +405,7 @@ html,
   direction: ltr;
 }
 
-/* مبدّل الأقسام: VANTARA وتحته اسم القسم بلونه؛ الضغط يُنزل لوحة الأقسام */
+/* هوية صفحة الإضافة (source-home.js) ما زالت بصنف brand-switch: تبقى بلا زر ولا تبديل */
 .v35 .brand-switch {
   pointer-events: auto;
   display: grid;
@@ -396,163 +416,33 @@ html,
   background: none;
   color: inherit;
   font: inherit;
-  cursor: pointer;
   direction: ltr;
   -webkit-tap-highlight-color: transparent;
 }
-.v35 .brand-switch:active .brand {
-  opacity: 0.7;
+
+/* الشعار: VANTARA وتحته اسم القسم، في المنتصف بصريًا. لم يعد زرًا: التبديل في الشريط.
+ * التباعد بين الحروف يترك فراغًا بعد آخر حرف، فيُسحب بمقداره ليتوسّط فعلًا. */
+.v35 .brand-lockup {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  direction: ltr;
+}
+.v35 .brand-lockup .brand {
+  margin-right: -3px;
 }
 .v35 .brand-section {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: grid;
   font-size: 9.5px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: 3.5px;
   color: var(--accent-text);
+  margin-right: -3.5px;
 }
-.v35 .brand-caret {
-  display: inline-flex;
-  opacity: 0.8;
-  transform: rotate(-90deg);
-  transition: transform 0.25s ease;
-}
-.v35 .brand-caret .icon {
-  width: 10px;
-  height: 10px;
-  stroke-width: 2.6;
-}
-.v35 .brand-switch[aria-expanded='true'] .brand-caret {
-  transform: rotate(90deg);
-}
-
-.v35 .section-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 39;
-  background: rgba(4, 4, 8, 0.55);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 0.22s ease;
-}
-.v35 .section-scrim.open {
-  opacity: 1;
-}
-.v35 .section-menu {
-  position: absolute;
-  top: calc(var(--top-h) + var(--safe-top) + 2px);
-  inset-inline: 0;
-  margin-inline: auto;
-  z-index: 40;
-  width: min(248px, calc(100vw - 32px));
-  display: grid;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  backdrop-filter: blur(24px) saturate(1.4);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 20px 50px rgba(0, 0, 0, 0.55);
-  transform-origin: top center;
-  opacity: 0;
-}
-.v35 .section-menu.open {
-  opacity: 1;
-}
-/* display:grid كان يتجاوز [hidden] في UA stylesheet؛ يمنع قائمة شفافة
-   من البقاء فوق شريط الأزرار مع أنها تبدو مغلقة. */
-.v35 .section-menu[hidden] {
-  display: none;
-}
-.v35 .section-scrim:not(.open) {
-  pointer-events: none;
-}
-.v35 .section-item {
-  --tone: #8f5cff;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 16px;
-  background: transparent;
-  color: var(--text-1);
-  font: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 0.16s ease;
-}
-.v35 .section-item::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 22%, transparent), color-mix(in srgb, var(--tone) 6%, transparent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.v35 .section-item[aria-checked='true']::before {
-  opacity: 1;
-}
-.v35 .section-item:active {
-  transform: scale(0.97);
-}
-.v35 .section-item--anime {
-  --tone: #3b82f6;
-}
-.v35 .section-item--cinema {
-  --tone: #e0303a;
-}
-.v35 .section-lockup {
-  position: relative;
-  display: grid;
-  justify-items: end;
-  gap: 3px;
-  direction: ltr;
-  line-height: 1;
-}
-.v35 .section-kicker {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 3px;
-  margin-inline-end: -3px;
-  color: rgba(255, 255, 255, 0.45);
-}
-.v35 .section-word {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  margin-inline-end: -4px; /* يلغي تباعد آخر حرف لتتحاذى الكلمتان */
-  color: color-mix(in srgb, var(--tone) 62%, #fff);
-}
-.v35 .section-sub {
-  position: relative;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-}
-.v35 .section-item[aria-disabled='true'] .section-word {
-  color: color-mix(in srgb, var(--tone) 35%, rgba(255, 255, 255, 0.3));
-}
-.v35 .section-item[aria-disabled='true'] .section-kicker,
-.v35 .section-item[aria-disabled='true'] .section-sub {
-  color: rgba(255, 255, 255, 0.28);
-}
-@media (prefers-reduced-motion: reduce) {
-  .v35 .section-menu,
-  .v35 .section-scrim,
-  .v35 .brand-caret {
-    transition: none;
-  }
+.v35 .brand-word {
+  grid-area: 1 / 1;
+  justify-self: center;
 }
 
 /* ترويسة الصفحات الفرعية: رجوع في البداية (يمين)، العنوان، أفعال في النهاية */
@@ -602,9 +492,13 @@ html,
 .v35.native-android .detail-glow i {
   filter: none !important;
 }
-.v35.native-android .page-top,
-.v35.native-android .bottom-nav {
+.v35.native-android .page-top {
   background: var(--bg);
+}
+/* أندرويد بلا ضبابية خلفية (أداء WebView): السطح نفسه معتم بدرجته */
+.v35.native-android .dock-cap {
+  /* فحمي محايد: لون القسم في مؤشر التحديد وحده، لا في سطح الكبسولة (قرار المالك) */
+  background: #111015;
 }
 
 /* البانر والفهرس (هوية المانجا) في manga.css */
@@ -840,81 +734,413 @@ html,
   color: var(--text-3);
 }
 
-/* ───────────────────────── التنقّل السفلي ─────────────────────────
- * مؤشّر حبّة خلف الأيقونة المختارة (لغة أندرويد الحديثة) بدل خطٍ رفيع فوقها:
- * يُرى بطرف العين، ولا يحتاج لون النص كله ليقول «أنت هنا». */
+/* ───────────────────────── الشريط المقسوم ─────────────────────────
+ * ثلاث كبسولات عائمة مستقلة ومتساوية بينها فراغ واضح: الرئيسية واكتشف يمينًا،
+ * مبدّل الأقسام في الوسط، مكتبتي والأصدقاء يسارًا. سطح داكن هادئ، وظل خفيف جدًا
+ * لكل كبسولة؛ السطح نفسه هو ما يفصلها عن المحتوى. الحركة في dock.js. */
 
-.v35 .bottom-nav {
+.v35 .dock {
   position: fixed;
   z-index: 50;
-  bottom: 0;
   left: 50%;
+  bottom: calc(var(--dock-gap) + var(--safe-bottom));
   transform: translateX(-50%);
-  width: min(100%, 520px);
-  height: calc(var(--nav-h) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  border-top: 1px solid var(--line);
+  box-sizing: border-box;
+  width: min(calc(100% - 2 * var(--dock-side)), 420px);
+  height: var(--nav-h);
+  display: flex;
+  gap: 8px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none; /* سحب الدائرة لا يصير تمريرًا للصفحة */
+  user-select: none;
 }
-.v35 .nav {
+.v35 .dock-group {
+  position: absolute; /* مجموعة الأقسام لقارئ الشاشة فقط؛ لا مكان لها في صف الكبسولات */
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.v35 .dock[hidden] {
+  display: none;
+}
+/* لوحة المفاتيح تقصّر الشاشة: الشريط مثبّت في مكانه أسفل الشاشة الكاملة (تحت اللوحة) لا يصعد فوقها */
+.v35 .dock {
+  translate: 0 var(--kb-shift, 0px);
+}
+.v35 .dock-cap {
   position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  border-radius: 28px;
+  overflow: hidden; /* المؤشر وطبقة القسم لا يغادران كبسولتهما */
+  /* فحمي محايد: لون القسم في مؤشر التحديد وحده، لا في سطح الكبسولة (قرار المالك) */
+  background: #111015;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 6px 18px rgba(0, 0, 0, 0.28);
+  transition: background-color 0.4s ease;
+  isolation: isolate;
+}
+.v35 .cap-body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-evenly;
+  transform-origin: 50% 50%;
+}
+.v35 .cap-body[inert] {
+  pointer-events: none;
+}
+
+/* ── الوجهة: خانة ثابتة، الأيقونة تتحرك داخلها فقط، والاسم في مكان محجوز تحتها ── */
+.v35 .dock .nav {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 48px;
+  padding: 0;
   border: 0;
   background: none;
-  color: var(--text-3);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 11.5px;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.2s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.v35 .nav-pill {
-  width: 56px;
-  height: 30px;
-  border-radius: 99px;
+.v35 .dock .nav.active {
+  color: #fff;
+}
+.v35 .dock .nav-pill {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+.v35 .dock .nav-pill::before,
+.v35 .dock .nav-pill::after,
+.v35 .dock .nav::before {
+  content: none;
+}
+.v35 .dock .nav .icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  stroke-width: 1.85;
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.v35 .dock .nav.active .icon {
+  stroke-width: 2;
+  /* ارتفاع مرن ناعم: تجاوز صغير جدًا ثم استقرار */
+  /* بلا أسماء: الأيقونة في وسط دائرتها تمامًا، تنبض نبضة خفيفة فقط */
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+  transition: transform 0.3s cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+.v35 .dock .nav:active .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(calc(var(--os, 1) * 0.9));
+  transition-duration: 0.12s;
+}
+.v35 .dock .nav.active:active .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(calc(var(--os, 1) * 0.88));
+}
+/* محاذاة بصرية لا رياضية: كل أيقونة بكتلتها */
+.v35 .dock .nav[data-page='home'] .icon { --oy: 0.5px; }
+.v35 .dock .nav[data-page='discover'] .icon { --os: 0.93; }
+.v35 .dock .nav[data-page='library'] .icon { --oy: 0.5px; --os: 0.98; }
+.v35 .dock .nav[data-page='majlis'] .icon { --os: 0.95; --ox: 0.5px; }
+.v35 .dock .nav-label {
+  display: none; /* بلا أسماء تحت الأيقونات (رأي المالك)؛ الاسم في aria-label للزر */
+  position: absolute;
+  inset-inline: -6px;
+  bottom: 4px;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 11px;
+  font-weight: 650;
+  color: #fff;
+  opacity: 0;
+  transform: translate3d(0, 3px, 0);
+  transition:
+    opacity 0.14s ease,
+    transform 0.2s ease;
+}
+.v35 .dock .nav.active .nav-label {
+  opacity: 0.92;
+  transform: none;
+  transition:
+    opacity 0.2s ease 0.06s,
+    transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) 0.04s;
+}
+.v35 .dock .nav .notify-dot {
+  top: 9px;
+  inset-inline-end: 10px;
+}
+/* أثناء السحب: الأيقونة تحت الدائرة هي التي ترتفع */
+.v35 .dock.scrubbing .nav.active:not(.near) .icon {
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+}
+.v35 .dock.scrubbing .nav.active:not(.near) .nav-label {
+  opacity: 0;
+}
+.v35 .dock.scrubbing .nav.near {
+  color: #fff;
+}
+.v35 .dock.scrubbing .nav.near .icon {
+  stroke-width: 2;
+  transform: translate3d(var(--ox, 0px), var(--oy, 0px), 0) scale(var(--os, 1));
+  transition: transform 0.3s cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+.v35 .dock.scrubbing .nav.near .nav-label {
+  opacity: 0.92;
+  transform: none;
+}
+
+/* ── دائرة التحديد: واحدة لكل كبسولة تنقّل، لون القسم أعمق من الثيم ── */
+.v35 .cap-ind {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: calc(50% - 20px); /* في وسط الكبسولة بالضبط */
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  /* حلقة شفافة بلون القسم: بلا تعبئة ولا لمعة */
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  /* تبديل القسم يلوّن الدائرة بسلاسة مع سطح الكبسولة، لا قفزة لون */
+  transition: background-color 0.4s ease;
+}
+
+/* ── المبدّل: ثلاثة مربعات أكبر قليلًا، والحالي أبيض ثابت وأعرض ── */
+.v35 .dock-switch {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  touch-action: none;
+  transform-origin: 50% 50%;
+}
+.v35 .dock-sq {
+  flex: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  transition:
+    width 0.24s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.16s ease;
+}
+.v35 .dock-sq.current {
+  width: 20px;
+  background: #fff;
+  border-color: #fff;
+}
+.v35 .dock-switch:active .dock-sq {
+  transform: scale(0.9);
+}
+.v35 .dock.open .dock-switch {
+  pointer-events: none;
+}
+
+/* ── طبقة القسم: تملأ كبسولتها وتنزلق فوق أزرارها؛ الحالي بلون القسم العميق ── */
+.v35 .dock-opt {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: inherit;
+  background: #18171d;
+  color: var(--text-1);
   display: grid;
   place-items: center;
-  transition: background var(--dur) var(--ease);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: background-color 0.4s ease;
 }
-.v35 .nav .icon {
-  width: 23px;
-  height: 23px;
+.v35 .dock.open .dock-opt {
+  pointer-events: auto;
 }
-.v35 .nav.active {
-  color: var(--text-1);
+.v35 .dock-opt.current {
+  background: #17161c;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff);
 }
-/* ───────────────────────── التنقّل ─────────────────────────
- * علامة التحديد مشتركة: شرطة بلون القسم فوق الأيقونة، بلا خلفية حولها. */
+.v35 .dock-opt:active {
+  filter: brightness(1.12);
+}
+.v35 .dock-opt-label {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.v35 .dock-opt-label b {
+  font-size: 11.5px;
+  font-weight: 760;
+  letter-spacing: 2.4px;
+  margin-right: -2.4px;
+}
+.v35 .dock-opt-label small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+.v35 .dock-opt.current .dock-opt-label small {
+  color: rgba(255, 255, 255, 0.8);
+}
 
-.v35 .nav.active .nav-pill {
-  background: none;
-  color: var(--text-1);
+/* التركيز من لوحة المفاتيح ظاهر دائمًا */
+.v35 .dock .nav:focus-visible,
+.v35 .dock-switch:focus-visible,
+.v35 .dock-opt:focus-visible {
+  outline: none;
 }
-.v35 .nav::before {
-  content: '';
+.v35 .dock .nav:focus-visible .icon {
+  outline: 2px solid rgba(255, 255, 255, 0.75);
+  outline-offset: 6px;
+  border-radius: 8px;
+}
+.v35 .dock-switch:focus-visible .dock-sq.current,
+.v35 .dock-opt:focus-visible .dock-opt-label {
+  outline: 2px solid rgba(255, 255, 255, 0.75);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* الستارة: تغطي الشاشة كلها والترويسة معها، والشريط فوقها */
+.v35 .dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(4, 3, 8, 0.45);
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.v35 .dock-scrim[hidden] {
+  display: none;
+}
+
+/* ── هوية كل صفحة قسم على الصفحة نفسها: صفحة المانجا بألوان المانجا ولو كان التطبيق كله في قسم
+ * آخر (أثناء الانتقال). ألوان الأنمي والسينما في anime.css بالمحدِّد نفسه، واختيار المستخدم مضمّن
+ * على كل صفحة (applySection). ── */
+.v35 [data-home='manga'] {
+  --bg: #08070c;
+  --bg-raised: #0c0b12;
+  --surface-1: #121019;
+  --surface-2: #18161f;
+  --surface-3: #211e2b;
+  --line: rgba(255, 255, 255, 0.065);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --text-2: #bab6c6;
+  --text-3: #85809a;
+  --text-4: #57536a;
+  --accent: #8f5cff;
+  --accent-press: #7a47f0;
+  --accent-text: #bba2ff;
+  --accent-soft: rgba(143, 92, 255, 0.14);
+  --accent-line: rgba(143, 92, 255, 0.4);
+  accent-color: #8f5cff;
+  caret-color: #bba2ff;
+}
+
+/* ── طبقات الأقسام أثناء الانتقال (dock.js: createLayers) ── */
+.v35 #home.layering {
+  position: relative;
+  overflow-x: clip;
+}
+.v35 #home.layering > .home-view:not([hidden]) {
   position: absolute;
+  inset-inline: 0;
+  /* من أعلى الصفحة نفسها، والمحتوى في مكانه الطبيعي بحشوة بارتفاع الترويسة: بانر السينما
+   * الممتد تحت الترويسة (هامش سالب) يبقى في موضعه أثناء الحركة ولا يقفز عند نهايتها */
   top: 0;
-  left: 50%;
-  width: 22px;
-  height: 2px;
-  margin-left: -11px;
-  background: var(--accent);
-  transform: scaleX(0);
-  transition: transform var(--dur) var(--ease-out);
+  padding-top: var(--layer-top, 0px);
+  box-sizing: border-box;
+  height: 100vh;
+  overflow: hidden; /* طبقة بحجم الشاشة: صورة صغيرة يحرّكها المركّب بلا إعادة رسم */
+  contain: layout paint;
+  background: var(--bg);
+  pointer-events: none;
+  will-change: transform;
+  backface-visibility: hidden;
 }
-.v35 .nav.active::before {
-  transform: scaleX(1);
+/* مجهّزة قبل الاختيار: مبنية ومرسومة التخطيط لكن غير مرئية ولا تلمس */
+.v35 #home.layer-ready {
+  position: relative;
+}
+.v35 #home > .home-view.layer-standby[hidden] {
+  display: block !important;
+}
+.v35 #home.layering > .header {
+  z-index: 40; 
 }
 
-.v35 .nav .notify-dot {
-  top: 7px;
-  inset-inline-end: calc(50% - 22px);
+.v35 #home > .header .header-start,
+.v35 #home > .header .header-end {
+  transition: opacity 180ms ease;
+}
+
+.v35 #home.layering.header-scroll-fade > .header .header-start,
+.v35 #home.layering.header-scroll-fade > .header .header-end {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 140ms;
+}
+ /* الترويسة فوق الطبقات المتحركة */
+
+.v35 #home > .home-view.layer-standby {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  padding-top: var(--layer-top, 0px);
+  box-sizing: border-box;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(-100%, 0, 0);
+  /* بارتفاع الشاشة: محتواها مخطَّط كاملًا لكنه لا يمدّ تمرير الصفحة الظاهرة (كان المانجا يتمرر 2887 بدل 881) */
+  max-height: 100vh;
+  overflow: hidden;
+}
+.v35 .layer-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+/* إيقاف الحركة (النظام أو التطبيق): كل تغيّر في الشريط فوري، بلا أي مدة */
+@media (prefers-reduced-motion: reduce) {
+  .v35 .dock *,
+  .v35 .dock-scrim {
+    transition: none !important;
+  }
+}
+html[data-motion='off'] .v35 .dock *,
+html[data-motion='off'] .v35 .dock-scrim {
+  transition: none !important;
 }
 
 /* ───────────────────────── صفحة العمل ─────────────────────────
@@ -1395,7 +1621,7 @@ html,
   display: grid;
   place-items: center;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   box-shadow: 0 0 0 2px var(--bg);
   animation: v35-pop var(--dur) var(--ease-out);
 }
@@ -2014,7 +2240,7 @@ html,
   display: grid;
   place-items: center;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 11.5px;
   font-weight: 700;
 }
@@ -2150,7 +2376,7 @@ html,
   position: fixed;
   z-index: 200;
   left: 50%;
-  bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+  bottom: calc(var(--dock-space) + 12px);
   max-width: calc(100% - 32px);
   transform: translate(-50%, 8px);
   opacity: 0;
@@ -2181,9 +2407,12 @@ html,
     border-radius: 28px;
     box-shadow: 0 0 0 1px var(--line), 0 35px 100px rgba(0, 0, 0, 0.45);
   }
-  .v35 .bottom-nav {
+  .v35 .bottom-nav:not(.dock) {
     bottom: 24px;
     border-radius: 0 0 28px 28px;
+  }
+  .v35 .dock {
+    bottom: calc(24px + var(--dock-gap) + var(--safe-bottom));
   }
 }
 
@@ -2398,7 +2627,7 @@ html,
 .v35 .notif-kind--frame,
 .v35 .notif-kind--recommendation {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 .v35 .notif-kind .icon {
   width: 12px;
@@ -3081,7 +3310,7 @@ html,
 /* «ترجمة تلقائية» بجانب العين: مقفلة رمادية، ومفعّلة بلون التطبيق */
 .v35 .detail-tl[hidden] { display: none; }
 .v35 .detail-tl.detail-tl--on {
-  color: #fff;
+  color: var(--on-accent, #fff);
   background: var(--accent);
   border-radius: 999px;
 }
@@ -3210,7 +3439,7 @@ html,
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  transition: opacity var(--reveal-ms) var(--reveal-ease);
 }
 .v35 .up-img.loaded {
   opacity: 1;
@@ -3287,10 +3516,10 @@ html,
    خطوط شعرية كالسينما والرئيسية: رأس هو أنت، وعناوين بكلمة لاتينية صغيرة،
    وصفوف خفيفة. لا خلفيات ولا إطارات حول المجموعات. */
 
-.v35 #settingsBody {
+.v35 :is(#settingsBody, #settingsPaneBody) {
   padding-top: 8px;
 }
-.v35 #settingsBody .settings-me {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -3304,46 +3533,46 @@ html,
   font: inherit;
   cursor: pointer;
 }
-.v35 #settingsBody .settings-me-text {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text {
   flex: 1;
   min-width: 0;
   display: grid;
   gap: 2px;
 }
-.v35 #settingsBody .settings-me-text strong {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text strong {
   font-size: 20px;
   font-weight: 750;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 #settingsBody .settings-me-text small {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-text small {
   color: var(--text-3);
   font-size: var(--fs-meta);
   text-align: end;
   justify-self: start;
 }
-.v35 #settingsBody .settings-me-cta {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me-cta {
   color: var(--accent-text);
   font-size: var(--fs-meta);
   font-weight: 650;
 }
-.v35 #settingsBody .settings-me .chev {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-me .chev {
   width: 16px;
   height: 16px;
   color: var(--accent-text);
 }
 
-.v35 #settingsBody .settings-group-label {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-group-label {
   display: grid;
   gap: 2px;
   margin: 30px 0 4px;
   color: var(--text-1);
 }
-.v35 #settingsBody .settings-group-label:first-child {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-group-label:first-child {
   margin-top: 4px;
 }
-.v35 #settingsBody .settings-eyebrow {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3353,53 +3582,53 @@ html,
   font-weight: 700;
   letter-spacing: 0.22em;
 }
-.v35 #settingsBody .settings-eyebrow::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-eyebrow::after {
   content: '';
   width: 18px;
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
 }
-.v35 #settingsBody .settings-title {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-title {
   font-size: 19px;
   font-weight: 750;
 }
 /* عنوان فرعي داخل المجموعة («ما تراه أنت»): أصغر وبلا كلمة لاتينية */
-.v35 #settingsBody .settings-sublabel {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-sublabel {
   margin-top: 18px;
 }
-.v35 #settingsBody .settings-sublabel .settings-title {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-sublabel .settings-title {
   font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--text-3);
 }
 
-.v35 #settingsBody .settings-list {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-list {
   border-radius: 0;
   background: none;
   box-shadow: none;
   overflow: visible;
 }
-.v35 #settingsBody .setting {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting {
   min-height: 58px;
   padding: 13px 0;
   gap: 14px;
 }
-.v35 #settingsBody .setting + .setting::before {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting + .setting::before {
   inset-inline: 36px 0;
 }
-.v35 #settingsBody .setting > .icon {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting > .icon {
   flex: none;
   width: 20px;
   height: 20px;
   color: var(--text-3);
 }
-.v35 #settingsBody .setting strong {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting strong {
   font-size: 15px;
   font-weight: 600;
   line-height: 1.45;
 }
-.v35 #settingsBody .setting small {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting small {
   margin-top: 1px;
   font-size: 12.5px;
   line-height: 1.55;
@@ -3408,29 +3637,29 @@ html,
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.v35 #settingsBody .setting .value {
+.v35 :is(#settingsBody, #settingsPaneBody) .setting .value {
   flex: none;
   max-width: 40%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v35 #settingsBody button.setting:active {
+.v35 :is(#settingsBody, #settingsPaneBody) button.setting:active {
   background: none;
   opacity: 0.7;
 }
-.v35 #settingsBody .switch-input {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input {
   width: 40px;
   height: 24px;
 }
-.v35 #settingsBody .switch-input::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input::after {
   width: 18px;
   height: 18px;
 }
-.v35 #settingsBody .switch-input:checked::after {
+.v35 :is(#settingsBody, #settingsPaneBody) .switch-input:checked::after {
   transform: translateX(-16px);
 }
-.v35 #settingsBody .settings-note {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-note {
   margin: 4px 0 0;
   padding-inline-start: 34px;
   font-size: 12px;
@@ -3438,7 +3667,7 @@ html,
 }
 
 /* النظام: صف شعري يُطوى، لا صندوق */
-.v35 #settingsBody .system-toggle {
+.v35 :is(#settingsBody, #settingsPaneBody) .system-toggle {
   min-height: 58px;
   margin-top: 30px;
   padding: 13px 0;
@@ -3447,7 +3676,7 @@ html,
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.v35 #settingsBody .settings-list.danger-zone {
+.v35 :is(#settingsBody, #settingsPaneBody) .settings-list.danger-zone {
   background: none;
   box-shadow: none;
 }
@@ -3481,3 +3710,107 @@ html,
 .whats-new__kind { flex: none; font-size: 11px; font-weight: 700; color: var(--accent, #c9a6ff); min-width: 34px; }
 .whats-new__kind--fix { color: #7fd1a7; }
 .whats-new__kind--improve { color: #8fb8ff; }
+
+/* إعدادات المظهر: ألوان القسم العشرون */
+.v35 .look-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 8px; padding: 6px 2px 14px; }
+.v35 .look-swatch { display: grid; justify-items: center; gap: 7px; padding: 0; color: var(--text-2); font-size: 11.5px; text-align: center; }
+.v35 .look-swatch i { width: 44px; height: 44px; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.v35 .look-swatch.on i { box-shadow: 0 0 0 3px var(--bg-raised, #000), 0 0 0 5px var(--text-1); }
+.v35 .look-swatch.on { color: var(--text-1); }
+.v35 .look-swatch--reset i { background: conic-gradient(#8f5cff 0 33%, #3b82f6 0 66%, #c1121f 0); }
+
+/* ───── انتقالات الصفحات الداخلية (page-motion.js) ─────
+ * تلاشٍ خالص 400ms: الداخلة تظهر فوق، والخارجة بموضعها المرئي خلفها تتلاشى. لا شيء يتحرك. لا تمسّ الأقسام الرئيسية. */
+.v35 .page.page-out {
+  display: block;
+  position: fixed;
+  z-index: 5;
+  pointer-events: none;
+  contain: layout paint;
+}
+/* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
+.v35 .page.page-in {
+  position: relative;
+  z-index: 6;
+}
+@media (prefers-reduced-motion: reduce) {
+}
+
+/* Temporary compositor hints only while navigating; work contents never stagger or translate. */
+.v35 .page.page-in, .v35 .page.page-out { will-change: opacity; }
+.v35 .page.page-depth { will-change: transform, opacity; }
+
+
+/* الأوراق (openSheet وورقة السيرفرات): فتح بارتفاع خفيف وتلاشٍ 240ms، وإغلاق عكسي أقصر 160ms.
+ * انتقالات لا إطارات مفتاحية: فتحٌ أثناء إغلاق (أو العكس) يرتدّ من حيث وصل، ولا تراكم.
+ * «تقليل الحركة» يُبقي التلاشي وحده؛ وإيقاف الحركة في الإعدادات يجعلها فورية. */
+.v35 .sheet-backdrop { transition: opacity 160ms cubic-bezier(0.4, 0, 1, 1); }
+.v35 .sheet-backdrop > .sheet { transition: transform 160ms cubic-bezier(0.4, 0, 1, 1); }
+.v35 .sheet-backdrop.show { transition: opacity 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+.v35 .sheet-backdrop.show > .sheet { transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .v35 .sheet-backdrop > .sheet,
+  .v35 .sheet-backdrop.show > .sheet { transform: none; }
+}
+html[data-motion='off'] .v35 .sheet-backdrop,
+html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transition: none !important; }
+html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !important; }
+
+/* ── إحصائيات المتابعة (تصميم الدوائر) ── */
+.v35 .insights-body { position: relative; isolation: isolate; background-image: none !important; }
+.v35 .ins-silk { position: absolute; inset: 0 0 auto; height: 520px; z-index: -1; overflow: hidden; background: #02010a; -webkit-mask-image: linear-gradient(180deg, #000 45%, transparent); mask-image: linear-gradient(180deg, #000 45%, transparent); opacity: .9; }
+.v35 .ins-silk canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.v35 .ins { padding: 8px 20px 24px; opacity: 0; transition: opacity .35s ease, filter .35s ease; }
+.v35 .ins.ins-in { opacity: 1; }
+.v35 .ins.ins-swap { opacity: .25; filter: blur(6px); transition-duration: .16s; }
+.v35 .ins-head { text-align: center; padding: 18px 0 6px; }
+.v35 .ins-head small { display: block; font-size: 12.5px; color: var(--text-3); }
+.v35 .ins-total { display: block; font-size: 44px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.v35 .ins-tabs { display: flex; justify-content: center; gap: 24px; height: 46px; margin: 10px 0 8px; box-shadow: 0 1px 0 rgba(255,255,255,.07); }
+.v35 .ins-tabs button { position: relative; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 15px; font-weight: 700; padding: 0; cursor: pointer; }
+.v35 .ins-tabs button.on { color: var(--text-1); }
+.v35 .ins-tabs button.on::after { content: ""; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; background: var(--text-1); }
+.v35 .ins-pies { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 28px; padding: 18px 0 8px; }
+.v35 .ins-pie { position: relative; width: clamp(250px, 80vw, 340px); aspect-ratio: 1; flex: none; }
+.v35 .ins-pie svg { display: block; overflow: visible; }
+.v35 .ins-sl { stroke: var(--accent); opacity: var(--o, 1); cursor: pointer; transition: stroke-dasharray .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease; }
+.v35 .ins-sl.on { opacity: 1; stroke: color-mix(in srgb, var(--accent) 70%, #fff); }
+.v35 .ins-av { display: inline-grid; place-items: center; width: var(--s, 30px); height: var(--s, 30px); border-radius: 50%; overflow: hidden; flex: none; background: var(--surface-3); color: var(--text-1); font-weight: 800; font-size: calc(var(--s, 30px) * .42); }
+.v35 .ins-av img { width: 100%; height: 100%; object-fit: cover; }
+.v35 .ins-pav { position: absolute; translate: -50% -50%; box-shadow: 0 0 0 3px var(--bg), 0 4px 12px rgba(0,0,0,.4); cursor: pointer; }
+.v35 .ins-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; padding: 0 24%; }
+.v35 .ins-mid strong { white-space: nowrap; font-size: clamp(17px, 5.4vw, 22px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.v35 .ins-mid small { font-size: 11.5px; color: var(--text-3); max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.v35 .ins-legend { list-style: none; margin: 8px 0 0; padding: 0; }
+.v35 .ins-legend button { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 52px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; box-shadow: 0 1px 0 rgba(255,255,255,.06); }
+.v35 .ins-legend .ins-nm { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.v35 .ins-legend .ins-h { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.v35 .ins-legend li.on .ins-nm { color: var(--accent-text); }
+.v35 .ins-legend li.locked { opacity: .55; }
+.v35 .ins-works { margin-top: 28px; }
+.v35 .ins-works h3 { font-size: 19px; font-weight: 800; margin: 0 0 12px; }
+.v35 .ins-list { display: grid; gap: 10px; }
+.v35 .ins-row { display: flex; align-items: center; gap: 6px; }
+.v35 .ins-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; border: 0; background: none; color: inherit; font: inherit; padding: 0; cursor: pointer; text-align: start; }
+.v35 .ins-row-main .insights-track { flex: 1; min-width: 0; }
+.v35 .ins-row-main .insights-rank-copy { width: 46%; flex: none; }
+.v35 .ins-del { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border: 0; background: none; color: var(--text-4); cursor: pointer; border-radius: 50%; }
+.v35 .ins-del:active { background: var(--danger-soft); color: var(--danger); }
+.v35 .ins-more { display: block; margin: 14px auto 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 13.5px; font-weight: 600; min-height: 44px; cursor: pointer; }
+.v35 .ins-empty { text-align: center; color: var(--text-3); padding: 24px 0; }
+.v35 .ins-sk { display: block; margin: 0 auto; background: linear-gradient(90deg, #16141b 30%, #1f1c26 50%, #16141b 70%) 0 0/300% 100%; animation: uv-shim 1.5s linear infinite; }
+.v35 .ins-sk-total { width: 180px; height: 44px; border-radius: 8px; margin-top: 30px; }
+.v35 .ins-sk-ring { width: 220px; height: 220px; border-radius: 50%; -webkit-mask: radial-gradient(circle, transparent 63px, #000 64px, #000 93px, transparent 94px); mask: radial-gradient(circle, transparent 63px, #000 64px, #000 93px, transparent 94px); }
+@media (prefers-reduced-motion: reduce) { .v35 .ins-sl { transition: none; } .v35 .ins.ins-swap { filter: none; } }
+/* إحصائيات المتابعة (الجولة الثالثة): التبديل يحوّل ولا يهدم */
+.v35 .ins-sl { transition: stroke-dasharray .7s cubic-bezier(.22,.8,.2,1), stroke-dashoffset .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, stroke .4s ease; }
+.v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1); }
+@media (prefers-reduced-motion: reduce) { .v35 .ins-sl, .v35 .ins-pav { transition: none; } }
+.v35 .ins-sl { stroke: var(--ins-accent, var(--accent)); }
+/* المقفل يُرى بساعاته (لا يخفت)، ومن لا وقت له في القسم يبقى ظاهرًا بـ«—» هادئة. الصورة الخارجة من الدائرة تتلاشى */
+.v35 .ins-legend li.locked { opacity: 1; }
+.v35 .ins-legend li.ins-none .ins-h { color: var(--text-4); }
+.v35 .ins-legend .ins-lock { color: var(--text-3); flex: none; }
+.v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, scale .3s ease; }
+.v35 .ins-pav--gone { opacity: 0; scale: .6; pointer-events: none; }
+.v35 .ins-row-gone { opacity: 0; transform: translateY(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }

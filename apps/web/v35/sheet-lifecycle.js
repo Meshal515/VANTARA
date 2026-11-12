@@ -24,6 +24,7 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     body.replaceChildren();
     body.className = 'sheet';
     body.removeAttribute('aria-label');
+    body.removeAttribute('data-diagnostic-sheet');
   };
 
   function close() {
@@ -55,17 +56,22 @@ export function createSheetController(overlay, body, { exitMs = EXIT_MS } = {}) 
     close();
     // Reopening before the fade ends must not allow the old timer to hide us.
     cancelExit();
+    // From display:none the browser has no starting style to transition from, so the sheet
+    // popped in at full size. Commit the closed state once before showing it.
+    const fromHidden = overlay.hasAttribute('hidden');
     overlay.removeAttribute('hidden');
     overlay.removeAttribute('inert');
     overlay.removeAttribute('aria-hidden');
     body.className = 'sheet';
     body.innerHTML = full ? '' : '<div class="sheet-handle"></div>';
     body.removeAttribute('aria-label');
+    body.removeAttribute('data-diagnostic-sheet');
     if (tone) overlay.dataset.tone = tone;
     else delete overlay.dataset.tone;
     overlay.classList.toggle('sheet-backdrop--full', Boolean(full));
     try {
       onClose = build(body) ?? null;
+      if (fromHidden) void overlay.offsetWidth;
       overlay.classList.add('show');
     } catch (error) {
       overlay.setAttribute('inert', '');

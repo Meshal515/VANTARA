@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * طبقة أدوات مشغل ويندوز — نفس تصميم مشغل الـAPK (PlayerActivity.kt) ونفس عناصر مشغل الويب
  * (pwa/player/player.js): تدرّج أعلى بالرجوع والعنوان والحلقة وملء الصورة وملء الشاشة والمزيد،
@@ -208,6 +209,10 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     }
   }
   doc.defaultView?.addEventListener('resize', positionSheet);
+  const releaseDiagnostics = diagnosticsUi.subscribe(() => {
+    if (!sheet.hidden && openKind === 'more') showMore();
+  });
+  doc.defaultView?.addEventListener('pagehide', releaseDiagnostics, { once: true });
   function openSheet(kind, title, subtitle, build, modifier = '') {
     if (anchorButton) anchorButton.setAttribute('aria-expanded', 'false');
     openKind = kind;
@@ -416,12 +421,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         offsetOut = row.querySelector('output');
         body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
       }
+      if (diagnosticsUi.visible()) {
       body.append(sectionLabel('الشبكة'));
       const net = el('div', 'pp-net');
       if (state.net?.peers != null) net.append(el('span', null, 'مشاركون متصلون'), el('b', null, String(state.net.peers)));
       net.append(el('span', null, 'السرعة الآن'), el('b', null, state.net?.kbps != null ? `${(state.net.kbps * 8 / 1024).toFixed(1)} Mbps` : '—'));
       net.append(el('span', null, 'السيرفر'), el('b', null, state.serverCode ?? '—'));
       body.append(net);
+      }
     });
   }
 

@@ -1,0 +1,310 @@
+package dev.vantara.runtime.http;
+
+import okhttp3.*;
+import java.io.*;
+import java.net.*;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Original host-owned HTTP broker. No UI, player, provider code or automatic retries. */
+public final class HttpBroker {
+    public static final int MAX_REQUEST_BYTES=1024*1024, MAX_RESPONSE_BYTES=4*1024*1024;
+    /** Same limit as OkHttp's own redirect follower; sites behind cookie or locale hops exceed five. */
+    public static final int MAX_REDIRECTS=20;
+    public static final int MAX_PROBE_BYTES=64*1024;
+    /**
+     * Scope origin meaning "any public HTTP(S) host". Media providers reach CDNs, APIs and video hosts the
+     * package cannot list in advance (as Mihon/Aniyomi/CloudStream allow). Isolation still holds: DNS answers
+     * must pass {@link AddressPermission} (no private/loopback/link-local), cookies stay per account and source,
+     * and the worker never sees host-app data.
+     */
+    public static final String PUBLIC_INTERNET="*";
+    /** Parallel requests one host may receive; providers fetch an episode's servers concurrently. */
+    public static final int DEFAULT_PER_HOST=6;
+    public record Scope(String family,String packageId,String sourceId,String sessionId,Set<String> origins) {
+        public Scope {
+            for(String value:Arrays.asList(family,packageId,sourceId,sessionId))
+                if(value==null||value.isEmpty()||value.length()>200)throw new IllegalArgumentException("Invalid broker identity");
+            if(origins==null||origins.isEmpty()||origins.size()>32)throw new IllegalArgumentException("Invalid broker origins");
+            Set<String> normalized=new HashSet<>();
+            if(origins.contains(PUBLIC_INTERNET)) normalized.add(PUBLIC_INTERNET);
+            else for(String value:origins)normalized.add(origin(checkedOrigin(value)));
+            origins=Collections.unmodifiableSet(normalized);
+        }
+    }
+    public record Input(String url,String method,Headers headers,byte[] body,boolean followRedirects) {
+        public Input {headers=headers==null?new Headers.Builder().build():headers;body=body==null?null:body.clone();}
+        @Override public byte[] body(){return body==null?null:body.clone();}
+    }
+    public record Output(String url,int status,Headers headers,byte[] body) {
+        public Output {body=body.clone();}
+        @Override public byte[] body(){return body.clone();}
+    }
+    public static final class Failure extends IOException {
+        public final String code; public final long retryAt;
+        /**
+         * VERIFICATION_REQUIRED only: the hop that was challenged, which after a redirect is not the requested
+         * URL. Host-side only: the worker transport forwards the code alone, never this URL.
+         */
+        public final String challengedUrl;
+        public Failure(String code){this(code,0);}
+        public Failure(String code,long retryAt){super(code);this.code=code;this.retryAt=retryAt;this.challengedUrl=null;}
+        public Failure(String code,HttpUrl challenged){super(code);this.code=code;this.retryAt=0;this.challengedUrl=challenged.toString();}
+    }
+    public interface CookieVault {List<Cookie> load(HttpUrl url);void save(HttpUrl url,List<Cookie> cookies);}
+    public interface Vaults {CookieVault forScope(Scope scope);}
+    public interface AddressPermission {boolean allows(InetAddress address);}
+    private record Challenge(String family,String pkg,String source,String session,String origin) {}
+    private static final class Host {int active;long retryAt;}
+    private final OkHttpClient client;
+    /**
+     * The same isolated client over a socket factory that splits the TLS ClientHello (SNI) into two writes.
+     * ISP filters that inspect only the first packet reset the handshake on a blocked site's name; Aniyomi's path
+     * (AnimeHostRouter) already retried such resets this way, CloudStream's broker did not: every CloudStream source
+     * behind such a filter failed on the owner's phone (PROVIDER_FAILED) while the datacenter emulator passed.
+     */
+    private final OkHttpClient fragmentClient;
+    private final Set<String> fragmentHosts=ConcurrentHashMap.newKeySet();
+    private final Vaults vaults;
+    private final Clock clock;
+    private final LinkedHashMap<String,Host> hosts=new LinkedHashMap<>();
+    /**
+     * Origins that answered with a Cloudflare challenge, and when. A challenge blocks requests only for
+     * CHALLENGE_TTL_MS: afterwards the site is tried again, so a source whose site dropped its protection recovers
+     * by itself instead of staying "needs verification" until the app restarts.
+     */
+    private final Map<Challenge,Long> challenges=new HashMap<>();
+    static final long CHALLENGE_TTL_MS=600_000L;
+    private final Semaphore total=new Semaphore(8);
+    private final int perHost;
+
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock) {this(base,resolver,addresses,vaults,clock,DEFAULT_PER_HOST);}
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost) {this(base,resolver,addresses,vaults,clock,perHost,null);}
+    public HttpBroker(OkHttpClient base,Dns resolver,AddressPermission addresses,Vaults vaults,Clock clock,int perHost,javax.net.SocketFactory fragmenting) {
+        if(perHost<1||perHost>16)throw new IllegalArgumentException("Invalid per-host limit");this.perHost=perHost;
+        this.vaults=Objects.requireNonNull(vaults);this.clock=Objects.requireNonNull(clock);
+        Objects.requireNonNull(resolver);Objects.requireNonNull(addresses);
+        Dns checked=hostname->{
+            final List<InetAddress> resolved;
+            try{resolved=resolver.lookup(hostname);}catch(UnknownHostException e){throw new DeniedDns("DNS_FAILED");}
+            if(resolved==null||resolved.isEmpty()||resolved.size()>32)throw new DeniedDns("DNS_FAILED");
+            for(InetAddress address:resolved)if(address==null||!addresses.allows(address))throw new DeniedDns("DNS_ADDRESS_DENIED");
+            return new ArrayList<>(resolved);
+        };
+        // DNS is checked by the connection's actual resolver, not by a separate
+        // preflight lookup that could rebind before connect. Proxies/retries and
+        // automatic redirects must not sidestep this broker's hop admission.
+        OkHttpClient.Builder isolated=Objects.requireNonNull(base).newBuilder().dns(checked).proxy(Proxy.NO_PROXY).cache(null)
+            .cookieJar(CookieJar.NO_COOKIES).authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE)
+            .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
+            .connectTimeout(10,TimeUnit.SECONDS).readTimeout(15,TimeUnit.SECONDS).callTimeout(20,TimeUnit.SECONDS);
+        isolated.interceptors().clear();isolated.networkInterceptors().clear();
+        client=isolated.build();
+        fragmentClient=fragmenting==null?null:client.newBuilder().socketFactory(fragmenting).build();
+    }
+    private static final java.util.regex.Pattern RESET=java.util.regex.Pattern.compile("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|terminated the handshake|peer shut down|EOF",java.util.regex.Pattern.CASE_INSENSITIVE);
+    /** A handshake cut by the network (a filter's injected reset), not a genuine TLS or certificate failure. */
+    static boolean looksLikeNetworkReset(IOException e) {
+        for(Throwable c=e;c!=null;c=c.getCause()) if(c instanceof java.security.cert.CertificateException||c instanceof javax.net.ssl.SSLPeerUnverifiedException) return false;
+        for(Throwable c=e;c!=null;c=c.getCause())
+            if((c instanceof SocketException||c instanceof javax.net.ssl.SSLException||c instanceof EOFException)&&c.getMessage()!=null&&RESET.matcher(c.getMessage()).find()) return true;
+        return false;
+    }
+    public Session open(Scope scope) {return new Session(Objects.requireNonNull(scope),Objects.requireNonNull(vaults.forScope(scope)));}
+    /** Request URLs may be plain HTTP: several video hosts still are. Origin grants stay HTTPS-only. */
+    private static HttpUrl checkedUrl(String value) {
+        if(value==null||value.length()>8192||value.matches("(?s).*[\\x00-\\x20\\x7f].*"))throw new IllegalArgumentException("INVALID_ENDPOINT");
+        final HttpUrl parsed;
+        try{parsed=HttpUrl.get(value);}catch(IllegalArgumentException e){throw new IllegalArgumentException("INVALID_ENDPOINT");}
+        if(!parsed.username().isEmpty()||!parsed.password().isEmpty())throw new IllegalArgumentException("INVALID_ENDPOINT");
+        return parsed.newBuilder().fragment(null).build();
+    }
+    private static HttpUrl checkedOrigin(String value) {
+        HttpUrl parsed=checkedUrl(value);
+        if(!parsed.isHttps())throw new IllegalArgumentException("INVALID_ENDPOINT");
+        return parsed;
+    }
+    public static String origin(HttpUrl url){return url.scheme()+"://"+(url.host().contains(":")?"["+url.host()+"]":url.host())+(url.port()==443?"":":"+url.port());}
+    private Challenge challenge(Scope s,String origin){return new Challenge(s.family(),s.packageId(),s.sourceId(),s.sessionId(),origin);}
+    /** Host verification coordinator only; this controller is never given to provider code. */
+    public void verificationSucceeded(Scope s,String origin) {synchronized(challenges){challenges.remove(challenge(s,origin));}}
+    private boolean challenged(Challenge c) {
+        synchronized(challenges){
+            Long at=challenges.get(c);
+            if(at==null)return false;
+            if(clock.millis()-at<CHALLENGE_TTL_MS)return true;
+            challenges.remove(c);return false;
+        }
+    }
+    private Host acquireHost(String name) throws Failure {
+        synchronized(hosts){
+            Host state=hosts.get(name);
+            if(state==null){
+                if(hosts.size()>=128){
+                    Iterator<Map.Entry<String,Host>> rows=hosts.entrySet().iterator();boolean evicted=false;
+                    while(rows.hasNext()){Host old=rows.next().getValue();if(old.active==0&&old.retryAt<=clock.millis()){rows.remove();evicted=true;break;}}
+                    if(!evicted)throw new Failure("ENGINE_CAPACITY");
+                }
+                state=new Host();hosts.put(name,state);
+            }
+            // A provider asking for more pages of one site at once than its slots waits its turn, as the engine
+            // slots do (ENGINE_BUSY after 15 s) and as CloudStream's own OkHttp dispatcher queues: refusing the 7th
+            // concurrent request at once broke providers that fetch their servers' links in parallel.
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(state.active>=perHost){
+                long left=deadline-System.nanoTime();
+                if(left<=0)throw new Failure("HOST_BUSY");
+                try{hosts.wait(Math.max(1,TimeUnit.NANOSECONDS.toMillis(left)));}
+                catch(InterruptedException e){Thread.currentThread().interrupt();throw new Failure("HOST_BUSY");}
+            }
+            if(state.retryAt>clock.millis())throw new Failure("HOST_COOLDOWN",state.retryAt);
+            state.active++;return state;
+        }
+    }
+    private void release(Host host){synchronized(hosts){host.active--;hosts.notifyAll();}}
+    private void cooldown(Host host,long delay){synchronized(hosts){host.retryAt=Math.max(host.retryAt,saturatingAdd(clock.millis(),delay));}}
+    private static long saturatingAdd(long a,long b){return b>Long.MAX_VALUE-a?Long.MAX_VALUE:a+b;}
+    private long retryAfter(Response response){
+        String value=response.header("Retry-After");if(value==null)return 60000;
+        try{if(value.trim().matches("[0-9]+")){long seconds=Long.parseLong(value.trim());return seconds>Long.MAX_VALUE/1000?Long.MAX_VALUE:seconds*1000;}}
+        catch(NumberFormatException e){return Long.MAX_VALUE;}
+        try{
+            long target=ZonedDateTime.parse(value,DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli();
+            long now=clock.millis();String date=response.header("Date");
+            if(date!=null)try{now=ZonedDateTime.parse(date,DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli();}catch(RuntimeException ignored){}
+            return Math.max(0,target-now);
+        }catch(RuntimeException e){return 60000;}
+    }
+    private static final class DeniedDns extends UnknownHostException {final String code;DeniedDns(String code){super(code);this.code=code;}}
+
+    public final class Session implements AutoCloseable {
+        private final Scope scope;
+        private final CookieVault cookies;
+        private final AtomicBoolean closed=new AtomicBoolean();
+        private final Set<Call> active=new HashSet<>();
+        private Session(Scope scope,CookieVault cookies){this.scope=scope;this.cookies=cookies;}
+        public boolean needsVerification(String origin){return challenged(challenge(scope,origin));}
+        private void admit(HttpUrl url) throws Failure {
+            if(closed.get())throw new Failure("SESSION_CLOSED");
+            if(!scope.origins().contains(PUBLIC_INTERNET)&&!scope.origins().contains(origin(url)))throw new Failure("ORIGIN_NOT_ALLOWED");
+            if(needsVerification(origin(url)))throw new Failure("VERIFICATION_REQUIRED",url);
+        }
+        public Output execute(Input input) throws IOException {return exchange(input,MAX_RESPONSE_BYTES,false);}
+        /** Host-only media admission probe. Never exposed through the worker HTTP transport.
+         * Uses identical connection/admission/cookie/cancellation guards, but closes after a bounded prefix.
+         * Partial bytes are evidence only: callers must check status and actual media format.
+         */
+        public Output probePrefix(Input input,int limit) throws IOException {
+            if(limit<1||limit>MAX_PROBE_BYTES)throw new Failure("PROBE_BODY_LIMIT");
+            if(input==null||!"GET".equals(input.method()))throw new Failure("INVALID_PROBE_REQUEST");
+            return exchange(input,limit,true);
+        }
+        private Output exchange(Input input,int responseLimit,boolean prefix) throws IOException {
+            if(closed.get())throw new Failure("SESSION_CLOSED");
+            if(input==null)throw new Failure("INVALID_REQUEST");
+            HttpUrl url;try{url=checkedUrl(input.url());}catch(IllegalArgumentException e){throw new Failure("INVALID_ENDPOINT");}
+            String method=input.method();if(!Arrays.asList("GET","HEAD","POST","PUT").contains(method))throw new Failure("METHOD_UNSUPPORTED");
+            byte[] body=input.body();if(body!=null&&body.length>MAX_REQUEST_BYTES)throw new Failure("REQUEST_BODY_LIMIT");
+            if((method.equals("GET")||method.equals("HEAD"))&&body!=null)throw new Failure("INVALID_REQUEST_BODY");
+            // Transport-owned headers are dropped, not refused: providers written for OkHttp commonly copy them
+            // (Host, Content-Length…) and OkHttp sets its own. Refusing them failed whole sources.
+            Headers.Builder cleaned=input.headers().newBuilder();
+            for(String name:Arrays.asList("Host","Connection","Content-Length","Transfer-Encoding","Proxy-Authorization"))cleaned.removeAll(name);
+            Headers headers=cleaned.build();
+            // Wait for a slot like any HTTP client; a provider's parallel fan-out must not fail instantly.
+            try{if(!total.tryAcquire(15,TimeUnit.SECONDS))throw new Failure("ENGINE_BUSY");}
+            catch(InterruptedException e){Thread.currentThread().interrupt();throw new Failure("SESSION_CLOSED");}
+            try {
+                for(int hop=0;hop<=MAX_REDIRECTS;hop++) {
+                    admit(url);Host host=acquireHost(url.host());
+                    try {
+                        // Let the transport negotiate/decode gzip. Provider headers must
+                        // not disable OkHttp's bounded, transparent decompression.
+                        Headers.Builder sent=headers.newBuilder().removeAll("Accept-Encoding");List<Cookie> jar=cookies.load(url);
+                        if(headers.get("Cookie")==null&&!jar.isEmpty()){
+                            StringBuilder cookie=new StringBuilder();for(Cookie c:jar){if(cookie.length()>0)cookie.append("; ");cookie.append(c.name()).append('=').append(c.value());}sent.set("Cookie",cookie.toString());
+                        }
+                        RequestBody payload=(method.equals("POST")||method.equals("PUT"))?RequestBody.create(body==null?new byte[0]:body,MediaType.parse(headers.get("Content-Type")==null?"application/octet-stream":headers.get("Content-Type"))):null;
+                        Request request=new Request.Builder().url(url).headers(sent.build()).method(method,payload).build();
+                        final String hostKey=url.host();
+                        final boolean split=fragmentClient!=null&&fragmentHosts.contains(hostKey);
+                        final Call[] call={(split?fragmentClient:client).newCall(request)};
+                        synchronized(active){if(closed.get())throw new Failure("SESSION_CLOSED");active.add(call[0]);}
+                        try(Response response=openWithFallback(request,hostKey,call,split)) {
+                            if(closed.get())throw new Failure("SESSION_CLOSED");
+                            cookies.save(url,Cookie.parseAll(url,response.headers()));
+                            if("challenge".equalsIgnoreCase(response.header("cf-mitigated"))){
+                                synchronized(challenges){Challenge c=challenge(scope,origin(url));long now=clock.millis();challenges.values().removeIf(at->now-at>=CHALLENGE_TTL_MS);if(challenges.size()>=128&&!challenges.containsKey(c))throw new Failure("ENGINE_CAPACITY");challenges.put(c,now);}
+                                throw new Failure("VERIFICATION_REQUIRED",url);
+                            }
+                            if(response.code()==429){cooldown(host,retryAfter(response));throw new Failure("RATE_LIMITED",host.retryAt);}
+                            // A bare 403/5xx is an ordinary response: providers read the status and try their next
+                            // server. Failing here (and cooling the host) broke every fallback inside a provider.
+                            String location=response.header("Location");int status=response.code();
+                            if(input.followRedirects()&&location!=null&&Arrays.asList(301,302,303,307,308).contains(status)) {
+                                if(hop==MAX_REDIRECTS)throw new Failure("REDIRECT_LIMIT");
+                                HttpUrl next=url.resolve(location);if(next==null||!next.username().isEmpty()||!next.password().isEmpty())throw new Failure("INVALID_REDIRECT");
+                                admit(next);
+                                Headers.Builder nextHeaders=headers.newBuilder();
+                                if(!origin(url).equals(origin(next))) {
+                                    for(String sensitive:Arrays.asList("Authorization","Cookie","Origin","Proxy-Authorization"))nextHeaders.removeAll(sensitive);
+                                    if(headers.get("Referer")!=null)nextHeaders.set("Referer",origin(url)+"/");
+                                }
+                                if((status==303&&!method.equals("HEAD"))||((status==301||status==302)&&method.equals("POST"))){method="GET";body=null;nextHeaders.removeAll("Content-Type");}
+                                headers=nextHeaders.build();url=next;continue;
+                            }
+                            String encoding=response.header("Content-Encoding");
+                            if(encoding!=null&&!"identity".equalsIgnoreCase(encoding))throw new Failure("UNSUPPORTED_CONTENT_ENCODING");
+                            ByteArrayOutputStream bytes=new ByteArrayOutputStream();ResponseBody stream=response.body();
+                            if(stream!=null) {
+                                if(!prefix&&stream.contentLength()>responseLimit)throw new Failure("RESPONSE_BODY_LIMIT");
+                                try(InputStream in=stream.byteStream()) {
+                                    byte[] chunk=new byte[Math.min(8192,responseLimit)];int n;
+                                    while(!prefix||bytes.size()<responseLimit) {
+                                        int wanted=prefix?Math.min(chunk.length,responseLimit-bytes.size()):chunk.length;
+                                        n=in.read(chunk,0,wanted);if(n==-1)break;
+                                        if(bytes.size()+n>responseLimit)throw new Failure("RESPONSE_BODY_LIMIT");
+                                        bytes.write(chunk,0,n);
+                                    }
+                                }
+                            }
+                            if(closed.get())throw new Failure("SESSION_CLOSED");
+                            return new Output(url.toString(),status,response.headers(),bytes.toByteArray());
+                        } catch(IOException e) {
+                            if(closed.get())throw new Failure("SESSION_CLOSED");
+                            if(e instanceof Failure)throw e;
+                            for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof DeniedDns)throw new Failure(((DeniedDns)cause).code);
+                            Failure failure=new Failure("TRANSPORT_FAILED");failure.initCause(e);throw failure;
+                        } finally {synchronized(active){active.remove(call[0]);}}
+                    } finally {release(host);}
+                }
+                throw new Failure("REDIRECT_LIMIT");
+            } finally {total.release();}
+        }
+        /**
+         * Once per host: a handshake reset by the network is retried with the split ClientHello, and the host is
+         * remembered so its later requests go straight that way (as AnimeHostRouter does for Aniyomi sources).
+         */
+        private Response openWithFallback(Request request,String hostKey,Call[] call,boolean split) throws IOException {
+            // Whether THIS attempt was split, not whether the host is marked now: parallel first requests are all
+            // reset at once, and each gets its own split retry (a race otherwise failed them). A split attempt reset
+            // again (its halves coalesced on a busy device or path) is tried once more; anything else is final.
+            int splitTries=split?1:0;
+            while(true) {
+                try {
+                    Response response=call[0].execute();
+                    if(splitTries>0)fragmentHosts.add(hostKey);
+                    return response;
+                } catch(IOException reset) {
+                    if(closed.get()||reset instanceof Failure||fragmentClient==null||splitTries>=2||!looksLikeNetworkReset(reset))throw reset;
+                    splitTries++;
+                    synchronized(active){active.remove(call[0]);if(closed.get())throw new Failure("SESSION_CLOSED");call[0]=fragmentClient.newCall(request);active.add(call[0]);}
+                }
+            }
+        }
+        @Override public void close(){if(closed.compareAndSet(false,true))synchronized(active){for(Call call:active)call.cancel();}}
+    }
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, relative, sep } from 'node:path';
 import test from 'node:test';
@@ -383,17 +383,24 @@ test('every module the app imports at boot is precached by the service worker', 
   const roots = ['apps/web/app.js', 'apps/web/reader.js', 'apps/web/screens/accounts.js'];
   const missing = [];
 
-  for (const root of roots) {
-    const source = read(root);
-    const dir = root.slice(0, root.lastIndexOf('/'));
+  // كل شجرة الاستيراد الثابت لا المستوى الأول وحده (#323 U-01/U-11): shell.js يستورد source-home.js
+  // ولم يكن في القائمة، فلا يقلع التطبيق بلا شبكة والحارس أخضر لأنه لا يرى إلا استيرادات الجذور.
+  const seen = new Set();
+  const visit = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const source = read(file);
+    const dir = file.slice(0, file.lastIndexOf('/'));
     // المسار كما يراه المتصفح: `apps/web` هو جذر الموقع لا جزء من العنوان
     const webDir = dir === 'apps/web' ? '' : `${dir.slice('apps/web/'.length)}/`;
-    for (const match of source.matchAll(/^import[^'"]*['"](\.[^'"]+)['"]/gm)) {
-      const specifier = match[1];
+    for (const match of source.matchAll(/^\s*(?:import|export)\b[^'"]*?\bfrom\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gm)) {
+      const specifier = match[1] ?? match[2];
       const resolved = new URL(specifier, `https://x/${webDir}`).pathname;
-      if (!shell.has(resolved)) missing.push(`${root} → ${resolved}`);
+      if (!shell.has(resolved)) missing.push(`${file} → ${resolved}`);
+      visit(`apps/web${resolved}`);
     }
-  }
+  };
+  for (const root of roots) visit(root);
 
   assert.deepEqual(missing, [], `modules imported but not precached:\n${missing.join('\n')}`);
 });
@@ -1196,7 +1203,7 @@ test('every source extension ships inside the app and matches its pinned hash', 
   const english = pinned('android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt');
   assert.ok(english.length >= 5, 'FillerSources.kt must pin the English filler extensions');
   const specs = [...arabic, ...english];
-  const dir = 'android/app/src/main/assets/extensions';
+  const dir = 'android/app/src/release/assets/extensions';
   const tracked = trackedFiles().filter((p) => p.startsWith(`${dir}/`));
   const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
   for (const { pkg, sha } of specs) {
@@ -1211,24 +1218,33 @@ test('every source extension ships inside the app and matches its pinned hash', 
   assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
 });
 
-test('anime/cinema extensions are bundled in the APK with the manifest fingerprint', () => {
-  // المستودع يحذف الإصدار القديم مع كل بناء: رابط Anime4Up وOkAnime المثبّت صار 404
-  // («تعذّر تنزيل» على الجهاز). كل إضافة في البيان مضمّنة ببصمته نفسها.
+test('Debug is separated from the bundled manga sources while keeping their recovery chain', () => {
+  // فصل المدمجة في Debug بأمر المالك (31 أكتوبر 2026): النسخ داخل بناء Stable وحده (src/release)،
+  // وDebug يحمّلها كأي إضافة: مخزن الجهاز ← الرابط المثبّت بالبصمة ← آخر سليم ← Keiyoushi الرسمي بمفتاحه
+  const onDisk = (dir) => { try { return readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk')); } catch { return []; } };
+  assert.equal(onDisk('android/app/src/main/assets/extensions').length, 0, 'the shared source set must not bundle manga extensions');
+  assert.equal(onDisk('android/app/src/debug/assets/extensions').length, 0, 'Debug must not bundle manga extensions');
+  assert.ok(onDisk('android/app/src/release/assets/extensions').length >= 15, 'Stable keeps its bundled copies until its own separation release');
+  const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
+  const chain = plugin.slice(plugin.indexOf('private suspend fun loadPackage'), plugin.indexOf('private fun readBundled'));
+  assert.match(chain, /readVerifiedCache\(spec\)[\s\S]*?download\(spec\)[\s\S]*?previousOf[\s\S]*?fromRepository\(base, repoClient\)/,
+    'without a bundled copy a built-in still loads from the device vault, its pinned URL, its last good version, then the signed official release');
+  assert.match(read('android/app/src/main/kotlin/com/vantara/plugins/BuiltinSourceRefresh.kt'), /require\(meta\.fingerprint == KEIYOUSHI_KEY\)/,
+    'the official release is accepted only under the pinned Keiyoushi key');
+  // المصادر الظاهرة للحساب تُجهَّز في الخلفية عند الإقلاع (تُنزّل إلى المخزن مرة)، والتحديث اليومي والذاتي باقيان
+  assert.match(plugin, /fun eager\(pkg: String\) = visible\?\.contains\(pkg\) \?: hasLocalCopy\(pkg\)/);
+  assert.match(plugin, /refreshBuiltinsDaily\(::eager\)/);
+  assert.match(plugin, /refreshBuiltin\(call\.getString\("sourceId"\)\)/);
+});
+
+test('anime/cinema built-in sources are removed by owner decision (30 Oct 2026)', () => {
+  // المالك: لا مصادر أنمي أو سينما مدمجة؛ المستخدم يضيف إضافاته (والتورنت محرك مستقل لا يمسّه هذا)
   const manifest = JSON.parse(read('apps/web/anime/sources.json'));
-  const specs = manifest.sources.filter((s) => s.extension).map((s) => s.extension);
-  assert.ok(specs.length >= 5, 'the anime manifest must pin its extensions');
-  const dir = 'android/app/src/main/assets/anime-extensions';
-  const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
-  for (const { pkg, sha256, apk, version } of specs) {
-    const path = `${dir}/${pkg}.apk`;
-    assert.equal(apk.match(/-v([\d.]+)\.apk$/)?.[1], version, `${pkg}: version must match its APK file name`);
-    assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-anime-extensions.mjs`);
-    const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
-    assert.equal(actual, sha256, `${path} does not match the manifest sha256`);
-  }
-  assert.equal(onDisk.length, specs.length, 'no stale anime extension APKs may remain in the bundle');
-  const loader = read('android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt');
-  assert.match(loader, /cached \?: bundled\(ref\) \?: download\(ref\)/, 'the anime loader must prefer the bundled copy over downloading');
+  assert.deepEqual(manifest.sources, [], 'the anime/cinema manifest ships no built-in sources');
+  assert.ok(!existsSync(resolve(ROOT, 'android/app/src/main/assets/anime-extensions')), 'no bundled anime extension APKs');
+  const defs = JSON.parse(read('apps/web/pwa/sources/defs.json'));
+  const list = Array.isArray(defs) ? defs : defs.sources;
+  assert.ok(!list.some((d) => String(d.engine).endsWith('-site')), 'no built-in video site definitions on the web');
 });
 
 test('hybrid updates: web bundles only on matching native code, APKs only if official and newer', async () => {
@@ -1246,7 +1262,7 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
   ]) {
     assert.ok(inputs.includes(path), `native fingerprint must cover ${path}`);
   }
-  assert.ok(inputs.some((p) => p.startsWith('android/app/src/main/assets/extensions/')), 'bundled source extensions are native');
+  assert.ok(inputs.some((p) => p.startsWith('android/app/src/release/assets/extensions/')), 'bundled source extensions are native');
   assert.ok(!inputs.some((p) => p.startsWith('apps/') || p.includes('assets/public/')), 'web files must not change the native fingerprint');
   assert.ok(capacitorVersions(read('pnpm-lock.yaml')).length >= 3, 'installed @capacitor versions are part of the fingerprint');
 

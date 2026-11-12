@@ -6,6 +6,31 @@ import { renderSourceMode } from '../v35/source-mode.js';
 
 afterEach(()=>vi.unstubAllGlobals());
 
+it('routes CloudStream seasons through its actual optional bridge and gives each selection a distinct local work identity',async()=>{
+ const id='addon|cs3|cs3_123|source',url='https://source.test/work';
+ const plugins={VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'android'}),seasons:async()=>({seasons:[{sourceId:id,url,title:'Work · 1',requestedSeason:1,hasSeasons:false},{sourceId:id,url,title:'Work · 2',requestedSeason:2,hasSeasons:false}]})},
+  AnimeEngine:{sources:async()=>({sources:[{id,pkg:'cs3_123',name:'Source',content:'anime'}]}),page:async()=>{},details:async()=>{},episodes:async()=>({episodes:[]})}};
+ const result=await createNativeCatalog({pkg:'cs3_123',protocol:'cloudstream',_store:{kind:'anime'}},{plugins});
+ expect(typeof result.adapter.seasons).toBe('function');
+ const seasons=await result.adapter.seasons({sourceId:id,url,title:'Work',hasSeasons:true});
+ expect(seasons.map(x=>x.url)).toEqual([url,url]);
+ const works=seasons.map(item=>sourceWorkModel(item,{addon:result.addon}));
+ expect(works[0].id).not.toBe(works[1].id);
+ expect(works[1]._sourceCopy).toMatchObject({url,requestedSeason:2});
+});
+
+it('admits CloudStream only after Android measures a real runtime and declares this installed package source',async()=>{
+  const id='addon|cs3|cs3_123|provider';
+  const record={pkg:'cs3_123',protocol:'cloudstream',_store:{kind:'anime'}};
+  const engine={sources:async()=>({sources:[{id,pkg:'cs3_123',name:'Actual provider',content:'anime'}]}),
+    page:async()=>({page:{items:[{sourceId:id,url:'https://source.test/work',title:'Actual work'}],hasNext:false}}),details:async()=>({}),episodes:async()=>({episodes:[]})};
+  expect((await createNativeCatalog(record,{plugins:{AnimeEngine:engine}})).status).toBe('incompatible');
+  const result=await createNativeCatalog(record,{plugins:{AnimeEngine:engine,VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'android'})}}});
+  expect(result.status).toBe('ready');
+  expect((await result.adapter.catalogue(1)).items[0].sourceId).toBe(id);
+  expect((await createNativeCatalog(record,{plugins:{AnimeEngine:engine,VantaraRuntime:{capabilities:async()=>({cloudstream:true,platform:'desktop'})}}})).status).toBe('incompatible');
+});
+
 it('diagnoses an installed native package through its actual canonical source, never its display name',async()=>{
  const diagnose=vi.fn(async key=>({checks:[{capability:'home',state:'passed',message:key}]}));
  const runtime={registry:{list:()=>[{key:'core|wrong',name:mangaRecord.name,sourceId:'unrelated'},{key:'core|actual',sourceId:'org.native.reader#123'}]},diagnose,reloadSources:async()=>{}};
@@ -33,6 +58,12 @@ const mangaPlugin=(extra={})=>({
   series:async({manga})=>({manga,chapters:[{url:'/chapter/1',name:'One'}]}),chapters:async()=>({chapters:[]}),pages:async()=>({pages:[]}),...extra,
 });
 const animeRecord={pkg:'org.native.video',name:'Installed Video',_store:{kind:'anime'}};
+it('shows the native publisher/network restriction instead of claiming a source outage',async()=>{
+ const reason='يتطلب هذا المصدر مراجعة اتصال آمن وفق تحذير ناشره؛ لم تُرسل إليه طلبات.';
+ const engine=animePlugin({sources:async()=>({sources:[{id:'real-video-id',pkg:animeRecord.pkg,content:'anime',enabled:false,disabledReason:reason}]}),page:vi.fn()});
+ const out=await createNativeCatalog(animeRecord,{plugins:{AnimeEngine:engine}});
+ expect(out).toMatchObject({status:'incompatible',code:'NATIVE_SOURCE_DISABLED',reason});expect(engine.page).not.toHaveBeenCalled();
+});
 it('does not relabel the full catalogue as latest when an older native bridge has no latest method',async()=>{
  const out=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:mangaPlugin({latest:undefined})}});
  expect(out.adapter.home).toBeUndefined();
@@ -70,7 +101,7 @@ it('resolves the real manga package source and preserves memo through catalogue,
 
 it('requires explicit selection when a package exposes multiple native source IDs',async()=>{
  const plugin=mangaPlugin({sources:async()=>({sources:[{id:'one',pkg:mangaRecord.pkg,label:'First'},{id:'two',pkg:mangaRecord.pkg,label:'Second'}]})});
- const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});expect(result.status).toBe('select-source');expect(result.sources.map(x=>x.sourceId)).toEqual(['one','two']);
+ const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});expect(result.status).toBe('ready');expect(result.sourceId).toBe('one');expect(result.alternatives.map(x=>x.sourceId)).toEqual(['one','two']);
  expect((await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin},sourceId:'two'})).addon.sourceId).toBe('two');
  expect((await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin},sourceId:'unrelated'})).status).toBe('incompatible');
 });
@@ -130,4 +161,16 @@ it('renders the explicitly selected latest screen using real native page results
  const view=renderSourceMode({...out,state:{tab:'home',page:1,query:''}});document.body.append(view);await new Promise(r=>setTimeout(r,0));
  expect(view.querySelector('.up-title').textContent).toBe('Real Native 1');view.querySelector('.addon-source-more').click();await new Promise(r=>setTimeout(r,0));
  expect([...view.querySelectorAll('.up-title')].map(x=>x.textContent)).toEqual(['Real Native 1','Real Native 2']);expect(view.querySelector('.addon-source-more').hidden).toBe(true);view.close();
+});
+
+it('«فتح» يفتح المصدر العربي المفعّل مباشرة في إضافة متعددة المصادر، لا قائمة اختيار', async () => {
+  const plugin=mangaPlugin({sources:async()=>({sources:[
+    {id:'en',pkg:mangaRecord.pkg,label:'Source (EN)',lang:'en'},
+    {id:'ar-off',pkg:mangaRecord.pkg,label:'مصدر معطّل',lang:'ar',enabled:false},
+    {id:'ar',pkg:mangaRecord.pkg,label:'المصدر العربي',lang:'ar'},
+  ]})});
+  const result=await createNativeCatalog(mangaRecord,{plugins:{ExtensionEngine:plugin}});
+  expect(result.status).toBe('ready');
+  expect(result.sourceId).toBe('ar');
+  expect(result.alternatives).toHaveLength(3);
 });

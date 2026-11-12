@@ -1,0 +1,369 @@
+import { patchWorkDom } from './work-dom.js';
+import { mountLogoLayer } from './logo-layer.js';
+/**
+ * أنماط صفحة عمل الأنمي الأربعة (إعدادات ← المظهر)، منقولة من التصاميم المعتمدة كما هي:
+ * المنصة، البطاقة الطائرة، شاشة السينما، الحلقة أولًا. البطل (البنر وحركة العمق) من صفحة العمل
+ * نفسها؛ هنا كل ما تحته. نفس DOM للجوال والشاشة العريضة، والتخطيط العريض في work-looks.css.
+ * لا شيء هنا يجلب بيانات: كل ما يُعرض يأتي في ctx من anime.js.
+ */
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const img = (src, cls = '', pos = '', {eager=false,fallbacks=[]} = {}) => (src ? `<img class="${cls}" src="${esc(src)}" alt="" loading="${eager?'eager':'lazy'}"${eager?' fetchpriority="high"':''} decoding="async"${fallbacks.length?` data-art-fallbacks="${esc(JSON.stringify(fallbacks))}"`:''}${pos ? ` style="object-position:${pos}"` : ''}>` : '');
+
+/** مقطع الحلقات الظاهر: المسلسل الطويل مجموعات من 25 (المجموعة التي فيها حلقتك أولًا). */
+export function episodeRange(total, current, chosen = null, size = 25) {
+  if (total <= 24) return { from: 1, to: total, groups: [] };
+  const groups = [];
+  for (let a = 1; a <= total; a += size) groups.push([a, Math.min(total, a + size - 1)]);
+  const at = chosen ?? groups.findIndex(([a, b]) => current >= a && current <= b);
+  const [from, to] = groups[Math.max(0, at)] ?? groups[0];
+  return { from, to, groups, at: Math.max(0, at) };
+}
+
+/** خط متقطع يبدأ وينتهي بشرطة كاملة مهما كان طوله. */
+const dashLine = (n = 4) => `<svg class="wl-dash" preserveAspectRatio="none" viewBox="0 0 100 2" aria-hidden="true"><line x1="0" y1="1" x2="100" y2="1" pathLength="${2 * n - 1}" stroke-dasharray="1 1"/></svg>`;
+
+function parts(c) {
+  const { m, glyph } = c;
+  const movie = m.format === 'MOVIE';
+  const meta = c.meta.map((x) => `<span>${x.html ?? esc(x)}</span>`).join('');
+  // الأنواع روابط كما في المحور: تفتح مجموعة النوع
+  const genres = c.genres.map((g, i) => (c.genreKeys?.[i] ? `<button type="button" class="wl-genre" data-genre="${esc(c.genreKeys[i])}">${esc(g)}</button>` : `<span>${esc(g)}</span>`)).join('');
+  // الوظائف المشتركة مع المحور: موعد الحلقة القادمة (من AniList فقط) ونشاط الأصدقاء وتقدّمهم
+  const next = !movie && c.next ? `<div class="wl-next"><b>الحلقة ${esc(c.next.episode ?? '')} ${esc(c.next.rel)}</b><span>${esc(c.next.time)}</span></div>` : '';
+  const social = '<div class="wl-social" data-slot="insights"></div>';
+  const factsBox = c.facts.length ? `<div class="wl-facts">${c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('')}</div>` : '';
+  // الشعار أو الاسم في صندوق محجوز بارتفاع الشعار الأقصى لكل نمط (anime.css): وصول الشعار لا يحرّك ما تحته
+  const logo = `<div class="wl-mark">${c.logo ? `<img class="wl-logo" src="${esc(c.logo)}" alt="${esc(m.title)}" loading="eager" decoding="async">` : `<h1 class="wl-name" dir="auto">${esc(m.title)}</h1>`}</div>`;
+  const facts = c.facts.map(([k, v]) => `<div><small>${esc(k)}</small><b dir="auto">${esc(v)}</b></div>`).join('');
+  const play = glyph('play', { size: 22, filled: true });
+  const cur = c.point.episode;
+  const curTitle = movie ? m.title : c.epTitle(cur);
+  const range = episodeRange(c.total, cur, c.rangeAt);
+  const ranges = !c.episodeControls && range.groups.length > 1
+    ? `<div class="wl-ranges">${range.groups.map(([a, b], i) => `<button type="button" data-range="${i}" dir="ltr" class="${i === range.at ? 'on' : ''}">${a}–${b}</button>`).join('')}</div>`
+    : '';
+  const eps = movie ? [] : c.episodePage ? c.episodePage.numbers : Array.from({length:Math.max(0,range.to-range.from+1)},(_,i)=>range.from+i);
+  const episodeControls = c.episodeControls ? '<div data-slot="episode-controls"></div>' : '<h2>الحلقات</h2>'+ranges;
+  const empty = !eps.length && !movie ? '<p class="wl-episode-empty">لا توجد حلقات مطابقة للتصفية</p>' : '';
+  const epState = (n) => (c.seen(n) ? 'seen' : n === cur ? 'cur' : '');
+  const epSub = (n) => (c.seen(n) ? `${c.minutes(n)} · شوهدت` : n === cur && c.left ? `باقي ${c.left} د` : c.minutes(n));
+  const bar = (n) => (c.seen(n) ? '<u style="width:100%"></u>' : n === cur && c.ratio != null ? `<u style="width:${(c.ratio * 100).toFixed(1)}%"></u>` : '');
+  const thumb = (n, size) => {
+    const s = c.still(n, size === 'full');
+    return `<div class="th">${img(s.src, '', s.still ? '' : 'center 22%', {fallbacks:[...(s.fallbacks??[]),c.m.posterSmall??c.m.poster].filter(Boolean)})}<em>${n}</em>${bar(n)}</div>`;
+  };
+  // زر «شوهدت» الجانبي على كل حلقة (نفس زر المحور an-er-icon): ✓ بلون القسم أو حلقة فارغة
+  const seenBtn = (n) => (c.toggleSeen && c.canMark?.(n) !== false
+    ? `<span class="wl-seen" role="button" tabindex="0" data-seen-ep="${n}" aria-pressed="${c.seen(n)}" aria-label="${c.seen(n) ? `ألغِ «شوهدت» للحلقة ${n}` : `علّم الحلقة ${n} شوهدت`}">${c.seen(n) ? c.glyph('check', { size: 16 }) : '<i class="wl-seen-ring"></i>'}</span>`
+    : '');
+  const epRows = (withO = true) => `<div class="wl-eprows">${eps.map((n) => `<button type="button" class="er ${epState(n)}" data-ep="${n}" data-episode-row="">${thumb(n)}<span class="tx"><b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${withO && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(epSub(n))}</span></span>${seenBtn(n)}</button>`).join('')}${empty}</div>`;
+  const chars = (cls, k = 10) => (c.characters.length ? `<div class="${cls}">${c.characters.slice(0, k).map((p) => `<div class="ch">${img(p.image, '', 'center 20%')}<b dir="auto">${esc(p.name)}</b><span dir="auto">${esc(p.voice ?? '')}</span></div>`).join('')}</div>` : '');
+  const recs = (cls) => (m.recommendations?.length ? `<div class="${cls}">${m.recommendations.map((r) => `<button type="button" class="rc" data-open="${esc(r.id)}">${img(r.posterSmall ?? r.poster)}<b dir="auto">${esc(r.title)}</b><span>${r.score ? `★ ${r.score.toFixed(1)}` : esc(r.year ?? '')}</span></button>`).join('')}</div>` : '');
+  const desc = m.description ? `<p class="wl-desc" dir="auto">${esc(m.description)}</p>` : c.descPending ? '<p class="wl-desc wl-desc--wait" aria-hidden="true"></p>' : '';
+  const section = (title, body, key = '') =>
+    body && !(movie && /الحلقات/.test(title)) ? `<section class="wl-sec${key ? ` wl-s-${key}` : ''}">${c.episodeControls && /الحلقات/.test(title) ? episodeControls : `<div class="wl-h"><h2>${title}</h2></div>`}${body}</section>` : '';
+  return { movie, meta, genres, logo, facts, next, social, factsBox, play, cur, curTitle, ranges, episodeControls, empty, eps, epState, epSub, bar, thumb, seenBtn, epRows, chars, recs, desc, section };
+}
+
+/** «من نفس العالم»: ما قبله، ثم العمل نفسه («أنت هنا»)، ثم ما بعده، ثم بقية المرتبط؛ أنمي ومانجا. */
+function worldItems(c) {
+  const all = c.m.world ?? (c.m.relations ?? []).map((r) => ({ ...r, kind: 'anime', relationType: r.relation === 'الجزء السابق' ? 'PREQUEL' : r.relation === 'الجزء التالي' ? 'SEQUEL' : 'OTHER' }));
+  const before = all.filter((r) => r.relationType === 'PREQUEL' || r.relationType === 'PARENT' || r.relationType === 'ADAPTATION' || r.relationType === 'SOURCE');
+  const after = all.filter((r) => r.relationType === 'SEQUEL');
+  const rest = all.filter((r) => !before.includes(r) && !after.includes(r));
+  const here = { id: c.m.id, title: c.m.title, poster: c.m.poster, posterSmall: c.m.posterSmall, banner: c.heroSrc ?? c.m.banner, year: c.m.year, here: true, kind: 'anime' };
+  const list = [...before, here, ...after, ...rest];
+  return list.length > 1 ? list : [];
+}
+/** «مانجا · الجزء السابق»، «المانجا الأصلية»، «أنت هنا · 2022»، «عمل مرتبط · 2026». */
+function worldLabel(w) {
+  if (w.here) return ['أنت هنا', w.year].filter(Boolean).join(' · ');
+  if (w.kind === 'manga') return w.relationType === 'ADAPTATION' || w.relationType === 'SOURCE' ? 'المانجا الأصلية' : ['مانجا', w.relation].join(' · ');
+  return [w.relation, w.year].filter(Boolean).join(' · ');
+}
+/** الأنمي يُفتح في صفحة الأنمي، والمانجا في قسم المانجا ببحث عن اسمها. */
+const openAttr = (w) => (w.here ? '' : w.kind === 'manga' ? `data-manga="${esc(w.title)}"` : `data-open="${esc(w.id)}"`);
+
+/** A stable official-logo train; its compositor clock survives incremental updates. */
+function logoLayer(c) {
+  if (!c.logo) return '';
+  const unit = `<img src="${esc(c.logo)}" crossorigin="anonymous" alt="" decoding="async">`;
+  const group = `<span class="wl-logo-group">${unit}</span>`;
+  return `<div class="wl-logo-layer" data-logo-src="${esc(c.logo)}" aria-hidden="true" hidden><div class="wl-logo-entry"><span class="wl-logo-train">${group}${group}</span></div></div>`;
+}
+
+const LOOKS = {
+  /* ── المنصة ── */
+  platform(c, p) {
+    const world = worldItems(c);
+    return `
+      <div class="wl-htxt">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div>
+      <div class="wl-grid">
+        <aside class="wl-aside">
+          <div class="wl-plate"><div class="wl-cover">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%', {eager:true})}</div><div class="wl-facts">${p.facts}</div></div>
+          <button type="button" class="wl-cta" data-ep="${p.cur}"><span class="dot">${p.play}</span><span>${esc(c.label)}<small dir="auto">${esc([p.curTitle, c.left ? `باقي ${c.left} د` : null].filter(Boolean).join(' · '))}</small></span></button>
+          <div class="wl-pg" style="--w:${c.seenRatio * 100}%"><i></i><span>${esc(c.progressText)}</span></div>
+          ${p.next}${p.social}
+        </aside>
+        <main class="wl-main">${p.desc}${p.section('الحلقات', p.ranges + p.epRows(), 'eps')}${p.section('الشخصيات', p.chars('wl-chars', 10), 'chars')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</main>
+      </div>
+      <div class="wl-dock"><span class="wl-dock-cover">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}</span><span class="wl-dock-text" style="--w:${c.seenRatio * 100}%"><b>${esc(c.label)}</b><small dir="auto">${esc([p.curTitle, c.progressText].filter(Boolean).join(' · '))}</small><i></i></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
+  },
+
+  /* ── البطاقة الطائرة ── */
+  card(c, p) {
+    const world = worldItems(c);
+    const strip = p.eps.map((n) => `<button type="button" class="sp ${p.epState(n)}" data-ep="${n}" data-episode-row="">${p.thumb(n)}<b dir="auto">${n}. ${esc(c.epTitle(n) || `الحلقة ${n}`)}</b>${n === p.cur && c.epOverview(n) ? `<p dir="auto">${esc(c.epOverview(n))}</p>` : ''}<span>${esc(p.epSub(n))}</span>${p.seenBtn(n)}</button>`).join('');
+    return `
+      <div class="wl-head">
+        ${logoLayer(c)}
+        <div class="wl-stage3d"><div class="wl-card">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%', {eager:true})}</div></div>
+        <div class="wl-info">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div><div class="wl-row"><button type="button" class="wl-big" data-ep="${p.cur}"><span class="dot">${p.play}</span>${esc(c.label)}</button><span class="wl-sub">${esc(c.progressText)}</span></div>${p.next}${p.social}</div>
+      </div>
+      <div class="wl-body">${p.desc}${p.movie ? '' : `<section class="wl-sec wl-full">${p.episodeControls}<div class="wl-strip">${strip}${p.empty}</div></section>`}${c.characters.length ? `<section class="wl-sec wl-full"><h2>الشخصيات</h2>${p.chars('wl-tall', 8)}</section>` : ''}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join(dashLine(4))}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
+  },
+
+  /* ── شاشة السينما ── */
+  screen(c, p) {
+    const world = worldItems(c);
+    return `
+      <div class="wl-top">
+        <div class="wl-cover">${img(c.m.poster ?? c.m.posterSmall, '', 'center 20%', {eager:true})}</div>
+        <div class="wl-mid">${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div>${p.next}</div>
+        <button type="button" class="wl-go" data-ep="${p.cur}"><span class="dot">${p.play}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc([p.curTitle, c.progressText].filter(Boolean).join(' · '))}</small></span></button>
+      </div>
+      <div class="wl-body">${p.social}${p.desc}${p.section('الحلقات', p.ranges + `<div class="wl-line" style="--done:${c.lineDone}">${p.epRows()}</div>`)}${p.section('الشخصيات', p.chars('wl-ring', 9))}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w, i) => `<button type="button" class="wn${w.here ? ' here' : ''}${w.banner ? ' banner' : ''}" ${openAttr(w)}>${w.banner ? img(w.banner, 'bn') : ''}${img(w.posterSmall ?? w.poster, 'cv')}<i>${i + 1}</i><span class="t"><b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></span></button>`).join('')}</div>` : '')}${p.section('معلومات', p.factsBox, 'facts')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div>`;
+  },
+
+  /* ── الحلقة أولًا ── */
+  episode(c, p) {
+    const world = worldItems(c);
+    const from = Math.max(1, p.cur - 4);
+    const to = Math.min(c.total || p.cur, from + 9);
+    const scrub = [];
+    for (let n = from; n <= to; n++) {
+      const s = c.still(n);
+      scrub.push(`<button type="button" class="${p.epState(n)}" data-ep="${n}">${img(s.src, '', s.still ? '' : 'center 22%', {fallbacks:[...(s.fallbacks??[]),c.m.posterSmall??c.m.poster].filter(Boolean)})}<em>${n}</em></button>`);
+    }
+    return `
+      <div class="wl-headrow">
+        <div class="wl-now"><small>${c.point.replay ? 'أعد المشاهدة' : c.point.resume ? 'تابع من حيث وقفت' : 'ابدأ من هنا'}${p.movie ? ' · الفيلم' : ` · الحلقة ${p.cur}`}</small><h1 dir="auto">${esc(p.curTitle || `الحلقة ${p.cur}`)}</h1><p dir="auto" class="wl-now-over">${esc(c.epOverview(p.cur) ?? '')}</p><div class="wl-pl"><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button>${c.ratio != null ? `<i style="--w:${(c.ratio * 100).toFixed(1)}%"></i>` : ''}<span>${esc([c.left ? `باقي ${c.left} د` : null, c.upcoming ? c.label : c.progressText].filter(Boolean).join(' · '))}</span></div>${p.next}</div>
+        <div class="wl-series">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}<div>${p.logo}<div class="wl-meta">${p.meta}</div><div class="wl-genres">${p.genres}</div></div></div>
+      </div>
+      ${p.movie ? '' : `<div class="wl-scrub"><div class="wl-track">${scrub.join('')}</div><div class="wl-sline" style="--w:${c.seenRatio * 100}%"></div></div>`}
+      <div class="wl-body"><div class="wl-left">${p.desc}${p.social}${p.section('كل الحلقات', p.ranges + p.epRows(false), 'eps')}${p.section('الشخصيات', p.chars('wl-grid4', 10), 'chars')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div><div class="wl-right">${p.section('معلومات', p.factsBox, 'facts')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}</div></div>
+      <div class="wl-mini"><span class="wl-mini-th">${img(c.still(p.cur).src)}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc(p.curTitle ?? '')}</small></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
+  },
+};
+
+export const LOOK_IDS = Object.keys(LOOKS);
+
+/**
+ * ما يضعه كل نمط في البطل. «الحلقة أولًا» يعرض لقطة الحلقة الأصلية كما هي: لا غلاف مضبّب بديلًا
+ * عنها، ولا نسخة مضبّبة خلفها (::before)؛ بلا لقطة ولا خلفية للعمل يبقى لون العمل وحده. بقية الأنماط
+ * تحتفظ بمعالجة البنرات: الغلاف الطولي جوًّا ضبابيًا حين لا خلفية عريضة، والنسخة المضبّبة للأطراف.
+ * @returns {{ episodeStill: boolean, posterFallback: boolean, ambient: boolean }}
+ */
+export function heroPlan(look) {
+  const episode = look === 'episode';
+  return { episodeStill: episode, posterFallback: !episode, ambient: !episode };
+}
+
+/** يرسم النمط في host ويربط الضغطات (تشغيل حلقة، فتح عمل، تبديل مجموعة الحلقات). */
+export function renderLook(look, host, c, { center = true } = {}) {
+  const make = LOOKS[look];
+  if (!make || !host) return;
+  const rails = '.wl-strip, .wl-track, .wl-tall, .wl-ring, .wl-ranges, .an-seasons';
+  const kept = [...host.querySelectorAll(rails)].map(el=>el.scrollLeft);
+  const previousLogo=host.querySelector('.wl-logo-layer');
+  const sameWork=host.dataset.workId===String(c.m.id) && host.classList.contains(`wl-${look}`);
+  const keepLogo=sameWork && c.logo && previousLogo?.dataset.logoSrc===c.logo;
+  if(!keepLogo)host._releaseLogoLayer?.();
+  const template=document.createElement('template');
+  template.innerHTML=make(c,parts(c));
+  const fresh=document.createElement('div');for(const a of [...host.attributes])fresh.setAttribute(a.name,a.value);fresh.className=`wl wl-${look}`;fresh.dataset.workId=String(c.m.id);fresh.append(template.content);
+  if(sameWork)patchWorkDom(host,fresh);
+  else {host.className=fresh.className;host.dataset.workId=String(c.m.id);host.replaceChildren(...fresh.childNodes)}
+  if(!keepLogo)host._releaseLogoLayer=mountLogoLayer(host);
+  if(!center)[...host.querySelectorAll(rails)].forEach((el,i)=>{if(kept[i]!=null)el.scrollLeft=kept[i]});
+  host._updateLogoLayer?.();
+  // صورة تعذّرت: الشعار يحل محله الاسم مكتوبًا، وغيره يختفي بدل رمز الصورة المكسورة
+  for (const im of host.querySelectorAll('img')) {
+    im.onerror = () => {
+      let fallbacks=[];try{fallbacks=JSON.parse(im.dataset.artFallbacks??'[]')}catch{}
+      const next=fallbacks.shift();if(next){im.dataset.artFallbacks=JSON.stringify(fallbacks);im.src=next;return}
+      if (im.classList.contains('wl-logo')) {
+        const h = document.createElement('h1');
+        h.className = 'wl-name';
+        h.dir = 'auto';
+        h.textContent = c.m.title;
+        im.replaceWith(h);
+      } else im.style.visibility = 'hidden';
+    };
+  }
+  host.onclick = (e) => {
+    const r = e.target.closest('[data-range]');
+    if (r) return c.onRange?.(Number(r.dataset.range));
+    // زر «شوهدت» داخل صف الحلقة: يبدّل العلامة ولا يشغّل الحلقة
+    const seen = e.target.closest('[data-seen-ep]');
+    if (seen) {
+      const row = seen.closest('[data-ep]');
+      if (row?._held) row._held = false;
+      return void c.toggleSeen?.(Number(seen.dataset.seenEp));
+    }
+    const ep = e.target.closest('[data-ep]');
+    // ضغطة مطوّلة فتحت قائمة الحلقة: اللمسة التي تتبعها ليست تشغيلًا
+    if (ep?._held) return void (ep._held = false);
+    if (ep) return c.play(Number(ep.dataset.ep));
+    const genre = e.target.closest('[data-genre]');
+    if (genre) return c.openGenre?.(genre.dataset.genre);
+    // القصة: لمسة تفتحها كاملة وأخرى تطويها (كـ«المزيد» في المحور)
+    const desc = e.target.closest('.wl-desc');
+    if (desc) return void desc.classList.toggle('open');
+    const open = e.target.closest('[data-open]');
+    if (open) return c.open(open.dataset.open);
+    const manga = e.target.closest('[data-manga]');
+    if (manga) return c.openManga?.(manga.dataset.manga);
+  };
+  host.onkeydown = (e) => {
+    const seen = e.target.closest?.('[data-seen-ep]');
+    if (!seen || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    c.toggleSeen?.(Number(seen.dataset.seenEp));
+  };
+  // الحلقة الحالية في وسط الشرائط الأفقية عند أول رسم وعند تبديل المجموعة فقط (أفقيًا؛ الصفحة لا تتحرك)
+  if (center) requestAnimationFrame(() => {
+    for (const strip of host.querySelectorAll('.wl-strip, .wl-track')) {
+      const cur = strip.querySelector('.cur');
+      if (!cur) continue;
+      const a = cur.getBoundingClientRect();
+      const b = strip.getBoundingClientRect();
+      strip.scrollLeft += a.left + a.width / 2 - (b.left + b.width / 2);
+    }
+  });
+}
+
+/**
+ * حركة كل نمط مع التمرير. نفس نظام النمط الأساسي (collapse-hero.js): CSS بخط زمني للتمرير يحرّكها
+ * مع الإصبع على خيط العرض نفسه فلا تتأخر إطارًا عن الصفحة (سبب اهتزاز البنر)، والمعادلات نفسها
+ * تُكتب من JS أثناء الانزلاق بعد رفع الإصبع فقط. كل طبقة وصف واحد يولّد الاثنين، فلا يختلفان.
+ * - المنصة: البنر يغوص أبطأ من الصفحة ويبهت، والشعار والمعلومات ترتفع وتختفي.
+ * - البطاقة الطائرة: البنر أبطأ، والبطاقة المائلة تعتدل وتقترب.
+ * - شاشة السينما: الشاشة ترجع للخلف بعيدًا وتنزل قليلًا وتبهت (لا تنطوي كالأساسي)، والغلاف يرتفع.
+ * - الحلقة أولًا: اللقطة تبتعد قليلًا وتبهت، وعنوان الحلقة يخفت.
+ */
+// العمق مع التمرير لكل الأنماط في ملف واحد (depth.js)؛ الأسماء نفسها تُصدَّر من هنا كما كانت
+export { lookMotion } from './depth.js';
+
+/**
+ * ما لا يُربط بموضع التمرير: شريط «تابع» الصغير في «الحلقة أولًا» يظهر بانتقال بعد البطل (عنصر
+ * ثابت، فلا اهتزاز)، وبطاقات «من نفس العالم» المائلة في البطاقة الطائرة تعتدل بهدوء حين تصلها.
+ * @returns {() => void} فكّ الربط
+ */
+export function bindLookExtras(look, host, { active = () => true } = {}) {
+  const offs = [() => host._releaseLogoLayer?.()];
+  host._logoActive = active;
+  if (look === 'episode') {
+    let on = null;
+    const check = () => {
+      if (!active() || !host.isConnected) return;
+      const next = globalThis.scrollY > (globalThis.innerHeight || 800) * 0.32;
+      if (next === on) return;
+      on = next;
+      host.querySelector('.wl-mini')?.classList.toggle('on', next);
+    };
+    globalThis.addEventListener('scroll', check, { passive: true });
+    offs.push(() => globalThis.removeEventListener('scroll', check));
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(() => { on = null; check(); }) : null;
+    mo?.observe(host, { childList: true });
+    offs.push(() => mo?.disconnect());
+    check();
+  }
+  if (look === 'card' && typeof IntersectionObserver === 'function') {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) e.target.classList.add('in');
+    }, { threshold: 0.6 });
+    const watch = () => host.querySelectorAll('.wl-world .wn:not(.in)').forEach((n) => io.observe(n));
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(watch) : null;
+    mo?.observe(host, { childList: true });
+    watch();
+    offs.push(() => { io.disconnect(); mo?.disconnect(); });
+  }
+  offs.push(bindRails(host));
+  return () => offs.forEach((f) => f());
+}
+
+/** الأشرطة الأفقية في الأنماط: الحلقات، «إذا عجبك هذا»، «من نفس العالم»، الشخصيات. */
+const RAILS = '.wl-strip, .wl-recs, .wl-world, .wl-tall, .wl-chars, .aw-ranges, .an-seasons';
+
+/**
+ * على الكمبيوتر: عجلة الفأرة تحرّك الشريط الأفقي تحت المؤشر، والسحب بالفأرة يحرّكه أيضًا. الاتجاه عربي:
+ * الشريط يبدأ من اليمين، فالعجلة للأسفل تتقدّم نحو اليسار (scrollLeft في RTL من 0 إلى قيم سالبة). عند
+ * طرف الشريط تعود العجلة لتمرير الصفحة. اللمس لا يُمس: الجوال يسحب بإصبعه كما كان.
+ */
+export function bindRails(host) {
+  const railOf = (t) => t?.closest?.(RAILS);
+  const rtl = (rail) => getComputedStyle(rail).direction === 'rtl';
+  const onWheel = (e) => {
+    const rail = railOf(e.target);
+    if (!rail || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const max = rail.scrollWidth - rail.clientWidth;
+    if (max <= 1) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * rail.clientWidth : e.deltaY;
+    // التقدّم في RTL يُنقص scrollLeft، وفي LTR يزيده
+    const step = rtl(rail) ? -dy : dy;
+    const at = rail.scrollLeft;
+    const lo = rtl(rail) ? -max : 0, hi = rtl(rail) ? 0 : max;
+    if ((step < 0 && at <= lo + 1) || (step > 0 && at >= hi - 1)) return;
+    e.preventDefault();
+    rail.scrollBy({ left: step, behavior: 'auto' });
+  };
+  let drag = null;
+  const onDown = (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    const rail = railOf(e.target);
+    if (!rail || rail.scrollWidth - rail.clientWidth <= 1) return;
+    drag = { rail, x: e.clientX, left: rail.scrollLeft, moved: false, snap: rail.style.scrollSnapType };
+  };
+  const onMove = (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) < 6) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      // الالتصاق يشدّ الشريط أثناء السحب فيبدو متعلقًا؛ يعود بعد الإفلات
+      drag.rail.style.scrollSnapType = 'none';
+      drag.rail.classList.add('dragging');
+    }
+    // المحتوى يتبع المؤشر في الاتجاهين
+    drag.rail.scrollLeft = drag.left - dx;
+  };
+  const onUp = () => {
+    if (!drag) return;
+    const { rail, moved, snap } = drag;
+    drag = null;
+    if (!moved) return;
+    rail.style.scrollSnapType = snap;
+    rail.classList.remove('dragging');
+    // السحب ليس لمسة: لا تُفتح الحلقة أو العمل الذي أُفلت فوقه
+    const block = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    rail.addEventListener('click', block, { capture: true, once: true });
+    setTimeout(() => rail.removeEventListener('click', block, { capture: true }), 0);
+  };
+  // سحب الصورة نفسها (سحب وإفلات المتصفح) يلغي أحداث المؤشر فيتوقف سحب الشريط
+  const noImageDrag = (e) => { if (railOf(e.target)) e.preventDefault(); };
+  host.addEventListener('wheel', onWheel, { passive: false });
+  host.addEventListener('pointerdown', onDown);
+  host.addEventListener('dragstart', noImageDrag);
+  globalThis.addEventListener?.('pointermove', onMove);
+  globalThis.addEventListener?.('pointerup', onUp);
+  return () => {
+    host.removeEventListener('wheel', onWheel);
+    host.removeEventListener('pointerdown', onDown);
+    host.removeEventListener('dragstart', noImageDrag);
+    globalThis.removeEventListener?.('pointermove', onMove);
+    globalThis.removeEventListener?.('pointerup', onUp);
+  };
+}

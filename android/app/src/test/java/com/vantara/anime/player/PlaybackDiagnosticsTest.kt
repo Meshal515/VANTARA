@@ -65,4 +65,21 @@ class PlaybackDiagnosticsTest {
     @Test fun torrentVerdictNeverBlamesAServer() {
         assertEquals("الشبكة جيدة", NetStats.verdict(2400, 3_000_000, 8_000_000, 2_000, torrentPeers = 40, torrent = true))
     }
+    @Test fun readyWithoutFrameReportsTheMissingVideoEvidence() {
+        at(0); diag.start()
+        val source = Any()
+        at(100); diag.opened(source, 0); diag.transferred(source, 1024)
+        at(200); diag.state(Player.STATE_READY, 0, 10000)
+        at(5000)
+        assertTrue(diag.verdict(null, player(), clock).contains("أول صورة"))
+    }
+
+    @Test fun copiedFailureRetainsCauseCodeButRedactsUrlsAndHeaders() {
+        at(0); diag.start()
+        diag.error("ROOT HTTP 403 https://media.test/a?token=secret Cookie: session=secret")
+        val report = diag.report(null, player(), clock)
+        assertTrue(report.contains("ROOT HTTP 403"))
+        assertFalse(report.contains("secret")); assertFalse(report.contains("media.test"))
+    }
+
 }

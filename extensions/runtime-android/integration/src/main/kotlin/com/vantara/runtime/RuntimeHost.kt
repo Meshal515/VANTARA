@@ -1,0 +1,642 @@
+package com.vantara.runtime
+
+import android.content.Context
+import android.util.AtomicFile
+import com.vantara.anime.AnimeEngine
+import com.vantara.anime.RuntimeSourceBinding
+import com.vantara.anime.adapters.*
+import com.vantara.anime.registry.*
+import com.vantara.anime.stream.Candidate
+import com.vantara.addons.NativeAddonCandidates
+import com.vantara.verification.VerificationCoordinator
+import com.vantara.verification.VerificationPending
+import com.vantara.verification.VerificationPolicy
+import dev.vantara.runtime.android.*
+import dev.vantara.runtime.api.RuntimeHttpAccess
+import dev.vantara.runtime.http.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.serialization.json.*
+import okhttp3.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.io.File
+import java.io.IOException
+import java.security.MessageDigest
+import java.time.Clock
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/** New-family storage and workers only. No changes to existing APK sources or user databases. */
+class RuntimeHost(
+    context: Context,
+    private val engine: AnimeEngine,
+    private val userAgent: String,
+    private val vaults: HttpBroker.Vaults = FileCookieVaults(File(context.filesDir,"runtime-cloudstream-v1/cookies").toPath()),
+    // نفس محلّل أسماء محرك الأنمي: النظام أولًا، وDNS مشفّر حين يحجب مزوّد الإنترنت الاسم أو يحوّله
+    // لصفحة حجب. كان Dns.SYSTEM وحده فتسقط مصادر عربية محجوبة بالاسم فقط ويُطلب لها VPN بلا داعٍ.
+    // فحص العناوين العامة في الوسيط باقٍ كما هو على ما يعيده هذا المحلّل.
+    // وتجزئة ClientHello عند قطع الحجب، كما في مسار Aniyomi (AnimeHostRouter): بدونها كل مصدر CloudStream
+    // خلف فلتر مزوّد يفشل على جوال المستخدم (PROVIDER_FAILED) وينجح في محاكي مركز البيانات.
+    // DoH أولًا لكل مضيف (مواقع الإضافات وسيرفرات فيديوها)، كما تُحل مضيفات المصادر المدمجة في الستيبل.
+    private val broker: HttpBroker = HttpBroker(OkHttpClient(), engine.dns.dohFirst, PublicAddresses(),
+        vaults, Clock.systemUTC(), HttpBroker.DEFAULT_PER_HOST, com.vantara.anime.net.SniFragmentingSocketFactory()),
+    private val sourceTransport: (AndroidRuntimeClient.Scope,HttpBroker)->AndroidRuntimeClient.HostHttpTransport = { scope,http -> BrokerHostTransport(scope,http) },
+    /** حل صامت لتحدي Cloudflare غير التفاعلي (url، User-Agent) ← cf_clearance أو null. null = لا حل صامت. */
+    private val silentClearance: ((String,String)->String?)? = null,
+) {
+    private val app = context.applicationContext
+    private val directory = File(app.filesDir,"runtime-cloudstream-v1")
+    private val lock = Any()
+    private val slots = Semaphore(2)
+    private val workers = ConcurrentHashMap<AndroidRuntimeClient,AndroidRuntimeClient.Scope>()
+    private var epoch = 0L
+    @Volatile private var closed=false
+    private val packageEpochs=HashMap<String,Long>()
+    private data class Owner(val id: String, val epoch: Long, val store: RuntimePackageStore)
+    @Volatile private var owner = Owner("local",0,RuntimePackageStore(File(directory,"packages").toPath(),"local"))
+    private val indexes = ConcurrentHashMap<String,Pair<Long,JsonArray>>()
+    private data class Retry(val owner: Owner,val generation: Long,val installed: RuntimePackageStore.Installed,val source: JsonObject,val id: String,val operation: String,val input: JsonObject,val url: String,val userAgent: String,val scope: AndroidRuntimeClient.Scope)
+    private val pending = ConcurrentHashMap<String,Retry>()
+    private val activeVerifications = ConcurrentHashMap<String,Retry>()
+    private data class DependencyKey(val owner:String,val pkg:String,val hash:String,val source:String)
+    // Only exact origins attested by source-owned settings, never keys/cookies.
+    private val dependencyOrigins=HashMap<DependencyKey,Set<String>>()
+    /** Bound operations per visible source id, for diagnostics that need the raw provider answer. */
+    private val invokers=ConcurrentHashMap<String,suspend (String,JsonObject)->JsonObject>()
+
+    fun setProfile(id: String) = synchronized(lock) {
+        check(!closed) { "PROFILE_CHANGED" }
+        require(id.isNotBlank() && id.length <= 200) { "PROFILE_REQUIRED" }
+        if (owner.id != id) {
+            workers.keys.forEach { it.close() }; workers.clear(); epoch++
+            engine.setRuntimeSources(emptyList())
+            owner = Owner(id,epoch,RuntimePackageStore(File(directory,"packages").toPath(),id))
+            indexes.clear()
+            pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear()
+        }
+        refresh(owner)
+    }
+    private fun checkOwner(captured: Owner) { check(!closed && owner === captured) { "PROFILE_CHANGED" } }
+    private fun checkPackage(o: Owner,pkg: String,generation: Long) {
+        checkOwner(o);check((packageEpochs[pkg] ?: 0L)==generation) { "PACKAGE_CHANGED" }
+    }
+    private fun repositoryFile(o: Owner) = AtomicFile(File(directory,"repositories/${digest(o.id)}.json"))
+    private fun repositories(o: Owner): JsonArray {
+        val f = repositoryFile(o)
+        if (!f.baseFile.exists() && !File(f.baseFile.path+".bak").exists()) return JsonArray(emptyList())
+        require(f.baseFile.length() <= 256*1024) { "REPOSITORY_STORAGE_LIMIT" }
+        return f.openRead().use { RuntimeJson.parse(it.bufferedReader().readText()).jsonArray }
+    }
+    private fun saveRepositories(o: Owner, rows: JsonArray) = synchronized(lock) {
+        checkOwner(o); require(rows.size <= 32) { "REPOSITORY_LIMIT" }
+        val bytes=rows.toString().toByteArray();require(bytes.size<=256*1024) { "REPOSITORY_STORAGE_LIMIT" }
+        val f = repositoryFile(o); f.baseFile.parentFile?.mkdirs()
+        val stream = f.startWrite()
+        try { stream.write(bytes); f.finishWrite(stream) }
+        catch (error: Throwable) { f.failWrite(stream); throw error }
+    }
+    private fun endpoint(url: String): HttpUrl {
+        require(url.length in 1..8192 && url.none { it.code < 33 || it.code == 127 }) { "INVALID_ENDPOINT" }
+        val value = url.toHttpUrl()
+        require(value.isHttps && value.username.isEmpty() && value.password.isEmpty() && value.fragment == null) { "INVALID_ENDPOINT" }
+        return value
+    }
+    /** A source's own site may still be plain HTTP; repositories and packages stay HTTPS-only. */
+    private fun sourceEndpoint(url: String): HttpUrl {
+        require(url.length in 1..8192 && url.none { it.code < 33 || it.code == 127 }) { "INVALID_ENDPOINT" }
+        val value = url.toHttpUrl()
+        require(value.username.isEmpty() && value.password.isEmpty() && value.fragment == null) { "INVALID_ENDPOINT" }
+        return value
+    }
+    private fun repositoryOrigins(url: HttpUrl): Set<String> {
+        val own = HttpBroker.origin(url)
+        // These are public package distribution endpoints, never source-site permission grants.
+        return if (url.host in setOf("github.com","raw.githubusercontent.com","objects.githubusercontent.com","release-assets.githubusercontent.com"))
+            setOf(own,"https://github.com","https://raw.githubusercontent.com","https://objects.githubusercontent.com","https://release-assets.githubusercontent.com") else setOf(own)
+    }
+    private fun fetch(o: Owner,url: String): ByteArray {
+        checkOwner(o)
+        val parsed = endpoint(url)
+        val scope = HttpBroker.Scope("cloudstream","repository","repository",o.id,repositoryOrigins(parsed))
+        broker.open(scope).use { session ->
+            val output = session.execute(HttpBroker.Input(parsed.toString(),"GET",Headers.headersOf("User-Agent",userAgent),null,true))
+            require(output.status() == 200) { "REPOSITORY_HTTP_${output.status()}" }
+            checkOwner(o); return output.body()
+        }
+    }
+    suspend fun addRepository(url: String): JsonObject = withContext(Dispatchers.IO) {
+        val o = owner; val canonical = endpoint(url).toString()
+        val raw = RuntimeJson.parse(fetch(o,canonical).decodeToString()).jsonObject
+        val lists = raw["pluginLists"]?.jsonArray ?: error("NOT_CLOUDSTREAM_REPOSITORY")
+        require(lists.size in 1..16 && lists.all { it is JsonPrimitive && it.isString }) { "INVALID_REPOSITORY_INDEX" }
+        lists.forEach { endpoint(it.jsonPrimitive.content) }
+        val row = buildJsonObject {
+            put("url",canonical); put("name",raw.text("name").take(160).ifBlank { endpoint(canonical).host })
+            put("pluginLists",lists); raw["iconUrl"]?.let { put("iconUrl",it) }
+        }
+        val rows = repositories(o).filter { it.jsonObject.text("url") != canonical } + row
+        saveRepositories(o,JsonArray(rows)); row
+    }
+    fun removeRepository(url: String) {
+        val o = owner
+        saveRepositories(o,JsonArray(repositories(o).filter { it.jsonObject.text("url") != url }))
+        indexes.remove(o.id+"|"+url)
+        // Unlinking a repository never uninstalls its sources.
+    }
+    private suspend fun index(o: Owner,url: String,force: Boolean=false): JsonArray = withContext(Dispatchers.IO) {
+        checkOwner(o); val key=o.id+"|"+url
+        indexes[key]?.takeIf { !force && System.currentTimeMillis()-it.first < 300000 }?.let { return@withContext it.second }
+        val repo = repositories(o).map { it.jsonObject }.singleOrNull { it.text("url")==url } ?: error("REPOSITORY_NOT_SAVED")
+        val rows = mutableListOf<JsonElement>()
+        for (list in repo.getValue("pluginLists").jsonArray) {
+            val data = RuntimeJson.parse(fetch(o,list.jsonPrimitive.content).decodeToString()).jsonArray
+            require(rows.size + data.size <= 512) { "REPOSITORY_INDEX_LIMIT" }
+            for (entry in data) {
+                rows.add(RuntimeRepositoryEntry.decode(entry.jsonObject,url,repo.text("name")))
+            }
+        }
+        checkOwner(o); val result=JsonArray(rows.distinctBy { it.jsonObject.text("pkg") }); indexes[key]=System.currentTimeMillis() to result; result
+    }
+    suspend fun extensions(url: String): JsonArray {
+        val o=owner;val installed=o.store.inventory().installed().associateBy { it.packageId() }
+        return JsonArray(index(o,url).map { raw ->
+            val row=raw.jsonObject; val current=installed[row.text("pkg")]
+            JsonObject(row + mapOf("installed" to JsonPrimitive(current!=null),"anime" to JsonPrimitive(true),"protocol" to JsonPrimitive("cloudstream"),
+                "update" to JsonPrimitive(current!=null && (row["version"]?.jsonPrimitive?.intOrNull ?: 0)>current.version())))
+        })
+    }
+    fun list(): JsonObject {
+        val o=owner;val inventory=o.store.inventory()
+        val unreadable=inventory.unreadable().map { buildJsonObject { put("pkg",it.packageId());put("error",it.code()) } }.toMutableList()
+        val installed=inventory.installed().mapNotNull {
+            try { installedRow(it,o.id) } catch (_: Exception) { unreadable.add(buildJsonObject { put("pkg",it.packageId());put("error","PACKAGE_METADATA_UNREADABLE") });null }
+        }
+        return buildJsonObject {
+            put("repos",repositories(o))
+            put("installed",JsonArray(installed))
+            put("unreadable",JsonArray(unreadable))
+        }
+    }
+    private fun installedRow(installed: RuntimePackageStore.Installed,account: String): JsonObject {
+        val metadata=RuntimeJson.parse(installed.metadata()).jsonObject
+        return JsonObject(metadata + mapOf("pkg" to JsonPrimitive(installed.packageId()),"version" to JsonPrimitive(installed.version()),
+            "installed" to JsonPrimitive(true),"protocol" to JsonPrimitive("cloudstream"),"anime" to JsonPrimitive(true),
+            "repo" to JsonPrimitive(metadata.text("repoUrl")),"repositoryName" to JsonPrimitive(metadata.text("repoName")),
+            "sourceIds" to JsonArray(metadata["registration"]?.jsonObject?.get("sources")?.jsonArray.orEmpty().map { source -> JsonPrimitive(sourceId(installed.packageId(),source.jsonObject.text("name"),account)) })))
+    }
+    suspend fun install(repo: String,pkg: String,content: String): JsonObject = withContext(Dispatchers.IO) {
+        val o=owner
+        require(content in setOf("anime","cinema")) { "UNSUPPORTED_CONTENT" }
+        val row=index(o,repo,true).map { it.jsonObject }.singleOrNull { it.text("pkg")==pkg } ?: error("PACKAGE_NOT_IN_REPOSITORY")
+        val bytes=fetch(o,row.text("url"));val observed=digest(bytes)
+        val declared=row.text("sha256").lowercase()
+        require(declared.isBlank() || declared==observed) { "PACKAGE_HASH_MISMATCH" }
+        directory.mkdirs(); val download=File.createTempFile("cs3-download-",".part",directory)
+        try {
+            download.outputStream().use { it.write(bytes) }
+            installFile(o,download,observed,pkg,JsonObject(row+mapOf("content" to JsonPrimitive(content),"enabled" to JsonPrimitive(true))))
+        } finally { download.delete() }
+    }
+    /**
+     * Full public catalogue/details/episodes/video-links canary on each candidate source BEFORE an update
+     * can replace an already installed package. Scope IDs are version-specific,
+     * isolating candidate cookies from the active user's cookies and sessions.
+     * First installs are independent: there is no known-good version to protect.
+     */
+    private suspend fun sourceCanary(
+        o:Owner,generation:Long,pkg:String,source:JsonObject,
+        dex:File,packageHash:String,dexHash:String,entry:String,purpose:String,
+        expectedOperation:String?=null,expectedInput:JsonObject=JsonObject(emptyMap())
+    ) {
+        val name=source.text("name")
+        val candidateId=sourceId(pkg,name,o.id)+"|"+purpose+"|"+packageHash.take(12)
+        val origins=RuntimeNetworkPolicy.sourceOrigins(packageHash,source.text("mainUrl"),emptySet())
+        val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,candidateId,o.id,origins)
+        val bound=sourceTransport(scope,broker)
+        val transport=object:AndroidRuntimeClient.HostHttpTransport {
+            override fun exchange(caller:AndroidRuntimeClient.Scope,request:RuntimeHttpAccess.Request):RuntimeHttpAccess.Response {
+                val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER)
+                headers.putAll(request.headers())
+                headers.putIfAbsent("User-Agent",listOf(userAgent))
+                return bound.exchange(caller,RuntimeHttpAccess.Request(
+                    request.url(),request.method(),headers,request.body(),request.followRedirects()))
+            }
+            override fun close(){bound.close()}
+        }
+        try {
+            worker(o,generation,scope,dex,dexHash,entry,transport) { client ->
+                suspend fun call(operation:String,input:JsonObject,deadline:Long=15_000L):JsonObject {
+                    val wire=JsonObject(input+mapOf("source" to JsonPrimitive(name)))
+                    return RuntimeJson.parse(client.invokeJson(operation,wire.toString(),deadline).await()).jsonObject
+                }
+                expectedOperation?.let { operation ->
+                    check(RuntimeOperationHealth.assess(operation,expectedInput,call(operation,expectedInput),source)==
+                        RuntimeOperationHealth.Result.PRODUCTIVE) { "PREVIOUS_OPERATION_NOT_HEALTHY" }
+                }
+                val catalogue=call("catalogue",buildJsonObject{put("page",1)})
+                val workUrl=RuntimeCanaryContract.firstWorkUrl(catalogue)
+                RuntimeCanaryContract.requireDetails(call("details",buildJsonObject{put("url",workUrl)}))
+                val episodeData=RuntimeCanaryContract.firstEpisodeData(call("episodes",buildJsonObject{put("url",workUrl)}))
+                val links=call("videoLinks",buildJsonObject{put("data",episodeData)},30_000L)
+                // A URL alone cannot promote an update. Probe only bounded media prefixes, through
+                // the same scoped transport/cookies/headers; never mark a work watched.
+                withTimeout(45_000L) {
+                    coroutineScope {
+                        val probe=async(Dispatchers.IO) {
+                            try {
+                            RuntimeMediaProbe { url,headers ->
+                                synchronized(lock) { checkPackage(o,pkg,generation) }
+                                val sent=headers.newBuilder().apply { if(headers["User-Agent"]==null)set("User-Agent",userAgent) }.build()
+                                val response=bound.probePrefix(scope,RuntimeHttpAccess.Request(url,"GET",sent.toMultimap(),null,true),HttpBroker.MAX_PROBE_BYTES)
+                                synchronized(lock) { checkPackage(o,pkg,generation) }
+                                val returned=Headers.Builder().apply { response.headers().forEach { (key,values)->values.forEach {add(key,it)} } }.build()
+                                HttpBroker.Output(response.url(),response.status(),returned,response.body())
+                            }.requirePlayable(links)
+                            } catch (failure:Exception) {
+                                currentCoroutineContext().ensureActive()
+                                throw failure
+                            }
+                        }
+                        // Closing on timeout/cancellation aborts the physical OkHttp call before
+                        // structured concurrency waits for the blocking child to finish.
+                        try { probe.await() } finally { bound.close() }
+                    }
+                }
+            }
+        }finally{transport.close()}
+    }
+
+    /** Reject updates that do not complete a source-neutral five-step public video journey.
+     * No user library, viewing state or active plugin pointer changes during this probe.
+     * Media URL validation is NOT decoded-frame certification; that is a separate gate.
+     */
+    private suspend fun preflightCandidateUpdate(
+        o: Owner,generation:Long,pkg:String,
+        candidate: RuntimePackageStore.Staged,sources:JsonArray
+    )=withTimeout(90_000L) {
+        for(raw in sources) {
+            sourceCanary(o,generation,pkg,raw.jsonObject,candidate.dexFile(),
+                candidate.candidate().packageHash(),candidate.candidate().dexHash(),
+                candidate.candidate().entry(),"candidate")
+        }
+    }
+
+    private val recoveryGate=RuntimeRecoveryGate()
+    /**
+     * Automatic post-promotion recovery is conservative: require three successive
+     * functional errors AND prove the previous immutable revision completes the
+     * same real catalogue→details→episodes→video-links journey. External outages,
+     * auth challenges and user edits must never force a blind rollback.
+     */
+    private suspend fun recoverAfterFailure(o:Owner,installed:RuntimePackageStore.Installed,source:JsonObject,id:String,operation:String,input:JsonObject,failure:Throwable) {
+        if(failure is CancellationException || operation !in setOf("catalogue","details","episodes","videoLinks")) return
+        val reason=if(failure is RuntimeFailure)failure.code else failure.message.orEmpty()
+        if(listOf("VERIFICATION_REQUIRED","SOURCE_DISABLED","PROFILE_CHANGED","PACKAGE_CHANGED",
+            "REPOSITORY_","ORIGIN_NOT_ALLOWED","INVALID_ENDPOINT").any { reason.contains(it,true) })return
+        val pkg=installed.packageId()
+        val active=synchronized(lock) { checkOwner(o);o.store.current(pkg) } ?: return
+        if(active.packageHash()!=installed.packageHash())return
+        val old=o.store.previous(pkg) ?: return
+        if(old.packageHash()==active.packageHash())return
+        val key=o.id+"|"+pkg+"|"+active.packageHash()+"|"+id+"|"+operation+"|"+digest(input.toString())
+        if(!recoveryGate.onFailure(key,System.currentTimeMillis()))return
+        val sources=RuntimeJson.parse(old.metadata()).jsonObject["registration"]?.jsonObject
+            ?.get("sources") as? JsonArray ?: return
+        val oldSource=sources.map { it.jsonObject }.firstOrNull { it.text("name")==source.text("name") } ?:return
+        val generation=synchronized(lock) { checkOwner(o);packageEpochs[pkg] ?: 0L }
+        try {
+            withTimeout(75_000L) {
+                sourceCanary(o,generation,pkg,oldSource,old.dexFile(),old.packageHash(),
+                    old.dexHash(),old.entry(),"recovery",operation,input)
+            }
+        } catch (verificationFailure:Exception) {
+            currentCoroutineContext().ensureActive()
+            android.util.Log.w("VantaraRuntime","ROLLBACK_SKIPPED:previous_revision_not_verified:$pkg")
+            return
+        }
+        synchronized(lock) {
+            checkOwner(o)
+            if(o.store.restoreLastKnownGoodIfCurrent(active)) {
+                stopPackage(pkg)
+                refresh(o)
+                android.util.Log.w("VantaraRuntime","AUTO_RECOVERED_LAST_GOOD:$pkg")
+            }
+        }
+    }
+
+    /** Also used by device integration tests with real pinned archives and an isolated test broker. */
+    suspend fun installFile(file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = installFile(owner,file,hash,pkg,metadata)
+    private suspend fun installFile(o: Owner,file: File,hash: String,pkg: String,metadata: JsonObject): JsonObject = slots.withPermit {
+        require(pkg.matches(Regex("cs3_[0-9a-f]{32}"))) { "INVALID_PACKAGE_ID" }
+        val generation=synchronized(lock) { checkOwner(o);packageEpochs[pkg] ?: 0L }
+        o.store.stage(file,hash).use { candidate ->
+            // Registration has no network permission. A plugin's load() cannot probe a source site.
+            val scope=AndroidRuntimeClient.Scope("cloudstream",pkg,"registration",o.id,setOf("https://registration.example"))
+            val registration=retryWorkerStart {
+                worker(o,generation,scope,candidate.dexFile(),candidate.candidate().dexHash(),candidate.candidate().entry(),
+                    AndroidRuntimeClient.HostTransport { _,_ -> throw IOException("INITIALIZATION_NETWORK_DENIED") }) { client ->
+                    RuntimeJson.parse(client.invokeJson("capabilities","{}",10_000).await()).jsonObject
+                }
+            }
+            val sources=RuntimeRegistration.validate(registration,pkg)
+            val before=synchronized(lock) { checkPackage(o,pkg,generation);o.store.current(pkg) }
+            val previous=before?.let { RuntimeJson.parse(it.metadata()).jsonObject }
+            // Source IDs are derived from the exact publisher name, not a transient URL.
+            RuntimeUpdateAdmission.preserveIds(previous,registration)
+            if(before!=null && before.packageHash()!=candidate.candidate().packageHash()) {
+                try { preflightCandidateUpdate(o,generation,pkg,candidate,sources) }
+                catch (timedOut: TimeoutCancellationException) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_TIMEOUT",timedOut) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_FAILED",failure) }
+            }
+            val installed=synchronized(lock) {
+                checkPackage(o,pkg,generation)
+                check(o.store.current(pkg)==before) { "RUNTIME_PACKAGE_CHANGED_DURING_PREFLIGHT" }
+                val stored=JsonObject(metadata+mapOf("registration" to registration,"enabled" to (previous?.get("enabled") ?: metadata["enabled"] ?: JsonPrimitive(true))))
+                val retained=o.store.inventory().installed().filter { it.packageId()!=pkg }
+                val retainedCount=retained.sumOf { existing -> runCatching { RuntimeJson.parse(existing.metadata()).jsonObject.getValue("registration").jsonObject.getValue("sources").jsonArray.size }.getOrDefault(0) }
+                require(retained.size<128 && retainedCount+sources.size<=128) { "RUNTIME_SOURCE_LIMIT" }
+                val activated=candidate.activate(pkg,stored.toString())
+                try {
+                    stopPackage(pkg)
+                    refresh(o)
+                    check(sources.all { row ->
+                        engine.runtimeSource(sourceId(pkg,row.jsonObject.text("name"),o.id))!=null
+                    }) { "RUNTIME_SOURCE_ACTIVATION_MISSING" }
+                    activated
+                } catch (failure: Throwable) {
+                    // A failed immediate binding must not strand an upgraded package.
+                    // CAS refuses to overwrite newer settings or a concurrent install.
+                    if(before!=null && o.store.restoreIfCurrent(activated,before)) {
+                        stopPackage(pkg)
+                        refresh(o)
+                    }
+                    throw failure
+                }
+            }
+            installedRow(installed,o.id)
+        }
+    }
+    fun enable(pkg: String,enabled: Boolean) = synchronized(lock) {
+        val o=owner;val current=o.store.current(pkg) ?: error("PACKAGE_NOT_INSTALLED")
+        val data=RuntimeJson.parse(current.metadata()).jsonObject
+        o.store.updateMetadata(pkg,JsonObject(data+mapOf("enabled" to JsonPrimitive(enabled))).toString()); if(!enabled)stopPackage(pkg);refresh(o)
+    }
+    /**
+     * The provider's raw answer for one operation (for example `videoLinks` with its `missingExtractors`).
+     * Same worker, scope and policy as normal use; only the result is not reshaped.
+     */
+    suspend fun diagnose(sourceId: String,operation: String,input: JsonObject): JsonObject {
+        val call=invokers[sourceId] ?: error("SOURCE_NOT_INSTALLED")
+        return call(operation,input)
+    }
+    fun uninstall(pkg: String) = synchronized(lock) { val o=owner;o.store.uninstall(pkg);stopPackage(pkg);refresh(o) }
+    suspend fun seasons(anime: SourceAnime): List<SourceAnime> {
+        val o=owner;checkOwner(o)
+        require(anime.sourceId.startsWith("addon|cs3|cs3_") && engine.runtimeSource(anime.sourceId)!=null) { "SOURCE_NOT_INSTALLED" }
+        val adapter=engine.adapter(anime.sourceId) ?: error("SOURCE_DISABLED")
+        val result=adapter.seasons(anime);checkOwner(o);return result
+    }
+    private fun stopPackage(pkg: String) {
+        packageEpochs[pkg]=(packageEpochs[pkg] ?: 0L)+1L
+        workers.filterValues { it.packageId()==pkg }.keys.forEach { it.close();workers.remove(it) }
+        pending.entries.removeAll { it.value.installed.packageId()==pkg }
+        activeVerifications.entries.removeAll { it.value.installed.packageId()==pkg }
+        dependencyOrigins.keys.removeAll { it.pkg==pkg }
+    }
+    private fun refresh(o: Owner) {
+        checkOwner(o)
+        val bindings=mutableListOf<RuntimeSourceBinding>()
+        for (installed in o.store.inventory().installed()) {
+            try {
+                val metadata=RuntimeJson.parse(installed.metadata()).jsonObject
+                val enabled=metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false
+                val content=metadata.text("content").takeIf { it in setOf("anime","cinema") } ?: "anime"
+                val packageBindings=mutableListOf<RuntimeSourceBinding>()
+                for (raw in RuntimeRegistration.validate(metadata.getValue("registration").jsonObject,installed.packageId())) {
+                    val source=raw.jsonObject;val id=sourceId(installed.packageId(),source.text("name"),o.id);val origin=sourceEndpoint(source.text("mainUrl"))
+                    val name=source.text("name")
+                    // A publisher's VPN note is shown to the user, never turned into a block: the decision is theirs.
+                    val advisory=if(metadata.text("description").contains("VPN",true) || RuntimeRegistration.vpnMightBeNeeded(source))
+                        "ينبّه ناشر هذا المصدر إلى أن الموقع قد يحظر بعض الشبكات؛ إن تعذّر التحميل جرّب شبكة أخرى أو VPN." else null
+                    val entry=SourceEntry(id,name,source.text("lang").ifBlank { "und" },enabled=enabled,content=content,domains=Domains(origin.toString()),advisory=advisory)
+                    val call:suspend (String,JsonObject)->JsonObject={ operation,input -> invoke(o,installed,source,id,operation,input) }
+                    invokers[id]=call
+                    val adapter=RuntimeSourceAdapter(id,name,userAgent,engine.embeds,call)
+                    packageBindings.add(RuntimeSourceBinding(entry,adapter,installed.packageId(),installed.version().toString(),metadata.text("repoName"),metadata.text("repoUrl"),metadata.text("iconUrl").ifBlank { null }))
+                }
+                require(bindings.size+packageBindings.size<=128) { "RUNTIME_SOURCE_LIMIT" };bindings.addAll(packageBindings)
+            } catch (_: Exception) { android.util.Log.w("VantaraRuntime","PACKAGE_METADATA_UNREADABLE:${installed.packageId()}") }
+        }
+        engine.setRuntimeSources(bindings)
+    }
+    private suspend fun invoke(o: Owner,installed: RuntimePackageStore.Installed,source: JsonObject,id: String,operation: String,input: JsonObject): JsonObject = try {
+        slots.withPermit {
+        val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
+        val origins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),
+            synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
+        val learned=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        var rejected:RuntimeFailure?=null
+        val initial=try { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,origins,{ learned.add(it) }) } }
+        catch(failure:RuntimeFailure) { rejected=failure;null }
+        val permissionChanged=RuntimeNetworkPolicy.PUBLIC_INTERNET !in origins && learned.any { it !in origins }
+        // Some published providers catch a denied media request and return an
+        // empty result. Attested media still needs the same single scope sync.
+        if(!permissionChanged || operation !in setOf("catalogue","search","details","episodes","videoLinks") || (rejected!=null && rejected.code!="ORIGIN_NOT_ALLOWED")) {
+            rejected?.let { throw it };return@withPermit initial!!
+        }
+        run {
+            // A permission sync replay, once, only after an attested settings
+            // migration. It gets its own budget of one load plus one operation (30 + 30 s, the
+            // worker's own limits): the first attempt may already have used both legitimately,
+            // and a budget counted from its start left the replay none (code review, 6 Nov).
+            val remaining=REPLAY_BUDGET_MS
+            val synchronizedOrigins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
+            try { withTimeout(remaining) { retryWorkerStart { invokeOnce(o,installed,source,id,operation,input,synchronizedOrigins,{ learned.add(it) }) } } }
+            catch(timeout:TimeoutCancellationException){throw IllegalStateException("OPERATION_TIMEOUT",timeout)}
+        }
+    }.also { result ->
+        val health=RuntimeOperationHealth.assess(operation,input,result,source)
+        val recoveryKey=o.id+"|"+installed.packageId()+"|"+installed.packageHash()+"|"+id+"|"+operation+"|"+digest(input.toString())
+        RuntimeOperationHealth.recordSuccess(recoveryGate,recoveryKey,health)
+        if(health==RuntimeOperationHealth.Result.EMPTY) {
+            recoverAfterFailure(o,installed,source,id,operation,input,IllegalStateException("EMPTY_PROVIDER_RESULT"))
+        }
+    }
+    } catch (failure:Throwable) {
+        try {recoverAfterFailure(o,installed,source,id,operation,input,failure)}
+        catch (recoveryError:Exception) {android.util.Log.w("VantaraRuntime","AUTO_RECOVERY_UNAVAILABLE:"+recoveryError.javaClass.simpleName)}
+        throw failure
+    }
+    private suspend fun invokeOnce(o:Owner,installed:RuntimePackageStore.Installed,source:JsonObject,id:String,operation:String,input:JsonObject,origins:Set<String>,learned:(String)->Unit):JsonObject {
+        val generation=synchronized(lock) { checkOwner(o);packageEpochs[installed.packageId()] ?: 0L }
+        val current=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
+        check(current.packageHash()==installed.packageHash()) { "PACKAGE_CHANGED" }
+        val metadata=RuntimeJson.parse(current.metadata()).jsonObject
+        check(metadata["enabled"]?.jsonPrimitive?.booleanOrNull != false) { "SOURCE_DISABLED" }
+        val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,origins)
+        val bound=sourceTransport(scope,broker)
+        val transport=object: AndroidRuntimeClient.HostHttpTransport {
+            override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
+                synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
+                val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER);headers.putAll(request.headers())
+                headers.putIfAbsent("User-Agent",listOf(userAgent))
+                val outbound=RuntimeHttpAccess.Request(request.url(),request.method(),headers,request.body(),request.followRedirects())
+                return try {
+                    val result=bound.exchange(caller,outbound)
+                    // للتشخيص: الحالة والمضيف والحجم فقط (لا مسار ولا محتوى)؛ يكشف صفحة حجب بـ200 أو 403 عادي
+                    // (هذه الطبقة في Debug وحده: srcDir في sourceSets.debug)
+                    android.util.Log.d("VantaraRuntimeHttp","${source.text("name")} $operation ${result.status()} ${runCatching { java.net.URI(result.url()).host }.getOrNull()} ${result.headers().entries.firstOrNull { it.key.equals("Content-Length",true) }?.value?.firstOrNull() ?: "?"}")
+                    RuntimeNetworkPolicy.trustedSettingsOrigin(installed.packageHash(),source.text("mainUrl"),outbound,result)?.let { origin ->
+                        synchronized(lock) {
+                            checkPackage(o,installed.packageId(),generation)
+                            val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
+                            val retained=dependencyOrigins[key].orEmpty().filterNot { origin.endsWith("-dsn.algolia.net") && it.endsWith("-dsn.algolia.net") }.toSet()
+                            dependencyOrigins[key]=retained+origin
+                            learned(origin)
+                        }
+                    }
+                    result
+                }
+                catch (failure: RuntimeFailure) {
+                    if(failure.code=="VERIFICATION_REQUIRED") {
+                        val actualUserAgent=headers["User-Agent"]?.firstOrNull() ?: userAgent
+                        // The challenge belongs to the hop that answered it. After a redirect (a site moved to a new
+                        // domain or subdomain) that is not request.url(): verifying the old host opened a page that
+                        // redirected away and closed at once, and its cookie was saved for the wrong host.
+                        val challenged=(failure.cause as? HttpBroker.Failure)?.challengedUrl ?: request.url()
+                        // كما يفعل CloudStream الأصلي: تحدٍّ يحلّ نفسه في متصفح مخفي لا يحتاج ضغطة من المستخدم.
+                        // نجاحه يعيد الطلب نفسه مرة؛ تحدٍّ يطلب إنسانًا أو يتكرر يبقى «تحتاج تحقق» كما كان.
+                        if(clearSilently(scope,challenged,actualUserAgent)) {
+                            try { return bound.exchange(caller,outbound) }
+                            catch (again: RuntimeFailure) { if(again.code!="VERIFICATION_REQUIRED")throw again }
+                        }
+                        synchronized(lock) {
+                            checkPackage(o,installed.packageId(),generation)
+                            pending[id]=Retry(o,generation,installed,source,id,operation,input,challenged,actualUserAgent,scope)
+                            VerificationCoordinator.require(sourceEndpoint(challenged),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
+                        }
+                    }
+                    throw failure
+                }
+            }
+            override fun close() { bound.close() }
+        }
+        val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
+        try {
+            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await()) }
+            synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
+            val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
+            check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
+            // Search's published ABI returns a list; all other operations return objects.
+            return if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
+        } finally { transport.close() }
+    }
+    /**
+     * A worker that never came up is VANTARA's failure, not the provider's or the site's: no provider code
+     * ran and no request left the device. One fresh worker (and a fresh transport, since each attempt builds
+     * its own) before reporting it. Provider and network failures are never retried here.
+     */
+    private suspend fun <T> retryWorkerStart(block: suspend ()->T): T = try { block() } catch (failure: RuntimeFailure) {
+        if(failure.code !in WORKER_START_FAILURES)throw failure
+        android.util.Log.w("VantaraRuntime","WORKER_START_RETRY:"+failure.code)
+        block()
+    }
+    private suspend fun <T> worker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
+        val client=synchronized(lock) {
+            checkPackage(o,scope.packageId(),generation)
+            AndroidRuntimeClient(app,scope,transport).also { workers[it]=scope }
+        }
+        try { client.loadCloudStream(dex,hash,entry).await();return run(client) }
+        finally { workers.remove(client);client.close() }
+    }
+    private val silentGate=SilentClearanceGate()
+    /**
+     * يحاول الحل الصامت مرة لكل مصدر وموقع كل 10 دقائق. عند النجاح يحفظ كوكي cf_clearance واحدًا للمضيف
+     * في مخزن هذا المصدر والحساب وحده (كما في التحقق اليدوي) ويرفع حالة التحدي عن الموقع.
+     */
+    private fun clearSilently(scope: AndroidRuntimeClient.Scope,url: String,userAgent: String): Boolean {
+        val solve=silentClearance ?: return false
+        val target=runCatching { sourceEndpoint(url) }.getOrNull() ?: return false
+        if(!target.isHttps)return false
+        val origin=HttpBroker.origin(target);val now=System.currentTimeMillis()
+        if(!silentGate.admit(scope.sourceId()+"|"+origin,now))return false
+        val value=runCatching { solve(target.toString(),userAgent) }.getOrNull()
+            ?.takeIf { VerificationPolicy.clearance("cf_clearance=$it")==it } ?: return false
+        val brokerScope=HttpBroker.Scope(scope.family(),scope.packageId(),scope.sourceId(),scope.sessionId(),scope.allowedOrigins())
+        val cookie=Cookie.Builder().name("cf_clearance").value(value).hostOnlyDomain(target.host).path("/").secure().httpOnly().expiresAt(now+1800000).build()
+        vaults.forScope(brokerScope).save(target,listOf(cookie))
+        broker.verificationSucceeded(brokerScope,origin)
+        android.util.Log.i("VantaraRuntime","SILENT_CLEARANCE:"+target.host)
+        return true
+    }
+    fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { sourceEndpoint(it.url).host }.distinct()
+    fun beginVerification(host: String): VerificationPending = synchronized(lock) {
+        val retry=pending.values.firstOrNull { it.owner===owner && sourceEndpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
+        checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
+        val original=VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
+        require(original.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
+        val item=VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")
+        activeVerifications[item.token]=retry;item
+    }
+    fun verificationProfile(item: VerificationPending): String = synchronized(lock) {
+        val retry=activeVerifications[item.token] ?: error("VERIFICATION_EXPIRED")
+        checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
+        "runtime_"+digest(retry.scope.sourceId()) // sourceId already includes stable account and package identity.
+    }
+    suspend fun completeVerification(item: VerificationPending,clearance: String): JsonObject {
+        val retry=activeVerifications.remove(item.token) ?: error("VERIFICATION_EXPIRED")
+        synchronized(lock) {
+            checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
+            require(VerificationCoordinator.pending().any { it.host==item.host && it.token==item.token && it.state=="active" }) { "VERIFICATION_EXPIRED" }
+            require(VerificationPolicy.clearance("cf_clearance=$clearance")==clearance) { "INVALID_CLEARANCE" }
+            val url=sourceEndpoint(retry.url)
+            require(url.host==item.host && HttpBroker.origin(url)==item.origin && item.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
+            val scope=HttpBroker.Scope(retry.scope.family(),retry.scope.packageId(),retry.scope.sourceId(),retry.scope.sessionId(),retry.scope.allowedOrigins())
+            // Precisely one host-only clearance, scoped to the challenged source/account.
+            // No login cookies, app CookieManager, localStorage or existing sessions are copied/cleared.
+            val cookie=Cookie.Builder().name("cf_clearance").value(clearance).hostOnlyDomain(url.host).path("/").secure().httpOnly().expiresAt(System.currentTimeMillis()+1800000).build()
+            vaults.forScope(scope).save(url,listOf(cookie))
+            broker.verificationSucceeded(scope,HttpBroker.origin(url))
+        }
+        // Exactly one replay of the real source operation; a repeated challenge remains a failure.
+        val response=invoke(retry.owner,retry.installed,retry.source,retry.id,retry.operation,retry.input)
+        pending.remove(retry.id,retry)
+        return buildJsonObject { put("ok",true);put("host",item.host);put("state","verified");put("replayedOperation",retry.operation);put("result",response) }
+    }
+    fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
+    companion object {
+        private val WORKER_START_FAILURES=setOf("BINDING_TIMEOUT","BINDING_FAILED")
+        /**
+         * Every operation gets the worker's maximum. CloudStream itself bounds none of them; a home page with many
+         * sections (Akwam: 22s on the emulator) or a slow details page timed out at 15s although the site answered.
+         * The bound still stops a hung provider.
+         */
+        private const val OPERATION_BUDGET_MS=30_000L
+        /** One provider load (AndroidRuntimeClient.loadProfile: 30 s) plus one operation. */
+        private const val REPLAY_BUDGET_MS=30_000L+OPERATION_BUDGET_MS
+        fun digest(value: String)=digest(value.toByteArray())
+        fun digest(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        fun packageId(repository: String,internalName: String)="cs3_"+digest(repository+"\u0000"+internalName).take(32)
+        fun sourceId(pkg: String,name: String,account: String="local")="addon|cs3|$pkg|"+digest(name).take(24)+"|u"+digest(account).take(24)
+    }
+}
+
+internal fun JsonObject.text(key: String)=get(key)?.let { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+internal suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel(true) }
+    whenComplete { value,error -> if (continuation.isActive) { if(error==null)continuation.resume(value) else continuation.resumeWithException(error.cause ?: error) } }
+}
+
+/** محاولة حل صامت واحدة لكل مصدر وموقع في كل نافذة زمنية: موقع يعيد التحدي لا يُدخل المحرك في حلقة. */
+internal class SilentClearanceGate(private val windowMs: Long=600_000L) {
+    private val tried=ConcurrentHashMap<String,Long>()
+    fun admit(key: String,now: Long): Boolean {
+        val last=tried[key]
+        if(last!=null && now-last<windowMs)return false
+        tried[key]=now;return true
+    }
+}

@@ -1,0 +1,28 @@
+/* ═══ ويبتوني v2: لغة المانجا (الزر البنفسجي، الشرائح، الأزرار المربعة) + هوية المانهوا الأسبوعية ═══ */
+#detail[data-v=wt] .mw-amb { display: none !important; }
+#detail[data-v=wt] .mw-stage { position: relative; padding: 0 !important; margin: 0 !important; }
+#detail[data-v=wt] .mw-cover { width: 100% !important; max-width: none !important; height: var(--wt-hero, 590px) !important; margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; transform: none !important; }
+#detail[data-v=wt] .mw-cover img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; border-radius: 0 !important; }
+#detail[data-v=wt] .wt-fade { position: absolute; inset: 0 0 auto 0; height: var(--wt-hero, 590px); pointer-events: none; z-index: 1;
+  background: linear-gradient(180deg, rgba(8,7,12,.5) 0, rgba(8,7,12,0) 16%, rgba(8,7,12,0) 50%, rgba(8,7,12,.86) 82%, var(--bg) 100%); }
+#detail[data-v=wt] .mw-center { position: relative; z-index: 2; margin-top: -196px !important; padding-bottom: 4px; }
+#detail[data-v=wt] .mw-title { font-size: 34px !important; letter-spacing: -.01em; text-shadow: 0 6px 30px rgba(0,0,0,.55); }
+#detail[data-v=wt] .mw-chip { background: rgba(255,255,255,.13) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+/* إيقاع الإصدار: يُحسب من تواريخ الفصول */
+.wt-beat { position: relative; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 9px; margin: 14px auto 0; width: max-content; max-width: calc(100% - 40px);
+  padding: 8px 14px; border-radius: 999px; background: rgba(74,222,128,.1); color: #c9f7da; font-size: 12.5px; font-weight: 650; }
+.wt-beat i { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 4px rgba(74,222,128,.18); flex: none; }
+.wt-beat b { color: #fff; font-weight: 800; }
+#detail[data-v=wt] .mw-acts { margin-top: 20px !important; }
+/* الفصول: خط زمني واحد، الرقم عقدة على الخط، والشهور محطات */
+#detail[data-v=wt] .mw-chs { position: relative; padding-inline-start: 0; }
+#detail[data-v=wt] .mw-chs::before { content: ''; position: absolute; top: 8px; bottom: 0; inset-inline-start: 21px; width: 2px; border-radius: 2px; background: linear-gradient(var(--accent), rgba(143,92,255,.12) 70%, transparent); }
+#detail[data-v=wt] .mw-ch { position: relative; border: 0 !important; padding-inline-start: 0; }
+#detail[data-v=wt] .mw-ch .mw-ch-open { gap: 14px; }
+#detail[data-v=wt] .mw-ch .n { position: relative; z-index: 1; flex: none; width: 44px; height: 44px; min-width: 44px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--bg); box-shadow: inset 0 0 0 2px rgba(143,92,255,.55); font-size: 13.5px !important; font-weight: 800; color: var(--text-1); font-variant-numeric: tabular-nums; }
+#detail[data-v=wt] .mw-ch.wt-new .n { background: var(--accent); box-shadow: 0 0 0 5px rgba(143,92,255,.18); color: #fff; }
+.wt-tag { margin-inline-start: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(143,92,255,.18); color: #cbb6ff; font-size: 10.5px; font-weight: 800; vertical-align: 2px; }
+.wt-month { position: relative; display: flex; align-items: baseline; gap: 10px; margin: 26px 0 8px; padding-inline-start: 58px; font-size: 15px; font-weight: 800; color: var(--text-1); }
+.wt-month::before { content: ''; position: absolute; inset-inline-start: 14px; top: 50%; width: 16px; height: 16px; margin-top: -8px; border-radius: 4px; transform: rotate(45deg); background: var(--bg); box-shadow: inset 0 0 0 3px var(--accent); }
+.wt-month small { font-size: 12px; font-weight: 600; color: var(--text-4); }

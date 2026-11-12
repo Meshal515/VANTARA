@@ -13,7 +13,7 @@ const { createCinema } = await import('./cinema.js');
 afterEach(() => { state.listeners.clear(); state.open.mockClear(); state.pick.mockClear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it.each([false, true])('73 native torrent choices remain selectable while HTTP pending=%s, with excess releases folded and no autoplay', async (httpPending) => {
   vi.useFakeTimers();
-  state.routes = Array.from({length:73},(_,i) => ({id:`torrent-${i}`,code:`TRR${i}`,server:'Torrentio',sourceId:'addon|torrentio',sourceName:'Torrentio',label:`Fight.Club.1999.1080p.Release-${i}`,quality:1080,state:'READY',runtimeReady:true,probed:null}));
+  state.routes = Array.from({length:73},(_,i) => ({id:`torrent-${i}`,code:`TRR${i}`,server:'Torrentio',sourceId:'addon|torrentio',sourceName:'Torrentio',label:`Fight.Club.1999.1080p.Release-${i}\n👤 ${5+i}`,quality:1080,state:'READY',runtimeReady:true,probed:null}));
   if (httpPending) state.routes.push({id:'http-pending',sourceId:'arabseed',code:'SRV',state:'READY',probed:null});
   const {window,document}=parseHTML('<html><body><main id="cinema"></main><div id="sheet"></div></body></html>');
   vi.stubGlobal('window',window);vi.stubGlobal('document',document);
@@ -36,7 +36,8 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   const first=sheet.querySelector('.an-srv-group > .an-srv-grid .an-srv');
   expect(first.disabled).toBe(false);
   expect(first.textContent).toContain('Torrentio');
-  expect(first.textContent).toContain('Release-0');
+  // الأول هو المقترح: أكثر المشاركين (77) بين المتساويين جودةً ولغة
+  expect(first.textContent).toContain('Release-72');
   expect(first.className).toContain('an-srv--ready');
   expect(first.className).toContain('ss-row--torrent');
   expect(sheet.querySelector('.ss-row--top .ss-name').textContent).toBe('Torrentio');
@@ -47,7 +48,7 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   expect(more.querySelector('summary').textContent).toContain('67');
   expect(more.querySelectorAll('.an-srv').length).toBe(67);
   more.open=true;
-  state.listeners.get('route')({session:state.session,route:{...state.routes[72],state:'FAILED',runtimeReady:false}});
+  state.listeners.get('route')({session:state.session,route:{...state.routes[0],state:'FAILED',runtimeReady:false}});
   await vi.advanceTimersByTimeAsync(1);
   expect(more.querySelector('summary').textContent).toContain('66');
   expect(more.querySelectorAll('.an-srv').length).toBe(66);
@@ -55,6 +56,6 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   await first.onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.pick).toHaveBeenCalled();
-  expect(state.open).toHaveBeenCalledWith(expect.objectContaining({candidate:'torrent-0',section:'cinema'}));
+  expect(state.open).toHaveBeenCalledWith(expect.objectContaining({candidate:'torrent-72',section:'cinema'}));
   cleanup?.();
 });

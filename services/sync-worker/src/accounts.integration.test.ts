@@ -135,6 +135,21 @@ describe('profile PIN', () => {
     expect(second).toMatchObject({ ok: false, error: 'pin_locked' });
   });
 
+  // #323 U-22: محاولات متزامنة كانت تُحسب واحدة (قراءة ثم كتابة failed+1) فلا يُقفل الحساب أبدًا
+  it('concurrent wrong PINs are all counted and lock the account', async () => {
+    const { env, call, tokenFor, db } = await setup();
+    const token = await tokenFor(DAHMI);
+    await call('/v1/pin', { action: 'set', pin: '135790' }, token);
+    const now = Date.now();
+    const results = await Promise.all(Array.from({ length: 10 }, () => checkPin(env, DAHMI, '000000', now)));
+    const row = db.prepare('SELECT failed, locked_until FROM account_pins WHERE user_id = ?').get(DAHMI) as { failed: number; locked_until: number };
+    expect(row.failed).toBeGreaterThanOrEqual(5);
+    expect(row.locked_until).toBeGreaterThan(now);
+    expect(results.some((r) => !r.ok && r.error === 'pin_locked')).toBe(true);
+    // والصحيح بعدها مرفوض ما دام القفل قائمًا
+    expect(await checkPin(env, DAHMI, '135790', now)).toMatchObject({ ok: false, error: 'pin_locked' });
+  });
+
   it('change and removal need the current PIN; data stays on the same identity', async () => {
     const { call, tokenFor, session, db } = await setup();
     db.prepare("INSERT INTO library (user_id, series_ref, series_title, added_at, removed, rev) VALUES (?, 'ext:s:1', 'Solo', 1, 0, 1)").run(DAHMI);

@@ -40,6 +40,7 @@ const P = {
   settings:
     '<path d="M18.89 9.92 21 10.17v3.66l-2.11.25-.55 1.33 1.33 1.67-2.59 2.59-1.67-1.33-1.33.55-.25 2.11h-3.66l-.25-2.11-1.33-.55-1.67 1.33-2.59-2.59 1.33-1.67-.55-1.33L3 13.83v-3.66l2.11-.25.55-1.33-1.33-1.67 2.59-2.59 1.67 1.33 1.33-.55L10.17 3h3.66l.25 2.11 1.33.55 1.67-1.33 2.59 2.59-1.33 1.67Z"/><circle cx="12" cy="12" r="3"/>',
   bolt: '<path d="M13.2 3 5.5 13.2h5.6L10.4 21l7.9-10.4h-5.7Z"/>',
+  magnet: '<path d="M6 4v7a6 6 0 0 0 12 0V4"/><path d="M6 8.5h3.5M14.5 8.5H18"/>',
   server: '<rect x="4" y="4.5" width="16" height="6" rx="1.5"/><rect x="4" y="13.5" width="16" height="6" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/>',
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
   flame: '<path d="M12 20.5c3.3 0 5.8-2.4 5.8-5.7 0-3.6-2.6-5.4-3.6-8.8-1.1 1.4-1.5 2.8-1.4 4.3-1.4-.9-2.6-3.3-2.3-6.8C7.7 6 6.2 9.8 6.2 14.8c0 3.3 2.5 5.7 5.8 5.7Z"/>',
@@ -86,6 +87,8 @@ const P = {
   fitHeight: '<path d="M5 4h14M5 20h14M12 7.5v9M9.5 10 12 7.5l2.5 2.5M9.5 14l2.5 2.5 2.5-2.5"/>',
   zoom: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4M11 8.3v5.4M8.3 11h5.4"/>',
   gap: '<rect x="5" y="3.5" width="14" height="6.5" rx="1.5"/><rect x="5" y="14" width="14" height="6.5" rx="1.5"/>',
+  palette: '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.3 0 1.9-.9 1.9-1.8 0-1.2-1-1.6-1-2.6 0-.9.7-1.6 1.7-1.6h2.1a3.8 3.8 0 0 0 3.8-3.8c0-4-3.8-7.2-8.5-7.2Z"/><circle cx="7.8" cy="11" r="1.1"/><circle cx="10.4" cy="7.4" r="1.1"/><circle cx="14.6" cy="7.6" r="1.1"/>',
+  moon: '<path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1Z"/>',
   layers: '<path d="M12 4 20.5 8.5 12 13 3.5 8.5Z"/><path d="m3.5 12.8 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5" opacity=".55"/>',
   translate: '<path d="M4 5.5h9M8.5 3.5v2M6 5.5c.6 3.3 2.7 6 6 7.5M11 5.5c-.7 3.6-3.3 6.6-7 8"/><path d="m12.5 20.5 4-9.5 4 9.5M14 17h5"/>',
   // فقاعتان: «A» الأصل و«ع» العربي — زرّ الترجمة في القارئ
@@ -112,12 +115,21 @@ const P = {
 /** رموزٌ لها حالة «مفعّل» تُملأ فيها بدل أن تُحدَّد. */
 const FILLABLE = new Set(['bolt', 'heart', 'library', 'star', 'bell', 'play', 'pause']);
 
+// Optical corrections after inspecting the whole family in actual circular buttons.
+// Values are local 24-unit geometry, not a blanket shift of buttons or all SVGs.
+const OPTICAL = Object.freeze({
+  play: [-0.35, 0], heart: [0, 0.65], share: [-0.55, 0],
+  send: [-0.55, 0.55], puzzle: [0.55, -0.55], check: [0, -0.4],
+});
+
 /**
  * @param {keyof typeof P} name
  * @param {{ size?: number, filled?: boolean, cls?: string }} [opts]
  */
 export function glyph(name, { size = 22, filled = false, cls = 'icon', id } = {}) {
-  const body = P[name] ?? P.info;
+  const path = P[name] ?? P.info;
+  const correction = OPTICAL[name];
+  const body = correction ? `<g transform="translate(${correction.join(' ')})">${path}</g>` : path;
   const fill = filled && FILLABLE.has(name) ? 'currentColor' : 'none';
   return (
     `<svg${id ? ` id="${id}"` : ''} class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="currentColor" ` +

@@ -93,7 +93,7 @@ it('shows the cinematic room before native playback and hides its HWND until the
 });
 it('opens the shared server sheet and keeps settings out of the video until requested',async()=>{
  const f=fixture();vi.stubGlobal('document',f.document);
- let extra=[];f.engine.routes=async()=>({done:true,routes:[...extra,{id:'route-1',state:'READY',quality:1080,sourceId:'addon|https://torrentio.strem.fun|torrentio',sourceName:'Torrentio',label:'WEB-DL 1080p',server:'Torrentio',candidates:[{id:'source-1'}]}]});
+ let extra=[];f.engine.routes=async()=>({done:true,routes:[...extra,{id:'route-1',state:'READY',quality:1080,sourceId:'addon|https://torrentio.strem.fun|torrentio',sourceName:'Torrentio',label:'WEB-DL 1080p\n👤 120',server:'Torrentio',runtimeReady:true,candidates:[{id:'source-1'}]}]});
  f.engine.pick=vi.fn(async()=>({candidate:'source-1'}));f.engine.best=async()=>({candidate:'source-1'});
  f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one'});
  f.event({type:'playback/progress',session:'one',position:15000,duration:60000});

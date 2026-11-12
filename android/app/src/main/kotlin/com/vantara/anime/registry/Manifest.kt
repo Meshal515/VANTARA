@@ -41,6 +41,8 @@ data class SourceEntry(
     val catalog: CatalogHint = CatalogHint(),
     /** سبب إيقاف معروف (دومين ميت…): يظهر في شاشة الصحة ولا يُحمَّل. */
     val disabledReason: String? = null,
+    /** تنبيه من ناشر المصدر (مثل احتمال حظر الشبكة): يُعرض للمستخدم والمصدر يعمل. */
+    val advisory: String? = null,
 )
 
 @Serializable
@@ -52,6 +54,8 @@ data class ExtensionRef(
     val version: String? = null,
     /** اسم المصدر داخل الحزمة إن كانت تحمل أكثر من مصدر. */
     val sourceName: String? = null,
+    /** Exact publisher-declared source identity; survives name/locale changes. */
+    val sourceId: String? = null,
 )
 
 @Serializable
@@ -170,7 +174,8 @@ object ManifestParser {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** المحوّلات الأصلية التي يعرفها هذا الإصدار من التطبيق. */
-    val NATIVE_ADAPTERS = setOf(com.vantara.anime.adapters.WitAnimeSiteAdapter.KIND, com.vantara.anime.adapters.ArabSeedSiteAdapter.KIND, com.vantara.anime.adapters.TukTukSiteAdapter.KIND, com.vantara.anime.adapters.ShahiidSiteAdapter.KIND, com.vantara.anime.adapters.AkwamSiteAdapter.KIND, com.vantara.anime.adapters.EgyDeadSiteAdapter.KIND, com.vantara.anime.adapters.RistoAnimeSiteAdapter.KIND)
+    /** لا محوّلات مواقع مدمجة (قرار المالك 30 أكتوبر 2026). */
+    val NATIVE_ADAPTERS: Set<String> = emptySet()
 
     fun parse(text: String): Manifest = json.decodeFromString(Manifest.serializer(), text)
 

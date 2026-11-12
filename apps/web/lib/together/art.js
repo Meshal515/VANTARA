@@ -37,22 +37,105 @@ function cached(key, now) {
     return now - v.at >= 0 && now - v.at < TTL_MS ? v.data : null;
   } catch { return null; }
 }
+/**
+ * سقف كاش الصور (خلل الـAPK، 9 نوفمبر): كان مفتاح لكل أنمي بلا حد ولا إخلاء، ففتحة واحدة للرئيسية الموحدة
+ * تكتب ~2.4MB، ومع الأيام يمتلئ localStorage (~5MB) فيفشل حفظ الإعدادات بصمت (الألوان والتوحيد).
+ * الآن: حد أقصى لعدد الأعمال، والأقدم يُخلى أولًا، وامتلاء التخزين يُخلي الكاش كله بدل أن يزاحم الإعدادات.
+ */
+export const ART_CACHE_MAX = 24;
+export function artCacheKeys(storage = globalThis.localStorage) {
+  const out = [];
+  try {
+    for (let i = 0; i < (storage?.length ?? 0); i++) { const k = storage.key(i); if (k?.startsWith(CACHE_PREFIX)) out.push(k); }
+  } catch { /* تخزين محجوب */ }
+  return out;
+}
+/** يُخلي كاش الصور كله أو حتى يبقى `keep` مدخلًا (الأحدث). كاش يُعاد جلبه: لا بيانات للمستخدم تضيع. */
+export function trimArtCache(keep = ART_CACHE_MAX, storage = globalThis.localStorage) {
+  const keys = artCacheKeys(storage);
+  if (keys.length <= keep) return 0;
+  const aged = keys.map((k) => {
+    let at = 0;
+    try { at = JSON.parse(storage.getItem(k) ?? '{}')?.at ?? 0; } catch { at = 0; }
+    return [k, at];
+  }).sort((a, b) => a[1] - b[1]);
+  const drop = aged.slice(0, keys.length - keep);
+  for (const [k] of drop) { try { storage.removeItem(k); } catch { /* */ } }
+  return drop.length;
+}
 function remember(key, data, now) {
-  try { globalThis.localStorage?.setItem(CACHE_PREFIX + key, JSON.stringify({ at: now, data })); } catch { /* اختياري */ }
+  const storage = globalThis.localStorage;
+  const value = JSON.stringify({ at: now, data });
+  try {
+    storage?.setItem(CACHE_PREFIX + key, value);
+    if (artCacheKeys(storage).length > ART_CACHE_MAX) trimArtCache(ART_CACHE_MAX, storage);
+  } catch {
+    // ممتلئ: الكاش لا يزاحم ما يحفظه المستخدم. نصفه يُخلى ثم محاولة واحدة، وإلا يبقى في الذاكرة فقط
+    trimArtCache(Math.floor(ART_CACHE_MAX / 2), storage);
+    try { storage?.setItem(CACHE_PREFIX + key, value); } catch { /* اختياري */ }
+  }
 }
 
 /** مختصر ani.zip لعمل واحد: IMDb وصور الحلقات وعناوينها (بلا بقية الرد الكبير). */
 const inflight = new Map();
-export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0 } = {}) {
-  const key = `az3-${anilistId}`;
+export function aniZipArt(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), depth = 0, timeoutMs = 8000, signal, _budget = null } = {}) {
+  const signals = [...new Set([signal, _budget?.signal].filter(Boolean))];
+  if (signals.some(s => s.aborted)) return Promise.resolve(null);
+  const key = `az4-${anilistId}`;
   const hit = cached(key, now);
   if (hit) return Promise.resolve(hit);
-  // صفحة العمل وغرفة المشاهدة قد تطلبانه معًا: طلب واحد للاثنين
-  if (!inflight.has(key)) inflight.set(key, aniZip(anilistId, fetchImpl, now, depth).finally(() => inflight.delete(key)));
-  return inflight.get(key);
+  let entry = inflight.get(key);
+  if (entry?.ctrl.signal.aborted) { inflight.delete(key); entry = null; }
+  if (!entry) {
+    // Requests share results, but each consumer owns only its subscription.
+    // A parent cancellation must not cancel an independent room/detail consumer.
+    const ctrl = new AbortController();
+    const deadline = _budget?.deadline ?? Date.now() + timeoutMs;
+    const rawFetch = _budget?.fetchImpl ?? fetchImpl;
+    const budget = { signal: ctrl.signal, deadline, fetchImpl: rawFetch };
+    entry = { ctrl, subscribers: new Set(), done: false, promise: null };
+    const task = entry;
+    const timer = setTimeout(() => ctrl.abort(), Math.max(0, deadline - Date.now()));
+    let onAbort;
+    const stopped = new Promise(resolve => {
+      onAbort = () => resolve(null);
+      ctrl.signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const boundedFetch = (url, init = {}) => {
+      if (ctrl.signal.aborted) throw new Error('art_cancelled');
+      return rawFetch(url, { ...init, signal: ctrl.signal });
+    };
+    task.promise = Promise.race([
+      aniZip(anilistId, boundedFetch, now, depth, budget), stopped,
+    ]).finally(() => {
+      task.done = true;
+      if (inflight.get(key) === task) inflight.delete(key);
+      clearTimeout(timer);
+      ctrl.signal.removeEventListener('abort', onAbort);
+      // Release speculative children. Their independent subscribers stay alive.
+      ctrl.abort();
+    });
+    inflight.set(key, task);
+  }
+  return new Promise((resolve, reject) => {
+    const subscriber = {};
+    entry.subscribers.add(subscriber);
+    let finished = false;
+    const complete = (accept, value) => {
+      if (finished) return;
+      finished = true;
+      for (const s of signals) s.removeEventListener('abort', cancelled);
+      entry.subscribers.delete(subscriber);
+      if (!entry.done && !entry.subscribers.size) entry.ctrl.abort();
+      accept(value);
+    };
+    const cancelled = () => complete(resolve, null);
+    for (const s of signals) s.addEventListener('abort', cancelled, { once: true });
+    entry.promise.then(value => complete(resolve, value), error => complete(reject, error));
+  });
 }
-async function aniZip(anilistId, fetchImpl, now, depth) {
-  const key = `az3-${anilistId}`;
+async function aniZip(anilistId, fetchImpl, now, depth, budget) {
+  const key = `az4-${anilistId}`;
   const r = await fetchImpl(`https://api.ani.zip/mappings?anilist_id=${anilistId}`);
   // 404: عمل جديد لم يصل ani.zip بعد — يبقى له Cinemeta والسلسلة أدناه
   const d = r.ok ? await r.json() : null;
@@ -64,6 +147,9 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
     const rating = Number.parseFloat(e?.rating);
     episodes[n] = {
       image: typeof e?.image === 'string' ? e.image : null,
+      // ترقيم TVDB للحلقة (موسم/رقم): به تُطابق صورها عالية الدقة من metahub (anime-art.js)
+      season: Number.isInteger(e?.seasonNumber) ? e.seasonNumber : null,
+      number: Number.isInteger(e?.episodeNumber) ? e.episodeNumber : null,
       title,
       overview: typeof e?.overview === 'string' && e.overview.trim() ? e.overview.trim() : null,
       airDate: e?.airDate ?? e?.airdate ?? null,
@@ -82,24 +168,24 @@ async function aniZip(anilistId, fetchImpl, now, depth) {
     // اسم العمل وسنته وعلاقاته من AniList (طلب واحد)، حتى لو لم يعرفه ani.zip
     const info = await anilistInfo(anilistId, fetchImpl).catch(() => undefined);
     if (info === undefined) settled = false;
-    // جديد بلا IMDb في ani.zip: Cinemeta (مصدر Stremio) يعرفه بالاسم والسنة
-    imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
+    // جديد بلا IMDb في ani.zip: Cinemeta (مصدر Stremio) يعرفه بالاسم والسنة.
     // موسم/جزء/فيلم تكميلي («Gachiakuta Season 2»): فن السلسلة نفسها من الجزء السابق أو
-    // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم
-    if (!imdb && depth < 4 && info) {
-      for (const id of info.ups) {
-        const z = await aniZipArt(id, { fetchImpl, now, depth: depth + 1 }).catch(() => undefined);
-        if (z === undefined) settled = false;
-        if (!z?.imdb) continue;
-        imdb = z.imdb;
-        fanart ??= z.fanart ?? null;
-        break;
-      }
+    // العمل الأم في علاقات AniList — ربط مؤكد بالسلسلة لا تخمين بالاسم.
+    // الطريقان معًا لا بالتتابع؛ نتيجة Cinemeta تُقدَّم كما كانت
+    const ups = !(depth < 4 && info) ? [] : info.ups.map((id) => aniZipArt(id, { fetchImpl, now, depth: depth + 1, _budget: budget }).catch(() => undefined));
+    imdb = await imdbFromCinemeta(searchSpec(d, info), fetchImpl).catch(() => null);
+    for (const up of imdb ? [] : ups) {
+      const z = await up;
+      if (z === undefined) settled = false;
+      if (!z?.imdb) continue;
+      imdb = z.imdb;
+      fanart ??= z.fanart ?? null;
+      break;
     }
   }
   if (!d && !imdb) return null;
   const data = { imdb, fanart, episodes };
-  if (settled) remember(key, data, now);
+  if (settled && !budget.signal.aborted) remember(key, data, now);
   return data;
 }
 
@@ -139,17 +225,22 @@ const normTitle = (t) => String(t ?? '').toLowerCase().normalize('NFKD').replace
  */
 export async function imdbFromCinemeta({ names = [], year = null, movie = false } = {}, fetchImpl = globalThis.fetch) {
   const types = movie ? ['movie', 'series'] : ['series', 'movie'];
-  for (const name of names) {
-    for (const type of types) {
+  // كل البحوث معًا لا واحدًا بعد الآخر (كانت حتى أربع رحلات متتالية قبل أن يظهر بنر عمل جديد)؛
+  // الترتيب نفسه يحسم: الاسم الأول والنوع الأول أولًا
+  const tries = names.flatMap((name) => types.map((type) => ({ name, type })));
+  const found = await Promise.all(tries.map(async ({ name, type }) => {
+    try {
       const r = await fetchImpl(`https://v3-cinemeta.strem.io/catalog/${type}/top/search=${encodeURIComponent(name)}.json`);
-      if (!r?.ok) continue;
+      if (!r?.ok) return null;
       const metas = (await r.json())?.metas ?? [];
       const exact = metas.filter((m) => /^tt\d+$/.test(m?.id ?? '') && normTitle(m.name) === normTitle(name));
       const fits = year ? exact.filter((m) => Math.abs((Number.parseInt(m.releaseInfo, 10) || 0) - year) <= 1) : exact.length === 1 ? exact : [];
-      if (fits.length) return fits[0].id;
+      return fits[0]?.id ?? null;
+    } catch {
+      return null;
     }
-  }
-  return null;
+  }));
+  return found.find(Boolean) ?? null;
 }
 
 /**

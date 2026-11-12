@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 const fixtures=vi.hoisted(()=>({runtime:null,pwaPlugin:null}));
 vi.mock('../pwa/platform.js',async original=>({...await original(),isNative:()=>globalThis.Capacitor?.isNativePlatform?.()===true,webPlugin:()=>fixtures.pwaPlugin}));
 vi.mock('../addons/runtime.js',()=>({getAddonRuntime:async()=>fixtures.runtime}));
-afterEach(()=>{fixtures.pwaPlugin=null;vi.unstubAllGlobals();vi.resetModules();});
+afterEach(()=>{fixtures.pwaPlugin=null;vi.useRealTimers();vi.unstubAllGlobals();vi.resetModules();});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 async function setup(pending) {
  const calls=[];
@@ -102,4 +102,125 @@ it('uses the same generated PWA session when deferred addon discovery finishes',
  mapping.resolve({...identity,episode:2,externalIds:{anilist:'21',kitsu:'12'}});await new Promise(r=>setTimeout(r,0));
  expect(calls.find(x=>x[0]==='extend')[1]).toMatchObject({session:out.session,copies:[{sourceId:'addon|provider',identity:{episode:2}}]});
  await api.closeSession(out.session);
+});
+
+it('every source that matches the work contributes a copy, not only exact-title ones (Solo Leveling on the emulator)', async () => {
+  const { pickCopies } = await import('./anime-engine.js');
+  const items = [
+    { sourceId: 'a', url: '/1', title: 'ore dake level up na ken' },
+    { sourceId: 'b', url: '/2', title: 'Solo Leveling (Ore dake Level Up na Ken)' },
+    { sourceId: 'b', url: '/3', title: 'Solo Leveling Season 2: Arise from the Shadow (Ore dake Level Up na Ken Season 2)' },
+  ];
+  const work = pickCopies(items, ['Ore dake Level Up na Ken', 'Solo Leveling']);
+  expect(work.copies.map((c) => `${c.sourceId}${c.url}`)).toEqual(['a/1', 'b/2']);
+});
+
+it('extends late Android CS3 copies through native preparation while reserving Stremio siblings separately', async () => {
+ const pending=deferred();const {api,calls}=await setup(pending);
+ await api.prepare({copies:[{sourceId:'native',url:'/work'}],episode:2,session:'mixed-late'});
+ const cs3={sourceId:'addon|cs3|cs3_real|source',url:'https://source.test/work',title:'Work'};
+ const stremio={sourceId:'addon|provider',id:'tt123',url:'tt123',type:'series',identity};
+ expect(await api.extend('mixed-late',[cs3,stremio])).toBe(2);
+ expect(calls.find(([method])=>method==='extend')?.[1]).toEqual({session:'mixed-late',copies:[cs3],addonGeneration:calls[0][1].addonGeneration});
+ expect(calls.find(([method])=>method==='reserve')?.[1].sourceIds).toEqual(['addon|provider']);
+ pending.resolve([{status:'RESOLVED',url:'https://cdn.test/stremio.mp4'}]);
+ await new Promise(r=>setTimeout(r,0));
+ expect(calls.find(([method])=>method==='append')?.[1]).toMatchObject({sourceId:'addon|provider',streams:[{url:'https://cdn.test/stremio.mp4'}]});
+ await api.closeSession('mixed-late');
+});
+
+it('aborts preparation promptly while addon runtime readiness is stalled and releases native state',async()=>{
+ const {api,calls}=await setup(deferred());
+ fixtures.runtime.ready=new Promise(()=>{});
+ const controller=new AbortController();
+ const preparing=api.prepare({copies:[],episode:1,session:'abort-ready',signal:controller.signal});
+ const outcome=preparing.then(()=>null,error=>error);
+ await new Promise(r=>setTimeout(r,0));controller.abort();
+ const result=await Promise.race([outcome,new Promise(r=>setTimeout(()=>r({name:'STILL_PENDING'}),30))]);
+ expect(result?.name).toBe('AbortError');
+ expect(calls.map(([method])=>method)).toEqual(['close']);
+});
+it('cancels a pending native prepare reply without starting late addon jobs',async()=>{
+ const pending=deferred(),reply=deferred();const {api,calls,plugin}=await setup(pending);
+ plugin.prepare=async args=>{calls.push(['prepare',args]);return reply.promise;};
+ const controller=new AbortController();
+ const preparing=api.prepare({copies:[],identity,episode:1,session:'abort-reply',signal:controller.signal});
+ const outcome=preparing.then(()=>null,error=>error);
+ await new Promise(r=>setTimeout(r,0));controller.abort();
+ const result=await Promise.race([outcome,new Promise(r=>setTimeout(()=>r({name:'STILL_PENDING'}),30))]);
+ expect(result?.name).toBe('AbortError');
+ reply.resolve({session:'abort-reply',routes:[],done:false});pending.resolve([]);
+ await new Promise(r=>setTimeout(r,0));
+ expect(calls.some(([method])=>method==='append')).toBe(false);
+ expect(calls.some(([method])=>method==='close')).toBe(true);
+});
+it('aborts a stalled route snapshot without closing playable native session routes',async()=>{
+ const {api,calls,plugin}=await setup(deferred());
+ plugin.routes=()=>new Promise(()=>{});
+ const controller=new AbortController();
+ const snapshot=api.routes('playing',{signal:controller.signal});
+ const outcome=snapshot.then(()=>null,error=>error);
+ await new Promise(r=>setTimeout(r,0));controller.abort();
+ const result=await Promise.race([outcome,new Promise(r=>setTimeout(()=>r({name:'STILL_PENDING'}),30))]);
+ expect(result?.name).toBe('AbortError');
+ expect(calls.some(([method])=>method==='close')).toBe(false);
+});
+
+it('bounds a stalled route snapshot even when no caller signal is supplied',async()=>{
+ const {api,calls,plugin}=await setup(deferred());
+ plugin.routes=()=>new Promise(()=>{});
+ vi.useFakeTimers();
+ let error;
+ void api.routes('playing').catch(reason=>{error=reason;});
+ await vi.advanceTimersByTimeAsync(15_001);
+ expect(error?.code).toBe('ENGINE_ROUTES_TIMEOUT');
+ expect(calls.some(([method])=>method==='close')).toBe(false);
+});
+
+it('scopes in-flight native copy extension to its generation when a session ID is reused',async()=>{
+ const {api,calls,plugin}=await setup(deferred());
+ const gate=deferred(),mutated=[];
+ await api.prepare({copies:[],episode:1,session:'reuse-extend'});
+ const oldGeneration=calls.find(([method])=>method==='prepare')[1].addonGeneration;
+ let currentGeneration=oldGeneration;
+ plugin.extend=async args=>{
+   await gate.promise;
+   if(args.addonGeneration && args.addonGeneration!==currentGeneration)return {added:0};
+   mutated.push(...args.copies);return {added:args.copies.length};
+ };
+ const extending=api.extend('reuse-extend',[{sourceId:'addon|cs3|cs3_real|source',url:'/old-work'}]);
+ await new Promise(r=>setTimeout(r,0));
+ await api.prepare({copies:[],episode:2,session:'reuse-extend'});
+ currentGeneration=calls.filter(([method])=>method==='prepare').at(-1)[1].addonGeneration;
+ expect(currentGeneration).not.toBe(oldGeneration);
+ gate.resolve();expect(await extending).toBe(0);
+ expect(mutated).toEqual([]);
+ await api.closeSession('reuse-extend');
+});
+
+it('aborts both active work-search aliases and removes their listeners',async()=>{
+ const {api,plugin}=await setup(deferred());const listeners=new Set(),searches=[],cancelled=[];
+ plugin.addListener=async (_name,fn)=>{listeners.add(fn);return {remove:()=>listeners.delete(fn)};};
+ plugin.searchStream=async args=>{searches.push(args.searchId);};
+ plugin.cancelSearch=async args=>{cancelled.push(args.searchId);};
+ const controller=new AbortController();
+ const searching=api.findWorkStream(['One Piece','ワンピース'],()=>{}, {signal:controller.signal});
+ const outcome=searching.then(()=>null,error=>error);
+ await new Promise(r=>setTimeout(r,0));expect(searches).toHaveLength(2);
+ controller.abort();
+ const result=await Promise.race([outcome,new Promise(r=>setTimeout(()=>r({name:'STILL_PENDING'}),30))]);
+ expect(result?.name).toBe('AbortError');
+ expect(cancelled.sort()).toEqual([...searches].sort());expect(listeners.size).toBe(0);
+});
+it('removes a late search listener registration after cancellation and never launches its source work',async()=>{
+ const {api,plugin}=await setup(deferred());const registration=deferred(),launched=[];let removed=0;
+ plugin.addListener=()=>registration.promise;
+ plugin.searchStream=async args=>{launched.push(args);};
+ const controller=new AbortController();
+ const search=api.searchStream('One Piece','anime',()=>{}, {signal:controller.signal});
+ await new Promise(r=>setTimeout(r,0));controller.abort();
+ registration.resolve({remove:()=>{removed++;}});
+ await new Promise(r=>setTimeout(r,0));
+ expect(launched).toEqual([]);expect(removed).toBe(1);
+ expect(await search.done).toBe(false);
 });

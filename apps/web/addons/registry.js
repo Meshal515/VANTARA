@@ -3,7 +3,21 @@ import { LIMITS } from "./contracts.js";
 import { assertBoundedData, canonicalData, manifestEndpoint, parseAddonImport } from "./import.js";
 import { assessAddon } from "./assessment.js";
 import { createHealth } from "./health.js";
+import { compareVersions, fingerprint } from "../lib/plugin-vault.js";
 const STORAGE = "addons.v1";
+/** حدود بصمة manifest: نفس حدود assertBoundedData وحجم manifest (contracts.js). */
+const PRINT_LIMITS = Object.freeze({ bytes: 2 * LIMITS.manifest, depth: 64, nodes: 50000 });
+export const DOWNGRADE_REFUSED = "DOWNGRADE_REFUSED";
+/** نافذة المراقبة بعد تفعيل نسخة جديدة، وعدد أعطال العقد المتتالية التي تعيد النسخة السابقة. */
+export const PROBATION_MS = 30 * 60 * 1000;
+export const PROBATION_FAILS = 3;
+export const OUT_OF_REPOSITORY = "لم تعد في مستودعها؛ تعمل النسخة المحفوظة على جهازك";
+const printOf = async (raw) => { try { return await fingerprint(raw, PRINT_LIMITS); } catch { return null; } };
+const older = (next, current) => (compareVersions(next, current) ?? 0) < 0;
+const downgradeError = (next, current) => Object.assign(
+  new Error(`الإصدار ${next} أقدم من المثبت ${current}؛ رُفض. للرجوع استعمل «النسخة السابقة»`),
+  { code: DOWNGRADE_REFUSED },
+);
 // عمليًا بلا حد (Stremio المعتاد أقل من 20)؛ المساحة الفعلية تحرس نفسها: حفظ فاشل يُرجع التثبيت برسالة واضحة
 const MAX_INSTALLED = 300;
 export function createAddonRegistry({
@@ -16,6 +30,10 @@ export function createAddonRegistry({
   let healthWrite = Promise.resolve();
   const flushHealth = () => healthWrite;
   const entries = new Map(),
+    // سجلات محفوظة لا يقرؤها هذا الإصدار (ولا نسختها السابقة): تبقى على القرص كما هي ولا تُحذف
+    dormant = [],
+    // مراقبة ما بعد التفعيل: key → عدد أعطال العقد المتتالية
+    probation = new Map(),
     previews = new WeakMap(),
     health = createHealth({
       clock,
@@ -68,20 +86,35 @@ export function createAddonRegistry({
       .catch(() => null);
     health.restore(savedHealth?.value);
     const saved = await store.get("state", STORAGE).catch(() => null);
-    for (const row of Array.isArray(saved?.value) ? saved.value : []) {
+    // كل سجل يُقرأ من نسخته المحلية وحدها، ولا يحتاج مستودعه. النسخة الفاعلة تالفة (بصمتها لا
+    // تطابق) أو لا يقبلها هذا الإصدار ⇒ النسخة السابقة (LKG) إن صلحت، وإلا يُحفظ السجل كما هو.
+    const accept = async (slot) => {
+      if (!slot?.manifestRaw || typeof slot.url !== "string") return null;
+      assertBoundedData(slot.manifestRaw);
+      if (slot.sha256 && (await printOf(slot.manifestRaw)) !== slot.sha256) return null;
+      const checked = validateManifest(slot.manifestRaw, { origin: publicUrl(slot.url).origin });
+      return checked.errors.length ? null : checked.manifest;
+    };
+    for (const row of (Array.isArray(saved?.value) ? saved.value : []).slice(0, MAX_INSTALLED * 2)) {
       try {
-        assertBoundedData(row.manifestRaw);
-        const checked = validateManifest(row.manifestRaw, {
-          origin: publicUrl(row.url).origin,
+        let manifest = await accept(row).catch(() => null), next = row;
+        if (!manifest && row?.previous) {
+          const previous = await accept(row.previous).catch(() => null);
+          if (previous && !entries.has(previous.key)) {
+            manifest = previous;
+            next = { ...row, ...row.previous, previous: null, staged: null, cacheEpoch: crypto.randomUUID(), activatedAt: null,
+              restored: { at: clock(), from: row.manifest?.version ?? null, to: previous.version, reason: "النسخة الفاعلة تالفة أو غير متوافقة؛ عادت النسخة السابقة السليمة" } };
+          }
+        }
+        if (!manifest || entries.has(manifest.key)) { if (row && typeof row === "object") dormant.push(row); continue; }
+        entries.set(manifest.key, {
+          ...next,
+          manifest,
+          formerKeys: (Array.isArray(next.formerKeys) ? next.formerKeys.slice(-50) : []).filter(value => safeFormerKey(value, manifest.id)),
         });
-        if (!checked.errors.length)
-          entries.set(checked.manifest.key, {
-            ...row,
-            manifest: checked.manifest,
-            formerKeys: (Array.isArray(row.formerKeys) ? row.formerKeys.slice(-50) : []).filter(value => safeFormerKey(value, checked.manifest.id)),
-          });
       } catch {
-        /* سجل إضافة تالف لا يعطل core */
+        /* سجل إضافة تالف لا يعطل core، ولا يُحذف من القرص */
+        if (row && typeof row === "object") dormant.push(row);
       }
     }
   })();
@@ -94,8 +127,33 @@ export function createAddonRegistry({
     return new Error(`${prefix}؛ رفض التخزين الكتابة (${f?.reason ?? "سبب غير معروف"})`);
   };
   const save = async () => {
-    if ((await store.set("state", STORAGE, [...entries.values()])) === false)
+    if ((await store.set("state", STORAGE, [...entries.values(), ...dormant])) === false)
       throw storeFailure("تعذر حفظ الإضافات");
+  };
+  /**
+   * ختم البصمة بعد التثبيت (Plugin Vault): sha256 لنص manifest القانوني يُحسب في الخلفية ويُحفظ
+   * مع السجل، فيُكشف عند الإقلاع أي تلف للنسخة على القرص ويُرجع لـLKG. لا يؤخر التثبيت نفسه.
+   */
+  const seal = (r) => {
+    const raw = r.manifestRaw;
+    void printOf(raw).then((sha) => {
+      if (!sha || r.sha256 === sha) return;
+      return mutate(async () => {
+        if (entries.get(r.manifest.key) !== r || r.manifestRaw !== raw) return;
+        r.sha256 = sha;
+        if (r.previous && !r.previous.sha256) r.previous.sha256 = await printOf(r.previous.manifestRaw);
+        try { await save(); } catch { /* الختم يُعاد في التثبيت التالي */ }
+      });
+    }).catch(() => {});
+  };
+  /** «لم تعد في مستودعها»: رابطها يعيد 404/410. النسخة المحلية تبقى فاعلة كما هي. */
+  const noteUpstream = async (r, error) => {
+    const missing = error?.status === 404 || error?.status === 410;
+    const before = r.upstream ?? null;
+    const next = missing ? { state: "missing", at: clock(), status: error.status, reason: OUT_OF_REPOSITORY } : null;
+    if ((before?.state ?? null) === (next?.state ?? null)) return;
+    r.upstream = next;
+    try { await save(); } catch { r.upstream = before; }
   };
   const view = (row) => { const addon = ({
     ...structuredClone({ ...row.manifest, baseUrl: undefined }),
@@ -107,6 +165,10 @@ export function createAddonRegistry({
     stagedCapabilities: row.staged?.manifest.capabilities ?? [],
     stagedHosts: row.staged?.manifest.permissions.networkHosts ?? [],
     previousVersion: row.previous?.manifest.version ?? null,
+    sha256: row.sha256 ?? null,
+    inRepository: row.upstream?.state !== "missing",
+    upstream: row.upstream ? structuredClone(row.upstream) : null,
+    restored: row.restored ? structuredClone(row.restored) : null,
     bundled: false,
     health: Object.fromEntries(
       row.manifest.capabilities.map((c) => [
@@ -197,11 +259,13 @@ export function createAddonRegistry({
       }
       if (!before && entries.size >= MAX_INSTALLED) throw new Error(`الحد الأقصى ${MAX_INSTALLED} إضافة مثبتة`);
       if (before && sessions) throw new Error("انتظر انتهاء الجلسة قبل استبدال نسخة الإضافة");
+      if (before && older(m.version, before.manifest.version)) throw downgradeError(m.version, before.manifest.version);
       const next = {
-        manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url,
+        manifest: m, manifestRaw: structuredClone(hidden.raw), url: hidden.url, sha256: null,
+        ...(before && !moved ? { activatedAt: clock() } : {}),
         enabled: before?.enabled ?? true, installedAt: before?.installedAt ?? clock(),
         cacheEpoch: crypto.randomUUID(), staged: null,
-        previous: before && !moved ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url } : null,
+        previous: before && !moved ? { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url, sha256: before.sha256 ?? null } : null,
         formerKeys: before ? [...new Set([...(before.formerKeys ?? []), ...(moved ? [beforeKey] : [])])].filter(key => key !== m.key).slice(-50) : [],
       };
       if (moved) entries.delete(beforeKey);
@@ -211,6 +275,7 @@ export function createAddonRegistry({
       previews.delete(preview);
       health.reset(m.key);
       if (moved) health.reset(beforeKey);
+      seal(next);
       return view(next);
     });
   }
@@ -225,7 +290,13 @@ export function createAddonRegistry({
       };
       cancelled();
       if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
-      const raw = await transport.json(before.url, { signal, limit: LIMITS.manifest, cache: "no-store" });
+      let raw;
+      try {
+        raw = await transport.json(before.url, { signal, limit: LIMITS.manifest, cache: "no-store" });
+      } catch (error) {
+        if (error?.name !== "AbortError") await noteUpstream(before, error);
+        throw error;
+      }
       cancelled();
       assertBoundedData(raw);
       const checked = validateManifest(raw, { origin: publicUrl(before.url).origin });
@@ -233,6 +304,7 @@ export function createAddonRegistry({
       const manifest = checked.manifest;
       if (manifest.key !== key || manifest.protocol !== before.manifest.protocol)
         throw new Error("هوية إعادة التثبيت مختلفة؛ احتُفظ بالإضافة السابقة");
+      if (older(manifest.version, before.manifest.version)) throw downgradeError(manifest.version, before.manifest.version);
       if (manifest.configuration?.required && !manifest.configuration.configured)
         throw Object.assign(new Error("تحتاج الخدمة إلى إعداد؛ احتُفظ بالإضافة السابقة ورابطها"), { code: "CONFIG_REQUIRED" });
       if (manifest.baseUrl !== before.manifest.baseUrl || canonicalData([...manifest.permissions.networkHosts].sort()) !== canonicalData([...before.manifest.permissions.networkHosts].sort()))
@@ -240,15 +312,18 @@ export function createAddonRegistry({
       if (sessions) throw new Error("انتظر انتهاء الجلسة قبل إعادة تثبيت الإضافة");
       const next = {
         ...before,
-        manifest, manifestRaw: structuredClone(raw), cacheEpoch: crypto.randomUUID(), staged: null,
-        previous: { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url },
+        manifest, manifestRaw: structuredClone(raw), sha256: null, cacheEpoch: crypto.randomUUID(), staged: null,
+        upstream: null, restored: null, activatedAt: clock(),
+        previous: { manifest: before.manifest, manifestRaw: before.manifestRaw, url: before.url, sha256: before.sha256 ?? null },
       };
       // Publish in memory only after the complete replacement is durable.
-      const replacement = [...entries.values()].map(entry => entry === before ? next : entry);
+      const replacement = [...[...entries.values()].map(entry => entry === before ? next : entry), ...dormant];
       if ((await store.set("state", STORAGE, replacement)) === false)
         throw storeFailure("تعذر حفظ إعادة التثبيت واحتُفظ بالإضافة السابقة");
       entries.set(key, next);
+      probation.delete(key);
       health.reset(key);
+      seal(next);
       await flushHealth();
       return view(next);
     });
@@ -298,12 +373,19 @@ export function createAddonRegistry({
   }
   function stage(key) {
     return mutate(async () => {
-      const r = row(key), p = await inspect(r.url), h = previews.get(p);
+      const r = row(key);
+      let p;
+      try { p = await inspect(r.url); }
+      catch (error) { if (error?.name !== "AbortError") await noteUpstream(r, error); throw error; }
+      const h = previews.get(p);
+      await noteUpstream(r, null);
       if (p.manifest.key !== key) throw new Error("معرف التحديث تغير");
       previews.delete(p);
       if (canonicalData(r.manifestRaw) === canonicalData(h.raw)) return { changed: false };
+      // لا رجوع لإصدار أقدم من المستودع (TUF): فهرس قديم أو متلاعب به لا يعيد ثغرة أُصلحت
+      if (older(p.manifest.version, r.manifest.version)) return { changed: false, refused: DOWNGRADE_REFUSED, version: p.manifest.version };
       const before = r.staged;
-      r.staged = { manifest: structuredClone(p.manifest), manifestRaw: h.raw, url: h.url };
+      r.staged = { manifest: structuredClone(p.manifest), manifestRaw: h.raw, url: h.url, sha256: null };
       try { await save(); } catch (e) { r.staged = before; throw e; }
       return { changed: true };
     });
@@ -317,15 +399,21 @@ export function createAddonRegistry({
       const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة الجديدة غير متوافقة");
+      if (r.staged.sha256 && (await printOf(r.staged.manifestRaw)) !== r.staged.sha256)
+        throw new Error("النسخة الجديدة تالفة على الجهاز؛ احتُفظ بالحالية");
+      if (older(checked.manifest.version, r.manifest.version)) throw downgradeError(checked.manifest.version, r.manifest.version);
       const before = structuredClone(r);
-      r.previous = { manifest: r.manifest, manifestRaw: r.manifestRaw, url: r.url };
-      Object.assign(r, r.staged, { manifest: checked.manifest, staged: null, cacheEpoch: crypto.randomUUID() });
+      r.previous = { manifest: r.manifest, manifestRaw: r.manifestRaw, url: r.url, sha256: r.sha256 ?? null };
+      // تبديل ذري: يُحفظ كاملًا، وأي فشل حفظ يعيد السجل كما كان
+      Object.assign(r, r.staged, { manifest: checked.manifest, staged: null, cacheEpoch: crypto.randomUUID(), activatedAt: clock(), restored: null });
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
+      probation.delete(key);
       health.reset(key);
+      seal(r);
       return true;
     });
   }
-  function rollback(key) {
+  function rollback(key, { reason = null } = {}) {
     return mutate(async () => {
       key = resolveKey(key);
       const r = row(key);
@@ -334,11 +422,33 @@ export function createAddonRegistry({
       const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة السابقة غير متوافقة");
+      if (prev.sha256 && (await printOf(prev.manifestRaw)) !== prev.sha256)
+        throw new Error("النسخة السابقة تالفة على الجهاز");
       const before = structuredClone(r);
-      Object.assign(r, prev, { manifest: checked.manifest, previous: null, staged: null, cacheEpoch: crypto.randomUUID() });
+      Object.assign(r, prev, { manifest: checked.manifest, previous: null, staged: null, cacheEpoch: crypto.randomUUID(), activatedAt: null,
+        restored: reason ? { at: clock(), from: before.manifest.version, to: checked.manifest.version, reason } : null });
       try { await save(); } catch (e) { entries.set(key, before); throw e; }
+      probation.delete(key);
       health.reset(key);
+      return true;
     });
+  }
+  /**
+   * مراقبة ما بعد التفعيل (§3.3 خطوة 6): نتيجة كل نداء حقيقي لإضافة. `structural`: عطل في عقد
+   * الإضافة نفسها (بيانات مخالفة، JSON تالف)، لا عطل الموقع ولا الشبكة. ثلاثة أعطال متتالية
+   * خلال نصف ساعة من تفعيل نسخة جديدة ⇒ تعود النسخة السابقة تلقائيًا ويُذكر السبب بالعربية.
+   */
+  function observe(key, { ok, structural = false } = {}) {
+    key = resolveKey(key);
+    const r = entries.get(key);
+    if (!r) return Promise.resolve(false);
+    if (ok) { probation.delete(key); return Promise.resolve(false); }
+    if (!structural || !r.previous || !r.activatedAt || clock() - r.activatedAt > PROBATION_MS) return Promise.resolve(false);
+    const fails = (probation.get(key) ?? 0) + 1;
+    probation.set(key, fails);
+    if (fails < PROBATION_FAILS || sessions) return Promise.resolve(false);
+    const reason = `تعطّلت النسخة ${r.manifest.version} بعد تفعيلها؛ عادت النسخة السابقة ${r.previous.manifest.version} تلقائيًا`;
+    return rollback(key, { reason }).catch(() => false);
   }
   function snapshot() {
     sessions++;
@@ -377,6 +487,7 @@ export function createAddonRegistry({
     stage,
     activateStaged,
     rollback,
+    observe,
     snapshot,
     connection,
     resolveKey,

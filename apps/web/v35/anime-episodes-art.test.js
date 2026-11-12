@@ -63,7 +63,19 @@ it('continue-watching rows get a ⋮ beside the title: list and remove work, fav
   expect(row.querySelector('.an-hc-poster img').getAttribute('src')).toBe('p.jpg');
   expect(row.querySelector('[aria-label="احذف من السجل"]')).toBeNull();
   expect(root.querySelector('.an-clear')).toBeTruthy();
-  const more = row.querySelector('.cw-name .cw-more');
+  // «مسح الكل» يسأل أولًا: «لا، خلّه» لا يمسح شيئًا، والتأكيد وحده يمسح (#323 U-04)
+  root.querySelector('.an-clear').onclick();
+  expect(deps.openSheet).toHaveBeenCalledTimes(1);
+  expect(sheet.querySelector('h3').textContent).toBe('تمسح سجل المشاهدة؟');
+  sheet.querySelector('.btn-secondary').onclick();
+  expect(JSON.parse(store.get(key))[5]).toBeTruthy();
+  root.querySelector('.an-clear').onclick();
+  sheet.querySelector('[data-key="confirm-clear"]').onclick();
+  expect(JSON.parse(store.get(key) || '{}')[5]).toBeUndefined();
+  store.set(key, JSON.stringify({ 5: { id: 5, title: 'Frieren', poster: 'p.jpg', episode: 3, at: 1, episodes: { 3: { position: 60_000, duration: 1_440_000 } } } }));
+  anime.renderLibrary();
+  deps.openSheet.mockClear();
+  const more = root.querySelector('.an-hc .cw-name .cw-more');
   expect(more).toBeTruthy();
   more.onclick({ stopPropagation() {}, preventDefault() {} });
   expect(deps.openSheet).toHaveBeenCalledTimes(1);

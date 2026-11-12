@@ -344,11 +344,21 @@ class ExtensionAdapter(
         return coroutineScope {
             hosters.mapIndexed { i, hoster ->
                 async {
+                    // «لا رابط فيديو» وحده كان يغطي أربع حالات: مهلة، خطأ الإضافة، رابط رفضه فانتارا، وقائمة فارغة.
+                    // كل سيرفر يحمل الآن سببه الحقيقي، فتعرف الورقة والاعتماد من يملك العطل.
+                    var why = "لا رابط فيديو"
                     val got = withTimeoutOrNull(hosterTimeoutMs) {
-                        runCatching { videosOf(hoster) }.getOrDefault(emptyList())
-                            .mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
-                    }.orEmpty()
-                    if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = "لا رابط فيديو")
+                        val videos = try { videosOf(hoster) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Throwable) { why = "الإضافة: ${e.brief()}"; emptyList() }
+                        val accepted = videos.mapNotNull { video -> runCatching { toCandidate(hoster, video, episode, now) }.getOrNull() }
+                        if (accepted.isEmpty() && videos.isNotEmpty()) {
+                            val scheme = videos.first().videoUrl.substringBefore(':', "").take(12).ifBlank { "بلا مخطط" }
+                            why = "رابط غير قابل للتشغيل ($scheme)"
+                        }
+                        accepted
+                    } ?: run { why = "انتهت مهلة السيرفر (${hosterTimeoutMs / 1000} ث)"; emptyList() }
+                    if (got.isEmpty()) report(trace, "h$i", nameOf(hoster), null, variant, RouteState.UNAVAILABLE, reason = why)
                     else report(trace, "h$i", nameOf(hoster), got.maxOfOrNull { it.quality ?: 0 }?.takeIf { it > 0 }, variant, RouteState.READY, got)
                     got
                 }
@@ -359,21 +369,29 @@ class ExtensionAdapter(
     private suspend fun videosOf(hoster: Hoster): List<Video> {
         val listed = hoster.videoList ?: source.getVideoList(hoster)
         val http = source as? AnimeHttpSource ?: return listed
-        // الفيديو الكسول يُحل الآن (قبل التشغيل مباشرة)، والفاشل يسقط وحده
-        return listed.mapNotNull { v -> if (v.initialized || v.videoUrl.isNotBlank()) v else runCatching { http.resolveVideo(v) }.getOrNull() }
+        // initialized governs resolution: a nonblank URL can still be an embed or token placeholder.
+        // Resolve each listed video once; the result need not set initialized (legacy default is identity).
+        // Keep this request-local so a later playback request can refresh expiring links.
+        return listed.mapNotNull { video ->
+            if (video.initialized) video else try { http.resolveVideo(video) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { null }
+        }
     }
 
     private fun toCandidate(hoster: Hoster, video: Video, episode: SourceEpisode, now: Long): Candidate? {
-        val url = video.videoUrl.takeIf { it.startsWith("http") } ?: return null
+        // magnet من إضافات التورنت (Torrentio Anime): يصير تذكرة في محرك التورنت عند التجهيز (MagnetLinks)
+        val url = video.videoUrl.takeIf { it.startsWith("http") || com.vantara.anime.stream.MagnetLinks.isMagnet(it) } ?: return null
+        val magnet = com.vantara.anime.stream.MagnetLinks.isMagnet(url)
         val serverName = hoster.hosterName.takeUnless { it == Hoster.NO_HOSTER_LIST || it.isBlank() } ?: video.videoTitle
-        val headers = (video.headers ?: (source as? AnimeHttpSource)?.headers)
+        val headers = if (magnet) emptyMap() else (video.headers ?: (source as? AnimeHttpSource)?.headers)
             ?.let { h -> h.names().associateWith { h[it].orEmpty() } }.orEmpty()
         return Candidate(
             id = "$id|${episode.url}|${url.hashCode()}",
             sourceId = id,
             sourceName = name,
             server = serverName,
-            host = StreamClassifier.host(url),
+            host = if (magnet) "torrent" else StreamClassifier.host(url),
             url = url,
             headers = headers,
             quality = video.resolution ?: StreamClassifier.quality(video.videoTitle, serverName),

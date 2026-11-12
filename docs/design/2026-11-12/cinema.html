@@ -1,0 +1,105 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/v35/core.css"><link rel="stylesheet" href="/v35/unified-view.css"><link rel="stylesheet" href="/mock/mock.css">
+<style>
+.phone{--cn:#ff4d5e}
+.phone .go{background:var(--cn)!important}
+/* «المسلسل أولًا» */
+.sf-cont{position:relative;margin:92px 16px 0;border-radius:20px;overflow:hidden;height:236px}
+.sf-cont img{width:100%;height:100%;object-fit:cover}
+.sf-cont::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.1) 30%,rgba(0,0,0,.82))}
+.sf-cont .in{position:absolute;inset:auto 16px 14px 16px;z-index:2}
+.sf-cont .lg{height:38px;object-fit:contain;object-position:right;margin-bottom:10px;filter:drop-shadow(0 2px 10px #000)}
+.sf-cont .k{font-size:12px;font-weight:700;color:#ffb3ba}
+.sf-cont .t{font-size:18px;font-weight:800;margin:2px 0 10px}
+.sf-cont .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.22);overflow:hidden}
+.sf-cont .bar::after{content:'';display:block;height:100%;width:62%;background:var(--cn)}
+.sf-cont .pl{position:absolute;inset-inline-start:16px;top:16px;z-index:2;width:52px;height:52px;border-radius:50%;background:var(--cn);display:grid;place-items:center}
+.sf-cont .pl svg{width:22px;height:22px;fill:#fff}
+.seasons{display:flex;gap:12px;overflow:hidden;padding:20px 16px 4px}
+.season{width:96px;flex:none}
+.season .p{width:96px;height:140px;border-radius:12px;overflow:hidden;position:relative;background:var(--surface-2)}
+.season .p img{width:100%;height:100%;object-fit:cover}
+.season .p .bar{position:absolute;inset:auto 8px 8px 8px;height:3px;border-radius:3px;background:rgba(255,255,255,.25);overflow:hidden}
+.season .p .bar::after{content:'';display:block;height:100%;width:var(--p);background:var(--cn)}
+.season b{display:block;font-size:13px;margin-top:8px}.season span{font-size:11.5px;color:var(--text-3)}
+.season.on .p{box-shadow:0 0 0 2px var(--cn)}
+.sf-list{padding:10px 16px 120px}
+/* «الشريط العريض» بعد التعديل: 2:1 وقص أعلى قليلًا، ورأس زجاجي عند التمرير */
+.mq-art{margin-top:84px;aspect-ratio:2/1;overflow:hidden;position:relative}
+.mq-art img{width:100%;height:100%;object-fit:cover;object-position:50% 30%}
+.mq-body{text-align:center;padding:22px 20px 0}
+.mq-body .lg{height:58px;margin:0 auto;object-fit:contain}
+.mq-body .g{font-size:11.5px;font-weight:700;letter-spacing:.12em;color:var(--text-3);margin-top:12px}
+.mq-body .facts{display:flex;justify-content:center;gap:22px;margin:16px 0}
+.mq-body .facts div{font-size:11px;color:var(--text-3)}.mq-body .facts b{display:block;font-size:16px;color:var(--text-1);margin-top:3px}
+.mq-go{margin:6px 20px 0;height:52px;border-radius:12px;background:var(--cn);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:750}
+.mq-go svg{width:20px;height:20px;fill:#fff}
+/* «الملصق» بعد التعديل: خلفية ثابتة هادئة (حركة ≤24px)، بلا شعار، والعنوان نصًا */
+.ps-amb{position:absolute;inset:0 0 auto 0;height:560px;overflow:hidden}
+.ps-amb img{width:100%;height:100%;object-fit:cover;filter:blur(34px) saturate(1.15) brightness(.7);transform:scale(1.25)}
+.ps-amb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,7,12,.15),var(--bg) 96%)}
+.ps-top{position:relative;padding:96px 20px 0;text-align:center;z-index:2}
+.ps-cover{width:196px;height:294px;margin:0 auto;border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.65)}
+.ps-cover img{width:100%;height:100%;object-fit:cover}
+.ps-top h1{margin:20px 0 6px;font-size:26px;font-weight:850}
+.ps-top .sub{font-size:12.5px;color:var(--text-2)}
+.note-mv{position:absolute;top:96px;inset-inline-end:10px;z-index:5;font-size:10.5px;font-weight:700;color:#000;background:#ffd56b;border-radius:6px;padding:3px 6px}
+</style></head>
+<body class="v35">
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="back" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="share" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></symbol>
+<symbol id="heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+<symbol id="dots" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></symbol>
+<symbol id="mark" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></symbol>
+</defs></svg>
+
+<!-- «المسلسل أولًا» -->
+<section class="phone" id="c-series">
+  <div class="tb glass"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Breaking Bad</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="sf-cont"><img src="https://images.metahub.space/background/medium/tt0903747/img"><span class="pl"><svg><use href="#play"/></svg></span>
+    <div class="in"><img class="lg" src="https://images.metahub.space/logo/medium/tt0903747/img"><div class="k">تابع من حيث وقفت · بقي 19 د</div><div class="t">الموسم 2 · الحلقة 5 · Breakage</div><div class="bar"></div></div></div>
+  <div class="seasons">
+    <div class="season"><span class="p" style="--p:100%;display:block"><img src="https://images.metahub.space/poster/medium/tt0903747/img"><i class="bar"></i></span><b>الموسم 1</b><span>7/7 · شاهدته</span></div>
+    <div class="season on"><span class="p" style="--p:38%;display:block"><img src="https://images.metahub.space/poster/medium/tt0903747/img" style="filter:hue-rotate(30deg)"><i class="bar"></i></span><b>الموسم 2</b><span>5/13</span></div>
+    <div class="season"><span class="p" style="--p:0%;display:block"><img src="https://images.metahub.space/poster/medium/tt0903747/img" style="filter:hue-rotate(90deg)"><i class="bar"></i></span><b>الموسم 3</b><span>13 حلقة</span></div>
+    <div class="season"><span class="p" style="--p:0%;display:block"><img src="https://images.metahub.space/poster/medium/tt0903747/img" style="filter:hue-rotate(200deg)"><i class="bar"></i></span><b>الموسم 4</b><span>13 حلقة</span></div>
+  </div>
+  <div class="sf-list">
+    <div class="lbl">الموسم 2</div>
+    <div class="ep"><span class="sh" style="--p:100%"><img src="https://images.metahub.space/background/medium/tt0903747/img" style="object-position:70% 50%"><i class="bar"></i></span><span class="m"><b>4 · Down</b><span>47 د · شاهدتها</span></span></div>
+    <div class="ep"><span class="sh" style="--p:62%"><img src="https://images.metahub.space/background/medium/tt0903747/img" style="object-position:30% 50%"><i class="bar"></i></span><span class="m"><b>5 · Breakage</b><span>بقي 19 د</span></span></div>
+  </div>
+</section>
+
+<!-- «الشريط العريض» بعد التعديل -->
+<section class="phone" id="c-marquee">
+  <div class="tb"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Breaking Bad</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="mq-art"><img src="https://images.metahub.space/background/medium/tt0903747/img"></div>
+  <div class="mq-body"><img class="lg" src="https://images.metahub.space/logo/medium/tt0903747/img"><div class="g">جريمة · دراما · إثارة</div>
+    <div class="facts"><div>IMDb<b>9.5</b></div><div>المواسم<b>5</b></div><div>السنة<b>2008</b></div></div></div>
+  <div class="mq-go"><svg><use href="#play"/></svg>شاهد · م1 ح1</div>
+  <div class="mo-body" style="padding-top:14px"><div class="ep"><span class="sh"><img src="https://images.metahub.space/background/medium/tt0903747/img"></span><span class="m"><b>1 · Pilot</b><span>58 د</span></span></div></div>
+</section>
+<section class="phone" id="c-marquee-scrolled">
+  <div class="tb glass"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Breaking Bad</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="mo-body" style="padding-top:90px">
+    <div class="lbl" style="margin-top:0">الحلقات · الموسم 1</div>
+    <div class="ep"><span class="sh"><img src="https://images.metahub.space/background/medium/tt0903747/img"></span><span class="m"><b>1 · Pilot</b><span>58 د</span></span></div>
+    <div class="ep"><span class="sh"><img src="https://images.metahub.space/background/medium/tt0903747/img" style="object-position:20% 50%"></span><span class="m"><b>2 · Cat's in the Bag</b><span>48 د</span></span></div>
+    <div class="ep"><span class="sh"><img src="https://images.metahub.space/background/medium/tt0903747/img" style="object-position:80% 50%"></span><span class="m"><b>3 · …And the Bag's in the River</b><span>48 د</span></span></div>
+    <div class="ep"><span class="sh"><img src="https://images.metahub.space/background/medium/tt0903747/img" style="object-position:50% 20%"></span><span class="m"><b>4 · Cancer Man</b><span>48 د</span></span></div>
+  </div>
+</section>
+
+<!-- «الملصق» بعد التعديل -->
+<section class="phone" id="c-poster">
+  <div class="ps-amb"><img src="https://images.metahub.space/poster/medium/tt0903747/img"></div>
+  <span class="note-mv">الخلفية ثابتة تقريبًا: ≤24px</span>
+  <div class="tb"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Breaking Bad</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="ps-top"><span class="ps-cover" style="display:block"><img src="https://images.metahub.space/poster/medium/tt0903747/img"></span>
+    <h1>Breaking Bad</h1><div class="sub">مسلسل · 2008 · IMDb 9.5 · 5 مواسم</div></div>
+  <div class="mq-go" style="margin-top:20px;position:relative;z-index:2"><svg><use href="#play"/></svg>شاهد · م1 ح1</div>
+</section>
+</body></html>

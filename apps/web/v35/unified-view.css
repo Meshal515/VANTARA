@@ -1,0 +1,266 @@
+/* الرئيسية الموحدة: بلا حاويات، الهرمية بالطباعة والفراغ، المقاسات محجوزة من أول إطار. */
+.v35 .uv{--uv-g:20px;--uv-r:14px;--uv-t2:var(--text-3,#8f8b9c);--uv-hair:rgba(255,255,255,.07);--uv-sk:#16141b;--uv-sk2:#1f1c26;padding-bottom:24px}
+.v35 .uv button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+.v35 .uv-t1{display:block;font-size:14px;font-weight:600;line-height:20px;color:var(--text-1,#f2f1f5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:plaintext}
+.v35 .uv-2l{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;height:40px}
+.v35 .uv-t2{display:block;font-size:12.5px;font-weight:500;line-height:18px;color:var(--uv-t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v35 .uv-t2 em{font-style:normal;color:var(--text-1,#f2f1f5)}
+
+/* Verified updates: separate release unit and relative time instead of
+   clipping both into the old one-line .uv-t2 on narrow 3-column layouts. */
+.v35 .uv-up .uv-t1,.uv-page .uv-up .uv-t1{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  white-space:normal;overflow:hidden;min-height:40px
+}
+.v35 .uv-up .uv-update-meta,.uv-page .uv-up .uv-update-meta{
+  display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+  min-height:38px;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip
+}
+.v35 .uv-up .uv-update-unit,.uv-page .uv-up .uv-update-unit{
+  display:block;max-width:100%;color:var(--text-1,#f2f1f5);
+  font-weight:600;line-height:17px;white-space:normal;overflow-wrap:break-word
+}
+.v35 .uv-up .uv-update-when,.uv-page .uv-up .uv-update-when{
+  display:block;max-width:100%;font-size:12px;line-height:17px;
+  font-weight:500;color:var(--uv-t2,var(--text-3,#8f8b9c));
+  white-space:normal;overflow-wrap:break-word
+}
+
+
+/* البنر */
+.v35 .uv-hero{position:relative;isolation:isolate;padding-top:12px;overflow:hidden}
+.v35 .uv-silk{position:absolute;inset:0;z-index:-2;background:#02010a;-webkit-mask-image:linear-gradient(180deg,#000 62%,transparent);mask-image:linear-gradient(180deg,#000 62%,transparent)}
+.v35 .uv-silk canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.v35 .uv-hero::after{content:"";position:absolute;inset:0 0 -1px;z-index:-1;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.03),rgba(0,0,0,.01) 40%,rgba(0,0,0,.18) 62%,var(--bg,#09080c))}
+.v35 .uv-reel{position:relative;height:300px;touch-action:pan-y;user-select:none}
+.v35 .uv-rc{position:absolute;top:0;left:50%;width:200px;height:300px;margin-left:-100px;border-radius:var(--uv-r);overflow:hidden;opacity:0;visibility:hidden;
+  transform:scale(.94);box-shadow:0 30px 60px -18px rgba(0,0,0,.75);transition:transform .6s cubic-bezier(.22,.8,.2,1),opacity .45s ease,visibility 0s .6s}
+.v35 .uv-rc.on{opacity:1;visibility:visible;transform:none;transition:transform .6s cubic-bezier(.22,.8,.2,1),opacity .5s ease .08s,visibility 0s}
+.v35 .uv-rc.out{visibility:visible;opacity:0;transform:translateX(calc(var(--dir,1) * -70px)) scale(.92)}
+.v35 .uv-rc.from{transition:none;opacity:0;visibility:visible;transform:translateX(calc(var(--dir,1) * 70px)) scale(.94)}
+.v35 .uv-rcimg{width:100%;height:100%;object-fit:cover;pointer-events:none}
+.v35 .uv-rc-sk{position:absolute;top:0;left:50%;margin-left:-100px;border-radius:var(--uv-r)}
+.v35 .uv-hinfo{position:relative;height:186px;margin-top:24px}
+.v35 .uv-hi{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 var(--uv-g);opacity:0;visibility:hidden;transform:translateY(8px);
+  transition:opacity .35s ease,transform .45s cubic-bezier(.22,.8,.2,1),visibility 0s .45s}
+.v35 .uv-hi.on{opacity:1;visibility:visible;transform:none;transition:opacity .45s ease .15s,transform .55s cubic-bezier(.22,.8,.2,1) .15s,visibility 0s}
+.v35 .uv-hmeta{display:flex;align-items:center;height:18px;font-size:12.5px;font-weight:500;color:var(--text-2,#bab6c6)}
+.v35 .uv-hmeta i{width:3px;height:3px;border-radius:50%;background:var(--uv-t2);margin-inline:10px}
+.v35 .uv-hmark{height:72px;margin-top:12px;display:flex;align-items:center;justify-content:center;width:100%}
+.v35 .uv-htitle{font-size:26px;font-weight:800;line-height:34px;max-width:92%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;unicode-bidi:plaintext}
+.v35 .uv-hlogo{max-height:72px;max-width:68%;object-fit:contain}
+.v35 .uv-hacts{display:flex;align-items:center;justify-content:center;margin-top:20px;height:48px}
+.v35 .uv-btn{display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 32px!important;border-radius:24px;background:var(--accent)!important;color:#fff!important;font-weight:700;font-size:15px}
+.v35 .uv-btn-sk{border-radius:24px;margin-top:20px}
+.v35 .uv-hidx{display:flex;justify-content:center;height:24px;margin-top:4px}
+.v35 .uv-hidx button{width:26px;height:24px;display:grid;place-items:center}
+.v35 .uv-hidx i{width:14px;height:2px;border-radius:1px;background:var(--text-4,#57536a);transition:width .3s,background .3s}
+.v35 .uv-hidx .on i{width:22px;background:var(--text-1,#f2f1f5)}
+
+/* الفلتر: نص فقط */
+/* الفلتر يمرّ مع الصفحة: لا يلحق القارئ فوق المحتوى (قرار المالك) */
+.v35 .uv-tabs{position:static;display:flex;gap:26px;padding:0 var(--uv-g);height:50px;background:var(--bg,#09080c);box-shadow:0 1px 0 var(--uv-hair);margin-top:4px}
+.v35 .uv-tabs button{position:relative;font-size:15px;font-weight:700;color:var(--uv-t2)}
+.v35 .uv-tabs button.on{color:var(--text-1,#f2f1f5)}
+.v35 .uv-tabs button.on::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:2px;background:var(--text-1,#f2f1f5)}
+
+/* الأقسام */
+.v35 .uv-sec{margin-top:40px}
+.v35 .uv-sh{display:flex;align-items:baseline;padding:0 var(--uv-g);margin-bottom:16px;min-height:28px}
+.v35 .uv-sh h2{font-size:20px;font-weight:800;line-height:28px;margin:0}
+.v35 .uv-all{margin-inline-start:auto;display:inline-flex;align-items:center;gap:2px;height:44px;margin-block:-8px;font-size:13px;font-weight:600;color:var(--uv-t2)!important}
+.v35 .uv-rail{display:flex;gap:14px;overflow-x:auto;padding:0 var(--uv-g);scroll-snap-type:x mandatory;scroll-padding-inline:var(--uv-g);scrollbar-width:none}
+.v35 .uv-rail::-webkit-scrollbar{display:none}
+.v35 .uv-rail>*{flex:none;scroll-snap-align:start}
+.v35 .uv-po{display:block;width:120px}
+.v35 .uv-art{position:relative;display:block;width:120px;height:180px;border-radius:var(--uv-r);overflow:hidden;background:var(--uv-sk)}
+.v35 .uv-img{width:100%;height:100%;object-fit:cover;display:block}
+.v35 .uv-po .uv-t1{margin-top:10px}
+.v35 .uv-go{position:absolute;bottom:8px;inset-inline-start:8px;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(9,8,12,.62);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff}
+.v35 .uv-none{padding:4px var(--uv-g);color:var(--uv-t2);font-size:13px}
+
+/* جدول البث */
+.v35 .uv-days{display:flex;gap:22px;padding:0 var(--uv-g);margin:-4px 0 4px}
+.v35 .uv-days button{height:36px;font-size:14px;font-weight:600;color:var(--uv-t2)}
+.v35 .uv-days button.on{color:var(--text-1,#f2f1f5)}
+.v35 .uv-air{list-style:none;margin:0;padding:0 var(--uv-g)}
+.v35 .uv-ar{display:grid;grid-template-columns:62px 1fr;align-items:center;column-gap:12px;min-height:76px;box-shadow:0 1px 0 var(--uv-hair)}
+.v35 .uv-ar:last-child{box-shadow:none}
+.v35 .uv-ar time{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.v35 .uv-ar time small{font-size:11px;font-weight:600;color:var(--uv-t2);margin-inline-start:3px}
+.v35 .uv-ar-b{display:grid!important;grid-template-columns:42px 1fr auto;align-items:center;column-gap:12px;min-width:0;padding:8px 0!important}
+.v35 .uv-ar-img{width:42px;height:60px;border-radius:6px;object-fit:cover;background:var(--uv-sk)}
+.v35 .uv-ar-t{min-width:0}
+.v35 .uv-ar-s{font-size:12.5px;font-weight:600;color:var(--accent-text,var(--accent))}
+.v35 .uv-ar.done time,.v35 .uv-ar.done .uv-t1{color:var(--uv-t2)}
+.v35 .uv-ar.done .uv-ar-s{color:var(--text-4,#57536a)}
+.v35 .uv-ar.done .uv-ar-img{opacity:.7}
+
+/* هياكل التحميل */
+@keyframes uv-shim{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.v35 .uv-sk{display:block;flex:none;border-radius:4px;background:linear-gradient(90deg,var(--uv-sk) 30%,var(--uv-sk2) 50%,var(--uv-sk) 70%) 0 0/300% 100%;animation:uv-shim 1.5s linear infinite}
+.v35 .uv-art-sk{border-radius:var(--uv-r)}
+.v35 .uv-l1{margin-top:12px}.v35 .uv-l2{margin-top:8px}
+.v35 .uv-hi .uv-sk+.uv-hmark{margin-top:12px}
+@media (prefers-reduced-motion:reduce){.v35 .uv-sk{animation:none}.v35 .uv-rc,.v35 .uv-hi{transition:opacity .2s!important;transform:none!important}}
+
+/* الصفحات الفرعية: فوق الشاشة، بلا الشريط العلوي */
+.v35-page-host .uv-page,.uv-page{position:fixed;inset:0;z-index:80;overflow-y:auto;background:var(--bg,#09080c);color:var(--text-1,#f2f1f5);opacity:0;transition:opacity .4s cubic-bezier(.4,0,.2,1);font-family:inherit;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 32px)}
+.uv-page.in{opacity:1}
+.uv-page button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.uv-ptop{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;height:calc(env(safe-area-inset-top,0px) + 60px);padding:env(safe-area-inset-top,0px) 8px 0;background:var(--bg,#09080c)}
+.uv-ptop h1{font-size:22px;font-weight:800;margin:0}
+.uv-back{width:44px;height:44px;display:grid;place-items:center}
+.uv-page .uv-days-lg{overflow-x:auto;scrollbar-width:none;margin:8px 0 4px}
+.uv-page .uv-days-lg button{display:flex;align-items:baseline;gap:6px;font-size:15px}
+.uv-page .uv-days-lg small{font-size:11px;color:var(--text-4,#57536a);font-weight:600}
+.uv-page .uv-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px 12px;padding:20px var(--uv-g,20px)}
+.uv-page .uv-grid .uv-po{width:auto}
+.uv-page .uv-grid .uv-art{width:100%;height:auto;aspect-ratio:2/3}
+
+@media (min-width:1000px){
+  .v35 .uv{--uv-g:48px}
+  .v35 .uv-reel{height:390px}.v35 .uv-rc{width:260px;height:390px;margin-left:-130px}
+  .v35 .uv-htitle{font-size:36px;line-height:46px}.v35 .uv-hlogo{max-height:88px}.v35 .uv-hmark{height:92px}.v35 .uv-hinfo{height:200px}
+  .v35 .uv-tabs{justify-content:center;gap:40px}
+  .v35 .uv-po,.v35 .uv-art{width:150px}.v35 .uv-art{height:225px}
+  .v35 .uv-air{columns:2;column-gap:64px}.v35 .uv-ar{break-inside:avoid}
+  .uv-page .uv-grid{grid-template-columns:repeat(7,minmax(0,1fr))}
+}
+
+.uv-ep{position:absolute;bottom:8px;inset-inline-start:8px;padding:3px 8px;border-radius:6px;background:rgba(9,8,12,.78);font-size:11.5px;font-weight:700;color:#fff}
+.uv-ac.done .uv-img{filter:saturate(.8) brightness(.82)}
+.uv-ac:not(.done) .uv-t2 em{color:var(--accent-text,var(--accent))}
+
+/* بكامل الشاشة مثل رئيسية الأنمي: البنر يمتد تحت الترويسة الشفافة */
+.v35[data-content='unified'] #home > .header{position:relative;z-index:4;background:transparent!important;box-shadow:none!important}
+.v35[data-content='unified'] #allHome .uv-hero{margin-top:calc(-1 * (var(--top-h,56px) + var(--safe-top,0px)));padding-top:calc(var(--top-h,56px) + var(--safe-top,0px) + 12px)}
+/* «شاهد» بلا حاوية: أيقونة ونص */
+.v35 .uv-btn{background:none!important;padding:0 8px!important;height:48px;color:var(--text-1,#f2f1f5)!important;font-size:16px;font-weight:700;gap:10px}
+.v35 .uv-btn .icon{color:var(--accent-text,var(--accent))}
+.v35 .uv-btn:active{opacity:.7}
+
+.v35 .uv-hacts{justify-content:center;align-items:center}
+.v35 .uv-btn{display:inline-flex!important;align-items:center;justify-content:center;line-height:1}
+.v35 .uv-btn .icon{display:block;flex:none}
+.v35 .uv-btn span{display:block;line-height:1}
+
+.uv-page .uv-dayhead{font-size:17px;font-weight:800;margin:26px var(--uv-g,20px) 0}
+.uv-page .uv-dayhead+.uv-grid{padding-top:12px}
+.v35 .uv-htitle{text-align:center;width:100%}
+/* بطاقات ناعمة: زوايا أوسع، وحافة ضوء خفيفة، وضغطة لينة */
+.v35 .uv-art,.uv-page .uv-art{border-radius:14px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.v35 .uv-art::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);pointer-events:none}
+.v35 .uv-po{transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.v35 .uv-po:active{transform:scale(.97)}
+.v35 .uv-rc{border-radius:16px}
+.uv-page .uv-grid .uv-art{border-radius:14px}
+
+/* جدول البث بتصميم Stable (anime.css على main: an-days/an-slot): أيام بخط تحت المختار، وبطاقات 16:9
+ * والوقت والحلقة والاسم ومتى تحت الصورة. لا نص فوق الصورة ولا صناديق. المقاس محجوز قبل الصورة. */
+.v35 .uv-sched .uv-sh{align-items:flex-end}
+.v35 .uv-air-titles{display:grid;gap:2px}
+.v35 .uv-air-titles h2{font-size:20px;font-weight:800;line-height:28px;margin:0}
+.v35 .uv-air-sub{font-size:12px;color:var(--uv-t2)}
+.v35 .uv-air-days{display:flex;gap:22px;padding:0 var(--uv-g);margin:-2px 0 14px;overflow-x:auto;scrollbar-width:none;min-height:34px}
+.v35 .uv-air-days::-webkit-scrollbar{display:none}
+.v35 .uv-air-days button{position:relative;flex:none;padding:6px 0!important;font-size:15px;font-weight:700;color:var(--uv-t2);transition:color .2s ease}
+.v35 .uv-air-days button::after{content:"";position:absolute;inset-inline:0;bottom:0;height:2px;background:var(--accent);transform:scaleX(0);transition:transform .25s ease}
+.v35 .uv-air-days button.on{color:var(--text-1,#f2f1f5)}
+.v35 .uv-air-days button.on::after{transform:scaleX(1)}
+.v35 .uv-air-strip{gap:14px}
+.v35 .uv-slot{--art:var(--uv-sk);width:min(74vw,290px);display:grid;gap:4px;align-content:start}
+.v35 .uv-slot-art{position:relative;display:block;aspect-ratio:16/9;margin-bottom:6px;border-radius:12px;overflow:hidden;
+  background:color-mix(in srgb,var(--art) 30%,var(--uv-sk));transition:transform .18s ease}
+.v35 .uv-slot:active .uv-slot-art{transform:scale(.97)}
+.v35 .uv-slot-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease}
+.v35 .uv-slot-img.in{opacity:1}
+.v35 .uv-slot-line{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--text-2,#bab6c6)}
+.v35 .uv-slot-time{font-size:17px;font-weight:850;color:var(--text-1,#f2f1f5);font-variant-numeric:tabular-nums}
+.v35 .uv-slot.aired .uv-slot-time{color:var(--text-2,#bab6c6)}
+.v35 .uv-slot-title{display:block;font-size:13.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.v35 .uv-slot-when{font-size:11.5px;color:var(--uv-t2)}
+.v35 .uv-slot:not(.aired) .uv-slot-when{color:var(--text-2,#bab6c6)}
+@media (prefers-reduced-motion:reduce){.v35 .uv-slot-img,.v35 .uv-air-days button::after{transition:none}}
+
+/* ═════ الجولة الأولى من الصقل (9 نوفمبر): لغة VANTARA الموحدة ═════
+ * سلّم واحد: عنوان قسم 20/28 ثقيل، ونص أول 13.5/18، وثانوي 12/16 خافت. حافة واحدة (يمين، 20px).
+ * إيقاع رأسي: 32px بين الأقسام، و14px بين العنوان ومحتواه. البطاقات: 2:3 بانحناء 12px. */
+.v35 .uv{--uv-g:20px;--uv-r:12px}
+.v35 .uv-sec{margin-top:32px}
+.v35 .uv-sh{margin-bottom:14px}
+.v35 .uv-sh h2{font-size:20px;line-height:28px;font-weight:800;letter-spacing:-.1px}
+.v35 .uv-all{font-size:13px}
+.v35 .uv-art,.uv-page .uv-art,.uv-page .uv-grid .uv-art{border-radius:var(--uv-r)}
+
+/* البنر: نقطة الجذب الأولى دون أن يأكل الشاشة (كان ~620px من 900): غلاف 176×264 ومعلومات أضيق */
+.v35 .uv-reel{height:264px}
+.v35 .uv-rc{width:176px;height:264px;margin-left:-88px;border-radius:14px}
+.v35 .uv-rc-sk{margin-left:-88px}
+.v35 .uv-hinfo{height:150px;margin-top:20px}
+.v35 .uv-hmark{height:56px;margin-top:10px}
+.v35 .uv-hlogo{max-height:56px;max-width:62%}
+.v35 .uv-htitle{font-size:24px;line-height:30px}
+.v35 .uv-hacts{margin-top:14px;height:44px}
+.v35 .uv-btn{height:44px;padding:0 28px!important;border-radius:22px;font-size:14.5px}
+.v35 .uv-hidx{margin-top:2px}
+@media (min-width:700px){
+  .v35 .uv-reel{height:360px}.v35 .uv-rc{width:240px;height:360px;margin-left:-120px}
+  .v35 .uv-hinfo{height:170px}.v35 .uv-hmark{height:72px}.v35 .uv-hlogo{max-height:72px}
+}
+
+/* تصفّح: شبكة 2×2 بخطوط شعرية، بلا صناديق. كل باب بارتفاع ثابت 72px، وأغلفته المتراكبة تحت النص */
+.v35 .uv-browse{margin-top:28px}
+.v35 .uv-doors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0 var(--uv-g);border-top:1px solid var(--uv-hair)}
+.v35 .uv-door{position:relative;display:flex;align-items:center;gap:12px;height:72px;min-width:0;border-bottom:1px solid var(--uv-hair)!important;transition:opacity .15s ease}
+.v35 .uv-door:nth-child(odd){padding-inline-end:12px!important;border-inline-end:1px solid var(--uv-hair)!important}
+.v35 .uv-door:nth-child(even){padding-inline-start:12px!important}
+.v35 .uv-door:active{opacity:.6}
+.v35 .uv-door-art{position:relative;flex:none;width:38px;height:44px}
+.v35 .uv-door-cv{position:absolute;top:0;width:28px;aspect-ratio:2/3;border-radius:4px;overflow:hidden;background:var(--uv-sk);box-shadow:0 0 0 1.5px var(--bg,#09080c),0 4px 10px rgba(0,0,0,.45)}
+.v35 .uv-door-cv:nth-child(1){inset-inline-start:0;z-index:3}
+.v35 .uv-door-cv:nth-child(2){inset-inline-start:6px;top:2px;z-index:2;opacity:.8}
+.v35 .uv-door-cv:nth-child(3){inset-inline-start:10px;top:4px;z-index:1;opacity:.55}
+.v35 .uv-door-cv .uv-img{width:100%;height:100%;object-fit:cover;display:block}
+.v35 .uv-door-text{flex:1;min-width:0;display:grid;gap:2px}
+.v35 .uv-door-l{font-size:13.5px;font-weight:800;line-height:18px;color:var(--text-1,#f2f1f5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v35 .uv-door-s{font-size:11.5px;line-height:16px;color:var(--uv-t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v35 .uv-door-chev{flex:none;color:var(--text-4,#57536a);transform:scaleX(-1)}
+
+/* الفلتر بعد «تصفّح»: هوامش الإيقاع نفسها */
+.v35 .uv > .uv-tabs{margin-top:20px}
+
+/* آخر المشاهدات: أربعة أغلفة بعرض ربع السطر (أصغر من ملصقات الصفوف 120px)، العنوان سطرًا والتقدّم تحته */
+.v35 .uv-rv-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 var(--uv-g)}
+.v35 .uv-rv{display:grid;align-content:start;min-width:0;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.v35 .uv-rv.pressing{transform:scale(.96)}
+.v35 .uv-rv-art{display:block;aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:var(--uv-sk);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.v35 .uv-rv-art .uv-img{width:100%;height:100%;object-fit:cover;display:block}
+.v35 .uv-rv-t{display:block;margin-top:8px;font-size:12.5px;font-weight:700;line-height:17px;height:17px;color:var(--text-1,#f2f1f5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.v35 .uv-rv-s{display:block;font-size:11px;line-height:15px;height:15px;color:var(--uv-t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+@media (min-width:700px){.v35 .uv-rv-grid{grid-template-columns:repeat(4,minmax(0,150px));gap:16px}}
+@media (prefers-reduced-motion:reduce){.v35 .uv-rv,.v35 .uv-door{transition:none}}
+
+/* تنفّس (ملاحظة المالك): الفلتر كان ملاصقًا لعنوان «جدول البث» تحته بخط شعري على طول الشاشة. الآن الفلتر
+ * سطر مستقل بلا خط عرضي (الخط تحت المختار وحده)، وفراغ واضح فوقه وتحته، وأول قسم بعده يبدأ بإيقاع الأقسام */
+.v35 .uv > .uv-tabs{margin-top:28px;height:40px;box-shadow:none;align-items:flex-start}
+.v35 .uv > .uv-tabs button{height:32px}
+.v35 .uv > .uv-tabs button.on::after{bottom:0}
+.v35 .uv-body > .uv-sec:first-child{margin-top:28px}
+.v35 .uv-browse .uv-sh{margin-bottom:12px}
+
+/* الصقل (9 نوفمبر، بعد التفتيش): أهداف لمس 44px دون تغيير ما يُرى، وأبواب «تصفّح» بلا سهم يأكل النص */
+.v35 .uv-hidx{height:44px;margin-top:-6px}
+.v35 .uv-hidx button{width:30px;height:44px}
+.v35 .uv-sched .uv-air-days button{min-width:44px;min-height:40px;text-align:center}
+.v35 .uv > .uv-tabs button{min-width:44px;min-height:40px}
+.v35 .uv-door{gap:12px}
+.v35 .uv-door-l{font-size:14px}
+.v35 .uv-days button{min-width:44px;min-height:40px;text-align:center}
+.v35 .uv > .uv-tabs button,.v35 .uv-days button,.v35 .uv-air-days button{line-height:1.6;overflow:visible}
+.v35 .uv > .uv-tabs{height:44px}
+.v35 .uv > .uv-tabs button{height:36px}
+
+/* Unified subpages use the same 400ms page timing; app/OS reduced motion wins. */
+html[data-motion='off'] .uv-page{transition:none!important}
+@media (prefers-reduced-motion:reduce){.uv-page{transition:none!important}}

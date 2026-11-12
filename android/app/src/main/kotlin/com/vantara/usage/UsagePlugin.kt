@@ -23,14 +23,16 @@ class UsagePlugin : Plugin() {
         }
     }
 
+    // الكتابة (fsync) خارج الخيط الرئيسي: عليه كانت توقف زخم تمرير القارئ كل 5 ثوانٍ (UsageWriter)
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "vantara-follow-time").apply { isDaemon = true } }
+    private val writer by lazy { UsageWriter({ o, ms, at -> UsageStore.get(context).credit(o, ms, at) }, io) }
+
     private fun checkpoint() {
         unsaved += clock.sample(wanted && foreground && owner != null)
         val current = owner ?: return
         if (unsaved > 0) {
-            try {
-                UsageStore.get(context).credit(current, unsaved, System.currentTimeMillis())
-                unsaved = 0
-            } catch (_: Exception) { /* Retry the same unsaved time at the next checkpoint. */ }
+            writer.write(current, unsaved, System.currentTimeMillis())
+            unsaved = 0
         }
     }
 
@@ -43,12 +45,15 @@ class UsagePlugin : Plugin() {
     override fun handleOnPause() {
         foreground = false
         checkpoint()
+        // التطبيق قد يُقتل في الخلفية: الوقت يُكتب قبل المغادرة كما كان
+        writer.drain(1_000)
         notifyListeners("foreground", JSObject().put("active", false))
     }
     override fun handleOnDestroy() {
         foreground = false
         checkpoint()
         main.removeCallbacks(tick)
+        writer.drain(1_000)
     }
 
     @PluginMethod fun reader(call: PluginCall) {
@@ -57,8 +62,8 @@ class UsagePlugin : Plugin() {
             val ref = call.getString("seriesRef").orEmpty()
             val next = if (user.isNotBlank() && ref.isNotBlank()) UsageOwner(user, "manga", ref, call.getString("title").orEmpty(), call.getString("coverUrl")) else null
             wanted = false
+            // وقت المالك السابق يدخل طابور الكتابة باسمه قبل التبديل، ويبقى له إن فشلت كتابته: لا يُنسب للجديد
             checkpoint()
-            if (unsaved > 0 && next != owner) { call.reject("تعذّر حفظ وقت القراءة"); return@post }
             owner = next
             wanted = call.getBoolean("active", false) == true
             checkpoint()
@@ -68,6 +73,8 @@ class UsagePlugin : Plugin() {
 
     @PluginMethod fun pending(call: PluginCall) {
         val user = call.getString("userId")?.takeIf { it.isNotBlank() } ?: return call.reject("userId مطلوب")
+        // خيط الإضافة لا الرئيسي: ما قبل هذا النداء (إغلاق القارئ) يُكتب أولًا، فالترتيب كما كان
+        writer.drain(1_000)
         try { call.resolve(JSObject().put("items", JSArray(Json.encodeToString(UsageStore.get(context).peek(user))))) }
         catch (e: Exception) { call.reject("تعذّر قراءة الوقت المحفوظ", e) }
     }

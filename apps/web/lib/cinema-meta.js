@@ -44,6 +44,8 @@ export function seasonsOf(videos = []) {
       title: v.name || v.title || null,
       overview: v.overview || v.description || null,
       thumb: v.thumbnail || null,
+      // لقطة metahub الأصلية 1920×1080 (المصدر نفسه بلا تصغير)، و`thumb` 780 بديلها
+      thumbHd: typeof v.thumbnail === 'string' && /^https:\/\/episodes\.metahub\.space\/.+\/w\d+\.jpg$/.test(v.thumbnail) ? v.thumbnail.replace(/\/w\d+\.jpg$/, '/original.jpg') : null,
       rating: Number.parseFloat(v.rating) > 0 ? Number.parseFloat(v.rating) : null,
       // بعض أعمال Cinemeta (Besstydniki) تعطي firstAired بدل released
       released: v.released || v.firstAired ? Date.parse(v.released || v.firstAired) || null : null,

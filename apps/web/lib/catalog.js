@@ -123,7 +123,12 @@ export function normalizeTitle(raw) {
 // كلمات لا تميّز عملًا: «Wistoria’s Wand and Sword» عند مانجا ليك هو
 // «WISTORIA: WAND AND SWORD» عند العاشق — الفرق ’s و«and» لا غير
 const FILLER = new Set(['s', 'the', 'a', 'an', 'of', 'and', '&']);
-const meaningful = (normalized) => normalized.split(' ').filter((w) => w && !FILLER.has(w));
+// «S» في آخر العنوان وسم تتمة («Kurosaki-kun no Iinari ni Nante Naranai S»)، لا ملكية فقدت فاصلتها:
+// الملكية تأتي قبل اسم («Wistoria’s Wand»)، فـ«s» الأخيرة كلمة مميِّزة
+const meaningful = (normalized) => {
+  const words = normalized.split(' ');
+  return words.filter((w, i) => w && (!FILLER.has(w) || (w === 's' && i === words.length - 1 && i > 0)));
+};
 
 export function titlesMatch(a, b) {
 	const na = normalizeTitle(a);
@@ -157,6 +162,16 @@ export function parseChapterNumber(name) {
 }
 
 /**
+ * رقم مرّ بـFloat في المحرك الأصلي (356.1f ← 356.1000061035156) يعود لما كتبه المصدر (#323 U-28).
+ * لا يمس إلا قيمة هي Float32 بالضبط وفيها ذيل عشري طويل؛ 356.1 وأمثاله من نص المصدر تبقى كما هي.
+ */
+export function fromFloat32(n) {
+	if (!Number.isFinite(n) || Number.isInteger(n) || Math.fround(n) !== n) return n;
+	const short = Number(n.toPrecision(7));
+	return Math.fround(short) === n ? short : n;
+}
+
+/**
  * رقم الفصل: ما قاله المصدر، وإلا ما يُقرأ من الاسم.
  *
  * `chapterNumber` يصل ‎-1 حين لا يضبطه المحلّل، وهي القيمة الافتراضية في
@@ -164,7 +179,7 @@ export function parseChapterNumber(name) {
  */
 export function chapterNumberOf(chapter) {
 	const given = Number(chapter?.chapterNumber);
-	if (Number.isFinite(given) && given >= 0) return given;
+	if (Number.isFinite(given) && given >= 0) return fromFloat32(given);
 	return parseChapterNumber(chapter?.name);
 }
 
@@ -307,9 +322,9 @@ function evidenceIn(words, prepared) {
 		// Requiem» يكمل اسمًا آخر بنفس الأبجدية: ليس دليلًا (عمل آخر).
 		for (let i = 0; i + words.length <= alt.length; i++) {
 			if (!words.every((w, j) => alt[i + j] === w)) continue;
-			const before = alt[i - 1];
-			const after = alt[i + words.length];
-			if ((before === undefined || scriptOf(before) !== script) && (after === undefined || scriptOf(after) !== script)) return `⊂ «${raw}»`;
+			// والرقم يكمل الاسم لا يحدّه: «جوجوتسو كايسن» داخل «جوجوتسو كايسن 0» اسم جزء آخر
+			const edge = (w) => w === undefined || (scriptOf(w) !== script && !/^\d+$/.test(w));
+			if (edge(alt[i - 1]) && edge(alt[i + words.length])) return `⊂ «${raw}»`;
 		}
 	}
 	return null;
@@ -402,11 +417,13 @@ export function slugName(manga) {
  * مفتاح البطاقة ثابت بقاعدة لا بالترتيب: مالك أسماء محفوظة، وإلا الاسم الذي أشارت
  * إليه نسخ أكثر، وإلا الأطول، وإلا الأسبق أبجديًا.
  */
-export function canonicalIndex({ aliases = new Map() } = {}) {
-	const entries = [];
-	const rejected = [];
-	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
-	// يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
+// الأسماء المحفوظة لا تتغير بين فهرس وآخر ما لم تتغير خريطتها (manga-alias-store يبني خريطة جديدة عند كل
+// تعلّم)، فتُجهَّز مرة لكل خريطة. كانت تُعاد مع كل فهرس: فتح «مكتبتي» يبني سبعة فهارس (عدد كل تبويب)، فيُطبَّع
+// جدول الأسماء كله سبع مرات على الخيط الرئيسي (≈400ms بإبطاء ×4) لحظة اللمس.
+const preparedCache = new WeakMap();
+function preparedAliases(aliases) {
+	let hit = preparedCache.get(aliases);
+	if (hit) return hit;
 	const prepared = new Map();
 	const byWord = new Map();
 	for (const [owner, names] of aliases) {
@@ -418,6 +435,17 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			byWord.get(k).add(owner);
 		}
 	}
+	hit = { prepared, byWord };
+	preparedCache.set(aliases, hit);
+	return hit;
+}
+
+export function canonicalIndex({ aliases = new Map() } = {}) {
+	const entries = [];
+	const rejected = [];
+	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
+	// يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
+	const { prepared, byWord } = preparedAliases(aliases);
 	const staticClaimers = (key) => {
 		const words = keyWords(key);
 		let candidates = null;
@@ -523,6 +551,9 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			pointers.set(e.own, own.concat(e.names));
 		}
 		const words = new Map(entryKeys.map((k) => [k, keyWords(k)]));
+		// نسخة تشير أسماؤها إلى عدة أعمال (مجموعة قصص قصيرة عند MangaDex تسرد أسماء قصصها): أسماؤها ليست
+		// أسماءها، فلا يدمجها عنوان أصلي من بينها بإحدى القصص (الخطوة 4)
+		const ambiguous = new Set();
 		for (const [from, names] of [...pointers].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
 			const targets = new Set();
 			for (const l of new Set(names.map((n) => n.loose))) {
@@ -534,6 +565,7 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			roots.delete(find(from));
 			if (roots.size > 1) {
 				rejected.push(`«${from}» ← ${[...targets].map((t) => `«${t}»`).join(' / ')}`);
+				ambiguous.add(from);
 				continue;
 			}
 			for (const t of targets) {
@@ -558,7 +590,7 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			byOriginal.get(o).add(k);
 		};
 		for (const k of entryKeys) for (const raw of aliases.get(k) ?? []) noteOriginal(k, raw);
-		for (const e of entries) for (const n of e.names) noteOriginal(e.own, n.raw);
+		for (const e of entries) if (!ambiguous.has(e.own)) for (const n of e.names) noteOriginal(e.own, n.raw);
 		// اسمٌ يحوي الآخر ويزيد عليه («The Ravages of Time» و«… Blue Hawk») جزءٌ ثانٍ أو جانبي يشارك
 		// الأصل عنوانه غالبًا: لا يُدمج بهذا الدليل وحده
 		const spinOff = (a, b) => {
@@ -754,6 +786,7 @@ export default {
 	normalizeTitle,
 	parseChapterNumber,
 	chapterNumberOf,
+	fromFloat32,
 	gather,
 	createWorkIndex,
 	groupWorks,

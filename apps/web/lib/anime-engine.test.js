@@ -1,5 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { available, clock, configure, groupRoutes, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute } from './anime-engine.js';
+import { available, clock, configure, groupRoutes, judgeAnimeCopy, matchingWorkingRoute, momentLabel, momentStart, pickWork, retrySeconds, upsertRoute, withPhaseDeadline } from './anime-engine.js';
+import * as engine from './anime-engine.js';
+
+describe('canonical anime identity', () => {
+  it.each([
+    ['Attack on Titan Season 2', 'Attack on Titan Season 3'],
+    ['Re Zero Season 2 Part 1', 'Re Zero Season 2 Part 2'],
+    ['The Ancient Magus Bride', 'The Ancient Magus Bride 2'],
+    ['Mushoku Tensei II', 'Mushoku Tensei III'],
+    ['ون بيس الموسم الثاني', 'ون بيس الموسم الثالث'],
+    ['One Piece', 'One Piece Movie'],
+  ])('rejects a different edition: %s versus %s', (wanted, title) => {
+    expect(judgeAnimeCopy({ title }, [wanted])).toMatchObject({ ok: false, reason: 'sequel' });
+  });
+  it.each([
+    ['Attack on Titan Season 2', 'Attack on Titan 2nd Season'],
+    ['Mushoku Tensei II', 'Mushoku Tensei Season 2'],
+    ['Kaiju No. 8', 'Kaiju No. 8 (TV)'],
+    ['86', '86 (TV)'],
+    ['ون بيس Season 2', 'ون بيس الجزء الثاني'],
+  ])('accepts equivalent edition spelling: %s versus %s', (wanted, title) => {
+    expect(judgeAnimeCopy({ title }, [wanted]).ok).toBe(true);
+  });
+  it('uses known movie format even when the title has no movie suffix', () => {
+    expect(judgeAnimeCopy({ title: 'One Piece Movie' }, ['One Piece'], { format: 'MOVIE' }).ok).toBe(true);
+    expect(judgeAnimeCopy({ title: 'One Piece Movie' }, ['One Piece'], { format: 'TV' }).ok).toBe(false);
+  });
+  it('does not require a provider to repeat the known movie format in its title', () => {
+    expect(judgeAnimeCopy({ title: 'A Silent Voice مترجم' }, ['A Silent Voice'], { format: 'MOVIE' }).ok).toBe(true);
+    expect(judgeAnimeCopy({ title: 'A Silent Voice', format: 'TV' }, ['A Silent Voice'], { format: 'MOVIE' }).ok).toBe(false);
+  });
+});
 
 const work = (title, ...copies) => ({ key: title, title, thumbnail: null, copies: copies.map((c) => ({ sourceId: c, url: `/${c}`, title })) });
 
@@ -91,11 +122,11 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
   });
 
   /** محرك وهمي: كل مصدر يرد بعد زمنه، و`searchDone` بعد أبطئهم. */
-  function fakeEngine(plan) {
+  function fakeEngine(plan, debug = false) {
     const listeners = {};
     const asked = [];
     globalThis.Capacitor = { Plugins: { AnimeEngine: {
-      configure: async () => ({ ok: true, errors: [] }),
+      configure: async () => ({ ok: true, errors: [], debug }),
       addListener: async (name, fn) => {
         (listeners[name] ??= new Set()).add(fn);
         return { remove() { listeners[name].delete(fn); } };
@@ -106,7 +137,7 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
         let last = 0;
         for (const h of hits) {
           last = Math.max(last, h.after);
-          setTimeout(() => { for (const fn of listeners.searchHit ?? []) fn({ searchId, sourceId: h.sourceId, items: h.items, ms: h.after }); }, h.after);
+          setTimeout(() => { for (const fn of listeners.searchHit ?? []) fn({ ...h, searchId, ms: h.after }); }, h.after);
         }
         setTimeout(() => { for (const fn of listeners.searchDone ?? []) fn({ searchId }); }, last + 1);
         return { searchId };
@@ -115,6 +146,29 @@ describe('findWorkStream — أول مصدر يطابق يكفي', () => {
     return { asked };
   }
   const copy = (sourceId, title) => ({ sourceId, url: `/${sourceId}/${title}`, title });
+
+  it('preserves a native page failure in Debug evidence instead of only the generic discovery error', async () => {
+    const { findWorkStream } = await import('./anime-engine.js');
+    const { discoveryDiagnostics } = await import('./discovery-diagnostics.js');
+    fakeEngine({ Example: [{ sourceId: 'source-b', items: [], after: 1, page: 2, error: 'HTTP 522', diagnostic: 'java.net.UnknownHostException: original DNS failure' }] }, true);
+    await configure({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+    await expect(findWorkStream(['Example'])).rejects.toThrow('تعذّر');
+    expect(discoveryDiagnostics().at(-1).events).toContainEqual(expect.objectContaining({ stage: 'source_page', sourceId: 'source-b', page: 2, diagnostic: 'java.net.UnknownHostException: original DNS failure' }));
+  });
+
+  it('discovers a source requiring a later alias after another source has matched', async () => {
+    vi.useFakeTimers();
+    try {
+      const { findWorkStream } = await import('./anime-engine.js');
+      fakeEngine({ English: [{ sourceId: 'a', items: [copy('a', 'English')], after: 1 }], Arabic: [{ sourceId: 'b', items: [copy('b', 'Arabic')], after: 1 }] });
+      await configure({ force: true, fetchImpl: async () => ({ json: async () => ({ sources: [] }) }) });
+      const updates = [];
+      const first = findWorkStream(['English', 'Romaji', 'Arabic'], w => updates.push(w));
+      await vi.advanceTimersByTimeAsync(20);
+      expect((await first).copies.map(c => c.sourceId)).toEqual(['a']);
+      expect(updates.at(-1)?.copies.map(c => c.sourceId)).toEqual(['a', 'b']);
+    } finally { vi.useRealTimers(); }
+  });
 
   it('ReZero romaji matches immediately while the English query is stalled', async () => {
     vi.useFakeTimers();
@@ -186,4 +240,72 @@ describe('شاهد اللقطة', () => {
     expect(momentRange('الحلقة 3')).toBeNull();
     expect(momentRange('الحلقة 3 · 2:00–1:00')).toBeNull();
   });
+});
+
+describe('prepare stage timeouts', () => {
+  it('returns the original completed value and clears the deadline', async () => {
+    await expect(withPhaseDeadline(Promise.resolve({ ok: true }), 100, 'TEST')).resolves.toEqual({ ok: true });
+  });
+  it('returns a stable error code instead of awaiting an unresponsive bridge forever', async () => {
+    await expect(withPhaseDeadline(new Promise(() => {}), 10, 'BRIDGE_STAGE_TIMEOUT')).rejects.toMatchObject({
+      code: 'BRIDGE_STAGE_TIMEOUT',
+    });
+  });
+});
+
+describe('seasonAliases: موسم لاحق باسم فرعي يُطابق ترقيم المواقع', () => {
+  const s1 = { id: 1, format: 'TV', title: 'Tougen Anki', romaji: 'Tougen Anki', relations: [] };
+  const s2 = { id: 2, format: 'TV', title: 'Tougen Anki: Nikko Kegon no Taki-hen', romaji: 'Tougen Anki: Nikkou Kegon no Taki-hen',
+    relations: [{ id: 1, format: 'TV', relation: 'الجزء السابق' }, { id: 9, format: 'MOVIE', relation: 'الجزء السابق' }] };
+  const detail = (id) => Promise.resolve({ 1: s1 }[id] ?? null);
+
+  it('follows the TV prequel chain to number the season and keeps season 1 out of matching', async () => {
+    const a = await engine.seasonAliases(s2, detail);
+    expect(a.titles).toEqual(['Tougen Anki Season 2']);
+    expect(a.queries).toEqual(['Tougen Anki']);
+    const titles = [s2.title, s2.romaji, ...a.titles];
+    for (const t of ['Tougen Anki Season 2', 'Tougen Anki 2nd Season', 'Tougen Anki الموسم الثاني', 'tougen anki: nikko kegon no taki-hen'])
+      expect(engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' }).ok, t).toBe(true);
+    for (const t of ['Tougen Anki', 'Tougen Anki Season 3'])
+      expect(engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' }).ok, t).toBe(false);
+  });
+
+  it('gives nothing when the chain cannot be confirmed or the title already carries its number', async () => {
+    expect(await engine.seasonAliases({ ...s2, id: 3 }, () => Promise.reject(new Error('offline')))).toEqual({ titles: [], queries: [] });
+    expect(await engine.seasonAliases({ ...s2, id: 4, title: 'Jujutsu Kaisen Season 2', romaji: 'Jujutsu Kaisen 2nd Season' }, detail)).toEqual({ titles: [], queries: [] });
+    expect(await engine.seasonAliases(s1, detail)).toEqual({ titles: [], queries: [] });
+  });
+});
+
+describe('source titles carry episode numbers and site noise (AniList 204650, cs3 diagnostic)', () => {
+  const titles = ['TOUGEN ANKI: Nikko Kegon Falls Arc', 'Tougen Anki: Nikko・Kegon no Taki-hen', '桃源暗鬼 日光・華厳の滝編', 'TOUGEN ANKI Season 2', 'Tougen Anki Season 2'];
+  const judge = (t) => engine.judgeAnimeCopy({ title: t }, titles, { format: 'TV' });
+  it.each([
+    'انمي Tougen Anki الموسم الثاني الحلقة 5 مترجمة اون لاين',
+    'Tougen Anki الموسم الثاني الحلقة 5',
+    'Tougen Anki 2nd Season Episode 5',
+    'Tougen Anki Season 2 - Episode 05 English Subbed',
+    'مشاهدة انمي Tougen Anki الموسم 2 الحلقة 12 مترجمة',
+    '桃源暗鬼 日光・華厳の滝編 第5話',
+  ])('accepts the right season: %s', (t) => expect(judge(t).ok).toBe(true));
+  it.each([
+    'انمي Tougen Anki الحلقة 5 مترجمة',
+    'انمي Tougen Anki الموسم الثالث الحلقة 1',
+    'Tougen Anki Movie',
+    'انمي Kimetsu no Yaiba الموسم الثاني الحلقة 5 مترجمة',
+  ])('still refuses another season or another work: %s', (t) => expect(judge(t).ok).toBe(false));
+});
+
+it('one copy per source: the series page before episode pages, then the first reply', () => {
+  const titles = ['Tougen Anki Season 2'];
+  const items = [
+    { sourceId: 'cs3', url: '/ep5', title: 'انمي Tougen Anki الموسم الثاني الحلقة 5 مترجمة' },
+    { sourceId: 'cs3', url: '/ep4', title: 'انمي Tougen Anki الموسم الثاني الحلقة 4 مترجمة' },
+    { sourceId: 'cs3', url: '/series', title: 'Tougen Anki الموسم الثاني' },
+    { sourceId: 'rift', url: '/a', title: 'Tougen Anki Season 2' },
+  ];
+  const work = engine.pickCopies(items, titles, { format: 'TV' });
+  expect(work.copies.map((c) => `${c.sourceId}${c.url}`).sort()).toEqual(['cs3/series', 'rift/a']);
+  const onlyEpisodes = engine.pickCopies(items.slice(0, 2), titles, { format: 'TV' });
+  expect(onlyEpisodes.copies.map((c) => c.url)).toEqual(['/ep5']);
 });

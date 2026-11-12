@@ -3,3 +3,13 @@ include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
 
 apply from: 'capacitor.settings.gradle'
+
+// Experimental runtime is an explicit Debug opt-in. Stable resolves no new modules.
+if (providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true') {
+    includeBuild('../extensions/runtime-android') {
+        dependencySubstitution {
+            substitute module('dev.vantara.runtime:executor') using project(':executor')
+            substitute module('dev.vantara.runtime:bootstrap') using project(':bootstrap')
+        }
+    }
+}

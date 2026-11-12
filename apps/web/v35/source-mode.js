@@ -8,7 +8,7 @@ const node = (tag, cls, text) => {
   if (text != null) n.textContent = text;
   return n;
 };
-function sourceLogo(addon) {
+export function sourceLogo(addon) {
   const mark = node("span", "addon-logo");
   mark.setAttribute("aria-hidden", "true");
   const fallback = () => {
@@ -334,9 +334,14 @@ export function renderSourceMode({
           title = node("b", "up-title", work.title ?? work.name ?? "عمل");
         card.type = "button";
         title.dir = "auto";
-        card.onclick = () => {
+        // الفتح قد يطول (تفاصيل وحلقات من الإضافة): البطاقة تُظهر أنها تعمل، ولا تُفتح مرتين
+        card.onclick = async () => {
+          if (card.dataset.opening) return;
+          card.dataset.opening = "1";
+          card.setAttribute("aria-busy", "true");
           state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
-          onOpenWork(work, { addon, adapter, state });
+          try { await onOpenWork(work, { addon, adapter, state }); }
+          finally { delete card.dataset.opening; card.removeAttribute("aria-busy"); }
         };
         const imageState = (value, label) => {
           art.dataset.imageState = value;

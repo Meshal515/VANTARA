@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { renderV7Addons } from "./addons-v7.js";
 import { publicUrl } from "../addons/manifest.js";
 import { supportedCapabilities } from "../addons/assessment.js";
@@ -204,7 +205,6 @@ export function renderAddonDetails({
     assessmentDetail,
     actions,
     status,
-    diagnostics,
   );
   const config = configureLink(addon, registry);
   if (
@@ -242,7 +242,9 @@ export function renderAddonDetails({
     closed = false,
     checkController, configurationController;
   let configurationGeneration = 0;
+  let releaseDiagnostics = () => {};
   root.close = () => {
+    releaseDiagnostics();
     closed = true;
     checkController?.abort();
     configurationController?.abort();
@@ -364,12 +366,26 @@ export function renderAddonDetails({
     returned.append(input, controls, result);
     root.insertBefore(returned, status);
   }
-  if (onCheck)
-    action("فحص الإضافة", () => {
-      checkController?.abort();
-      checkController = new AbortController();
-      return onCheck(addon, { signal: checkController.signal });
-    });
+  if (onCheck) {
+    let checkButton;
+    const paint = () => {
+      if (!diagnosticsUi.visible()) {
+        checkController?.abort(); checkButton?.remove(); checkButton = null; diagnostics.remove();
+        return;
+      }
+      if (!checkButton) {
+        action("فحص الإضافة", () => {
+          if (!diagnosticsUi.visible()) return;
+          checkController?.abort(); checkController = new AbortController();
+          return onCheck(addon, { signal: checkController.signal });
+        });
+        checkButton = actions.lastElementChild;
+      }
+      root.append(diagnostics);
+    };
+    releaseDiagnostics = diagnosticsUi.subscribe(paint);
+    paint();
+  }
   if (registry.pin)
     action(
       addon.pinned ? "إلغاء التثبيت في الأعلى" : "تثبيت في الأعلى",

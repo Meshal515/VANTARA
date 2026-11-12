@@ -42,7 +42,10 @@ class AnimeEnginePlugin : Plugin() {
     private val crawls = ConcurrentHashMap<String, Job>()
     private lateinit var engine: AnimeEngine
     /** مستودعات Aniyomi وإضافاتها التي ثبّتها المستخدم. */
-    private val userStore by lazy { com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json")) }
+    private val userStoreResult by lazy { runCatching {
+        com.vantara.anime.registry.UserAnimeStore(java.io.File(context.filesDir, "anime-extensions/user-repos.json"))
+    } }
+    private val userStore get() = userStoreResult.getOrThrow()
     private val http by lazy { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client }
     private val repoClient by lazy { com.vantara.plugins.RepoClient(context, http) }
 
@@ -50,7 +53,8 @@ class AnimeEnginePlugin : Plugin() {
         WebViewActivityHolder.set(activity)
         ensureEngineInjekt(context.applicationContext as Application)
         engine = AnimeEngine.get(context)
-        engine.setUserSources(userStore.state.extensions.map { it.entry() })
+        initializeAnimeUserSources(userStoreResult) { engine.setUserSources(it.extensions.flatMap { item -> item.entries() }) }
+            ?.let { android.util.Log.w("AnimeEngine", "Installed extension state unavailable; bytes retained", it) }
         // تقدّم المشاهدة من المشغّل الأصلي إلى الواجهة (سجل المشاهدة/الاستئناف)
         com.vantara.anime.player.PlaybackEvents.listener = { p ->
             notifyListeners(
@@ -101,10 +105,12 @@ class AnimeEnginePlugin : Plugin() {
                 title = call.getString("title").orEmpty(),
                 animeId = call.getString("animeId").orEmpty(),
                 section = call.getString("section")?.takeIf { it == "cinema" } ?: "anime",
+                accent = call.getString("accent")?.takeIf { Regex("^#[0-9a-fA-F]{6}$").matches(it) },
                 usageUserId = call.getString("usageUserId"),
                 malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),
                 total = call.getInt("total") ?: 0,
+                format = call.getString("format"),
                 positionMs = (call.getDouble("position") ?: 0.0).toLong(),
                 candidate = call.getString("candidate"),
                 preferCode = call.getString("prefer"),
@@ -179,6 +185,14 @@ class AnimeEnginePlugin : Plugin() {
     }
 
     @PluginMethod
+    fun finishAddonBatch(call: PluginCall) {
+        val session = call.getString("session") ?: return call.reject("session مطلوب")
+        val sourceId = call.getString("sourceId") ?: return call.reject("sourceId مطلوب")
+        val finished = engine.finishAddonBatch(session, sourceId, call.getString("addonGeneration"))
+        call.resolve(JSObject().put("finished", finished))
+    }
+
+    @PluginMethod
     fun appendAddonStreams(call: PluginCall) = run(call) {
         val session = call.getString("session") ?: error("session مطلوب")
         val sourceId = call.getString("sourceId") ?: error("sourceId مطلوب")
@@ -197,7 +211,7 @@ class AnimeEnginePlugin : Plugin() {
         val copiesJson = call.getArray("copies") ?: return call.reject("copies مطلوب")
         val copies = runCatching { (0 until copiesJson.length()).map { animeFrom(copiesJson.getJSONObject(it)) } }
             .getOrElse { return call.reject(it.message ?: "copies غير صالحة") }
-        call.resolve(JSObject().put("added", engine.extendPreparation(session, copies)))
+        call.resolve(JSObject().put("added", engine.extendPreparation(session, copies, call.getString("addonGeneration"))))
     }
 
     @PluginMethod
@@ -242,7 +256,8 @@ class AnimeEnginePlugin : Plugin() {
             try {
                 call.resolve(block())
             } catch (t: Throwable) {
-                call.reject(t.message ?: t.javaClass.simpleName)
+                val diagnostic = if (com.vantara.app.BuildConfig.DEBUG) JSObject().put("diagnostic", com.vantara.anime.DiscoveryFailure.describe(t)) else JSObject()
+                call.reject(t.message ?: t.javaClass.simpleName, t.javaClass.simpleName, diagnostic)
             }
         }
     }
@@ -261,37 +276,46 @@ class AnimeEnginePlugin : Plugin() {
     fun configure(call: PluginCall) {
         val manifest = call.getObject("manifest") ?: return call.reject("manifest مطلوب")
         val errors = engine.configure(manifest.toString())
-        call.resolve(JSObject().put("ok", errors.isEmpty()).put("errors", JSArray(errors)))
+        call.resolve(JSObject().put("ok", errors.isEmpty()).put("errors", JSArray(errors)).put("debug", com.vantara.app.BuildConfig.DEBUG))
     }
 
     @PluginMethod
     fun sources(call: PluginCall) {
         scope.launch(Dispatchers.IO) {
             try {
-                val st = userStore.state
+                // A damaged Aniyomi registry must not hide independently registered CloudStream sources.
+                // This is optional presentation metadata, never a replacement written to the store.
+                val st = userStoreResult.getOrNull()?.state
                 val list = JSArray()
                 for (s in engine.sources()) {
+                    val runtime = engine.runtimeSource(s.id)
                     val rec = engine.health.get(HealthStore.sourceKey(s.id))
-                    val installed = s.extension?.let { ref -> st.extensions.firstOrNull { it.pkg == ref.pkg } }
+                    val installed = s.extension?.let { ref -> st?.extensions?.firstOrNull { it.pkg == ref.pkg } }
                     val icon = s.extension?.let { ref -> NativeExtensionIcons.iconUrl(context, "anime-extensions", ref.pkg, ref.sha256) }
+                        ?: installed?.let { ext -> com.vantara.plugins.RepoIndex.iconUrl(ext.iconUrl, ext.repoUrl)
+                            ?: com.vantara.plugins.RepoIndex.legacyIconUrl(ext.repoUrl, ext.pkg)
+                            ?: st?.repos?.firstOrNull { it.url == ext.repoUrl }?.iconUrl }
                     list.put(
                         JSObject()
                             .put("id", s.id).put("name", s.name).put("content", s.content)
-                            .put("pkg", s.extension?.pkg)
+                            .put("pkg", s.extension?.pkg ?: runtime?.packageId)
                             .put("lang", s.lang)
-                            .put("version", s.extension?.version)
-                            .put("user", installed != null)
-                            .put("repo", installed?.let { ext -> st.repos.firstOrNull { it.url == ext.repoUrl }?.name })
-                            .put("repoUrl", installed?.repoUrl)
+                            .put("version", s.extension?.version ?: runtime?.version)
+                            .put("user", installed != null || runtime != null)
+                            .put("repo", installed?.let { ext -> st?.repos?.firstOrNull { it.url == ext.repoUrl }?.name } ?: runtime?.repository)
+                            .put("repoUrl", installed?.repoUrl ?: runtime?.repositoryUrl)
                             .put("enabled", s.enabled && s.disabledReason == null)
                             .put("disabledReason", s.disabledReason)
+                            .put("advisory", s.advisory)
                             .put("loadError", engine.loadError(s.id))
                             .put("domain", rec?.domain ?: s.domains.current)
                             .put("catalog", engine.catalogCursor(s.id)?.let { JSONObject(json.encodeToString(com.vantara.anime.catalog.CatalogCursor.serializer(), it)) })
-                            .withIcon(icon),
+                            .withIcon(icon ?: runtime?.iconUrl),
                     )
                 }
-                call.resolve(JSObject().put("sources", list))
+                call.resolve(JSObject().put("sources", list).apply {
+                    userStoreResult.exceptionOrNull()?.let { put("installationStateError", "EXTENSION_STATE_CORRUPTED") }
+                })
             } catch (t: Throwable) { call.reject(t.message ?: "تعذّر قراءة المصادر") }
         }
     }
@@ -300,7 +324,25 @@ class AnimeEnginePlugin : Plugin() {
 
     private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
     private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
-    private fun failure(call: PluginCall, t: Throwable) = call.reject(t.message ?: t.javaClass.simpleName)
+    /** سبب عربي ورمز ثابت ومالك العطل (VANTARA، الإضافة، الموقع، غير مدعوم)؛ لا رمز خام مثل PROVIDER_FAILED. */
+    private fun failure(call: PluginCall, t: Throwable) {
+        val localCode = generateSequence(t) { it.cause }.take(6).mapNotNull { it.message }.firstOrNull {
+            it.startsWith("EXTENSION_STATE_") || it in setOf("ANIYOMI_PACKAGE_CHANGED", "ANIYOMI_REPOSITORY_CHANGED", "ANIYOMI_REPOSITORY_KEY_CHANGED", "ANIYOMI_APK_VERSION_MISMATCH", "ANIYOMI_DOWNGRADE_REJECTED")
+        }
+        if (localCode != null) {
+            val message = when (localCode) {
+                "ANIYOMI_APK_VERSION_MISMATCH" -> "إصدار APK لا يطابق فهرس المستودع؛ لم يُفعّل التحديث وبقيت الإضافة المثبتة"
+                "ANIYOMI_DOWNGRADE_REJECTED" -> "المستودع يعرض إصدارًا أقدم؛ بقي الإصدار المثبت دون تغيير"
+                "ANIYOMI_REPOSITORY_KEY_CHANGED" -> "المستودع يعلن مفتاح توقيع مختلفًا؛ بقي المفتاح المثبت والإضافات دون تغيير. تحقق من الناشر قبل إعادة إضافته"
+                "ANIYOMI_PACKAGE_CHANGED" -> "تغيّرت الإضافة أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
+                "ANIYOMI_REPOSITORY_CHANGED" -> "تغيّر المستودع أثناء فحص التحديث؛ لم يُفعّل هذا التحديث"
+                else -> "تعذّر قراءة أو حفظ سجل الإضافات؛ بقيت البيانات المحفوظة دون مسح"
+            }
+            return call.reject(message, localCode, t as? Exception, JSObject().put("owner", if (localCode in setOf("ANIYOMI_REPOSITORY_KEY_CHANGED", "ANIYOMI_APK_VERSION_MISMATCH", "ANIYOMI_DOWNGRADE_REJECTED")) "extension" else "vantara"))
+        }
+        val verdict = com.vantara.plugins.ExtensionFailure.classify(t)
+        call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
+    }
 
     @PluginMethod
     fun repos(call: PluginCall) {
@@ -313,6 +355,8 @@ class AnimeEnginePlugin : Plugin() {
                         .put("installed", JSArray(st.extensions.map {
                             JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl)
                                 .withIcon(NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
+                                    ?: com.vantara.plugins.RepoIndex.iconUrl(it.iconUrl, it.repoUrl)
+                                    ?: com.vantara.plugins.RepoIndex.legacyIconUrl(it.repoUrl, it.pkg)
                                     ?: st.repos.firstOrNull { repo -> repo.url == it.repoUrl }?.iconUrl)
                         })),
                 )
@@ -328,7 +372,7 @@ class AnimeEnginePlugin : Plugin() {
                 val (meta, list) = repoClient.read(base)
                 require(list.any { it.anime }) { "هذا مستودع مانجا؛ أضفه من قسم المانجا" }
                 val repo = com.vantara.plugins.UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
-                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base } + repo) }
+                userStore.registerRepository(repo)
                 call.resolve(JSObject().put("repo", repoJson(repo)).put("count", list.count { it.anime }))
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -339,8 +383,11 @@ class AnimeEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val next = userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }, extensions = st.extensions.filter { it.repoUrl != base }) }
-                engine.setUserSources(next.extensions.map { it.entry() })
+                // Removing a repository is not the same action as uninstalling its
+                // already-pinned extensions. Keep the code and account/library links.
+                // Repository metadata does not change installed sources. Republishing a snapshot
+                // outside the store monitor could race a newer install/uninstall publication.
+                userStore.update { st -> st.copy(repos = st.repos.filter { it.url != base }) }
                 call.resolve()
             } catch (t: Throwable) { failure(call, t) }
         }
@@ -363,8 +410,8 @@ class AnimeEnginePlugin : Plugin() {
                             .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
                             .put("builtin", engine.shipsPackage(ext.pkg))
                             .put("installed", mine?.version).put("content", mine?.content)
-                            .put("update", mine != null && mine.version != ext.version)
-                            .put("sources", JSArray(com.vantara.plugins.RepoIndex.visibleSources(ext).map { it.name }))
+                            .put("update", mine != null && if(mine.versionCode>0 && ext.versionCode>0) ext.versionCode>mine.versionCode else mine.version != ext.version)
+                            .put("sources", JSArray(ext.sources.map { it.name }))
                             .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256) }
                                 ?: engine.sources().firstOrNull { it.extension?.pkg == ext.pkg }?.extension?.let {
                                     NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
@@ -388,22 +435,109 @@ class AnimeEnginePlugin : Plugin() {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
                 val content = call.getString("content")?.takeIf { it == "anime" || it == "cinema" } ?: "anime"
-                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val token = userStore.beginInstall(pkg, base)
+                val repo = token.repository
                 require(!engine.shipsPackage(pkg)) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
                 val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
                 require(ext.anime) { "هذه إضافة مانجا؛ ثبّتها من قسم المانجا" }
+                token.previous?.let { old -> com.vantara.anime.loader.AnimeVersionPolicy.update(
+                    old.version,old.versionCode,ext.version,ext.versionCode) }
                 val bytes = repoClient.downloadSigned(ext.apkUrl, repo.fingerprint)
-                val source = com.vantara.plugins.RepoIndex.visibleSources(ext).firstOrNull() ?: error("الإضافة لا تعلن مصدرًا")
+                // The signed APK/factory, not a possibly incomplete index, defines
+                // the complete set of available sources and their actual identities.
+                val inspector = com.vantara.anime.loader.AnimeExtensionLoader(context, http)
+                val actual = inspector.inspect(
+                    com.vantara.anime.registry.ExtensionRef(pkg, ext.apkUrl,
+                        com.vantara.plugins.sha256Hex(bytes), version = ext.version), bytes, expectedVersionCode = ext.versionCode)
+                val declared = ext.sources.associateBy { it.id }
+                require(ext.sources.all { item -> actual.any { it.id.toString() == item.id } }) {
+                    "SOURCE_MISSING_IN_APK: المستودع يعلن مصادر غير موجودة داخل APK"
+                }
+                val publisherSources = actual.map { found ->
+                    val meta = declared[found.id.toString()]
+                    com.vantara.plugins.RepoIndex.Source(
+                        id = found.id.toString(), name = found.name, lang = found.lang,
+                        baseUrl = (found as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)
+                            ?.baseUrl?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                            ?: meta?.baseUrl.orEmpty(),
+                    )
+                }
+                require(publisherSources.isNotEmpty()) { "الحزمة لا تحمل مصادر أنمي" }
+                require(publisherSources.distinctBy { it.id }.size == publisherSources.size) {
+                    "DUPLICATE_SOURCE_ID: المستودع يعلن مصادر مكررة"
+                }
+                val previous = token.previous
+                // A legacy primary with no raw source ID must be matched unambiguously:
+                // never silently reassign a library's old ID to a different website.
+                val matched = previous?.let { old ->
+                    publisherSources.firstOrNull { it.id == old.primarySourceId }
+                        ?: publisherSources.firstOrNull {
+                            old.sourceName != null && it.name == old.sourceName && it.baseUrl == old.baseUrl
+                        }
+                        ?: publisherSources.singleOrNull { it.baseUrl == old.baseUrl && it.lang == old.sourceLang }
+                }
+                require(previous == null || matched != null || publisherSources.size == 1) {
+                    "SOURCE_IDENTITY_UNRESOLVED: لا يمكن ترحيل المصدر الأساسي بأمان"
+                }
+                val primary = matched ?: publisherSources.firstOrNull { it.lang.equals("ar", ignoreCase = true) }
+                    ?: publisherSources.first()
+                require(previous == null || previous.primarySourceId == null ||
+                    primary.id == previous.primarySourceId) {
+                    "SOURCE_REMOVED: تحديث الحزمة يزيل المصدر الأساسي المحفوظ؛ لم يُحذف الإصدار العامل"
+                }
+                val previousAdditional = previous?.additionalSources.orEmpty().associateBy { it.sourceId }
+                val additional = publisherSources.filter { it.id != primary.id }.map { source ->
+                    com.vantara.anime.registry.InstalledAnimeSource(
+                        sourceId = source.id,
+                        id = previousAdditional[source.id]?.id ?: "user-$pkg#${source.id}",
+                        name = source.name,
+                        lang = source.lang,
+                        baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    )
+                }
                 val user = com.vantara.anime.registry.UserAnimeExtension(
                     repoUrl = base, name = ext.name.removePrefix("Aniyomi: "), pkg = pkg, apkUrl = ext.apkUrl,
                     sha256 = com.vantara.plugins.sha256Hex(bytes), version = ext.version, content = content,
-                    sourceName = source.name.takeIf { ext.sources.size > 1 }, baseUrl = source.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    sourceName = primary.name, baseUrl = primary.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
+                    stableId = previous?.id ?: "user-$pkg", sourceLang = primary.lang,
+                    primarySourceId = primary.id, additionalSources = additional, versionCode = ext.versionCode,
+                    iconUrl = ext.iconUrl,
                 )
-                // التحميل نفسه الذي سيستعمله المحرك: حزمة لا تُحمَّل لا تُحفظ
-                com.vantara.anime.loader.AnimeExtensionLoader(context, http).load(user.entry().extension!!, bytes)
-                val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg } + user) }
-                engine.setUserSources(next.extensions.map { it.entry() })
-                call.resolve(JSObject().put("id", user.id))
+                val entries = user.entries()
+                val ids = entries.map { it.id }
+                require(ids.toSet().size == ids.size && userStore.state.extensions.filter { it.pkg != pkg }
+                    .flatMap { it.entries() }.none { it.id in ids }) {
+                    "SOURCE_ID_COLLISION: معرّفات مصادر Aniyomi متعارضة"
+                }
+                // Verify the signed APK's actual factory sources, not just the repo's claims.
+                // This is one DexClassLoader inspection; no partially persisted update.
+                require(previous?.additionalSources.orEmpty().all { saved ->
+                    publisherSources.any { it.id == saved.sourceId }
+                }) { "SOURCE_REMOVED: تحديث الحزمة يزيل مصادر محفوظة؛ الإصدار القديم باقٍ" }
+                // Updates are never promoted solely because the APK and its factory load.
+                // Probe each actual candidate source while the old metadata and APK pointer
+                // still refer to the working revision. No user library rows are changed here.
+                kotlinx.coroutines.withTimeout(90_000L) {
+                    AniyomiUpdateGate.verify(previous?.sha256, com.vantara.plugins.sha256Hex(bytes),
+                        publisherSources.map { it.id }) { sourceId ->
+                        val candidateSource = actual.single { it.id.toString() == sourceId }
+                        kotlinx.coroutines.withTimeout(60_000L) {
+                            val adapter = com.vantara.anime.adapters.ExtensionAdapter("candidate-" + sourceId, candidateSource)
+                            AniyomiUpdateGate.verifyJourney(adapter) { candidates ->
+                                verifyAniyomiCandidateMedia(
+                                    (candidateSource as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)?.client ?: http,
+                                    candidates,
+                                )
+                            }
+                            true
+                        }
+                    }
+                }
+                userStore.commitInstall(token, user) { next ->
+                    engine.setUserSources(next.extensions.flatMap { it.entries() })
+                }
+                call.resolve(JSObject().put("id", user.id).put("ids", JSArray(entries.map { it.id }))
+                    .put("sourceCount", entries.size))
             } catch (t: Throwable) { failure(call, t) }
         }
     }
@@ -411,11 +545,21 @@ class AnimeEnginePlugin : Plugin() {
     @PluginMethod
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
-        if (userStore.state.extensions.none { it.pkg == pkg }) return call.reject("ليست إضافة مثبتة من مستودع")
-        val next = userStore.update { st -> st.copy(extensions = st.extensions.filter { it.pkg != pkg }) }
-        engine.setUserSources(next.extensions.map { it.entry() })
-        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
-        call.resolve()
+        scope.launch {
+            try {
+                if (userStore.state.extensions.none { it.pkg == pkg }) error("ليست إضافة مثبتة من مستودع")
+                userStore.uninstall(pkg, { next -> engine.setUserSources(next.extensions.flatMap { it.entries() }) }) {
+                    // Explicit uninstall only; never the user's library, progress or sessions.
+                    if (pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) {
+                        java.io.File(context.filesDir, "anime-extensions/vault/$pkg").deleteRecursively()
+                        java.io.File(context.filesDir, "anime-extensions/$pkg.apk").let {
+                            if (it.exists()) { it.setWritable(true, true); it.delete() }
+                        }
+                    }
+                }
+                call.resolve()
+            } catch (error: Throwable) { failure(call, error) }
+        }
     }
 
     /** صحة كل مصدر وسيرفر: النجاح، آخر نجاح/فشل، الزمن، الدومين الحالي. */
@@ -463,20 +607,29 @@ class AnimeEnginePlugin : Plugin() {
         val loadTimeout = (call.getInt("loadTimeoutMs") ?: AnimeEngine.STREAM_LOAD_TIMEOUT_MS.toInt()).toLong()
         searches.remove(id)?.cancel()
         searches[id] = scope.launch {
+            var failure: Throwable? = null
             try {
                 engine.searchEach(query, content, timeoutMs = timeout, loadTimeoutMs = loadTimeout) { hit ->
                     notifyListeners(
                         "searchHit",
                         JSObject().put("searchId", id).put("sourceId", hit.sourceId).put("ms", hit.ms)
                             .put("error", hit.error).put("skipped", hit.skipped).put("needsHuman", hit.needsHuman)
+                            .put("page", hit.page).put("hasNext", hit.hasNext).put("stop", hit.stop)
+                            .apply { if (com.vantara.app.BuildConfig.DEBUG) put("diagnostic", hit.diagnostic) }
                             .put("items", hit.items, ListSerializer(SourceAnime.serializer())),
                     )
                 }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
+                failure = t
             } finally {
                 searches.remove(id)
-                notifyListeners("searchDone", JSObject().put("searchId", id))
+                notifyListeners("searchDone", JSObject().put("searchId", id).apply {
+                    failure?.let { error ->
+                        put("error", error.javaClass.simpleName)
+                        if (com.vantara.app.BuildConfig.DEBUG) put("diagnostic", com.vantara.anime.DiscoveryFailure.describe(error))
+                    }
+                })
             }
         }
         call.resolve(JSObject().put("searchId", id))
@@ -587,3 +740,12 @@ class AnimeEnginePlugin : Plugin() {
         JSObject().put("items", engine.catalogItems(id), ListSerializer(SourceAnime.serializer()))
     }
 }
+
+/** Startup failure is isolated from plugin registration; the strict store remains untouched. */
+internal fun initializeAnimeUserSources(
+    result: Result<com.vantara.anime.registry.UserAnimeStore>,
+    publish: (com.vantara.anime.registry.UserAnimeState) -> Unit,
+): Throwable? = result.fold(
+    onSuccess = { store -> runCatching { publish(store.state) }.exceptionOrNull() },
+    onFailure = { it },
+)

@@ -94,3 +94,27 @@ describe('ورقة السيرفرات لا تحبس أزرار أعلى الشا
     expect(overlay.hasAttribute('hidden')).toBe(true);
   });
 });
+
+it('clears the diagnostic-sheet marker before opening ordinary content', () => {
+  const { body, sheets } = fixture();
+  sheets.open(host => { host.dataset.diagnosticSheet = ''; });
+  sheets.open(() => {});
+  expect(body.hasAttribute('data-diagnostic-sheet')).toBe(false);
+  sheets.destroy();
+});
+
+it('الفتح من المخفي يثبّت الحالة المغلقة أولًا فيتحرك، وإعادة الفتح أثناء الإغلاق لا تعيده من الصفر', () => {
+  vi.useFakeTimers();
+  const { overlay, sheets } = fixture();
+  const order = [];
+  Object.defineProperty(overlay, 'offsetWidth', { get: () => (order.push(overlay.classList.contains('show') ? 'read:show' : 'read:closed'), 0) });
+  const add = overlay.classList.add.bind(overlay.classList);
+  overlay.classList.add = (...c) => (c.includes('show') && order.push('show'), add(...c));
+  sheets.open(() => null);
+  expect(order).toEqual(['read:closed', 'show']);
+  order.length = 0;
+  sheets.close();
+  sheets.open(() => null);
+  // ما زال ظاهرًا (لم ينته الإغلاق): الانتقال يرتدّ من حيث وصل، بلا قراءة تخطيط
+  expect(order).toEqual(['show']);
+});

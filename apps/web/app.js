@@ -47,6 +47,7 @@ import {
 } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
+import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
@@ -73,6 +74,34 @@ globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, re
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
 const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
+
+/**
+ * من يرى مصادر المانجا التي كانت مدمجة في التطبيق (lib/source-entitlement.js): القرار من صف
+ * الحساب المتزامن (`created_at`) واختياراته في `settings`، لا من مخزن الجهاز.
+ */
+function refreshSourceEntitlement() {
+  const standalone = !syncConfigured();
+  const userId = sync.user?.userId;
+  setChoiceOwner(standalone ? 'standalone' : userId ? `account:${userId}` : null);
+  setEntitlement(decide({
+    standalone,
+    account: userId ? sync.rows('accounts', (row) => row.user_id === userId)[0] ?? null : null,
+    settings: standalone ? readLocalChoices() : userId ? sync.row('settings', userId)?.data ?? null : null,
+  }));
+}
+setChoiceWriter(async (fields, context) => {
+  const local = !syncConfigured();
+  const userId = sync.user?.userId;
+  // Read the actual session again at dispatch, including before a delayed session event is delivered.
+  setChoiceOwner(local ? 'standalone' : userId ? `account:${userId}` : null);
+  assertChoiceContext(context);
+  if (local) writeLocalChoices(fields);
+  else if (!userId) throw new Error('سجّل الدخول لتضيف مصدرًا لحسابك');
+  else await sync.enqueue('settings.patch', { fields }, { requireDurable: true });
+  refreshSourceEntitlement();
+});
+refreshSourceEntitlement();
+void sync.ready.then(refreshSourceEntitlement, () => {});
 
 const state = {
   route: { name: 'gate' },
@@ -2051,7 +2080,7 @@ function showApkUpdate(apk) {
       };
       document.addEventListener('visibilitychange', resume);
     } else if (out.error) {
-      idle(APK_ERRORS[out.error] ?? 'ما اكتمل التنزيل. جرّب مرة ثانية');
+      idle(APK_ERRORS[out.error] ?? `ما اكتمل التنزيل. جرّب مرة ثانية (${String(out.error).slice(0, 80)})`);
     } else {
       sub.textContent = 'أكّد «تحديث» في شاشة أندرويد';
       go.textContent = 'تثبيت';
@@ -2199,6 +2228,7 @@ function toastNewNotifications() {
 
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  if (tables.some((table) => table === 'accounts' || table === 'settings' || table === 'session')) refreshSourceEntitlement();
   // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
   if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
   if (tables.includes('accounts')) followAccountState();

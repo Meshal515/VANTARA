@@ -44,8 +44,8 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   const ui = createServerSheet(body, { el, kicker: 'الحلقة 1', title: 'Re:ZERO', onPick, prefer: null, directLang: 'مترجم عربي', sourceName: (r) => ({ witanime: 'WitAnime', okanime: 'OkAnime' })[r.sourceId] ?? r.sourceId });
   const routes = [
     { id: 't', sourceId: TORR, sourceName: 'Torrentio', quality: 2160, state: 'READY', runtimeReady: true, label: 'X.2160p.WEB-DL\n👤 500 💾 4 GB ⚙️ Nyaa' },
-    { id: 'slow', sourceId: 'okanime', server: 'mp4upload', code: 'MPU', quality: 1080, state: 'READY', probeMs: 6000 },
-    { id: 'fast', sourceId: 'witanime', server: 'streamwish', code: 'SWH', quality: 1080, state: 'READY', probeMs: 700 },
+    { id: 'slow', sourceId: 'okanime', server: 'mp4upload', code: 'MPU', quality: 1080, state: 'READY', probed: true, probeMs: 6000 },
+    { id: 'fast', sourceId: 'witanime', server: 'streamwish', code: 'SWH', quality: 1080, state: 'READY', probed: true, probeMs: 700 },
     { id: 'wait', sourceId: 'witanime', server: 'hgcloud', code: 'HGC', quality: 720, state: 'RESOLVING' },
     { id: 'dead', sourceId: 'witanime', server: 'videa', code: 'VDA', quality: 480, state: 'UNAVAILABLE' },
   ];
@@ -58,7 +58,7 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   expect(top[0].querySelector('.ss-host').textContent).toBe('StreamWish');
   expect(top[0].textContent).toContain('مترجم عربي');
   expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل الأفضل');
-  expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · يبدأ فورًا');
+  expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · عربي · يبدأ فورًا');
   // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ لا رموز ثلاثية في أي صف
   const direct = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
   expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload']);
@@ -130,9 +130,9 @@ it('a movie without logo or episode shows its name as text and no episode line',
   expect(body.querySelector('.ss-art').className).toContain('ss-art--none');
 });
 
-const choose = (select, value) => {
-  for (const o of select.querySelectorAll('option')) o.toggleAttribute('selected', o.value === value);
-  select.onchange();
+const choose = (body, value) => {
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  [...body.querySelectorAll('.ss-addon-opt')].find((o) => o.dataset.value === value).onclick({ stopPropagation() {} });
 };
 
 it('filters by quality, language and source as quiet tabs plus one source menu', () => {
@@ -148,15 +148,16 @@ it('filters by quality, language and source as quiet tabs plus one source menu',
   ui.update({ routes, settled: true, status: { text: '4 جاهزة' } });
   const tabs = [...body.querySelectorAll('.ss-tab')].map((b) => b.textContent);
   expect(tabs).toEqual(['الكل', '4K', '1080p', '720p', 'مترجم', 'مدبلج']);
-  const select = body.querySelector('.ss-addon-select');
-  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
-  choose(select, 'Comet');
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  expect([...body.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  choose(body, 'Comet');
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-name').textContent)).toEqual(['Comet']);
   // المقترح والزر يتبعان المرشّح
   expect(body.querySelector('.ss-row--top .ss-name').textContent).toBe('Comet');
   body.querySelector('.an-pick-best').onclick();
   expect(onPick).toHaveBeenLastCalledWith(routes[3]);
-  choose(body.querySelector('.ss-addon-select'), 'all');
+  choose(body, 'all');
   [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
   expect(body.querySelector('.ss-tab.on').textContent).toBe('الكل');
@@ -169,11 +170,153 @@ it('says plainly when nothing is ready, without a hero card, and offers a retry'
   const ui = createServerSheet(body, { el, onPick() {}, onRetry });
   ui.update({ routes: [], settled: false, status: { text: 'نبحث…', spin: true } });
   expect(body.querySelectorAll('.ss-skel')).toHaveLength(5);
-  expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل أول سيرفر يجهز');
+  // لا «شغّل أول ما يجهز»: الأفضل من الصالح وحده، فالزر ينتظر رابطًا صالحًا
+  expect(body.querySelector('.an-pick-best').textContent).toContain('ننتظر رابطًا صالحًا');
   ui.update({ routes: [{ id: 'x', sourceId: 'witanime', server: 'videa', quality: 480, state: 'UNAVAILABLE' }], settled: true, status: { text: '' }, retry: { wait: 0 } });
   expect(body.querySelector('.ss-note').textContent).toContain('لم يجهز أي سيرفر الآن');
   expect(body.querySelector('.an-srv-status').hidden).toBe(true);
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
   expect(onRetry).toHaveBeenCalled();
+});
+
+import { rank, learnStart } from './server-sheet.js';
+import { rememberStart, startFeatures } from '../lib/start-memory.js';
+
+const tor = (label, extra = {}) => ({ id: label, sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true, label, ...extra });
+const score = (r) => rank(r, describeRoute(r));
+
+it('«الأفضل» من جدول المعايير: تورنت يدعم العربية يغلب، و1080 قبل 4K، وAV1 يتأخر، والسرب الأقوى يرجّح المتساويين', () => {
+  globalThis.localStorage?.clear?.();
+  const many = tor('A.1080p.WEB.x264\n👤 1000 💾 1.4 GB ⚙️ Nyaa', { quality: 1080 });
+  const fewAr = tor('B.1080p.WEB.x264 Arabic\n👤 100 💾 1.4 GB ⚙️ Nyaa\n🇸🇦', { quality: 1080 });
+  expect(score(fewAr)).toBeGreaterThan(score(many));
+  const fewer = tor('A2.1080p.WEB.x264\n👤 20 💾 1.4 GB ⚙️ Nyaa', { quality: 1080 });
+  expect(score(many)).toBeGreaterThan(score(fewer));
+  const uhd = tor('D.2160p.WEB.x264\n👤 1000 💾 6 GB ⚙️ Nyaa', { quality: 2160 });
+  expect(score(many)).toBeGreaterThan(score(uhd));
+  const av1 = tor('E.1080p.WEB.AV1\n👤 1000 💾 331 MB ⚙️ Nyaa', { quality: 1080 });
+  expect(score(many)).toBeGreaterThan(score(av1));
+  // سرب بلا مشاركين أو بلا عدد معلن ليس صالحًا: لا درجة له أصلًا
+  expect(score(tor('Z.1080p.WEB.x264\n👤 0 💾 1 GB ⚙️ Nyaa', { quality: 1080 }))).toBe(-Infinity);
+});
+
+it('ما بدأ على هذا الجهاز ببطء يتأخر في الترشيح التالي (زمن المشغّل الأصلي الحقيقي)', () => {
+  const store = new Map();
+  const saved = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), clear: () => store.clear() };
+  try {
+    const hevc = tor('F.1080p.WEB.HEVC-GRP\n👤 600 💾 1 GB ⚙️ Nyaa', { quality: 1080 });
+    const avc = tor('G.1080p.WEB.x264-OTHER\n👤 500 💾 1 GB ⚙️ Nyaa', { quality: 1080 });
+    expect(score(hevc)).toBeGreaterThan(score(avc) - 5e7);
+    rememberStart(startFeatures(describeRoute(hevc)), 28000, true);
+    expect(score(avc)).toBeGreaterThan(score(hevc));
+    // learnStart لا ينسب زمنًا بلا صف لُمس
+    learnStart({ stage: 'server', outcome: 'ok', ms: 1000 });
+  } finally { globalThis.localStorage = saved; }
+});
+
+it('صف التورنت: الجودة والمصدر واللغة والحجم والمشاركون فقط، والباقي تحت السهم ولا يشغّل', () => {
+  const { el, body } = dom();
+  const onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick });
+  const r = tor('[NyaaSi] Show Dubbed / Multi Subs 🇬🇧/🇷🇺 2160p WEB-DL HEVC DV DDP5.1\n👤 1100 💾 2.5 GB ⚙️ Nyaa\nMulti Audio / 🇸🇦', { quality: 2160 });
+  ui.update({ routes: [r], settled: true, status: { text: '1' } });
+  const row = body.querySelector('.ss-row');
+  expect(row.querySelector('.ss-host').hidden).toBe(true);
+  expect(row.querySelector('.ss-q small').textContent).toBe('');
+  const meta = row.querySelector('.ss-meta').textContent;
+  expect(meta).toContain('2.5 GB');
+  expect(meta).not.toMatch(/HEVC|WEB-DL|DDP/);
+  const chev = row.querySelector('.ss-chev');
+  chev.onclick({ stopPropagation() {} });
+  expect(row.classList.contains('ss-row--open')).toBe(true);
+  expect(row.querySelector('.ss-details').textContent).toContain('HEVC');
+  expect(onPick).not.toHaveBeenCalled();
+});
+
+
+const CS3_RIFT = 'addon|cs3|cs3_0123456789abcdef0123456789abcdef|aa0123456789abcdef012345|u123456789abcdef123456789';
+const CS3_4UP = 'addon|cs3|cs3_abcdef0123456789abcdef0123456789|bb0123456789abcdef012345|u123456789abcdef123456789';
+it('native CloudStream media routes are direct even when the runtime reported them ready', () => {
+  const direct = describeRoute({ id: 'rift-1', sourceId: CS3_RIFT, sourceName: 'AnimeRift', server: 'vidmoly', code: 'VDM',
+    quality: 1080, state: 'READY', runtimeReady: true, probed: true });
+  expect(direct.torrent).toBe(false);
+  expect(direct.name).toBe('AnimeRift');
+  const ordinary = describeRoute({ id: 'native', sourceId: 'witanime', sourceName: 'WitAnime', server: 'mp4upload',
+    state: 'READY', runtimeReady: true, probed: true });
+  expect(ordinary.torrent).toBe(false);
+  expect(describeRoute({ id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true }).torrent).toBe(true);
+});
+
+it('live-installed CloudStream sources appear above torrents immediately and automatically populate filter', () => {
+  const { body, el } = dom(), onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
+  const torrent = { id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true,
+    label: 'Series S01E01 1080p 👤 92' };
+  const rift = { id: 'rift', sourceId: CS3_RIFT, sourceName: 'AnimeRift', state: 'READY', server: 'vidmoly',
+    quality: 1080, variant: 'SUB', runtimeReady: true, probed: true, probeMs: 500 };
+  const anime4up = { id: 'fourup', sourceId: CS3_4UP, sourceName: 'Anime4up', state: 'READY', server: 'mp4upload',
+    quality: 720, variant: 'SUB', runtimeReady: true, probed: true, probeMs: 800 };
+  ui.update({ routes: [torrent], settled: false, status: { text: '1 جاهز' } });
+  expect(body.querySelector('.ss-addon-btn')).toBeNull(); // one source only
+  ui.update({ routes: [torrent, rift, anime4up], settled: true, status: { text: '3 جاهزة' } });
+  const direct = [...body.querySelectorAll('.ss-group--direct .ss-row')];
+  expect(direct.map(r => r.querySelector('.ss-name').textContent)).toEqual(['AnimeRift', 'Anime4up']);
+  expect([...body.querySelectorAll('.ss-group--torrent .ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Torrentio']);
+  expect(body.querySelector('.ss-addon-btn').textContent).toContain('كل المصادر');
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  expect([...body.querySelectorAll('.ss-addon-opt')].map(o => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'AnimeRift', 'Anime4up']);
+  // No user filter interaction needed: all 3 are visible, directly selectable.
+  body.querySelector('.ss-group--direct .ss-row').onclick();
+  expect(onPick).toHaveBeenCalledWith(rift);
+  choose(body, 'Anime4up');
+  expect([...body.querySelectorAll('.ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Anime4up']);
+  choose(body, 'all');
+  expect(body.querySelectorAll('.ss-group--direct .ss-row')).toHaveLength(2);
+  expect(body.querySelectorAll('.ss-group--torrent .ss-row')).toHaveLength(1);
+});
+
+it('غير المتاح مطويّ تحت الجاهز ويقول سببه في سطره، لا بعد لمسة', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  ui.update({
+    routes: [
+      { id: 'ok', sourceId: 'witanime', server: 'ok.ru', quality: 1080, state: 'READY', probed: true, candidates: ['c1'] },
+      { id: 'cf', sourceId: 'witanime', server: 'videa', quality: 720, state: 'UNAVAILABLE', reason: 'CLOUDFLARE' },
+    ],
+    settled: true,
+    status: { text: 'سيرفر جاهز' },
+  });
+  const dead = body.querySelector('.ss-dead');
+  expect(dead.querySelector('summary').textContent).toContain('1');
+  const why = dead.querySelector('.ss-bad');
+  expect(why.textContent).not.toBe('');
+  expect(why.textContent).not.toBe('غير متاح');
+});
+
+it('an Aniyomi torrent route (Torrentio Anime magnet → native ticket) is a torrent row, not a direct Arabic one', () => {
+  const route = { sourceId: 'torrentio-anime', sourceName: 'Torrentio Anime', server: 'Torrentio Anime', type: 'torrent', quality: 1080,
+    label: '1080p\nBlack Lagoon - 01 [1080p].mkv\n👤 39 💾 1.7 GB ⚙️ NyaaSi', variant: 'SUB' };
+  const d = describeRoute(route, { directLang: 'مترجم عربي', sourceName: () => 'Torrentio Anime' });
+  expect(d.torrent).toBe(true);
+  expect(d.info.seeders).toBe(39);
+  expect(d.host).toContain('NyaaSi');
+  expect(d.langs.map((l) => l.t)).not.toContain('مترجم عربي');
+});
+
+it('قائمة المصدر المفتوحة تبقى مفتوحة حين يصل سيرفر جديد، ويظهر مصدره فيها', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  const r = (id, name) => ({ id, sourceId: id, sourceName: name, state: 'READY', quality: 1080, runtimeReady: true, probed: true });
+  ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime')], settled: false, status: { text: '2' } });
+  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime'), r('c', 'AnimeRift')], settled: false, status: { text: '3' } });
+  const menu = body.querySelector('.ss-addon-menu');
+  expect(menu && !menu.hidden).toBe(true);
+  expect([...menu.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'ArabAnime', 'AnimeRift']);
+  expect(body.querySelector('.ss-addon-btn').getAttribute('aria-expanded')).toBe('true');
+  // اختيار مصدر يغلقها كالعادة
+  menu.querySelector('[data-value="AnimeRift"]').onclick({ stopPropagation() {} });
+  expect(body.querySelector('.ss-addon-menu')).toBeNull();
 });

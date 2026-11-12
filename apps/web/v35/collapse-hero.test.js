@@ -95,3 +95,31 @@ describe('العمق المربوط بالتمرير في CSS', () => {
     } finally { Object.assign(g, saved); }
   });
 });
+
+describe('طبقات العمق الإضافية (الغلاف واللوقو) تدخل التسليم نفسه', () => {
+  it('لا تُكتب مع الإصبع، وبعد رفعه تُكتب بقيم معادلتها ثم تعود لـCSS', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const g = globalThis;
+    const saved = { window: g.window, getComputedStyle: g.getComputedStyle, requestAnimationFrame: g.requestAnimationFrame, innerHeight: g.innerHeight };
+    const node = (anim, h = 460) => ({ style: { setProperty() {} }, isConnected: true, offsetHeight: h, classList: { toggle() {} }, anim });
+    const hero = node('none'), bar = node('none', 60), cover = node('aw-cover-out');
+    const on = {};
+    g.window = { scrollY: 0, addEventListener: (k, f) => (on[k] = f), removeEventListener: (k) => delete on[k] };
+    g.innerHeight = 1000;
+    g.getComputedStyle = (n) => ({ animationName: n.anim });
+    g.requestAnimationFrame = (f) => f();
+    try {
+      const layer = { node: cover, range: (_, vh) => [0, vh * 0.5], at: (t) => ({ transform: `t=${t}`, opacity: 1 - t }) };
+      const unbind = bindCollapsingHero({ hero, bar, layers: [layer], active: () => true });
+      on.touchstart();
+      g.window.scrollY = 250; on.scroll();
+      expect(cover.style.transform).toBeUndefined();
+      on.touchend();
+      expect(cover.style.animation).toBe('none');
+      expect(cover.style.transform).toBe('t=0.5');
+      expect(cover.style.opacity).toBe('0.5');
+      unbind();
+      expect(cover.style.animation).toBe('');
+    } finally { Object.assign(g, saved); }
+  });
+});
