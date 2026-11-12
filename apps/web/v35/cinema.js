@@ -2786,8 +2786,5 @@ export function createCinema(deps) {
     host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty));
   }
 
-  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover, openSourcesDebug,
-    // Invalidate in-flight metadata immediately on Back; no mid-exit DOM replacements.
-    leaveDetail: () => { state.token++; },
-  };
+  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover, openSourcesDebug };
 }

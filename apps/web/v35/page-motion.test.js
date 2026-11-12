@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { bindTabMotion, finishPageMotion, handoffSurface, pageIn, pageOut } from './page-motion.js';
 
 afterEach(() => { finishPageMotion(); vi.unstubAllGlobals(); });
@@ -77,26 +78,6 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
 });
 
 
-describe('work exit lifecycle', () => {
-  it('invokes the same exit completion exactly once after interruption', () => {
-    const work = page();
-    const done = vi.fn();
-    pageOut(work, { doc: doc(), onComplete: done });
-    expect(done).not.toHaveBeenCalled();
-    finishPageMotion();
-    expect(done).toHaveBeenCalledTimes(1);
-    finishPageMotion();
-    expect(done).toHaveBeenCalledTimes(1);
-  });
-  it('completes immediately with reduced motion', () => {
-    const work = page();
-    const done = vi.fn();
-    pageOut(work, { doc: doc('off'), onComplete: done });
-    expect(done).toHaveBeenCalledTimes(1);
-    expect(work.animate).not.toHaveBeenCalled();
-  });
-});
-
 describe('cinema detail jump regression', () => {
   it('Dexter and marquee use an in-place fade, never a temporary fixed viewport or scroll restore', () => {
     const movie = page({top: 0, left: 0, width: 390, height: 2400});
@@ -164,46 +145,20 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
     expect(cinema.anims[1].frames).toEqual([{opacity:1},{opacity:0}]);
     expect(cinema.classes.has('page-depth')).toBe(false);
   });
-  it('holds outgoing work until the saved modal finishes fading in, not a separate timer', () => {
+  it('holds the outgoing work opaque while fading the saved modal back in', () => {
     const work=page({top:0,left:0,width:390,height:2500});
-    const release=pageOut(work,{depth:true,hold:true,doc:doc()});
-    expect(work.classes.has('page-out')).toBe(true);
-    expect(work.classes.has('page-held')).toBe(true);
-    expect(work.animate).not.toHaveBeenCalled();
+    pageOut(work,{depth:true,hold:true,doc:doc()});
+    expect(work.anims[0].frames).toEqual([{opacity:1},{opacity:1}]);
     const origin=page();
-    const onComplete=vi.fn(() => release());
+    const onComplete=vi.fn();
     handoffSurface(origin,{enter:true,onComplete,doc:doc()});
     expect(origin.anims[0].frames).toEqual([{opacity:0},{opacity:1}]);
     expect(origin.anims[0].opts.duration).toBe(400);
     expect(origin.style.opacity).toBe('0');
-    expect(origin.style.transition).toBe('none'); // CSS fade must not race WAAPI
-    expect(work.classes.has('page-out')).toBe(true);
     finishPageMotion();
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(origin.style.opacity).toBe('');
-    expect(origin.style.transition).toBe('');
     expect(work.classes.has('page-out')).toBe(false);
-    expect(work.classes.has('page-held')).toBe(false);
-    release(); // idempotent after interrupted/finished transitions
-  });
-  it('keeps the outgoing work visible beyond 400ms if the modal completion is delayed', () => {
-    vi.useFakeTimers();
-    try {
-      const work=page({top:0,left:0,width:390,height:2500});
-      const release=pageOut(work,{hold:true,doc:doc()});
-      vi.advanceTimersByTime(1200);
-      expect(work.classes.has('page-out')).toBe(true);
-      release();
-      expect(work.classes.has('page-out')).toBe(false);
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {vi.useRealTimers();}
-  });
-  it('keeps a non-active outgoing page painted via the base page CSS', async () => {
-    const {readFileSync}=await import('node:fs');
-    const css=readFileSync(new URL('./core.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*display:\s*block/);
-    expect(css).toMatch(/\.v35 \.page\.page-out\s*\{[^}]*z-index:\s*5/);
-    expect(css).toMatch(/\.v35 \.page\.page-out\.page-held\s*\{[^}]*background:\s*var\(--bg/);
   });
   it('outgoing modal uses the existing fade and interrupts cleanly', () => {
     const modal=page();
@@ -217,122 +172,15 @@ describe('work/unified handoff uses the existing 400ms page motion', () => {
   });
 });
 
-describe('outgoing work visuals stay mounted and unchanged', () => {
-  it('keeps all four manga scroll depth looks active throughout page-out', async () => {
-    const { readFileSync } = await import('node:fs');
-    const css = readFileSync(new URL('./manga.css', import.meta.url), 'utf8');
-    const selector = "#detail.mw:is(.active,.page-out)[data-scroll-depth='on']";
-    expect(css.split(selector).length - 1).toBeGreaterThanOrEqual(8);
-    expect(css).not.toContain("#detail.mw.active[data-scroll-depth='on']");
-    const depth = readFileSync(new URL('./manga-work.js', import.meta.url), 'utf8');
-    expect(depth).toContain("if (page.classList.contains('page-out')) return;");
-  });
-
-  it('keeps the cinema bar fixed and invalidates stale metadata before Back', async () => {
-    const { readFileSync } = await import('node:fs');
-    const css = readFileSync(new URL('./cinema.css', import.meta.url), 'utf8');
-    const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
-    const cinema = readFileSync(new URL('./cinema.js', import.meta.url), 'utf8');
-    expect(css).toContain("#cinema:is(.active,.page-out) .cn-detail-bar");
-    expect(shell).toContain("if (from === 'cinema' && id !== 'cinema') cinema.leaveDetail()");
-    expect(cinema).toContain("leaveDetail: () => { state.token++; }");
-  });
-
-  it('leaves hidden manga detail alone and paints Home only after exit', async () => {
-    const { readFileSync } = await import('node:fs');
-    const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
-    const core = readFileSync(new URL('./core.css', import.meta.url), 'utf8');
-    expect(shell).toContain("if (state.current?.id !== work.id || currentPage() !== 'detail') return;");
-    expect(shell).toContain("const deferHomePaint = id === 'home'");
-    expect(shell).toContain('scrollTop: sourceScroll, onComplete: onWorkExit');
-    expect(shell).toContain("if (id === 'detail') q('detailTop').classList.remove('collapsed')");
-    expect(core).toContain("#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page");
-  });
-});
-
-describe('cinema wide-strip-only pixel-stable Back', () => {
-  it('freezes the marquee image matrix and compensates its actual viewport delta', () => {
-    const movie = page({top:0,left:0,width:390,height:2500});
-    movie.id = 'cinema';
-    const img = {};
-    const props = new Map();
-    const fades = [];
-    const fade = vi.fn((frames, opts) => {
-      const animation = {frames,opts,cancel:vi.fn(),finished:new Promise(()=>{})};
-      fades.push(animation);
-      return animation;
-    });
-    const art = {
-      getBoundingClientRect: () => ({top: movie.style.position === 'fixed' ? 144 : 92}),
-      querySelector: () => img,
-      animate: fade,
-    };
-    const body = {animate: fade};
-    const bar = {animate: fade};
-    const detail = {
-      style: {
-        top: '',
-        getPropertyValue: (k) => props.get(k) || '',
-        setProperty: (k,v) => props.set(k,v),
-        removeProperty: (k) => props.delete(k),
-      },
-      querySelector: (selector) => ({
-        '.cn-detail-art': art,
-        '.cn-detail-body': body,
-        '.cn-detail-bar': bar,
-      })[selector] || null,
-      animate: vi.fn(),
-    };
-    movie.querySelector = () => detail;
-    movie.querySelectorAll = () => [];
-    vi.stubGlobal('getComputedStyle', () => ({transform:'matrix(1, 0, 0, 1, 0, 18)'}));
-    const release = pageOut(movie,{hold:true,marqueeExit:true,doc:doc()});
-    expect(detail.style.top).toBe('-52px');
-    expect(props.get('--cn-exit-img-transform')).toBe('matrix(1, 0, 0, 1, 0, 18)');
-    expect(fades).toHaveLength(3);
-    expect(fades[0].frames).toEqual([
-      {opacity:1,offset:0},{opacity:0,offset:0.38},{opacity:0,offset:1},
-    ]);
-    expect(fades[1].frames).toEqual(fades[0].frames);
-    expect(fades[2].frames).toEqual([
-      {opacity:1,offset:0},{opacity:1,offset:0.7},{opacity:0,offset:1},
-    ]);
-    expect(detail.animate).not.toHaveBeenCalled(); // do not fade Back controls with the entire page
-    expect(movie.animate).not.toHaveBeenCalled();
-    release();
-    expect(detail.style.top).toBe('');
-    expect(props.has('--cn-exit-img-transform')).toBe(false);
-    for (const animation of fades) expect(animation.cancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not use the marquee exit for another cinema work style', () => {
-    const movie=page({top:0,left:0,width:390,height:2200});
-    movie.id='cinema';
-    movie.querySelector=() => null;
-    pageOut(movie,{marqueeExit:true,doc:doc()});
-    expect(movie.anims[0].frames).toEqual([{opacity:1},{opacity:0}]);
-  });
-
-  it('does not reveal the unified update grid while marquee is still visible', () => {
-    const origin=page();
-    handoffSurface(origin,{enter:true,throughBlack:true,doc:doc()});
-    expect(origin.anims[0].frames).toEqual([
-      {opacity:0,offset:0},{opacity:0,offset:0.38},{opacity:1,offset:1},
-    ]);
-    const home=page();
-    pageIn(home,{throughBlack:true,doc:doc()});
-    expect(home.anims[0].frames).toEqual(origin.anims[0].frames);
-  });
-
-  it('keeps the existing cinema wide-strip size and scopes the freeze to page-out', async () => {
-    const {readFileSync}=await import('node:fs');
-    const css=readFileSync(new URL('./cinema.css',import.meta.url),'utf8');
-    expect(css).toMatch(/\.cn-detail\[data-style='marquee'\] \.cn-detail-art\s*\{\s*aspect-ratio:\s*2\.39\s*\/\s*1/);
-    expect(css).toContain("#cinema.page-out .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img");
-    expect(css).toContain(".v35:has(#cinema.page-out .cn-detail[data-style='marquee']) #home");
-    expect(css).not.toContain(".v35:has(#cinema.page-out) #home");
-    const shell=readFileSync(new URL('./shell.js',import.meta.url),'utf8');
-    expect(shell).toContain("const marqueeExit = from === 'cinema'");
-    expect(shell).toContain("throughBlack: marqueeReturn");
+// #323: الرجوع من صفحة عمل كان يخفي الشريط السفلي طوال تلاشيها (visibility:hidden على .dock ما دامت
+// الصفحة page-out) ثم يُظهره دفعة واحدة بعد ~470ms. الشريط جزء مما ترجع إليه: يبقى ظاهرًا ثابتًا.
+describe('Back keeps the bottom bar on screen (no hide-then-pop)', () => {
+  const css = ['core.css', 'manga.css', 'anime.css', 'cinema.css', 'unified-view.css']
+    .map((f) => readFileSync(new URL(`./${f}`, import.meta.url), 'utf8')).join('\n');
+  it('no rule hides or fades the dock while a page leaves', () => {
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').split('}');
+    const offenders = rules.filter((r) => /page-out|uv-page/.test(r.split('{')[0] || '') && /\.dock\b/.test(r.split('{')[0] || '')
+      && /(visibility\s*:\s*hidden|opacity\s*:\s*0|display\s*:\s*none)/.test(r.split('{')[1] || ''));
+    expect(offenders.map((r) => r.trim().slice(0, 120))).toEqual([]);
   });
 });

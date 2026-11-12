@@ -5,26 +5,6 @@ const MS = 400;
 const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 const EASE_IN = EASE;
 const DEPTH = 0.985;
-// The marquee returns through the opaque work background, not through a
-// simultaneous 50/50 blend of the poster and unified update cards.
-const MARQUEE_HANDOFF_SPLIT = 0.38;
-const marqueeExitFrames = [
-  { opacity: 1, offset: 0 },
-  { opacity: 0, offset: MARQUEE_HANDOFF_SPLIT },
-  { opacity: 0, offset: 1 },
-];
-const marqueeEnterFrames = [
-  { opacity: 0, offset: 0 },
-  { opacity: 0, offset: MARQUEE_HANDOFF_SPLIT },
-  { opacity: 1, offset: 1 },
-];
-// Unlike the artwork/body, the cinema Back controls should stay visible
-// until the returning updates surface is ready to cover them.
-const marqueeBarExitFrames = [
-  { opacity: 1, offset: 0 },
-  { opacity: 1, offset: 0.7 },
-  { opacity: 0, offset: 1 },
-];
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -100,53 +80,12 @@ function captureFixed(page, r) {
     };
   };
 }
-/** Keep the wide-strip hero at its exact viewport pixels while converting the
- * departing cinema page to a fixed compositor surface. No other cinema looks
- * or anime/manga work pages use this path. */
-function freezeMarqueeFrame(page) {
-  const detail = page.querySelector?.(".cn-detail[data-style='marquee']");
-  const art = detail?.querySelector?.('.cn-detail-art');
-  if (!art?.getBoundingClientRect) return null;
-  const image = art.querySelector?.('.cn-img');
-  const body = detail.querySelector?.('.cn-detail-body');
-  const bar = detail.querySelector?.('.cn-detail-bar');
-  const before = art.getBoundingClientRect();
-  const priorTop = detail.style.top;
-  const priorImageTransform = detail.style.getPropertyValue('--cn-exit-img-transform');
-  const computedImageTransform = image ? globalThis.getComputedStyle?.(image)?.transform : null;
-  detail.style.setProperty('--cn-exit-img-transform', computedImageTransform || 'none');
-  return {
-    detail,
-    art,
-    body,
-    bar,
-    image,
-    stabilize() {
-      // pageOut changes the containing block and transfers root scroll into the
-      // fixed page. Offset that resulting layout delta before the first frame.
-      const after = art.getBoundingClientRect();
-      const delta = before.top - after.top;
-      if (Number.isFinite(delta) && Math.abs(delta) > 0.25) {
-        detail.style.top = `${(parseFloat(priorTop) || 0) + delta}px`;
-      }
-    },
-    restore() {
-      detail.style.top = priorTop;
-      if (priorImageTransform) detail.style.setProperty('--cn-exit-img-transform', priorImageTransform);
-      else detail.style.removeProperty('--cn-exit-img-transform');
-    },
-  };
-}
-export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document, onComplete = () => {}, marqueeExit = false } = {}) {
+export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
   active.get(page)?.();
-  if (!page?.animate || motionReduced(doc)) { onComplete(); return; }
+  if (!page?.animate || motionReduced(doc)) return;
   // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
   if (page.id === 'cinema' || hold) depth = false;
-  const marquee = marqueeExit && page.id === 'cinema' ? freezeMarqueeFrame(page) : null;
-  // This image's CSS scroll animation is superseded by the sampled exit
-  // matrix; do not pause it and later attempt to restart a canceled animation.
-  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a =>
-    a.effect?.target !== page && a.effect?.target !== marquee?.image && a.playState === 'running');
+  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
   const bindFixed = captureFixed(page,r);
@@ -155,51 +94,20 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   const offset = Math.max(0, -r.top);
   const previousScroll = page.scrollTop || 0;
   const restore = save(page, ['position','top','left','width','height','minHeight','overflow','transformOrigin']);
-  const origin = depth ? (visual?.origin || originOf(page, r, offset)) : null;
+  const origin = visual?.origin || originOf(page, r, offset);
   page.classList.add('page-out');
-  if (hold) page.classList.add('page-held');
   if (depth) page.classList.add('page-depth');
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
-  marquee?.stabilize();
   const unpin = bindFixed();
   if (depth) page.style.transformOrigin = origin;
-  // Fade the hero/body separately from the fixed Back controls. Previously
-  // fading .cn-detail itself made the controls vanish in the first 152ms,
-  // even though the original update list had not yet returned.
-  const fadeOptions = {duration:MS,easing:EASE,fill:'both'};
-  const marqueeFades = marquee ? [
-    marquee.art?.animate?.(marqueeExitFrames, fadeOptions),
-    marquee.body?.animate?.(marqueeExitFrames, fadeOptions),
-    marquee.bar?.animate?.(marqueeBarExitFrames, fadeOptions),
-  ].filter(Boolean) : [];
-  const cleanup = () => {
-    for (const fade of marqueeFades) fade.cancel();
-    unpin(); page.classList.remove('page-out','page-depth','page-held'); restore(); page.scrollTop = previousScroll;
-    marquee?.restore();
+  // When returning to a saved unified modal, keep this work opaque until
+  // the modal has completely faded back in; never reveal Home between them.
+  const frames = hold ? [{opacity:1},{opacity:1}] : depth ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }] : [{opacity:visual?.opacity ?? 1},{opacity:0}];
+  track(page, page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
+    unpin(); page.classList.remove('page-out','page-depth'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
-    onComplete();
-  };
-  // A fixed-duration "hold" used to expire before the modal fade finished.
-  // Hold the old page until the actual handoff completion; the caller releases
-  // it on animation.finish, cancellation, reduced-motion or a newer navigation.
-  if (hold) {
-    let done = false;
-    const release = () => {
-      if (done) return;
-      done = true;
-      running.delete(release);
-      if (active.get(page) === release) active.delete(page);
-      cleanup();
-    };
-    running.add(release);
-    active.set(page, release);
-    return release;
-  }
-  const frames = depth
-    ? [{ opacity: visual?.opacity ?? 1, transform: visual?.transform && visual.transform !== 'none' ? visual.transform : 'scale(1)' }, { opacity: 0, transform: `scale(${DEPTH})` }]
-    : [{opacity:visual?.opacity ?? 1},{opacity:0}];
-  track(page, marqueeFades[0] || page.animate(frames, {duration:MS,easing:EASE,fill:'both'}), cleanup);
+  });
 }
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
@@ -226,7 +134,7 @@ function viewportWork(page, doc) {
     if (page.classList.contains('active')) globalThis.scrollTo?.({top:y,behavior:'instant'});
   };
 }
-export function pageIn(page, { depth = false, doc = globalThis.document, throughBlack = false } = {}) {
+export function pageIn(page, { depth = false, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   // Cinema's wide hero must not be put in a temporary fixed, scrollable viewport:
@@ -240,9 +148,7 @@ export function pageIn(page, { depth = false, doc = globalThis.document, through
     page.classList.add('page-depth');
   }
   page.classList.add('page-in');
-  const frames = throughBlack && !depth ? marqueeEnterFrames
-    : depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}]
-    : [{opacity:0},{opacity:1}];
+  const frames = depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}] : [{opacity:0},{opacity:1}];
   track(page, page.animate(frames,{duration:MS,easing:EASE,fill:'both'}), () => {
     page.classList.remove('page-in','page-depth'); restore(); restoreViewport();
   });
@@ -253,23 +159,15 @@ export function pageIn(page, { depth = false, doc = globalThis.document, through
  * subpage to/from the work with the EXISTING page-motion timing and easing.
  * No clone, independently programmed curve, or reveal of the underlying Home.
  */
-export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}, throughBlack = false} = {}) {
+export function handoffSurface(node, {enter = false, doc = globalThis.document, onComplete = () => {}} = {}) {
   active.get(node)?.();
   if (!node?.animate || motionReduced(doc)) { onComplete(); return; }
-  const priorOpacity = node.style.opacity ?? '';
-  const priorTransition = node.style.transition ?? '';
-  // .uv-page has its own 400ms CSS opacity transition. Do not let a second
-  // transition replay from zero when the Web Animation is cancelled/restored.
-  node.style.transition = 'none';
+  const restore = save(node, ['opacity']);
   // Stage the restored modal as transparent within the SAME JS turn as resume().
   if (enter) node.style.opacity = '0';
-  const frames = enter ? (throughBlack ? marqueeEnterFrames : [{opacity:0},{opacity:1}]) : [{opacity:1},{opacity:0}];
+  const frames = enter ? [{opacity:0},{opacity:1}] : [{opacity:1},{opacity:0}];
   track(node, node.animate(frames, {duration:MS,easing:EASE,fill:'both'}), () => {
-    node.style.opacity = priorOpacity;
-    // Commit the final opacity before enabling CSS transitions again.
-    // Otherwise a finished animation visibly jumps into another 400ms fade.
-    void node.offsetWidth;
-    node.style.transition = priorTransition;
+    restore();
     onComplete();
   });
 }

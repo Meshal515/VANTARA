@@ -760,11 +760,6 @@ html,
 .v35 .dock[hidden] {
   display: none;
 }
-/* Only the exiting work or a unified overlay owns the frame during Back. */
-.v35:has(#detail.page-out, #anime.page-out, #cinema.page-out, .uv-page) .dock {
-  visibility: hidden;
-  pointer-events: none;
-}
 /* لوحة المفاتيح تقصّر الشاشة: الشريط مثبّت في مكانه أسفل الشاشة الكاملة (تحت اللوحة) لا يصعد فوقها */
 .v35 .dock {
   translate: 0 var(--kb-shift, 0px);
@@ -3729,11 +3724,6 @@ html[data-motion='off'] .v35 .dock-scrim {
   z-index: 5;
   pointer-events: none;
   contain: layout paint;
-}
-/* The saved unified subpage crossfades above this held, opaque work surface.
-   The ordinary outgoing-page stacking and animation stay untouched. */
-.v35 .page.page-out.page-held {
-  background: var(--bg, #09080c);
 }
 /* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
 .v35 .page.page-in {
