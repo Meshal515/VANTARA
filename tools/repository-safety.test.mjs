@@ -399,6 +399,31 @@ test('every module the app imports at boot is precached by the service worker', 
       if (!shell.has(resolved)) missing.push(`${file} → ${resolved}`);
       visit(`apps/web${resolved}`);
     }
+    // و`import()` الكسول (توصية U-11 الثانية): ميزة تُحمَّل عند الطلب يكفيها كاش وقت التشغيل
+    // (isShellRequest)، لكن مسارًا خارجه (مثل /v35/) لا يُحفظ أبدًا فيسقط دون اتصال؛ وشجرتها تُتبع كذلك.
+    for (const match of source.matchAll(/\bimport\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
+      const resolved = new URL(match[1], `https://x/${webDir}`).pathname;
+      if (!shell.has(resolved) && !runtimeCached(resolved)) missing.push(`${file} → import(${resolved})`);
+      lazy(`apps/web${resolved}`);
+    }
+  };
+  // ما يحفظه العامل وقت التشغيل: نفس بادئات isShellRequest في sw.js (تُقرأ منه لا تُنسخ)
+  const prefixes = [...(worker.match(/const isShellRequest = [\s\S]*?;\n/)?.[0] ?? '').matchAll(/startsWith\('([^']+)'\)/g)].map((m) => m[1]);
+  assert.ok(prefixes.includes('/lib/'), 'isShellRequest prefixes must be readable from sw.js');
+  const runtimeCached = (path) => prefixes.some((prefix) => path.startsWith(prefix));
+  // شجرة الوحدة الكسولة: استيراداتها الثابتة تُحمَّل معها فتخضع لقاعدتها هي لا لقاعدة الإقلاع
+  const lazySeen = new Set();
+  const lazy = (file) => {
+    if (seen.has(file) || lazySeen.has(file)) return;
+    lazySeen.add(file);
+    const source = read(file);
+    const dir = file.slice(0, file.lastIndexOf('/'));
+    const webDir = dir === 'apps/web' ? '' : `${dir.slice('apps/web/'.length)}/`;
+    for (const match of source.matchAll(/^\s*(?:import|export)\b[^'"]*?\bfrom\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]|\bimport\(\s*['"](\.[^'"]+)['"]\s*\)/gm)) {
+      const resolved = new URL(match[1] ?? match[2] ?? match[3], `https://x/${webDir}`).pathname;
+      if (!shell.has(resolved) && !runtimeCached(resolved)) missing.push(`${file} → ${resolved} (lazy)`);
+      lazy(`apps/web${resolved}`);
+    }
   };
   for (const root of roots) visit(root);
 
