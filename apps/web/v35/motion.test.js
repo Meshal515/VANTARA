@@ -15,32 +15,31 @@ it('makes the destination visible synchronously even if animation frames never r
   expect(gsap.fromTo).toHaveBeenCalled();
 });
 
-it('in-app motion off disables shared GSAP list motion', async () => {
-  const {stripIn,reduced}=await import('./motion.js');
-  const before=globalThis.document;
+// #323 D4: ظهور الشبكات بعقد الحركة نفسه (تلاشٍ واندفاع 96%، MOTION)، مرة لكل عنصر، ولا شيء مع إيقاف الحركة
+const card = () => ({ style: {}, isConnected: true, animate: vi.fn() });
+it('in-app motion off disables list motion', async () => {
+  const { stripIn, reduced } = await import('./motion.js');
+  const before = globalThis.document;
   try {
-    globalThis.document={documentElement:{dataset:{motion:'off'}}};
-    gsap.fromTo.mockClear();
+    globalThis.document = { documentElement: { dataset: { motion: 'off' } } };
     expect(reduced()).toBe(true);
-    stripIn([{style:{}}]);
-    expect(gsap.fromTo).not.toHaveBeenCalled();
-  }finally{globalThis.document=before;}
+    const c = card(); stripIn([c]);
+    expect(c.animate).not.toHaveBeenCalled();
+  } finally { globalThis.document = before; }
 });
 
-it('runs the original GSAP cover entrance once for a reused DOM card', async () => {
-  const {stripIn}=await import('./motion.js');
-  gsap.fromTo.mockClear();
-  gsap.killTweensOf.mockClear();
-  const a={style:{},isConnected:true}, b={style:{},isConnected:true};
-  stripIn([a,b]); stripIn([a,b]);
-  expect(gsap.fromTo).toHaveBeenCalledTimes(1);
-  expect(gsap.killTweensOf).not.toHaveBeenCalled();
-  expect(gsap.fromTo.mock.calls[0][0]).toEqual([a,b]);
-  expect(gsap.fromTo.mock.calls[0][2]).toMatchObject({duration:0.4,stagger:0.04});
-  stripIn([{style:{},isConnected:false}]);
-  expect(gsap.fromTo).toHaveBeenCalledTimes(1);
-  const c={style:{},isConnected:true};
-  stripIn([a,c]);
-  expect(gsap.fromTo).toHaveBeenCalledTimes(2);
-  expect(gsap.fromTo.mock.calls[1][0]).toEqual([c]);
+it('cards push in with the page motion contract, once per DOM identity', async () => {
+  const { stripIn } = await import('./motion.js');
+  const { MOTION } = await import('./page-motion.js');
+  const a = card(), b = card();
+  stripIn([a, b]); stripIn([a, b]);
+  expect(a.animate).toHaveBeenCalledTimes(1);
+  expect(a.animate.mock.calls[0][0]).toEqual([{ opacity: 0, transform: `scale(${MOTION.push})` }, { opacity: 1, transform: 'none' }]);
+  expect(a.animate.mock.calls[0][1]).toMatchObject({ duration: MOTION.ms, easing: MOTION.enter, delay: 0 });
+  expect(b.animate.mock.calls[0][1]).toMatchObject({ delay: 40 });
+  const gone = { ...card(), isConnected: false }; stripIn([gone]);
+  expect(gone.animate).not.toHaveBeenCalled();
+  const c = card(); stripIn([a, c]);
+  expect(a.animate).toHaveBeenCalledTimes(1);
+  expect(c.animate).toHaveBeenCalledTimes(1);
 });

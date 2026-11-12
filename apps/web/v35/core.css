@@ -69,6 +69,9 @@
   --dur-fast: 120ms;
   --dur: 200ms;
   --dur-slow: 320ms;
+  /* ظهور الأغلفة حين تصل (#323 D4): رمز واحد بعقد حركة الصفحات (MOTION في page-motion.js) */
+  --reveal-ms: 380ms;
+  --reveal-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* أسماء قديمة تستعملها طبقة الأصدقاء والملف إلى أن تُنقل */
   --surface: var(--surface-1);
@@ -3436,7 +3439,7 @@ html[data-motion='off'] .v35 .dock-scrim {
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  transition: opacity var(--reveal-ms) var(--reveal-ease);
 }
 .v35 .up-img.loaded {
   opacity: 1;

@@ -7,6 +7,19 @@
  */
 import { gsap as GSAP } from '../vendor/gsap.esm.js';
 
+import { MOTION } from './page-motion.js';
+
+/**
+ * ظهور الشبكات والصفوف حين تصل (#323 D4): عقد الحركة نفسه للصفحات (MOTION في page-motion.js):
+ * تلاشٍ مع اندفاع للداخل من 96%، بمنحنى الدخول، وتتابع قصير. WAAPI على المؤلِّف بلا GSAP.
+ */
+function pushIn(nodes, { stagger = 40, delay = 0 } = {}) {
+  nodes.forEach((node, i) => node?.animate?.(
+    [{ opacity: 0, transform: `scale(${MOTION.push})` }, { opacity: 1, transform: 'none' }],
+    { duration: MOTION.ms, easing: MOTION.enter, delay: delay + i * stagger, fill: 'backwards' },
+  ));
+}
+
 const gsap = () => GSAP ?? null;
 export const reduced = () => globalThis.document?.documentElement?.dataset?.motion === 'off' || (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 const live = () => (reduced() ? null : gsap());
@@ -47,27 +60,21 @@ export function swapViews(from, to, { onSwap } = {}) {
 
 /** دخول العناصر المعلَّمة `[data-reveal]` داخل حاوية، بترتيبها. */
 export function revealIn(container, delay = 0) {
-  const g = live();
-  if (!g || !container) return;
-  const items = [...container.querySelectorAll('[data-reveal]')];
-  if (!items.length) return;
-  g.fromTo(items, { y: 14 }, { y: 0, duration: 0.45, ease: EASE.out, stagger: 0.05, delay, clearProps: 'transform' });
+  if (reduced() || !container) return;
+  pushIn([...container.querySelectorAll('[data-reveal]')], { stagger: 50, delay: delay * 1000 });
 }
 
-/** بطاقات شريط جديد: تنزلق من جهة البداية بتتابع سريع. */
+/** بطاقات شريط جديد: تدخل بعقد الحركة نفسه (تلاشٍ واندفاع للداخل) بتتابع سريع، مرة لكل عنصر. */
 // New covers enter exactly once per DOM identity. Reusing cards after back
 // or cache reconciliation must not restart their original GSAP entrance.
 // WeakSet does not keep detached cards alive after navigation.
 const enteredCards = new WeakSet();
 export function stripIn(cards) {
-  const g = live();
-  if (!g || !cards?.length) return;
+  if (reduced() || !cards?.length) return;
   const fresh = cards.filter((node) => node && typeof node === 'object' && node.isConnected !== false && !enteredCards.has(node));
   if (!fresh.length) return;
   for (const node of fresh) enteredCards.add(node);
-  // Do NOT kill other independent tweens (tap feedback, etc.) on a new card.
-  // Keep the EXACT original anime/cinema curve, travel and stagger.
-  g.fromTo(fresh, { x: -12 }, { x: 0, duration: 0.4, ease: EASE.out, stagger: 0.04, clearProps: 'transform' });
+  pushIn(fresh, { stagger: 40 });
 }
 
 /** البانر: صورة تتقدّم ببطء (Ken Burns) ونص يصعد سطرًا سطرًا. */

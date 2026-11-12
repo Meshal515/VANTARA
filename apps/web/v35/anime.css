@@ -84,7 +84,7 @@ html[data-section='cinema'],
   object-fit: cover;
   display: block;
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transition: opacity var(--reveal-ms) var(--reveal-ease);
 }
 .v35 .an-img.loaded {
   opacity: 1;
