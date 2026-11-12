@@ -34,11 +34,20 @@ export const DEPTH_SPECS = Object.freeze({
     { sel: '.wl-now', range: [0, 0.4], o: [1, 0.4] },
   ],
 }),
+  // السينما: الصورة تنزل بنصف سرعة الصفحة وتكبر فتغوص خلفها (كان cn-art-depth وheroFrame بنسختين)
+  cinema: Object.freeze({
+    current: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
+    premiere: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
+    marquee: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
+    // «الملصق» بشخصيته (قرار المالك): خلفية هادئة تتحرك 24px وتكبر ×1.03 فقط، بدل 240px و×1.12
+    poster: [{ sel: '.cn-detail-art > .cn-img', span: true, px: true, y: [0, 24], s: [1, 1.03] }],
+  }),
 });
 
 const lerpN = (a, b, t) => a + (b - a) * t;
 export function layerValue(l, t, span) {
-  const k = l.span ? span : 1;
+  // span: المدى ارتفاع البطل والإزاحة نسبة منه؛ px: الإزاحة بالبكسل كما هي ولو كان المدى ارتفاع البطل
+  const k = l.span && !l.px ? span : 1;
   const v = (pair, d) => (pair ? lerpN(pair[0], pair[1], t) : d);
   const transform = `perspective(${l.p ?? 1000}px) translate3d(0px, ${(v(l.y, 0) * k).toFixed(1)}px, ${v(l.z, 0).toFixed(1)}px) rotateX(${v(l.rx, 0).toFixed(2)}deg) rotateY(${v(l.ry, 0).toFixed(2)}deg) scale(${v(l.s, 1).toFixed(4)})`;
   // hold: الشفافية ثابتة حتى نسبة hold من المدى ثم تخفت خطيًا (الغلاف واللوقو في «الأساسي»)
