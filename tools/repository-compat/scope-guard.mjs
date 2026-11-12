@@ -367,7 +367,7 @@ for (const path of ["apps/web/v35/anime-depth.js", "apps/web/v35/anime-depth.tes
 // #323 (12 نوفمبر، أمر المالك): قرار فن العمل الواحد (الغلاف والبنر) لكل الشاشات. ملفان بالاسم.
 for (const path of ["apps/web/lib/art.js", "apps/web/lib/art.test.js"]) seams.add(path);
 // #323 (مراجعة الحلول وإكمال غير المحلول، 12 نوفمبر): ملفات جديدة بأسمائها فقط.
-for (const path of ["services/sync-worker/src/progress-touch.integration.test.ts", "apps/web/pwa/image-cache-lru.test.js", "apps/web/addons/anime-mapping.js", "apps/web/addons/anime-mapping.test.js", "apps/web/addons/subtitles.js"]) seams.add(path);
+for (const path of ["services/sync-worker/src/progress-touch.integration.test.ts", "apps/web/pwa/image-cache-lru.test.js", "apps/web/addons/anime-mapping.js", "apps/web/addons/anime-mapping.test.js", "apps/web/addons/subtitles.js", "apps/web/v35/anime-discover.test.js"]) seams.add(path);
 // أغلفة المانجا وبنراتها من المصدر الرئيسي (قرار المالك، 12 نوفمبر)
 for (const path of ["apps/web/lib/manga-art.js", "apps/web/lib/manga-art.test.js", "apps/web/lib/kitsu-art.js", "apps/web/lib/kitsu-art.test.js"]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
