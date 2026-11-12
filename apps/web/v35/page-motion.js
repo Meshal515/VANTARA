@@ -97,12 +97,7 @@ function push(page, o, from, to, timing) {
   return animations;
 }
 
-/**
- * طبقة واحدة تتحرك (قرار المالك، 12 نوفمبر): كانت المغادرة والداخلة تتلاشيان معًا والداخلة فوق، فتظهر الصفحتان
- * شبه شفافتين في منتصف الحركة (تعريض مزدوج يغمق). الآن عند فتح عمل يبقى الأصل ثابتًا معتمًا تحته (hold) وتدخل
- * صفحة العمل فوقه، وعند الرجوع تظهر الوجهة كاملة تحته وتغادر صفحة العمل فوقها (over).
- */
-export function pageOut(page, { depth = false, hold = false, over = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
+export function pageOut(page, { depth = false, hold = false, visual = null, scrollTop = 0, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   if (hold) depth = false;
@@ -116,7 +111,6 @@ export function pageOut(page, { depth = false, hold = false, over = false, visua
   const previousScroll = page.scrollTop || 0;
   const restore = save(page, ['position','top','left','width','height','minHeight','overflow']);
   page.classList.add('page-out');
-  if (over) page.classList.add('page-over');
   // الصفحة المغادرة تبقى بموضعها المرئي: نافذة ثابتة بحجم الشاشة يُعوَّض فيها تمرير الجذر الذي يعود للداخلة.
   // بلا transform ولا contain عليها، فأشرطتها الثابتة تبقى على الشاشة كما هي دون أي تثبيت يدوي.
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
@@ -127,7 +121,7 @@ export function pageOut(page, { depth = false, hold = false, over = false, visua
   const fade = page.animate(hold ? [{opacity:1},{opacity:1}] : [{opacity:visual?.opacity ?? 1},{opacity:0}], timing);
   const pushed = depth ? push(page, origin, visual?.scale ?? 1, DEPTH, timing) : [];
   track(page, [fade, ...pushed], () => {
-    page.classList.remove('page-out', 'page-over'); restore(); page.scrollTop = previousScroll;
+    page.classList.remove('page-out'); restore(); page.scrollTop = previousScroll;
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
   });
 }

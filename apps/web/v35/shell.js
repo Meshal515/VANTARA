@@ -5264,10 +5264,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
-    // طبقة واحدة تتحرك: فتح عمل فوق أصل ثابت، والرجوع منه فوق وجهة ثابتة (page-motion.js)
-    const intoWork = WORK_PAGES.has(id) && !WORK_PAGES.has(from);
-    const outOfWork = WORK_PAGES.has(from) && !WORK_PAGES.has(id) && !unifiedRestore;
-    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore || intoWork, over: outOfWork, visual, scrollTop: sourceScroll });
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     const nav = q('bottomNav');
     if (MAIN_PAGES.includes(id)) {
@@ -5358,7 +5355,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
-    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && !(outOfWork && outgoing) && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
         if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
       };

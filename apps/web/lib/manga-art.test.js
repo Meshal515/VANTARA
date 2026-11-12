@@ -23,7 +23,9 @@ describe('غلاف المانجا وبنرها: المصدر الرئيسي أو
   it('البنر الحقيقي العريض إن كفى عرضه، وإلا أعلى غلاف جودةً', () => {
     const covers = [{ url: 'c1', width: 460, height: 690 }, { url: 'c2', width: 900, height: 1350 }];
     expect(chooseBanner({ url: 'b', width: 1900, height: 400 }, covers)).toEqual({ url: 'b', wide: true });
-    expect(chooseBanner({ url: 'small', width: 600, height: 200 }, covers)).toEqual({ url: 'c2', wide: false });
+    expect(chooseBanner({ url: 'small', width: 900, height: 300 }, covers)).toEqual({ url: 'c2', wide: false });
+    // عريض لكن ليس شريطًا (1.5:1): يشبه الغلاف ولا يُعرض بنرًا
+    expect(chooseBanner({ url: 'squarish', width: 1500, height: 1000 }, covers)).toEqual({ url: 'c2', wide: false });
     expect(chooseBanner(null, covers)).toEqual({ url: 'c2', wide: false });
   });
   it('resolveArt يجلب الرسمي والمصادر معًا ويعيد قرارًا واحدًا', async () => {

@@ -11,8 +11,12 @@
 
 const KEY = 'vantara.manga.art.v2';
 const MAX = 1500;
-/** أدنى عرض لبنر يُعرض بنرًا؛ أصغر منه يُعامل غلافًا. */
-export const BANNER_MIN_WIDTH = 1000;
+/**
+ * قاعدة البنر في «الملف» (قرار المالك): البنر صورة عريضة مختلفة الشكل عن الغلاف، بجودة عالية فقط:
+ * عرض 1200 بكسل فأكثر ونسبة 1.6:1 فأعرض. ما لا يحقق ذلك لا يُعرض بنرًا، ويحل محله أعلى الأغلفة جودة (طبيعي).
+ */
+export const BANNER_MIN_WIDTH = 1200;
+export const BANNER_MIN_RATIO = 1.6;
 /** صورة متحركة بهذا العرض فأكثر تُعد عالية الجودة. */
 export const GIF_MIN_WIDTH = 400;
 /** غلاف مصدر يتقدم على الرسمي فقط إن زادت بكسلاته بهذه النسبة. */
@@ -70,7 +74,7 @@ export function chooseCover(loaded) {
  * @returns {{ url: string, wide: boolean }|null}
  */
 export function chooseBanner(banner, loadedCovers) {
-  if (banner && banner.width >= BANNER_MIN_WIDTH && banner.width / banner.height >= 1.2) return { url: banner.url, wide: true };
+  if (banner && banner.width >= BANNER_MIN_WIDTH && banner.width / banner.height >= BANNER_MIN_RATIO) return { url: banner.url, wide: true };
   const best = [...(loadedCovers ?? [])].filter((m) => artScore(m) > 0).sort((a, b) => artScore(b) - artScore(a))[0];
   return best ? { url: best.url, wide: false } : null;
 }

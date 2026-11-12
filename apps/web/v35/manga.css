@@ -2011,13 +2011,14 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
 .v35 #detail[data-look='webtoon'] .mw-stage .mw-cover {
   width: 100%;
   max-height: 150vw;
-  aspect-ratio: auto;
+  /* مقاس محجوز قبل وصول الصورة: كان الغلاف بلا ارتفاع حتى تتحمّل صورته فيقفز كل ما تحته ~580px */
+  aspect-ratio: 2 / 3;
   margin: 0;
   border-radius: 0;
   box-shadow: none;
 }
 /* الغلاف بنسبته كاملًا: لا قص ولا تمدد */
-.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover > img { position: static; height: auto; max-height: 150vw; object-fit: contain; }
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover > img { width: 100%; height: 100%; object-fit: contain; }
 .v35 #detail[data-look='webtoon'] .mw-stage .mw-cover::after {
   content: '';
   position: absolute;
@@ -2029,18 +2030,23 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
 .v35 #detail[data-look='webtoon'] .mw-title { font-size: 32px; letter-spacing: -0.01em; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.55); }
 .v35 #detail[data-look='webtoon'] .mw-chip { background: rgba(255, 255, 255, 0.13); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .v35 #detail .wt-beat {
-  position: relative;
-  z-index: 2;
+  /* فوق الفن أعلى الصفحة لا في تدفقها: يظهر حين تصل الفصول دون أن يدفع زر القراءة (كان يقفز ~50px) */
+  position: absolute;
+  top: calc(var(--safe-top, 0px) + 68px);
+  inset-inline: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 9px;
   width: max-content;
   max-width: calc(100% - 40px);
-  margin: 14px auto 0;
+  margin: 0 auto;
   padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(74, 222, 128, 0.1);
+  background: rgba(10, 30, 18, 0.62);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   color: #c9f7da;
   font-size: 12.5px;
   font-weight: 650;
