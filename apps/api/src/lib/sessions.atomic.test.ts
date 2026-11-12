@@ -36,7 +36,8 @@ function upstream() {
       {
         id: 'minted-token-id',
         name: 'vantara-test-token',
-        expiresAt: '2026-12-01T00:00:00.000Z',
+        // نسبي لا ثابت (#323 U-24): تاريخ ثابت يكسر الاختبار يوم يمضي، ونسخة main انكسرت فعلًا في 31 أكتوبر
+        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
         expired: false,
       },
     ]),
