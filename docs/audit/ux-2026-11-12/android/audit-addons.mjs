@@ -318,6 +318,16 @@ try {
     await until(`document.querySelector('.an-pick-best, .an-srv-status')`, 'server sheet', 30000);
     return Date.now() - t;
   };
+  // U-33 مقارنة نظيفة: نفس تجهيز سيرفرات Frieren عبر الجسر بلا واجهة، بلا probe ثم بـprobe (الورقة تمرر probe:true،
+  // التشغيل 1 نجح بدونه). إن مات المحاكي في الثانية فالمسبّب فحص روابط الفيديو لا رسم الورقة.
+  for (const probe of [false, true]) if (wantSheets) await step(`bridge-prepare-${probe ? 'probe' : 'noprobe'}`, () => js(`(async()=>{const e=await import('/lib/anime-engine.js');const t0=Date.now();
+    const titles=['Sousou no Frieren',"Frieren: Beyond Journey's End"];const raw=[];
+    const found=await new Promise(res=>{const s=e.searchStream(titles[0],'anime',hit=>{raw.push(...(hit.items||[]))});Promise.resolve(s.done).then(()=>res(e.pickCopies(raw,titles)))});
+    if(!found)return {copies:0,searchMs:Date.now()-t0};
+    const p=await e.prepare({copies:found.copies,episode:1,probe:${probe}});
+    await new Promise(r=>setTimeout(r,45000));
+    const routes=(await e.routes(p.session).catch(()=>null))?.routes??[];
+    return {copies:found.copies.length,searchMs:Date.now()-t0,routes:routes.length,ready:routes.filter(r=>/ready/i.test(String(r.state))).length}})()`, 200000), 220000);
   if (wantSheets) await step('sheet-frieren', async () => {
     const openMs = await openWatch('anime:154587', 'Frieren');
     return { sheetOpenMs: openMs, ...(await sampleSheet('sheet-frieren', 45)) };
