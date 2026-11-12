@@ -7458,6 +7458,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       document.removeEventListener('visibilitychange', refreshChapters);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);
+      // مستمعات القسمين الدائمة (#311 D-011، D-013)
+      cinema.destroy?.();
+      anime.destroy?.();
       unsubscribe?.();
     },
   };

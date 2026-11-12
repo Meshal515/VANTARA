@@ -122,8 +122,10 @@ export function castPhotos(imdb, { fetchImpl = globalThis.fetch } = {}) {
   if (!castCache.has(imdb)) {
     const query = `SELECT ?name ?img WHERE { ?w wdt:P345 "${imdb}" . ?w wdt:P161 ?p . ?p wdt:P18 ?img . ?p rdfs:label ?name FILTER(lang(?name)="en") }`;
     castCache.set(imdb, fetchImpl(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, { headers: { Accept: 'application/sparql-results+json' } })
-      .then((r) => (r.ok ? r.json() : null))
+      // 429/503 فشل عابر لا «لا صور» (#311 D-012): كان null يُحفظ قائمة فارغة لا تُطلب ثانية طوال الجلسة
+      .then((r) => { if (!r.ok) throw new Error(`wikidata_${r.status}`); return r.json(); })
       .then((d) => {
+        if (!d || typeof d !== 'object') throw new Error('wikidata_body');
         const out = new Map();
         for (const b of d?.results?.bindings ?? []) {
           const key = normName(b.name?.value);

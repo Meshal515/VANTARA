@@ -2397,17 +2397,23 @@ export function createAnime(deps) {
       outboxInFlight.delete(userId);
     }
   }
-  engine.on('outbox', () => void flushOutbox());
+  // كل اشتراك يُحفظ إلغاؤه ويُفك في destroy (#311 D-013): كانت مستمعات مجهولة تبقى بعد تدمير القشرة،
+  // فتتراكم مع كل تركيب ويُستدعى flushOutbox لوحدات قديمة
+  const unlisten = [];
+  unlisten.push(engine.on('outbox', () => void flushOutbox()));
   // قياس «تعذّر» من المشغّل الأصلي (أنمي وسينما): محاولة الحلقة وكل سيرفر، عدّادات بلا هوية
-  engine.on('playstat', (e) => {
+  unlisten.push(engine.on('playstat', (e) => {
     reportSource(e);
     // زمن البدء الحقيقي على هذا الجهاز يدخل ترشيح «الأفضل» القادم (server-sheet.js)
     learnStart(e);
-  });
-  document.addEventListener('visibilitychange', () => {
+  }));
+  const onVisible = () => {
     if (document.visibilityState === 'visible') void flushOutbox();
-  });
-  setTimeout(() => void flushOutbox(), 2500);
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  unlisten.push(() => document.removeEventListener('visibilitychange', onVisible));
+  const firstFlush = setTimeout(() => void flushOutbox(), 2500);
+  unlisten.push(() => clearTimeout(firstFlush));
 
   /**
    * لمسة الحلقة: الورقة تفتح فورًا والسيرفرات تتجهّز خلفها واحدًا واحدًا.
@@ -3210,5 +3216,6 @@ export function createAnime(deps) {
     idle(() => void warmToday());
   }
 
-  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, openSourcesHealth, sourcesAvailable: () => engine.available(), leaveDetail: () => {state.view?.episodeControls?.suspend();} };
+  const destroy = () => { for (const off of unlisten.splice(0)) { try { void off?.(); } catch { /* مصدر مغلق */ } } };
+  return { show, loadHome, openAnime, play: playEpisode, showDiscover, renderLibrary, openDiscover, openCollection, shareCurrent, openSourcesHealth, sourcesAvailable: () => engine.available(), leaveDetail: () => {state.view?.episodeControls?.suspend();}, destroy };
 }

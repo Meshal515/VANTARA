@@ -174,7 +174,11 @@ export function createCinema(deps) {
   const { q, el, toast } = deps;
   const currentUser = () => deps.sync?.user?.userId ?? null;
   // الترويسة فوق البانر البديل: شفافة في أعلى الصفحة، معتمة متى بدأ التمرير
-  globalThis.addEventListener?.('scroll', () => deps.root?.classList?.toggle('cn-scrolled', globalThis.scrollY > 8), { passive: true });
+  // مرجع محفوظ يُفصل في destroy (#311 D-011): كان مستمعًا مجهولًا يبقى بعد تدمير القشرة ويتكرر مع كل تركيب
+  const onHeaderScroll = () => deps.root?.classList?.toggle('cn-scrolled', globalThis.scrollY > 8);
+  globalThis.addEventListener?.('scroll', onHeaderScroll, { passive: true });
+  /** مراقبو «المزيد» الأحياء: شبكة استُبدلت يُفصل مراقبها (#311 D-015). */
+  const gridWatchers = new Set();
   const state = {
     home: null,
     loading: null,
@@ -2603,6 +2607,7 @@ export function createCinema(deps) {
     }, { tone: 'cinema' });
   }
 
+  let searchTimer = null;
   function showDiscover() {
     const host = q('cinemaDiscover');
     if (!host) return;
@@ -2614,20 +2619,23 @@ export function createCinema(deps) {
     form.innerHTML = `${glyph('search', { size: 18 })}<input type="search" enterkeyhint="search" autocomplete="off" placeholder="فيلم، مسلسل… بالاسم الإنجليزي" aria-label="ابحث عن فيلم أو مسلسل">`;
     const input = form.querySelector('input');
     input.value = d.query;
-    let t = null;
+    // مؤقت واحد للقسم لا لكل نسخة من الصفحة (#311 D-014): إعادة البناء (نوع أو تصنيف) خلال 380ms كانت تترك
+    // مؤقت الحقل المنفصل يكتب state.discover.query ويطلق بحثًا لا يظهر
+    clearTimeout(searchTimer);
     const run = () => {
+      if (!input.isConnected) return;
       const next = input.value.trim();
       if (next === state.discover.query) return;
       state.discover.query = next;
       paintBody();
     };
     input.oninput = () => {
-      clearTimeout(t);
-      t = setTimeout(run, 380);
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(run, 380);
     };
     form.onsubmit = (e) => {
       e.preventDefault();
-      clearTimeout(t);
+      clearTimeout(searchTimer);
       rememberSearch(input.value);
       run();
       input.blur();
@@ -2833,10 +2841,18 @@ export function createCinema(deps) {
       if (run.done) {
         sentinel.remove();
         io?.disconnect();
+        gridWatchers.delete(watcher);
       } else if (alive() && sentinel.getBoundingClientRect().top < innerHeight + 600) void more();
     };
     grid.after(sentinel);
-    const io = globalThis.IntersectionObserver ? new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && void more(), { rootMargin: '600px 0px' }) : null;
+    // شبكات استُبدلت قبل نفاد صفحاتها: مراقبها يُفصل الآن لا يبقى حتى «النضوب» الذي لا يأتي (#311 D-015)
+    for (const w of gridWatchers) if (!w.grid.isConnected) { w.io?.disconnect(); gridWatchers.delete(w); }
+    const io = globalThis.IntersectionObserver ? new IntersectionObserver((entries) => {
+      if (!alive()) { io?.disconnect(); gridWatchers.delete(watcher); return; }
+      if (entries.some((e) => e.isIntersecting)) void more();
+    }, { rootMargin: '600px 0px' }) : null;
+    const watcher = { grid, io };
+    if (io) gridWatchers.add(watcher);
     io?.observe(sentinel);
     void more();
   }
@@ -2879,5 +2895,11 @@ export function createCinema(deps) {
     host.replaceChildren(tabs, items.length ? grid : emptyBox(...empty));
   }
 
-  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover, openSourcesDebug };
+  function destroy() {
+    globalThis.removeEventListener?.('scroll', onHeaderScroll);
+    clearTimeout(searchTimer);
+    for (const w of gridWatchers) w.io?.disconnect();
+    gridWatchers.clear();
+  }
+  return { show, loadHome, openWork, showDiscover, renderLibrary, openDiscover, openSourcesDebug, destroy };
 }
