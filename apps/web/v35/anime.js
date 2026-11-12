@@ -2934,7 +2934,15 @@ export function createAnime(deps) {
 
     const foot = el('div', 'an-hc-foot');
     const poster = el('span', 'an-hc-poster');
-    poster.append(image(w.poster));
+    // بلا غلاف (صف view.add بـcoverUrl null) أو غلاف لم يُحمَّل: أول حرف من الاسم، لا بلاطة فارغة فوق صورة
+    // الحلقة (#323 U-15)
+    const initial = () => { poster.classList.add('an-hc-poster--initial'); poster.replaceChildren(el('b', null, [...String(w.title ?? '').trim()][0]?.toUpperCase() ?? '؟')); };
+    if (w.poster) {
+      const cover = image(w.poster);
+      const failed = cover.onerror;
+      cover.onerror = () => { failed?.(); if (cover.classList.contains('failed')) initial(); };
+      poster.append(cover);
+    } else initial();
     const info = el('div', 'an-hc-info');
     const t = el('b', 'an-hc-title', w.title);
     t.dir = 'auto';

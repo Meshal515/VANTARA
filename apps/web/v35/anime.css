@@ -2212,6 +2212,13 @@ html[data-section='cinema'],
   height: 100%;
   object-fit: cover;
 }
+.v35 .an-hc-poster--initial {
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-2);
+}
 .v35 .an-hc-info {
   flex: 1;
   min-width: 0;

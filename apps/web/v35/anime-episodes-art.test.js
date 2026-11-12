@@ -104,3 +104,21 @@ it('signed in: the ⋮ sheet adds to favorites through the account', () => {
   sheet.querySelector('[data-key="remove"]').onclick();
   expect(deps.sync.enqueue).toHaveBeenCalledWith('view.remove', { seriesRef: 'anime:5' });
 });
+
+// #323 U-15: سجل بلا غلاف (صف view.add بـcoverUrl null) كان يرسم بلاطة فارغة داكنة فوق صورة الحلقة
+it('a history row without a cover shows the title initial, and a cover that fails to load falls back to it', async () => {
+  const { root, anime, store } = setup();
+  store.set('vantara.anime.watch.v2.guest', JSON.stringify({
+    5: { id: 5, title: 'Frieren', poster: null, episode: 3, at: 2, episodes: { 3: { position: 60_000, duration: 1_440_000 } } },
+    6: { id: 6, title: 'Dandadan', poster: 'https://img/broken.jpg', episode: 1, at: 1, episodes: { 1: { position: 1, duration: 1_440_000 } } },
+  }));
+  anime.renderLibrary();
+  const [noCover, broken] = [...root.querySelectorAll('.an-hc')];
+  expect(noCover.querySelector('.an-hc-poster img')).toBeNull();
+  expect(noCover.querySelector('.an-hc-poster').textContent).toBe('F');
+  const img = broken.querySelector('.an-hc-poster img');
+  expect(img).toBeTruthy();
+  img.onerror();
+  expect(broken.querySelector('.an-hc-poster img')).toBeNull();
+  expect(broken.querySelector('.an-hc-poster').textContent).toBe('D');
+});
