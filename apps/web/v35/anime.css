@@ -1493,39 +1493,7 @@ html[data-section='cinema'],
   padding-top: 32px;
 }
 
-/*
- * العمق مع التمرير مربوط بالتمرير نفسه على خيط الرسم (scroll-driven): كان JavaScript يحرّك
- * الخلفية بعد حدث scroll، والـWebView يمرّر الصفحة على خيط مستقل ويجمّع الأحداث، فتتأخر الخلفية
- * إطارًا عن الصفحة وتبدو تطلع وتنزل. نفس القيم في collapse-hero.js (heroFrame)، وهو البديل حيث
- * لا يدعم المحرك الخطّ الزمني للتمرير.
- */
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .v35 .aw-hero {
-      --aw-span: var(--hero-span, calc(clamp(380px, 112vw, 560px) - var(--top-h) - var(--safe-top)));
-    }
-    .v35 .aw-bg {
-      animation: aw-bg-depth linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 var(--aw-span);
-    }
-    .v35 .aw-head {
-      animation: aw-head-depth linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 var(--aw-span);
-    }
-  }
-}
-@keyframes aw-bg-depth {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(0, calc(var(--aw-span) * 0.5), 0) scale(1.12); }
-}
-@keyframes aw-head-depth {
-  0% { transform: perspective(800px) translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
-  20% { opacity: 1; }
-  70% { opacity: 0; }
-  100% { transform: perspective(800px) translate3d(0, calc(var(--aw-span) * -0.18), 0) rotateX(14deg) scale(0.86); opacity: 0; }
-}
+/* العمق مع التمرير لكل الأنماط: depth.js (جدول DEPTH_SPECS ومحرك واحد). */
 
 @media (prefers-reduced-motion: reduce) {
   .v35 .aw-bg-img,
@@ -2914,38 +2882,9 @@ html[dir='rtl'] .v35 .aw-menu::before {
   }
 }
 
-/* العمق مع التمرير: البنر ينطوي للخلف ويغيب، الغلاف يصعد ويميل ويصغر، واللوقو يتبعه بفارق */
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .v35 .aw .aw-bg {
-      transform-origin: 50% 100%;
-      animation-name: aw-banner-out;
-    }
-    .v35 .aw-cover {
-      animation: aw-cover-out linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 52svh;
-    }
-    .v35 .aw-stage .an-mark {
-      animation: aw-mark-out linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 4svh 60svh;
-    }
-  }
-}
-@keyframes aw-banner-out {
-  from { transform: perspective(900px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
-  to { transform: perspective(900px) translate3d(0, calc(var(--aw-span) * 0.42), -140px) rotateX(34deg) scale(1.14); opacity: 0; }
-}
-@keyframes aw-cover-out {
-  0% { transform: perspective(800px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
-  45% { opacity: 1; }
-  100% { transform: perspective(800px) translate3d(0, -40px, -90px) rotateX(38deg) scale(0.84); opacity: 0; }
-}
-@keyframes aw-mark-out {
-  0% { transform: perspective(700px) translate3d(0, 0px, 0px) rotateX(0deg) scale(1); opacity: 1; }
-  40% { opacity: 1; }
-  100% { transform: perspective(700px) translate3d(0, -26px, -60px) rotateX(46deg) scale(0.86); opacity: 0; }
+/* أصل انطواء البنر في «الأساسي» (الحركة نفسها من depth.js) */
+@media (prefers-reduced-motion: no-preference) {
+  .v35 .aw .aw-bg { transform-origin: 50% 100%; }
 }
 
 /* ═══════════ ارتفاع البطل من شكل صورته، وظهور الخلفية المضبّبة تدريجيًا ═══════════
@@ -3324,8 +3263,6 @@ html[dir='rtl'] .v35 .aw-menu::before {
 .v35 .wl-episode .er .tx { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .v35 .wl-episode .er .tx b { flex: 0 1 auto; min-width: 0; }
 .v35 .wl-episode .er .tx > span { flex: none; }
-/* كل نمط له حركته (work-looks.js bindLookMotion)؛ انطواء البنر بالخط الزمني للأساسي وحده */
-.v35 .aw:not([data-style='core']) .aw-bg { animation: none !important; }
 .v35 .aw[data-style='screen'] .aw-hero { transform-origin: 50% 100%; will-change: transform, opacity; }
 .v35 .aw[data-style='episode'] .aw-hero { transform-origin: 50% 0; will-change: transform, opacity; }
 /* الحلقة أولًا بلا حاوية: الحلقة هي البطل (عنوان كبير، وصف، تشغيل)، ثم العمل تحتها ثانويًا بمسافة لا صندوق */

@@ -11,6 +11,12 @@
  */
 export const DEPTH_SPECS = Object.freeze({
   anime: Object.freeze({
+    // «الأساسي»: البنر ينطوي للخلف ويغيب، والغلاف يصعد ويميل ويصغر، واللوقو يتبعه بفارق
+    core: [
+      { sel: '.aw-bg', at: 'hero', span: true, p: 900, y: [0, 0.42], z: [0, -140], rx: [0, 34], s: [1, 1.14], o: [1, 0] },
+      { sel: '.aw-cover', range: [0, 0.52], p: 800, y: [0, -40], z: [0, -90], rx: [0, 38], s: [1, 0.84], o: [1, 0], hold: 0.45 },
+      { sel: '.aw-stage .an-mark', range: [0.04, 0.6], p: 700, y: [0, -26], z: [0, -60], rx: [0, 46], s: [1, 0.86], o: [1, 0], hold: 0.4 },
+    ],
   platform: [
     { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.35], s: [1, 1.05], o: [1, 0.4] },
     { sel: '.wl-htxt', range: [0, 0.4], y: [0, -20], o: [1, 0] },
@@ -35,7 +41,9 @@ export function layerValue(l, t, span) {
   const k = l.span ? span : 1;
   const v = (pair, d) => (pair ? lerpN(pair[0], pair[1], t) : d);
   const transform = `perspective(${l.p ?? 1000}px) translate3d(0px, ${(v(l.y, 0) * k).toFixed(1)}px, ${v(l.z, 0).toFixed(1)}px) rotateX(${v(l.rx, 0).toFixed(2)}deg) rotateY(${v(l.ry, 0).toFixed(2)}deg) scale(${v(l.s, 1).toFixed(4)})`;
-  return { transform, opacity: l.o ? v(l.o, 1) : 1 };
+  // hold: الشفافية ثابتة حتى نسبة hold من المدى ثم تخفت خطيًا (الغلاف واللوقو في «الأساسي»)
+  const fade = l.hold == null || t <= l.hold ? (l.hold == null ? t : 0) : (t - l.hold) / (1 - l.hold);
+  return { transform, opacity: l.o ? lerpN(l.o[0], l.o[1], fade) : 1 };
 }
 
 /**
@@ -56,7 +64,8 @@ export function depthMotion(section, look, { hero, dims, scope, hostOf = (h) => 
     const from = layerValue(l, 0, span);
     const to = layerValue(l, 1, span);
     const sel = l.at === 'self' ? `${scope} > .aw-hero` : `${scope} ${l.sel}`;
-    return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}to{transform:${to.transform};opacity:${to.opacity}}}
+    const hold = l.hold == null ? '' : `${Math.round(l.hold * 100)}%{opacity:${from.opacity}}`;
+    return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}${hold}to{transform:${to.transform};opacity:${to.opacity}}}
 html:not([data-motion='off']) ${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;
   }).join('\n')}}}`;
   return { layers, css };

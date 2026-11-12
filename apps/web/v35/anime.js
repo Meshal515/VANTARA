@@ -33,7 +33,6 @@ import { isChecking, isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
 import { bindCollapsingHero } from './collapse-hero.js';
-import { animeDepthLayers } from './anime-depth.js';
 import { workStyleOf } from './appearance.js';
 import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
 import { applyLocalMarks, buildMarkSheet } from './episode-marks.js';
@@ -697,10 +696,13 @@ export function createAnime(deps) {
     // يبقى مربوطًا حتى يُفتح عمل آخر: الرجوع للصفحة من «الكل» يجدها تنطوي كما تركتها
     const live = () => deps.currentPage() === 'anime' && state.detailToken === token;
     // الأنماط: حركة كل نمط بنظام الأساسي نفسه (CSS بخط زمني للتمرير + تسليم الانزلاق في collapse-hero)
+    // العمق مع التمرير من جدول depth.js لكل الأنماط، «الأساسي» منها (كان بنسختين يدويتين في anime.css
+    // وanime-depth.js). مداه في «الأساسي» ارتفاع البطل ناقص الشريط كما كان.
     let unLook = () => {};
-    let motionLayers = null;
-    if (lw) {
-      const dims = { span: hero.offsetHeight || 300, vh: globalThis.innerHeight || 800 };
+    let motionLayers = [];
+    const spanOf = () => (lw ? hero.offsetHeight || 300 : Math.max(1, hero.offsetHeight - bar.offsetHeight) || 300);
+    {
+      const dims = { span: spanOf(), vh: globalThis.innerHeight || 800 };
       const motion = lookMotion(look, { hero, dims });
       let tag = document.getElementById('wl-motion');
       if (!tag) {
@@ -711,17 +713,17 @@ export function createAnime(deps) {
       tag.textContent = motion.css();
       // ارتفاع البطل يتغيّر حين تصل صورته، والشاشة حين تدور: تُعاد الأرقام في CSS وJS معًا
       const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-        const next = { span: hero.offsetHeight || dims.span, vh: globalThis.innerHeight || dims.vh };
+        const next = { span: spanOf() || dims.span, vh: globalThis.innerHeight || dims.vh };
         if (next.span === dims.span && next.vh === dims.vh) return;
         Object.assign(dims, next);
         tag.textContent = motion.css();
       }) : null;
       ro?.observe(hero);
-      const unExtras = bindLookExtras(look, lw, { active: live });
+      const unExtras = lw ? bindLookExtras(look, lw, { active: live }) : () => {};
       unLook = () => { ro?.disconnect(); unExtras(); };
       motionLayers = motion.layers;
     }
-    const unHero = bindCollapsingHero({ hero, bar, layers: motionLayers ?? animeDepthLayers({ bg, cover, mark }), active: live });
+    const unHero = bindCollapsingHero({ hero, bar, layers: motionLayers, active: live });
     state.view.unbind = () => {
       unHero?.();
       unLook();
