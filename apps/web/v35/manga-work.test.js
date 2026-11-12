@@ -143,10 +143,14 @@ describe('«ويبتوني» و«مباشر»: البحث والخط الزمن�
     const dates = [998, 998, 991, 984, 977, 970].map((d) => d * DAY);
     expect(releaseBeat(dates, now)).toEqual({ days: 7, weekly: true, next: 1005 * DAY });
   });
-  it('لا إيقاع لأقل من أربعة إصدارات، ولا «قادم» لعمل توقف', () => {
+  it('لا إيقاع لأقل من أربعة إصدارات، ولا لعمل توقف أو انتهى', () => {
     expect(releaseBeat([1, 2, 3].map((d) => d * DAY))).toBeNull();
     const old = [100, 93, 86, 79].map((d) => d * DAY);
-    expect(releaseBeat(old, 1000 * DAY)?.next).toBeNull();
+    expect(releaseBeat(old, 1000 * DAY)).toBeNull();
+  });
+  it('رفع دفعات متباعدة لعمل مكتمل ليس إيقاع إصدار («كل ~13 يومًا»)', () => {
+    const batches = [998, 997, 985, 960, 959, 940, 912].map((d) => d * DAY);
+    expect(releaseBeat(batches, 1000 * DAY)).toBeNull();
   });
   it('«ويبتوني» على هيكل «المعرض» مع البحث وإيقاع الإصدار، و«المعرض» بلا بحث', () => {
     const html = detailMarkup('webtoon', { glyph, iconButton });

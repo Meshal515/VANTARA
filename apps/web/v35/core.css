@@ -3727,6 +3727,8 @@ html[data-motion='off'] .v35 .dock-scrim {
   z-index: 5;
   pointer-events: none;
 }
+/* الرجوع من صفحة عمل: المغادرة فوق الوجهة الثابتة (page-motion.js: over) */
+.v35 .page.page-out.page-over { z-index: 7; }
 /* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
 .v35 .page.page-in {
   position: relative;

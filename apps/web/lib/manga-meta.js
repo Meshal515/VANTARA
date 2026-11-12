@@ -104,15 +104,35 @@ export function matchMangaRating(title, candidates) {
   return { id: m.id, score: Math.round(score) / 10 };
 }
 
-/** استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة. */
-export async function fetchMangaRatings(titles, { fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+/**
+ * فن العمل الرسمي من AniList للعمل نفسه (المطابقة نفسها: الاسم بلا لبس، وليس للكبار): الغلاف بأعلى دقة
+ * والبنر العريض. هذا المصدر الرئيسي لأغلفة المانجا وبنراتها؛ غلاف المصدر يأتي بعده إلا إن كان أعلى جودة.
+ * @returns {{ cover: string|null, banner: string|null, color: string|null }|null}
+ */
+export function matchMangaArt(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return null;
+  const named = (candidates ?? []).filter((m) => !m.isAdult && !adultGenre(m.genres)
+    && [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key));
+  if (named.length !== 1) return null;
+  const m = named[0];
+  const cover = m.coverImage?.extraLarge || m.coverImage?.large || null;
+  if (!cover && !m.bannerImage) return null;
+  return { cover, banner: m.bannerImage || null, color: m.coverImage?.color || null };
+}
+
+/**
+ * استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة: التقييم والفن الرسمي معًا، فلا طلب ثانٍ للفن.
+ * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
+ */
+export async function fetchMangaMatches(titles, { fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
   const names = [...new Set(titles.filter(Boolean))].slice(0, 8);
-  const output = new Map(names.map((title) => [title, null]));
+  const output = new Map(names.map((title) => [title, { rating: null, art: null }]));
   if (!names.length) return output;
   const variables = Object.fromEntries(names.map((name, i) => [`q${i}`, name]));
   const args = names.map((_, i) => `$q${i}: String!`).join(', ');
   // بلا isAdult:false: عمل للكبار يجب أن يُعرف فيُحجب، لا أن يختفي من البحث فيبقى في القائمة
-  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id title { romaji english native } synonyms averageScore isAdult genres } }`).join(' ');
+  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id title { romaji english native } synonyms averageScore isAdult genres coverImage { extraLarge large color } bannerImage } }`).join(' ');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -123,9 +143,18 @@ export async function fetchMangaRatings(titles, { fetchImpl = globalThis.fetch, 
     if (!response.ok) throw new Error(`anilist_${response.status}`);
     const body = await response.json();
     if (!body?.data) throw new Error('anilist_no_data');
-    names.forEach((title, i) => output.set(title, matchMangaRating(title, body.data[`p${i}`]?.media)));
+    names.forEach((title, i) => {
+      const media = body.data[`p${i}`]?.media;
+      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media) });
+    });
     return output;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** التقييم وحده (للمستدعين القدامى). */
+export async function fetchMangaRatings(titles, options = {}) {
+  const found = await fetchMangaMatches(titles, options);
+  return new Map([...found].map(([title, m]) => [title, m.rating]));
 }

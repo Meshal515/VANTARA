@@ -235,7 +235,7 @@ export function monthOf(ms) {
 /**
  * إيقاع الإصدار في «ويبتوني»: وسيط الفاصل بين آخر الفصول المؤرَّخة (بلا تكرار اليوم نفسه، فعدة فصول في
  * يوم واحد إصدار واحد). يكفيه أربعة إصدارات. أسبوعي إن كان الوسيط 6–8 أيام. «القادم» = آخر إصدار + الوسيط،
- * ولا يُعرض إن فات بأكثر من فاصلين (العمل متوقف غالبًا).
+ * ولا إيقاع أصلًا لعمل آخر إصداره أبعد من فاصلين أو فواصله مبعثرة (رفع دفعات لعمل مكتمل).
  * @param {number[]} dates تواريخ نشر بالمللي ثانية
  * @returns {{days:number, weekly:boolean, next:number|null}|null}
  */
@@ -246,6 +246,13 @@ export function releaseBeat(dates, now = Date.now()) {
   const gaps = days.slice(1).map((d, i) => days[i] - d).sort((a, b) => a - b);
   const mid = gaps[Math.floor(gaps.length / 2)];
   if (!(mid >= 1) || mid > 60) return null;
+  // إيقاع حقيقي لا رفع دفعات: أغلب الفواصل قريبة من الوسيط. المصادر ترفع الأعمال المكتملة دفعات متباعدة
+  // («كل ~13 يومًا» لعمل انتهى)، فلا يُقال «يصدر» لما فواصله مبعثرة
+  const steady = gaps.filter((g) => Math.abs(g - mid) <= Math.max(2, mid * 0.35)).length;
+  if (steady < Math.ceil(gaps.length * 0.6)) return null;
+  // آخر إصدار أبعد من فاصلين (أو شهر ونصف): العمل متوقف أو انتهى، لا إيقاع
+  const today = Math.floor(now / DAY);
+  if (today - days[0] > Math.min(45, 2 * mid + 1)) return null;
   const next = (days[0] + mid) * DAY;
-  return { days: mid, weekly: mid >= 6 && mid <= 8, next: next + 2 * mid * DAY < now ? null : next };
+  return { days: mid, weekly: mid >= 6 && mid <= 8, next: next + mid * DAY < now ? null : next };
 }

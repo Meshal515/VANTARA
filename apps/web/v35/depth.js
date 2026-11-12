@@ -47,10 +47,31 @@ export const DEPTH_SPECS = Object.freeze({
     // «الملصق» بشخصيته (قرار المالك): خلفية هادئة تتحرك 24px وتكبر ×1.03 فقط، بدل 240px و×1.12
     poster: [{ sel: '.cn-detail-art > .cn-img', span: true, px: true, y: [0, 24], s: [1, 1.03] }],
   }),
-  // المانجا (قرار المالك، 12 نوفمبر): «المعرض» وحده بعمق تمرير؛ غلافه يميل للخلف ويتراجع كصفحة تُطوى.
-  // الأرقام كما كانت في محرك المانجا اليدوي (‎-22px، ‎-175px، 13°) على مدى 45% من الشاشة (380px على الجوال).
+  // المانجا (قرار المالك، 12 نوفمبر): لكل نمط شخصيته مع التمرير، بالمحرك نفسه. الطبقات حاويات لا تحمل
+  // حركة دخول (الغلاف والبنر يدخلان بحركتهما في manga.css)، فلا يُسقط أحدهما الآخر.
   manga: Object.freeze({
+    // «كلاسيكي»: كتاب يُغلق؛ الغلاف ينعطف جانبًا ويتراجع، والضوء خلفه يتأخر ويخفت
+    page: [
+      { sel: '.detail-glow', span: true, y: [0, 0.4], o: [1, 0.35] },
+      { sel: '.detail-head > .detail-cover', range: [0, 0.4], p: 900, y: [0, -10], z: [0, -120], ry: [0, -16] },
+    ],
+    // «المعرض»: الغلاف يميل للخلف ويتراجع كصفحة تُطوى (أرقامه السابقة)
     gallery: [{ sel: '.mw-stage > .mw-lift', range: [0, 0.45], p: 1000, y: [0, -22], z: [0, -175], rx: [0, 13] }],
+    // «الملف»: البنر يتأخر عن الصفحة ويكبر خلفها، وصف الهوية يقترب نحوك
+    profile: [
+      { sel: '.mw-ban', at: 'self', span: true, y: [0, 0.45], s: [1, 1.08] },
+      { sel: '.mw-idrow', range: [0, 0.35], p: 900, y: [0, -14], z: [0, 60] },
+    ],
+    // «من حيث وقفت»: البطاقة تنقلب للخلف كورقة في رزمة، ورقم الفصل يكبر نحوك
+    resume: [
+      { sel: '.mw-resume', at: 'self', range: [0, 0.4], p: 900, rx: [0, -12], z: [0, -90], o: [1, 0.5] },
+      { sel: '.mw-resume .mw-big', range: [0, 0.3], y: [0, -6], s: [1, 1.12] },
+    ],
+    // «ويبتوني»: الفن الطولي يُقرأ كشريط؛ ينزلق أبطأ من الصفحة ويكبر قليلًا، والاسم فوقه يصعد ويغيب
+    webtoon: [
+      { sel: '.mw-stage > .mw-lift', at: 'hero', span: true, y: [0, 0.35], s: [1, 1.04] },
+      { sel: '.mw-stage > .mw-center', range: [0, 0.3], y: [0, -30], o: [1, 0] },
+    ],
   }),
 });
 
@@ -82,7 +103,7 @@ export function depthMotion(section, look, { hero, dims, scope, hostOf = (h) => 
     const [a, b] = rangeOf(l);
     const from = layerValue(l, 0, span);
     const to = layerValue(l, 1, span);
-    const sel = l.at === 'self' ? `${scope} > .aw-hero` : `${scope} ${l.sel}`;
+    const sel = l.at === 'self' ? `${scope} ${l.sel === '.aw-hero' ? '> .aw-hero' : l.sel}` : `${scope} ${l.sel}`;
     const hold = l.hold == null ? '' : `${Math.round(l.hold * 100)}%{opacity:${from.opacity}}`;
     return `@keyframes ${name}{from{transform:${from.transform};opacity:${from.opacity}}${hold}to{transform:${to.transform};opacity:${to.opacity}}}
 html:not([data-motion='off']) ${sel}{animation:${name} linear both;animation-timeline:scroll(root block);animation-range:${a}px ${Math.max(a + 1, b)}px}`;

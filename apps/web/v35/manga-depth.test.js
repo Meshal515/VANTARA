@@ -3,13 +3,17 @@ import { readFileSync } from 'node:fs';
 import { DEPTH_SPECS, depthMotion, layerValue } from './depth.js';
 import { MANGA_LOOKS } from './manga-work.js';
 
-// عمق تمرير المانجا (قرار المالك، 12 نوفمبر): «المعرض» وحده، ومن جدول depth.js كبقية الأقسام.
+// عمق تمرير المانجا (قرار المالك، 12 نوفمبر): لكل نمط هويته، من جدول depth.js كبقية الأقسام.
 // المحرك اليدوي (mountMangaScrollDepth و--mw-scroll-depth) حُذف: كان يكتب متغيرًا بجافاسكربت كل إطار.
 describe('manga scroll depth lives in the shared depth table', () => {
-  it('only «المعرض» has a depth row; every other manga look scrolls flat', () => {
-    expect(Object.keys(DEPTH_SPECS.manga)).toEqual(['gallery']);
-    for (const look of MANGA_LOOKS.filter((l) => l !== 'gallery')) {
-      expect(depthMotion('manga', look, { hero: null, dims: { span: 500, vh: 844 }, scope: '.x' }).layers).toEqual([]);
+  it('every manga look has its own scroll identity in the shared table', () => {
+    expect(Object.keys(DEPTH_SPECS.manga).sort()).toEqual([...MANGA_LOOKS].sort());
+    const signatures = MANGA_LOOKS.map((look) => JSON.stringify(DEPTH_SPECS.manga[look]));
+    expect(new Set(signatures).size).toBe(MANGA_LOOKS.length);
+  });
+  it('no depth layer is an element that carries an entry animation (cover, banner image)', () => {
+    for (const look of MANGA_LOOKS) for (const l of DEPTH_SPECS.manga[look]) {
+      expect(l.sel).not.toMatch(/\.mw-cover$|> img$|\.mw-ban > img/);
     }
   });
   it('«المعرض» keeps its numbers: the cover leans back 13° and recedes 175px over 380px on a phone', () => {

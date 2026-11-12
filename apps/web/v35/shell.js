@@ -61,7 +61,8 @@ import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
-import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
+import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
+import { cachedArt, rememberArt, resolveArt } from '../lib/manga-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut } from './page-motion.js';
@@ -761,24 +762,35 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const ratingPromises = new Map();
   const ratingQueue = [];
   let ratingTimer = null;
-  function ratingFor(title) {
+  // التقييم والفن الرسمي من طلب AniList نفسه (ثمانية عناوين في استعلام): artFor لا يكلّف طلبًا إضافيًا
+  const artPromises = new Map();
+  function matchFor(title) {
     if (!ratingPromises.has(title)) {
+      let resolveArtOf;
+      artPromises.set(title, new Promise((r) => { resolveArtOf = r; }));
       ratingPromises.set(title, new Promise((resolve) => {
-        ratingQueue.push({ title, resolve });
+        ratingQueue.push({ title, resolve, resolveArt: resolveArtOf });
         ratingTimer ??= setTimeout(flushRatings, 50);
       }));
     }
+  }
+  function ratingFor(title) {
+    matchFor(title);
     return ratingPromises.get(title);
+  }
+  function artFor(title) {
+    matchFor(title);
+    return artPromises.get(title);
   }
   async function flushRatings() {
     ratingTimer = null;
     const batch = ratingQueue.splice(0, 8);
     if (!batch.length) return;
     try {
-      const matches = await fetchMangaRatings(batch.map((b) => b.title));
-      batch.forEach(({ title, resolve }) => resolve(matches.get(title) ?? null));
+      const matches = await fetchMangaMatches(batch.map((b) => b.title));
+      batch.forEach(({ title, resolve, resolveArt }) => { resolve(matches.get(title)?.rating ?? null); resolveArt(matches.get(title)?.art ?? null); });
     } catch {
-      batch.forEach(({ title, resolve }) => { ratingPromises.delete(title); resolve(null); });
+      batch.forEach(({ title, resolve, resolveArt }) => { ratingPromises.delete(title); artPromises.delete(title); resolve(null); resolveArt(null); });
     }
     if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
   }
@@ -1656,11 +1668,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
     state.chapterQuery = '';
-    // عمق التمرير من جدول depth.js كبقية الأقسام؛ في المانجا «المعرض» وحده له صف (قرار المالك)
-    const stage = page.querySelector('.mw-stage');
-    unbindMangaDepth = stage
-      ? mountDepth('manga', look, { hero: stage, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage.offsetHeight, active: () => currentPage() === 'detail' })
-      : mountDepth('manga', look, { hero: page, scope: '', styleId: 'mw-motion', spanOf: () => 0, active: () => false });
+    // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
+    const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
+    unbindMangaDepth = mountDepth('manga', look, { hero: stage ?? page, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
     if (TABBED_LOOKS.includes(look)) bindDetailTabs();
     bindChapterSearch();
     paintDetailTools();
@@ -1807,53 +1817,54 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const glow = q('detailGlow');
       glow?.classList.remove('ready');
       glow?.removeAttribute('src');
-      // «الملف»: البنر الحقيقي أولًا، ثم الغلاف الحادّ كبديل؛ الضبابية خلفية زخرفية فقط.
+      // الغلاف والبنر يُحسمان في الخفاء ثم يظهران مرة واحدة (lib/manga-art.js): AniList أولًا، والمصدر فقط إن
+      // كان أعلى جودة فعلًا. ما حُسم يُحفظ للعمل فلا يتبدل في الفتحة التالية. الهيكل حتى ذلك.
       const banner = q('detailBanner');
       const bannerBox = banner?.closest('.mw-ban');
-      const wide = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
-      let coverUrl = null;
-      let usingCover = false;
-      const showCover = () => {
-        if (!banner || !coverUrl || !banner.isConnected || state.current?.id !== w.id) return;
-        usingCover = true;
-        bannerBox?.classList.remove('mw-ban--art');
-        bannerBox?.classList.add('mw-ban--cover');
-        banner.classList.remove('ready');
-        banner.src = coverUrl;
-      };
-      if (banner) {
-        banner.classList.remove('ready');
-        bannerBox?.classList.remove('mw-ban--art', 'mw-ban--cover');
-        banner.onload = () => {
-          if (!banner.isConnected || state.current?.id !== w.id) return;
-          // Some manga providers label a portrait cover as bannerImage.
-          // Only true landscape art occupies the hero at full strength.
-          const isWide = !usingCover && isWideMangaArtwork(banner.naturalWidth, banner.naturalHeight);
-          bannerBox?.classList.toggle('mw-ban--art', isWide);
-          bannerBox?.classList.toggle('mw-ban--cover', !isWide);
-          banner.classList.add('ready');
-        };
-        // فشل البنر لا يخفي الصورة: جرّب الغلاف النهائي عند توفره.
-        banner.onerror = () => {
-          banner.classList.remove('ready');
-          bannerBox?.classList.remove('mw-ban--art');
-          if (!usingCover && coverUrl) showCover();
-          else banner.removeAttribute('src');
-        };
-        if (wide) banner.src = wide;
-        else banner.removeAttribute('src');
-      }
-      // لا معاينة منخفضة الجودة قبل الغلاف النهائي، ولا تتبدل الصورة عند وصول metadata.
-      void mountImage(cover, w, { final: true }).then((url) => {
-        if (!url || state.current?.id !== w.id) return;
-        coverUrl = url;
-        // ضوء خلفي فقط؛ NEVER use the blurred ambient image as the visible profile banner.
+      banner?.classList.remove('ready');
+      bannerBox?.classList.remove('mw-ban--art', 'mw-ban--cover');
+      const ref = String(w.id);
+      const live = () => cover.isConnected && cover.dataset.for === ref && String(state.current?.id) === ref;
+      const paintArt = (art) => {
+        if (!live()) return;
+        const img = new Image();
+        img.alt = '';
+        img.decoding = 'async';
+        img.classList.add('img-fade');
+        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); };
+        img.src = art.cover;
+        cover.replaceChildren(img);
+        shownCovers.set(ref, art.cover);
         for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
           g.onload = () => g.classList.add('ready');
-          g.src = url;
+          g.src = art.cover;
         }
-        if (banner && (!wide || !banner.hasAttribute('src'))) showCover();
-      });
+        if (banner) {
+          bannerBox?.classList.toggle('mw-ban--art', art.wide);
+          bannerBox?.classList.toggle('mw-ban--cover', !art.wide);
+          banner.onload = () => { if (live()) banner.classList.add('ready'); };
+          banner.onerror = () => { if (live() && banner.getAttribute('src') !== art.cover) { bannerBox?.classList.replace('mw-ban--art', 'mw-ban--cover'); banner.src = art.cover; } };
+          banner.src = art.banner || art.cover;
+        }
+      };
+      const known = cachedArt(ref);
+      if (known) paintArt(known);
+      else {
+        cover.replaceChildren(imageLoadingNode());
+        const wideHint = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
+        const title = w._work?.title || w.title?.english || titleOf(w);
+        void (async () => {
+          // أغلفة المصادر بمحرّكها (ترويساتها) إن أمكن، وإلا الرابط نفسه؛ لا تنتظر أكثر من ثانيتين ونصف
+          const sources = await Promise.all(coverCandidates(w).slice(0, 4).map((c) =>
+            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
+          const art = await resolveArt({ official: artFor(title), sources, wideHint });
+          if (!live()) return;
+          if (!art.cover) return void mountImage(cover, w, { final: true });
+          rememberArt(ref, art);
+          rememberCover(ref, art.cover);
+          paintArt(art);
+        })();
+      }
     }
     paintStory(w);
     refreshLibraryDetail();
@@ -2838,7 +2849,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function paintReleaseBeat(w, rows) {
     const host = q('releaseBeat');
     if (!host) return;
-    const done = /FINISHED|CANCELLED|COMPLETED/i.test(String(state.detailFacts?.status ?? w.status ?? ''));
+    const done = [state.detailFacts?.status, w.status].some((x) => /FINISHED|CANCELLED|COMPLETED|ENDED|HIATUS|مكتمل|منته|متوقف/i.test(String(x ?? '')));
     const beat = done ? null : releaseBeat(mainChapters(rows).map((r) => Number(r.chapter?.dateUpload)));
     host.hidden = !beat;
     if (!beat) return;
@@ -5253,7 +5264,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (dockFirst) dockCtl?.activate(id);
     const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
     finishPageMotion();
-    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
+    // طبقة واحدة تتحرك: فتح عمل فوق أصل ثابت، والرجوع منه فوق وجهة ثابتة (page-motion.js)
+    const intoWork = WORK_PAGES.has(id) && !WORK_PAGES.has(from);
+    const outOfWork = WORK_PAGES.has(from) && !WORK_PAGES.has(id) && !unifiedRestore;
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore || intoWork, over: outOfWork, visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
     const nav = q('bottomNav');
     if (MAIN_PAGES.includes(id)) {
@@ -5344,7 +5358,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
-    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+    if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && !(outOfWork && outgoing) && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
         if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id) });
       };
