@@ -137,6 +137,7 @@ const SHELL = [
   '/data/manga-aliases.json',
   '/lib/manga-meta.js',
   '/lib/manga-art.js',
+  '/lib/art.js',
   '/v35/card-reconcile.js',
   '/v35/image-loading.js',
   '/v35/text-actions.js',
