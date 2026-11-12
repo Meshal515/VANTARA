@@ -72,3 +72,41 @@ describe('chapter read state', () => {
     expect(shouldAutoMark({ ratio: 0.8, alreadyRead: true })).toBe(false);
   });
 });
+
+// #323 U-21: نظرة على فصل قديم لا تقلب «تابع»
+import { continueChapter } from './reading.js';
+describe('continue point', () => {
+  const ch = (n) => ({ number: n, key: `c${n}` });
+  const ordered = [ch(335), ch(336), ch(337), ch(385), ch(386), ch(387)];
+  const keyOf = (row, c) => row.chapter_key === c.key;
+  const row = (n, ratio, at) => ({ chapter_key: `c${n}`, ratio, updated_at: at });
+  it('a short look back at an older chapter keeps the furthest chapter', () => {
+    expect(continueChapter([row(386, 0.4, 100), row(337, 0.05, 200)], ordered, keyOf).number).toBe(386);
+  });
+  it('really re-reading an older chapter (half or more) moves «continue» there', () => {
+    expect(continueChapter([row(386, 0.4, 100), row(337, 0.6, 200)], ordered, keyOf).number).toBe(337);
+  });
+  it('the latest reading ahead of everything wins, and a finished chapter goes to the next', () => {
+    expect(continueChapter([row(337, 1, 100), row(386, 0.3, 200)], ordered, keyOf).number).toBe(386);
+    expect(continueChapter([row(386, 0.99, 200)], ordered, keyOf).number).toBe(387);
+  });
+  it('nothing usable: null', () => {
+    expect(continueChapter([], ordered, keyOf)).toBeNull();
+    expect(continueChapter([row(1, 0.5, 1)], ordered, keyOf)).toBeNull();
+  });
+});
+
+// #323 U-29: التمرير السريع لا يعلّم الفصول مقروءة
+describe('auto mark needs real reading time', () => {
+  it('a 3-second fly-through of a 40-page chapter is not «read»', () => {
+    expect(shouldAutoMark({ ratio: 1, alreadyRead: false, readMs: 3000, pages: 40 })).toBe(false);
+  });
+  it('real reading of the first fifth marks it', () => {
+    expect(shouldAutoMark({ ratio: 0.2, alreadyRead: false, readMs: 30_000, pages: 40 })).toBe(true);
+  });
+  it('long chapters need proportionally more time (¼ s per page, at least 5 s)', () => {
+    expect(shouldAutoMark({ ratio: 0.5, alreadyRead: false, readMs: 9_000, pages: 60 })).toBe(false);
+    expect(shouldAutoMark({ ratio: 0.5, alreadyRead: false, readMs: 15_000, pages: 60 })).toBe(true);
+    expect(shouldAutoMark({ ratio: 0.5, alreadyRead: false, readMs: 4_000, pages: 4 })).toBe(false);
+  });
+});

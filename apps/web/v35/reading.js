@@ -87,6 +87,37 @@ export function markChapter(sync, seriesRef, row, read) {
  * شرائح كثيرة أسرع من ذلك، فتُعلَّم فصول وتُترك أخرى بلا نمط.
  */
 export const MARK_READ_RATIO = 0.2;
-export function shouldAutoMark({ ratio, alreadyRead }) {
-  return !alreadyRead && ratio >= MARK_READ_RATIO;
+/**
+ * ومعها وقت قراءة فعلي (#323 U-29): التمرير السريع عبر 39 فصلًا كان يعلّمها كلها مقروءة لأن أبعد
+ * صفحة وحدها تكفي. الحد الأدنى 5 ثوانٍ أو ربع ثانية لكل صفحة في الفصل، أيهما أكبر. `readMs` غير
+ * المعروف (مستدعٍ قديم) لا يمنع التعليم.
+ */
+export const MIN_READ_MS = 5000;
+export const READ_MS_PER_PAGE = 250;
+export function shouldAutoMark({ ratio, alreadyRead, readMs, pages }) {
+  if (alreadyRead || !(ratio >= MARK_READ_RATIO)) return false;
+  if (readMs == null) return true;
+  return readMs >= Math.max(MIN_READ_MS, (Number(pages) || 0) * READ_MS_PER_PAGE);
+}
+
+/**
+ * أين يكمل «تابع»: الفصل الأبعد الذي تقدّمت فيه، لا آخر صف كُتب فقط (#323 U-21).
+ * نظرة سريعة على فصل قديم (قرأت 386 ثم فتحت 337 ثماني ثوانٍ) كانت تقلب «تابع» إلى 337. القديم يأخذ
+ * «تابع» فقط إن قرأت منه شيئًا حقيقيًا (نصفه فأكثر)؛ وإلا يبقى الأبعد. فصل مكتمل (≥98%) ← الذي يليه.
+ * `ordered` الفصول من الأقدم للأحدث، و`keyOf(row, chapter)` يطابق صف التقدم بفصله.
+ */
+export const REREAD_RATIO = 0.5;
+export function continueChapter(rows, ordered, keyOf) {
+  if (!rows?.length || !ordered?.length) return null;
+  const placed = [];
+  for (const row of rows) {
+    const at = ordered.findIndex((c) => keyOf(row, c));
+    if (at >= 0) placed.push({ row, at });
+  }
+  if (!placed.length) return null;
+  const latest = placed.reduce((a, b) => ((b.row.updated_at ?? 0) > (a.row.updated_at ?? 0) ? b : a));
+  const furthest = placed.reduce((a, b) => (b.at > a.at ? b : a));
+  const pick = latest.at >= furthest.at || (latest.row.ratio ?? 0) >= REREAD_RATIO ? latest : furthest;
+  if ((pick.row.ratio ?? 0) < 0.98) return ordered[pick.at];
+  return ordered[pick.at + 1] ?? ordered[pick.at];
 }

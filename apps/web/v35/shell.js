@@ -31,7 +31,7 @@ import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
+import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, markChapter, markChapters } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
@@ -2531,13 +2531,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const refs = refsOf(ref);
     const rows = sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref));
     if (!rows.length || !base.length) return null;
-    const latest = rows.reduce((a, b) => ((b.updated_at ?? 0) > (a.updated_at ?? 0) ? b : a));
     // الترتيب من الأقدم للأحدث؛ مفتاح الفصل بمرجع صفّه نفسه (القديم إن كان منه)
     const ordered = [...base].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
-    const at = ordered.findIndex((r) => chapterKeyOf(latest.series_ref, r) === latest.chapter_key);
-    if (at < 0) return null;
-    if ((latest.ratio ?? 0) < 0.98) return ordered[at];
-    return ordered[at + 1] ?? ordered[at];
+    return continueChapter(rows, ordered, (row, chapter) => chapterKeyOf(row.series_ref, chapter) === row.chapter_key);
   }
 
   /** آخر مرة قرأت فيها هذا العمل (آخر تقدم محفوظ). */
