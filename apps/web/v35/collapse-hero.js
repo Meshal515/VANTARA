@@ -43,10 +43,12 @@ export const lerp = (a, b, t) => a + (b - a) * t;
 export const rangeProgress = (y, [start, end]) => clamp((y - start) / Math.max(1, end - start));
 
 /**
- * @param {{ hero: HTMLElement, bar: HTMLElement, bg?: HTMLElement|null, head?: HTMLElement|null, layers?: DepthLayer[], active: () => boolean }} o
+ * `bar` اختياري: صفحة تملك طيّ شريطها بنفسها (المانجا) تمرّر null فلا يُلمس شريطها ولا يُطرح من المدى.
+ * @param {{ hero: HTMLElement, bar?: HTMLElement|null, bg?: HTMLElement|null, head?: HTMLElement|null, layers?: DepthLayer[], active: () => boolean }} o
  * @returns {() => void} فكّ الربط
  */
-export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers = [], active }) {
+export function bindCollapsingHero({ hero, bar = null, bg = null, head = null, layers = [], active }) {
+  const barHeight = () => bar?.offsetHeight ?? 0;
   let queued = false;
   let last = null;
   const still = reduced();
@@ -72,11 +74,11 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
     queued = false;
     if (!active() || !hero.isConnected) return;
     const y = window.scrollY;
-    const next = Math.max(1, hero.offsetHeight - bar.offsetHeight);
+    const next = Math.max(1, hero.offsetHeight - barHeight());
     // مدى CSS هو مدى هذا المسار نفسه: لا قفزة عند التسليم بينهما
     if (cssNodes.length && next !== span) hero.style.setProperty?.('--hero-span', `${next}px`);
     span = next;
-    const p = collapseProgress(y, hero.offsetHeight, bar.offsetHeight);
+    const p = collapseProgress(y, hero.offsetHeight, barHeight());
     // CSS يثبت عند نهاية المدى، فالمسار حين يتسلّم منه يثبت مثله
     const f = heroFrame(handed ? Math.min(y, span) : y, p, { still });
     if (bg && f.bg && (!cssBg || handed)) bg.style.transform = f.bg;
@@ -95,7 +97,7 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, layers =
     }
     if (f.collapsed !== last) {
       last = f.collapsed;
-      bar.classList.toggle('collapsed', f.collapsed);
+      bar?.classList.toggle('collapsed', f.collapsed);
     }
   };
   const handBack = () => {

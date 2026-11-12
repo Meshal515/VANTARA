@@ -32,9 +32,9 @@ import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
 import { isChecking, isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
-import { bindCollapsingHero } from './collapse-hero.js';
 import { workStyleOf } from './appearance.js';
-import { bindLookExtras, bindRails, heroPlan, lookMotion, renderLook } from './work-looks.js';
+import { bindLookExtras, bindRails, heroPlan, renderLook } from './work-looks.js';
+import { mountDepth } from './depth.js';
 import { applyLocalMarks, buildMarkSheet } from './episode-marks.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
 import { workKind, workMenuEntries } from './work-menu.js';
@@ -625,6 +625,7 @@ export function createAnime(deps) {
     // الترويسة: رجوع، والشعار صغيرًا حين ينطوي البطل، وفي الجهة المقابلة المفضلة ورشّح والمزيد
     // رموزًا بلا كلام. تبقى ظاهرة مع التمرير؛ صلبة متى انطوى البطل (لا محتوى من خلفها)
     const bar = el('header', 'aw-bar');
+    bar.dataset.motionFixed = ''; // شريط ثابت: لا يندفع مع المحتوى (page-motion.js)
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
     const barTitle = el('div', 'aw-bar-title');
     const barText = el('span', 'aw-bar-text', m.title);
@@ -698,35 +699,12 @@ export function createAnime(deps) {
     // الأنماط: حركة كل نمط بنظام الأساسي نفسه (CSS بخط زمني للتمرير + تسليم الانزلاق في collapse-hero)
     // العمق مع التمرير من جدول depth.js لكل الأنماط، «الأساسي» منها (كان بنسختين يدويتين في anime.css
     // وanime-depth.js). مداه في «الأساسي» ارتفاع البطل ناقص الشريط كما كان.
-    let unLook = () => {};
-    let motionLayers = [];
     const spanOf = () => (lw ? hero.offsetHeight || 300 : Math.max(1, hero.offsetHeight - bar.offsetHeight) || 300);
-    {
-      const dims = { span: spanOf(), vh: globalThis.innerHeight || 800 };
-      const motion = lookMotion(look, { hero, dims });
-      let tag = document.getElementById('wl-motion');
-      if (!tag) {
-        tag = document.createElement('style');
-        tag.id = 'wl-motion';
-        document.head.append(tag);
-      }
-      tag.textContent = motion.css();
-      // ارتفاع البطل يتغيّر حين تصل صورته، والشاشة حين تدور: تُعاد الأرقام في CSS وJS معًا
-      const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-        const next = { span: spanOf() || dims.span, vh: globalThis.innerHeight || dims.vh };
-        if (next.span === dims.span && next.vh === dims.vh) return;
-        Object.assign(dims, next);
-        tag.textContent = motion.css();
-      }) : null;
-      ro?.observe(hero);
-      const unExtras = lw ? bindLookExtras(look, lw, { active: live }) : () => {};
-      unLook = () => { ro?.disconnect(); unExtras(); };
-      motionLayers = motion.layers;
-    }
-    const unHero = bindCollapsingHero({ hero, bar, layers: motionLayers, active: live });
+    const unDepth = mountDepth('anime', look, { hero, bar, scope: `.v35 .aw[data-style='${look}']`, styleId: 'wl-motion', spanOf, active: live });
+    const unExtras = lw ? bindLookExtras(look, lw, { active: live }) : () => {};
     state.view.unbind = () => {
-      unHero?.();
-      unLook();
+      unDepth();
+      unExtras();
       state.view?.episodeControls?.destroy();
       state.view?.unbindEpisodeRails?.();
     };

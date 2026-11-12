@@ -2,7 +2,6 @@
  * أنماط صفحة عمل المانجا (إعدادات ← المظهر)، بقرارات المالك:
  *   - page «كلاسيكي»: صفحة Stable كما هي، بلا عمق.
  *   - webtoon «ويبتوني»: الفن طوليًا بنسبته، إيقاع الإصدار، والفصول خط زمني بالشهور.
- *   - direct «مباشر»: رأس مدمج ثم الفصول فورًا.
  *   - gallery «المعرض»: الغلاف في الوسط بضوء من ألوانه، الزر بين دائرتين، وتبويبات.
  *   - profile «الملف»: صورة العمل العريضة والغلاف متداخل معها، ثلاثة أرقام، والفصول بنطاقات 50.
  *   - resume «من حيث وقفت»: رقم الفصل التالي كبيرًا، والفصول شبكة أرقام.
@@ -12,12 +11,12 @@
  */
 
 /** معرّفات متفق عليها مع إعدادات المظهر؛ الأول هو الأساسي. */
-export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
+export const MANGA_LOOKS = Object.freeze(['page', 'gallery', 'profile', 'resume', 'webtoon']);
 
 /** أنماط تبني على هيكل «المعرض» (الغلاف، الزر بين مربعين، وتبويبات) وتختلف بالـCSS وبعض المحتوى. */
-export const TABBED_LOOKS = Object.freeze(['gallery', 'webtoon', 'direct']);
+export const TABBED_LOOKS = Object.freeze(['gallery', 'webtoon']);
 
-/** أي قيمة غير الأربعة (ومنها «core» قبل أن تعرف الإعدادات أنماط المانجا) = «الصفحة». */
+/** أي قيمة غير معروفة (ومنها نمط حُذف، أو «core» قبل أن تعرف الإعدادات أنماط المانجا) = «كلاسيكي». */
 export const mangaLook = (id) => (MANGA_LOOKS.includes(id) ? id : 'page');
 
 /** Distinguish a genuine wide banner from a portrait/square metadata image. */
@@ -99,11 +98,11 @@ export const isNewChapter = (row, read, now = Date.now()) =>
 export function detailMarkup(look, { glyph, iconButton }) {
   const L = mangaLook(look);
   const bar =
-    `<header class="aw-bar mw-bar" id="detailTop">${iconButton('back', 'رجوع', { act: 'backFromDetail' })}` +
+    `<header class="aw-bar mw-bar" id="detailTop" data-motion-fixed>${iconButton('back', 'رجوع', { act: 'backFromDetail' })}` +
     `<div class="aw-bar-title"><span class="aw-bar-text" id="detailTopTitle" dir="auto"></span></div>` +
     `<div class="aw-tools" id="detailTools"></div><div class="aw-menu" id="detailMenu" role="menu" aria-label="المزيد"></div></header>` +
     // ستارة القائمة: تفصل عناوين الدوائر عن الصورة تحتها، ولمستها تغلق القائمة
-    '<div class="mw-scrim" id="detailScrim" aria-hidden="true"></div>';
+    '<div class="mw-scrim" id="detailScrim" aria-hidden="true" data-motion-fixed></div>';
   const amb = (cls = 'mw-amb') => `<div class="${cls}" aria-hidden="true"><img id="detailGlow" alt="" decoding="async"></div>`;
   const cover = '<div class="mw-cover" id="detailCover"></div>';
   const kick = '<div class="mw-kick" id="detailKicker"></div>';
@@ -138,15 +137,16 @@ export function detailMarkup(look, { glyph, iconButton }) {
   const info = `<section class="mw-info"><h2 class="mw-h">معلومات</h2>${insights}<div class="info-grid" id="infoGrid"></div></section>`;
 
   if (TABBED_LOOKS.includes(L)) {
-    // «ويبتوني» و«مباشر» (قرار المالك، 12 نوفمبر): بحث في الفصول برقمه أو اسمه بدل النطاقات
-    const find = L === 'gallery' ? '' :
+    // «ويبتوني» (قرار المالك، 12 نوفمبر): بحث في الفصول برقمه أو اسمه بدل النطاقات
+    const find = L !== 'webtoon' ? '' :
       `<label class="mw-find">${glyph('search', { size: 16 })}<input type="search" id="chapterSearch" inputmode="search" enterkeyhint="search" ` +
       `placeholder="ابحث برقم الفصل أو اسمه" aria-label="ابحث في الفصول" autocomplete="off"></label>`;
     // «ويبتوني»: إيقاع الإصدار يُحسب من تواريخ الفصول (shell.js)، ويُخفى إن لم يكفِ ما يُحسب منه
     const beat = L === 'webtoon' ? '<div class="wt-beat" id="releaseBeat" hidden></div>' : '';
     return (
       bar +
-      `<div class="mw-stage">${amb()}${cover}<div class="mw-center mw-wrap">${title}${stats}${genres}</div>${beat}</div>` +
+      // .mw-lift: طبقة عمق التمرير (depth.js)، منفصلة عن الغلاف الذي يحمل حركة الدخول
+      `<div class="mw-stage">${amb()}<div class="mw-lift">${cover}</div><div class="mw-center mw-wrap">${title}${stats}${genres}</div>${beat}</div>` +
       `<div class="mw-wrap mw-acts"><div class="mw-row">${square('libraryBtn', 'toggleLibraryCurrent', 'library', 'مكتبتي')}${cta()}` +
       `${square('togetherBtn', 'readTogetherCurrent', 'users', 'اقرأ مع أصدقائك')}</div>${progress()}</div>` +
       `<div class="mw-tabbed"><div class="mw-tabs" role="tablist" id="detailTabs">` +
@@ -212,62 +212,7 @@ export function detailMarkup(look, { glyph, iconButton }) {
 
 
 /**
- * Scroll-linked depth for the four manga detail looks. This is deliberately
- * independent of page enter/exit animation and of manga data/rendering.
- * Only a compositor-friendly CSS custom property changes on scroll.
- */
-export function mangaScrollProgress(y, distance = 380) {
-  return Math.max(0, Math.min(1, (Number(y) || 0) / distance));
-}
-
-/** One passive scroll listener per mounted detail; no timers or DOM rebuilds. */
-export function mountMangaScrollDepth(root, win = window, doc = document) {
-  const page = root.querySelector('#detail');
-  if (!page) return { sync() {}, destroy() {} };
-  const reduced = typeof win.matchMedia === 'function'
-    ? win.matchMedia('(prefers-reduced-motion: reduce)')
-    : null;
-  let frame = null;
-  let disposed = false;
-
-  const paint = () => {
-    frame = null;
-    if (disposed) return;
-    const enabled = page.isConnected && page.classList.contains('active')
-      && root.dataset.section === 'manga' && !reduced?.matches && !doc.hidden;
-    if (!enabled) {
-      page.removeAttribute('data-scroll-depth');
-      page.style.removeProperty('--mw-scroll-depth');
-      return;
-    }
-    const depth = mangaScrollProgress(win.scrollY);
-    page.dataset.scrollDepth = 'on';
-    page.style.setProperty('--mw-scroll-depth', depth.toFixed(3));
-  };
-  const sync = () => {
-    if (!disposed && frame === null) frame = win.requestAnimationFrame(paint);
-  };
-  win.addEventListener('scroll', sync, { passive: true });
-  reduced?.addEventListener?.('change', sync);
-  doc.addEventListener('visibilitychange', sync);
-  sync();
-  return {
-    sync,
-    destroy() {
-      if (disposed) return;
-      disposed = true;
-      if (frame !== null) win.cancelAnimationFrame(frame);
-      win.removeEventListener('scroll', sync);
-      reduced?.removeEventListener?.('change', sync);
-      doc.removeEventListener('visibilitychange', sync);
-      page.removeAttribute('data-scroll-depth');
-      page.style.removeProperty('--mw-scroll-depth');
-    },
-  };
-}
-
-/**
- * بحث الفصول («ويبتوني» و«مباشر»): رقم = الفصول التي يبدأ رقمها به (12 ← 12، 120، 12.5)، وأي نص آخر
+ * بحث الفصول («ويبتوني»): رقم = الفصول التي يبدأ رقمها به (12 ← 12، 120، 12.5)، وأي نص آخر
  * يُطابق اسم الفصل أو فريق الترجمة. يبحث في كل الصفوف لا في الدفعة المعروضة.
  * @param {object[]} rows
  * @param {string} query

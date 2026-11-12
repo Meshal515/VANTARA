@@ -24,7 +24,8 @@ import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, mountMangaScrollDepth, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
+import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
@@ -82,7 +83,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { applyAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
+import { applyAppearance, migrateAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
@@ -243,6 +244,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   onChapters(observeMangaChapters);
   // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
   try { trimArtCache(); } catch { /* اختياري */ }
+  migrateAppearance();
   const root = el('div', 'v35');
   bindTabMotion(root);
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
@@ -1640,22 +1642,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * هيكل صفحة العمل بالنمط المختار في الإعدادات (manga-work.js). يُبنى عند كل فتح عمل؛ التحديثات بعده
    * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
    */
-  let mangaDepth = null;
+  let unbindMangaDepth = () => {};
   function mountDetail() {
-    mangaDepth?.destroy();
+    unbindMangaDepth();
     closeDetailMenu();
     state.marking = null;
     const page = q('detail');
     const look = mangaLook(workStyleOf('manga'));
     page.dataset.look = look;
-    // «ويبتوني» و«مباشر» يبنيان على أساس «المعرض» (data-base) ويختلفان بقواعدهما
+    // «ويبتوني» يبني على أساس «المعرض» (data-base) ويختلف بقواعده
     if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
     else delete page.dataset.base;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
     state.chapterQuery = '';
-    // بلا عمق تمرير: «كلاسيكي» (Stable كما هي)، والنمطان الجديدان إلى أن يُصمَّم عمقهما (قرار المالك)
-    mangaDepth = ['page', 'webtoon', 'direct'].includes(look) ? null : mountMangaScrollDepth(root);
+    // عمق التمرير من جدول depth.js كبقية الأقسام؛ في المانجا «المعرض» وحده له صف (قرار المالك)
+    const stage = page.querySelector('.mw-stage');
+    unbindMangaDepth = stage
+      ? mountDepth('manga', look, { hero: stage, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage.offsetHeight, active: () => currentPage() === 'detail' })
+      : mountDepth('manga', look, { hero: page, scope: '', styleId: 'mw-motion', spanOf: () => 0, active: () => false });
     if (TABBED_LOOKS.includes(look)) bindDetailTabs();
     bindChapterSearch();
     paintDetailTools();
@@ -2728,6 +2733,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     let bar = q('markBar');
     if (!bar) {
       bar = el('div', 'mw-selbar');
+      bar.dataset.motionFixed = '';
       bar.id = 'markBar';
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', 'علّم فصول');
@@ -5336,7 +5342,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
-    mangaDepth?.sync();
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
     if (!sectionSwitch && !unifiedHandoff && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
@@ -7312,7 +7317,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     },
     destroy() {
       scrollRestore++; scrollRestoreCleanup?.();
-      mangaDepth?.destroy();
+      unbindMangaDepth();
       ++pageMotionRequest;
       finishPageMotion();
       sourceVerification.close();

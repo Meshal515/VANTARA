@@ -8,7 +8,12 @@
  *  - طبقات collapse-hero لما بعد رفع الإصبع (الانزلاق)، بالأرقام نفسها حرفيًا.
  * الدخول والخروج والتبديل ليست هنا: page-motion.js. والصفحة المغادرة تتجمّد حركاتها هناك، فلا يحتاج
  * أي نمط استثناءً.
+ *
+ * طبقة العمق لا تشارك عنصرها حركة دخول: خاصية animation واحدة للعنصر، فحركة الدخول على العنصر نفسه
+ * تُسقط العمق أو يُسقطها. لذلك عمق «المعرض» على حاوية الغلاف (.mw-lift) ودخوله على الغلاف نفسه.
  */
+import { bindCollapsingHero } from './collapse-hero.js';
+
 export const DEPTH_SPECS = Object.freeze({
   anime: Object.freeze({
     // «الأساسي»: البنر ينطوي للخلف ويغيب، والغلاف يصعد ويميل ويصغر، واللوقو يتبعه بفارق
@@ -41,6 +46,11 @@ export const DEPTH_SPECS = Object.freeze({
     marquee: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
     // «الملصق» بشخصيته (قرار المالك): خلفية هادئة تتحرك 24px وتكبر ×1.03 فقط، بدل 240px و×1.12
     poster: [{ sel: '.cn-detail-art > .cn-img', span: true, px: true, y: [0, 24], s: [1, 1.03] }],
+  }),
+  // المانجا (قرار المالك، 12 نوفمبر): «المعرض» وحده بعمق تمرير؛ غلافه يميل للخلف ويتراجع كصفحة تُطوى.
+  // الأرقام كما كانت في محرك المانجا اليدوي (‎-22px، ‎-175px، 13°) على مدى 45% من الشاشة (380px على الجوال).
+  manga: Object.freeze({
+    gallery: [{ sel: '.mw-stage > .mw-lift', range: [0, 0.45], p: 1000, y: [0, -22], z: [0, -175], rx: [0, 13] }],
   }),
 });
 
@@ -82,3 +92,37 @@ html:not([data-motion='off']) ${sel}{animation:${name} linear both;animation-tim
 
 /** الأنمي كما كان (work-looks.js يصدّرها بالاسم نفسه). */
 export const lookMotion = (look, { hero, dims }) => depthMotion('anime', look, { hero, dims, scope: `.v35 .aw[data-style='${look}']` });
+
+/**
+ * يركّب عمق نمط على صفحته: يحقن CSS الخط الزمني في <style id> واحدة للقسم، يعيد توليدها حين يتغيّر ارتفاع
+ * البطل أو الشاشة، ويربط تسليم الانزلاق (collapse-hero). نمط بلا صف في الجدول لا يحرّك شيئًا ولا يسجّل
+ * مستمعًا. الأقسام الثلاثة تمر من هنا: لا نسخة ربط لكل قسم.
+ * @param {{ hero: HTMLElement, bar?: HTMLElement|null, scope: string, styleId: string, spanOf: () => number, active: () => boolean, hostOf?: Function, prefix?: string }} o
+ * @returns {() => void} فكّ الربط
+ */
+export function mountDepth(section, look, { hero, bar = null, scope, styleId, spanOf, active, hostOf, prefix }) {
+  const doc = hero?.ownerDocument ?? globalThis.document;
+  let tag = doc.getElementById(styleId);
+  if (!tag) {
+    tag = doc.createElement('style');
+    tag.id = styleId;
+    doc.head.append(tag);
+  }
+  if (!DEPTH_SPECS[section]?.[look]?.length) {
+    tag.textContent = '';
+    // الشريط ينطوي مع البطل حتى في نمط بلا طبقات عمق
+    return bar ? bindCollapsingHero({ hero, bar, active }) : () => {};
+  }
+  const dims = { span: spanOf() || 300, vh: globalThis.innerHeight || 800 };
+  const motion = depthMotion(section, look, { hero, dims, scope, ...(hostOf ? { hostOf } : {}), ...(prefix ? { prefix } : {}) });
+  tag.textContent = motion.css();
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    const next = { span: spanOf() || dims.span, vh: globalThis.innerHeight || dims.vh };
+    if (next.span === dims.span && next.vh === dims.vh) return;
+    Object.assign(dims, next);
+    tag.textContent = motion.css();
+  }) : null;
+  ro?.observe(hero);
+  const unbind = bindCollapsingHero({ hero, bar, layers: motion.layers, active });
+  return () => { ro?.disconnect(); unbind(); };
+}

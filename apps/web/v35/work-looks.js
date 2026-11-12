@@ -108,7 +108,7 @@ const LOOKS = {
         </aside>
         <main class="wl-main">${p.desc}${p.section('الحلقات', p.ranges + p.epRows(), 'eps')}${p.section('الشخصيات', p.chars('wl-chars', 10), 'chars')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</main>
       </div>
-      <div class="wl-dock"><span class="wl-dock-cover">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}</span><span class="wl-dock-text" style="--w:${c.seenRatio * 100}%"><b>${esc(c.label)}</b><small dir="auto">${esc([p.curTitle, c.progressText].filter(Boolean).join(' · '))}</small><i></i></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
+      <div class="wl-dock" data-motion-fixed><span class="wl-dock-cover">${img(c.m.posterSmall ?? c.m.poster, '', 'center 20%')}</span><span class="wl-dock-text" style="--w:${c.seenRatio * 100}%"><b>${esc(c.label)}</b><small dir="auto">${esc([p.curTitle, c.progressText].filter(Boolean).join(' · '))}</small><i></i></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
   },
 
   /* ── البطاقة الطائرة ── */
@@ -153,7 +153,7 @@ const LOOKS = {
       </div>
       ${p.movie ? '' : `<div class="wl-scrub"><div class="wl-track">${scrub.join('')}</div><div class="wl-sline" style="--w:${c.seenRatio * 100}%"></div></div>`}
       <div class="wl-body"><div class="wl-left">${p.desc}${p.social}${p.section('كل الحلقات', p.ranges + p.epRows(false), 'eps')}${p.section('الشخصيات', p.chars('wl-grid4', 10), 'chars')}${p.section('إذا عجبك هذا', p.recs('wl-recs'), 'recs')}</div><div class="wl-right">${p.section('معلومات', p.factsBox, 'facts')}${p.section('من نفس العالم', world.length ? `<div class="wl-world">${world.map((w) => `<button type="button" class="wn${w.here ? ' here' : ''}" ${openAttr(w)}>${img(w.posterSmall ?? w.poster)}<b dir="auto">${esc(w.title)}</b><span>${esc(worldLabel(w))}</span></button>`).join('')}</div>` : '', 'world')}</div></div>
-      <div class="wl-mini"><span class="wl-mini-th">${img(c.still(p.cur).src)}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc(p.curTitle ?? '')}</small></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
+      <div class="wl-mini" data-motion-fixed><span class="wl-mini-th">${img(c.still(p.cur).src)}</span><span><b>${esc(c.label)}</b><small dir="auto">${esc(p.curTitle ?? '')}</small></span><button type="button" class="dot" data-ep="${p.cur}" aria-label="${esc(c.label)}">${p.play}</button></div>`;
   },
 };
 

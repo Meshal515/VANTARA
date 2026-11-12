@@ -10,7 +10,7 @@ const rows = (max) => Array.from({ length: max }, (_, i) => row(max - i));
 
 describe('أنماط صفحة عمل المانجا', () => {
   it('الستة بمعرّفاتها المتفق عليها، وأي قيمة أخرى = «كلاسيكي» (page)', () => {
-    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
+    expect(MANGA_LOOKS).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon']);
     for (const id of MANGA_LOOKS) expect(mangaLook(id)).toBe(id);
     for (const id of ['core', 'platform', '', null, undefined]) expect(mangaLook(id)).toBe('page');
   });
@@ -148,15 +148,19 @@ describe('«ويبتوني» و«مباشر»: البحث والخط الزمن�
     const old = [100, 93, 86, 79].map((d) => d * DAY);
     expect(releaseBeat(old, 1000 * DAY)?.next).toBeNull();
   });
-  it('النمطان على هيكل «المعرض» مع البحث، و«ويبتوني» وحده بإيقاع الإصدار', () => {
-    for (const look of ['webtoon', 'direct']) {
-      const html = detailMarkup(look, { glyph, iconButton });
-      expect(html).toContain('id="detailTabs"');
-      expect(html.split('id="chapterSearch"').length - 1).toBe(1);
-      expect(html).not.toContain('id="chapterRanges"');
-    }
-    expect(detailMarkup('webtoon', { glyph, iconButton })).toContain('id="releaseBeat"');
-    expect(detailMarkup('direct', { glyph, iconButton })).not.toContain('id="releaseBeat"');
+  it('«ويبتوني» على هيكل «المعرض» مع البحث وإيقاع الإصدار، و«المعرض» بلا بحث', () => {
+    const html = detailMarkup('webtoon', { glyph, iconButton });
+    expect(html).toContain('id="detailTabs"');
+    expect(html.split('id="chapterSearch"').length - 1).toBe(1);
+    expect(html).not.toContain('id="chapterRanges"');
+    expect(html).toContain('id="releaseBeat"');
     expect(detailMarkup('gallery', { glyph, iconButton })).not.toContain('id="chapterSearch"');
+  });
+  it('«مباشر» حُذف: معرّفه يرسم «كلاسيكي» ولا يبقى له هيكل خاص', () => {
+    expect(mangaLook('direct')).toBe('page');
+    expect(detailMarkup('direct', { glyph, iconButton })).toBe(detailMarkup('page', { glyph, iconButton }));
+  });
+  it('طبقة عمق «المعرض» حاوية حول الغلاف، لا الغلاف الذي يحمل حركة الدخول', () => {
+    expect(detailMarkup('gallery', { glyph, iconButton })).toContain('<div class="mw-lift"><div class="mw-cover" id="detailCover"></div></div>');
   });
 });

@@ -3726,7 +3726,6 @@ html[data-motion='off'] .v35 .dock-scrim {
   position: fixed;
   z-index: 5;
   pointer-events: none;
-  contain: layout paint;
 }
 /* الداخلة فوق الخارجة طوال التلاشي (الخارجة خلفها) */
 .v35 .page.page-in {
@@ -3736,9 +3735,9 @@ html[data-motion='off'] .v35 .dock-scrim {
 @media (prefers-reduced-motion: reduce) {
 }
 
-/* Temporary compositor hints only while navigating; work contents never stagger or translate. */
+/* تلميح للمؤلِّف أثناء التنقل فقط. الشفافية وحدها: transform أو contain أو will-change: transform على الصفحة
+ * يجعلها مرجع أشرطتها الثابتة بدل الشاشة فتقفز (page-motion.js: motionUnits). */
 .v35 .page.page-in, .v35 .page.page-out { will-change: opacity; }
-.v35 .page.page-depth { will-change: transform, opacity; }
 
 
 /* الأوراق (openSheet وورقة السيرفرات): فتح بارتفاع خفيف وتلاشٍ 240ms، وإغلاق عكسي أقصر 160ms.

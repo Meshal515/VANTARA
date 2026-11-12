@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { MOTION, bindTabMotion, dockIn, dockOut, finishPageMotion, handoffSurface, pageIn, pageOut } from './page-motion.js';
+import { MOTION, bindTabMotion, dockIn, dockOut, finishPageMotion, handoffSurface, motionUnits, pageIn, pageOut } from './page-motion.js';
 
 afterEach(() => { finishPageMotion(); vi.unstubAllGlobals(); });
 
@@ -15,6 +15,17 @@ function page(rect = { top: -900, left: 0, width: 390, height: 3000 }) {
     anims,
     classes,
   };
+}
+/** صفحة عمل بمحتوى وشريط ثابت معلَن: الاندفاع على المحتوى، والشريط والصفحة نفسها لا تُحوَّل. */
+function work(rect = { top: 0, left: 0, width: 390, height: 2400 }) {
+  const p = page(rect);
+  const node = (fixed = false) => { const n = page({ top: 100, left: 0, width: 390, height: 300 }); n.fixed = fixed; n.children = []; return n; };
+  const bar = node(true), hero = node(), body = node();
+  p.children = [bar, hero, body];
+  p.querySelectorAll = (sel) => (sel === '[data-motion-fixed]' ? [bar] : []);
+  p.querySelector = () => null;
+  for (const c of p.children) c.parentElement = p;
+  return { p, bar, hero, body };
 }
 const doc = (motion) => ({ documentElement: { dataset: motion ? { motion } : {} } });
 
@@ -79,26 +90,45 @@ describe('tabs inside a page (one rule for all of VANTARA)', () => {
 
 
 describe('entry never pins the page (#323: the pin caused a 60px marquee jump when released)', () => {
-  it('no spacer, no fixed viewport, for cinema or any work page', () => {
+  it('no spacer, no fixed viewport, no transform on the page itself, for any work page', () => {
     for (const id of ['cinema', 'anime', 'detail']) {
-      const p = page({ top: 0, left: 0, width: 390, height: 2400 }); p.id = id;
+      const { p, hero } = work(); p.id = id;
       p.before = vi.fn();
-      pageIn(p, { depth: true, doc: { ...doc(), createElement: () => ({ style: {}, setAttribute: vi.fn(), remove: vi.fn() }) } });
+      pageIn(p, { depth: true, doc: doc() });
       expect(p.before).not.toHaveBeenCalled();
       expect(p.style.position).toBeUndefined();
-      expect(p.anims[0].frames[0]).toEqual({ opacity: 0, transform: `scale(${MOTION.push})` });
+      expect(p.anims[0].frames).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+      expect(hero.anims[0].frames[0].scale).toBe(String(MOTION.push));
       finishPageMotion();
     }
   });
 });
 
-describe('work detail depth transition, with stationary contents', () => {
-  it('zooms the whole work in and out (MOTION) without translating its children', () => {
-    const a=page(), b=page();
-    pageOut(a,{depth:true,doc:doc()});pageIn(b,{depth:true,doc:doc()});
-    expect(a.anims[0].frames).toEqual([{opacity:1,transform:'scale(1)'},{opacity:0,transform:`scale(${MOTION.push})`}]);
-    expect(b.anims[0].frames).toEqual([{opacity:0,transform:`scale(${MOTION.push})`},{opacity:1,transform:'scale(1)'}]);
-    expect(a.anims[0].opts.duration).toBe(MOTION.ms);expect(b.anims[0].opts.duration).toBe(MOTION.ms);
+// الأشرطة الثابتة (الرجوع، الزر العائم) قفزت عند نهاية الحركة: transform على الصفحة يجعلها مرجع position:fixed
+describe('work detail depth transition: the content pushes, the page and its fixed bars never transform', () => {
+  it('fades the page and pushes every content unit in and out (MOTION), never the declared fixed bar', () => {
+    const a = work(), b = work();
+    pageOut(a.p, { depth: true, doc: doc() }); pageIn(b.p, { depth: true, doc: doc() });
+    expect(a.p.anims[0].frames).toEqual([{ opacity: 1 }, { opacity: 0 }]);
+    expect(b.p.anims[0].frames).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+    expect(JSON.stringify([a.p.anims, b.p.anims].flat().map((x) => x.frames))).not.toMatch(/transform|scale/);
+    for (const u of [a.hero, a.body]) expect(u.anims[0].frames.map((f) => f.scale)).toEqual(['1', String(MOTION.push)]);
+    for (const u of [b.hero, b.body]) expect(u.anims[0].frames.map((f) => f.scale)).toEqual([String(MOTION.push), '1']);
+    expect(a.bar.animate).not.toHaveBeenCalled();
+    expect(b.bar.animate).not.toHaveBeenCalled();
+    for (const x of [...a.p.anims, ...b.p.anims, ...a.hero.anims, ...b.hero.anims]) expect(x.opts.duration).toBe(MOTION.ms);
+    finishPageMotion();
+    expect(a.hero.anims[0].cancel).toHaveBeenCalled();
+  });
+  it('motionUnits: siblings of every ancestor of a fixed bar, not the ancestors nor the bars', () => {
+    const { p, bar, hero, body } = work();
+    expect(motionUnits(p)).toEqual([hero, body]);
+    const inner = work(); const wrap = inner.p; // صفحة > غلاف > (شريط، محتوى)
+    const outer = page(); outer.children = [wrap]; wrap.parentElement = outer;
+    outer.querySelectorAll = () => [inner.bar];
+    inner.bar.parentElement = wrap;
+    expect(motionUnits(outer)).toEqual([inner.hero, inner.body]);
+    expect(motionUnits(outer)).not.toContain(bar);
   });
   it('clips the outgoing document to the visible viewport while preserving the reader position', () => {
     vi.stubGlobal('innerHeight',844);
@@ -169,13 +199,13 @@ describe('one motion contract for every section', () => {
     expect(MOTION).toMatchObject({ ms: 380, push: 0.96 });
   });
   it('cinema gets the same push in and out as any work page', () => {
-    const p = page(); p.id = 'cinema';
-    pageOut(p, { depth: true, doc: doc() });
-    expect(p.anims[0].frames.at(-1)).toEqual({ opacity: 0, transform: `scale(${MOTION.push})` });
-    const q = page({ top: 0, left: 0, width: 390, height: 2400 }); q.id = 'cinema';
-    pageIn(q, { depth: true, doc: doc() });
-    expect(q.anims.at(-1).frames[0]).toEqual({ opacity: 0, transform: `scale(${MOTION.push})` });
-    expect(q.anims.at(-1).opts.easing).toBe(MOTION.enter);
+    const a = work(); a.p.id = 'cinema';
+    pageOut(a.p, { depth: true, doc: doc() });
+    expect(a.hero.anims[0].frames.at(-1).scale).toBe(String(MOTION.push));
+    const b = work(); b.p.id = 'cinema';
+    pageIn(b.p, { depth: true, doc: doc() });
+    expect(b.hero.anims[0].frames[0].scale).toBe(String(MOTION.push));
+    expect(b.hero.anims[0].opts.easing).toBe(MOTION.enter);
   });
 });
 

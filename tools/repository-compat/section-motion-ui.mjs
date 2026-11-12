@@ -166,8 +166,15 @@ try {
         await visual.waitForTimeout(delay);
         ys.push(await visual.evaluate(()=>document.querySelector('.cn-detail-art').getBoundingClientRect().top));
       }
-      const travel=Math.max(...ys)-Math.min(...ys);
-      if(travel>2)throw new Error('Dexter art shifts on page entry: '+JSON.stringify({width,travel,ys}));
+      // عقد الاندفاع (MOTION.push) يحرّك البنر بسلاسة نحو موضعه؛ القفزة المرفوضة هي ارتداد أو استقرار في غير
+      // موضعه أو إزاحة أكبر من الاندفاع نفسه (كانت 60px حين ثُبّتت الصفحة الداخلة ثم أُطلقت).
+      const {h,push}=await visual.evaluate(async()=>({h:document.querySelector('.cn-detail-art').getBoundingClientRect().height,push:(await import('/v35/page-motion.js')).MOTION.push}));
+      await visual.waitForTimeout(300);
+      const settled=await visual.evaluate(()=>document.querySelector('.cn-detail-art').getBoundingClientRect().top);
+      const after=ys.slice(1);
+      const monotone=after.every((y,i)=>i===0||Math.abs(y-start.before)<=Math.abs(after[i-1]-start.before)+0.5);
+      const bound=(1-push)*h/2+1;
+      if(Math.abs(settled-start.before)>0.5||!monotone||Math.max(...ys.map(y=>Math.abs(y-start.before)))>bound)throw new Error('Dexter art jumps on page entry: '+JSON.stringify({width,ys,settled,bound}));
       if(width===390)await visual.screenshot({path:out+'/marquee-no-jump.png'});
     }
   } finally {await visual.close()}

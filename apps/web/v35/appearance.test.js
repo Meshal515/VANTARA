@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCENTS, MANGA_WORK_STYLES, WORK_STYLES, accentOf, brandOf, stylesOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, MANGA_WORK_STYLES, RETIRED_STYLES, WORK_STYLES, migrateAppearance, patchAppearance, accentOf, brandOf, stylesOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
 
 const memory = () => {
   const m = new Map();
@@ -11,8 +11,8 @@ const node = () => {
 };
 
 describe('أنماط المانجا والسينما ولون العلامة', () => {
-  it('المانجا بستة أنماط متفق عليها أولها «كلاسيكي» (page)، والأنمي كما هو، والسينما بأساسيها وثلاثة أنماط (قرار المالك، 9 نوفمبر)', () => {
-    expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon', 'direct']);
+  it('المانجا بخمسة أنماط متفق عليها أولها «كلاسيكي» (page)، والأنمي كما هو، والسينما بأساسيها وثلاثة أنماط (قرار المالك، 9 نوفمبر)', () => {
+    expect(MANGA_WORK_STYLES.map((s) => s.id)).toEqual(['page', 'gallery', 'profile', 'resume', 'webtoon']);
     expect(workStyleOf('manga', readAppearance(memory()))).toBe('page');
     expect(workStyleOf('manga', { style: { manga: 'gallery' } })).toBe('gallery');
     expect(workStyleOf('manga', { style: { manga: 'core' } })).toBe('page');
@@ -24,6 +24,32 @@ describe('أنماط المانجا والسينما ولون العلامة', (
     expect(workStyleOf('cinema', { style: { cinema: 'marquee' } })).toBe('marquee');
     expect(workStyleOf('cinema', { style: { cinema: 'core' } })).toBe('current');
     expect(workStyleOf('cinema', { style: {} })).toBe('current');
+  });
+
+  it('«مباشر» المحذوف يُرحَّل إلى «المعرض» مرة واحدة دون مس بقية الإعدادات', () => {
+    const store = memory();
+    store.setItem('vantara.appearance.v1', JSON.stringify({ style: { manga: 'direct', anime: 'card' }, accent: { manga: 'gold' }, pureBlack: true, future: { kept: 1 } }));
+    // القراءة وحدها تعطي البديل حتى قبل الترحيل
+    expect(workStyleOf('manga', readAppearance(store))).toBe('gallery');
+    expect(migrateAppearance(store)).toBe(true);
+    expect(JSON.parse(store.getItem('vantara.appearance.v1'))).toEqual({ style: { manga: 'gallery', anime: 'card' }, accent: { manga: 'gold' }, pureBlack: true, future: { kept: 1 } });
+    expect(migrateAppearance(store)).toBe(false);
+    // كل بديل نمطٌ موجود فعلًا في قسمه
+    for (const [section, map] of Object.entries(RETIRED_STYLES)) for (const [gone, next] of Object.entries(map)) {
+      expect(stylesOf(section).some((s) => s.id === next)).toBe(true);
+      expect(stylesOf(section).some((s) => s.id === gone)).toBe(false);
+    }
+  });
+  it('لا ترحيل ولا كتابة لمن لم يختر نمطًا محذوفًا أو لتخزين تالف', () => {
+    const store = memory();
+    expect(migrateAppearance(store)).toBe(false);
+    expect(store.getItem('vantara.appearance.v1')).toBeNull();
+    store.setItem('vantara.appearance.v1', '{broken');
+    expect(migrateAppearance(store)).toBe(false);
+    expect(store.getItem('vantara.appearance.v1')).toBe('{broken');
+    store.setItem('vantara.appearance.v1', JSON.stringify({ style: { manga: 'resume' } }));
+    expect(migrateAppearance(store)).toBe(false);
+    expect(patchAppearance(() => ({ pureBlack: true }), store).style.manga).toBe('resume');
   });
 
   it('لون العلامة القديم لا يغيّر اللون الأساسي الجديد', () => {

@@ -90,8 +90,18 @@ export const MANGA_WORK_STYLES = Object.freeze([
   { id: 'profile', name: 'الملف', note: 'صورة العمل العريضة وثلاثة أرقام' },
   { id: 'resume', name: 'من حيث وقفت', note: 'الفصل التالي أولًا وشبكة أرقام' },
   { id: 'webtoon', name: 'ويبتوني', note: 'الفن طوليًا، وإيقاع الإصدار، والفصول بالشهور' },
-  { id: 'direct', name: 'مباشر', note: 'رأس مدمج ثم الفصول فورًا' },
 ]);
+
+/**
+ * أنماط حُذفت وبديلها: من اختار نمطًا محذوفًا يُنقل اختياره لأقرب نمط باقٍ، لا لأساسي القسم.
+ * «مباشر» (حُذف 12 نوفمبر) كان مبنيًا على هيكل «المعرض» نفسه برأس أصغر، فبديله «المعرض».
+ */
+export const RETIRED_STYLES = Object.freeze({ manga: Object.freeze({ direct: 'gallery' }) });
+const liveStyles = (style) => {
+  const out = { ...style };
+  for (const [section, map] of Object.entries(RETIRED_STYLES)) if (map[out[section]]) out[section] = map[out[section]];
+  return out;
+};
 
 /**
  * أنماط صفحة عمل السينما (قرار المالك، 9 نوفمبر): الأساسي كما هو، واثنان بروح نمطَي الأنمي «شاشة السينما»
@@ -148,7 +158,7 @@ export function readAppearance(storage = globalThis.localStorage) {
     const v = JSON.parse(readPreference(KEY, storage) ?? 'null');
     if (!v || typeof v !== 'object') return blank();
     return {
-      style: v.style && typeof v.style === 'object' ? v.style : {},
+      style: v.style && typeof v.style === 'object' ? liveStyles(v.style) : {},
       accent: v.accent && typeof v.accent === 'object' ? v.accent : {},
       pureBlack: v.pureBlack === true,
     };
@@ -160,6 +170,20 @@ export function readAppearance(storage = globalThis.localStorage) {
 export function writeAppearance(next, storage = globalThis.localStorage) {
   writePreference(KEY, JSON.stringify(next), storage);
   return next;
+}
+
+/**
+ * ترحيل لمرة واحدة عند الإقلاع: اختيار نمط محذوف يُكتب بديله في التخزين، فلا يبقى المعرّف القديم محفوظًا.
+ * لا يلمس اللون ولا أي حقل آخر، ولا يكتب شيئًا إن لم يكن هناك ما يُرحَّل.
+ * @returns {boolean} هل رُحِّل شيء
+ */
+export function migrateAppearance(storage = globalThis.localStorage) {
+  let raw = null;
+  try { raw = JSON.parse(readPreference(KEY, storage) ?? 'null'); } catch { return false; }
+  const style = raw && typeof raw === 'object' && raw.style && typeof raw.style === 'object' ? raw.style : null;
+  if (!style || !Object.entries(RETIRED_STYLES).some(([section, map]) => map[style[section]])) return false;
+  writeAppearance({ ...raw, style: liveStyles(style) }, storage);
+  return true;
 }
 
 /**

@@ -69,7 +69,7 @@ describe('مركز الإعدادات', () => {
     const { body, sheets } = mount(storage);
     body.querySelector('.look-tiles .look-tile').onclick();
     const options = sheets[0].querySelectorAll('.look-tile');
-    expect(options).toHaveLength(6);
+    expect(options).toHaveLength(5);
     options[3].onclick();
     expect(readAppearance(storage).style).toEqual({ anime: 'card', manga: 'resume' });
   });

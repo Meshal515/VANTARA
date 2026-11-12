@@ -31,8 +31,7 @@ import { report as reportUpdate } from '../lib/update-engine.js';
 import { createLocator, createMemory, createMetrics } from '../lib/cinema-fast.js';
 import { agoAr, latestGroups, unitLabel } from './updates-view.js';
 import { asButton, moreButton, openWatchMenu, watchMenuItems } from './watch-menu.js';
-import { bindCollapsingHero } from './collapse-hero.js';
-import { depthMotion } from './depth.js';
+import { mountDepth } from './depth.js';
 import { workStyleOf } from './appearance.js';
 import { applyLocalMarks, buildMarkSheet, cinemaEpisodeKey, cinemaLocalKey, changedKeys, seenFrom, syncOps } from './episode-marks.js';
 import { workKind, workMenuEntries } from './work-menu.js';
@@ -1772,6 +1771,7 @@ export function createCinema(deps) {
     wrap.dataset.style = look;
 
     const bar = el('div', 'cn-detail-bar');
+    bar.dataset.motionFixed = ''; // شريط ثابت: لا يندفع مع المحتوى (page-motion.js)
     bar.innerHTML = iconButton('back', 'رجوع', { act: 'goBack' });
     // حين تنطوي الخلفية مع التمرير: الترويسة صلبة والشعار (أو الاسم) صغيرًا فيها
     const barTitle = el('div', 'cn-bar-title');
@@ -1939,21 +1939,11 @@ export function createCinema(deps) {
     page.replaceChildren(wrap);
     unbindHero?.();
     // العمق مع التمرير من depth.js (نفس محرك الأنمي): CSS على المؤلِّف + طبقات الانزلاق من الصف نفسه
-    const spanOf = () => Math.max(1, art.offsetHeight - bar.offsetHeight);
-    const dims = { span: spanOf() || 300, vh: globalThis.innerHeight || 800 };
-    const motion = depthMotion('cinema', look, { hero: art, dims, scope: `.v35 .cn-detail[data-style='${look}']`, hostOf: (h) => h?.closest('.cn-detail'), prefix: 'cn' });
-    let tag = document.getElementById('cn-motion');
-    if (!tag) { tag = document.createElement('style'); tag.id = 'cn-motion'; document.head.append(tag); }
-    tag.textContent = motion.css();
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-      const next = { span: spanOf() || dims.span, vh: globalThis.innerHeight || dims.vh };
-      if (next.span === dims.span && next.vh === dims.vh) return;
-      Object.assign(dims, next);
-      tag.textContent = motion.css();
-    }) : null;
-    ro?.observe(art);
-    const unDepth = bindCollapsingHero({ hero: art, bar, layers: motion.layers, active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id });
-    unbindHero = () => { ro?.disconnect(); unDepth?.(); };
+    unbindHero = mountDepth('cinema', look, {
+      hero: art, bar, scope: `.v35 .cn-detail[data-style='${look}']`, styleId: 'cn-motion', prefix: 'cn',
+      hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => Math.max(1, art.offsetHeight - bar.offsetHeight),
+      active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id,
+    });
     if (!partial) {
       startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);

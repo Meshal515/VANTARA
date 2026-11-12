@@ -924,69 +924,8 @@
 .v35 #detail[data-look='resume'] .mw-story { margin-top: 28px; }
 .v35 #detail[data-look='resume'] .mw-chips { margin-top: 16px; }
 
-/* ═══ عمق التمرير — مستقل عن حركات الدخول والخروج ═══
- * One normalized --mw-scroll-depth (0..1), updated at most once per frame.
- * Each look has its own spatial mechanic. No layout properties are animated;
- * all transforms are compositor-friendly and scoped to the active detail page.
- */
-.v35 #detail.mw.active[data-scroll-depth='on'] {
-  --mw-scroll-depth: 0;
-}
-/* الصفحة: غلاف يتراجع داخل العمق، والنص يبقى واضحًا ثابت الموضع. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head {
-  perspective: 900px;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='page'] .mw-head .mw-cover {
-  transform: translate3d(0, calc(var(--mw-scroll-depth) * -18px), calc(var(--mw-scroll-depth) * -220px))
-    rotateY(calc(var(--mw-scroll-depth) * -10deg));
-  backface-visibility: hidden;
-  will-change: transform;
-}
-/* المعرض: الغلاف يميل للخلف كصفحة في مساحة ثلاثية الأبعاد. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage {
-  perspective: 1000px;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='gallery'] .mw-stage .mw-cover {
-  transform: translate3d(0, calc(var(--mw-scroll-depth) * -22px), calc(var(--mw-scroll-depth) * -175px))
-    rotateX(calc(var(--mw-scroll-depth) * 13deg));
-  backface-visibility: hidden;
-  will-change: transform;
-}
-/* الملف: البنر يتحرك في مستوى أعمق، والغلاف في المقدمة دون تعتيم الصورة. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-ban > img {
-  transform: translate3d(0, calc(var(--mw-scroll-depth) * 22px), 0) scale(1.06);
-  will-change: transform;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow {
-  perspective: 900px;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='profile'] .mw-idrow .mw-cover {
-  transform: translate3d(0, calc(var(--mw-scroll-depth) * -12px), calc(var(--mw-scroll-depth) * 90px))
-    rotateY(calc(var(--mw-scroll-depth) * 7deg));
-  backface-visibility: hidden;
-  will-change: transform;
-}
-/* من حيث وقفت: الرقم يقترب تدريجيًا والغلاف يتراجع؛ بقية الأزرار لا تتحرك. */
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-resume,
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident {
-  perspective: 900px;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-big {
-  transform: translate3d(0, calc(var(--mw-scroll-depth) * -8px), calc(var(--mw-scroll-depth) * 70px));
-  will-change: transform;
-}
-.v35 #detail.mw.active[data-scroll-depth='on'][data-look='resume'] .mw-ident .mw-cover {
-  transform: translate3d(0, 0, calc(var(--mw-scroll-depth) * -130px))
-    rotateY(calc(var(--mw-scroll-depth) * -11deg));
-  backface-visibility: hidden;
-  will-change: transform;
-}
-@media (prefers-reduced-motion: reduce) {
-  .v35 #detail.mw[data-scroll-depth] :is(.mw-head .mw-cover, .mw-stage .mw-cover, .mw-ban > img, .mw-idrow .mw-cover, .mw-big, .mw-ident .mw-cover) {
-    transform: none !important;
-    will-change: auto;
-  }
-}
+/* عمق التمرير: «المعرض» وحده (قرار المالك)، وأرقامه في depth.js مع بقية الأقسام؛ هنا لا شيء منه. */
+.v35 #detail[data-look='gallery'] .mw-stage > .mw-lift { backface-visibility: hidden; }
 
 /* ═══ الآيباد: عمود أعرض ومقاسات أكبر بنفس النسب ═══ */
 @media (min-width: 700px) {
@@ -2167,23 +2106,3 @@ html[data-motion='off'] .v35 #detail :is(.mw-cover, .mw-ban > img) { animation: 
   box-shadow: inset 0 0 0 3px var(--accent);
 }
 .v35 #detail .wt-month small { font-size: 12px; font-weight: 600; color: var(--text-4); }
-
-/* ════ «مباشر» (قرار المالك، 12 نوفمبر): رأس مدمج في سطر واحد ثم الفصول فورًا ════ */
-.v35 #detail[data-look='direct'] .mw-amb { height: 300px; opacity: 0.55; }
-.v35 #detail[data-look='direct'] .mw-stage {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 16px;
-  align-items: end;
-  padding: calc(var(--safe-top) + 74px) var(--mw-side) 0;
-}
-.v35 #detail[data-look='direct'] .mw-stage .mw-cover { width: 96px; margin: 0; border-radius: 12px; grid-row: 1; }
-.v35 #detail[data-look='direct'] .mw-center { grid-row: 1; margin: 0; padding: 0; text-align: start; }
-.v35 #detail[data-look='direct'] .mw-title { margin: 0 0 6px; font-size: 24px; text-align: start; }
-.v35 #detail[data-look='direct'] .mw-stats,
-.v35 #detail[data-look='direct'] .mw-chips { justify-content: flex-start; }
-.v35 #detail[data-look='direct'] .mw-chips { margin-top: 8px; }
-.v35 #detail[data-look='direct'] .mw-chip { height: 26px; padding: 0 10px; font-size: 12px; }
-.v35 #detail[data-look='direct'] .mw-chip:nth-child(n + 3) { display: none; }
-.v35 #detail[data-look='direct'] .mw-acts { margin-top: 18px; }
-.v35 #detail[data-look='direct'] .mw-tabs { margin-top: 14px; }
