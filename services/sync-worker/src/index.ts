@@ -976,6 +976,9 @@ export function statementsFor(
       return [
         db
           .prepare(
+            // كتابة لا تتقدم لا تلمس الصف (`WHERE` في آخره، #323 U-21/U-07): كانت تحدّث updated_at
+            // وrev، فتصير نظرة ثوانٍ على فصل قديم مكتمل «آخر قراءة» ويقلب «تابع» إليه، وتسحب الأجهزة
+            // الأخرى تغييرًا فارغًا كل 5 ثوانٍ.
             // `owner_synced = 0`: هذه الكتابة صادرة حتى يُقرّها مالك التقدم.
             // القيمة المدموجة قد تتغير بـMAX هنا، فالإقرار القديم لا يصلح لها —
             // وإلا اعتُبر تقدم لم يره المالك مؤكَّدًا فسقط بلا دفع.
@@ -990,7 +993,8 @@ export function statementsFor(
                owner_synced = CASE
                  WHEN MAX(progress.page, excluded.page) = progress.page
                   AND MAX(progress.ratio, excluded.ratio) = progress.ratio
-                 THEN progress.owner_synced ELSE 0 END`,
+                 THEN progress.owner_synced ELSE 0 END
+             WHERE excluded.page > progress.page OR excluded.ratio > progress.ratio`,
           )
           .bind(userId, chapterKey, seriesRef, normalized.page, normalized.ratio, now, rev),
       ];
