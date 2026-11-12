@@ -54,7 +54,7 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { createTogether } from './together.js';
 import { openProfileEditor } from './profile-editor.js';
-import { SECTIONS, readSection, writeSection } from './sections.js';
+import { SECTIONS, readSection, writeSection as storeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
@@ -279,6 +279,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   });
   const q = (id) => root.querySelector(`#${id}`);
+  /**
+   * القسم المحفوظ للمستخدم (المبدّل). في «توحيد المحتوى» لا مبدّل: فتح فيلم أو أنمي يلبس الصفحة هوية قسمها
+   * (applySection) ولا يغيّر القسم الذي اختاره صاحبه، وإلا وجد نفسه في السينما حين يطفئ الموحد (#323 U-12).
+   */
+  const writeSection = (id) => { if (root.dataset.content !== 'unified') storeSection(id); };
   // الشريط الجانبي للشاشات العريضة يُرسم بعد اكتمال الإقلاع (يقرأ رفيق والحساب)
   const wideScreen = globalThis.matchMedia?.('(min-width: 1024px)');
   let railReady = false;
@@ -6678,6 +6683,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (unified !== was && experienceApplied) { dockMotion = unified ? 'dock-merge' : 'dock-split'; playDockMotion(); }
     experienceApplied = true;
     q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
+    // الخروج من الموحد: القسم المحفوظ يعود (فتح عمل من الموحد يغيّر data-section مؤقتًا فقط، #323 U-12)
+    if (was && !unified && root.dataset.section !== readSection()) applySection(readSection());
     showHome(root.dataset.section ?? 'manga');
     // الخروج من الموحد: الإقلاع الموحد لا يرسم أي قسم (#323 U-06)، فالقسم الذي ظهر الآن يُرسم هنا وإلا
     // بقيت رئيسية الأنمي أو السينما فارغة (showPage لا يرسمهما عند الرجوع، وprepareSections يتخطى الحالي).
