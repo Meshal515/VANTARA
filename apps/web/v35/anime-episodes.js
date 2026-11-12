@@ -8,9 +8,15 @@ const integer = (value, fallback = 0) => {
   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : fallback;
 };
 
+/**
+ * فيلم واحد = صيغة MOVIE بلا أكثر من حلقة (#323 U-02). AniList يصنّف أعمالًا متعددة الحلقات MOVIE
+ * (مثل «17-26»، 8 حلقات)، فكانت تُعرض «شاهد الفيلم» بلا قائمة حلقات.
+ */
+export const isSingleMovie = (m) => m?.format === 'MOVIE' && !(Number(m?.episodes) > 1);
+
 /** Available episodes, distinct from an announced future season length. Movies have no list. */
 export function episodeCount(m = {}) {
-  if (m.format === 'MOVIE' || m.status === 'NOT_YET_RELEASED') return 0;
+  if (isSingleMovie(m) || m.status === 'NOT_YET_RELEASED') return 0;
   const aired = integer(m.aired);
   if (aired) return aired;
   if (m.status === 'RELEASING' && m.next?.episode != null) return Math.max(0, integer(m.next.episode) - 1);
@@ -72,7 +78,7 @@ export function normalizeEpisodeRange(from, to, total) {
  * Account isSeen, when supplied, is authoritative over device-local done flags.
  */
 export function resumeEpisode({ m = {}, watch = null, isSeen = null } = {}) {
-  const movie = m.format === 'MOVIE';
+  const movie = isSingleMovie(m);
   const episodes = watch?.episodes ?? {};
   const seen = isSeen ?? (n => Boolean(episodes[n]?.done));
   const base = { episode: 1, resume: false, completed: false, replay: false };

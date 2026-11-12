@@ -122,3 +122,18 @@ describe('resume from actual playback', () => {
     expect(resumeEpisode({ m: movie, watch: { episode: 1, episodes: { 1: done } } })).toMatchObject({ episode: 1, replay: true, completed: true, resume: false });
   });
 });
+
+// #323 U-02: MOVIE بعدة حلقات ليس فيلمًا واحدًا
+import { isSingleMovie } from './anime-episodes.js';
+describe('MOVIE format with several episodes', () => {
+  it('only a one-episode (or unknown) MOVIE is a single film', () => {
+    expect(isSingleMovie({ format: 'MOVIE', episodes: 1 })).toBe(true);
+    expect(isSingleMovie({ format: 'MOVIE' })).toBe(true);
+    expect(isSingleMovie({ format: 'MOVIE', episodes: 8 })).toBe(false);
+    expect(isSingleMovie({ format: 'TV', episodes: 1 })).toBe(false);
+  });
+  it('a multi-episode MOVIE gets its episode list', () => {
+    expect(episodeCount({ format: 'MOVIE', episodes: 8, status: 'FINISHED' })).toBe(8);
+    expect(episodeCount({ format: 'MOVIE', episodes: 1, status: 'FINISHED' })).toBe(0);
+  });
+});

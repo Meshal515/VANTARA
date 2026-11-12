@@ -1,4 +1,4 @@
-import { episodeCount, episodePage, normalizeEpisodeRange, resumeEpisode } from './anime-episodes.js';
+import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resumeEpisode } from './anime-episodes.js';
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
@@ -43,7 +43,7 @@ import { EMPTY_COPY, LIBRARY_TABS } from './library-model.js';
 import { createAnimeToday } from './anime-today.js';
 import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib/discovery-diagnostics.js';
 
-const isMovie = m => m?.format === 'MOVIE';
+const isMovie = isSingleMovie;
 const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
 
 export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
