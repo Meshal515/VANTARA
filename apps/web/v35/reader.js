@@ -1711,17 +1711,23 @@ export function openSmartReader(deps, ctx) {
       body.append(grid);
     });
   }
+  /**
+   * العمل الحي لا لقطته عند الفتح (#323 U-27): المصادر التي تصل بعد الضغطة تدخل التجاوز التلقائي
+   * و«مصدر آخر». `ctx.getWork` من القشرة يعيد آخر نسخة من العمل نفسه.
+   */
+  const workNow = () => ctx.getWork?.() ?? ctx.work;
   /** اسم مصدر الفصل؛ صفّ القارئ الذكي الإنجليزي بلا اسم فيُؤخذ من نسخته. */
   function labelOf(row) {
-    return row.label || sourceLabel(ctx.work?._editions?.find((e) => e.sourceId === row.sourceId)) || null;
+    return row.label || sourceLabel(workNow()?._editions?.find((e) => e.sourceId === row.sourceId)) || null;
   }
   /** نسخ هذا الفصل نفسه (بالرقم) عند مصادر العمل الأخرى. */
   function otherSources(row) {
-    const editions = ctx.work?._editions ?? [];
+    const work = workNow();
+    const editions = work?._editions ?? [];
     if (!Number.isFinite(row.number) || row.number < 0) return [];
     return editions
       .filter((e) => e.sourceId !== row.sourceId)
-      .map((e) => editionRows(ctx.work, e.sourceId).find((r) => r.number === row.number))
+      .map((e) => editionRows(work, e.sourceId).find((r) => r.number === row.number))
       .filter(Boolean);
   }
   function openSourceSheet() {

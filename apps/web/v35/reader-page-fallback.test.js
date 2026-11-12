@@ -43,3 +43,39 @@ it('a page that fails on its source is filled in place from another source; the 
   expect(asked).toContain('B/B/1/3');
   reader.destroy();
 });
+
+// #323 U-27: القارئ كان يأخذ لقطة ثابتة من ctx.work؛ مصدر وصل بعد الضغطة لا يدخل التجاوز التلقائي
+it('a source that arrived after the reader opened can fill a failed page (live work, not the snapshot)', async () => {
+  vi.useFakeTimers(); vi.resetModules();
+  const { window, document } = parseHTML('<html><body></body></html>');
+  document.visibilityState = 'visible';
+  vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('navigator', { onLine: true });
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem() {} });
+  vi.stubGlobal('Image', class { constructor() { const img = document.createElement('img'); img.decode = async () => {}; img.naturalWidth = 800; img.naturalHeight = 3000; return img; } });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.HTMLElement.prototype.scrollTo = function ({ top = 0 }) { this.scrollTop = top; };
+  window.HTMLElement.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 1000, height: 1000 });
+  vi.stubGlobal('requestAnimationFrame', (fn) => setTimeout(fn, 0)); vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  const asked = [];
+  let failNow; const failing = new Promise((_, reject) => { failNow = () => reject(new Error('cloudflare')); }); failing.catch(() => {});
+  const engine = {
+    pages: async (sourceId, chapter) => Array.from({ length: 6 }, (_, i) => ({ url: `${sourceId}${chapter.url}/${i}` })),
+    pageImage: async (sourceId, page) => { asked.push(page.url); if (page.url === 'A/A/1/3') return failing; return { src: `img:${page.url}` }; },
+  };
+  const chapters = (s) => [1, 2].map((n) => ({ url: `/${s}/${n}`, name: `Chapter ${n}`, chapter_number: n }));
+  const opened = { id: 'w', _editions: [{ sourceId: 'A', label: 'A', chapters: chapters('A') }] };
+  let live = opened;
+  const rows = [1, 2].map((n) => ({ number: n, sourceId: 'A', label: 'A', chapter: { url: `/A/${n}`, name: `Chapter ${n}`, chapter_number: n } }));
+  const { openSmartReader } = await import('./reader.js');
+  const reader = openSmartReader({ sync: { user: { userId: 'u' }, rows: () => [], enqueue() {} }, engine, mount: (n) => document.body.append(n), exit() {} },
+    { title: 'Webtoon', seriesRef: 'w', rows, row: rows[0], work: opened, getWork: () => live });
+  for (let n = 0; n < 40; n++) await vi.advanceTimersByTimeAsync(200);
+  // المصدر B يصل والقارئ مفتوح
+  live = { id: 'w', _editions: [...opened._editions, { sourceId: 'B', label: 'B', chapters: chapters('B') }] };
+  failNow();
+  for (let n = 0; n < 40; n++) await vi.advanceTimersByTimeAsync(200);
+  expect(asked).toContain('B/B/1/3');
+  const page = [...document.querySelectorAll('.rd-page')].find((f) => f.querySelector('img')?.src === 'img:B/B/1/3');
+  expect(page?.dataset.index).toBe('3');
+  reader.destroy();
+});

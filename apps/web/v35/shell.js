@@ -1588,8 +1588,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
     };
     const show = (full, { settled }) => {
-      if (state.current?.id !== work.id || currentPage() === 'reader') return;
+      if (state.current?.id !== work.id) return;
       if (!full._chapters?.length && !settled) return;
+      // والقارئ مفتوح: تُحفظ النسخة الأحدث (يقرؤها القارئ بـgetWork) بلا رسم الصفحة التي خلفه
+      if (currentPage() === 'reader') { state.current = full; return; }
       const first = !state.current?._chapters;
       state.current = full;
       // غلافٌ عرفته التفاصيل تجرّبه البطاقات التي بقيت بلا غلاف، حالًا لا بعد الرجوع
@@ -2872,7 +2874,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openChapter(w, row, { inviteTogether = false } = {}) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
+    // آخر نسخة من العمل نفسه: المصادر تصل والقارئ مفتوح (#323 U-27)
+    const getWork = () => (state.current && String(state.current.id) === String(w.id) ? state.current : w);
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, getWork, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
   }
 
   /**
