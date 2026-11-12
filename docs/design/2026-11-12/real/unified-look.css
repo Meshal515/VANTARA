@@ -48,9 +48,24 @@ article.aw[data-look=unified] .aw-genre { padding: 0 !important; background: non
 .u-season span { font-size: 11px; color: var(--text-4); white-space: nowrap; }
 .u-season.active { color: var(--text-1); }
 .u-season.active::after { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
-article.aw[data-look=unified] .aw-episode-controls > :first-child:not(.an-seasons):not(.aw-ranges) { display: none; }
+article.aw[data-look=unified] .aw-eps-head { display: none !important; }
 .cn-detail[data-look=unified] .cn-eps-head, .cn-detail[data-look=unified] .cn-eps-count { display: none !important; }
 :is(article.aw, .cn-detail)[data-look=unified] :is(.aw-below, .cn-cast, .cn-sources:empty) { display: none !important; }
 :is(article.aw, .cn-detail)[data-look=unified] .work-insights { display: none; }
 
 :is(article.aw, .cn-detail)[data-look=unified] :is(.an-mark, .cn-mark) { display: flex !important; }
+
+/* البطل: إطاره بنسبة الصورة المختارة (أقرب صورة متناسقة مع الإطار، وإلا الغلاف) فلا قص */
+:root { --u-hero: min(150vw, 600px); }
+/* البحث والترتيب والتصفية: في سطر الألسنة نفسه، في كل الأقسام */
+.u-tabs { align-items: flex-end; }
+.u-tools { margin-inline-start: auto; display: flex; gap: 2px; padding-bottom: 4px; }
+.u-tools .icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: none !important; color: var(--text-2); }
+.u-tools .icon-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+/* الصورة المختارة ملصق/غلاف (عنوانه مطبوع عليه): لا شعار ثانٍ فوقه؛ العنوان نصًا تحت الصورة عند ذوبانها */
+:is(article.aw, .cn-detail)[data-look=unified].u-poster :is(.aw-main, .cn-detail-body) { margin-top: -64px !important; }
+:is(article.aw, .cn-detail)[data-look=unified].u-poster :is(.an-mark-logo, .cn-mark-logo) { display: none !important; }
+:is(article.aw, .cn-detail)[data-look=unified].u-poster :is(.an-mark-text, .cn-mark-text) { position: static !important; width: auto !important; height: auto !important; clip: auto !important; clip-path: none !important; display: block !important; margin: 0 !important; font-size: 26px !important; font-weight: 800; line-height: 1.2; text-align: start !important; overflow: visible !important; white-space: normal !important; -webkit-line-clamp: 2; }
+:is(article.aw, .cn-detail)[data-look=unified].u-poster :is(.an-mark, .cn-mark) { margin-bottom: 10px !important; }
+article.aw[data-look=unified] .aw-hero { width: 100% !important; max-width: none !important; margin-inline: 0 !important; left: 0 !important; right: 0 !important; transform: none !important; }
+:is(article.aw, .cn-detail)[data-look=unified].u-poster :is(.an-mark-text, .cn-mark-text) { opacity: 1 !important; font-size: 21px !important; }
