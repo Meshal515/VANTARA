@@ -34,6 +34,8 @@ const USERNAME = /^[a-z0-9_.]{3,20}$/;
 const PIN = /^(\d{4}|\d{6})$/;
 /** بعد كل 5 محاولات خاطئة: قفل يتصاعد. */
 const LOCKS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+/** مدة القفل للجولة رقم (failed+1)/5 داخل SQL، من LOCKS_MS نفسه (آخرها لما بعدها). */
+const LOCK_STEP_SQL = `(CASE MIN((failed + 1) / 5 - 1, ${LOCKS_MS.length - 1}) ${LOCKS_MS.map((ms, i) => `WHEN ${i} THEN ${ms}`).join(' ')} END)`;
 
 const encoder = new TextEncoder();
 
@@ -109,14 +111,16 @@ export async function checkPin(env: Env, userId: string, pin: unknown, now: numb
     }
     return { ok: true };
   }
-  const counted = await env.DB.prepare('UPDATE account_pins SET failed = failed + 1 WHERE user_id = ? AND locked_until <= ? RETURNING failed')
-    .bind(userId, now).first<{ failed: number }>();
+  // العدّ والقفل في عبارة واحدة: كانا عبارتين، فصحيحٌ يصل بينهما (العدّاد بلغ 5 والقفل لم يُكتب بعد) يمر.
+  const counted = await env.DB.prepare(
+    `UPDATE account_pins SET failed = failed + 1,
+       locked_until = CASE WHEN (failed + 1) % 5 = 0 THEN ? + ${LOCK_STEP_SQL} ELSE locked_until END
+     WHERE user_id = ? AND locked_until <= ? RETURNING failed, locked_until`,
+  )
+    .bind(now, userId, now).first<{ failed: number; locked_until: number }>();
   if (!counted) return locked();
-  const failed = counted.failed;
-  if (failed % 5 !== 0) return { ok: false, error: 'pin_wrong', digits: row.digits };
-  const lockedUntil = now + LOCKS_MS[Math.min(failed / 5 - 1, LOCKS_MS.length - 1)]!;
-  await env.DB.prepare('UPDATE account_pins SET locked_until = MAX(locked_until, ?) WHERE user_id = ?').bind(lockedUntil, userId).run();
-  return { ok: false, error: 'pin_locked', retryAt: lockedUntil, digits: row.digits };
+  if (counted.locked_until <= now) return { ok: false, error: 'pin_wrong', digits: row.digits };
+  return { ok: false, error: 'pin_locked', retryAt: counted.locked_until, digits: row.digits };
 }
 
 /** إذن الجهاز بعد PIN صحيح: يُرجع للعميل مرة، ويُخزَّن هنا مُجزّأً فقط. */
