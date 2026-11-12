@@ -13,11 +13,11 @@ logcat_pid=$!
 adb install "$apk" | tee "$out/install.txt"
 # انتظار هدوء المحاكي بعد الإقلاع (خدمات Google تتزاحم في أول دقيقة) حتى لا يُنسب حمله للتطبيق: حتى 3 دقائق
 for _ in $(seq 1 36); do
-  l=$(timeout 8 adb shell cut -d' ' -f1 /proc/loadavg | tr -d '\r'); echo "$(date +%T) load ${l:-?}" >> "$out/settle.txt"
+  l=$(timeout 8 adb shell cat /proc/loadavg | tr -d '\r' | cut -d' ' -f1); echo "$(date +%T) load ${l:-?}" >> "$out/settle.txt"
   awk -v l="${l:-99}" 'BEGIN{exit !(l<3.0)}' && break; sleep 5
 done
 # عيّنات ذاكرة وعمليات كل ثانيتين حتى لحظة التجمّد (تُكتب على المضيف فتبقى إن مات المحاكي)
-( while true; do echo "=== $(date +%T)"; timeout 8 adb shell "head -4 /proc/meminfo; top -b -n1 -m 12 -o PID,RES,%CPU,NAME | tail -13"; sleep 2; done ) > "$out/live-mem.txt" 2>&1 &
+( while true; do echo "=== $(date +%T)"; timeout 8 adb shell "head -4 /proc/meminfo; top -b -n1 -m 12 -s 3 -o PID,RES,%CPU,NAME | tail -13"; sleep 2; done ) > "$out/live-mem.txt" 2>&1 &
 sampler_pid=$!
 adb shell am start -W -n "$pkg/com.vantara.app.MainActivity" | tee "$out/start.txt"
 for _ in $(seq 1 30); do adb shell pidof "$pkg" >/dev/null && break; sleep 1; done

@@ -85,6 +85,12 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash docs/audit/ux-2026-11-12/android/audit.sh apks/audit.apk
+      - name: Collect emulator host crash data
+        if: always()
+        run: |
+          mkdir -p audit-evidence/emu-host
+          cp -r /tmp/android-runner/. audit-evidence/emu-host/ 2>/dev/null || true
+          ls -la audit-evidence/emu-host | head -20
       - name: Summarize
         if: always()
         run: |
