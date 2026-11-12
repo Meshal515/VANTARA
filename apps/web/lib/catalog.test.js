@@ -308,3 +308,17 @@ describe('chapter numbers widened from Float32', () => {
 		expect(numbers).toEqual([356.1]);
 	});
 });
+
+// #323 U-30: صف Mangalek {url:'n-a', name:'0', chapterNumber:-1} صار «الفصل 0» من اسمه، فاختاره «ابدأ»
+describe('placeholder chapter rows', () => {
+	it('a row without a real chapter path is not a chapter (not «chapter 0»)', () => {
+		const merged = mergeChapters([
+			{ sourceId: 'mangalek', chapters: [chapter('2', { chapterNumber: 2 }), chapter('1', { chapterNumber: 1 }), { url: 'n-a', name: '0', chapterNumber: -1 }] },
+		]);
+		expect(merged.map((c) => c.number)).toEqual([2, 1]);
+	});
+	it('a real prologue numbered 0 stays', () => {
+		const merged = mergeChapters([{ sourceId: 'a', chapters: [chapter('Chapter 1', { chapterNumber: 1 }), chapter('Prologue', { chapterNumber: 0 })] }]);
+		expect(merged.map((c) => c.number)).toEqual([1, 0]);
+	});
+});

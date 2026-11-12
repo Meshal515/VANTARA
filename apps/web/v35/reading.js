@@ -123,9 +123,9 @@ export function continueChapter(rows, ordered, keyOf) {
 }
 
 /**
- * «ابدأ» بلا تقدم: أقدم فصل مرقّم غير مقروء (#323 U-30). الصفوف بلا رقم (chapterNumber -1، مثل
- * صف Mangalek «n-a» الموسوم unofficial) تأتي آخر `mergeChapters` أي «الأقدم»، فكان «ابدأ» يفتحها
- * باسم «الفصل 0». تُختار فقط إن لم يكن للعمل فصل مرقّم أصلًا. `base` من الأحدث للأقدم كما تعرضه القائمة.
+ * «ابدأ» بلا تقدم: أقدم فصل مرقّم غير مقروء (#323 U-30). الصفوف بلا رقم تأتي آخر `mergeChapters` أي
+ * «الأقدم»، فتُختار فقط إن لم يكن للعمل فصل مرقّم أصلًا. (صف Mangalek «n-a» نفسه كان يُقرأ «الفصل 0»
+ * من اسمه، فيُسقطه `mergeChapters` من أصله: `isPlaceholderChapter`.) `base` من الأحدث للأقدم.
  */
 export function startChapter(base, isRead) {
   const oldestFirst = [...(base ?? [])].reverse();

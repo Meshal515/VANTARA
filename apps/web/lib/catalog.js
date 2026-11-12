@@ -751,6 +751,16 @@ export function countMainChapters(rows) {
 	return main || (rows?.length ?? 0);
 }
 
+/**
+ * صف «فصل» بلا مسار حقيقي: Mangalek يرسل `{url:'n-a', name:'0', chapterNumber:-1}` لفصل غير متاح، فكان
+ * يُقرأ «الفصل 0» من اسمه ويصير «أقدم غير مقروء» فيفتحه «ابدأ» (#323 U-30). لا يُفتح ولا يُعدّ.
+ */
+const PLACEHOLDER_URLS = new Set(['n-a', 'n/a', 'na', '#', 'null', 'undefined', 'about:blank']);
+export function isPlaceholderChapter(chapter) {
+	const url = chapter?.url;
+	return typeof url === 'string' && PLACEHOLDER_URLS.has(url.trim().toLowerCase());
+}
+
 export function mergeChapters(editions, { rank = null } = {}) {
 	const byNumber = new Map();
 	const loose = new Map();
@@ -761,6 +771,7 @@ export function mergeChapters(editions, { rank = null } = {}) {
 
 	for (const edition of ranked) {
 		for (const chapter of edition.chapters ?? []) {
+			if (isPlaceholderChapter(chapter)) continue;
 			const number = chapterNumberOf(chapter);
 			const row = {
 				number,
