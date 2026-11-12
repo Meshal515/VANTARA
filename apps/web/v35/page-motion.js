@@ -1,10 +1,15 @@
-/** One compositor transition for work pages: opacity + a small depth scale, 400ms.
- * Navigation tabs retain their stationary fade. No child stagger, blur or cover clone.
+/** One compositor transition for work pages: opacity + the MOTION push scale. Navigation tabs keep a
+ * stationary fade. No child stagger, blur or cover clone.
  */
-const MS = 400;
-const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
-const EASE_IN = EASE;
-const DEPTH = 0.985;
+/**
+ * عقد الحركة الواحد في VANTARA (قرار المالك، 12 نوفمبر): تلاشٍ مع اندفاع للداخل عند الدخول وللخارج
+ * عند الخروج، هادئ فخم. كل انتقال صفحة وتسليم وتبديل لسان يقرأ من هنا؛ لا قسم مستثنى بالاسم.
+ */
+export const MOTION = Object.freeze({ ms: 380, push: 0.96, enter: 'cubic-bezier(0.22, 1, 0.36, 1)', exit: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+const MS = MOTION.ms;
+const EASE = MOTION.exit;
+const EASE_IN = MOTION.enter;
+const DEPTH = MOTION.push;
 
 export function motionReduced(doc = globalThis.document) {
   return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) || doc?.documentElement?.dataset.motion === 'off';
@@ -84,7 +89,7 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   // Entry and exit must both avoid cinema's fixed depth viewport (marquee jump).
-  if (page.id === 'cinema' || hold) depth = false;
+  if (hold) depth = false;
   const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
@@ -112,36 +117,12 @@ export function pageOut(page, { depth = false, hold = false, visual = null, scro
 /** Keep work-page fixed controls relative to a viewport, not to a 10,000px document.
  * A nonvisual flow placeholder preserves document height and existing root scroll timelines.
  */
-function viewportWork(page, doc) {
-  const owner = page.ownerDocument ?? doc;
-  if (!owner?.createElement || !page.before) return () => {};
-  const r = page.getBoundingClientRect();
-  const h = globalThis.innerHeight || r.height;
-  const previousScroll = page.scrollTop || 0;
-  const bindFixed = captureFixed(page,r);
-  const restore = save(page,['position','top','left','width','height','minHeight','overflow']);
-  const spacer = owner.createElement('div');
-  spacer.setAttribute('aria-hidden','true'); spacer.setAttribute('data-motion-space','');
-  spacer.style.height = `${r.height}px`;
-  page.before(spacer);
-  Object.assign(page.style,{position:'fixed',top:`${Math.max(0,r.top)}px`,left:`${r.left}px`,width:`${r.width}px`,height:`${h}px`,minHeight:'0',overflow:'auto'});
-  page.scrollTop = previousScroll + Math.max(0,-r.top);
-  const unpin = bindFixed();
-  return () => {
-    unpin();
-    const y = page.scrollTop;
-    restore(); spacer.remove(); page.scrollTop = previousScroll;
-    if (page.classList.contains('active')) globalThis.scrollTo?.({top:y,behavior:'instant'});
-  };
-}
 export function pageIn(page, { depth = false, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   // Cinema's wide hero must not be put in a temporary fixed, scrollable viewport:
   // restoring that viewport after the fade caused a visible Dexter/Marquee jump.
-  if (page.id === 'cinema') depth = false;
   const restore = save(page, ['transformOrigin']);
-  const restoreViewport = depth ? viewportWork(page, doc) : () => {};
   if (depth) {
     const r = page.getBoundingClientRect();
     page.style.transformOrigin = originOf(page, r);
@@ -149,8 +130,8 @@ export function pageIn(page, { depth = false, doc = globalThis.document } = {}) 
   }
   page.classList.add('page-in');
   const frames = depth ? [{opacity:0,transform:`scale(${DEPTH})`},{opacity:1,transform:'scale(1)'}] : [{opacity:0},{opacity:1}];
-  track(page, page.animate(frames,{duration:MS,easing:EASE,fill:'both'}), () => {
-    page.classList.remove('page-in','page-depth'); restore(); restoreViewport();
+  track(page, page.animate(frames,{duration:MS,easing:EASE_IN,fill:'both'}), () => {
+    page.classList.remove('page-in','page-depth'); restore();
   });
 }
 

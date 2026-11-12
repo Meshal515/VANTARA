@@ -3737,8 +3737,6 @@ html[data-motion='off'] .v35 .dock-scrim {
 .v35 .page.page-in, .v35 .page.page-out { will-change: opacity; }
 .v35 .page.page-depth { will-change: transform, opacity; }
 
-.v35 .page.page-in.page-depth { scrollbar-width: none; }
-.v35 .page.page-in.page-depth::-webkit-scrollbar { display: none; }
 
 /* الأوراق (openSheet وورقة السيرفرات): فتح بارتفاع خفيف وتلاشٍ 240ms، وإغلاق عكسي أقصر 160ms.
  * انتقالات لا إطارات مفتاحية: فتحٌ أثناء إغلاق (أو العكس) يرتدّ من حيث وصل، ولا تراكم.
