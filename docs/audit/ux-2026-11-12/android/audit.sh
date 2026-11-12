@@ -13,7 +13,7 @@ logcat_pid=$!
 adb install "$apk" | tee "$out/install.txt"
 adb shell am start -W -n "$pkg/com.vantara.app.MainActivity" | tee "$out/start.txt"
 for _ in $(seq 1 30); do adb shell pidof "$pkg" >/dev/null && break; sleep 1; done
-AUDIT_EVIDENCE="$out" node docs/audit/ux-2026-11-12/android/audit.mjs
+AUDIT_EVIDENCE="$out" node "docs/audit/ux-2026-11-12/android/${AUDIT_SCRIPT:-audit-addons.mjs}"
 status=$?
 adb exec-out screencap -p > "$out/final-screen.png" || true
 adb logcat -b crash -d -v threadtime > "$out/logcat-crash.txt" || true
