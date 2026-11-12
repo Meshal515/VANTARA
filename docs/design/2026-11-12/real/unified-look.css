@@ -1,0 +1,56 @@
+/* النمط الموحد: طبقة واحدة فوق صفحات الأقسام الحقيقية. بلا حاويات: لا كبسولات ولا بطاقات ولا خلفيات خلف المحتوى. */
+:root { --u-hero: min(125vw, 560px); --u-g: 20px; }
+/* ── الشريط العلوي: أيقونات حرة بلا كبسولة، وظل خفيف للقراءة فوق الصورة ── */
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-tools, .cn-tools) { background: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-tool, .icon-btn) { background: none !important; box-shadow: none !important; filter: drop-shadow(0 1px 8px rgba(0,0,0,.55)); }
+/* ── البطل: الصورة بعرض الشاشة 4:5 تذوب في الخلفية ── */
+article.aw[data-look=unified] .aw-hero { height: var(--u-hero) !important; }
+article.aw[data-look=unified] .aw-hero :is(.aw-bg, .aw-bg-img) { position: absolute; inset: 0; width: 100%; height: 100% !important; object-fit: cover; object-position: 50% 40%; transform: none !important; animation: none !important; }
+.cn-detail[data-look=unified] .cn-detail-art { aspect-ratio: auto !important; height: var(--u-hero) !important; margin-top: 0 !important; }
+.cn-detail[data-look=unified] .cn-detail-art > .cn-img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; }
+:is(article.aw .aw-hero, .cn-detail .cn-detail-art)::after { content: none; }
+:is(article.aw, .cn-detail)[data-look=unified] .u-fade { position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: linear-gradient(180deg, rgba(8,7,12,.55) 0, rgba(8,7,12,0) 22%, rgba(8,7,12,0) 48%, rgba(8,7,12,.78) 80%, var(--bg) 100%); }
+article.aw[data-look=unified] .aw-shade { display: none; }
+article.aw[data-look=unified] .aw-main, .cn-detail[data-look=unified] .cn-detail-body { position: relative; z-index: 2; margin-top: -196px !important; padding-inline: var(--u-g) !important; }
+article.aw[data-look=unified] .aw-stage { display: block; padding: 0 !important; text-align: start; }
+article.aw[data-look=unified] .aw-cover, article.aw[data-look=unified] .aw-still { display: none !important; }
+/* ── الهوية: الشعار على حافة الصورة من البداية، ثم سطر الحقائق نصًا ── */
+:is(article.aw, .cn-detail)[data-look=unified] :is(.an-mark, .cn-mark) { justify-content: flex-start !important; align-items: flex-end; height: auto !important; min-height: 0; margin: 0 0 14px !important; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.an-mark-logo, .cn-mark-logo) { max-height: 92px; max-width: 74%; width: auto; height: auto; object-fit: contain; object-position: right bottom; margin: 0 !important; margin-inline-end: auto !important; filter: drop-shadow(0 4px 24px rgba(0,0,0,.55)); }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-meta, .cn-facts) { justify-content: flex-start !important; flex-wrap: wrap; column-gap: 14px !important; row-gap: 4px !important; font-size: 13px; color: var(--text-2); margin: 0 0 6px; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-meta, .cn-facts) > span::after { content: none !important; }
+.cn-detail[data-look=unified] .cn-imdb { background: none !important; padding: 0 !important; color: #f5c518; }
+.cn-detail[data-look=unified] .cn-imdb b { background: none !important; color: #f5c518; padding: 0 !important; margin-inline-end: 4px; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-genres, .cn-genre-line) { justify-content: flex-start !important; text-align: start !important; column-gap: 12px !important; margin: 0 0 22px; font-size: 13px; color: var(--text-3); }
+article.aw[data-look=unified] .aw-genre { padding: 0 !important; background: none !important; color: var(--text-3); font-size: 13px; }
+/* ── الفعل: زر واحد بعرض الصفحة، وتحته التقدّم خطًا رفيعًا بلا إطار ── */
+.u-go { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 54px; border: 0; border-radius: 14px; background: var(--accent); color: var(--on-accent, #fff); font: inherit; font-size: 16px; font-weight: 750; cursor: pointer; }
+.u-go small { font-size: 12.5px; font-weight: 600; opacity: .78; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.u-go svg { width: 20px; height: 20px; fill: currentColor; }
+.cn-detail[data-look=unified] #cinemaPlay { height: 54px; border-radius: 14px !important; font-size: 16px; margin: 0 !important; }
+.u-progress { display: flex; align-items: center; gap: 12px; margin: 14px 0 0; font-size: 12.5px; color: var(--text-3); }
+.u-progress i { flex: 1; height: 2px; border-radius: 2px; background: rgba(255,255,255,.12); position: relative; overflow: hidden; }
+.u-progress i::after { content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--p); background: var(--accent); }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-about, .cn-about) { margin: 22px 0 0 !important; padding: 0 !important; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.an-synopsis, .cn-synopsis) { font-size: 14.5px; line-height: 1.75; color: var(--text-2); -webkit-line-clamp: 3; }
+/* ── الألسنة: نص فقط، والحالي خط بنفسجي تحته (نفس ألسنة مواسم الأنمي) ── */
+.u-tabs { display: flex; gap: 28px; margin: 30px 0 18px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.u-tabs button { position: relative; padding: 0 0 12px; border: 0; background: none; font: inherit; font-size: 16px; font-weight: 750; color: var(--text-3); cursor: pointer; }
+.u-tabs button small { font-size: 12px; font-weight: 600; color: var(--text-4); margin-inline-start: 6px; }
+.u-tabs button.on { color: var(--text-1); }
+.u-tabs button.on::after { content: ''; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+/* المواسم والأجزاء والمدى: لسان مواسم الأنمي نفسه في كل الأقسام */
+.u-seasons { display: flex; gap: 22px; overflow-x: auto; scrollbar-width: none; margin: 0 0 10px; }
+.u-seasons::-webkit-scrollbar { display: none; }
+.u-season { position: relative; flex: none; display: grid; justify-items: start; gap: 1px; padding: 6px 0 9px; border: 0; background: none; color: var(--text-3); font: inherit; text-align: start; cursor: pointer; }
+.u-season b { font-size: 14px; font-weight: 650; white-space: nowrap; }
+.u-season span { font-size: 11px; color: var(--text-4); white-space: nowrap; }
+.u-season.active { color: var(--text-1); }
+.u-season.active::after { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+article.aw[data-look=unified] .aw-episode-controls > :first-child:not(.an-seasons):not(.aw-ranges) { display: none; }
+.cn-detail[data-look=unified] .cn-eps-head, .cn-detail[data-look=unified] .cn-eps-count { display: none !important; }
+:is(article.aw, .cn-detail)[data-look=unified] :is(.aw-below, .cn-cast, .cn-sources:empty) { display: none !important; }
+:is(article.aw, .cn-detail)[data-look=unified] .work-insights { display: none; }
+
+:is(article.aw, .cn-detail)[data-look=unified] :is(.an-mark, .cn-mark) { display: flex !important; }
