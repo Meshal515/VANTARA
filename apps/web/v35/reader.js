@@ -467,7 +467,15 @@ export function openSmartReader(deps, ctx) {
       return {};
     }
   }
+  // يُكتب الموضع حين يتغير فقط، ووقت القراءة (pageMs) كل 30 ثانية على الأكثر (#323 U-08): المؤقت كل 5 ثوانٍ
+  // كان يقرأ ويكتب الخريطة كاملة (~250 KB) لكل فصل محمّل حتى بلا حركة.
+  const POSITION_REFRESH_MS = 30_000;
   function writePosition(seg) {
+    const sig = `${seg.current}|${readRatio(seg.furthest, seg.pages.length)}|${seg.pages.length}`;
+    const now = Date.now();
+    if (seg.positionSig === sig && now - (seg.positionAt ?? 0) < POSITION_REFRESH_MS) return;
+    seg.positionSig = sig;
+    seg.positionAt = now;
     try {
       const all = readPositions();
       all[keyOf(seg.row)] = { sourceId: seg.row.sourceId, pages: seg.pages.length, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length), pageMs: seg.pageMs, at: Date.now() };
@@ -1186,12 +1194,12 @@ export function openSmartReader(deps, ctx) {
     const seg = state.seg;
     if (!seg || !seg.pages.length) return;
     writePosition(seg);
-    sync.enqueue('progress.set', {
-      chapterKey: keyOf(seg.row),
-      seriesRef: ref,
-      page: seg.current,
-      ratio: readRatio(seg.furthest, seg.pages.length),
-    });
+    // نفس الموضع لا يُرسل مرتين (#323 U-07): كان progress.set يذهب للخادم كل 5 ثوانٍ بلا تغيير
+    const progress = { chapterKey: keyOf(seg.row), seriesRef: ref, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length) };
+    const sentSig = `${progress.chapterKey}|${progress.page}|${progress.ratio}`;
+    if (seg.sentSig === sentSig) return;
+    seg.sentSig = sentSig;
+    sync.enqueue('progress.set', progress);
   }
 
   function scrollToFrame(frame, smooth = true) {
