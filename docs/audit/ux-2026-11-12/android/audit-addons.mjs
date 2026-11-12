@@ -223,7 +223,7 @@ try {
   }
   // تثبيت عبر الجسور (كما في رحلات Debug) ثم الحكم على ما تعرضه القائمة
   const installed = await step('install-sources', () => js(`(async()=>{const out={};
-    await ${VR}.setProfile({profile:'local'});await ${VR}.addRepository({url:${JSON.stringify(CS_REPO)}});
+    await ${VR}.setProfile({profile:'qa'});await ${VR}.addRepository({url:${JSON.stringify(CS_REPO)}});
     const rows=(await ${VR}.extensions({url:${JSON.stringify(CS_REPO)}})).extensions;out.csRepoExtensions=rows.length;out.cs=[];
     for(const name of ${JSON.stringify(ANIME_CANDIDATES)}){const row=rows.find(r=>r.internalName===name);if(!row)continue;try{await ${VR}.install({url:${JSON.stringify(CS_REPO)},pkg:row.pkg});out.cs.push(name)}catch(e){out.cs.push(name+' ✗ '+String(e.message).slice(0,60))}}
     const E=${EE};await E.addRepo({url:${JSON.stringify(KEIYOUSHI)}});const idx=(await E.repoIndex({url:${JSON.stringify(KEIYOUSHI)}})).extensions;out.keiyoushiExtensions=idx.length;
@@ -253,6 +253,12 @@ try {
   await step('addons-install-from-ui', async () => {
     await tabTo('الإضافات'); await delay(1500);
     await js(`scrollTo(0,0)`);
+    // التبويب يعرض المستودعات أولًا: «استعراض» مستودع CloudStream ثم انتظار صفوف إضافاته
+    const repo = await js(`(()=>{const r=[...document.querySelectorAll('#utility .v7-row')].find(r=>/CloudStream/.test(r.querySelector('.v7-meta')?.textContent||''));const go=r?.querySelector('.v7-go');if(!go)return null;go.click();return r.querySelector('.v7-name')?.textContent.trim()})()`);
+    const tOpen = Date.now();
+    for (; Date.now() - tOpen < 45000; await delay(500)) if (await js(`Boolean(document.querySelector('#utility .v7-row .v7-flip'))`)) break;
+    const repoOpenMs = Date.now() - tOpen;
+    await shot('addons-repo-opened');
     const pick = await js(`(()=>{const r=[...document.querySelectorAll('#utility .v7-row')].find(r=>r.querySelector('.v7-flip:not(.installed)'));if(!r)return null;r.setAttribute('data-qa','pick');r.scrollIntoView({block:'center'});return {name:r.querySelector('.v7-name')?.textContent.trim(),y:Math.round(scrollY)}})()`);
     if (!pick) throw new Error('no installable row in the list');
     await delay(600);
@@ -267,7 +273,7 @@ try {
     }
     await shot('addons-install-result');
     const after = await js(`({nodes:document.querySelectorAll('#utility .v7-row').length,y:Math.round(scrollY)})`);
-    return { pick, ms: Date.now() - t, state, dialog, rowsBefore: before.nodes, rowsAfter: after.nodes, scrollBefore: before.y, scrollAfter: after.y };
+    return { repo, repoOpenMs, pick, ms: Date.now() - t, state, dialog, rowsBefore: before.nodes, rowsAfter: after.nodes, scrollBefore: before.y, scrollAfter: after.y };
   });
 
   // فتح مصدر مثبت من القائمة ← رئيسيته ← رجوع: هل ترجع للقائمة بنفس التبويب والموضع؟
