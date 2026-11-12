@@ -56,7 +56,7 @@ jobs:
       matrix:
         include:
           - { app: stable, styles: default }
-          - { app: debug, styles: 'gallery,profile,resume' }
+          - { app: debug, styles: 'page,gallery,profile,resume' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -138,7 +138,6 @@ const EE = 'Capacitor.Plugins.ExtensionEngine', AE = 'Capacitor.Plugins.AnimeEng
 
 const STYLES = (process.env.CAPTURE_STYLES || 'default').split(',').filter(Boolean);
 const CARD = `[...document.querySelectorAll('#root *')].filter(n=>n._work&&n.getClientRects().length&&n.getBoundingClientRect().width>60)`;
-let title = null;
 try {
   await connect();
   report.device = { abi: adb('shell', 'getprop', 'ro.product.cpu.abilist'), sdk: adb('shell', 'getprop', 'ro.build.version.sdk'), webview: await js('navigator.userAgent') };
@@ -155,10 +154,19 @@ try {
       return await js(`${CARD}.slice(0,8).map(n=>n._work.title)`);
     }, 260000);
     await step(`open-${style}`, async () => {
-      const t = await js(`(()=>{const all=${CARD};const want=${JSON.stringify(title)};const n=(want&&all.find(n=>n._work.title===want))||all.find(n=>n._work.thumbnailUrl)||all[0];n.click();return n._work.title})()`);
-      title ??= t;
+      // نفس العمل في كل لقطة: المطلوب بالاسم إن ظهر خلال 25 ثانية، وإلا أول بطاقة بغلاف
+      const want = process.env.CAPTURE_TITLE || 'Chainsaw Man';
+      const has = `${CARD}.some(n=>JSON.stringify(n._work.title).includes(${JSON.stringify(want)}))`;
+      await until(has, 'wanted title', 25000).catch(() => null);
+      const t = await js(`(()=>{const all=${CARD};const n=all.find(n=>JSON.stringify(n._work.title).includes(${JSON.stringify(want)}))||all.find(n=>n._work.thumbnailUrl)||all[0];n.click();return JSON.stringify(n._work.title)})()`);
       await delay(14000);
       return { title: t, height: await js('document.scrollingElement.scrollHeight') };
+    });
+    // نسخة DOM للصفحة (بلا سكربتات) لتصميم الأنماط محليًا فوق المكوّنات الحقيقية
+    await step(`dom-${style}`, async () => {
+      const html = await js(`'<!doctype html>'+document.documentElement.outerHTML.replace(/<script[\\s\\S]*?<\\/script>/gi,'')`, 60000);
+      writeFileSync(`${out}/dom-${style}.html`, html);
+      return { bytes: html.length, vw: await js('innerWidth'), dpr: await js('devicePixelRatio') };
     });
     for (const [i, y] of [[0, 0], [1, 560], [2, 1200], [3, 2000]]) {
       await js(`scrollTo(0,${y})`); await delay(1400); await shot(`work-${style}-${i}`);
