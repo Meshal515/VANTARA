@@ -112,8 +112,12 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
   };
 }
 
-/** نسبة الفن للحجز في CSS (aspect-ratio) أو null بلا أبعاد معروفة. */
+/** حدود نسبة الغلاف المحجوزة: غلاف شاذ (شريط طويل جدًا أو صورة عريضة) لا يكسر تخطيط النمط؛ يُقص قليلًا. */
+export const COVER_RATIO = Object.freeze({ min: 0.55, max: 0.85 });
+/** نسبة الفن للحجز في CSS (aspect-ratio) أو null بلا أبعاد معروفة. الغلاف محصور في COVER_RATIO. */
 export const artRatio = (d, which = 'cover') => {
   const w = which === 'banner' ? d?.bw : d?.w, h = which === 'banner' ? d?.bh : d?.h;
-  return w > 0 && h > 0 ? `${w} / ${h}` : null;
+  if (!(w > 0 && h > 0)) return null;
+  if (which === 'cover' && (w / h < COVER_RATIO.min || w / h > COVER_RATIO.max)) return String(Math.min(COVER_RATIO.max, Math.max(COVER_RATIO.min, w / h)));
+  return `${w} / ${h}`;
 };

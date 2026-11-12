@@ -96,7 +96,7 @@ export function readWatch(userId = null) {
 export function recordWatch(m, episode, position, duration, userId = null) {
   const all = readWatch(userId);
   const w = all[m.id] ?? { id: m.id, episodes: {} };
-  Object.assign(w, { title: m.title, poster: m.posterSmall ?? m.poster, banner: m.banner, color: m.color, total: m.episodes ?? null, format: m.format ?? null });
+  Object.assign(w, { title: m.title, poster: m.poster ?? m.posterSmall, banner: m.banner, color: m.color, total: m.episodes ?? null, format: m.format ?? null });
   const done = duration > 0 && position / duration >= 0.9;
   w.episodes[episode] = { position, duration, at: Date.now(), done: done || Boolean(w.episodes[episode]?.done) };
   w.episode = episode;
@@ -272,7 +272,7 @@ export function createAnime(deps) {
     c.setAttribute('aria-label', rank ? `${rank}. ${m.title}` : m.title);
     tint(c, m.color);
     const art = el('span', 'an-poster');
-    art.append(image(m.posterSmall ?? m.poster));
+    art.append(image(m.poster ?? m.posterSmall)); // أعلى دقة في البطاقة، والصفحة تفتح بالغلاف نفسه من ذاكرة المتصفح
     const t = el('span', 'an-card-title', m.title);
     t.dir = 'auto';
     if (rank) {
@@ -456,7 +456,7 @@ export function createAnime(deps) {
         section: 'anime',
         kind: 'episode',
         title: m.title,
-        cover: m.posterSmall ?? m.poster ?? null,
+        cover: m.poster ?? m.posterSmall ?? null,
         source: { s: 'anilist' },
         units: [{ number: m.episode, ...(m.airedAt ? { publishedAt: m.airedAt } : {}) }],
       });
@@ -2461,7 +2461,7 @@ export function createAnime(deps) {
             label: `${m.title} — ${unitLabel(m, n)}`,
             seriesRef: togetherRef,
             title: m.title,
-            cover: m.posterSmall ?? m.poster ?? null,
+            cover: m.poster ?? m.posterSmall ?? null,
             // شاشة الغرفة: بنر الحلقة (أو بنر العمل) وعنوانها؛ الشعار يُكمَّل من ani.zip
             banner: thumb ?? m.banner ?? null,
             episodeTitle: epTitle ?? null,
@@ -2786,7 +2786,7 @@ export function createAnime(deps) {
         format: m.format ?? null,
         position: startAt,
         ...(clip ? { clipStart: clip.startMs, clipEnd: clip.endMs } : {}),
-        poster: m.posterSmall ?? m.poster ?? null,
+        poster: m.poster ?? m.posterSmall ?? null,
         // شاشة التحميل في المشغّل: شعار العمل وخلفيته العريضة (الغلاف إن لم توجد)
         logo: artOf(m)?.logo ?? null,
         backdrop: (state.view?.id === m.id ? state.view.heroSrc : null) ?? artOf(m)?.fanart ?? null,
@@ -3136,7 +3136,7 @@ export function createAnime(deps) {
     if (!m) return;
     // داخل الحساب: ترشيح في المجلس لصديق أو للجميع (نفس ورقة المانجا)
     if (deps.share) {
-      deps.share({ ref: `anime:${m.id}`, title: m.title, cover: m.posterSmall ?? m.poster ?? null });
+      deps.share({ ref: `anime:${m.id}`, title: m.title, cover: m.poster ?? m.posterSmall ?? null });
       return;
     }
     const url = `https://anilist.co/anime/${m.id}`;

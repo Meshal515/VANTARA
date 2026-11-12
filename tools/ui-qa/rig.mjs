@@ -83,7 +83,8 @@ function cinemetaFixture(url, o) {
  * @param {number} [o.mangaDelay] تأخر وصول فصول المانجا (ms)
  * @param {number} [o.imageDelay] تأخر الصور المولّدة (ms)
  */
-export async function launch({ unified = false, section = 'manga', viewport = { width: 390, height: 844 }, appearance = null, rows = {}, net = 'fixture', mangaDelay = 400, imageDelay = 0, mobile = true, record = null, motion = null } = {}) {
+// QA_IMAGE_DELAY / QA_MANGA_DELAY: شبكة بطيئة (الصور والفصول تتأخر) لاختبار مسار المهلة والمحتوى المتأخر
+export async function launch({ unified = false, section = 'manga', viewport = { width: 390, height: 844 }, appearance = null, rows = {}, net = 'fixture', mangaDelay = Number(process.env.QA_MANGA_DELAY ?? 400), imageDelay = Number(process.env.QA_IMAGE_DELAY ?? 0), mobile = true, record = null, motion = null } = {}) {
   const index = await readFile(path.join(WEB, 'index.html'), 'utf8');
   const css = [...index.matchAll(/href="(\/[^"]*\.css)"/g)].map((m) => m[1]);
   const fontCss = /<style>[\s\S]*?<\/style>/.exec(index)?.[0] ?? '';

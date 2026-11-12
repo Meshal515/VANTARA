@@ -57,5 +57,8 @@ describe('قرار فن العمل الواحد (lib/art.js)', () => {
     expect(isOfficialArt('https://team-x/cover.jpg')).toBe(false);
     expect(artRatio({ w: 460, h: 690 })).toBe('460 / 690');
     expect(artRatio({ w: null })).toBeNull();
+    // غلاف شاذ لا يكسر التخطيط: يُحصر
+    expect(artRatio({ w: 300, h: 1200 })).toBe('0.55');
+    expect(artRatio({ w: 1000, h: 800 })).toBe('0.85');
   });
 });

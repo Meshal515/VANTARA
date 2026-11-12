@@ -62,7 +62,7 @@ import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
-import { cachedArt, rememberArt, resolveArt } from '../lib/manga-art.js';
+import { artRatio, createArtStore } from '../lib/art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
@@ -574,18 +574,74 @@ export function mountV35(deps, { page = 'home' } = {}) {
     });
   }
   /**
-   * أغلفةٌ ظهرت في هذه الجلسة: عملٌ → الرابط الذي عُرض. إعادة رسم القسم (وتتكرر
-   * مع كل تحديث للقوائم) كانت تبني الغلاف فارغًا ثم تحمّله، فيومض ويختفي
-   * ويرجع. الآن يوضع المعروف في نفس اللحظة، والذاكرة تعطيه بلا انتظار.
+   * قرار فن العمل الواحد (lib/art.js): كل شاشة تقرأ غلاف العمل من هنا، والبطاقة تحسمه أول ما تقترب من الشاشة
+   * فتجده صفحة العمل محسومًا بأبعاده (يظهر بنسبته من أول إطار، والغلاف نفسه في الخارج والداخل). كانت ثلاث
+   * قواعد (البطاقات: أول رابط يتحمّل، وصفحة العمل: بالقياس، والفهرس: بشكل الرابط) وأربع ذاكرات.
    */
-  const shownCovers = new Map();
+  const art = createArtStore();
   const failedCanonical = new Map();
+  let artActive = 0;
+  const artWaiting = [];
+  /** مرشحو غلاف عمل: غلاف الخادم الثابت، ثم غلاف البطاقة، ثم أغلفة نسخه من المصادر (لا البنر). */
+  function artSources(work) {
+    const id = String(work?.id ?? '');
+    const canonical = id ? sync.rows('works', (x) => x.series_ref === id)[0]?.cover_url ?? null : null;
+    const editions = work?._work?.editions ?? [];
+    const urls = [canonical, knownCover(id), work?.coverImage?.extraLarge, work?.coverImage?.large, work?._work?.thumbnailUrl, ...editions.map((e) => e.manga?.thumbnailUrl)];
+    const sourceOf = (url) => editions.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? editions[0]?.sourceId ?? null;
+    return [...new Set(urls.filter((u) => typeof u === 'string' && u))].map((url) => ({ url, sourceId: sourceOf(url) }));
+  }
+  /**
+   * يحسم فن العمل مرة (ثلاثة أعمال في آنٍ على الأكثر). أغلفة المصادر بمحرّكها وترويساتها إن أمكن (ملف محفوظ
+   * على الجهاز)، والرسمي من AniList للمانجا بطلب التقييم نفسه (ثمانية عناوين في استعلام).
+   */
+  function decideArt(work) {
+    const id = String(work?.id ?? '');
+    if (!id) return Promise.resolve(null);
+    const known = art.get(id);
+    if (known?.w) return Promise.resolve(known);
+    return new Promise((resolve) => {
+      const run = async () => {
+        artActive += 1;
+        try {
+          const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
+            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
+          const title = work?._work?.title || work?.title?.english || titleOf(work);
+          const official = id.startsWith('ext:') && title ? artFor(title) : null;
+          const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
+          resolve(await art.decide(id, { official, sources, wideHint }));
+        } catch { resolve(null); } finally {
+          artActive -= 1;
+          artWaiting.shift()?.();
+        }
+      };
+      if (artActive < 3) void run();
+      else artWaiting.push(run);
+    });
+  }
+  /** يرسم الغلاف المحسوم في حاويته بنسبته الحقيقية. `fade` لظهوره الأول فوق هيكله (لا تبديل لما ظهر). */
+  function paintDecided(container, work, d, { position = null, fade = false, onFail = null } = {}) {
+    const ratio = artRatio(d);
+    if (ratio) container.style.setProperty('--art-ratio', ratio);
+    const src = cachedCover(d.cover) ?? d.cover;
+    const current = container.querySelector(':scope > img');
+    if (current?.getAttribute('src') === src) return d.cover;
+    const img = new Image();
+    img.alt = '';
+    img.decoding = fade ? 'async' : 'sync';
+    if (fade) img.classList.add('img-fade');
+    if (position) img.style.objectPosition = position;
+    img.onerror = () => { art.forget(String(work?.id ?? '')); onFail?.(); };
+    img.src = src;
+    container.replaceChildren(img);
+    return d.cover;
+  }
   const idOf = (work) => String(work?.id ?? '');
   const animePosters = new Map();
   /** ملصق أنمي بمعرّف AniList، مرة لكل أنمي في الجلسة. */
   function animePoster(id) {
     if (!animePosters.has(id)) {
-      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.posterSmall ?? m?.poster ?? null).catch(() => null));
+      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.poster ?? m?.posterSmall ?? null).catch(() => null));
     }
     return animePosters.get(id);
   }
@@ -593,22 +649,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
-    // غلاف العمل الموحّد واحد في كل الشاشات: غلاف الخادم (يثبّته أول من عرفه) يسبق
-    // ذاكرة هذا الجهاز، فلا تختلف نسخة Debug عن Release ولا شاشة عن شاشة
     const canonical = work?.id ? sync.rows('works', (x) => x.series_ref === String(work.id))[0]?.cover_url ?? null : null;
-    const known0 = shownCovers.get(String(work?.id ?? ''));
-    const known = known0 && (!canonical || known0 === canonical || known0 === cachedCover(canonical) || failedCanonical.get(idOf(work)) === canonical) ? known0 : null;
-    if (known) {
-      const current = container.querySelector(':scope > img');
-      if (current?.getAttribute('src') === known) return known;
-      const img = new Image();
-      img.alt = '';
-      img.decoding = 'sync';
-      img.src = known;
-      if (opts.position) img.style.objectPosition = opts.position;
-      container.replaceChildren(img);
-      return known;
+    // القرار المحسوم للعمل (من أي شاشة حسمته): يظهر فورًا بنسبته، بلا هيكل ولا انتظار
+    const fallBack = () => { if (container.dataset.imageToken === token) void mountLegacy(container, work, opts, token, canonical); };
+    const decided = art.get(idOf(work));
+    if (decided) return paintDecided(container, work, decided, { position: opts.position, onFail: fallBack });
+    // لم يُحسم بعد: هيكل بمقاسه حتى يُحسم، ثم يظهر الغلاف النهائي مرة (لا غلاف مؤقت يُستبدل)
+    if (idOf(work) && !idOf(work).startsWith('anime:') && !idOf(work).startsWith('cinema:')) {
+      container.replaceChildren(imageLoadingNode());
+      await nearViewport(container);
+      if (container.dataset.imageToken !== token) return null;
+      const d = await decideArt(work);
+      if (container.dataset.imageToken !== token) return null;
+      if (d) return paintDecided(container, work, d, { position: opts.position, fade: true, onFail: fallBack });
     }
+    return mountLegacy(container, work, opts, token, canonical);
+  }
+  /**
+   * المسار الاحتياطي حين لا يُحسم فن (كل الروابط فشلت، أو أنمي/سينما من السجل بلا ملصق): ملف محفوظ، ثم محرّك
+   * المصدر، ثم الرابط، ثم الحرف الأول وطلب التفاصيل في الخلفية. لا يحسم قرارًا ولا يتقدم على قرار.
+   */
+  async function mountLegacy(container, work, opts, token, canonical) {
     // `late`: غلافٌ ثقيل (ميغابايتان على شبكة جوال) تجاوز المهلة لا يُرمى: يكمل
     // تحميله ويحلّ محل الحرف أو المعاينة حين يصل
     const tryUrl = (url, timeoutMs, late = null) =>
@@ -637,7 +698,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       if (opts.position) img.style.objectPosition = opts.position;
       container.replaceChildren(img);
-      if (id) shownCovers.set(id, img.getAttribute('src') ?? url);
       // بطاقات أخرى للعمل نفسه بقيت بحرفه (فشلت قبل أن يُعرف): تأخذه الآن
       for (const [other, waiting] of waitingCovers) {
         if (other === container || String(waiting.id) !== id) continue;
@@ -1827,6 +1887,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const live = () => cover.isConnected && cover.dataset.for === ref && String(state.current?.id) === ref;
       const paintArt = (art) => {
         if (!live()) return;
+        // النسبة الحقيقية للغلاف المحسوم: مكانه بمقاسه بلا فراغ فوقه أو تحته ولا قص
+        const ratio = artRatio(art);
+        if (ratio) cover.style.setProperty('--art-ratio', ratio);
         const img = new Image();
         img.alt = '';
         img.decoding = 'async';
@@ -1834,9 +1897,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
-        img.src = art.cover;
+        img.src = cachedCover(art.cover) ?? art.cover;
         cover.replaceChildren(img);
-        shownCovers.set(ref, art.cover);
         for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
           g.onload = () => g.classList.add('ready');
           g.src = art.cover;
@@ -1849,23 +1911,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
           banner.src = art.banner || art.cover;
         }
       };
-      const known = cachedArt(ref);
+      // القرار نفسه الذي رسمته البطاقة (lib/art.js): محسوم غالبًا قبل الفتح، فيظهر فورًا بنسبته
+      const known = art.get(ref);
       if (known) paintArt(known);
       else {
         cover.replaceChildren(imageLoadingNode());
-        const wideHint = w.wideBanner || (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null);
-        const title = w._work?.title || w.title?.english || titleOf(w);
-        void (async () => {
-          // أغلفة المصادر بمحرّكها (ترويساتها) إن أمكن، وإلا الرابط نفسه؛ لا تنتظر أكثر من ثانيتين ونصف
-          const sources = await Promise.all(coverCandidates(w).slice(0, 4).map((c) =>
-            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
-          const art = await resolveArt({ official: artFor(title), sources, wideHint });
+        void decideArt(w).then((d) => {
           if (!live()) return;
-          if (!art.cover) return void mountImage(cover, w, { final: true });
-          rememberArt(ref, art);
-          rememberCover(ref, art.cover);
-          paintArt(art);
-        })();
+          if (!d?.cover) { workReady(); return void mountImage(cover, w, { final: true }); }
+          rememberCover(ref, d.cover);
+          paintArt(d);
+        });
       }
     }
     paintStory(w);
