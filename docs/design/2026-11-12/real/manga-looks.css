@@ -72,3 +72,15 @@
 #detail[data-v=unified] .mw-row > .mw-cta { flex: 1 1 0 !important; width: auto !important; min-width: 0 !important; }
 #detail[data-v=unified] .mw-acts { width: auto !important; max-width: none !important; }
 #detail[data-v=unified] .mw-row > .mw-square { flex: 0 0 44px !important; width: 44px !important; }
+/* الموحد: إطار البطل بنسبة الغلاف نفسه، والأدوات في سطر الألسنة كالأنمي والسينما */
+#detail[data-v=unified] .mw-cover, #detail[data-v=unified] .u-fade { height: var(--u-hero, min(150vw, 600px)) !important; }
+#detail[data-v=unified] .mw-tabs { display: flex !important; align-items: flex-end; }
+#detail[data-v=unified] .mw-tabs .u-tools { margin-inline-start: auto; display: flex; gap: 2px; padding-bottom: 4px; }
+#detail[data-v=unified] .mw-tabs .u-tools .icon-btn, #detail[data-v=unified] .mw-tabs .u-tools .mw-sort { width: 40px; height: 40px; display: grid; place-items: center; border: 0; padding: 0 !important; background: none !important; color: var(--text-2); }
+#detail[data-v=unified] .mw-tabs .u-tools .mw-sort span { display: none; }
+#detail[data-v=unified] .mw-tabs .u-tools svg { width: 22px; height: 22px; }
+#detail[data-v=unified] .mw-tabs .u-tools .icon-btn svg { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+#detail[data-v=unified] .mw-center { margin-top: -64px !important; }
+#detail[data-v=unified] .mw-title { font-size: 28px !important; text-shadow: none; }
+#detail[data-v=unified] .mw-tabs .u-tools { flex-direction: row !important; align-items: center; position: static !important; }
+#detail[data-v=unified] .mw-tabs .u-tools > * { position: static !important; inset: auto !important; transform: none !important; margin: 0 !important; }

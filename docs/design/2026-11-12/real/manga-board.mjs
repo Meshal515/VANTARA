@@ -11,6 +11,14 @@ for (const v of (process.argv[2] || 'unified,webtoon,direct').split(',')) {
     const d = document.querySelector('#detail'); d.dataset.v = v;
     const p = d.querySelector('#detailProgress'); if (/لم تبدأ/.test(p?.innerText || '')) p.classList.add('u-empty');
     if (v !== 'direct') d.querySelector('.mw-stage').append(Object.assign(document.createElement('i'), { className: 'u-fade' }));
+    if (v === 'unified') {
+      const img = d.querySelector('.mw-cover img');
+      const W = innerWidth; if (img?.naturalWidth) document.documentElement.style.setProperty('--u-hero', Math.round(Math.min(W * img.naturalHeight / img.naturalWidth, 600)) + 'px');
+      const tools = document.createElement('div'); tools.className = 'u-tools';
+      tools.innerHTML = '<button class="icon-btn" aria-label="ابحث في الفصول"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>';
+      const sort = d.querySelector('#chapterSort'); if (sort) tools.append(sort);
+      d.querySelector('#detailTabs').append(tools);
+    }
     if (v === 'webtoon') {
       const M = { 'يناير': 1, 'فبراير': 2, 'مارس': 3, 'أبريل': 4, 'ابريل': 4, 'مايو': 5, 'يونيو': 6, 'يوليو': 7, 'أغسطس': 8, 'اغسطس': 8, 'سبتمبر': 9, 'أكتوبر': 10, 'اكتوبر': 10, 'نوفمبر': 11, 'ديسمبر': 12 };
       const rows = [...d.querySelectorAll('.mw-ch')];

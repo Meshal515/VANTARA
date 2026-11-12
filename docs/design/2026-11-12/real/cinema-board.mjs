@@ -61,7 +61,9 @@ const seasonsCss = `.v35 .cn-detail[data-style='series']{--look-r:4px}
 .qa-season small{display:block;font-size:12px;color:var(--text-3);margin-top:2px}
 .qa-season.on .art{outline:2px solid var(--accent);outline-offset:2px}
 .qa-head{display:flex;align-items:baseline;justify-content:space-between;margin-top:26px}
-.qa-head h2{font-size:20px;font-weight:800;margin:0}.qa-head span{font-size:12.5px;color:var(--text-3)}`;
+.qa-head h2{font-size:20px;font-weight:800;margin:0}
+.qa-tools{display:flex;gap:2px;margin-inline-start:auto}.qa-tools button{width:40px;height:40px;display:grid;place-items:center;border:0;background:none;color:var(--text-2)}.qa-tools svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+.v35 .cn-detail[data-style='series'] .cn-eps-head{display:flex;align-items:center;gap:10px}.qa-head span{font-size:12.5px;color:var(--text-3)}`;
 await h.page.addStyleTag({ content: seasonsCss });
 const built = await h.page.evaluate(async () => {
   const d = document.querySelector('.page.active .cn-detail'); d.dataset.style = 'series';
@@ -80,6 +82,10 @@ const built = await h.page.evaluate(async () => {
   }
   const play = d.querySelector('#cinemaPlay'); play.after(head, rail);
   const about = d.querySelector('section.cn-about'), eps = d.querySelector('#cinemaEpisodes');
+  // البحث والترتيب والتصفية في رأس الحلقات (مطلوبة في كل الأنماط الجديدة؛ السينما الحالية بلا أدوات)
+  const tools = document.createElement('div'); tools.className = 'qa-tools';
+  tools.innerHTML = '<button aria-label="ابحث في الحلقات"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button><button aria-label="الترتيب والتصفية"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>';
+  d.querySelector('.cn-eps-head').append(tools);
   eps.after(about);
   return by.size;
 });
