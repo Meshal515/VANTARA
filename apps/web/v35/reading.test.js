@@ -143,3 +143,31 @@ describe('progress counts the same chapters as the header', () => {
     expect(mainChapters(rows).length).toBe(countMainChapters(rows));
   });
 });
+
+// #323 U-28 (ترحيل): علامة حُفظت بمفتاح ذيل Float قبل الإصلاح لا تضيع بعد أن صار المفتاح n:356.1
+import { legacyChapterKeys } from './reading.js';
+describe('marks saved under the old Float32 key', () => {
+  beforeEach(() => _resetPending());
+  const legacy = `ext:w#n:${Math.fround(356.1)}`;
+  it('a chapter marked under n:356.1000061035156 still reads as read', () => {
+    const sync = fakeSync([{ user_id: 'me', chapter_key: legacy, read: 1 }]);
+    expect(chapterKeyOf('ext:w', row(356.1))).toBe('ext:w#n:356.1');
+    expect(isChapterRead(sync, 'ext:w', chapterKeyOf('ext:w', row(356.1)))).toBe(true);
+  });
+  it('a newer mark under the new key wins over the old one (unmarking is kept)', () => {
+    const sync = fakeSync([{ user_id: 'me', chapter_key: legacy, read: 1 }, { user_id: 'me', chapter_key: 'ext:w#n:356.1', read: 0 }]);
+    expect(isChapterRead(sync, 'ext:w', 'ext:w#n:356.1')).toBe(false);
+  });
+  it('«continue» still finds progress saved under the old key', async () => {
+    const { continueChapter, sameChapterKey } = await import('./reading.js');
+    const ordered = [row(356), row(356.1), row(357)];
+    const progress = [{ series_ref: 'ext:w', chapter_key: legacy, ratio: 0.4, updated_at: 1 }];
+    const next = continueChapter(progress, ordered, (r, c) => sameChapterKey(r.chapter_key, chapterKeyOf(r.series_ref, c)));
+    expect(next.chapter.chapterNumber).toBe(356.1);
+  });
+  it('whole and exact numbers have no legacy key', () => {
+    expect(legacyChapterKeys('ext:w#n:17')).toEqual([]);
+    expect(legacyChapterKeys('ext:w#n:0.5')).toEqual([]);
+    expect(legacyChapterKeys('ext:w#n:356.1')).toEqual([legacy]);
+  });
+});

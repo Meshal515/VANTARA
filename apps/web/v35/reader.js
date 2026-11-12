@@ -21,7 +21,7 @@ import { glyph, iconButton } from './icons.js';
 import { applyAppearance } from './appearance.js';
 import { readStructure } from './experience.js';
 import { countLabel } from './plural.js';
-import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
+import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, sameChapterKey, shouldAutoMark } from './reading.js';
 import { editionRows, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
@@ -455,7 +455,8 @@ export function openSmartReader(deps, ctx) {
     if (local && local.sourceId === row.sourceId && local.pages === pageCount) {
       return local.ratio >= 0.98 ? 0 : Math.min(pageCount - 1, Math.max(0, Math.floor(local.page)));
     }
-    const saved = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === key)[0];
+    // والمفتاح القديم للفصل العشري (ذيل Float قبل #323 U-28)
+    const saved = sync.rows('progress', (r) => r.user_id === me() && sameChapterKey(r.chapter_key, key)).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
     if (!saved || (saved.ratio ?? 0) >= 0.98 || !(saved.ratio > 0)) return 0;
     return Math.min(pageCount - 1, Math.max(0, Math.floor(saved.ratio * pageCount) - 1));
   }

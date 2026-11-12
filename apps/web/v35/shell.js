@@ -32,7 +32,7 @@ import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, startChapter } from './reading.js';
+import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
@@ -2658,7 +2658,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!rows.length || !base.length) return null;
     // الترتيب من الأقدم للأحدث؛ مفتاح الفصل بمرجع صفّه نفسه (القديم إن كان منه)
     const ordered = [...base].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
-    return continueChapter(rows, ordered, (row, chapter) => chapterKeyOf(row.series_ref, chapter) === row.chapter_key);
+    return continueChapter(rows, ordered, (row, chapter) => sameChapterKey(row.chapter_key, chapterKeyOf(row.series_ref, chapter)));
   }
 
   /** آخر مرة قرأت فيها هذا العمل (آخر تقدم محفوظ). */
@@ -3893,7 +3893,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function chapterRatio(userId, ref, number) {
     if (number == null) return null;
     const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
-    const row = sync.rows('progress', (r) => r.user_id === userId && r.chapter_key === key)[0];
+    const row = sync.rows('progress', (r) => r.user_id === userId && sameChapterKey(r.chapter_key, key)).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
     return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
   }
   /**

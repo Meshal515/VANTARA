@@ -35,14 +35,46 @@ export function chapterKeyOf(seriesRef, row) {
   return `${shortRef(seriesRef)}#${suffix}`.slice(0, MAX_KEY);
 }
 
-export function isChapterRead(sync, seriesRef, key) {
-  const userId = sync.user?.userId;
+/**
+ * مفتاح الفصل العشري كما حُفظ قبل #323 U-28: الرقم كان يمر بـFloat فيُكتب `n:356.1000061035156`
+ * بدل `n:356.1`. علامات الفصول وصفوف التقدم القديمة بهذا المفتاح تُقرأ منه ما لم يُكتب بالجديد.
+ */
+export function legacyChapterKeys(key) {
+  const match = /^(.*#n:)(-?\d+(?:\.\d+)?)$/.exec(String(key ?? ''));
+  if (!match) return [];
+  const n = Number(match[2]);
+  const widened = Math.fround(n);
+  if (Number.isInteger(n) || widened === n) return [];
+  return [`${match[1]}${widened}`.slice(0, MAX_KEY)];
+}
+
+/** صف (تقدم أو علامة) مفتاحه هذا الفصل بالمفتاح الحالي أو القديم. */
+export function sameChapterKey(stored, key) {
+  return stored === key || (stored != null && legacyChapterKeys(key).includes(stored));
+}
+
+function markOf(sync, userId, key) {
   // المزامنة الحقيقية: بحث بالمفتاح (والطبقة المتفائلة فوقه) لا مسح كل العلامات —
   // قائمة ألف فصل كانت تمسح ألف علامة لكل فصل فيها، فتتجمّد الصفحة
-  if (typeof sync.row === 'function') return Boolean(sync.row('chapter_marks', `${userId}/${key}`)?.read);
+  if (typeof sync.row === 'function') {
+    const row = sync.row('chapter_marks', `${userId}/${key}`);
+    return row ? Boolean(row.read) : undefined;
+  }
   if (pending.has(key)) return pending.get(key);
   const [mark] = sync.rows('chapter_marks', (r) => r.user_id === userId && r.chapter_key === key);
-  return Boolean(mark?.read);
+  return mark ? Boolean(mark.read) : undefined;
+}
+
+export function isChapterRead(sync, seriesRef, key) {
+  const userId = sync.user?.userId;
+  const own = markOf(sync, userId, key);
+  if (own !== undefined) return own;
+  // علامة بالمفتاح القديم (ذيل Float) ولا علامة بالجديد: تبقى كما علّمها صاحبها (#323 U-28)
+  for (const old of legacyChapterKeys(key)) {
+    const mark = markOf(sync, userId, old);
+    if (mark !== undefined) return mark;
+  }
+  return false;
 }
 
 /**
