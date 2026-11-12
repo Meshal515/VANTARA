@@ -6679,6 +6679,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     experienceApplied = true;
     q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
     showHome(root.dataset.section ?? 'manga');
+    // الخروج من الموحد: الإقلاع الموحد لا يرسم أي قسم (#323 U-06)، فالقسم الذي ظهر الآن يُرسم هنا وإلا
+    // بقيت رئيسية الأنمي أو السينما فارغة (showPage لا يرسمهما عند الرجوع، وprepareSections يتخطى الحالي).
+    if (was && !unified && !warmed.has(root.dataset.section ?? 'manga')) renderSection(root.dataset.section ?? 'manga');
     // الشريط تغيّر عرضه (المبدّل ظهر أو اختفى): مؤشر الوجهة يُعاد لموضعها بعد التخطيط
     requestAnimationFrame(() => dockCtl?.activate(currentPage()));
   }
