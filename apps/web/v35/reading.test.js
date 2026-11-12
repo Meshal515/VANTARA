@@ -110,3 +110,20 @@ describe('auto mark needs real reading time', () => {
     expect(shouldAutoMark({ ratio: 0.5, alreadyRead: false, readMs: 4_000, pages: 4 })).toBe(false);
   });
 });
+
+// #323 U-30: «ابدأ» لا يفتح صفًا بلا رقم باسم «الفصل 0»
+import { startChapter } from './reading.js';
+describe('start chapter', () => {
+  const r = (number, extra = {}) => ({ number, ...extra });
+  it('skips the unnumbered placeholder row that mergeChapters puts last', () => {
+    const base = [r(232), r(231), r(1), r(0, { prologue: true }), r(-1, { name: 'n-a' })];
+    expect(startChapter(base, () => false).number).toBe(0); // التمهيد المرقّم 0 فصل صحيح
+    expect(startChapter([r(232), r(1), r(-1)], () => false).number).toBe(1);
+  });
+  it('first unread numbered chapter from the oldest', () => {
+    expect(startChapter([r(3), r(2), r(1), r(-1)], (x) => x.number === 1).number).toBe(2);
+  });
+  it('a work with no numbers at all still opens something', () => {
+    expect(startChapter([r(-1, { name: 'a' }), r(-1, { name: 'b' })], () => false).name).toBe('b');
+  });
+});
