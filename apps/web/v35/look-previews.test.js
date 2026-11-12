@@ -14,16 +14,16 @@ describe('لقطات المعاينة الحقيقية', () => {
     for (const p of requiredPreviews()) expect(statSync(resolve(WEB, p.slice(1))).size).toBeLessThan(90_000);
   });
 
-  it('القائمة تغطي كل أنماط المانجا والأنمي والسينما (الأساسي وثلاثة أنماط)', () => {
+  it('القائمة تغطي كل أنماط المانجا والأنمي والسينما (الأساسي وأربعة أنماط، قرار 12 نوفمبر)', () => {
     const all = requiredPreviews();
     for (const s of MANGA_WORK_STYLES) expect(all).toContain(workPreview('manga', s.id, 'phone'));
     for (const s of WORK_STYLES) expect(all).toContain(workPreview('anime', s.id, 'pc'));
     expect(all).toContain(workPreview('cinema', 'current', 'ipad'));
     for (const s of CINEMA_WORK_STYLES) expect(all).toContain(workPreview('cinema', s.id, 'phone'));
-    expect(CINEMA_WORK_STYLES.map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee']);
+    expect(CINEMA_WORK_STYLES.map((s) => s.id)).toEqual(['current', 'premiere', 'poster', 'marquee', 'series']);
     expect(all).toContain(homePreview('cinema', 'phone'));
     expect(all).toContain(homePreview('unified', 'phone'));
-    expect(all).toHaveLength(3 * (3 + 4 + 5 + 4) + 3);
+    expect(all).toHaveLength(3 * (3 + 4 + 5 + 5) + 3);
   });
 
   it('لا لقطة يتيمة في المجلد: كل ملف له نمط أو رئيسية', () => {
