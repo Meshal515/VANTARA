@@ -463,7 +463,7 @@ self.addEventListener('fetch', (event) => {
 // الواجهة تضع `<img src="/__img?u=…&r=…">` (pwa/cache/images.js). هنا:
 //   - موجودة في كاش الصور ⇒ تُرد فورًا، بلا شبكة (وتعمل دون اتصال).
 //   - غير موجودة ⇒ تُجلب من جالب الويب بالإذن المحفوظ، وتُحفظ إن كانت صورة.
-//   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقدم.
+//   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقل استعمالًا.
 // المفتاح رابط الصورة الأصلي وحده (بلا الإذن ولا المرجع)، فتجديد الإذن لا يفرغه.
 
 const MAX_IMAGES = 2500;
@@ -485,7 +485,12 @@ async function sourceImage(url) {
   const key = new Request(`/__img?u=${encodeURIComponent(source)}`);
   const cache = await caches.open(IMAGE_CACHE);
   const hit = await cache.match(key);
-  if (hit) return hit;
+  if (hit) {
+    // LRU تقريبي (#323 U-18): القراءة لا تغيّر ترتيب keys()، فالغلاف المفتوح كل يوم كان يُكنس قبل غلاف رأيته
+    // مرة. إعادة حفظه تنقله لآخر الترتيب؛ مرة في اليوم على الأكثر لكل صورة (لا كتابة مع كل عرض).
+    if (Date.now() - (Number(hit.headers.get(USED_HEADER)) || 0) > TOUCH_MS) void touchImage(cache, key, hit.clone());
+    return hit;
+  }
 
   const config = await pwaConfig();
   if (!config?.fetchBase || !config?.grant || !/^https?:\/\//.test(source)) return new Response(null, { status: 503 });
@@ -504,7 +509,7 @@ async function sourceImage(url) {
   const type = response.headers.get('content-type') ?? '';
   if (response.ok && type.startsWith('image/')) {
     const body = await response.blob();
-    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000' } });
+    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } });
     try {
       await cache.put(key, stored.clone());
     } catch {
@@ -517,7 +522,19 @@ async function sourceImage(url) {
   return response;
 }
 
-/** يحذف الأقدم دخولًا حتى يرجع الكاش تحت الحد (مرة كل دقيقة على الأكثر). */
+const USED_HEADER = 'x-vantara-used';
+const TOUCH_MS = 86_400_000;
+async function touchImage(cache, key, response) {
+  try {
+    const body = await response.blob();
+    const type = response.headers.get('content-type') ?? 'image/jpeg';
+    await cache.put(key, new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } }));
+  } catch {
+    // القرص ممتلئ أو الكاش أُغلق: يبقى في موضعه
+  }
+}
+
+/** يحذف الأقل استعمالًا (ترتيب keys() بعد touchImage) حتى يرجع الكاش تحت الحد (مرة كل دقيقة على الأكثر). */
 async function trimImages() {
   const now = Date.now();
   if (now - lastTrim < 60_000) return;
@@ -532,6 +549,6 @@ async function trimImages() {
   } catch {
     // بلا تقدير: العدد وحده يحكم
   }
-  // keys() بترتيب الإدخال: الأول هو الأقدم
+  // keys() بترتيب الإدخال، وtouchImage يعيد إدخال ما يُقرأ: الأول هو الأقل استعمالًا
   for (const request of keys.slice(0, Math.max(0, excess))) await cache.delete(request);
 }
