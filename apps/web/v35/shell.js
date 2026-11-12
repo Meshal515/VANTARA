@@ -63,7 +63,7 @@ import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut } from './page-motion.js';
+import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -5195,7 +5195,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     finishPageMotion();
     if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), hold: unifiedRestore, visual, scrollTop: sourceScroll });
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
-    q('bottomNav').hidden = !MAIN_PAGES.includes(id);
+    const nav = q('bottomNav');
+    if (MAIN_PAGES.includes(id)) {
+      const entering = nav.hidden && from !== id;
+      nav.hidden = false;
+      if (entering) dockIn(nav);
+    } else if (!nav.hidden && !nav.inert) {
+      dockOut(nav, { onComplete: () => { if (!MAIN_PAGES.includes(currentPage())) nav.hidden = true; } });
+    }
     playDockMotion();
     if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
     if (id !== 'home') layers?.finish();

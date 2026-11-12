@@ -153,6 +153,25 @@ export function handoffSurface(node, {enter = false, doc = globalThis.document, 
   });
 }
 
+/**
+ * الشريط السفلي جزء من الصفحة التي يظهر فيها، فيتبع عقدها: يدخل مع الصفحة الداخلة (تلاشٍ واندفاع للداخل)
+ * ويخرج مع المغادرة. كان يظهر دفعة واحدة فوق صفحة العمل وهي ما زالت تغادر (#323، ملاحظة المالك)،
+ * وقبلها كان يُخفى ~470ms ثم يقفز. خاصية scale لا transform: translate الشريط محجوز لإزاحة لوحة المفاتيح.
+ */
+export function dockIn(nav, { doc = globalThis.document } = {}) {
+  if (!nav?.animate || motionReduced(doc)) return;
+  const restore = save(nav, ['pointerEvents']);
+  track(nav, nav.animate([{ opacity: 0, scale: String(DEPTH) }, { opacity: 1, scale: '1' }], { duration: MS, easing: EASE_IN, fill: 'backwards' }), restore);
+}
+export function dockOut(nav, { doc = globalThis.document, onComplete = () => {} } = {}) {
+  if (!nav?.animate || motionReduced(doc)) return onComplete();
+  nav.inert = true; // لا لمسة على شريط يغادر
+  track(nav, nav.animate([{ opacity: 1, scale: '1' }, { opacity: 0, scale: String(DEPTH) }], { duration: MS, easing: EASE, fill: 'forwards' }), () => {
+    nav.inert = false;
+    onComplete();
+  });
+}
+
 /** للتوافق: دخول قسم ظهر لأول مرة داخل الصفحة (تلاشٍ فقط، لا حركة تحرك ما حوله). */
 export function fadeIn(node, { doc = globalThis.document } = {}) {
   if (!node?.animate || motionReduced(doc)) return;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { MOTION, bindTabMotion, finishPageMotion, handoffSurface, pageIn, pageOut } from './page-motion.js';
+import { MOTION, bindTabMotion, dockIn, dockOut, finishPageMotion, handoffSurface, pageIn, pageOut } from './page-motion.js';
 
 afterEach(() => { finishPageMotion(); vi.unstubAllGlobals(); });
 
@@ -151,7 +151,7 @@ describe('work/unified handoff uses the same page motion', () => {
 });
 
 // #323: الرجوع من صفحة عمل كان يخفي الشريط السفلي طوال تلاشيها (visibility:hidden على .dock ما دامت
-// الصفحة page-out) ثم يُظهره دفعة واحدة بعد ~470ms. الشريط جزء مما ترجع إليه: يبقى ظاهرًا ثابتًا.
+// الصفحة page-out) ثم يُظهره دفعة واحدة بعد ~470ms. ولا يظهر دفعة واحدة فوق المغادرة: يدخل بعقد الحركة (أدناه).
 describe('Back keeps the bottom bar on screen (no hide-then-pop)', () => {
   const css = ['core.css', 'manga.css', 'anime.css', 'cinema.css', 'unified-view.css']
     .map((f) => readFileSync(new URL(`./${f}`, import.meta.url), 'utf8')).join('\n');
@@ -176,5 +176,33 @@ describe('one motion contract for every section', () => {
     pageIn(q, { depth: true, doc: doc() });
     expect(q.anims.at(-1).frames[0]).toEqual({ opacity: 0, transform: `scale(${MOTION.push})` });
     expect(q.anims.at(-1).opts.easing).toBe(MOTION.enter);
+  });
+});
+
+// ملاحظة المالك (#323): الشريط ظهر كاملًا فوق صفحة العمل وهي تغادر. يدخل ويخرج مع الصفحة بالعقد نفسه
+describe('the bottom bar follows the page motion contract', () => {
+  it('enters with the destination: fade + push in, same duration and curve', () => {
+    const nav = page();
+    dockIn(nav, { doc: doc() });
+    expect(nav.anims[0].frames).toEqual([{ opacity: 0, scale: String(MOTION.push) }, { opacity: 1, scale: '1' }]);
+    expect(nav.anims[0].opts).toMatchObject({ duration: MOTION.ms, easing: MOTION.enter });
+    expect(JSON.stringify(nav.anims[0].frames)).not.toMatch(/transform|translate/); // translate محجوز للوحة المفاتيح
+  });
+  it('leaves with the page, untouchable meanwhile, and is hidden only at the end', () => {
+    const nav = page(); const done = vi.fn();
+    dockOut(nav, { doc: doc(), onComplete: done });
+    expect(nav.anims[0].frames.at(-1)).toEqual({ opacity: 0, scale: String(MOTION.push) });
+    expect(nav.anims[0].opts).toMatchObject({ duration: MOTION.ms, easing: MOTION.exit });
+    expect(nav.inert).toBe(true);
+    expect(done).not.toHaveBeenCalled();
+    finishPageMotion(); // تنقل جديد يقاطع: ينتهي فورًا ولا يبقى الشريط معطّلًا
+    expect(done).toHaveBeenCalledOnce();
+    expect(nav.inert).toBe(false);
+  });
+  it('reduced motion: no animation, hidden at once', () => {
+    const nav = page(); const done = vi.fn();
+    dockIn(nav, { doc: doc('off') }); dockOut(nav, { doc: doc('off'), onComplete: done });
+    expect(nav.anims).toEqual([]);
+    expect(done).toHaveBeenCalledOnce();
   });
 });
