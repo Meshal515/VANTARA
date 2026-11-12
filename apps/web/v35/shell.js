@@ -31,7 +31,7 @@ import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, markChapter, markChapters, startChapter } from './reading.js';
+import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, startChapter } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
@@ -2609,7 +2609,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     const ref = String(w.id);
     const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
-    const readCount = all.filter(read).length;
+    // «قرأت X من Y» بنفس عدّ الرأس (#323 U-23): الفصول الصحيحة فقط (الجانبية 128.1 والصفوف بلا رقم
+    // تُعرض ولا تُعدّ)، وإلا ظهر «386 فصلًا» في الرأس و«قرأت 50 من 453» تحته. عمل بلا أرقام يُعدّ بصفوفه.
+    const counted = mainChapters(all);
+    const readCount = counted.filter(read).length;
     const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
     // «تابع» = آخر فصل كنت فيه فعلًا (آخر تقدم محفوظ)، ولو لم تُعلَّم الفصول قبله
     // مقروءة؛ أنهيته؟ فالذي بعده. ولا تقدم؟ فأول فصل غير مقروء من الأقدم.
@@ -2623,7 +2626,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clearTimeout(state.warmTimer);
       state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
     }
-    paintProgress(w, readCount, all.length);
+    paintProgress(w, readCount, counted.length);
     paintStats(w);
 
     const rows = visibleRows(w);

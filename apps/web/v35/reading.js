@@ -132,3 +132,13 @@ export function startChapter(base, isRead) {
   const numbered = oldestFirst.filter((r) => Number(r?.number) >= 0);
   return numbered.find((r) => !isRead(r)) ?? oldestFirst.find((r) => !isRead(r)) ?? numbered[0] ?? base?.[0] ?? null;
 }
+
+/**
+ * الفصول التي تُعدّ في «قرأت X من Y» وعدد الرأس معًا (#323 U-23): الصحيحة المرقّمة ≥1 فقط، كما
+ * يعدّ countMainChapters في catalog.js. عمل بلا أرقام أصلًا يُعدّ بكل صفوفه.
+ */
+export function mainChapters(rows) {
+  const all = rows ?? [];
+  const main = all.filter((r) => Number.isInteger(Number(r?.number)) && Number(r.number) >= 1);
+  return main.length ? main : all;
+}

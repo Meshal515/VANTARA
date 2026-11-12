@@ -127,3 +127,19 @@ describe('start chapter', () => {
     expect(startChapter([r(-1, { name: 'a' }), r(-1, { name: 'b' })], () => false).name).toBe('b');
   });
 });
+
+// #323 U-23: «قرأت 50 من 453» تحت «386 فصلًا» — العدّان من قاعدة واحدة
+import { mainChapters } from './reading.js';
+import { countMainChapters } from '../lib/catalog.js';
+describe('progress counts the same chapters as the header', () => {
+  it('side chapters and unnumbered rows are shown but not counted', () => {
+    const rows = [{ number: 3 }, { number: 2.5 }, { number: 2 }, { number: 1 }, { number: 0 }, { number: -1 }];
+    expect(mainChapters(rows).map((r) => r.number)).toEqual([3, 2, 1]);
+    expect(mainChapters(rows).length).toBe(countMainChapters(rows));
+  });
+  it('a work without numbers counts every row', () => {
+    const rows = [{ number: -1 }, { number: -1 }];
+    expect(mainChapters(rows).length).toBe(2);
+    expect(mainChapters(rows).length).toBe(countMainChapters(rows));
+  });
+});
