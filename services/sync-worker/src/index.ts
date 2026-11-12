@@ -3158,8 +3158,12 @@ export default {
 
     try {
       if (path === '/health' && url.searchParams.get('collectors') === '1') {
-        const rows = await env.DB.prepare('SELECT source, last_attempt_at, last_success_at, last_error FROM collector_state ORDER BY source').all();
-        return json({ ok: true, collectors: rows.results }, { status: 200 }, cors);
+        // عام بلا جلسة: الحالة فقط (#323 U-17). نص last_error قد يحمل مضيفًا داخليًا أو رسالة مزوّد،
+        // فلا يخرج؛ يبقى في الجدول لمن يشغّل الخادم.
+        const rows = await env.DB.prepare('SELECT source, last_attempt_at, last_success_at, last_error IS NOT NULL AS failing FROM collector_state ORDER BY source')
+          .all<{ source: string; last_attempt_at: number | null; last_success_at: number | null; failing: number }>();
+        const collectors = (rows.results ?? []).map((r) => ({ source: r.source, last_attempt_at: r.last_attempt_at, last_success_at: r.last_success_at, failing: Boolean(r.failing) }));
+        return json({ ok: true, collectors }, { status: 200 }, cors);
       }
       if (path === '/health') {
         return json({ ok: true, protocol: SYNC_PROTOCOL, rev: await currentRev(env) }, {}, cors);
