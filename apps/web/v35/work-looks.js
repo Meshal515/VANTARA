@@ -1,5 +1,6 @@
 import { patchWorkDom } from './work-dom.js';
 import { mountLogoLayer } from './logo-layer.js';
+import { isSingleMovie } from './anime-episodes.js';
 /**
  * أنماط صفحة عمل الأنمي الأربعة (إعدادات ← المظهر)، منقولة من التصاميم المعتمدة كما هي:
  * المنصة، البطاقة الطائرة، شاشة السينما، الحلقة أولًا. البطل (البنر وحركة العمق) من صفحة العمل
@@ -25,7 +26,8 @@ const dashLine = (n = 4) => `<svg class="wl-dash" preserveAspectRatio="none" vie
 
 function parts(c) {
   const { m, glyph } = c;
-  const movie = m.format === 'MOVIE';
+  // فيلم واحد لا عمل MOVIE بعدة قصص (#323 U-02: الأنماط كانت تخفي حلقات «17-26» الثماني)
+  const movie = isSingleMovie(m);
   const meta = c.meta.map((x) => `<span>${x.html ?? esc(x)}</span>`).join('');
   // الأنواع روابط كما في المحور: تفتح مجموعة النوع
   const genres = c.genres.map((g, i) => (c.genreKeys?.[i] ? `<button type="button" class="wl-genre" data-genre="${esc(c.genreKeys[i])}">${esc(g)}</button>` : `<span>${esc(g)}</span>`)).join('');

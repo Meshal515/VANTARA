@@ -45,7 +45,8 @@ import { beginDiscovery, discoveryDiagnostics, summarizeDiscovery } from '../lib
 const isMovie = isSingleMovie;
 const unitLabel = (m, n) => isMovie(m) ? 'الفيلم' : `الحلقة ${n}`;
 
-export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
+// `episodes`: عمل MOVIE بعدة حلقات يُطلب من الإضافات بالحلقة لا فيلمًا واحدًا (#323 U-02، singleMovieIdentity)
+export const animeAddonIdentity = (m, episode = 1) => ({ canonicalId: m.canonicalId ?? `anime:${m.id}`, kind: 'anime', format: m.format, episodes: Number(m.episodes) || null, externalIds: { mal: m.idMal, anilist: m.id, ...m.externalIds }, episode });
 
 const HOME_KEY = 'anime.home.v2';
 // Legacy unowned keys remain on disk for recovery, but are never read into a new account.

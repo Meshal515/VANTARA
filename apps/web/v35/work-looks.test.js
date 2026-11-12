@@ -58,6 +58,16 @@ it('every look presents a movie without episode headings, numbering or a next ep
   }
 });
 
+// #323 U-02: «17-26» صيغته MOVIE وفيه 8 قصص؛ الأنماط كانت تخفي حلقاته لأن الحكم بالصيغة وحدها
+it('every look lists the episodes of a multi-episode MOVIE work', () => {
+  for (const look of LOOK_IDS) {
+    const host = dom();
+    renderLook(look, host, ctx({ m: { id: 198188, title: '17-26', format: 'MOVIE', episodes: 8 }, total: 8, next: null, point: { episode: 3 }, label: 'شاهد الحلقة 3' }));
+    expect(host.querySelectorAll('[data-ep="3"]').length, look).toBeGreaterThan(0);
+    expect(host.textContent, look).not.toContain('· الفيلم');
+  }
+});
+
 it('every look carries the core functions: next-episode time, a slot for friends activity, facts, progress', () => {
   for (const look of LOOK_IDS) {
     const host = dom();

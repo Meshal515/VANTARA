@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { animeMappingRequests, kitsuIdFromMappings, kitsuVideoRequest, createAnimeIdentityResolver } from "./anime-mapping.js";
+import { animeMappingRequests, kitsuIdFromMappings, kitsuVideoRequest, createAnimeIdentityResolver, singleMovieIdentity } from "./anime-mapping.js";
 const captured = (name) => JSON.parse(readFileSync(new URL(`../../../docs/addons/rebuild/research/2026-10-09/${name}-response.observed.json`, import.meta.url), "utf8"));
 const al = captured("kitsu-anilist-21").response;
 const mal = captured("kitsu-mal-21").response;
@@ -46,6 +46,13 @@ it("builds a Kitsu episode ID without transplanting the AniList part's season", 
 });
 it("uses the bare Kitsu ID for an actual anime movie instead of requesting a series episode", () => {
   expect(kitsuVideoRequest({ ...identity, format: "MOVIE", externalIds: { kitsu: "142" }, episode: 1 })).toEqual({ type: "movie", workId: "kitsu:142", videoId: "kitsu:142" });
+});
+// #323 U-02: MOVIE بثماني قصص (17-26) يُطلب بالحلقة، لا «الفيلم» الذي هو القصة الأولى وحدها
+it("requests the chosen episode of a multi-episode MOVIE work", () => {
+  expect(kitsuVideoRequest({ ...identity, format: "MOVIE", episodes: 8, externalIds: { kitsu: "48000" }, episode: 3 })).toEqual({ type: "series", workId: "kitsu:48000", videoId: "kitsu:48000:3" });
+  expect(singleMovieIdentity({ format: "MOVIE", episodes: 1 })).toBe(true);
+  expect(singleMovieIdentity({ format: "MOVIE" })).toBe(true);
+  expect(singleMovieIdentity({ format: "MOVIE", episodes: 8 })).toBe(false);
 });
 it.each([{}, { ...identity, externalIds: {} }, { ...identity, kind: "series", externalIds: { kitsu: "12" } }, { ...identity, episode: 0, externalIds: { kitsu: "12" } }])("does not manufacture a video request for incomplete or wrong-section identity %j", (value) => {
   expect(kitsuVideoRequest(value)).toBeNull();

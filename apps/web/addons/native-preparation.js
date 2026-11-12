@@ -1,4 +1,5 @@
 import { subtitleRequest } from './subtitles.js';
+import { singleMovieIdentity } from './anime-mapping.js';
 
 /** Native source selection stays user-driven; this helper only prepares addon batches. */
 export function nativeAddonPreparation({ runtime, copies, episode }) {
@@ -27,7 +28,7 @@ export function nativeAddonPreparation({ runtime, copies, episode }) {
     const source = runtime.sources.source(copy.sourceId);
     if (!source) throw new Error('source unavailable');
     const episodes = await source.episodes({ ...copy, episode: Number(episode) }, { signal });
-    const movie = copy.type === 'movie' || copy.identity?.kind === 'anime' && copy.identity?.format === 'MOVIE';
+    const movie = copy.type === 'movie' || copy.identity?.kind === 'anime' && singleMovieIdentity(copy.identity);
     const current = movie
       ? episodes.find(ep => ep.url === (copy.id ?? copy.url)) ?? (episodes.length === 1 ? episodes[0] : null)
       : episodes.find(ep => Number(ep.number) === Number(episode) && (copy.requestedSeason == null || Number(ep.season) === Number(copy.requestedSeason)));
