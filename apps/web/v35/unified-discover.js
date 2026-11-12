@@ -230,9 +230,17 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
   function paintGenres(box) {
     box.replaceChildren(...genres(type).map(genreTile));
   }
+  /**
+   * الصفحة تُبنى مرة وتبقى (#323 U-10): كانت تُبنى من الصفر مع كل دخول ورجوع، فتُفك الأغلفة من جديد وتضيع
+   * حالة اللمس والتركيز. الدخول التالي يحدّث «الرائج» وحده، وفقط إن تغيّرت قائمته.
+   */
+  let built = null;
+  let trendingBox = null;
+  let trendingSig = null;
   function render(node = host) {
     if (!node) return;
     host = node;
+    if (built && built.parentNode === node) return void refreshTrending();
     const page = el('div', 'ud');
     const field = el('button', 'ud-field'); field.type = 'button';
     field.insertAdjacentHTML('afterbegin', glyph('search', { size: 20 }));
@@ -257,12 +265,29 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
     paintGenres(box);
     page.append(sec);
 
-    const tr = trending();
     const ts = el('section', 'ud-sec');
     const th = el('header', 'ud-sh'); th.append(el('h2', null, 'الرائج الآن'));
-    ts.append(th);
+    trendingBox = el('div', 'ud-trending');
+    trendingSig = null;
+    ts.append(th, trendingBox);
+    page.append(ts);
+    refreshTrending();
+    built = page;
+    node.replaceChildren(page);
+  }
+  /**
+   * «الرائج» وحده من بيانات الموحد الحالية. تُستدعى أيضًا حين تصل البيانات والصفحة ظاهرة (#323 U-05: كانت
+   * تُقرأ مرة داخل render فقط، فمن دخل قبل وصولها بقي على «نجهّز الرائج…» للأبد).
+   */
+  function refreshTrending() {
+    if (!trendingBox) return false;
+    const tr = trending().slice(0, 10);
+    const sig = tr.map(({ item, group }) => `${group}:${item?.id ?? item?.ref ?? item?.title ?? ''}`).join('|');
+    if (sig === trendingSig) return false;
+    trendingSig = sig;
+    if (!tr.length) { trendingBox.replaceChildren(el('p', 'uv-none', 'نجهّز الرائج…')); return true; }
     const list = el('ol', 'us-rank');
-    tr.slice(0, 10).forEach(({ item, group }, i) => {
+    tr.forEach(({ item, group }, i) => {
       const c = card(item, group);
       const li = el('li');
       const b = el('button', 'us-rank-row'); b.type = 'button';
@@ -273,11 +298,10 @@ export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, resu
       b.onclick = () => open(item, group);
       li.append(b); list.append(li);
     });
-    if (tr.length) ts.append(list); else ts.append(el('p', 'uv-none', 'نجهّز الرائج…'));
-    page.append(ts);
-    node.replaceChildren(page);
+    trendingBox.replaceChildren(list);
+    return true;
   }
   /** «كل الأعمال» بنوع الاكتشاف الحالي (الأنمي افتراضيًا). */
   const openAll = (t = type) => openGenre({ id: null, label: 'كل الأعمال' }, t);
-  return { render, back: closeGenre, openAll, openGenre, suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay, state: () => ({ type, suspended }) };
+  return { render, refreshTrending, back: closeGenre, openAll, openGenre, suspend, hideSuspended, resume, discardSuspended, motionNode: () => overlay, state: () => ({ type, suspended }) };
 }

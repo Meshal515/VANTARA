@@ -504,3 +504,39 @@ it('keeps loaded manga cards and horizontal scroll when anime data arrives', () 
     expect(updated===card).toBe(false);updated.click();expect(openManga).toHaveBeenCalledWith(manga);
   } finally {view.destroy();}
 });
+
+// #323 U-05/U-10: «اكتشف» الموحد يُبنى مرة، ويتحدث «الرائج» وحده حين تصل البيانات
+describe('#323 unified discover keeps its page and fills trending when data arrives', () => {
+  function setup() {
+    const { document } = parseHTML('<html><body><div class="v35"><div id="area"></div></div></body></html>');
+    const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+    let tr = [];
+    const view = createUnifiedDiscover({ el, glyph: () => '', genres: () => [{ id: 'Drama', label: 'دراما' }], results: async () => [],
+      card: (it) => ({ title: it.title, cover: null }), open: () => {}, openMangaGenre: () => {}, openSearch: () => {},
+      trending: () => tr, mount: () => {}, storage: { getItem: () => 'anime', setItem: () => {} } });
+    return { host: document.querySelector('#area'), view, setTrending: (v) => { tr = v; } };
+  }
+  it('a page shown before the data leaves «نجهّز الرائج…» as soon as trending arrives (U-05)', () => {
+    const { host, view, setTrending } = setup();
+    view.render(host);
+    expect(host.textContent).toContain('نجهّز الرائج');
+    setTrending([{ item: { id: 1, title: 'Frieren' }, group: 'anime' }]);
+    view.refreshTrending?.();
+    expect(host.querySelectorAll('.us-rank-row')).toHaveLength(1);
+    expect(host.textContent).not.toContain('نجهّز الرائج');
+  });
+  it('visiting again keeps the same nodes; unchanged trending is not rebuilt (U-10)', () => {
+    const { host, view, setTrending } = setup();
+    setTrending([{ item: { id: 1, title: 'Frieren' }, group: 'anime' }]);
+    view.render(host);
+    const page = host.firstChild, row = host.querySelector('.us-rank-row'), tile = host.querySelector('.ud-genre');
+    view.render(host);
+    expect(host.firstChild).toBe(page);
+    expect(host.querySelector('.us-rank-row')).toBe(row);
+    expect(host.querySelector('.ud-genre')).toBe(tile);
+    setTrending([{ item: { id: 2, title: 'Dandadan' }, group: 'anime' }]);
+    view.render(host);
+    expect(host.firstChild).toBe(page);
+    expect(host.querySelector('.us-rank-row .us-t1').textContent).toBe('Dandadan');
+  });
+});

@@ -6826,12 +6826,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
         next();
       });
       unifiedView.refresh();
+      unifiedDiscover.refreshTrending(); // «اكتشف» الظاهر قبل وصول البيانات لا يبقى على «نجهّز الرائج…» (#323 U-05)
       return loadHeroLogos(d?.trending).then(() => unifiedView.refresh());
     }).catch(() => { unifiedData.asked = false; });
     void import('../lib/cinema-meta.js').then(({ catalog }) => Promise.all([catalog('movie', 'top'), catalog('series', 'top')]))
       .then(([movie, series]) => {
         unifiedData.cinema = { movie, series };
         unifiedView.refresh();
+        unifiedDiscover.refreshTrending();
         return loadSeriesUpdates(series).then((u) => { unifiedData.series = u; unifiedView.refreshUpdates(); });
       }).catch(() => {});
   }
