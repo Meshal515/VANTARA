@@ -737,3 +737,20 @@ it('omits diagnostic tools while retaining installed addon actions when the shar
   expect(view.querySelector('.v7-checks')).toBeNull();
   expect(onCheck).not.toHaveBeenCalled(); view.close();
 });
+
+// #323 U-35: صفوف مستودع CloudStream تحمل tvTypes؛ التثبيت السريع يضع كل إضافة في قسمها
+it('quick install of a CloudStream repository row follows its declared tvTypes (movies go to cinema)', async()=>{
+  setup();const install=vi.fn(async()=>{});
+  const api={list:async()=>({repos:[{name:'Arabic Repo',url:'https://repo.example/repo.json'}],installed:[]}),
+    extensions:async()=>[{name:'Aflaam',pkg:'cs3_aflaam',tvTypes:['Movie','TvSeries']},{name:'Anime4up',pkg:'cs3_anime4up',tvTypes:['Anime','AnimeMovie','OVA']}],install};
+  const view=renderV7Addons({registry:registry(),cloudstreamRepositories:api});await tick();browse(view);await tick();
+  const rows=[...view.querySelectorAll('.v7-row')];
+  const row=name=>rows.find(r=>r.querySelector('.v7-name')?.textContent===name);
+  expect(row('Aflaam').querySelector('.v7-meta').textContent).toContain('سينما');
+  expect(row('Anime4up').querySelector('.v7-meta').textContent).toContain('أنمي');
+  row('Aflaam').querySelector('.v7-flip').click();await tick();
+  row('Anime4up').querySelector('.v7-flip').click();await tick();
+  expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_aflaam','cinema');
+  expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_anime4up','anime');
+  view.close();
+});

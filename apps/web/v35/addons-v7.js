@@ -490,9 +490,18 @@ export function renderV7Addons({
     }
     return null;
   }
+  // نوع إضافة CloudStream من tvTypes التي يعلنها المستودع (نفس قاعدة PublishedRepoRegistrationTest):
+  // Anime/AnimeMovie/OVA ← أنمي، وغيرها (Movie، TvSeries، AsianDrama…) ← سينما. كان كل صف «أنمي»
+  // والتثبيت السريع يضع مواقع الأفلام في الأنمي (#323 U-35).
+  const cloudstreamContent=item=>{
+    const types=(Array.isArray(item?.tvTypes)?item.tvTypes:[]).map(t=>String(t).toLowerCase());
+    if(!types.length)return undefined;
+    return types.some(t=>t==="anime"||t==="animemovie"||t==="ova")?"anime":"cinema";
+  };
   function nativeRecord(item,store,url){
     const local=localMetadata(item,store);
     const record={...item,...local,pkg:nativePackage(item),kind:store.kind,_store:store,_url:url||local?.repo};
+    if(store.family==="cloudstream"&&!record.content){const content=cloudstreamContent(item);if(content)record.content=content;}
     if(installedMetadata.has(store.id)){
       record.installed=local?(local.installed||local.version||true):false;
       if(!local)record.update=false;
@@ -804,9 +813,11 @@ export function renderV7Addons({
         }));
         if(a.pendingRestore&&!a.builtin)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
         if(a._store?.kind==="anime"){
-          acts.append(btn("ثبّت في السينما","v7-btn",async()=>{
+          // البديل عكس النوع المعلن: إضافة سينما تُعرض «ثبّت في الأنمي» والعكس
+          const other=a.content==="cinema"?"anime":"cinema";
+          acts.append(btn(other==="cinema"?"ثبّت في السينما":"ثبّت في الأنمي","v7-btn",async()=>{
             if(busy)return;busy=true;
-            try{await installNative(a,"cinema");closeModal(true);}
+            try{await installNative(a,other);closeModal(true);}
             catch(err){notify(fmtErr(err));}finally{busy=false;}
           }));
         }
