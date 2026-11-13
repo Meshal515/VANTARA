@@ -86,6 +86,7 @@ import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { sideDock } from './side-dock.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
@@ -1757,6 +1758,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
    */
   let unbindMangaDepth = () => {};
+  const desktopPointer = globalThis.matchMedia?.('(min-width: 1024px) and (hover: hover) and (pointer: fine)') ?? null;
+  let classicDock = null;
   function mountDetail() {
     unbindMangaDepth();
     closeDetailMenu();
@@ -1771,8 +1774,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // «ويبتوني» يبني على أساس «المعرض» (data-base) ويختلف بقواعده
     if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
     else delete page.dataset.base;
+    classicDock?.destroy();
+    classicDock = null;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
+    // «كلاسيكي» هو صفحة Stable كما هي، وعلى الكمبيوتر كانت عمودين: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب
+    // الاسم والفصول (side-dock.js). سقط الاستدعاء مع الأنماط فصار الغلاف بنصف الشاشة وما حوله فارغ؛ يُعاد له
+    // وحده، على شاشة الفأرة وحدها (قانون الكمبيوتر). الجوال واللمس: العناصر في أماكنها حرفيًا.
+    if (look === 'page' && !unified) {
+      classicDock = sideDock(
+        () => [q('detailCover'), page.querySelector('.detail-cta'), page.querySelector('.detail-quick'), q('detailProgress')],
+        { query: desktopPointer, className: 'detail-side' },
+      );
+    }
     state.chapterQuery = '';
     // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
     const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
