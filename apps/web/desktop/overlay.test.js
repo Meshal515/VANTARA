@@ -153,3 +153,36 @@ it('uses the common visibility gate for technical network metrics without hiding
  gate.mockReturnValue(true);view.open.more();
  expect(view.root.querySelector('.pp-net')).not.toBeNull();
 });
+
+it('شاشة التحميل كالـAPK: الشعار يمتلئ من اليسار بقدر التقدم ثم تتلاشى عند أول إطار',()=>{
+  const {view}=fixture();
+  view.update({ready:false,title:'Frieren',art:{backdrop:'https://img/bg.jpg',logo:'https://img/logo.png'},loadProgress:.4,loadEpoch:1});
+  const stage=view.root.querySelector('.pp-stage');
+  expect(stage.hidden).toBe(false);expect(stage.classList.contains('pp-stage--startup')).toBe(true);
+  expect(view.root.querySelector('.pp-stage__bg').getAttribute('src')).toBe('https://img/bg.jpg');
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 60% 0 0)');
+  expect(view.root.querySelector('.pp-spinner').hidden).toBe(true);
+  view.update({loadProgress:.2});
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 60% 0 0)');
+  view.update({ready:true,paused:false});
+  expect(stage.classList.contains('pp-stage--out')).toBe(true);
+  vi.advanceTimersByTime(320);expect(stage.hidden).toBe(true);
+});
+it('بلا شعار: الاسم بعد نصف ثانية لا فورًا، والروابط غير الآمنة لا تُحمَّل',()=>{
+  const {view}=fixture();
+  view.update({ready:false,title:'Blue Lock',art:{backdrop:'http://img/bg.jpg',logo:null}});
+  const name=view.root.querySelector('.pp-stage__name');
+  expect(name.hidden).toBe(true);vi.advanceTimersByTime(520);expect(name.hidden).toBe(false);
+  expect(name.textContent).toBe('Blue Lock');
+  expect(view.root.querySelector('.pp-stage__bg').getAttribute('src')).toBeNull();
+});
+it('التوقف أثناء المشاهدة: بعد 450ms فقط، والشعار كامل يومض، والخطأ يخفي الشاشة ليظهر زر الإعادة',()=>{
+  const {view}=fixture();
+  view.update({ready:true,paused:false,buffering:false,title:'X'});
+  const stage=view.root.querySelector('.pp-stage');
+  view.update({buffering:true});vi.advanceTimersByTime(300);expect(stage.hidden).toBe(true);
+  vi.advanceTimersByTime(200);expect(stage.hidden).toBe(false);expect(stage.classList.contains('pp-stage--stalled')).toBe(true);
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 0% 0 0)');
+  view.update({ready:false,buffering:false,status:{text:'تعذّر',error:true}});
+  expect(stage.hidden).toBe(true);expect(view.root.querySelector('.pp-retry').hidden).toBe(false);
+});

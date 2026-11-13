@@ -63,6 +63,16 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   root.dir = 'ltr';
   const gestures = el('div', 'pp-gestures');
   const spinner = el('div', 'pp-spinner'); spinner.innerHTML = '<i></i>';
+  // ── شاشة التحميل كما في الـAPK (LoadingStage.kt): بنر العمل معتّمًا وفوقه شعاره شفافًا يمتلئ لونًا من اليسار
+  // بقدر ما بلغه التحميل فعلًا (مراحل المحرك من player.js) مع زحف زمني لا يتجاوز الثلث. بلا شعار: الاسم بعد
+  // نصف ثانية. توقف أثناء المشاهدة: تعتيم فوق آخر إطار والشعار كاملًا يومض. ──
+  const stage = el('div', 'pp-stage'); stage.hidden = true; stage.setAttribute('aria-hidden', 'true');
+  const stageBg = el('img', 'pp-stage__bg'); stageBg.alt = ''; stageBg.decoding = 'async';
+  const stageMark = el('div', 'pp-stage__mark'); stageMark.hidden = true;
+  const logoGhost = el('img', 'pp-stage__logo'), logoFill = el('img', 'pp-stage__logo pp-stage__fill');
+  logoGhost.alt = logoFill.alt = ''; stageMark.append(logoGhost, logoFill);
+  const stageName = el('strong', 'pp-stage__name'); stageName.dir = 'auto'; stageName.hidden = true;
+  stage.append(stageBg, el('i', 'pp-stage__scrim'), stageMark, stageName);
   const retry = el('button','pp-retry','إعادة المحاولة');retry.type='button';retry.hidden=true;retry.onclick=()=>cmd('retry');
   const status = el('div', 'pp-status'); status.setAttribute('role', 'status');
 
@@ -126,7 +136,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   sheetScrim.onclick = () => closeSheet();
   // Like Android's pp-together strip: the participants stay visible even when
   // playback controls fade after three seconds.
-  root.append(retry,gestures, spinner, status, controls, peopleButton, skipBtn, sheetScrim, sheet);
+  root.append(stage, retry,gestures, spinner, status, controls, peopleButton, skipBtn, sheetScrim, sheet);
   doc.body.append(root);
 
   // ── الظهور والاختفاء ──
@@ -445,12 +455,88 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first?.focus(); }
       }
       if (e.key === ' ' && e.target?.tagName === 'BUTTON') return;
-      if (['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     }
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? '')) return;
     if (sheet.hidden && ['c', 'C'].includes(e.key)) { e.preventDefault(); showSubtitles(); return; }
-    if ([' ', 'ArrowLeft', 'ArrowRight', 'f', 'F', 'Escape', 'm', 'M'].includes(e.key)) { e.preventDefault(); showControls(); cmd('key', e.key); }
+    if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'f', 'F', 'Escape', 'm', 'M'].includes(e.key)) { e.preventDefault(); showControls(); cmd('key', e.key); }
   });
+
+  const safeArt = (url) => (typeof url === 'string' && /^https:\/\//i.test(url) ? url : null);
+  let stageMode = null, stageStart = 0, stageProgress = 0, stageEpoch = null, stageLogo = null, stageBgSrc = null;
+  let stageTick = 0, stageNameTimer = 0, stageShowTimer = 0, stageHideTimer = 0;
+  const paintFill = () => {
+    const p = stageMode === 'startup' ? stageProgress : 1;
+    logoFill.style.clipPath = `inset(0 ${Math.round((1 - p) * 1000) / 10}% 0 0)`;
+    stageName.style.opacity = stageMode === 'startup' ? String(0.35 + 0.65 * p) : '';
+  };
+  const advanceStage = () => {
+    if (stageMode !== 'startup') return;
+    const creep = Math.min(1 / 3, ((Date.now() - stageStart) / 15000) / 3);
+    const next = Math.min(0.97, Math.max(stageProgress, Number(state.loadProgress) || 0, creep));
+    if (next > stageProgress) { stageProgress = next; paintFill(); }
+  };
+  function paintArt() {
+    const art = state.art ?? {}, bg = safeArt(art.backdrop), logo = safeArt(art.logo);
+    if (bg !== stageBgSrc) {
+      stageBgSrc = bg; stage.classList.remove('pp-stage--bg');
+      if (bg) { stageBg.onload = () => { if (stageBgSrc === bg) stage.classList.add('pp-stage--bg'); }; stageBg.src = bg; } else stageBg.removeAttribute('src');
+    }
+    if (logo !== stageLogo) {
+      stageLogo = logo; stageMark.hidden = true;
+      if (logo) {
+        logoFill.onload = () => { if (stageLogo !== logo) return; stageMark.hidden = false; stageName.hidden = true; timers.clearTimeout(stageNameTimer); };
+        logoFill.onerror = () => { if (stageLogo === logo) { stageLogo = null; stageMark.hidden = true; if (stageMode) stageName.hidden = false; } };
+        logoGhost.src = logoFill.src = logo;
+      }
+    }
+    stageName.textContent = state.title ?? '';
+    stage.setAttribute('aria-label', state.title ?? '');
+  }
+  function showStage(mode) {
+    timers.clearTimeout(stageHideTimer);
+    if (stageMode === mode && !stage.hidden) return;
+    stageMode = mode;
+    if (mode === 'startup') { stageStart = Date.now(); stageProgress = 0; }
+    stage.className = `pp-stage pp-stage--${mode}${stageBgSrc && stage.classList.contains('pp-stage--bg') ? ' pp-stage--bg' : ''}`;
+    stage.hidden = false;
+    // الاسم بديل الشعار فقط إن لم يصل خلال نصف ثانية، فلا يومض نص ثم يُستبدل بالشعار
+    timers.clearTimeout(stageNameTimer);
+    if (stageMark.hidden) { stageName.hidden = true; stageNameTimer = timers.setTimeout(() => { if (stageMark.hidden && stageMode) stageName.hidden = false; }, 500); }
+    timers.clearInterval?.(stageTick);
+    if (mode === 'startup') stageTick = timers.setInterval?.(advanceStage, 200) ?? 0;
+    paintFill();
+  }
+  function finishStage() {
+    timers.clearInterval?.(stageTick); timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
+    if (!stageMode) return;
+    // 100%: يكتمل الشعار ثم تتلاشى الشاشة عن الفيديو خلال ~300ms
+    stageProgress = 1; paintFill();
+    stage.classList.add('pp-stage--out');
+    stageMode = null;
+    stageHideTimer = timers.setTimeout(() => { if (!stageMode) { stage.hidden = true; stage.classList.remove('pp-stage--out'); } }, 300);
+  }
+  function paintStage() {
+    paintArt();
+    const failed = !!state.status?.error;
+    const startup = !state.ready && !failed;
+    const stalled = !!state.ready && !!state.buffering && !state.paused && !failed;
+    if (startup) {
+      timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
+      if (stageEpoch !== state.loadEpoch && stageMode === 'startup') { stageStart = Date.now(); stageProgress = 0; }
+      stageEpoch = state.loadEpoch;
+      showStage('startup'); advanceStage();
+    } else if (stalled) {
+      // أثناء المشاهدة بعد مهلة قصيرة فقط، فلا يومض الشعار مع كل توقف لحظي
+      if (stageMode !== 'stalled' && !stageShowTimer) stageShowTimer = timers.setTimeout(() => { stageShowTimer = 0; if (state.ready && state.buffering && !state.paused) showStage('stalled'); }, 450);
+      else if (stageMode === 'startup') finishStage();
+    } else {
+      timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
+      if (failed) { timers.clearInterval?.(stageTick); stageMode = null; stage.hidden = true; }
+      else finishStage();
+    }
+    spinner.hidden = spinner.hidden || !stage.hidden;
+  }
 
   function update(next) {
     const previous = state;
@@ -493,6 +579,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     fullTop.innerHTML = fullBottom.innerHTML = state.fullscreen ? ICON.fullExit : ICON.full;
     if (state.skip) { skipBtn.hidden = false; skipBtn.textContent = state.skip; } else skipBtn.hidden = true;
     paintTime();
+    paintStage();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
     if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
