@@ -375,7 +375,7 @@ export function createAnime(deps) {
     // التصميم المعتمد: البنر من جدول اليوم، ثم تابع المشاهدة، ثم جدول الأسبوع (anime-today.js)
     const hero = data.week?.length ? today().todayHero(data.week) : null;
     if (hero) blocks.append(hero);
-    const air = data.week?.length ? today().schedule(data.week) : null;
+    const air = data.week?.length ? today().schedule(data.week, Date.now(), { more: deps.openUpdates ? () => deps.openUpdates('anime') : null }) : null;
     if (!air && data.trending?.length) blocks.append(rail('رائج الآن', { items: data.trending.slice(0, 12), card: (m) => posterCard(m), more: () => openCollection({ kind: 'trending' }) }));
     const cont = watching();
     if (cont.length) blocks.append(rail('تابع المشاهدة', { cls: 'an-rail--history ah-cw-rail', items: cont.slice(0, HOME_HISTORY), card: (w) => today().continueCard(w), more: () => openLibrary('history') }));

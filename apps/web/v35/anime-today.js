@@ -385,7 +385,7 @@ export function createAnimeToday(h) {
   }
 
   // ───────────── جدول البث ─────────────
-  function schedule(week, now = Date.now()) {
+  function schedule(week, now = Date.now(), { more: showAll = null } = {}) {
     const today = meccaDay(now);
     const days = new Map();
     for (const m of week) {
@@ -400,6 +400,14 @@ export function createAnimeToday(h) {
     const titles = el('div', 'an-rail-titles');
     titles.append(el('h2', null, 'جدول البث'), el('span', 'an-rail-sub', 'بتوقيت مكة'));
     head.append(titles);
+    // «الكل» في رأسه مثل كل رف (ملاحظة المالك، #323 O-3): كان المدخل الوحيد لآخر حلقات الأنمي، واختفى مع إعادة التصميم
+    if (showAll) {
+      const all = el('button', 'an-more');
+      all.type = 'button';
+      all.innerHTML = `<span>الكل</span>${glyph('chevron', { size: 16 })}`;
+      all.onclick = showAll;
+      head.append(all);
+    }
     const tabs = el('nav', 'ah-days');
     tabs.setAttribute('role', 'tablist');
     const list = el('div', 'ah-list');
