@@ -253,7 +253,7 @@ class AnimeEngine(context: Context) {
                 async {
                     val a = withTimeoutOrNull(loadTimeoutMs) { adapter(id) } ?: return@async emptyList()
                     val items = mutableListOf<SourceAnime>()
-                    guarded(id, timeoutMs) { SearchPages.walk(a, query) { items.addAll(it.items) } }
+                    guarded(id, timeoutMs) { SearchPages.walk(a, query, maxPages = SearchPages.GENERAL_SEARCH_PAGES, enough = { page -> page.any { SearchPages.covers(query, it.title) } }) { items.addAll(it.items) } }
                     items
                 }
             }.awaitAll().flatten()
@@ -328,10 +328,13 @@ class AnimeEngine(context: Context) {
         concurrency: Int = 6,
         timeoutMs: Long = STREAM_SEARCH_TIMEOUT_MS,
         loadTimeoutMs: Long = STREAM_LOAD_TIMEOUT_MS,
+        maxPages: Int = SearchPages.GENERAL_SEARCH_PAGES,
+        /** Sources that already hold this work: a later name of the same work does not ask them again. */
+        exclude: Set<String> = emptySet(),
         onHit: (SourceHit) -> Unit,
     ) {
         val now = System.currentTimeMillis()
-        val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content }
+        val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content && it.id !in exclude }
         val ordered = health.rank(all, { it.priority }) { HealthStore.sourceKey(it.id) }
         // التبريد بعد فشل متتالٍ (مهلة، خطأ شبكة) لا يُسقط المصدر من بحث فتحه المستخدم بنفسه: يُسأل بعد
         // السليمة فلا يؤخرها. مصادر CloudStream أكثر ما يتعثر هنا (عامل معزول يُشغَّل لكل طلب)، فكانت تغيب عن
@@ -366,10 +369,11 @@ class AnimeEngine(context: Context) {
                     val budget = if (s.id.startsWith(RUNTIME_SOURCE_PREFIX)) maxOf(timeoutMs, RUNTIME_SEARCH_TIMEOUT_MS) else maxOf(timeoutMs, SLOW_SOURCE_SEARCH_MS)
                     val hit: SourceHit? = try {
                         withTimeout(budget) {
-                            SearchPages.walk(a, query) { page ->
+                            // Stop at the page that already names the work; the cap is deliberate, not a failure.
+                            SearchPages.walk(a, query, maxPages = maxPages.coerceIn(1, 20), enough = { items -> items.any { SearchPages.covers(query, it.title) } }) { page ->
                                 pageNumber = page.number
                                 onHit(SourceHit(s.id, page.items, elapsed(),
-                                    error = if (page.hasNext && page.stop != null) "توقف البحث قبل تأكيد نهاية نتائج المصدر" else null,
+                                    error = if (page.hasNext && page.stop == "repeated_page") "توقف البحث قبل تأكيد نهاية نتائج المصدر" else null,
                                     page = page.number, hasNext = page.hasNext, stop = page.stop))
                             }
                         }

@@ -157,7 +157,7 @@ export async function verify(sourceId) {
  * حين يرد الجميع، أو null إن تعذّر البحث. محرك أقدم بلا البث يُغذّى من البحث
  * المجمّع (نفس الشكل، بزمن واحد للكل).
  */
-export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined, diagnostic = null } = {}) {
+export function searchStream(query, content = 'anime', onHit = () => {}, { timeoutMs = null, signal = undefined, diagnostic = null, exclude = [] } = {}) {
   const plugin = bridge();
   if (!plugin) return { done: Promise.resolve(null), cancel() {} };
   const searchId = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -210,7 +210,7 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
       if (e.error) diagnostic?.record('bridge_search_failed', { query, searchId, error: e.error, diagnostic: e.diagnostic });
       end(e.error ? null : true);
     })) return;
-    await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}) });
+    await plugin.searchStream({ query, content, searchId, ...(timeoutMs ? { timeoutMs } : {}), ...(exclude.length ? { exclude: [...exclude] } : {}) });
   })().catch(error => { diagnostic?.record('bridge_search_failed', { query, searchId, error }); end(null); });
   return {
     done,
@@ -401,7 +401,10 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
     let uncertain = false;
     const items = [];
     const tried = new Set();
-    const queries = [...titles, ...(criteria.queries ?? [])].filter(Boolean).map((t) => String(t).replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter((q) => q && !tried.has(q.toLowerCase()) && tried.add(q.toLowerCase()));
+    // أسماء البحث: ما تكتبه المواقع العربية فعلًا (لاتيني أو عربي)، وأربعة على الأكثر. الياباني والكوري والصيني
+    // وغيرها لا يجد شيئًا فيها، وكل اسم كان بحثًا كاملًا في كل مصدر: طوفان طلبات يستدعي حجب Cloudflare والتبريد،
+    // فيغيب المصدر عن البطاقة العامة وهو يعمل من صفحته. المطابقة تبقى بكل الأسماء.
+    const queries = searchQueries([...titles, ...(criteria.queries ?? [])]);
     // English and romaji must not wait behind each other's slow sources.
     // Matching still uses the complete canonical titles and season/year guards.
     const worker = async () => {
@@ -409,6 +412,8 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
       while (next < queries.length && !signal?.aborted) {
         const query = queries[next++];
         trace.record('query_started', { query });
+        // مصدر وجد العمل باسم سابق لا يُسأل باسم آخر له
+        const exclude = first ? [...new Set(first.copies.map((c) => c.sourceId))] : [];
         const { done } = searchStream(query, 'anime', (hit) => {
           trace.record('source_page', { query, sourceId: hit.sourceId, page: hit.page, hasNext: hit.hasNext, stop: hit.stop,
             received: hit.items?.length ?? 0, error: hit.error, diagnostic: hit.diagnostic, skipped: hit.skipped });
@@ -433,7 +438,7 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
             first = work;
             onWork(work);
           }
-        }, { signal, diagnostic: trace });
+        }, { signal, diagnostic: trace, exclude });
         if (await done === null) uncertain = true;
         if (signal?.aborted) throw new DOMException('تم إلغاء البحث', 'AbortError');
       }
@@ -445,6 +450,22 @@ export function findWorkStream(titles, onWork = () => {}, criteria = {}) {
       else resolve(null);
     }, reject);
   });
+}
+
+/** أسماء البحث العام: لاتينية أو عربية، بلا تكرار، وأربعة على الأكثر بترتيبها (الإنجليزي ثم الروماجي…). */
+export function searchQueries(names, limit = 4) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of names) {
+    const q = String(raw ?? '').replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!q || seen.has(q.toLowerCase())) continue;
+    // حروف من غير اللاتينية والعربية (ياباني، كوري، صيني، سيريلي…) = اسم لا تكتبه المواقع العربية
+    if (/[^\p{Script=Latin}\p{Script=Arabic}\p{N}\p{P}\p{S}\s]/u.test(q)) continue;
+    seen.add(q.toLowerCase());
+    out.push(q);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 const fold = (s) =>

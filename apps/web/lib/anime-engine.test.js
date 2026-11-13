@@ -309,3 +309,15 @@ it('one copy per source: the series page before episode pages, then the first re
   const onlyEpisodes = engine.pickCopies(items.slice(0, 2), titles, { format: 'TV' });
   expect(onlyEpisodes.copies.map((c) => c.url)).toEqual(['/ep5']);
 });
+
+describe('أسماء البحث العام: ما تكتبه المواقع العربية، وأربعة على الأكثر', () => {
+  it('يُسقط الياباني والكوري والصيني والسيريلي، ويُبقي اللاتيني والعربي بترتيبه بلا تكرار', () => {
+    expect(engine.searchQueries(['One Piece', 'ONE PIECE', 'ワンピース', '원피스', '海贼王', 'Ван-Пис', 'ون بيس', 'Wan Pisu'])).toEqual(['One Piece', 'ون بيس', 'Wan Pisu']);
+  });
+  it('أربعة أسماء على الأكثر: كل اسم بحثٌ كامل في كل مصدر', () => {
+    expect(engine.searchQueries(['A1', 'B2', 'C3', 'D4', 'E5', 'F6'])).toEqual(['A1', 'B2', 'C3', 'D4']);
+  });
+  it('الوسم بين قوسين لا يُرسل للموقع', () => {
+    expect(engine.searchQueries(['Jujutsu Kaisen (TV)'])).toEqual(['Jujutsu Kaisen']);
+  });
+});

@@ -1059,12 +1059,12 @@
 .v35 .addon-source-bar {
   position: sticky; top: calc(var(--top-h, 56px) + var(--safe-top, 0px)); z-index: 4;
   margin: -16px calc(-1 * var(--gutter, 18px)) 18px;
-  padding: 12px var(--gutter, 18px) 12px;
+  padding: 8px var(--gutter, 18px) 10px;
   background: var(--bg);
 }
 .v35 .addon-source .addon-source-search {
   display: flex; align-items: center; gap: 0; margin: 0;
-  height: 50px; padding: 0 6px 0 14px; border-radius: 16px;
+  height: 44px; padding: 0 4px 0 12px; border-radius: 14px;
   background: color-mix(in srgb, var(--text-1, #fff) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-1, #fff) 9%, transparent);
   transition: border-color 160ms ease, background-color 160ms ease;

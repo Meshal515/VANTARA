@@ -53,4 +53,25 @@ class SearchPagesTest {
         assertEquals("page_limit", results.last().stop)
         assertTrue(results.last().hasNext)
     }
+
+    @Test fun `the general search stops at the page that already names the work`() = runBlocking {
+        val asked = mutableListOf<Int>()
+        val results = mutableListOf<SearchPages.Page>()
+        SearchPages.walk(adapter { p -> asked += p; SourcePage(listOf(SourceAnime("test", "/$p", if (p == 2) "One Piece" else "Other $p")), true) },
+            "One Piece", maxPages = SearchPages.GENERAL_SEARCH_PAGES, enough = { items -> items.any { SearchPages.covers("One Piece", it.title) } }, onPage = { results.add(it) })
+        assertEquals(listOf(1, 2), asked)
+        assertEquals("found", results.last().stop)
+    }
+
+    @Test fun `the general search is capped at a few pages per name, not twenty`() = runBlocking {
+        val asked = mutableListOf<Int>()
+        SearchPages.walk(adapter { p -> asked += p; SourcePage(listOf(item(p)), true) }, "Missing", maxPages = SearchPages.GENERAL_SEARCH_PAGES, onPage = {})
+        assertEquals(listOf(1, 2, 3), asked)
+    }
+
+    @Test fun `covers ignores case, accents and punctuation but needs every word`() {
+        assertTrue(SearchPages.covers("one piece", "ONE PIECE - الحلقة 1100"))
+        assertTrue(SearchPages.covers("Pokémon", "Pokemon Horizons"))
+        assertFalse(SearchPages.covers("Black Clover Season 2", "Black Clover"))
+    }
 }

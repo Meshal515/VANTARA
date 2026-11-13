@@ -605,11 +605,13 @@ class AnimeEnginePlugin : Plugin() {
         val content = call.getString("content") ?: "anime"
         val timeout = (call.getInt("timeoutMs") ?: AnimeEngine.STREAM_SEARCH_TIMEOUT_MS.toInt()).toLong()
         val loadTimeout = (call.getInt("loadTimeoutMs") ?: AnimeEngine.STREAM_LOAD_TIMEOUT_MS.toInt()).toLong()
+        val maxPages = call.getInt("maxPages") ?: com.vantara.anime.SearchPages.GENERAL_SEARCH_PAGES
+        val exclude = call.getArray("exclude")?.let { arr -> (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }.toSet() } ?: emptySet()
         searches.remove(id)?.cancel()
         searches[id] = scope.launch {
             var failure: Throwable? = null
             try {
-                engine.searchEach(query, content, timeoutMs = timeout, loadTimeoutMs = loadTimeout) { hit ->
+                engine.searchEach(query, content, timeoutMs = timeout, loadTimeoutMs = loadTimeout, maxPages = maxPages, exclude = exclude) { hit ->
                     notifyListeners(
                         "searchHit",
                         JSObject().put("searchId", id).put("sourceId", hit.sourceId).put("ms", hit.ms)

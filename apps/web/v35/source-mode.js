@@ -522,6 +522,18 @@ export function renderSourceMode({
       paintStatus();
       if (!append && !state.query) setTimeout(prefetchTabs, 400);
     } catch (error) {
+      // المصدر لا يقدّم «آخر التحديثات» (إضافات Aniyomi كثيرة): القسم يُحذف ويُفتح التالي بصمت، لا خطأ للمصدر كله
+      if (run === generation && !activeController.signal.aborted && !append && !state.query && state.tab === "home"
+        && /LATEST_UNSUPPORTED/.test(`${error?.code ?? ""} ${error?.message ?? ""}`) && choices.length > 1) {
+        choices.splice(choices.findIndex(([tab]) => tab === "home"), 1);
+        tabs.querySelector('[data-tab="home"]')?.remove();
+        tabs.classList.toggle("is-single", choices.length < 2);
+        state.tab = choices[0][0];
+        paintFilters();
+        pending = false;
+        queueMicrotask(() => { if (!closed) void load(); });
+        return;
+      }
       if (run === generation && !activeController.signal.aborted) {
         if (append) {
           autoMore = false;

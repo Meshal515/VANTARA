@@ -446,3 +446,17 @@ it('أقسام المصدر كما يقدمها: آخر التحديثات وا�
   expect(calls).toEqual({ home: 1, popular: 1 });
   view.close();
 });
+
+it('مصدر لا يقدّم «آخر التحديثات» (Aniyomi): القسم يُحذف ويُفتح الرائج، لا خطأ للمصدر كله', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const unsupported = Object.assign(new Error('LATEST_UNSUPPORTED: المصدر لا يقدّم آخر التحديثات'), { code: 'UnsupportedOperationException' });
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Anime4Up', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: { home: async () => { throw unsupported; }, popular: async () => ({ items: [{ id: 'p', title: 'Black Clover' }] }) },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect([...view.querySelectorAll('.addon-catalog-tabs .addon-filter')].map((b) => b.textContent)).toEqual(['الرائج']);
+  expect(view.querySelector('.addon-source-error')).toBe(null);
+  expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
+  view.close();
+});

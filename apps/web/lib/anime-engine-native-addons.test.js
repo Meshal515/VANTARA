@@ -218,7 +218,7 @@ it('aborts both active work-search aliases and removes their listeners',async()=
  plugin.searchStream=async args=>{searches.push(args.searchId);};
  plugin.cancelSearch=async args=>{cancelled.push(args.searchId);};
  const controller=new AbortController();
- const searching=api.findWorkStream(['One Piece','ワンピース'],()=>{}, {signal:controller.signal});
+ const searching=api.findWorkStream(['One Piece','Wan Pisu'],()=>{}, {signal:controller.signal});
  const outcome=searching.then(()=>null,error=>error);
  await new Promise(r=>setTimeout(r,0));expect(searches).toHaveLength(2);
  controller.abort();

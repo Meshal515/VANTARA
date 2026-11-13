@@ -117,7 +117,10 @@ class ExtensionAdapter(
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage {
         val result = when (listing) {
             Listing.POPULAR -> source.getPopularAnime(page)
-            Listing.LATEST -> source.getLatestUpdates(page)
+            // Many Aniyomi extensions declare supportsLatest = false and throw from latestUpdatesRequest; the
+            // source page asked for it first and showed the whole source as failed. Say so without a request.
+            Listing.LATEST -> if (source.supportsLatest) source.getLatestUpdates(page)
+                else throw UnsupportedOperationException("LATEST_UNSUPPORTED: المصدر لا يقدّم آخر التحديثات")
             Listing.SEARCH -> source.getSearchAnime(page, query, AnimeFilterList())
         }
         return SourcePage(result.animes.map { it.toVantara() }, result.hasNextPage)
