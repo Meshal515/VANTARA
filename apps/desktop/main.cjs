@@ -62,6 +62,7 @@ const windowIcon = channelInfo.channel === 'debug'
 const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
+const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -243,6 +244,13 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     const fixtureOption=process.argv.find(x=>x.startsWith('--native-video-smoke-fixture='));
     if(!fixtureOption)throw new Error('إثبات الفيديو يحتاج fixture مؤلفًا');
     await require('./video-smoke.cjs').runEmbeddedVideoSmoke({window,videoHost,playerOverlay:overlay,native,fixture:fixtureOption.slice('--native-video-smoke-fixture='.length),reportPath:videoReportOption.slice('--native-video-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
+    app.quit();return;
+  }
+  if(torrentReportOption){
+    if(!videoHost)throw new Error('إثبات التورنت المدمج يحتاج Windows');
+    const fixtureOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-fixture='));
+    if(!fixtureOption)throw new Error('إثبات التورنت يحتاج fixture مؤلفًا');
+    await require('./torrent-smoke.cjs').runEmbeddedTorrentSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-torrent-smoke-fixture='.length),reportPath:torrentReportOption.slice('--native-torrent-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
     app.quit();return;
   }
   await window.loadURL('vantara://app/index.html');

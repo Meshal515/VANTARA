@@ -31,10 +31,10 @@
 #include <libtorrent/peer_info.hpp>
 #include <libtorrent/write_resume_data.hpp>
 #include <libtorrent/create_torrent.hpp>
-#include <libtorrent/hex.hpp>
 #include <boost/asio.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -282,7 +282,7 @@ public:
         lt::error_code ec;
         lt::add_torrent_params p = lt::parse_magnet_uri(magnet, ec);
         if (ec || !p.info_hashes.has_v1()) return {400, R"({"error":"invalid magnet"})"};
-        std::string const hash = lt::aux::to_hex(p.info_hashes.v1);
+        std::string const hash = [&] { std::ostringstream h; h << p.info_hashes.v1; return h.str(); }();
         bool const listOnly = q.count("list_only") && q.at("list_only") == "true";
         int onlyFile = -1;
         if (q.count("only_files")) {
