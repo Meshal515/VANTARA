@@ -2009,6 +2009,19 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
   pointer-events: none;
   background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 16%, rgba(8, 7, 12, 0) 50%, rgba(8, 7, 12, 0.86) 82%, var(--bg) 100%);
 }
+/* النافذة تملك تلاشيها لا الغلاف: الغلاف ينزلق أبطأ من الصفحة (depth.js) داخل مسرح مقصوص، فكان أسفله
+ * المتلاشي ينزل تحت حد المسرح ويُقص الباقي بحافة حادة (خط «الظل المقصوص»، حتى 114px عند تمرير 300px).
+ * أرضية ثابتة عند حد القص تُخفيه في كل موضع تمرير، كما في نافذة السينما. الاسم فوقها (z-index 2). */
+.v35 #detail[data-look='webtoon'] .mw-stage::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 1;
+  height: 140px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg) 14%, transparent);
+}
 .v35 #detail[data-look='webtoon'] .mw-center { position: relative; z-index: 2; margin-top: -150px; padding-bottom: 4px; }
 .v35 #detail[data-look='webtoon'] .mw-title { font-size: 32px; letter-spacing: -0.01em; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.55); }
 .v35 #detail[data-look='webtoon'] .mw-chip { background: rgba(255, 255, 255, 0.13); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
