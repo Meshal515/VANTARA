@@ -249,6 +249,8 @@ export function renderSourceMode({
   if (!catalogs.length && state.tab !== "search" && !choices.some(([tab]) => tab === state.tab))
     state.tab = choices[0]?.[0] ?? (fullCatalogue ? "catalogue" : "home");
   // قسم واحد (آخر التحديثات مثلًا) عنوانٌ هادئ لا زر؛ أكثر من قسم = شريط أقسام
+  const paintTabs = () => {
+  tabs.replaceChildren();
   tabs.classList.toggle("is-single", choices.length < 2);
   for (const [tab, label] of choices) {
     const b = btn(
@@ -266,8 +268,25 @@ export function renderSourceMode({
       "addon-filter",
     );
     b.dataset.tab = tab;
+    b.dir = "auto";
     tabs.append(b);
   }
+  };
+  paintTabs();
+  // أقسام المصدر كما يعلنها هو (طلب المالك): أقسام CloudStream الرئيسية بأسمائها وترتيبها، و«آخر التحديثات»
+  // لإضافة Aniyomi فقط إن أعلنته. تُقرأ بلا طلب شبكة، ثم يُطلب القسم المختار وحده. محرك أقدم بلا هذه القدرة
+  // يبقى على الأقسام العامة أعلاه.
+  let searchOnly = false;
+  const sectionsReady = !catalogs.length && typeof adapter.sections === "function"
+    ? Promise.resolve().then(() => adapter.sections()).then((list) => {
+        if (closed || !Array.isArray(list)) return;
+        const own = list.filter((x) => x && typeof x.key === "string" && typeof x.name === "string").map((x) => [x.key, x.name]);
+        choices.splice(0, choices.length, ...(fullCatalogue ? [["catalogue", "الكل"]] : []), ...own);
+        searchOnly = !choices.length;
+        if (state.tab !== "search" && !choices.some(([tab]) => tab === state.tab)) state.tab = choices[0]?.[0] ?? "search";
+        paintTabs();
+      }).catch(() => {})
+    : null;
   if (adapter.catalog && selectedCatalog())
     state.tab = `${selectedCatalog().type}|${selectedCatalog().id}`;
   const more = btn("تحميل المزيد", () => {
@@ -300,6 +319,8 @@ export function renderSourceMode({
   };
   const tabFetch = (tab, page, signal) => {
     const o = signal ? { signal } : {};
+    if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(tab))
+      return cached(`${tab}|${page}`, () => adapter.section(tab, page, o), signal);
     if (tab === "catalogue") return cached(`catalogue|${page}`, () => adapter.catalogue(page, o), signal);
     if (tab === "popular") return cached(`popular|${page}`, () => adapter.popular(page, o), signal);
     return cached(`home|${page}`, () => adapter.home(page, o), signal);
@@ -379,6 +400,12 @@ export function renderSourceMode({
         (addon.capabilities ?? []).includes("search")
       )
         out = await adapter.search(state.query, state.page, options);
+      else if (searchOnly) {
+        grid.replaceChildren();
+        note.textContent = "هذا المصدر بلا صفحة رئيسية: اكتب اسم العمل للبحث فيه.";
+        return;
+      } else if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(state.tab))
+        out = await tabFetch(state.tab, state.page, activeController.signal);
       else if (state.tab === "catalogue" && fullCatalogue)
         out = await tabFetch("catalogue", state.page, activeController.signal);
       else if (state.tab === "popular" && adapter.popular)
@@ -604,7 +631,8 @@ export function renderSourceMode({
       globalThis.scrollTo?.({ top: state.scroll ?? 0, behavior: "instant" }),
     );
   };
-  paintFilters();
-  void load();
+  const start = () => { if (closed) return; paintFilters(); void load(); };
+  if (sectionsReady) void sectionsReady.then(start);
+  else start();
   return root;
 }

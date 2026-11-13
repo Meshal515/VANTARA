@@ -460,3 +460,39 @@ it('مصدر لا يقدّم «آخر التحديثات» (Aniyomi): القسم
   expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
   view.close();
 });
+
+it('أقسام المصدر نفسه أولًا (CloudStream): ألسنة بأسمائها وترتيبها، والمطلوب القسم المختار وحده', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const asked = [];
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { asked.push('home'); return { items: [] }; },
+      sections: async () => [{ key: 'section:0', name: 'أفلام أجنبية' }, { key: 'section:1', name: 'مسلسلات تركية' }],
+      section: async (key) => { asked.push(key); return { items: [{ id: key, title: `Work ${key}` }] }; },
+    },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect([...view.querySelectorAll('.addon-catalog-tabs .addon-filter')].map((b) => b.textContent)).toEqual(['أفلام أجنبية', 'مسلسلات تركية']);
+  expect(view.querySelector('.up-title').textContent).toBe('Work section:0');
+  expect(asked).not.toContain('home');
+  view.close();
+});
+
+it('Aniyomi بلا «آخر التحديثات» المعلن: لا يُطلب ولا يظهر', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const asked = [];
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Anime4Up', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { asked.push('home'); throw new Error('must not be asked'); },
+      sections: async () => [{ key: 'popular', name: 'الرائج' }],
+      section: async (key) => { asked.push(key); return { items: [{ id: 'p', title: 'Black Clover' }] }; },
+    },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect(asked).toEqual(['popular']);
+  expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(true);
+  expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
+  view.close();
+});

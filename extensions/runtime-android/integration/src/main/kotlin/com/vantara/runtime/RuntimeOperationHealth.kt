@@ -10,7 +10,9 @@ internal object RuntimeOperationHealth {
     fun assess(operation:String,input:JsonObject,result:JsonObject,source:JsonObject):Result {
         if(operation=="search" || operation !in setOf("catalogue","details","episodes","videoLinks"))return Result.NEUTRAL
         if(operation=="catalogue" && ((input["page"] as? JsonPrimitive)?.intOrNull?.let { it>1 }==true ||
-                (source["hasMainPage"] as? JsonPrimitive)?.booleanOrNull==false))return Result.NEUTRAL
+                (source["hasMainPage"] as? JsonPrimitive)?.booleanOrNull==false ||
+                // One section the user picked (source page tab) may be empty on the site; only the merged home judges the package
+                input.containsKey("section")))return Result.NEUTRAL
         val productive=runCatching {
             when(operation) {
                 "catalogue" -> RuntimeCanaryContract.firstWorkUrl(result).isNotBlank()

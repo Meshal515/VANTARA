@@ -658,6 +658,14 @@ class AnimeEnginePlugin : Plugin() {
         JSObject().put("page", page, com.vantara.anime.adapters.SourcePage.serializer())
     }
 
+    /** أقسام المصدر بترتيبه (لا طلب شبكة): صفحة المصدر تبني ألسنتها منها. */
+    @PluginMethod
+    fun sections(call: PluginCall) = run(call) {
+        val id = call.getString("sourceId") ?: error("sourceId مطلوب")
+        val list = engine.sections(id) ?: error(engine.loadError(id) ?: "المصدر غير متاح")
+        JSObject().put("sections", list, ListSerializer(com.vantara.anime.adapters.SourceSection.serializer()))
+    }
+
     @PluginMethod
     fun details(call: PluginCall) = run(call) {
         val anime = animeFrom(call.getObject("anime"))

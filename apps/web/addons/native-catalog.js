@@ -150,6 +150,19 @@ export async function createNativeCatalog(record, {
     search: (query, number, options) => listing('search', number, String(query ?? ''), options),
   };
   if (!manga || typeof engine.popular === 'function') adapter.popular = (number, options) => listing('popular', number, '', options);
+  // أقسام المصدر كما يعلنها هو (بلا طلب شبكة): أقسام CloudStream الرئيسية، و«آخر التحديثات» لإضافة Aniyomi إن أعلنته.
+  // محرك أقدم بلا sections يبقى على الرائج والأحدث العامين.
+  if (!manga && typeof engine.sections === 'function') {
+    adapter.sections = async (options = {}) => {
+      const result = await invoke('sections', { sourceId: id }, options);
+      if (!Array.isArray(result?.sections)) throw failure('INVALID_NATIVE_RESPONSE', 'لم يُرجع المصدر أقسامًا صالحة.');
+      return result.sections
+        .filter(row => typeof row?.key === 'string' && /^(?:section:\d{1,3}|popular|latest)$/.test(row.key) && typeof row.name === 'string' && row.name.trim())
+        .slice(0, 40)
+        .map(row => ({ key: row.key, name: row.name.trim().slice(0, 80) }));
+    };
+    adapter.section = (key, number, options) => listing(key, number, '', options);
+  }
   if (manga) {
     adapter.series = async (work, options) => {
       const result = await invoke('series', { sourceId: id, manga: item(work) }, options);

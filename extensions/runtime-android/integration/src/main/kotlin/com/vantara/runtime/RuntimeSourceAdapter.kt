@@ -36,8 +36,27 @@ class RuntimeSourceAdapter(
      * CloudStream ships over a hundred, so most Arabic providers' servers came back as "no video link".
      */
     private val embeds: com.vantara.anime.hosts.EmbedResolver? = null,
+    /**
+     * Section names the provider declares (MainAPI.mainPage, from its registration): null = no home page at all,
+     * empty = a home page without declared sections (older providers build all sections themselves).
+     */
+    private val mainPages: List<String>? = emptyList(),
     private val execute: suspend (String,JsonObject)->JsonObject,
 ) : AnimeAdapter {
+    /** The provider's own home sections, in its order, as CloudStream shows them. No request. */
+    override fun sections(): List<SourceSection> = when {
+        mainPages == null -> emptyList()
+        mainPages.isEmpty() -> listOf(SourceSection("section:0", "الرئيسية"))
+        else -> mainPages.mapIndexed { i, name -> SourceSection("section:$i", name.trim().ifBlank { "القسم ${i + 1}" }) }
+    }
+    /** One section only: the merged home page asked every section of the site for one tab. */
+    override suspend fun section(index: Int, page: Int): SourcePage {
+        require(page>0 && index>=0)
+        val result=execute("catalogue",input("page" to JsonPrimitive(page),"section" to JsonPrimitive(index)))
+        val items=result["items"] as? JsonArray ?: error("INVALID_CATALOGUE_RESULT")
+        val flat=JsonArray(items.flatMap { (it.jsonObject["list"] as? JsonArray) ?: error("INVALID_CATALOGUE_SECTION") })
+        return SourcePage(flat.map { work(it.jsonObject) }.distinctBy { it.url },result["hasNext"]?.jsonPrimitive?.booleanOrNull ?: false)
+    }
     private fun input(vararg rows: Pair<String,JsonElement>)=JsonObject(mapOf(*rows))
     private fun work(item: JsonObject,previous: SourceAnime?=null): SourceAnime {
         val url=item.text("url").ifBlank { previous?.url.orEmpty() }

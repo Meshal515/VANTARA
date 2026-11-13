@@ -66,6 +66,10 @@ data class SourceEpisode(
 @Serializable
 data class SourcePage(val items: List<SourceAnime>, val hasNext: Boolean)
 
+/** قسم كما يعلنه المصدر نفسه (`key` يُمرَّر لـ`page`)، يُعرف بلا طلب شبكة. */
+@Serializable
+data class SourceSection(val key: String, val name: String)
+
 enum class Listing { POPULAR, LATEST, SEARCH }
 
 interface AnimeAdapter {
@@ -92,6 +96,15 @@ interface AnimeAdapter {
     /** يرجّح السيرفر السابق في ترتيب التجهيز، مع إبقاء جميع الخيارات متاحة. */
     suspend fun preferredCandidates(episode: SourceEpisode, server: String, now: Long = System.currentTimeMillis(), trace: ResolveTrace? = null): List<Candidate> =
         candidates(episode, now, trace, enough = Int.MAX_VALUE)
+
+    /**
+     * أقسام صفحة المصدر بترتيبه هو (طلب المالك 13 نوفمبر): أقسامه الخاصة أولًا، و«آخر التحديثات» فقط إن أعلنه.
+     * لا طلب شبكة هنا: صفحة المصدر تبني ألسنتها منه ثم تطلب القسم المختار وحده.
+     */
+    fun sections(): List<SourceSection> = listOf(SourceSection("popular", "الرائج"))
+
+    /** قسم بعينه من [sections] (المفتاح `section:N`). */
+    suspend fun section(index: Int, page: Int): SourcePage = throw UnsupportedOperationException("SECTION_UNSUPPORTED")
 }
 
 /**
@@ -113,6 +126,12 @@ class ExtensionAdapter(
 
     override val name: String get() = source.name
     val extensionBaseUrl: String? get() = (source as? AnimeHttpSource)?.baseUrl
+
+    /** إضافة Aniyomi: «الرائج» دائمًا، و«آخر التحديثات» فقط إن أعلنته الإضافة (supportsLatest). */
+    override fun sections(): List<SourceSection> = buildList {
+        add(SourceSection("popular", "الرائج"))
+        if (source.supportsLatest) add(SourceSection("latest", "آخر التحديثات"))
+    }
 
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage {
         val result = when (listing) {

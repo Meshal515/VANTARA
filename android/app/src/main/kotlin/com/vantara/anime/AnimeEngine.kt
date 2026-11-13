@@ -776,7 +776,13 @@ class AnimeEngine(context: Context) {
     fun catalogItems(id: String): List<SourceAnime> = catalogStore.items(id)
 
     suspend fun page(id: String, listing: String, page: Int, query: String = ""): SourcePage? =
-        adapter(id)?.page(listingOf(listing), page, query)
+        adapter(id)?.let { a ->
+            if (listing.startsWith("section:")) a.section(listing.removePrefix("section:").toIntOrNull()?.takeIf { it >= 0 } ?: error("SECTION_INVALID"), page)
+            else a.page(listingOf(listing), page, query)
+        }
+
+    /** أقسام المصدر كما يعلنها (بلا طلب شبكة)، أو null إن لم يتوفر المصدر. */
+    suspend fun sections(id: String): List<com.vantara.anime.adapters.SourceSection>? = adapter(id)?.sections()
 
     private fun listingOf(s: String) = when (s) {
         "latest" -> Listing.LATEST

@@ -210,4 +210,17 @@ class RuntimeSourceAdapterTest {
     @Test fun bracesAndEscapedQuotesInsideJsonStringsAreNotNesting() {
         assertEquals("a{[\"b",RuntimeJson.parse("""{"value":"a{[\"b"}""").jsonObject.text("value"))
     }
+
+    /** The source page shows the provider's own home sections, in its order, and asks for the chosen one only. */
+    @Test fun providerSectionsAreItsOwnAndOneSectionIsAskedAlone()=runBlocking {
+        val asked=mutableListOf<JsonObject>()
+        val adapter=RuntimeSourceAdapter(id,"Source",mainPages=listOf("أفلام أجنبية","مسلسلات تركية")) { op,input -> asked+=input;assertEquals("catalogue",op)
+            objectOf("""{"items":[{"name":"x","list":[{"url":"/w/1","name":"Work"}]}],"hasNext":true}""") }
+        assertEquals(listOf(SourceSection("section:0","أفلام أجنبية"),SourceSection("section:1","مسلسلات تركية")),adapter.sections())
+        val page=adapter.section(1,2)
+        assertEquals(listOf("Work"),page.items.map { it.title });assertTrue(page.hasNext)
+        assertEquals(1,asked.single()["section"]!!.jsonPrimitive.int);assertEquals(2,asked.single()["page"]!!.jsonPrimitive.int)
+        assertEquals(emptyList<SourceSection>(),RuntimeSourceAdapter(id,"Source",mainPages=null) { _,_->error("no request") }.sections())
+        assertEquals(listOf(SourceSection("section:0","الرئيسية")),RuntimeSourceAdapter(id,"Source") { _,_->error("no request") }.sections())
+    }
 }
