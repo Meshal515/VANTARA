@@ -2026,29 +2026,22 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 .v35 #detail[data-look='webtoon'] .mw-title { font-size: 32px; letter-spacing: -0.01em; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.55); }
 .v35 #detail[data-look='webtoon'] .mw-chip { background: rgba(255, 255, 255, 0.13); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .v35 #detail .wt-beat {
-  /* فوق الفن أعلى الصفحة لا في تدفقها: يظهر حين تصل الفصول دون أن يدفع زر القراءة (كان يقفز ~50px) */
-  position: absolute;
-  top: calc(var(--safe-top, 0px) + 68px);
-  inset-inline: 0;
-  z-index: 3;
+  /* سطر هادئ تحت التصنيفات بلون الصفحة نفسها: نقطة بلون التطبيق ونص ثانوي (كانت شارة خضراء فوق الفن).
+   * ارتفاعه محجوز وهو مخفي، فلا يدفع زر القراءة حين تصل الفصول (كان يقفز ~50px حين كان في التدفق) */
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  width: max-content;
-  max-width: calc(100% - 40px);
-  margin: 0 auto;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(10, 30, 18, 0.62);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  color: #c9f7da;
+  gap: 8px;
+  min-height: 20px;
+  margin: 14px 0 0;
+  color: var(--text-3);
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: 600;
+  line-height: 20px;
 }
-.v35 #detail .wt-beat[hidden] { display: none; }
-.v35 #detail .wt-beat i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.18); }
+/* data-off لا hidden: «[hidden]» في core.css يلغي العرض كليًا (!important) فيضيع المكان المحجوز */
+.v35 #detail .wt-beat[data-off] { visibility: hidden; }
+.v35 #detail .wt-beat i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(143, 92, 255, 0.22); }
 .v35 #detail[data-look='webtoon'] .mw-acts { margin-top: 20px; }
 /* الفصول: خط واحد، الرقم عقدة عليه، والشهور محطات */
 .v35 #detail[data-look='webtoon'] .mw-chs { position: relative; }
