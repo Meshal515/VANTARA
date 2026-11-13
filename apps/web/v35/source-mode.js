@@ -329,7 +329,9 @@ export function renderSourceMode({
   const prefetchTabs = () => {
     if (prefetched || closed || catalogs.length) return;
     prefetched = true;
-    for (const [tab] of choices) if (tab !== state.tab) void tabFetch(tab, 1).catch(() => {});
+    // القسمان التاليان فقط: مصدر CloudStream قد يعلن عشرة أقسام، وجلبها كلها مرة إغراق للموقع
+    const at = choices.findIndex(([tab]) => tab === state.tab);
+    for (const [tab] of choices.slice(at + 1, at + 3)) void tabFetch(tab, 1).catch(() => {});
   };
   const seen = new Set();
   const workKey = (work) => {
