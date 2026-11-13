@@ -480,6 +480,8 @@ export async function episodes(anime) {
  * (`RESOLVING`/`READY`/`UNAVAILABLE`/`FAILED`)، وما يتغيّر بعدها يصل بحدث
  * `route` ({session, route})، ونهاية التجهيز بحدث `prepared`.
  */
+/** أقصى انتظار لاكتشاف الإضافات قبل بدء المصادر الأصلية (#323 U-09). */
+const ADDON_QUICK_MS = 1200;
 export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null, signal = undefined }) {
   signal?.throwIfAborted();
   const plugin = bridge();
@@ -495,15 +497,30 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
   }
   const context = { identity: identity ? { ...identity, episode: Number(episode) } : null };
   addonDiscoverySessions.set(id, context);
-  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && copies.some(isNativeRuntimeCopy);
-  const discovery = deferMapping ? withAddonCopies([], context.identity).catch(() => []) : null;
+  const hasNative = copies.some(isNativeRuntimeCopy);
+  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && hasNative;
+  let discovery = deferMapping ? withAddonCopies([], context.identity).catch(() => []) : null;
   const attachDiscovery = () => {
     if (!discovery) return;
     void discovery.then(extra => addonDiscoverySessions.get(id) === context && extra.length ? extend(id, extra) : null).catch(() => {});
   };
   try {
   if (identity && !deferMapping) {
-    copies = await phase(withAddonCopies(copies, context.identity), 45_000, 'ADDON_DISCOVERY_TIMEOUT');
+    const full = withAddonCopies(copies, context.identity);
+    if (!hasNative) copies = await phase(full, 45_000, 'ADDON_DISCOVERY_TIMEOUT');
+    else {
+      // المصادر الأصلية لا تنتظر اكتشاف الإضافات أكثر من لحظة (#323 U-09): كانت تنتظر runtime ثم ready ثم
+      // ربط الهوية (حتى 45 ثانية) قبل أول طلب لها. الاكتشاف السريع يبقى كما كان (صفوف الإضافات محجوزة
+      // من البداية)، والبطيء تلتحق نسخه بالجلسة حين تصل (extend) كما في الأنمي بلا Kitsu.
+      let wait;
+      const quick = await phase(Promise.race([full.then(v => ({ v })), new Promise(r => { wait = setTimeout(() => r(null), ADDON_QUICK_MS); })]).finally(() => clearTimeout(wait)), 45_000, 'ADDON_DISCOVERY_TIMEOUT');
+      if (quick) copies = quick.v;
+      else {
+        const base = copies;
+        full.catch(() => {});
+        discovery = full.then(all => all.filter(c => !base.some(b => b.sourceId === c.sourceId)), () => []);
+      }
+    }
     const mapped = copies.find(c => c.identity?.externalIds?.kitsu);
     if (mapped) context.identity = mapped.identity;
   }

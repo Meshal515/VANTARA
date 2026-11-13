@@ -83,6 +83,20 @@ it('starts regular anime preparation without waiting for exact-ID mapping and ad
  pending.resolve([]);await new Promise(r=>setTimeout(r,0));
  expect(calls.find(x=>x[0]==='append')[1].provider.videoId).toBe('kitsu:12:2');
 });
+// #323 U-09: الأصلية لا تنتظر اكتشاف الإضافات (هوية Kitsu معروفة أو سينما)؛ الإضافات تلتحق بعدها
+it.each([
+ ['anime with a known Kitsu id',{canonicalId:'anime:21',kind:'anime',format:'TV',externalIds:{anilist:'21',kitsu:'12'},episode:2}],
+ ['a cinema series',{canonicalId:'cinema:tt0944947',kind:'series',externalIds:{imdb:'tt0944947'},season:1,episode:2}],
+])('native sources of %s start without waiting for addon discovery',async(_name,work)=>{
+ const pending=deferred(), mapping=deferred();const {api,calls}=await setup(pending);
+ fixtures.runtime.registry.list=()=>[];
+ fixtures.runtime.enrichAnimeIdentity=()=>mapping.promise;
+ const started=api.prepare({copies:[{sourceId:'native',url:'/work'}],identity:work,episode:2,session:`fast-${work.kind}`});
+ const out=await Promise.race([started,new Promise(r=>setTimeout(()=>r('waited'),2500))]);
+ expect(out).not.toBe('waited');
+ expect(calls.find(x=>x[0]==='prepare')).toBeTruthy();
+ mapping.resolve(work);await new Promise(r=>setTimeout(r,0));
+});
 it('refreshes an existing exact Kitsu copy for the selected episode instead of retaining episode one',async()=>{
  const {api}=await setup(deferred());
  fixtures.runtime.registry.list=()=>[{key:'provider',enabled:true,protocol:'stremio',capabilities:['streams'],resources:[{name:'stream',types:['series'],idPrefixes:['kitsu:']}]}];
