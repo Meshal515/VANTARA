@@ -411,7 +411,7 @@ html,
   direction: ltr;
 }
 
-/* هوية صفحة الإضافة (source-home.js) ما زالت بصنف brand-switch: تبقى بلا زر ولا تبديل */
+/* brand-switch: هوية بلا زر ولا تبديل */
 .v35 .brand-switch {
   pointer-events: auto;
   display: grid;

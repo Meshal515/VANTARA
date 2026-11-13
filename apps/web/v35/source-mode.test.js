@@ -406,3 +406,20 @@ it('يستأنف التحميل المتوقف بدل ترك هياكل التح
   expect(view.querySelectorAll('.up-skel')).toHaveLength(0);
   view.close();
 });
+
+it('صفحة المصدر الموحدة: البحث أولًا، بلا زر «الإضافات»، والاسم مرة واحدة، وVANTARA القسم لشريط الصفحة', async () => {
+    globalThis.document = parseHTML("<html><body></body></html>").document;
+    const brands = [];
+    const view = renderSourceMode({
+      addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series', 'anime'], capabilities: ['home', 'search'] },
+      adapter: { home: async () => ({ items: [] }), search: async () => ({ items: [] }) },
+      onKind: (_k, brand) => brands.push(brand),
+    });
+    expect(view.firstElementChild.classList.contains('addon-source-bar')).toBe(true);
+    expect(view.querySelector('.addon-source-back')).toBe(null);
+    expect([...view.querySelectorAll('h2')].map((h) => h.textContent)).toEqual(['Akwam']);
+    expect(view.querySelector('.addon-eyebrow').textContent).toBe('مصدر أفلام ومسلسلات');
+    expect(brands.at(-1)).toBe('VANTARA Cinema');
+    expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(true);
+    view.close();
+  });

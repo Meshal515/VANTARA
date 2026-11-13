@@ -22,6 +22,9 @@ export const DEPTH_SPECS = Object.freeze({
       { sel: '.aw-cover', range: [0, 0.52], p: 800, y: [0, -40], z: [0, -90], rx: [0, 38], s: [1, 0.84], o: [1, 0], hold: 0.45 },
       { sel: '.aw-stage .an-mark', range: [0.04, 0.6], p: 700, y: [0, -26], z: [0, -60], rx: [0, 46], s: [1, 0.86], o: [1, 0], hold: 0.4 },
     ],
+    // «الموحد» (طلب المالك 13 نوفمبر): الصورة ثابتة على الشاشة (تنزل بقدر ما تصعد الصفحة) وتخفت قليلًا،
+    // والمحتوى يصعد فوقها. النافذة تملك تلاشيها (::after) فلا خط حاد عند حدها.
+    unified: [{ sel: '.aw-bg', at: 'hero', span: true, y: [0, 1], s: [1, 1.06], o: [1, 0.55] }],
   platform: [
     { sel: '.aw-bg', at: 'hero', span: true, y: [0, 0.35], s: [1, 1.05], o: [1, 0.4] },
     { sel: '.wl-htxt', range: [0, 0.4], y: [0, -20], o: [1, 0] },
@@ -42,6 +45,7 @@ export const DEPTH_SPECS = Object.freeze({
   // السينما: الصورة تنزل بنصف سرعة الصفحة وتكبر فتغوص خلفها (كان cn-art-depth وheroFrame بنسختين)
   cinema: Object.freeze({
     current: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
+    unified: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 1], s: [1, 1.06], o: [1, 0.55] }],
     premiere: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
     marquee: [{ sel: '.cn-detail-art > .cn-img', span: true, y: [0, 0.5], s: [1, 1.12] }],
     // «الملصق» بشخصيته (قرار المالك): خلفية هادئة تتحرك 24px وتكبر ×1.03 فقط، بدل 240px و×1.12
@@ -56,6 +60,8 @@ export const DEPTH_SPECS = Object.freeze({
       { sel: '.detail-head > .detail-cover', range: [0, 0.4], p: 900, y: [0, -10], z: [0, -120], ry: [0, -16] },
     ],
     // «المعرض»: الغلاف يميل للخلف ويتراجع كصفحة تُطوى (أرقامه السابقة)
+    // «الموحد»: حاوية الغلاف (لا الصورة ذات حركة الدخول) ثابتة على الشاشة، والمسرح يقصّها ويملك تلاشيه
+    unified: [{ sel: '.mw-stage > .mw-lift', at: 'hero', span: true, y: [0, 1], s: [1, 1.04], o: [1, 0.55] }],
     gallery: [{ sel: '.mw-stage > .mw-lift', range: [0, 0.45], p: 1000, y: [0, -22], z: [0, -175], rx: [0, 13] }],
     // «الملف»: البنر يتأخر عن الصفحة ويكبر خلفها، وصف الهوية يقترب نحوك
     profile: [

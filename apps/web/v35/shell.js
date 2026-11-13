@@ -18,8 +18,8 @@ import { createSourceVerification } from '../lib/source-verification.js';
 import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
-import { renderSourceMode } from './source-mode.js';
-import { renderSourceHome, supportsSourceHome } from './source-home.js';
+import { declaredKind, renderSourceMode, SECTION_BRAND } from './source-mode.js';
+import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
 import { entitlement } from '../lib/source-entitlement.js';
@@ -1776,7 +1776,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterQuery = '';
     // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
     const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
-    unbindMangaDepth = unified ? () => {} : mountDepth('manga', look, { hero: stage ?? page, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
+    unbindMangaDepth = mountDepth('manga', unified ? 'unified' : look, { hero: stage ?? page, scope: unified ? '.v35 #detail[data-look][data-unified]' : `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
     if (TABBED_LOOKS.includes(look)) bindDetailTabs();
     bindChapterSearch();
     paintDetailTools();
@@ -5046,7 +5046,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const profile=sync.user?.userId??'local';
     const active=()=>run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
     addonSourcePending=true;
-    q('utilityTitle').textContent=addon.name;
+    // شريط الصفحة يحمل VANTARA القسم، واسم المصدر في رأس الصفحة وحده (لا تكرار)
+    q('utilityTitle').textContent=SECTION_BRAND[declaredKind(addon)];
     showPage('utility');
     q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
     try{
@@ -5062,7 +5063,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(!active())return;
       const workLookup=addonNavigation.begin();
       try {
-        toast('جارٍ فتح «' + String(item?.title ?? item?.name ?? 'العمل').slice(0, 40) + '»…');
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);
         if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');
@@ -5085,7 +5085,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         const episodes = addon.contentTypes.includes('manga') ? [] : await workLookup.wait(signal=>source.episodes(copy,{signal}),'SOURCE_EPISODES_TIMEOUT');
         if(!active())return;
-        const work = sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes });
+        // بطاقة العمل الأصلية (هوية AniList/IMDb المحسومة غالبًا من رسم الشبكة) وسيرفرات هذا المصدر وحده
+        const identity = addon.contentTypes.includes('manga') && !addon.contentTypes.some(t => t !== 'manga') ? null
+          : await Promise.race([resolveSourceIdentity(copy, addon), new Promise(r => setTimeout(() => r(null), 1500))]);
+        if(!active())return;
+        const work = withOfficialIdentity(sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes }), identity);
         // كل عمل يُفتح ببطاقة نوعه هو، لا بنوع الإضافة: مصدر متنوع قد يحمل مانجا داخل واجهة أنمي
         const itemType = String(item.type ?? '').toLowerCase();
         if (work._work || itemType === 'manga') { applySection('manga'); buildDrawer(); await workLookup.wait(()=>openWork(work),'SOURCE_WORK_TIMEOUT'); }
@@ -5097,21 +5101,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         openSheet(body=>{body.append(el('p','work-meta',error.message??'تعذّر فتح العمل'),sheetItem('refresh','أعد المحاولة',()=>{closeSheet();void openSelectedWork(item);}));});
       } finally { workLookup.finish(); }
     };
-    // واجهة الإضافة بلغة قسمها (source-home.js)، والقائمة الكاملة خلف أبوابها؛ الرجوع منها إلى واجهة الإضافة
-    const showList = (tab) => {
-      sourceView?.close?.();
-      const listState = tab ? { query: '', page: 1, scroll: 0, ...(tab === 'search' ? {} : { tab }) } : sourceState;
-      sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: listState, onBack: home ? showHome : openAddons, onOpenWork: openSelectedWork });
-      q('utilityBody').replaceChildren(sourceView);
-      if (tab === 'search') sourceView.querySelector('.addon-source-search input')?.focus?.();
-    };
-    const home = supportsSourceHome(adapter) && !sourceState?.tab;
-    function showHome() {
-      sourceView?.close?.();
-      sourceView = renderSourceHome({ addon, adapter, pulse: addons.pulse, onOpenWork: openSelectedWork, onOpenList: showList, onBack: openAddons });
-      q('utilityBody').replaceChildren(sourceView);
-    }
-    if (home) showHome(); else showList(null);
+    // صفحة المصدر واحدة (source-mode.js): بحث وأعمال المصدر، والرجوع إلى الإضافات من شريط الصفحة
+    sourceView?.close?.();
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork, onKind: (_kind, brand) => { if (active()) q('utilityTitle').textContent = brand; } });
+    q('utilityBody').replaceChildren(sourceView);
     }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
     finally{lookup.finish();}
   }

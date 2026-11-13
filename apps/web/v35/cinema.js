@@ -1040,7 +1040,7 @@ export function createCinema(deps) {
     if (m._sourceCopy) return pinnedHandle(m, season, m._sourceCopy);
     const key = playKey(m, season);
     const old = state.works.get(key);
-    if (old) return old;
+    if (old && !old.pinned) return old;
     const controller = new AbortController();
     const h = locator({ key, ...matchCriteria(m, { season }), ready: identityFor(m, season, controller.signal) }, controller.signal);
     const cancel = h.cancel;
@@ -1065,9 +1065,10 @@ export function createCinema(deps) {
   function pinnedHandle(m, season, copy) {
     const key = playKey(m, season);
     state.works.get(key)?.cancel?.();
-    memory.remember(key, [copy]);
+    // عمل بهوية رسمية (IMDb) فُتح من مصدر: نسخته المثبتة لا تُحفظ لمفتاح العمل العام، فالبحث العام لاحقًا يجد كل المصادر
+    if (!m._officialIdentity) memory.remember(key, [copy]);
     const found = { copies: [copy], near: [], total: 1, done: true, fast: true, answered: 1, sources: {} };
-    const h = { found, first: Promise.resolve(found), done: Promise.resolve(found), onCopies: () => () => {}, onHit: () => () => {}, cancel() {} };
+    const h = { pinned: true, found, first: Promise.resolve(found), done: Promise.resolve(found), onCopies: () => () => {}, onHit: () => () => {}, cancel() {} };
     h.run = metrics.start({ key, title: displayTitle(m), kind: m.type });
     h.run.fastPath();
     state.works.set(key, h);
@@ -1827,7 +1828,11 @@ export function createCinema(deps) {
     art.dataset.work = String(m.id);
     const remembered = heroPick.get(m.id);
     // الموحد: البطل ملصق العمل نفسه من أول رسم (قرار المالك: لا بحث عن صور أخرى)، لا الخلفية
-    const want = unified ? (m.poster ?? null) : remembered ?? (partial ? null : m.background ?? m.poster);
+    // الموحد: أوضح صورة متاحة للعمل من أول رسم. ملصق IMDb الصغير (240px) كان يُمدّ بعرض الشاشة فيغبش؛ الخلفية
+    // الأصلية (حتى 4K) بمعرّف IMDb أولًا، وإلا خلفية العمل، وإلا ملصقه بمقاسه الأكبر. لا تبديل بعد الظهور.
+    const unifiedWant = /^tt\d+$/.test(String(m.id)) ? `https://images.metahub.space/background/large/${m.id}/img`
+      : m.background ? sharpBackground(m.background, true) : (m.poster ? m.poster.replace(/(metahub\.space\/poster)\/(?:small|medium)\//, '$1/large/') : null);
+    const want = unified ? unifiedWant : remembered ?? (partial ? null : m.background ?? m.poster);
     const prior = art === priorArt ? art.querySelector('.cn-img') : null;
     let backdrop = null;
     if (prior && prior.dataset.want === want && (prior.classList.contains('loaded') || prior.classList.contains('kept'))) {
@@ -1835,7 +1840,9 @@ export function createCinema(deps) {
       backdrop = prior;
       backdrop.classList.add('kept');
     } else if (want) {
-      backdrop = image(want, 'cn-img', { eager: true, hero: !remembered });
+      backdrop = unified
+        ? image(want, 'cn-img', { eager: true, fallback: [m.background && sharpBackground(m.background, true), m.background, m.poster].filter((u) => u && u !== want) })
+        : image(want, 'cn-img', { eager: true, hero: !remembered });
       backdrop.dataset.want = want;
       backdrop.addEventListener('load', () => {
         if (!unified && (!partial || remembered)) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);
@@ -1966,9 +1973,9 @@ export function createCinema(deps) {
     page.replaceChildren(wrap);
     unbindHero?.();
     // العمق مع التمرير من depth.js (نفس محرك الأنمي): CSS على المؤلِّف + طبقات الانزلاق من الصف نفسه
-    unbindHero = unified ? null : mountDepth('cinema', look, {
-      hero: art, bar, scope: `.v35 .cn-detail[data-style='${look}']`, styleId: 'cn-motion', prefix: 'cn',
-      hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => Math.max(1, art.offsetHeight - bar.offsetHeight),
+    unbindHero = mountDepth('cinema', unified ? 'unified' : look, {
+      hero: art, bar, scope: unified ? '.v35 .cn-detail[data-style][data-unified]' : `.v35 .cn-detail[data-style='${look}']`, styleId: 'cn-motion', prefix: 'cn',
+      hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => (unified ? art.offsetHeight || 300 : Math.max(1, art.offsetHeight - bar.offsetHeight)),
       active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id,
     });
     if (!partial) {
@@ -2319,6 +2326,8 @@ export function createCinema(deps) {
         onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('cinema'); } } : {}),
+        // من داخل مصدر: سيرفراته وحده؛ الفيلم بهوية IMDb يجرّب البدائل بفتح العمل نفسه من كل المصادر
+        ...(m._sourceCopy ? { pinnedSource: { name: routeSourceLabel({ sourceId: m._sourceCopy.sourceId }) || 'هذا المصدر', onAlternatives: m._officialIdentity && /^tt\d+$/.test(String(m.id)) ? () => { deps.closeSheet(); dropWarm(); state.works.delete(playKey(m, season)); const { _sourceCopy, _officialIdentity, ...plain } = m; void openWork(plain, { autoplay: true }); } : null } } : {}),
       });
       const best = ui.best;
       // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر»

@@ -2,6 +2,34 @@ import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { nativeCover } from "./covers.js";
 import { imageLoadingNode, imageFallbackNode } from "./image-loading.js";
+import { identityKind, knownSourceIdentity, resolveSourceIdentity } from "./source-identity.js";
+
+/** اسم القسم في شريط الصفحة: VANTARA Anime / Cinema / Manga (طلب المالك). */
+export const SECTION_BRAND = { manga: "VANTARA Manga", anime: "VANTARA Anime", cinema: "VANTARA Cinema" };
+const KIND_AR = { manga: "مانجا", anime: "أنمي", cinema: "أفلام ومسلسلات" };
+
+/** القسم الغالب على أعمال مصدر: مصدر متنوع يأخذ اسم أغلب محتواه، وكل عمل يُفتح بنوعه هو. */
+export function dominantKind(items, fallback = "manga") {
+  const count = { manga: 0, anime: 0, cinema: 0 };
+  for (const w of items ?? []) {
+    const t = String(w?.type ?? "").toLowerCase();
+    if (t === "manga") count.manga++;
+    else if (t === "anime") count.anime++;
+    else if (t === "movie" || t === "series" || t === "tv") count.cinema++;
+  }
+  const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
+  return best[1] > 0 ? best[0] : fallback;
+}
+
+/** نوع المصدر من أنواعه المعلنة: الأفلام والمسلسلات تغلب «أنمي» المعلن بجانبها (أكوام مثلًا). */
+export function declaredKind(addon) {
+  const types = addon?.contentTypes ?? [];
+  if (types.includes("manga")) return "manga";
+  if (types.some((t) => t === "movie" || t === "series")) return "cinema";
+  if (types.includes("anime")) return "anime";
+  return "cinema";
+}
+const SEARCH_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -61,6 +89,7 @@ export function renderSourceMode({
   state = { query: "", page: 1, scroll: 0 },
   onOpenWork = () => {},
   onBack = () => {},
+  onKind = () => {},
   pulse = null,
 }) {
   const root = node("div", "addon-hub addon-source"),
@@ -71,6 +100,8 @@ export function renderSourceMode({
     grid = node("div", "addon-source-grid up-list"),
     note = node("p", "addon-source-note");
   root.dir = "rtl";
+  state.page ??= 1;
+  state.query ??= "";
   const fullCatalogue = (addon.contentTypes ?? []).includes("manga") && typeof adapter.catalogue === "function";
   state.tab ??= fullCatalogue ? "catalogue" : "home";
   note.setAttribute("role", "status");
@@ -90,15 +121,18 @@ export function renderSourceMode({
     b.onclick = fn;
     return b;
   };
-  // رأس المصدر: اسمه وحالته الفعلية الآن (من نبضه)، بلا شعار عام
+  // رأس المصدر: شعاره واسمه ونوعه وحالته الفعلية الآن (من نبضه). الاسم هنا وحده؛ شريط الصفحة يحمل VANTARA القسم
   const header = node("section", "addon-source-head"),
     heading = node("div", "addon-source-title"),
     mark = sourceLogo(addon),
-    status = node("p", "addon-pulse");
+    status = node("p", "addon-pulse"),
+    eyebrow = node("p", "addon-eyebrow");
   const name = node("h2", null, addon.name);
   name.dir = "auto";
-  const kind = (addon.contentTypes ?? []).includes("manga") ? "مانجا" : (addon.contentTypes ?? []).includes("anime") ? "أنمي" : "أفلام ومسلسلات";
-  heading.append(node("p", "addon-eyebrow", `مصدر ${kind}`), name, status);
+  let kind = declaredKind(addon);
+  const paintKind = () => { eyebrow.textContent = `مصدر ${KIND_AR[kind]}`; onKind(kind, SECTION_BRAND[kind]); };
+  paintKind();
+  heading.append(eyebrow, name, status);
   header.append(mark, heading);
   const paintStatus = () => {
     if (!pulse || !addon.key) return void (status.hidden = true);
@@ -107,26 +141,39 @@ export function renderSourceMode({
     status.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, st.label));
     if (st.detail) status.append(node("span", null, st.detail));
   };
-  root.append(
-    btn("‹ الإضافات", onBack, "addon-button addon-button-quiet addon-source-back"),
-    header,
-    tabs,
-    filters,
-    form,
-    note,
-    grid,
-  );
+  // البحث أولًا (أعلى الصفحة ويلتصق بها)، ثم رأس المصدر، ثم الأقسام والشبكة. الرجوع من شريط الصفحة وحده.
+  const bar = node("div", "addon-source-bar");
+  bar.append(form);
+  root.append(bar, header, tabs, filters, note, grid);
   input.type = "search";
+  input.enterKeyHint = "search";
+  input.autocomplete = "off";
   input.value = state.query ?? "";
   input.placeholder = `ابحث في ${addon.name}`;
   input.setAttribute("aria-label", input.placeholder);
-  const searchButton = btn(
-    "بحث",
-    () => {},
-    "addon-button addon-button-primary",
-  );
+  const searchButton = node("button", "addon-source-go");
   searchButton.type = "submit";
-  form.append(input, searchButton);
+  searchButton.innerHTML = SEARCH_ICON;
+  searchButton.setAttribute("aria-label", "بحث");
+  const clear = node("button", "addon-source-clear", "×");
+  clear.type = "button";
+  clear.setAttribute("aria-label", "امسح البحث");
+  clear.hidden = !input.value;
+  input.addEventListener("input", () => { clear.hidden = !input.value; });
+  clear.onclick = () => {
+    input.value = "";
+    clear.hidden = true;
+    if (state.query) {
+      state.query = "";
+      state.page = 1;
+      state.skip = 0;
+      if (!adapter.catalog && state.tab === "search") state.tab = choices[0]?.[0] ?? "home";
+      paintFilters();
+      void load();
+    }
+    input.focus?.();
+  };
+  form.append(searchButton, input, clear);
   const catalogs = addon.catalogs ?? [];
   const selectedCatalog = () =>
     catalogs.find((c) => `${c.type}|${c.id}` === state.tab) ?? catalogs[0];
@@ -198,6 +245,8 @@ export function renderSourceMode({
           ? [["popular", "الرائج"]]
           : []),
       ];
+  // قسم واحد (آخر التحديثات مثلًا) عنوانٌ هادئ لا زر؛ أكثر من قسم = شريط أقسام
+  tabs.classList.toggle("is-single", choices.length < 2);
   for (const [tab, label] of choices) {
     const b = btn(
       label,
@@ -324,6 +373,10 @@ export function renderSourceMode({
         out.hasNext ??
         (catalog?.extra?.some((x) => x.name === "skip") && items.length > 0)
       );
+      if (!append && items.length) {
+        const seen = dominantKind(items, kind);
+        if (seen !== kind) { kind = seen; paintKind(); }
+      }
       // بطاقة «آخر التحديثات» نفسها: الغلاف كاملًا ثم الاسم، ورقم الفصل/الحلقة فقط إن ذكره المصدر
       for (const work of items) {
         const key = workKey(work);
@@ -354,7 +407,8 @@ export function renderSourceMode({
           imageState("failed", "تعذّر تحميل الغلاف");
           art.replaceChildren(imageFallbackNode("—"));
         };
-        const image = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
+        const sourceImage = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
+        const paintImage = (image, official = false) => {
         if (image) {
           imageState("loading", "جارٍ تحميل الغلاف");
           art.style.position = "relative";
@@ -380,7 +434,7 @@ export function renderSourceMode({
             img.onerror = () => {
               if (!closed && root.contains(art)) imageFailed();
             };
-            if (addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
+            if (!official && addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
               // Same source client, cookies, headers and persistent cover cache as the library.
               // A failed native request must stay in that pipeline (including verification).
               void nativeCover(url, addon.sourceId).then(local => {
@@ -397,6 +451,29 @@ export function renderSourceMode({
         } else {
           imageState("missing", "لا يوجد غلاف من المصدر");
           art.append(imageFallbackNode("—"));
+        }
+        };
+        // الغلاف الرسمي (AniList/IMDb) للعمل الموجود هناك، وإلا غلاف المصدر. يُحسم مرة قبل الرسم: المعروف
+        // فورًا، والمجهول ينتظر هويته قليلًا (هيكل بمقاسه) ثم يُرسم مرة واحدة؛ لا تبديل غلاف أمام العين.
+        const officialKind = identityKind(work, addon);
+        const known = officialKind ? knownSourceIdentity(work, addon) : null;
+        const adopt = (identity) => {
+          if (identity?.title) { title.textContent = identity.title; title.dir = "ltr"; }
+          paintImage(identity?.poster ?? sourceImage, Boolean(identity?.poster));
+        };
+        if (!officialKind || known !== undefined) adopt(known);
+        else {
+          imageState("loading", "جارٍ تحميل الغلاف");
+          art.append(imageLoadingNode());
+          let settled = false;
+          const settle = (identity) => {
+            if (settled || closed || !root.contains(art)) return;
+            settled = true;
+            art.replaceChildren();
+            adopt(identity);
+          };
+          void resolveSourceIdentity(work, addon).then(settle);
+          setTimeout(() => settle(null), 2200);
         }
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;

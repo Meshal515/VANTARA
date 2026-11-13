@@ -512,7 +512,7 @@ export function createAnime(deps) {
     const artworkLoading = loadAnimeArt(m.id);
     let detailLoading;
     try {
-      detailLoading = Promise.resolve(m._sourceCopy ? m : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
+      detailLoading = Promise.resolve(m._sourceCopy ? (m._officialIdentity ? fetchAnimeDetail(m.id).then((d) => (d ? { ...d, _sourceCopy: m._sourceCopy, _officialIdentity: true } : m), () => m) : m) : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
     } catch (error) { detailLoading = Promise.reject(error); }
     // The original promise remains rejected for the guarded UI handler below.
     void detailLoading.catch(() => {});
@@ -717,7 +717,7 @@ export function createAnime(deps) {
     // العمق مع التمرير من جدول depth.js لكل الأنماط، «الأساسي» منها (كان بنسختين يدويتين في anime.css
     // وanime-depth.js). مداه في «الأساسي» ارتفاع البطل ناقص الشريط كما كان.
     const spanOf = () => (lw ? hero.offsetHeight || 300 : Math.max(1, hero.offsetHeight - bar.offsetHeight) || 300);
-    const unDepth = unified ? () => {} : mountDepth('anime', look, { hero, bar, scope: `.v35 .aw[data-style='${look}']`, styleId: 'wl-motion', spanOf, active: live });
+    const unDepth = unified ? mountDepth('anime', 'unified', { hero, bar, scope: '.v35 .aw[data-style][data-unified]', styleId: 'wl-motion', spanOf: () => hero.offsetHeight || 300, active: live }) : mountDepth('anime', look, { hero, bar, scope: `.v35 .aw[data-style='${look}']`, styleId: 'wl-motion', spanOf, active: live });
     const unExtras = lw ? bindLookExtras(look, lw, { active: live }) : () => {};
     state.view.unbind = () => {
       unDepth();
@@ -804,7 +804,9 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
     // الموحد: البطل غلاف العمل نفسه (قرار المالك: لا بحث عن صور أخرى)، بنسبته بلا قص
-    const plan = v.unified ? { episodeStill: false, posterFallback: true, ambient: false, posterOnly: true } : heroPlan(v.look);
+    // الموحد: أوضح صورة للعمل (خلفية IMDb/fanart الأصلية) والغلاف بديلها. غلاف AniList (~460px) ممدودًا بعرض
+    // الشاشة كان سبب الغبش. البانر العريض (1900×400) لا يصلح لإطار طولي فلا يدخل.
+    const plan = v.unified ? { episodeStill: false, posterFallback: true, ambient: false, noBanner: true } : heroPlan(v.look);
     // كم ينتظر البطل حسم أفضل مصدر قبل أن يعرض أفضل ما جهز (المحفوظ لكل عمل يُعرض فورًا)
     const HERO_SETTLE_MS = 2500;
     const current = () => state.detail?.id === v.id ? state.detail : m;
@@ -875,7 +877,7 @@ export function createAnime(deps) {
     const knownRank = known?.includes('/background/large/') ? 0 : known?.includes('/background/medium/') ? 0.1 : 0.6;
     add(known, knownRank, 'backdrop', true);
     // A clear banner can appear on every viewport while preferred art is loading.
-    add(m.banner, 1, 'backdrop', true);
+    if (!plan.noBanner) add(m.banner, 1, 'backdrop', true);
     if (plan.posterFallback) add(m.poster ?? m.posterSmall, 2, 'poster', true);
     }
     candidates.sort((a, b) => a.rank - b.rank);
@@ -909,7 +911,7 @@ export function createAnime(deps) {
         requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
       }
       if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-      if ((pick.kind !== 'poster' || v.unified) && img.naturalWidth && img.naturalHeight) {
+      if (pick.kind !== 'poster' && !v.unified && img.naturalWidth && img.naturalHeight) {
         const ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
         heroRatio.set(m.id, ratio);
         // مقاس البطل يُحسم قبل أن تُرى الصفحة ولا يتغير بعدها: كان ارتفاعه يتبع نسبة الصورة حين تصل، فيتحرك الغلاف
@@ -2587,6 +2589,8 @@ export function createAnime(deps) {
         onBest: () => playBest(),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
+        // من داخل مصدر: سيرفراته وحده، و«جرّب البدائل» يفتح العمل نفسه (هوية AniList) بكل المصادر على الحلقة نفسها
+        ...(m._sourceCopy ? { pinnedSource: { name: sourceName(m._sourceCopy.sourceId) || 'هذا المصدر', onAlternatives: m._officialIdentity && Number.isFinite(Number(m.id)) ? () => { deps.closeSheet(); const { _sourceCopy, _officialIdentity, ...plain } = m; void openAnime(plain, { episode: n, play: true }); } : null } } : {}),
         onRetry: () => {
           if (engine.retrySeconds(sheet.retryAt)) return;
           deps.closeSheet();

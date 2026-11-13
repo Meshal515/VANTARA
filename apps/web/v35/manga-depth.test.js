@@ -7,13 +7,22 @@ import { MANGA_LOOKS } from './manga-work.js';
 // المحرك اليدوي (mountMangaScrollDepth و--mw-scroll-depth) حُذف: كان يكتب متغيرًا بجافاسكربت كل إطار.
 describe('manga scroll depth lives in the shared depth table', () => {
   it('every manga look has its own scroll identity in the shared table', () => {
-    expect(Object.keys(DEPTH_SPECS.manga).sort()).toEqual([...MANGA_LOOKS].sort());
+    // «unified» صف النمط الموحد (إعداد مستقل لا نمط مانجا)
+    expect(Object.keys(DEPTH_SPECS.manga).filter((k) => k !== 'unified').sort()).toEqual([...MANGA_LOOKS].sort());
     const signatures = MANGA_LOOKS.map((look) => JSON.stringify(DEPTH_SPECS.manga[look]));
     expect(new Set(signatures).size).toBe(MANGA_LOOKS.length);
   });
   it('no depth layer is an element that carries an entry animation (cover, banner image)', () => {
-    for (const look of MANGA_LOOKS) for (const l of DEPTH_SPECS.manga[look]) {
+    for (const look of [...MANGA_LOOKS, 'unified']) for (const l of DEPTH_SPECS.manga[look]) {
       expect(l.sel).not.toMatch(/\.mw-cover$|> img$|\.mw-ban > img/);
+    }
+  });
+  it('«الموحد» pins the cover window: it descends exactly with the page so the content rises over it', () => {
+    for (const section of ['anime', 'cinema', 'manga']) {
+      const [layer] = DEPTH_SPECS[section].unified;
+      expect(layer.span).toBe(true);
+      expect(layer.y).toEqual([0, 1]);
+      expect(layerValue(layer, 1, 400).transform).toContain('translate3d(0px, 400.0px');
     }
   });
   it('«المعرض» keeps its numbers: the cover leans back 13° and recedes 175px over 380px on a phone', () => {

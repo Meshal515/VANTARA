@@ -246,6 +246,24 @@ export async function searchAnime({ search, genre, page = 1 } = {}, opts = {}) {
 }
 
 /**
+ * مطابقة عناوين كثيرة بطلب AniList واحد (أسماء مستعارة لكل عنوان): شبكة مصدر من 30 عملًا = 3 طلبات لا 30.
+ * يرجع لكل عنوان قائمة مرشحيه (مع أسمائه البديلة للحكم)، أو [] إن لم يجد.
+ */
+export async function searchAnimeBatch(titles, opts = {}) {
+  const list = titles.slice(0, 10);
+  if (!list.length) return [];
+  const vars = Object.fromEntries(list.map((t, i) => [`s${i}`, String(t)]));
+  const query = `query (${list.map((_, i) => `$s${i}: String`).join(', ')}) {
+  ${list.map((_, i) => `a${i}: Page(perPage: 4) { media(type: ANIME, search: $s${i}, sort: [SEARCH_MATCH], isAdult: false) { ${CARD} synonyms } }`).join('\n  ')}
+}`;
+  const data = await request(query, vars, opts);
+  return list.map((_, i) => (data?.[`a${i}`]?.media ?? []).map((raw) => {
+    const m = normalize(raw);
+    return m ? { ...m, synonyms: raw.synonyms ?? [] } : null;
+  }).filter(Boolean));
+}
+
+/**
  * البحث والتصفّح بفلاتر (ورقة الفلاتر في «اكتشف» وصفحات «الكل»): الأنواع المطلوبة
  * والمستبعدة، الشكل، الحالة، السنة والموسم، أقل تقييم، والترتيب. طلب AniList واحد.
  */

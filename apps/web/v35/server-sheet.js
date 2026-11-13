@@ -692,6 +692,19 @@ export function createServerSheet(body, o) {
       }
       return;
     }
+    // عمل فُتح من داخل مصدر: السيرفرات من هذا المصدر وحده، وحين لا يجهز منه شيء نقول ذلك ونعرض البدائل
+    if (o.pinnedSource) {
+      note.innerHTML = `${glyph('info', { size: 18 })}<div><b></b><p></p></div>`;
+      note.querySelector('b').textContent = model.error ? `تعذّر الوصول إلى ${o.pinnedSource.name}` : `لا سيرفر جاهز من ${o.pinnedSource.name} لهذه الحلقة`;
+      note.querySelector('p').textContent = o.pinnedSource.onAlternatives ? 'جرّب البدائل: نبحث عن العمل نفسه في كل مصادرك.' : 'أعد المحاولة بعد لحظات، أو افتح العمل من البحث العام لتجربة مصادر أخرى.';
+      if (o.pinnedSource.onAlternatives) {
+        const alt = btn('ss-add-source');
+        alt.textContent = 'جرّب البدائل';
+        alt.onclick = () => o.pinnedSource.onAlternatives();
+        note.querySelector('div').append(alt);
+      }
+      return;
+    }
     const msg = model.missing ? 'لم نجد هذه الحلقة في المصادر الآن' : model.error ? 'تعذّر الوصول إلى المصادر' : 'لم يجهز أي سيرفر الآن';
     const hint = model.missing ? 'جرّب لاحقًا، أو فعّل مصادر أخرى من الإعدادات.' : 'أعد المحاولة بعد لحظات — كثيرًا ما تعود السيرفرات سريعًا.';
     note.innerHTML = `${glyph('info', { size: 18 })}<div><b></b><p></p></div>`;
