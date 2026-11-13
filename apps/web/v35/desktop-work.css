@@ -23,13 +23,13 @@
   /* أسلوب منصات البث على التلفزيون: البنر بعرض الصفحة بلا ضباب ولا أشرطة، نقطة التركيز أعلى الصورة (الوجوه
    * لا تُقص)، وما يُقص إن لزم من الأسفل الذي يتلاشى في الصفحة أصلًا. الارتفاع = نسبة الصورة بحد «الشاشة
    * ناقص سطر المعلومات»، فالبنر والغلاف والشعار وزر التشغيل في الشاشة الأولى على كل مقاس. */
-  .v35 .aw:not([data-style='screen']) .aw-hero {
+  .v35 .aw:not([data-style='screen']):not([data-unified]) .aw-hero {
     height: auto !important;
     min-height: 0 !important;
     max-height: max(380px, calc(100svh - 260px)) !important;
     aspect-ratio: var(--aw-ratio, 16 / 9) !important;
   }
-  .v35 .aw:not([data-style='screen']) .aw-hero .aw-bg-img:not(.aw-bg-img--poster) {
+  .v35 .aw:not([data-style='screen']):not([data-unified]) .aw-hero .aw-bg-img:not(.aw-bg-img--poster) {
     object-fit: cover !important;
     object-position: center 12% !important;
   }
@@ -438,7 +438,7 @@
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   /* البنر: نسبة الصورة (16:9 لخلفيات TMDB) بحد «الشاشة ناقص سطر المعلومات»، والتركيز أعلى الصورة.
    * قيس قبل: 680px ثابتة فظهر 73% فقط على 1920 من خلفية «الأساسي». */
-  .v35 .cn-detail:not([data-style='poster']):not([data-style='series']) .cn-detail-art {
+  .v35 .cn-detail:not([data-style='poster']):not([data-style='series']):not([data-unified]) .cn-detail-art {
     width: 100%;
     height: auto;
     aspect-ratio: 16 / 9;
@@ -493,4 +493,131 @@
   .v35 .cn-detail[data-style='premiere'] .cn-cast { grid-area: cast; }
   .v35 .cn-detail[data-style='premiere'] .cn-credits { grid-area: credits; }
   .v35 .cn-detail[data-style='premiere'] .cn-similar { grid-area: similar; }
+}
+
+/* ═══ «النمط الموحد» على الكمبيوتر (appearance.unifiedLook) ═══
+ * قيس قبل (1366×768): البطل ملصق 2:3 بعرض الصفحة بسقف 600px (والأنمي والسينما فوقه قواعد البنر 16:9 أعلاه)،
+ * فظهر من الملصق 30% في الأنمي و32% في السينما و38% في المانجا: سماء أو شعر بلا وجوه، والأزرار في عمود ضيق.
+ * الهوية نفسها بلا تغيير (الملصق بطلًا بنسبته 2:3 بلا قص، بلا حاويات، كل النص من حافة البداية، زر أساسي
+ * واحد بعرض المحتوى)، والتوزيع للكمبيوتر: الملصق كاملًا في عمود ملتصق في جهة البداية بارتفاع يتسع للشاشة،
+ * والمحتوى بجانبه. الأقسام الثلاثة على الهيكل نفسه. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified],
+  .v35 #detail[data-look][data-unified] {
+    --ul-poster: min(clamp(260px, calc(30vw - 80px), 460px), calc((100svh - 140px) * 2 / 3));
+    --ul-top: 84px;
+    display: grid;
+    grid-template-columns: var(--ul-poster) minmax(0, 1fr);
+    column-gap: 48px;
+    align-items: start;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 1760px;
+    margin-inline: auto;
+    padding: var(--ul-top) 40px 56px;
+  }
+  /* السينما: شريطها ملتصق داخل الصفحة (لا ثابت)، فيأخذ صفًا كاملًا فوق العمودين */
+  .v35 .cn-detail[data-style][data-unified] {
+    padding-top: 0;
+  }
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-bar {
+    grid-column: 1 / -1;
+    margin-inline: -40px;
+    margin-bottom: 24px;
+  }
+  /* الملصق: كاملًا بنسبته، ملتصقًا تحت الشريط، بلا تلاشٍ فوقه (يظهر كله) */
+  .v35 .aw[data-style][data-unified] > .aw-hero,
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-art,
+  .v35 #detail[data-look][data-unified] .mw-lift {
+    grid-column: 1;
+    grid-row: 1 / span 6;
+    position: sticky;
+    top: var(--ul-top);
+    width: 100%;
+    height: auto;
+    max-height: none;
+    aspect-ratio: 2 / 3;
+    margin: 0;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 28px 60px -30px #000;
+  }
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-art {
+    grid-row: 2 / span 6;
+  }
+  .v35 #detail[data-look][data-unified] .mw-lift { aspect-ratio: auto; }
+  .v35 #detail[data-look][data-unified] .mw-stage .mw-cover {
+    aspect-ratio: 2 / 3;
+    width: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+  .v35 #detail[data-look][data-unified] .mw-stage .mw-cover > img { object-position: center; }
+  :is(.v35 .aw[data-style][data-unified] .aw-hero, .v35 .cn-detail[data-style][data-unified] .cn-detail-art, .v35 #detail[data-look][data-unified] .mw-stage .mw-cover)::after {
+    content: none;
+  }
+  .v35 :is(.aw[data-style][data-unified] .aw-hero .aw-bg-img, .cn-detail[data-style][data-unified] .cn-detail-art > .cn-img) {
+    object-fit: cover;
+    object-position: center;
+  }
+  /* المحتوى في العمود الثاني من أعلاه: بلا صعود فوق الصورة ولا خلفية ذوبان (لم تعد الصورة تحته) */
+  .v35 .aw[data-style][data-unified] > .aw-main,
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-body,
+  .v35 #detail[data-look][data-unified] .mw-center,
+  .v35 #detail[data-look][data-unified] > :is(.mw-acts, .mw-tabbed) {
+    grid-column: 2;
+    min-width: 0;
+    margin-top: 0;
+    background: none;
+  }
+  .v35 .aw[data-style][data-unified] > .aw-main,
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-body,
+  .v35 #detail[data-look][data-unified] .mw-center {
+    padding-top: 0;
+  }
+  .v35 .aw[data-style][data-unified] > .aw-main { grid-row: 1; }
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-body { grid-row: 2; max-width: none; }
+  /* حافة بداية واحدة: محتوى العمود يبدأ من حافته نفسها، لا من هامش الجوال */
+  .v35 .aw[data-style][data-unified] .aw-stage,
+  .v35 .cn-detail[data-style][data-unified] .cn-detail-body,
+  .v35 #detail[data-look][data-unified] :is(.mw-center, .mw-acts) {
+    padding-inline: 0;
+  }
+  .v35 .cn-detail[data-style][data-unified] .cn-detail-body > * {
+    max-width: none;
+    margin-inline: 0;
+  }
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified] :is(.an-mark-logo, .cn-mark-logo) {
+    max-height: 120px;
+    max-width: min(100%, 440px);
+  }
+  /* الأنمي الموحد مبني على هيكل «المحور» (core) الذي يقسم aw-main عمودين على ≥900 (anime.css @container aw):
+   * هنا عمود واحد بترتيب الهوية نفسه (الشعار، السطر، الأنواع، الموعد، الزر، القصة، الحلقات، ...) من حافة البداية */
+  .v35 .aw[data-style][data-unified] .aw-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-flow: row;
+    column-gap: 0;
+    padding: 0;
+  }
+  .v35 .aw[data-style][data-unified] .aw-main :is(.an-mark, .aw-meta, .aw-genres, .aw-side, .aw-cta, .aw-about, .work-insights, .aw-info, .aw-episodes, .aw-cast, .an-rail) {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: stretch;
+    margin-inline: 0;
+    max-width: none;
+  }
+  .v35 .aw[data-style][data-unified] .aw-main :is(.an-mark, .aw-meta, .aw-genres) { justify-self: start; margin-top: 0; }
+  .v35 .aw[data-style][data-unified] .aw-main .aw-meta { margin-top: 10px; }
+  .v35 .aw[data-style][data-unified] .aw-main .aw-genres { margin-top: 4px; }
+  .v35 .aw[data-style][data-unified] .aw-main :is(.aw-side, .aw-cta) { margin-top: 18px; }
+  .v35 .aw[data-style][data-unified] .aw-main .aw-about { margin-top: 20px; max-width: 760px; }
+  .v35 .aw[data-style][data-unified] .aw-main .aw-episodes { margin-top: 40px; }
+  /* الزر الأساسي بعرض المحتوى كما في الهوية، بسقف مريح على الشاشات العريضة */
+  .v35 .aw[data-style][data-unified] .aw-stage .aw-cta,
+  .v35 .cn-detail[data-style][data-unified] .cn-btn--play.cn-btn--block,
+  .v35 #detail[data-look][data-unified] .mw-row {
+    max-width: 560px;
+  }
 }
