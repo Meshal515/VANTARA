@@ -376,3 +376,121 @@
     margin-top: 18px;
   }
 }
+
+/* ═══ أنماط صفحة عمل السينما الخمسة: «البطولة» و«قد يعجبك» شبكات بدل شرائط ═══
+ * قيس على 1366: البطولة 10 وجوه (946px في 660px) و«قد يعجبك» 14 ملصقًا (2310px في 760px) في الأنماط الخمسة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail .cn-cast-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 20px 12px;
+    margin-inline: 0;
+    padding-inline: 0;
+    overflow: visible;
+  }
+  .v35 .cn-detail .cn-person {
+    flex: none;
+    width: auto;
+    min-width: 0;
+  }
+  .v35 .cn-detail .cn-face {
+    width: 76px;
+    height: 76px;
+  }
+  .v35 .cn-detail .cn-similar .cn-rail {
+    margin-inline: 0;
+  }
+  .v35 .cn-detail .cn-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    padding-inline: 0;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .cn-detail .cn-strip > .cn-poster {
+    width: auto;
+    min-width: 0;
+    flex: none;
+  }
+}
+
+/* ═══ صفحة عمل السينما: الصفحة غنية بلا فراغ (بند 4) ═══
+ * wide.css يحصر كل ما في الجسم بعرض 580px (منطقي للشعار والزر فوق الصورة كمنصات البث)، لكنه حصر معه
+ * القصة والبطولة والطاقم والحلقات، فبقي نصف الصفحة فارغًا بجانبها على الكمبيوتر. الشعار والمعلومات والزر
+ * باقية 580px فوق الصورة؛ القصة بعرض مقروء، والبطولة والطاقم والحلقات بعرض الصفحة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail-body > :is(.cn-cast, .cn-credits, .cn-episodes, .cn-seasons) {
+    max-width: none;
+  }
+  .v35 .cn-detail-body > .cn-about {
+    max-width: 760px;
+    margin-inline: 0;
+    text-align: start;
+  }
+  .v35 .cn-detail-body > .cn-credits {
+    grid-template-columns: repeat(auto-fill, minmax(110px, max-content) minmax(220px, 1fr));
+    column-gap: 18px;
+  }
+}
+
+/* ═══ السينما: البنر بأسلوب منصات البث، والجسم بعرض مريح، و«العرض الأول» بتركيب كمبيوتر ═══ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* البنر: نسبة الصورة (16:9 لخلفيات TMDB) بحد «الشاشة ناقص سطر المعلومات»، والتركيز أعلى الصورة.
+   * قيس قبل: 680px ثابتة فظهر 73% فقط على 1920 من خلفية «الأساسي». */
+  .v35 .cn-detail:not([data-style='poster']):not([data-style='series']) .cn-detail-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: max(380px, calc(100svh - 230px));
+  }
+  .v35 .cn-detail .cn-detail-art > .cn-img {
+    object-position: center top;
+  }
+  /* «الشريط العريض» هويته البنر كاملًا بلا قص (#323، قرار المالك: 16:9). cinema.css يعود ويفرض 2.39:1 على
+   * ≥700 فيقص ربع الصورة (قيس: 74%)؛ هنا 16:9 بلا سقف على الكمبيوتر. */
+  .v35 .cn-detail.cn-detail[data-style='marquee'] .cn-detail-art {
+    aspect-ratio: 16 / 9;
+    max-height: none;
+  }
+
+  /* الأنماط الوسطية كانت محصورة في 760px وسط الشاشة: الجسم 1180px، والشعار والمعلومات والزر بعرض 580 في الوسط */
+  .v35 .cn-detail:not([data-style='current']) .cn-detail-body {
+    max-width: min(1180px, 100%);
+  }
+  .v35 .cn-detail:is([data-style='poster'], [data-style='marquee'], [data-style='series']) .cn-detail-body > :is(.cn-detail-mark, .cn-facts, .cn-genre-line, .cn-btn--play, .cn-sources) {
+    max-width: 580px;
+    margin-inline: auto;
+  }
+
+  /* «العرض الأول»: الملصق في البداية، والشعار والمعلومات بجانبه، وبطاقة التشغيل في النهاية، كلها فوق أسفل الخلفية */
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-body {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr) minmax(0, 440px);
+    grid-template-areas:
+      'poster mark play'
+      'poster facts play'
+      'poster genre play'
+      'sources sources sources'
+      'about about about'
+      'cast cast cast'
+      'credits credits credits'
+      'similar similar similar';
+    column-gap: 40px;
+    align-items: end;
+    margin-top: -330px;
+    text-align: start;
+  }
+  .v35 .cn-detail[data-style='premiere'] .cn-look-poster { grid-area: poster; align-self: end; margin: 0; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark { grid-area: mark; justify-content: flex-start; height: auto; margin: 0; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-logo { margin-inline: 0; max-width: 100%; max-height: 110px; object-position: right bottom; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-text { text-align: start; font-size: 40px; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-body > .cn-facts { grid-area: facts; justify-content: flex-start; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-genre-line { grid-area: genre; text-align: start; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-btn--play { grid-area: play; max-width: none; align-self: end; }
+  .v35 .cn-detail[data-style='premiere'] .cn-sources { grid-area: sources; }
+  .v35 .cn-detail[data-style='premiere'] .cn-about { grid-area: about; margin-top: 36px; }
+  .v35 .cn-detail[data-style='premiere'] .cn-cast { grid-area: cast; }
+  .v35 .cn-detail[data-style='premiere'] .cn-credits { grid-area: credits; }
+  .v35 .cn-detail[data-style='premiere'] .cn-similar { grid-area: similar; }
+}
