@@ -2959,10 +2959,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!host) return;
     const done = [state.detailFacts?.status, w.status].some((x) => /FINISHED|CANCELLED|COMPLETED|ENDED|HIATUS|مكتمل|منته|متوقف/i.test(String(x ?? '')));
     const beat = done ? null : releaseBeat(mainChapters(rows).map((r) => Number(r.chapter?.dateUpload)));
-    host.hidden = !beat;
-    if (!beat) return;
+    // المكان محجوز في كل حال (manga.css): الإخفاء بالظهور لا بالإزالة، فلا يتحرك ما تحته
+    host.toggleAttribute('data-off', !beat);
+    host.setAttribute('aria-hidden', beat ? 'false' : 'true');
+    if (!beat) return host.replaceChildren();
     const when = beat.next ? new Date(beat.next).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { day: 'numeric', month: 'long' }) : null;
-    const every = beat.weekly ? 'أسبوعيًا' : `كل ~${countLabel(beat.days, 'day')}`;
+    const every = beat.weekly ? 'أسبوعيًا' : `كل ${countLabel(beat.days, 'day')} تقريبًا`;
     host.replaceChildren(el('i'), el('span', null, `يصدر ${every}${when ? ` · القادم ${when}` : ''}`));
   }
   function chapterRow(w, r, isRead, isNext) {

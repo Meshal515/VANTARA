@@ -141,12 +141,13 @@ export function detailMarkup(look, { glyph, iconButton }) {
     const find = L !== 'webtoon' ? '' :
       `<label class="mw-find">${glyph('search', { size: 16 })}<input type="search" id="chapterSearch" inputmode="search" enterkeyhint="search" ` +
       `placeholder="ابحث برقم الفصل أو اسمه" aria-label="ابحث في الفصول" autocomplete="off"></label>`;
-    // «ويبتوني»: إيقاع الإصدار يُحسب من تواريخ الفصول (shell.js)، ويُخفى إن لم يكفِ ما يُحسب منه
-    const beat = L === 'webtoon' ? '<div class="wt-beat" id="releaseBeat" hidden></div>' : '';
+    // «ويبتوني»: إيقاع الإصدار يُحسب من تواريخ الفصول (shell.js)، ويُخفى إن لم يكفِ ما يُحسب منه. سطر هادئ
+    // تحت التصنيفات (قرار المالك، 13 نوفمبر) لا شارة فوق الفن؛ مكانه محجوز من البداية فلا يدفع شيئًا حين يصل
+    const beat = L === 'webtoon' ? '<p class="wt-beat" id="releaseBeat" data-off aria-hidden="true"></p>' : '';
     return (
       bar +
       // .mw-lift: طبقة عمق التمرير (depth.js)، منفصلة عن الغلاف الذي يحمل حركة الدخول
-      `<div class="mw-stage">${amb()}<div class="mw-lift">${cover}</div><div class="mw-center mw-wrap">${title}${stats}${genres}</div>${beat}</div>` +
+      `<div class="mw-stage">${amb()}<div class="mw-lift">${cover}</div><div class="mw-center mw-wrap">${title}${stats}${genres}${beat}</div></div>` +
       `<div class="mw-wrap mw-acts"><div class="mw-row">${square('libraryBtn', 'toggleLibraryCurrent', 'library', 'مكتبتي')}${cta()}` +
       `${square('togetherBtn', 'readTogetherCurrent', 'users', 'اقرأ مع أصدقائك')}</div>${progress()}</div>` +
       `<div class="mw-tabbed"><div class="mw-tabs" role="tablist" id="detailTabs">` +
