@@ -981,6 +981,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     if (held && !settled) return last;
     const withChapters = editions.filter((e) => e.chapters?.length);
     const full = assemble(v35work, withChapters.length ? withChapters : editions, detail, [...failed.values()]);
+    // ردّ كل من يمكن أن يردّ ولا نبذة: نص فارغ («لا توجد نبذة من المصدر») لا undefined يُبقي القصة هيكلًا للأبد
+    if (settled && full.description === undefined) full.description = '';
     if (!settled && last && (full._chapters?.length ?? 0) === (last._chapters?.length ?? 0) && full.description === last.description) return last;
     last = full;
     onUpdate(full, { settled });
@@ -1018,6 +1020,25 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
         }
       }),
     );
+    // أوثق نسخة لم تُعد التفاصيل (فشل أو مهلة): النبذة والتصنيف من التالية بالترتيب، واحدة بعد واحدة (حد اثنتين).
+    // كانت القصة تبقى هيكلًا للأبد لأن التفاصيل تُطلب من نسخة واحدة فقط.
+    if (!detail) {
+      const rest = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).filter((e) => e !== primary).slice(0, 2);
+      for (const edition of rest) {
+        try {
+          const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+          if (!out?.manga) continue;
+          if (isWesternManga(out.manga)) learnWestern(v35work._work?.key);
+          if (adultManga(out.manga)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
+          learnDetailAliases(v35work._work?.key, out.manga);
+          detail = out.manga;
+          emit();
+          break;
+        } catch {
+          // التالية
+        }
+      }
+    }
   };
 
   // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
