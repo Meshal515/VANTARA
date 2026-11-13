@@ -30,6 +30,7 @@ const CARD = { anime: '.an-card:not(.an-card--ranked)', cinema: '.cn-poster', ma
       await page.waitForTimeout(8000);
       const name = `${sec}-${style ?? 'unified'}-${device}`;
       await page.screenshot({ path: `shots/gallery/${name}.png` });
+      if (process.env.FULL) await page.screenshot({ path: `shots/gallery/${name}-full.png`, fullPage: true });
       console.log(name, opened ? 'ok' : 'NO-CARD', await page.evaluate(() => document.querySelector('[data-style], [data-look]')?.getAttribute('data-style') ?? document.querySelector('[data-look]')?.getAttribute('data-look')));
       await ctx.close();
     }
