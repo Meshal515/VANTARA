@@ -1,0 +1,166 @@
+/*
+ * قانون الكمبيوتر لصفحات العمل: لا لف أفقي لتصفح المجموعات.
+ *
+ * النطاق: شاشة ≥1024 بمؤشر دقيق وhover (ويندوز والمتصفح بالفأرة). الجوال والتابلت باللمس (وAPK) يبقون
+ * على السحب الذي صُمم لهم؛ هذا الملف لا يغيّر عليهم سطرًا.
+ *
+ * قيس قبل التعديل على 1366×768 (V7): «إذا عجبك هذا» شريط أفقي في الأنماط الخمسة (12 عملًا، 2060px في
+ * عرض 626–1086px)، و«الشخصيات» في المحور، و«الحلقات» و«من نفس العالم» في البطاقة الطائرة. الشرائط كانت
+ * مقصودة («شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة» في anime.css) وتسحب بالفأرة؛ على الكمبيوتر
+ * العجلة عمودية، فتصير شبكات بأعمدة من العرض الفعلي (auto-fill) تملأ عمود النمط أيًّا كان عرضه.
+ *
+ * هوية كل نمط باقية: ميلان «من نفس العالم» وإطار «أنت هنا»، والحلقة الحالية مرفوعة بإطار اللون،
+ * ووجوه الشخصيات المستديرة. الذي يتغير الاتجاه والمقاس فقط.
+ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── البنر بنسبة صورته، بلا قص ولا أشرطة ──
+   * السبب الجذري: التصميم يقصد «البنر لا يُقص: نسبة الصورة نفسها» (anime.css)، لكن الحد max-height: 55svh
+   * (و58svh الثابت في المنصة/البطاقة/الحلقة) يقصّر الارتفاع والعرض باقٍ، فتنكسر النسبة: على 1366×768 صار
+   * البنر 1118×445 (2.5:1) وخلفيات 16:9 يقصّها cover ثلثها، وإطار «شاشة السينما» 990×422 (2.35:1) فظهرت
+   * أشرطة جانبية حول الصورة. القص كان يتبع ارتفاع النافذة، لذلك يختلف من جهاز لآخر.
+   * هنا: الأنماط بعرض الصفحة تأخذ نسبة الصورة بحد 80% من النافذة (لا 55%)، ومركز الصورة أعلى قليلًا حتى لا
+   * تنقص الوجوه إن بلغ الحد؛ و«شاشة السينما» عرضها من ارتفاعها × نسبة الصورة فيطابق الإطار الصورة دائمًا. */
+  .v35 .aw:not([data-style='screen']) .aw-hero {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 66svh !important;
+    aspect-ratio: var(--aw-ratio, 16 / 9) !important;
+  }
+  /* سقف 66% يُبقي الغلاف والشعار وزر التشغيل في الشاشة الأولى (80% أنزلها تحتها على 1080p). إن بلغ البنر
+   * سقفه تبقى الصورة كاملة (contain)، وما حولها نسختها المضبّبة (‎.amb::before‎ الموجودة أصلًا) لا قص ولا سواد. */
+  .v35 .aw:not([data-style='screen']):not([data-style='episode']) .aw-bg-img:not(.aw-bg-img--poster) {
+    object-fit: contain;
+    object-position: center;
+  }
+  /* «الحلقة أولًا»: اللقطة بلا ضباب هويته، وزر التشغيل داخل البنر نفسه؛ يأخذ ارتفاعًا أكبر ومركزًا أعلى */
+  .v35 .aw[data-style='episode'] .aw-hero {
+    max-height: 80svh !important;
+  }
+  .v35 .aw[data-style='episode'] .aw-bg-img {
+    object-position: center 22%;
+  }
+  .v35 .aw[data-style='screen'] .aw-hero {
+    width: min(1180px, calc(100% - 128px), calc(66svh * var(--aw-ratio, 16 / 9))) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    aspect-ratio: var(--aw-ratio, 16 / 9) !important;
+    margin-inline: auto !important;
+  }
+
+  /* ── «إذا عجبك هذا» في الأنماط الأربعة (wl) ── */
+  .v35 .wl .wl-recs {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    margin-inline: 0;
+    padding: 0;
+    overflow: visible;
+    scroll-snap-type: none;
+    cursor: auto;
+  }
+  .v35 .wl .wl-recs .rc {
+    flex: none !important;
+    width: auto !important;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .wl .wl-recs .rc img {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 2 / 3 !important;
+    object-fit: cover;
+  }
+  .v35 .wl .wl-recs .rc b {
+    font-size: 13px;
+  }
+  .v35 .wl .wl-recs .rc span {
+    font-size: 12px;
+  }
+
+  /* ── حلقات «البطاقة الطائرة»: نفس البطاقة، والحالية مرفوعة بإطار اللون، بشبكة بدل شريط ── */
+  .v35 .wl-card .wl-strip {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 30px 18px;
+    padding: 22px var(--wl-g) 8px !important;
+    overflow: visible;
+    scroll-snap-type: none !important;
+    align-items: start !important;
+    cursor: auto;
+  }
+  .v35 .wl-card .sp,
+  .v35 .wl-card .sp.cur {
+    flex: none !important;
+    width: auto;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .wl-card .sp.cur {
+    transform: translateY(-8px);
+  }
+
+  /* ── «من نفس العالم» في البطاقة الطائرة: الميلان و«أنت هنا» كما هما؛ الوصلات بين البطاقات للشريط فقط ── */
+  .v35 .wl-card .wl-world {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 28px 16px;
+    justify-items: center;
+    margin-inline: 0;
+    padding: 10px 0 4px;
+    overflow: visible;
+    cursor: auto;
+  }
+  .v35 .wl-card .wl-world .wl-dash {
+    display: none !important;
+  }
+  .v35 .wl-card .wn {
+    flex: none !important;
+    width: 100% !important;
+    min-width: 0;
+  }
+  .v35 .wl-card .wn img,
+  .v35 .wl-card .wn.here img {
+    width: min(100%, 150px) !important;
+    height: auto !important;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+  }
+
+  /* ── الشخصيات الطويلة في البطاقة الطائرة ── */
+  .v35 .wl-card .wl-tall {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 14px;
+    overflow: visible;
+  }
+  .v35 .wl-card .wl-tall .ch {
+    flex: none;
+    width: auto;
+  }
+
+  /* ── «المحور»: الشخصيات وجوه مستديرة بشبكة، و«إذا عجبك هذا» أغلفة بشبكة ── */
+  .v35 .aw .an-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    overflow: visible;
+    scroll-snap-type: none;
+    padding-bottom: 0;
+  }
+  .v35 .aw .an-strip > * {
+    width: auto;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .aw .an-strip.aw-cast-strip {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 20px 12px;
+  }
+  .v35 .aw .aw-cast-strip .aw-person {
+    width: auto;
+  }
+  .v35 .aw .an-strip .an-card {
+    width: auto;
+  }
+}
