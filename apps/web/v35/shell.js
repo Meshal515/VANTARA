@@ -1363,10 +1363,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     onLatest = ({ items }) => live('recent')({ items });
     latestListeners.add(onLatest);
     try {
-      const [tr, re] = await Promise.all([
-        globalPopular(1),
-        latestFirstPage(),
-      ]);
+      // الرائج (AniList) يُرسم فور وصوله: كان ينتظر أبطأ مصدر في Promise.all، فبقيت الرئيسية هياكل
+      // فارغة حتى تنتهي مهلة آخر مصدر (قيس: 78 ث مقابل أقل من ثانية للرائج نفسه).
+      const trending = globalPopular(1).then((result) => {
+        if (result.items.length) {
+          state.home.trending = result.items;
+          paint();
+        }
+        return result;
+      });
+      const [tr, re] = await Promise.all([trending, latestFirstPage()]);
       // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
       if (tr.items.length) state.home.trending = tr.items;
       if (re.items.length) state.home.recent = recentFromLatest(re.items, state.home.recent);
