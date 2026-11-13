@@ -26,6 +26,8 @@ let window;
 let services;
 let videoHost;
 let overlay=null;
+let overlayWindow=null;
+let windowZoom=null; // window-zoom.cjs: حجم الواجهة من عرض النافذة
 let fullscreenController;
 let playbackSession=null;
 let quitting = false;
@@ -147,7 +149,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
   if(videoHost){
     const {createPlayerOverlay}=require('./player-overlay.cjs');
-    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>fullscreenController?.bindInput(win),onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>{overlayWindow=win;fullscreenController?.bindInput(win);win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(windowZoom?.factor??1));},onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }
@@ -233,12 +235,13 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   window.webContents.setWindowOpenHandler(({ url }) => { if (/^https:/i.test(url)) void openSettings(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!isAppFrame(url)) { event.preventDefault(); if (/^https:/i.test(url)) void openSettings(url); } });
   window.once('ready-to-show', () => window.show());
+  windowZoom = require('./window-zoom.cjs').attachWindowZoom(window, { also: () => [overlayWindow] });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'VANTARA', submenu: [
       { label: 'الواجهة الرئيسية', click: () => void window.loadURL('vantara://app/index.html') },
       { type: 'separator' }, { label: 'خروج', role: 'quit' },
     ] },
-    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
+    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', accelerator: 'CmdOrCtrl+=', click: () => windowZoom?.zoomIn() }, { label: 'تصغير', accelerator: 'CmdOrCtrl+-', click: () => windowZoom?.zoomOut() }, { label: 'الحجم المناسب للشاشة', accelerator: 'CmdOrCtrl+0', click: () => windowZoom?.reset() }] },
   ]));
   if(videoReportOption){
     if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');

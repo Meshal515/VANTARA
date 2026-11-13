@@ -4,9 +4,14 @@
 const { chromium } = require('playwright');
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'HEAD']);
-async function openDesktop({ browser, viewport = { width: 1366, height: 768 }, storage = {}, port = 8765, mobile = false }) {
+const { fitZoom } = require('../../apps/desktop/window-zoom.cjs');
+/** شاشة فعلية → ما يراه Electron بعد window-zoom.cjs: عرض CSS أصغر بمعامل التكبير، وكثافة بكسل بالمعامل نفسه. */
+function screenView(width, height) { const f = fitZoom(width); return { viewport: { width: Math.round(width / f), height: Math.round(height / f) }, deviceScaleFactor: f }; }
+async function openDesktop({ browser, viewport = { width: 1366, height: 768 }, storage = {}, port = 8765, mobile = false, screen = null }) {
+  let dsf = 1;
+  if (screen && !mobile) ({ viewport, deviceScaleFactor: dsf } = screenView(screen.width, screen.height));
   // serviceWorkers: block — وإلا تعيد القشرة التحميل من كاش PWA بمدخل app.js فيضيع مدخل ويندوز
-  const ctx = await browser.newContext({ serviceWorkers: 'block', ...(mobile ? { viewport, isMobile: true, hasTouch: true } : { viewport }) });
+  const ctx = await browser.newContext({ serviceWorkers: 'block', ...(mobile ? { viewport, isMobile: true, hasTouch: true } : { viewport, deviceScaleFactor: dsf }) });
   const page = await ctx.newPage();
   const api = ctx.request;
   await page.exposeFunction('__vantaraRequest', async (args) => {
@@ -40,4 +45,4 @@ async function openDesktop({ browser, viewport = { width: 1366, height: 768 }, s
   await page.route('https://vantara-sync.ngm-309.workers.dev/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' }));
   return { ctx, page };
 }
-module.exports = { openDesktop, chromium };
+module.exports = { openDesktop, chromium, screenView };

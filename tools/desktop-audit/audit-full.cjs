@@ -8,12 +8,14 @@ const { openDesktop, chromium } = require('./desktop-harness.cjs');
 const fs = require('fs');
 const [section, onlyArg] = process.argv.slice(2);
 const STYLES = { anime: ['core', 'platform', 'card', 'screen', 'episode', 'unified'], cinema: ['current', 'premiere', 'poster', 'marquee', 'series', 'unified'], manga: ['page', 'gallery', 'profile', 'resume', 'webtoon', 'unified'] };
+// شاشات فعلية؛ تطبيق ويندوز يكبّر ما فوق ~1480 (window-zoom.cjs) والحزمة تحاكيه (screen)
 const VIEWS_ALL = [
-  { id: 'pc1366', viewport: { width: 1366, height: 768 }, rail: false, full: true, journey: true },
-  { id: 'pc1366-rail', viewport: { width: 1366, height: 768 }, rail: true },
-  { id: 'pc1920', viewport: { width: 1920, height: 1080 }, rail: false },
-  { id: 'pc1920-rail', viewport: { width: 1920, height: 1080 }, rail: true, full: true },
-  { id: 'pc2560-rail', viewport: { width: 2560, height: 1440 }, rail: true },
+  { id: 'pc1366', screen: { width: 1366, height: 768 }, rail: false, full: true, journey: true },
+  { id: 'pc1366-rail', screen: { width: 1366, height: 768 }, rail: true },
+  { id: 'pc1600', screen: { width: 1600, height: 900 }, rail: false },
+  { id: 'pc1920', screen: { width: 1920, height: 1080 }, rail: false },
+  { id: 'pc1920-rail', screen: { width: 1920, height: 1080 }, rail: true, full: true },
+  { id: 'pc2560-rail', screen: { width: 2560, height: 1440 }, rail: true },
   { id: 'm412', viewport: { width: 412, height: 915 }, mobile: true, full: true },
   { id: 'm390', viewport: { width: 390, height: 844 }, mobile: true },
 ];
@@ -98,7 +100,7 @@ async function settleWork(page) {
         'vantara.appearance.v1': { style: style === 'unified' ? {} : { [section]: style }, accent: {}, pureBlack: false, unifiedLook: style === 'unified' },
         ...(view.rail ? { 'vantara.rail.collapsed': '1' } : {}),
       };
-      const { ctx, page } = await openDesktop({ browser, viewport: view.viewport, storage, mobile: view.mobile });
+      const { ctx, page } = await openDesktop({ browser, viewport: view.viewport, screen: view.screen, storage, mobile: view.mobile });
       const errors = []; page.on('pageerror', (e) => errors.push(e.message.slice(0, 140)));
       try {
         await page.goto('http://127.0.0.1:8765/'); await page.waitForTimeout(4000);
