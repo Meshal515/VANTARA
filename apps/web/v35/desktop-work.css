@@ -20,24 +20,22 @@
    * أشرطة جانبية حول الصورة. القص كان يتبع ارتفاع النافذة، لذلك يختلف من جهاز لآخر.
    * هنا: الأنماط بعرض الصفحة تأخذ نسبة الصورة بحد 80% من النافذة (لا 55%)، ومركز الصورة أعلى قليلًا حتى لا
    * تنقص الوجوه إن بلغ الحد؛ و«شاشة السينما» عرضها من ارتفاعها × نسبة الصورة فيطابق الإطار الصورة دائمًا. */
+  /* أسلوب منصات البث على التلفزيون: البنر بعرض الصفحة بلا ضباب ولا أشرطة، نقطة التركيز أعلى الصورة (الوجوه
+   * لا تُقص)، وما يُقص إن لزم من الأسفل الذي يتلاشى في الصفحة أصلًا. الارتفاع = نسبة الصورة بحد «الشاشة
+   * ناقص سطر المعلومات»، فالبنر والغلاف والشعار وزر التشغيل في الشاشة الأولى على كل مقاس. */
   .v35 .aw:not([data-style='screen']) .aw-hero {
     height: auto !important;
     min-height: 0 !important;
-    max-height: 66svh !important;
+    max-height: max(380px, calc(100svh - 260px)) !important;
     aspect-ratio: var(--aw-ratio, 16 / 9) !important;
   }
-  /* سقف 66% يُبقي الغلاف والشعار وزر التشغيل في الشاشة الأولى (80% أنزلها تحتها على 1080p). إن بلغ البنر
-   * سقفه تبقى الصورة كاملة (contain)، وما حولها نسختها المضبّبة (‎.amb::before‎ الموجودة أصلًا) لا قص ولا سواد. */
-  .v35 .aw:not([data-style='screen']):not([data-style='episode']) .aw-bg-img:not(.aw-bg-img--poster) {
-    object-fit: contain;
-    object-position: center;
+  .v35 .aw:not([data-style='screen']) .aw-hero .aw-bg-img:not(.aw-bg-img--poster) {
+    object-fit: cover !important;
+    object-position: center 12% !important;
   }
-  /* «الحلقة أولًا»: اللقطة بلا ضباب هويته، وزر التشغيل داخل البنر نفسه؛ يأخذ ارتفاعًا أكبر ومركزًا أعلى */
+  /* «الحلقة أولًا»: زر التشغيل داخل البنر نفسه، فيأخذ الشاشة إلا شريطًا صغيرًا */
   .v35 .aw[data-style='episode'] .aw-hero {
-    max-height: 80svh !important;
-  }
-  .v35 .aw[data-style='episode'] .aw-bg-img {
-    object-position: center 22%;
+    max-height: max(420px, calc(100svh - 120px)) !important;
   }
   .v35 .aw[data-style='screen'] .aw-hero {
     width: min(1180px, calc(100% - 128px), calc(66svh * var(--aw-ratio, 16 / 9))) !important;
