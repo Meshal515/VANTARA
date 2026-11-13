@@ -6,6 +6,7 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { assessAddon, supportedCapabilities } from "../addons/assessment.js";
 
 import { configureLink } from "./addons-view.js";
+import { choosePackage, isBundled, packageOf } from "../lib/source-entitlement.js";
 import { manifestEndpoint } from "../addons/import.js";
 
 const icons = {
@@ -326,6 +327,11 @@ export function renderV7Addons({
       }
       if(!a.bundled && registry.remove){
         const del=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"remote");});
+        del.setAttribute("aria-label","حذف "+a.name);del.append(ico("trash"));actions.prepend(del);
+      }else if(formerlyBundled(a)){
+        // مصدر مانجا كان مدمجًا ثم فُصل (الويب يعرضه مدمجًا): حذفه اختيار في حسابك كما في الـAPK، فيختفي هنا وفي
+        // كل أجهزتك، والمكتبة والتقدم باقيان (lib/source-entitlement.js)
+        const del=btn("","v7-trash",e=>{e.stopPropagation();askDelete(a,"former");});
         del.setAttribute("aria-label","حذف "+a.name);del.append(ico("trash"));actions.prepend(del);
       }
     }else if(mode==="native"){
@@ -801,6 +807,7 @@ export function renderV7Addons({
         try{const link=configureLink(a,registry);if(link){link.className="v7-btn";advancedActions.append(link);}}
         catch{/* Optional configuration cannot prevent opening details. */}
       }
+      if(formerlyBundled(a))advancedActions.append(btn("حذف","v7-btn danger",()=>askDelete(a,"former")));
       if(advancedActions.childElementCount){advanced.append(advancedActions);dialog.append(advanced);}
     }else{
       const acts=el("div","v7-dialog-actions");
@@ -893,6 +900,8 @@ export function renderV7Addons({
     operation.finally(()=>{if(installs.get(key)===operation){installs.delete(key);if(alive&&installLifecycle===lifecycle)paintNativeRows(key,null,false);}}).catch(()=>{});
     return operation;
   }
+  /** مصدر مانجا مدمج سابقًا (حزمة Keiyoushi بمعرّفها القديم) ظاهر في سجل الإضافات مدمجًا (الويب وويندوز). */
+  function formerlyBundled(a){return !!a.bundled && (a.contentTypes??[]).includes("manga") && isBundled({id:a.sourceId});}
   function askDelete(a,mode){
     showDialog(a.pendingRestore?"إزالة اختيار المصدر؟":"حذف المصدر؟",a.pendingRestore?"سيُزال اختيار «"+a.name+"» من حسابك؛ مكتبتك وتقدمك يبقيان محفوظين.":"هل تريد حذف «"+a.name+"» من الإضافات المثبتة؟");
     const actions=el("div","v7-confirm-actions");
@@ -901,6 +910,7 @@ export function renderV7Addons({
       if(busy)return;busy=true;yes.disabled=true;
       try{
         if(mode==="remote")await registry.remove(a.key);
+        else if(mode==="former")await choosePackage(packageOf(a.sourceId),false);
         else await a._store.api.uninstall(a.pkg);
         closeModal(true);sourcesChanged();await refresh();draw();
       }catch(err){notify(fmtErr(err));}finally{busy=false;yes.disabled=false;}

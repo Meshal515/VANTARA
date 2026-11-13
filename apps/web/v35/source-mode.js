@@ -90,6 +90,8 @@ export function renderSourceMode({
   onOpenWork = () => {},
   onBack = () => {},
   onKind = () => {},
+  /** تحقّق Cloudflare للمصدر داخل التطبيق: `async () => ({ ok, error })`، أو null حيث لا يتوفر. */
+  onVerify = null,
   pulse = null,
 }) {
   const root = node("div", "addon-hub addon-source"),
@@ -579,6 +581,25 @@ export function renderSourceMode({
           // الإصلاح الذاتي: محاولة ثانية تلقائية بعد لحظات، ثم زر صريح
           failures++;
           const box = node("div", "addon-source-error");
+          // الموقع يطلب تحققًا بشريًا (Cloudflare): لا فائدة من الإعادة الصامتة؛ زر واحد يفتح صفحة التحقق ثم يعيد الجلب
+          if (onVerify && /cloudflare|CLOUDFLARE|needsHuman|تحقق بشري/i.test(`${error?.code ?? ""} ${error?.message ?? ""}`)) {
+            const verify = btn("تحقّق الآن", async () => {
+              verify.disabled = true;
+              const out = await Promise.resolve().then(onVerify).catch((e) => ({ ok: false, error: e?.message }));
+              if (closed) return;
+              verify.disabled = false;
+              if (out?.ok) { failures = 0; void load(); }
+              else note.textContent = `لم يكتمل التحقق${out?.error ? `: ${String(out.error).slice(0, 120)}` : ""}`;
+            }, "addon-button addon-button-primary");
+            box.append(
+              node("b", null, "الموقع يطلب تحققًا قبل التصفح"),
+              node("p", null, "افتح صفحة التحقق مرة، ثم نعيد جلب المصدر تلقائيًا."),
+              verify,
+            );
+            grid.replaceChildren(box);
+            note.textContent = "";
+            return;
+          }
           box.append(
             node("b", null, failures > 1 ? "المصدر لا يستجيب الآن" : "تعذّر الجلب؛ نعيد المحاولة…"),
             node("p", null, text),

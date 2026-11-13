@@ -914,7 +914,9 @@ export function createAnime(deps) {
         requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
       }
       if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-      if ((pick.kind !== 'poster' || v.unified) && img.naturalWidth && img.naturalHeight) {
+      // الموحد إطاره ثابت بنسبة الملصق (2:3): لا يأخذ نسبة صورة ولا يحفظها لأنماط أخرى (كانت نسبة بنر محفوظة من
+      // نمط سابق تقصّ ملصق Frieren شريطًا عريضًا)
+      if (pick.kind !== 'poster' && !v.unified && img.naturalWidth && img.naturalHeight) {
         const ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
         heroRatio.set(m.id, ratio);
         // مقاس البطل يُحسم قبل أن تُرى الصفحة ولا يتغير بعدها: كان ارتفاعه يتبع نسبة الصورة حين تصل، فيتحرك الغلاف

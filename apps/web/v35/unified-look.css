@@ -5,13 +5,17 @@
  * - بلا حاويات: لا كبسولات ولا بطاقات خلف المحتوى، والهرمية بالطباعة والمسافة.
  * - كل النص يبدأ من حافة واحدة (start)، والنص الثانوي بتباين مقروء (--text-2 لا --text-4).
  * - زر واحد بعرض الصفحة للفعل الأساسي.
- * - العمق (طلب المالك 13 نوفمبر): الصورة ثابتة مكانها والصفحة تصعد فوقها؛ صف `unified` في depth.js لكل قسم.
+ * - العمق (طلب المالك 13 نوفمبر): الصورة ثابتة مكانها بلا أي حركة (`position: sticky` يرسمه المؤلِّف، لا تحويل
+ *   ولا خط زمني يتأخر عن الإصبع في WebView فيهتز)، والمحتوى يصعد فوقها بتلاشٍ في حافته العليا ينتهي بـvar(--bg).
  *   الملصق بلا قص بنسبته 2:3 (لوحة 12 نوفمبر)، بأعلى دقة متاحة: ملصق IMDb الكبير قبل غلاف AniList/ملصق المصدر.
  * محددات بـ[data-style][data-unified] (أقوى من نمط القسم الأساسي) بدل !important. */
 
 /* ── الأنمي: على هيكل «الأساسي» (anime.js: wrap.dataset.unified) ── */
 .v35 .aw[data-style][data-unified] .aw-hero {
-  aspect-ratio: var(--aw-ratio, 2 / 3);
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  aspect-ratio: 2 / 3;
   height: auto;
   min-height: 0;
   max-height: min(150vw, 600px);
@@ -27,7 +31,9 @@
   height: 100%;
   object-fit: cover;
   object-position: 50% 0%;
+  /* صورة النمط الأساسي الخلفية مكبّرة ×1.25 ومضبّبة: الموحد يعرض الملصق نفسه صافيًا بمقاسه */
   filter: none;
+  transform: none;
 }
 .v35 .aw[data-style][data-unified] .aw-hero::before { content: none; }
 /* نافذة البطل تملك تلاشيها: ظل خفيف أعلاه للأيقونات، وذوبان في الخلفية أسفله */
@@ -52,10 +58,17 @@
   filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.7));
 }
 /* المسرح يبدأ على حافة الذوبان، والنص كله من حافة البداية */
+.v35 .aw[data-style][data-unified] .aw-main {
+  position: relative;
+  z-index: 1;
+  margin-top: -140px;
+  padding-top: 64px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent) 0, var(--bg) 140px);
+}
 .v35 .aw[data-style][data-unified] .aw-stage {
   justify-items: stretch;
   gap: 8px;
-  margin-top: -76px;
+  margin-top: 0;
   text-align: start;
   padding-inline: var(--gutter);
   position: relative;
@@ -115,6 +128,9 @@
 
 /* ── السينما: على هيكل «الحالي» (cinema.js: wrap.dataset.unified) ── */
 .v35 .cn-detail[data-style][data-unified] .cn-detail-art {
+  position: sticky;
+  top: 0;
+  z-index: 0;
   aspect-ratio: 2 / 3;
   max-height: min(150vw, 600px);
   overflow: hidden;
@@ -128,6 +144,7 @@
   height: 100%;
   object-fit: cover;
   object-position: 50% 0%;
+  transform: none;
 }
 .v35 .cn-detail[data-style][data-unified] .cn-detail-art::after {
   inset: 0;
@@ -138,7 +155,9 @@
 .v35 .cn-detail[data-style][data-unified] .cn-detail-body {
   position: relative;
   z-index: 2;
-  margin-top: -76px;
+  margin-top: -140px;
+  padding-top: 64px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent) 0, var(--bg) 140px);
   text-align: start;
 }
 .v35 .cn-detail[data-style][data-unified] .cn-detail-mark { justify-content: flex-start; }
@@ -166,17 +185,7 @@
 
 /* ── المانجا: على هيكل «المعرض» (shell.js mountDetail: #detail[data-unified]) ── */
 .v35 #detail[data-look][data-unified] .mw-amb { display: none; }
-.v35 #detail[data-look][data-unified] .mw-stage { padding-top: 0; position: relative; overflow: hidden; isolation: isolate; }
-/* المسرح نافذة الغلاف الثابت (عمق التمرير): هو يملك تلاشي حده الأسفل، فلا خط حاد حين يصعد المحتوى فوق الغلاف */
-.v35 #detail[data-look][data-unified] .mw-stage::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0;
-  height: 34%;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent), var(--bg) 78%);
-}
+.v35 #detail[data-look][data-unified] .mw-stage { padding-top: 0; }
 .v35 #detail[data-look][data-unified] .mw-stage .mw-cover {
   width: 100%;
   max-width: none;

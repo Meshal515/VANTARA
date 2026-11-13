@@ -59,7 +59,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
+import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore } from '../lib/art.js';
@@ -5103,7 +5103,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     // صفحة المصدر واحدة (source-mode.js): بحث وأعمال المصدر، والرجوع إلى الإضافات من شريط الصفحة
     sourceView?.close?.();
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork });
+    // مصدر أنمي/سينما أصلي (Aniyomi) يطلب تحقق Cloudflare: صفحة التحقق داخل التطبيق ثم إعادة الجلب
+    const verifiable = Boolean(nativeAdapter) && addon.sourceId && !String(addon.sourceId).startsWith('addon|cs3|') && !addon.contentTypes.includes('manga');
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork, onVerify: verifiable ? () => verifyAnimeSource(addon.sourceId) : null });
     q('utilityBody').replaceChildren(sourceView);
     }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
     finally{lookup.finish();}

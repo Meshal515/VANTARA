@@ -496,3 +496,23 @@ it('Aniyomi بلا «آخر التحديثات» المعلن: لا يُطلب �
   expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
   view.close();
 });
+
+it('مصدر يطلب تحقق Cloudflare: زر «تحقّق الآن» لا إعادة صامتة، وبعد التحقق يعيد الجلب', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  let calls = 0;
+  const blocked = Object.assign(new Error(''), { code: 'CloudflareBypassException' });
+  const verify = vi.fn(async () => ({ ok: true }));
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'WitAnime', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: { home: async () => { if (++calls === 1) throw blocked; return { items: [{ id: 'w', title: 'One Piece' }] }; } },
+    onVerify: verify,
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  const button = [...view.querySelectorAll('.addon-source-error button')].find((b) => b.textContent === 'تحقّق الآن');
+  expect(button).toBeTruthy();
+  button.click();
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect(verify).toHaveBeenCalledTimes(1);
+  expect(view.querySelector('.up-title').textContent).toBe('One Piece');
+  view.close();
+});

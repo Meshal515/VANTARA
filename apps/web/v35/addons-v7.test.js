@@ -2,6 +2,12 @@ import { beforeEach } from 'vitest';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseHTML } from 'linkedom';
+const entitlement = vi.hoisted(() => ({ choosePackage: null }));
+vi.mock('../lib/source-entitlement.js', async (original) => {
+  const real = await original();
+  entitlement.choosePackage = vi.fn(async () => {});
+  return { ...real, choosePackage: (...args) => entitlement.choosePackage(...args) };
+});
 import { renderV7Addons } from './addons-v7.js';
 import { createSourcePulse } from '../addons/source-pulse.js';
 import { SHELL_HTML } from './markup.js';
@@ -768,4 +774,19 @@ it('a mixed general site that also lists Anime installs to cinema; a mostly-anim
   expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_mycima','cinema');
   expect(install).toHaveBeenCalledWith('https://repo.example/repo.json','cs3_animesite','anime');
   view.close();
+});
+
+it('الويب: مصدر مانجا مدمج سابقًا يُحذف من الصف (اختيار في الحساب كما في الـAPK)، وغيره المدمج يبقى بلا حذف',async()=>{
+ const d=setup(),pkg='eu.kanade.tachiyomi.extension.ar.lonertranslations';
+ const former={key:`core|${pkg}`,sourceId:pkg,name:'Loner Translations',bundled:true,contentTypes:['manga'],capabilities:['home']};
+ const official={key:'core|akwam',sourceId:'akwam',name:'Akwam',bundled:true,contentTypes:['movie','series'],capabilities:['home']};
+ const view=renderV7Addons({registry:{runtimeName:'pwa',list:()=>[former,official]}});d.body.append(view);await tick();installedTab(view).click();await tick();
+ const rows=[...view.querySelectorAll('.v7-body .v7-row')];
+ const row=rows.find(r=>r.textContent.includes('Loner Translations')),other=rows.find(r=>r.textContent.includes('Akwam'));
+ expect(row.querySelector('.v7-trash')).not.toBeNull();
+ expect(other?.querySelector('.v7-trash') ?? null).toBeNull();
+ row.querySelector('.v7-trash').click();await tick();
+ [...d.querySelectorAll('.v7-btn.danger')].find(b=>b.textContent==='حذف').click();await tick();
+ expect(entitlement.choosePackage).toHaveBeenCalledWith(pkg,false);
+ view.close();
 });
