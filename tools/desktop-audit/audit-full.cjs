@@ -77,7 +77,10 @@ async function openWork(page) {
     let cards = [...document.querySelectorAll(sel)].filter((x) => x.checkVisibility?.() && x.querySelector('img'));
     if (rail) { const r = new RegExp(rail); const inRail = cards.filter((c) => r.test(c.closest('section')?.querySelector('h2,h3')?.textContent ?? '')); if (inRail.length) cards = inRail; }
     const c = (want && cards.find((x) => new RegExp(want, 'i').test(x.textContent))) ?? cards[0];
-    c?.scrollIntoView({ block: 'center' }); c?.click();
+    c?.scrollIntoView({ block: 'center' });
+    // موضع الرئيسية الحقيقي لحظة الفتح (بعد توسيط البطاقة)، لا قبله
+    window.__homeScrollAtOpen = Math.round(scrollY);
+    c?.click();
     return c?.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) ?? null;
   }, [p.card, p.want?.source ?? null, p.rail?.source ?? null]);
 }
@@ -108,6 +111,7 @@ async function settleWork(page) {
         let homeScroll = null;
         if (view.journey) { await page.evaluate(() => scrollTo(0, 900)); await page.waitForTimeout(600); homeScroll = await page.evaluate(() => scrollY); await page.evaluate(() => { window.__cls = 0; new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value; }).observe({ type: 'layout-shift', buffered: false }); }); }
         const work = await openWork(page);
+        const homeScrollAtOpen = await page.evaluate(() => window.__homeScrollAtOpen ?? null).catch(() => null);
         // الدخول: لقطات متتالية أول 900ms
         if (view.journey) { for (let i = 0, t = Date.now(); Date.now() - t < 900; i++) await page.screenshot({ path: `${out}/frames/${style}-enter-${String(i).padStart(2, '0')}.jpg`, type: 'jpeg', quality: 45 }); }
         await settleWork(page);
@@ -143,7 +147,7 @@ async function settleWork(page) {
           if (!back) await page.goBack().catch(() => {});
           for (let i = 0, t = Date.now(); Date.now() - t < 900; i++) await page.screenshot({ path: `${out}/frames/${style}-exit-${String(i).padStart(2, '0')}.jpg`, type: 'jpeg', quality: 45 });
           await page.waitForTimeout(800);
-          m.exit = { viaButton: back, homeScrollBefore: homeScroll, homeScrollAfter: await page.evaluate(() => Math.round(scrollY)) };
+          m.exit = { viaButton: back, homeScrollBefore: homeScrollAtOpen, homeScrollAfter: await page.evaluate(() => Math.round(scrollY)) };
         }
         r[view.id] = m;
         console.log(`${style} ${view.id} | rows ${m.rows.length} | crops ${m.crops.length} | gap ${m.maxGap} | content ${m.contentPct}% | play1st ${m.playFirstScreen} | units ${m.units} | ovx ${m.overflowX}${m.seasonSwitch ? ` | season +${m.seasonSwitch.added}/-${m.seasonSwitch.removed} img ${m.seasonSwitch.imageRequests}/${m.seasonSwitch.backImageRequests} jump ${m.seasonSwitch.scrollJump}` : ''}${m.exit ? ` | exit scroll ${m.exit.homeScrollBefore}→${m.exit.homeScrollAfter}` : ''} | ${m.work}`);

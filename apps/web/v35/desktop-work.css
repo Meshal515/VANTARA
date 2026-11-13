@@ -621,3 +621,82 @@
     max-width: 560px;
   }
 }
+
+/* ═══ ضبط الكمبيوتر بعد الفحص الشامل ببيانات حقيقية (14 نوفمبر) ═══
+ * المقاسات على تطبيق ويندوز صارت 1366–1600 بعرض CSS (window-zoom.cjs يكبّر الشاشات الأكبر بتناسب)، فهذا
+ * الضبط لذلك المدى، والشريط الجانبي مفتوح ومقفل. الهوية كما هي؛ المقاس والتوزيع فقط. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* «المنصة»: التشغيل كان تحت الغلاف (340×510) والمعلومات، فيقع على ~800px خارج أول شاشة 768. يتقدم فوق
+   * الغلاف في العمود الملتصق نفسه (الغلاف والتشغيل يرافقانك كما هما)، والمعلومات بعدهما. */
+  .v35 .wl-platform .wl-aside > .wl-cta { order: -1; }
+  .v35 .wl-platform .wl-facts { order: 2; }
+  /* «من نفس العالم» في المنصة: صفوف صغيرة لاصقة بجهة واحدة وبجانبها فراغ؛ صارت أعمدة من عرض المحتوى، والنقطة
+   * لكل عمل باقية (الخط الواصل للعمود الواحد فقط) */
+  .v35 .wl-platform .wl-world {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    column-gap: 40px;
+  }
+  .v35 .wl-platform .wl-world::before { content: none; }
+  /* «شاشة السينما»: بطاقات «من نفس العالم» تحمل بنر العمل العريض؛ في صف واحد بعرض 128px كان يظهر منه 15–40%.
+   * بطاقات عرضية بنسبة قريبة من البنر (4:1) كالجوال، في أعمدة من العرض */
+  .v35 .wl-screen .wl-world {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+  .v35 .wl-screen .wn {
+    height: auto;
+    aspect-ratio: 4 / 1;
+    min-height: 96px;
+  }
+  /* وجوه الشخصيات والبطولة: 66–76px كانت صغيرة في صفوف عريضة (11 وجهًا في الصف وصف ثانٍ بوجهين) */
+  .v35 .aw .an-strip.aw-cast-strip,
+  .v35 .cn-detail .cn-cast-strip {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 24px 14px;
+  }
+  .v35 .aw .aw-face { width: 92px; height: 92px; }
+  .v35 .aw .aw-person-name { font-size: 13px; }
+  .v35 .aw .aw-person-va { font-size: 11.5px; }
+  .v35 .cn-detail .cn-face { width: 92px; height: 92px; }
+  /* «المحور»: صور الحلقات 176px داخل صفوف بنصف عرض الصفحة؛ أكبر بتناسب الصف */
+  .v35 .aw[data-style='core'] .aw-main .an-er-main { grid-template-columns: clamp(176px, 40%, 240px) minmax(0, 1fr); }
+  /* الأغلفة في «إذا عجبك هذا» و«قد يعجبك» و«من نفس العالم»: حد أدنى أكبر قليلًا فلا تصير عشرة أعمدة صغيرة */
+  .v35 .wl .wl-recs,
+  .v35 .wl-card .wl-world,
+  .v35 .aw .an-strip:not(.aw-cast-strip),
+  .v35 .cn-detail .cn-strip {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  }
+  .v35 .wl-card .wn img,
+  .v35 .wl-card .wn.here img { width: min(100%, 200px) !important; }
+
+  /* السينما — المواسم في «المسلسل أولًا» شريط أفقي (flex + overflow-x): بثلاثة مواسم لا يظهر، بعشرة لف أفقي.
+   * شبكة بلقطات أكبر بدل 150px */
+  .v35 .cn-sf-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 18px 14px;
+    overflow: visible;
+    margin-inline: 0;
+    padding: 2px 0 4px;
+    scroll-snap-type: none;
+  }
+  .v35 .cn-sf-season { width: auto; min-width: 0; }
+  /* الحلقات: صف بعرض الصفحة (1038px) وصورة 132×74 ووصف بسطر طويل؛ عمودان بصور أكبر */
+  .v35 .cn-detail:not([data-unified]) .cn-eps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 32px;
+    row-gap: 8px;
+  }
+  .v35 .cn-detail .cn-ep-row { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+  .v35 .cn-detail .cn-ep-art { border-radius: 8px; }
+
+  /* صفوف أدوات تصير لفًّا أفقيًا مع البيانات الطويلة فقط (لم يُظهرها الفحص بعمل من 3 مواسم و200 فصل):
+   * نطاقات الحلقات وتبويبات المواسم (One Piece أكثر من 1100 حلقة)، ونطاقات الفصول والمصادر في المانجا
+   * (1000+ فصل)، ورقائق الأنواع. على الكمبيوتر تلتف أسطرًا بدل التمرير الأفقي. */
+  .v35 :is(.aw-episode-controls .aw-ranges, .aw-episode-controls .an-seasons, .wl-ranges, .em-seasons, #detail .mw-ranges, #detail[data-look='page'] .source-row, .cn-chips) {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 8px;
+  }
+}
