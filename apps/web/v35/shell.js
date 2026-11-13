@@ -1762,8 +1762,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     closeDetailMenu();
     state.marking = null;
     const page = q('detail');
-    const look = mangaLook(workStyleOf('manga'));
+    // «النمط الموحد» (الإعدادات): هيكل «المعرض» بلبوس unified-look.css، بلا عمق تمرير
+    const unified = unifiedLookOn();
+    const look = unified ? 'gallery' : mangaLook(workStyleOf('manga'));
     page.dataset.look = look;
+    if (unified) page.dataset.unified = '';
+    else delete page.dataset.unified;
     // «ويبتوني» يبني على أساس «المعرض» (data-base) ويختلف بقواعده
     if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
     else delete page.dataset.base;
@@ -1772,7 +1776,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterQuery = '';
     // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
     const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
-    unbindMangaDepth = mountDepth('manga', look, { hero: stage ?? page, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
+    unbindMangaDepth = unified ? () => {} : mountDepth('manga', look, { hero: stage ?? page, scope: `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
     if (TABBED_LOOKS.includes(look)) bindDetailTabs();
     bindChapterSearch();
     paintDetailTools();

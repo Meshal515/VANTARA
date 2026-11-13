@@ -10,10 +10,11 @@ const FRAMED = new Set(['cinema/marquee']); // البنر في إطار 16:9 ب�
 let bad = 0;
 for (const sec of ['manga', 'anime', 'cinema']) {
   const [styles, kind, pid] = SETS[sec];
-  for (const { id: look } of styles) {
+  // «النمط الموحد» (appearance.unifiedLook) حالة إضافية لكل قسم
+  for (const { id: look } of [...styles, { id: 'unified' }]) {
     const spec = DEPTH_SPECS[sec]?.[look] ?? [];
     if (!spec.length) { console.log(`${sec}/${look}: لا طبقات`); continue; }
-    const h = await launch({ section: sec, appearance: { style: { [sec]: look } } });
+    const h = await launch({ section: sec, appearance: look === 'unified' ? { unifiedLook: true } : { style: { [sec]: look } } });
     await sleep(900); await h.page.evaluate((k) => window.__open(k), kind); await sleep(2000);
     const out = [];
     for (const y of [0, 150, 300]) {

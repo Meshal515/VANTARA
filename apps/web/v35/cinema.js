@@ -1790,8 +1790,11 @@ export function createCinema(deps) {
     const page = q('cinema');
     const wrap = el('article', 'cn-detail');
     // نمط الصفحة (الإعدادات ← المظهر): الوظائف والعناصر واحدة، والنمط يرتّبها ويلبسها (cinema-looks.css)
-    const look = workStyleOf('cinema');
+    // «النمط الموحد» (الإعدادات): هيكل «الحالي» بلبوس unified-look.css، بلا عمق تمرير
+    const unified = deps.unifiedLook?.() ?? false;
+    const look = unified ? 'current' : workStyleOf('cinema');
     wrap.dataset.style = look;
+    if (unified) wrap.dataset.unified = '';
 
     const bar = el('div', 'cn-detail-bar');
     bar.dataset.motionFixed = ''; // شريط ثابت: لا يندفع مع المحتوى (page-motion.js)
@@ -1823,7 +1826,8 @@ export function createCinema(deps) {
     const art = priorArt && priorArt.dataset.work === String(m.id) ? priorArt : el('div', 'cn-detail-art');
     art.dataset.work = String(m.id);
     const remembered = heroPick.get(m.id);
-    const want = remembered ?? (partial ? null : m.background ?? m.poster);
+    // الموحد: البطل ملصق العمل نفسه من أول رسم (قرار المالك: لا بحث عن صور أخرى)، لا الخلفية
+    const want = unified ? (m.poster ?? null) : remembered ?? (partial ? null : m.background ?? m.poster);
     const prior = art === priorArt ? art.querySelector('.cn-img') : null;
     let backdrop = null;
     if (prior && prior.dataset.want === want && (prior.classList.contains('loaded') || prior.classList.contains('kept'))) {
@@ -1834,7 +1838,7 @@ export function createCinema(deps) {
       backdrop = image(want, 'cn-img', { eager: true, hero: !remembered });
       backdrop.dataset.want = want;
       backdrop.addEventListener('load', () => {
-        if (!partial || remembered) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);
+        if (!unified && (!partial || remembered)) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);
       }, { once: true });
     }
     if (backdrop !== prior) art.replaceChildren(...(backdrop ? [backdrop] : []));
@@ -1962,7 +1966,7 @@ export function createCinema(deps) {
     page.replaceChildren(wrap);
     unbindHero?.();
     // العمق مع التمرير من depth.js (نفس محرك الأنمي): CSS على المؤلِّف + طبقات الانزلاق من الصف نفسه
-    unbindHero = mountDepth('cinema', look, {
+    unbindHero = unified ? null : mountDepth('cinema', look, {
       hero: art, bar, scope: `.v35 .cn-detail[data-style='${look}']`, styleId: 'cn-motion', prefix: 'cn',
       hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => Math.max(1, art.offsetHeight - bar.offsetHeight),
       active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id,

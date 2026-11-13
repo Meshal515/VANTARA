@@ -93,10 +93,12 @@ function check({ rows, sync, t0 }, { kind, expectEnd }) {
 let bad = 0, total = 0;
 for (const sec of sections) {
   const [styles, kind, pid] = SETS[sec];
-  for (const { id: look } of styles) {
+  // «النمط الموحد» إعداد منفصل عن أنماط القسم (appearance.unifiedLook): حالة إضافية لكل قسم بالمعايير نفسها
+  for (const { id: look } of [...styles, { id: 'unified' }]) {
     if (lookFilter && !lookFilter.includes(look)) continue;
     for (const c of CONDITIONS) {
-      const h = await launch({ section: sec, appearance: { style: { [sec]: look } }, imageDelay: c.image, mangaDelay: c.data || 200 });
+      const appearance = look === 'unified' ? { unifiedLook: true } : { style: { [sec]: look } };
+      const h = await launch({ section: sec, appearance, imageDelay: c.image, mangaDelay: c.data || 200 });
       if (c.data) await h.page.route(/anilist|cinemeta|strem\.io/, async (route) => { await sleep(c.data); return route.fallback(); });
       const cdp = RATE > 1 ? await h.context.newCDPSession(h.page) : null;
       await sleep(1000);

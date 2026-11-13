@@ -37,7 +37,7 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 18%, rgba(8, 7, 12, 0) 52%, color-mix(in srgb, var(--bg) 82%, transparent) 84%, var(--bg) 100%);
+  background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 18%, rgba(8, 7, 12, 0) 44%, color-mix(in srgb, var(--bg) 70%, transparent) 66%, color-mix(in srgb, var(--bg) 94%, transparent) 82%, var(--bg) 92%);
 }
 /* الأيقونات بلا كبسولة فوق الصورة، بظل يحفظ قراءتها على الصور الفاتحة */
 .v35 .aw[data-style][data-unified] .aw-tools {
@@ -110,3 +110,115 @@
   font-weight: 750;
 }
 .v35 .aw[data-style][data-unified] .aw-progress { color: var(--text-2); }
+
+/* ── السينما: على هيكل «الحالي» (cinema.js: wrap.dataset.unified) ── */
+.v35 .cn-detail[data-style][data-unified] .cn-detail-art {
+  aspect-ratio: 2 / 3;
+  max-height: 55svh;
+  width: 100%;
+  margin-top: 0;
+}
+.v35 .cn-detail[data-style][data-unified] .cn-detail-art > .cn-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 12%;
+  transform: none;
+}
+.v35 .cn-detail[data-style][data-unified] .cn-detail-art::after {
+  inset: 0;
+  height: auto;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 18%, rgba(8, 7, 12, 0) 44%, color-mix(in srgb, var(--bg) 70%, transparent) 66%, color-mix(in srgb, var(--bg) 94%, transparent) 82%, var(--bg) 92%);
+}
+.v35 .cn-detail[data-style][data-unified] .cn-detail-body {
+  position: relative;
+  z-index: 2;
+  margin-top: -76px;
+  text-align: start;
+}
+.v35 .cn-detail[data-style][data-unified] .cn-detail-mark { justify-content: flex-start; }
+.v35 .cn-detail[data-style][data-unified] .cn-mark-logo {
+  object-position: right bottom;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.6));
+}
+.v35 .cn-detail[data-style][data-unified] :is(.cn-facts, .cn-genre-line) { color: var(--text-2); justify-content: flex-start; }
+.v35 .cn-detail[data-style][data-unified] .cn-tools {
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.v35 .cn-detail[data-style][data-unified] .cn-detail-bar :is(.aw-tool, .icon-btn) {
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.7));
+}
+.v35 .cn-detail[data-style][data-unified] .cn-btn--play.cn-btn--block {
+  height: 54px;
+  border-radius: 14px;
+  font-size: 16px;
+}
+
+/* ── المانجا: على هيكل «المعرض» (shell.js mountDetail: #detail[data-unified]) ── */
+.v35 #detail[data-look][data-unified] .mw-amb { display: none; }
+.v35 #detail[data-look][data-unified] .mw-stage { padding-top: 0; }
+.v35 #detail[data-look][data-unified] .mw-stage .mw-cover {
+  width: 100%;
+  max-width: none;
+  max-height: 55svh;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.v35 #detail[data-look][data-unified] .mw-stage .mw-cover > img { object-position: 50% 12%; }
+/* نافذة الغلاف تملك تلاشيها، وينتهي بـvar(--bg) */
+.v35 #detail[data-look][data-unified] .mw-stage .mw-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(8, 7, 12, 0.5) 0, rgba(8, 7, 12, 0) 18%, rgba(8, 7, 12, 0) 44%, color-mix(in srgb, var(--bg) 70%, transparent) 66%, color-mix(in srgb, var(--bg) 94%, transparent) 82%, var(--bg) 92%);
+}
+.v35 #detail[data-look][data-unified] .mw-center {
+  position: relative;
+  z-index: 2;
+  margin-top: -76px;
+  text-align: right;
+}
+/* العنوان من حافة الصفحة نفسها ولو كان إنجليزيًا (plaintext كان يرسل «Chainsaw Man» لليسار) */
+.v35 #detail[data-look][data-unified] .mw-title { font-size: 26px; margin-top: 0; text-align: right; }
+.v35 #detail[data-look][data-unified] :is(.mw-stats, .mw-chips) { justify-content: flex-start; }
+.v35 #detail[data-look][data-unified] .mw-stats { color: var(--text-2); }
+.v35 #detail[data-look][data-unified] .mw-chip {
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.v35 #detail[data-look][data-unified] .mw-chips { gap: 4px 12px; }
+.v35 #detail[data-look][data-unified] .mw-acts { margin-top: 18px; }
+.v35 #detail[data-look][data-unified] .mw-row > .mw-cta { flex: 1 1 0; width: auto; min-width: 0; height: 54px; border-radius: 14px; }
+.v35 #detail[data-look][data-unified] .mw-square { background: none; box-shadow: none; }
+/* الغلاف يملأ إطاره: نسبته معروفة قبل ظهور الصفحة (القرار المحفوظ)، والقص القليل تحت الذوبان */
+/* حتى الغلاف المتأخر (mw-fit) يملأ الإطار المحجوز نفسه: الإطار لا يتغير مقاسه (CLAUDE.md)، والسقف 55% يجعل
+ * العرض الكامل هامشين جانبيين؛ القص القليل تحت الذوبان */
+.v35 #detail[data-look][data-unified] #detailCover > img,
+.v35 #detail[data-look][data-unified] #detailCover > img.mw-fit { object-fit: cover; }
+.v35 #detail[data-look][data-unified] .mw-title { margin-bottom: 4px; }
+.v35 #detail[data-look][data-unified] .mw-acts { margin-top: 10px; padding-top: 0; }
+.v35 #detail[data-look][data-unified] .aw-tools {
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.v35 #detail[data-look][data-unified] .mw-bar :is(.aw-tool, .icon-btn) {
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.7));
+}
