@@ -103,7 +103,7 @@ export function renderSourceMode({
   state.page ??= 1;
   state.query ??= "";
   const fullCatalogue = (addon.contentTypes ?? []).includes("manga") && typeof adapter.catalogue === "function";
-  state.tab ??= fullCatalogue ? "catalogue" : "home";
+
   note.setAttribute("role", "status");
   note.setAttribute("aria-live", "polite");
   let controller = null,
@@ -234,17 +234,20 @@ export function renderSourceMode({
       filters.append(label);
     }
   }
+  // أقسام المصدر كما يقدمها هو (طلب المالك): آخر التحديثات، الرائج، والكل للمانجا. أزرار تتنقل بينها.
   const choices = catalogs.length
     ? catalogs.map((c) => [`${c.type}|${c.id}`, c.name ?? c.id])
     : [
-        ...(fullCatalogue ? [["catalogue", "الكتالوج"]] : []),
-        ...((addon.capabilities ?? []).includes("home")
+        // المانجا: «الكل» أولًا كما كانت (الفهرس الكامل)، ثم آخر التحديثات والرائج
+        ...(fullCatalogue ? [["catalogue", "الكل"]] : []),
+        ...((addon.capabilities ?? []).includes("home") && typeof adapter.home === "function"
           ? [["home", "آخر التحديثات"]]
           : []),
-        ...(addon.bundled && (addon.contentTypes ?? []).includes("manga")
-          ? [["popular", "الرائج"]]
-          : []),
+        ...(typeof adapter.popular === "function" ? [["popular", "الرائج"]] : []),
       ];
+  // القسم الأول للمصدر يفتح أولًا (آخر التحديثات إن قدّمها)، والمحفوظ من زيارة سابقة يبقى
+  if (!catalogs.length && state.tab !== "search" && !choices.some(([tab]) => tab === state.tab))
+    state.tab = choices[0]?.[0] ?? (fullCatalogue ? "catalogue" : "home");
   // قسم واحد (آخر التحديثات مثلًا) عنوانٌ هادئ لا زر؛ أكثر من قسم = شريط أقسام
   tabs.classList.toggle("is-single", choices.length < 2);
   for (const [tab, label] of choices) {
@@ -280,6 +283,33 @@ export function renderSourceMode({
   const io = typeof IntersectionObserver === "undefined" ? null
     : new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting) && !more.hidden && !pending && autoMore) more.click(); }, { rootMargin: "500px" });
   io?.observe(more);
+  // ذاكرة صفحات الأقسام: الرجوع لقسم فُتح يظهر فورًا، والأقسام الأخرى تُجلب مسبقًا بعد أول قسم.
+  // النتيجة تبقى 5 دقائق؛ الفشل لا يُحفظ.
+  const pageCache = state.pageCache ??= new Map();
+  const PAGE_TTL = 5 * 60_000;
+  // طلب أُلغي (رجوع، تبديل قسم) يُنسى فورًا: لا يُعاد استعمال طلب معلّق بعد العودة
+  const cached = (key, fetch, signal) => {
+    const hit = pageCache.get(key);
+    if (hit && (hit.done || !hit.signal?.aborted) && Date.now() - hit.at < PAGE_TTL) return hit.value;
+    const entry = { at: Date.now(), value: null, signal, done: false };
+    entry.value = Promise.resolve().then(fetch);
+    pageCache.set(key, entry);
+    entry.value.then(() => { entry.done = true; }, () => { if (pageCache.get(key) === entry) pageCache.delete(key); });
+    signal?.addEventListener("abort", () => { if (!entry.done && pageCache.get(key) === entry) pageCache.delete(key); }, { once: true });
+    return entry.value;
+  };
+  const tabFetch = (tab, page, signal) => {
+    const o = signal ? { signal } : {};
+    if (tab === "catalogue") return cached(`catalogue|${page}`, () => adapter.catalogue(page, o), signal);
+    if (tab === "popular") return cached(`popular|${page}`, () => adapter.popular(page, o), signal);
+    return cached(`home|${page}`, () => adapter.home(page, o), signal);
+  };
+  let prefetched = false;
+  const prefetchTabs = () => {
+    if (prefetched || closed || catalogs.length) return;
+    prefetched = true;
+    for (const [tab] of choices) if (tab !== state.tab) void tabFetch(tab, 1).catch(() => {});
+  };
   const seen = new Set();
   const workKey = (work) => {
     const id = work.id ?? work.url;
@@ -350,11 +380,11 @@ export function renderSourceMode({
       )
         out = await adapter.search(state.query, state.page, options);
       else if (state.tab === "catalogue" && fullCatalogue)
-        out = await adapter.catalogue(state.page, options);
+        out = await tabFetch("catalogue", state.page, activeController.signal);
       else if (state.tab === "popular" && adapter.popular)
-        out = await adapter.popular(state.page, options);
+        out = await tabFetch("popular", state.page, activeController.signal);
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
-        out = await adapter.home(state.page, options);
+        out = await tabFetch("home", state.page, activeController.signal);
       else {
         grid.replaceChildren();
         note.textContent = "اكتب اسم العمل للبحث في هذا المصدر.";
@@ -490,6 +520,7 @@ export function renderSourceMode({
       failures = 0;
       autoMore = true;
       paintStatus();
+      if (!append && !state.query) setTimeout(prefetchTabs, 400);
     } catch (error) {
       if (run === generation && !activeController.signal.aborted) {
         if (append) {

@@ -423,3 +423,26 @@ it('صفحة المصدر الموحدة: البحث أولًا، بلا زر «
     expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(true);
     view.close();
   });
+
+it('أقسام المصدر كما يقدمها: آخر التحديثات والرائج أزرار، والرجوع لقسم فُتح فوري بلا طلب جديد', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const calls = { home: 0, popular: 0 };
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { calls.home++; return { items: [{ id: 'h', title: 'Home work' }] }; },
+      popular: async () => { calls.popular++; return { items: [{ id: 'p', title: 'Popular work' }] }; },
+    },
+  });
+  const tabs = [...view.querySelectorAll('.addon-catalog-tabs .addon-filter')];
+  expect(tabs.map((b) => b.textContent)).toEqual(['آخر التحديثات', 'الرائج']);
+  expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(false);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Home work');
+  tabs[1].click(); await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Popular work');
+  tabs[0].click(); await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Home work');
+  expect(calls).toEqual({ home: 1, popular: 1 });
+  view.close();
+});

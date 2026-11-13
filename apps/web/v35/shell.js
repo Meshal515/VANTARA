@@ -18,7 +18,7 @@ import { createSourceVerification } from '../lib/source-verification.js';
 import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
-import { declaredKind, renderSourceMode, SECTION_BRAND } from './source-mode.js';
+import { renderSourceMode } from './source-mode.js';
 import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
 import { getAddonRuntime } from '../addons/runtime.js';
 import { supportedCapabilities } from '../addons/assessment.js';
@@ -5046,8 +5046,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const profile=sync.user?.userId??'local';
     const active=()=>run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
     addonSourcePending=true;
-    // شريط الصفحة يحمل VANTARA القسم، واسم المصدر في رأس الصفحة وحده (لا تكرار)
-    q('utilityTitle').textContent=SECTION_BRAND[declaredKind(addon)];
+    // شريط الصفحة: VANTARA وحدها (طلب المالك)، واسم المصدر في رأس الصفحة وحده (لا تكرار)
+    q('utilityTitle').textContent='VANTARA';
     showPage('utility');
     q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
     try{
@@ -5103,7 +5103,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     // صفحة المصدر واحدة (source-mode.js): بحث وأعمال المصدر، والرجوع إلى الإضافات من شريط الصفحة
     sourceView?.close?.();
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork, onKind: (_kind, brand) => { if (active()) q('utilityTitle').textContent = brand; } });
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork });
     q('utilityBody').replaceChildren(sourceView);
     }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
     finally{lookup.finish();}
