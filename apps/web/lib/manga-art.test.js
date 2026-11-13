@@ -45,7 +45,7 @@ describe('غلاف المانجا وبنرها: المصدر الرئيسي أو
   });
   it('مطابقة AniList للفن بالاسم نفسه بلا لبس، ولا فن لعمل للكبار', () => {
     const row = { id: 1, title: { english: 'Nano Machine' }, coverImage: { extraLarge: 'xl', large: 'l' }, bannerImage: 'bn', genres: [] };
-    expect(matchMangaArt('Nano Machine', [row])).toEqual({ cover: 'xl', banner: 'bn', color: null });
+    expect(matchMangaArt('Nano Machine', [row])).toEqual({ id: 1, cover: 'xl', banner: 'bn', color: null });
     expect(matchMangaArt('Nano Machine', [row, { ...row, id: 2 }])).toBeNull();
     expect(matchMangaArt('Nano Machine', [{ ...row, isAdult: true }])).toBeNull();
     expect(matchMangaArt('Other', [row])).toBeNull();

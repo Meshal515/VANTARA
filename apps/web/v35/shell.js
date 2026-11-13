@@ -63,6 +63,7 @@ import { momentRange, momentStart, repositories as animeRepositories, withPhaseD
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore } from '../lib/art.js';
+import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
@@ -606,7 +607,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
         try {
           // الرسمي (AniList) يُطلب أولًا فيسير بالتوازي مع أغلفة المصادر، لا خلفها (كان ينتظر حتى 2.5 ثانية لها)
           const title = work?._work?.title || work?.title?.english || titleOf(work);
-          const official = id.startsWith('ext:') && title ? artFor(title) : null;
+          // AniList ومعه Kitsu بالهوية نفسها (رقم AniList): غلاف وبنر أعلى جودة وأخف غالبًا (lib/kitsu-art.js)
+          const official = id.startsWith('ext:') && title ? artFor(title).then(async (a) => {
+            if (!a?.id) return a;
+            const more = await Promise.race([kitsuArt(a.id), new Promise((r) => setTimeout(() => r(null), 1200))]);
+            return more ? { ...a, more: [{ cover: more.cover?.url ?? null, banner: more.banner?.url ?? null }] } : a;
+          }) : null;
           const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
             Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
           const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);

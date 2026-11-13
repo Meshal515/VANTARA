@@ -82,12 +82,18 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
       const uniq = [...new Set(sources.filter(Boolean))].slice(0, 4);
       const srcProbes = uniq.map((u) => measure(u, left()).then((m) => m && { ...m, official: isOfficialArt(u) }));
       const off = official ? await Promise.race([Promise.resolve(official).catch(() => null), new Promise((r) => setTimeout(() => r(null), left()))]) : null;
-      const offCover = off?.cover ? measure(off.cover, left()).then((m) => m && { ...m, official: true }) : Promise.resolve(null);
-      const bannerUrl = off?.banner || wideHint || null;
-      const [oc, b, ...src] = await Promise.all([offCover, bannerUrl ? measure(bannerUrl, left()) : null, ...srcProbes]);
-      const covers = [oc, ...src].filter(Boolean);
+      // المصادر الرسمية: AniList، ومعه ما يضيفه `off.more` بالهوية نفسها (Kitsu برقم AniList). كلها رسمية تتنافس
+      // بالجودة، والبنرات كلها تُقاس ويُختار أكبرها مما يحقق قاعدة البنر
+      const officialCovers = [off?.cover, ...(off?.more ?? []).map((m) => m?.cover)].filter(Boolean);
+      const bannerUrls = [...new Set([off?.banner, ...(off?.more ?? []).map((m) => m?.banner), wideHint].filter(Boolean))];
+      const offProbes = [...new Set(officialCovers)].map((u) => measure(u, left()).then((m) => m && { ...m, official: true }));
+      const [offMeasured, banners, src] = await Promise.all([
+        Promise.all(offProbes), Promise.all(bannerUrls.map((u) => measure(u, left()))), Promise.all(srcProbes),
+      ]);
+      const covers = [...offMeasured, ...src].filter(Boolean);
       const cover = chooseCover(covers);
       if (!cover) return known ?? null;
+      const b = banners.filter(Boolean).filter((m) => chooseBanner(m, [])?.wide).sort((x, y) => x.width * x.height - y.width * y.height).at(-1) ?? null;
       const banner = chooseBanner(b, covers);
       const bannerDims = banner?.wide ? b : cover;
       const decision = { cover: cover.url, w: cover.width, h: cover.height, banner: banner?.url ?? cover.url, wide: Boolean(banner?.wide), bw: bannerDims?.width ?? null, bh: bannerDims?.height ?? null };

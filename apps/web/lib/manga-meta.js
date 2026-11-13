@@ -118,7 +118,7 @@ export function matchMangaArt(title, candidates) {
   const m = named[0];
   const cover = m.coverImage?.extraLarge || m.coverImage?.large || null;
   if (!cover && !m.bannerImage) return null;
-  return { cover, banner: m.bannerImage || null, color: m.coverImage?.color || null };
+  return { id: m.id, cover, banner: m.bannerImage || null, color: m.coverImage?.color || null };
 }
 
 /**
