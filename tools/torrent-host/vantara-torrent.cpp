@@ -31,6 +31,8 @@
 #include <libtorrent/peer_info.hpp>
 #include <libtorrent/write_resume_data.hpp>
 #include <libtorrent/create_torrent.hpp>
+#include <libtorrent/load_torrent.hpp>
+#include <libtorrent/version.hpp>
 #include <boost/asio.hpp>
 
 #include <algorithm>
@@ -70,6 +72,19 @@ namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 using clk = std::chrono::steady_clock;
 using namespace std::chrono_literals;
+
+// توافق libtorrent 2.0 (لينكس: 2.0.10) و2.1 (vcpkg على ويندوز: 2.1.x بلا الدوال المهملة، TORRENT_ABI_VERSION=100).
+// 2.1 أخفى torrent_info::files() وpeer_info::ip وadd_files وfrom_span؛ بدائلها في 2.1 وحدها، فنختار
+// عند الترجمة. لا نعيد تسمية ملفات التورنت، فـlayout() يساوي files() عمليًا.
+namespace ltc {
+#if LIBTORRENT_VERSION_NUM >= 20100
+inline lt::file_storage const& files(lt::torrent_info const& ti) { return ti.layout(); }
+inline lt::tcp::endpoint endpoint(lt::peer_info const& p) { return p.remote_endpoint(); }
+#else
+inline lt::file_storage const& files(lt::torrent_info const& ti) { return ti.files(); }
+inline lt::tcp::endpoint endpoint(lt::peer_info const& p) { return p.ip; }
+#endif
+}  // namespace ltc
 
 static constexpr const char* VERSION = "1.0.0";
 
@@ -238,7 +253,7 @@ public:
         if (allowPrivate_) { s.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true); s.set_bool(lt::settings_pack::enable_dht, false); s.set_bool(lt::settings_pack::enable_upnp, false); s.set_bool(lt::settings_pack::enable_natpmp, false); }
         s.set_str(lt::settings_pack::listen_interfaces, (allowPrivate_ ? "127.0.0.1:" : "0.0.0.0:") + std::to_string(listenPort) + (allowPrivate_ ? "" : ",[::]:" + std::to_string(listenPort)));
         s.set_str(lt::settings_pack::user_agent, std::string("VANTARA/") + VERSION + " libtorrent/" + lt::version());
-        s.set_int(lt::settings_pack::alert_mask, int(lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{})));
+        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
         lt::session_params params(std::move(s));
         // جدول DHT المحفوظ (مثل dht.state في APK): لا يبدأ كل تشغيل من عقد الإقلاع
         if (!stateDir_.empty()) {
@@ -392,7 +407,7 @@ public:
     bool stream(std::shared_ptr<Torrent> const& t, int fileIndex, int64_t from, int64_t to, uint64_t readerId, Send&& send) {
         auto ti = t->h.torrent_file();
         if (!ti) return false;
-        auto const& files = ti->files();
+        auto const& files = ltc::files(*ti);
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int const pieceLength = ti->piece_length();
         int64_t pos = from;
@@ -446,7 +461,7 @@ private:
     }
 
     std::string describe(Torrent& t, lt::torrent_info const& ti, bool listOnly) {
-        auto const& files = ti.files();
+        auto const& files = ltc::files(ti);
         std::ostringstream o;
         std::string const folder = fs::absolute(fs::u8path(dir_)).u8string();
         o << "{\"id\":" << (listOnly ? std::string("null") : std::to_string(t.id)) << ",\"output_folder\":\"" << jsonEscape(folder) << "\",\"details\":{\"info_hash\":\"" << t.infoHash
@@ -467,7 +482,7 @@ private:
         int n = 0;
         for (auto const& peer : peers) {
             if (n >= 50) break;
-            auto const& ep = peer.ip;
+            auto const ep = ltc::endpoint(peer);
             std::string addr = ep.address().is_v6() ? "[" + ep.address().to_string() + "]" : ep.address().to_string();
             o << (n++ ? "," : "") << '"' << addr << ':' << ep.port() << '"';
         }
@@ -500,7 +515,7 @@ private:
      * نبقى «مهتمين» بأول قطعة من أكبر ملف فيديو بأولوية منخفضة، فيُفك الخنق قبل أن يختار المشغّل الملف.
      */
     static void keepInterested(Torrent& t, lt::torrent_info const& ti) {
-        auto const& files = ti.files();
+        auto const& files = ltc::files(ti);
         int best = -1;
         int64_t bestSize = 0;
         for (int i = 0; i < files.num_files(); ++i) {
@@ -522,7 +537,7 @@ private:
 
     // TorrentPolicy.edges: أول قطعة وآخر قطعتين من الملف
     static std::vector<int> edgePieces(lt::torrent_info const& ti, int index) {
-        auto const& files = ti.files();
+        auto const& files = ltc::files(ti);
         int64_t const offset = files.file_offset(lt::file_index_t(index));
         int64_t const size = files.file_size(lt::file_index_t(index));
         if (size <= 0) return {0};
@@ -545,7 +560,7 @@ private:
         if (primary != readerId) return;
         if (piece == t->windowStart) return;
         t->windowStart = piece;
-        auto const& files = ti.files();
+        auto const& files = ltc::files(ti);
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int64_t const size = files.file_size(lt::file_index_t(fileIndex));
         int const first = int(offset / ti.piece_length());
@@ -635,7 +650,7 @@ private:
             std::vector<std::pair<int, asio::ip::address>> victims;
             for (auto const& p : peers)
                 if (int(static_cast<std::int32_t>(p.downloading_piece_index)) == t->waitingPiece && p.down_speed < std::max(policy::SLOW_BPS, typical / 4) && fastest >= std::max(p.down_speed * 3, policy::SLOW_BPS))
-                    victims.emplace_back(p.down_speed, p.ip.address());
+                    victims.emplace_back(p.down_speed, ltc::endpoint(p).address());
             std::sort(victims.begin(), victims.end(), [](auto& a, auto& b) { return a.first < b.first; });
             for (size_t i = 0; i < victims.size() && i < size_t(policy::MAX_VICTIMS); ++i) { banned_[victims[i].second] = clk::now() + policy::HOTSWAP_BAN; changed = true; ++swaps_; }
             std::lock_guard<std::mutex> lock(m_);
@@ -791,7 +806,7 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
             int fileIndex;
             try { fileIndex = std::stoi(parts[4]); } catch (...) { return respond(sock, {404, R"({"error":"bad file"})"}); }
             if (!ti || fileIndex < 0 || fileIndex >= ti->num_files()) return respond(sock, {404, R"({"error":"bad file"})"});
-            int64_t const size = ti->files().file_size(lt::file_index_t(fileIndex));
+            int64_t const size = ltc::files(*ti).file_size(lt::file_index_t(fileIndex));
             int64_t from = 0, to = size - 1;
             bool partial = false;
             auto range = req.headers.find("range");
@@ -809,7 +824,7 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
                 r.headers.emplace_back("Content-Range", "bytes */" + std::to_string(size));
                 return respond(sock, r);
             }
-            std::string name(ti->files().file_name(lt::file_index_t(fileIndex)));
+            std::string name(ltc::files(*ti).file_name(lt::file_index_t(fileIndex)));
             std::string ext = lower(name.substr(name.rfind('.') == std::string::npos ? name.size() : name.rfind('.')));
             std::string type = ext == ".mp4" || ext == ".m4v" ? "video/mp4" : ext == ".mkv" ? "video/x-matroska" : ext == ".webm" ? "video/webm" : "application/octet-stream";
             std::ostringstream o;
@@ -850,13 +865,19 @@ static bool parentAlive(long pid) {
 
 // وضع البذر المحلي للاختبارات فقط: ينشئ تورنت ملف ويبذره ويطبع المغناطيس.
 static int seedMode(std::string const& file, int port, int pieceSize) {
+#if LIBTORRENT_VERSION_NUM >= 20100
+    lt::create_torrent ct(lt::list_files(file), pieceSize, lt::create_torrent::v1_only);
+#else
     lt::file_storage storage;
     lt::add_files(storage, file);
     lt::create_torrent ct(storage, pieceSize, lt::create_torrent::v1_only);
+#endif
     lt::set_piece_hashes(ct, fs::path(file).parent_path().string());
     std::vector<char> buf;
     lt::bencode(std::back_inserter(buf), ct.generate());
-    auto ti = std::make_shared<lt::torrent_info>(buf, lt::from_span);
+    // load_torrent_buffer موجود في 2.0.7+ و2.1، بدل from_span المحذوف في 2.1
+    lt::add_torrent_params p = lt::load_torrent_buffer(lt::span<char const>(buf.data(), std::ptrdiff_t(buf.size())));
+    p.info_hashes = p.ti->info_hashes();  // make_magnet_uri(atp) يبني المغناطيس من info_hashes
     lt::settings_pack s;
     s.set_str(lt::settings_pack::listen_interfaces, "127.0.0.1:" + std::to_string(port));
     s.set_bool(lt::settings_pack::enable_dht, false);
@@ -864,11 +885,9 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
     s.set_bool(lt::settings_pack::enable_upnp, false);
     s.set_bool(lt::settings_pack::enable_natpmp, false);
     s.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true);
-    s.set_int(lt::settings_pack::alert_mask, int(lt::alert_category::status | lt::alert_category::error | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect | lt::alert_category::peer_log : lt::alert_category_t{})));
+    s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect | lt::alert_category::peer_log : lt::alert_category_t{}));
     s.set_int(lt::settings_pack::upload_rate_limit, std::getenv("VANTARA_SEED_RATE") ? std::atoi(std::getenv("VANTARA_SEED_RATE")) : 0);
     lt::session ses(s);
-    lt::add_torrent_params p;
-    p.ti = ti;
     p.save_path = fs::path(file).parent_path().string();
     p.flags |= lt::torrent_flags::seed_mode;
     // الافتراضي paused|auto_managed: التورنت الموقوف يرفض الاتصال الوارد حتى يستأنفه المدير لاحقًا
@@ -885,7 +904,7 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
             if (auto* f = lt::alert_cast<lt::listen_failed_alert>(a)) { std::cerr << f->message() << '\n'; return 4; }
         }
     }
-    std::cout << lt::make_magnet_uri(*ti) << "&x.pe=127.0.0.1:" << port << std::endl;
+    std::cout << lt::make_magnet_uri(p) << "&x.pe=127.0.0.1:" << port << std::endl;
     bool const debug = std::getenv("VANTARA_TORRENT_LOG") != nullptr;
     while (!g_quit) {
         ses.wait_for_alert(200ms);
