@@ -36,7 +36,10 @@ $p=Start-Process $exe -ArgumentList "--smoke-report=`"$bootReport`"" -PassThru
 if(-not $p.WaitForExit(120000)){$p.Kill();throw 'Application boot timed out'}
 if($p.ExitCode -ne 0){throw "Boot failed: $($p.ExitCode)"}
 $boot=Get-Content $bootReport -Raw | ConvertFrom-Json
-if(-not $boot.hasBridge -or $boot.desktop -ne 'windows' -or $boot.sourceCount -lt 27 -or (-not $boot.gate -and -not $boot.canonical)){throw 'Canonical desktop application did not boot'}
+# كل المصادر المدمجة في الحزمة نفسها يجب أن تُحمَّل (V7: 19 مصدر مانجا بعد نقل مصادر الفيديو للإضافات؛ main: 27)
+$bundledSources=(Get-Content (Join-Path $target 'resources\app\web\pwa\sources\defs.json') -Raw | ConvertFrom-Json).sources.Count
+if($bundledSources -lt 1){throw 'No bundled sources in defs.json'}
+if(-not $boot.hasBridge -or $boot.desktop -ne 'windows' -or $boot.sourceCount -lt $bundledSources -or (-not $boot.gate -and -not $boot.canonical)){throw "Canonical desktop application did not boot (sources $($boot.sourceCount)/$bundledSources, gate=$($boot.gate), canonical=$($boot.canonical))"}
 if($boot.assetFailures.Count -or $boot.failedLoads.Count -or $boot.rendererExits.Count){throw 'Application load failure'}
 # تشغيل تورنت حقيقي داخل التطبيق المثبت: libtorrent المرفق + mpv المدمج، لكل fixture (1080p/2K/4K)
 if($TorrentFixtures){
