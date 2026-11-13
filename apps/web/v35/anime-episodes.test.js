@@ -137,3 +137,22 @@ describe('MOVIE format with several episodes', () => {
     expect(episodeCount({ format: 'MOVIE', episodes: 1, status: 'FINISHED' })).toBe(0);
   });
 });
+
+// #323 U-14: صورة «شاهد الحلقة 1» كانت تتبدل للقطة أخرى من مصدر آخر بعد ظهورها (لقطة AniList ← metahub)
+import { stillUpgrade } from './anime-episodes.js';
+describe('a shown episode still is only replaced by the same frame', () => {
+  const cr = 'https://img1.ak.crunchyroll.com/i/spire1-tmb/abc_full.jpg';
+  const mid = 'https://episodes.metahub.space/tt0388629/1/1/w780.jpg';
+  const original = 'https://episodes.metahub.space/tt0388629/1/1/original.jpg';
+  it('a still from another source does not replace the still on screen', () => {
+    expect(stillUpgrade({ src: cr, still: true }, { src: original, still: true })).toBe(false);
+  });
+  it('the same frame at a higher resolution does', () => {
+    expect(stillUpgrade({ src: mid, still: true }, { src: original, still: true })).toBe(true);
+  });
+  it('a cover gives way to a still; a still never gives way to a cover', () => {
+    expect(stillUpgrade({ src: 'https://img/cover.jpg', still: false }, { src: cr, still: true })).toBe(true);
+    expect(stillUpgrade({ src: cr, still: true }, { src: 'https://img/cover.jpg', still: false })).toBe(false);
+    expect(stillUpgrade(null, { src: cr, still: true })).toBe(true);
+  });
+});

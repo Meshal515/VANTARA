@@ -14,6 +14,20 @@ const integer = (value, fallback = 0) => {
  */
 export const isSingleMovie = (m) => m?.format === 'MOVIE' && !(Number(m?.episodes) > 1);
 
+/**
+ * هل تحل صورة الحلقة الجديدة محل الظاهرة؟ (#323 U-14) لقطة ظاهرة لا تُبدَّل إلا بالإطار نفسه بدقة أعلى
+ * (metahub w780 ← original من المسار نفسه)؛ لقطة مصدر آخر إطار آخر فتبدو الصفحة كأنها لم تستقر. الغلاف
+ * يفسح للقطة، واللقطة لا تفسح لغلاف.
+ */
+const frameOf = (src) => String(src ?? '').replace(/\/(?:w\d+|original)\.jpg$/, '');
+export function stillUpgrade(shown, next) {
+  if (!next?.src) return false;
+  if (!shown?.src) return true;
+  if (!shown.still) return true;
+  if (!next.still) return false;
+  return shown.src !== next.src && frameOf(shown.src) === frameOf(next.src);
+}
+
 /** Available episodes, distinct from an announced future season length. Movies have no list. */
 export function episodeCount(m = {}) {
   if (isSingleMovie(m) || m.status === 'NOT_YET_RELEASED') return 0;

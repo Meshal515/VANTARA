@@ -1,4 +1,4 @@
-import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resumeEpisode } from './anime-episodes.js';
+import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resumeEpisode, stillUpgrade } from './anime-episodes.js';
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
@@ -1113,10 +1113,13 @@ export function createAnime(deps) {
       const opts = { eager: true, position: shot.still ? 'center' : 'center 22%', fallback: [...(shot.fallbacks ?? []), m.poster ?? null] };
       if (prev && !prev.classList.contains('failed')) {
         v.still.append(prev);
-        swapWhenReady(prev, shot.src, opts, () => v.still.classList.toggle('aw-still--cover', !shot.still));
+        // لقطة ظاهرة لا تُبدَّل بإطار آخر من مصدر آخر بعد ظهورها (#323 U-14): الدقة الأعلى للإطار نفسه فقط
+        const shown = { src: prev.dataset.want ?? prev.getAttribute('src'), still: prev.dataset.still === '1' };
+        if (stillUpgrade(shown, shot)) swapWhenReady(prev, shot.src, opts, (next) => { next.dataset.still = shot.still ? '1' : ''; v.still.classList.toggle('aw-still--cover', !shot.still); });
       } else {
         const img = image(shot.src, 'an-img', opts);
         img.dataset.want = shot.src;
+        img.dataset.still = shot.still ? '1' : '';
         v.still.append(img);
         v.still.classList.toggle('aw-still--cover', !shot.still);
       }
