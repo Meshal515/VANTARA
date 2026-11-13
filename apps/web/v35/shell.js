@@ -1969,6 +1969,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
         cover.replaceChildren(img);
+        // ألواح «ويبتوني» على الكمبيوتر تأخذ الغلاف المحسوم نفسه (لا مسار غلاف ثانٍ)
+        for (const panel of document.querySelectorAll('#detail [data-wt-panel]')) panel.src = img.src;
         for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
           g.onload = () => g.classList.add('ready');
           g.src = art.cover;

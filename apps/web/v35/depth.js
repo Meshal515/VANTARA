@@ -75,6 +75,28 @@ export const DEPTH_SPECS = Object.freeze({
   }),
 });
 
+/**
+ * عمق الكمبيوتر (قرار المالك، 13 نوفمبر): بعض الأنماط لها تركيب مكتبي مستقل لا يصلح له عمق الجوال
+ * (عمق ويبتوني الجوال يُنزل الفن ويُخفي الاسم، والفن على الكمبيوتر شريط ثابت بارتفاع الشاشة والاسم في عمود
+ * المحتوى). المحرك نفسه؛ صف هنا يحل محل صف الجوال على شاشة ≥1024 بمؤشر دقيق فقط.
+ */
+export const DESKTOP_DEPTH_SPECS = Object.freeze({
+  manga: Object.freeze({
+    // «ويبتوني»: الشريط ثابت، والفن داخله يتقدم قليلًا للأعلى ويهدأ ضوؤه كأنك بدأت القراءة؛ بلا تكبير (لا قص)
+    // «ويبتوني» «ألواح الكوميكس»: كل لوح بسرعته كأنك تنزل في الصفحة، والغلاف الأوسط يتراجع قليلًا؛ بلا تكبير
+    webtoon: [
+      { sel: '.wt-panels > .wt-p:first-child', range: [0, 0.9], y: [0, 70] },
+      { sel: '.wt-panels > .wt-p:last-child', range: [0, 0.9], y: [0, -40] },
+      { sel: '.mw-stage > .mw-lift', range: [0, 0.9], p: 1200, y: [0, 34], z: [0, -60] },
+    ],
+  }),
+});
+export const DESKTOP_DEPTH_QUERY = '(min-width: 1024px) and (hover: hover) and (pointer: fine)';
+/** صف العمق لنمط: صف الكمبيوتر إن وُجد وكانت الشاشة كمبيوترًا بالفأرة، وإلا صف الجوال كما هو. */
+export function depthSpecOf(section, look, desktop = Boolean(globalThis.matchMedia?.(DESKTOP_DEPTH_QUERY)?.matches)) {
+  return (desktop && DESKTOP_DEPTH_SPECS[section]?.[look]) || DEPTH_SPECS[section]?.[look] || [];
+}
+
 const lerpN = (a, b, t) => a + (b - a) * t;
 export function layerValue(l, t, span) {
   // span: المدى ارتفاع البطل والإزاحة نسبة منه؛ px: الإزاحة بالبكسل كما هي ولو كان المدى ارتفاع البطل
@@ -91,8 +113,7 @@ export function layerValue(l, t, span) {
  * span = ارتفاع البطل بالبكسل، vh = ارتفاع الشاشة؛ المدى بالبكسل كي يطابق مسار JS حرفيًا.
  * `scope` محدد صفحة النمط في القسم (الأنمي: `.v35 .aw[data-style='<look>']`).
  */
-export function depthMotion(section, look, { hero, dims, scope, hostOf = (h) => h?.closest('.aw'), prefix = 'wl' }) {
-  const spec = DEPTH_SPECS[section]?.[look] ?? [];
+export function depthMotion(section, look, { hero, dims, scope, hostOf = (h) => h?.closest('.aw'), prefix = 'wl', spec = depthSpecOf(section, look) }) {
   const nodeOf = (l) => () => (l.at === 'self' ? hero : l.at === 'hero' ? hero?.querySelector(l.sel) : hostOf(hero)?.querySelector(l.sel));
   // الأبعاد تُقرأ في كل مرة: البطل يتغيّر ارتفاعه حين تصل صورته، فيُعاد توليد CSS بالأرقام نفسها
   const rangeOf = (l) => (l.span ? [0, dims.span] : l.range.map((r) => Math.round(r * dims.vh)));
@@ -129,13 +150,14 @@ export function mountDepth(section, look, { hero, bar = null, scope, styleId, sp
     tag.id = styleId;
     doc.head.append(tag);
   }
-  if (!DEPTH_SPECS[section]?.[look]?.length) {
+  const spec = depthSpecOf(section, look);
+  if (!spec.length) {
     tag.textContent = '';
     // الشريط ينطوي مع البطل حتى في نمط بلا طبقات عمق
     return bar ? bindCollapsingHero({ hero, bar, active }) : () => {};
   }
   const dims = { span: spanOf() || 300, vh: globalThis.innerHeight || 800 };
-  const motion = depthMotion(section, look, { hero, dims, scope, ...(hostOf ? { hostOf } : {}), ...(prefix ? { prefix } : {}) });
+  const motion = depthMotion(section, look, { hero, dims, scope, spec, ...(hostOf ? { hostOf } : {}), ...(prefix ? { prefix } : {}) });
   tag.textContent = motion.css();
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
     const next = { span: spanOf() || dims.span, vh: globalThis.innerHeight || dims.vh };
