@@ -2983,6 +2983,8 @@ export function createAnime(deps) {
         c.classList.add('has-still');
       };
       pre.src = shot.src;
+    }).catch(() => {
+      // فن الحلقة تحسين لا شرط: فشل جلبه يُبقي الغلاف، ولا يترك رفضًا غير معالج (كان يُسقط بناء الـCI بعد انتهاء الاختبار)
     });
     return c;
   }
