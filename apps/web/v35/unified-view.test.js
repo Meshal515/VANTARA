@@ -534,6 +534,31 @@ it('keeps loaded manga cards and horizontal scroll when anime data arrives', () 
   } finally {view.destroy();}
 });
 
+// #311 D-026 (شق السينما): «كل الأعمال»/تصنيف السينما كان يعيد الدفعة الأولى فقط بلا صفحات تالية
+describe('#311 D-026 cinema pages in unified discovery', () => {
+  it('page 2 continues each catalogue from where page 1 stopped and ends when both run out', async () => {
+    const { createCinemaPager } = await import('./unified-discover.js');
+    const asked = [];
+    const sizes = { movie: [3, 2, 0], series: [2, 0, 0] };
+    const catalog = async (type, _id, { genre, skip }) => {
+      asked.push([type, genre, skip]);
+      const before = skip ?? 0;
+      const pageIndex = sizes[type].reduce((acc, n, i) => (acc.sum < before ? { sum: acc.sum + n, i: i + 1 } : acc), { sum: 0, i: 0 }).i;
+      return Array.from({ length: sizes[type][pageIndex] ?? 0 }, (_, i) => ({ id: `${type}-${before + i}` }));
+    };
+    const pager = createCinemaPager(catalog);
+    const p1 = await pager('Drama', 1);
+    expect(p1.items.map((x) => x.id)).toEqual(['movie-0', 'series-0', 'movie-1', 'series-1', 'movie-2']);
+    expect(p1.hasNext).toBe(true);
+    const p2 = await pager('Drama', 2);
+    expect(asked.filter(([, , skip]) => skip)).toEqual([['movie', 'Drama', 3], ['series', 'Drama', 2]]);
+    expect(p2.items.map((x) => x.id)).toEqual(['movie-3', 'movie-4']);
+    const p3 = await pager('Drama', 3);
+    expect(p3.items).toEqual([]);
+    expect(p3.hasNext).toBe(false);
+  });
+});
+
 // #323 U-05/U-10: «اكتشف» الموحد يُبنى مرة، ويتحدث «الرائج» وحده حين تصل البيانات
 describe('#323 unified discover keeps its page and fills trending when data arrives', () => {
   function setup() {

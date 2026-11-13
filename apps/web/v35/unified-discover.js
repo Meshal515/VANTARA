@@ -19,6 +19,29 @@ const KIND = { anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
  *   open: (item: any, type: string) => void, openMangaGenre: (genreId: string) => void, openSearch: () => void,
  *   trending: () => {item: any, group: string}[], mount: (node: HTMLElement) => void, storage?: Storage }} ctx
  */
+/**
+ * صفحات السينما في «كل الأعمال» والتصنيفات (#311 D-026، شق السينما): كتالوجا Cinemeta (أفلام ومسلسلات)
+ * يُكملان من حيث توقف كل منهما (skip)، بالتناوب كما في الصفحة الأولى، وتنتهي القائمة حين ينفد الاثنان.
+ * `catalog(type, id, { genre, skip })` من cinema-meta.js.
+ */
+export function createCinemaPager(catalog) {
+  const offsets = new Map(); // genre → [{movie, series}] لبداية كل صفحة
+  return async (genre, page = 1) => {
+    const key = genre ?? '';
+    const starts = offsets.get(key) ?? [{ movie: 0, series: 0 }];
+    offsets.set(key, starts);
+    const at = starts[page - 1] ?? starts[starts.length - 1];
+    const [movie, series] = await Promise.all([
+      catalog('movie', 'top', { genre: key, ...(at.movie ? { skip: at.movie } : {}) }),
+      catalog('series', 'top', { genre: key, ...(at.series ? { skip: at.series } : {}) }),
+    ]);
+    starts[page] = { movie: at.movie + movie.length, series: at.series + series.length };
+    const items = [];
+    for (let i = 0; i < Math.max(movie.length, series.length); i++) items.push(movie[i], series[i]);
+    return { items: items.filter(Boolean), hasNext: movie.length > 0 || series.length > 0 };
+  };
+}
+
 export function createUnifiedDiscover({ el, glyph, genres, genreArt = null, results, card, open, openMangaGenre, openSearch, trending, mount, storage = globalThis.localStorage }) {
   const KEY = 'vantara.unified.discover.type';
   let type = 'anime';

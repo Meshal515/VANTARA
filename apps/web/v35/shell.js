@@ -94,7 +94,7 @@ import { workMenuEntries, workOptionEntries } from './work-menu.js';
 import { EMPTY_COPY, LIBRARY_TABS, libraryShelves } from './library-model.js';
 import { createUnifiedLibrary } from './unified-library.js';
 import { createUnifiedSearch } from './unified-search.js';
-import { createUnifiedDiscover } from './unified-discover.js';
+import { createCinemaPager, createUnifiedDiscover } from './unified-discover.js';
 import { GENRES_AR as CINEMA_GENRES_AR } from '../lib/cinema-meta.js';
 import { trimArtCache } from '../lib/together/art.js';
 
@@ -4128,6 +4128,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return entry.promise;
     }
   }
+  let cinemaPager = null;
   const unifiedDiscover = createUnifiedDiscover({
     el, glyph,
     genreArt,
@@ -4143,11 +4144,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const result = await (genre ? fetchMangaGenre(genre, { page }) : fetchMangaPopular({ page }));
         return { items: result.items, hasNext: result.hasNextPage };
       }
+      // صفحات تالية للسينما أيضًا (#311 D-026): كانت الدفعة الأولى وحدها
       const { catalog } = await import('../lib/cinema-meta.js');
-      const [movie, series] = await Promise.all([catalog('movie', 'top', { genre: genre ?? '' }), catalog('series', 'top', { genre: genre ?? '' })]);
-      const out = [];
-      for (let i = 0; i < Math.max(movie.length, series.length); i++) out.push(movie[i], series[i]);
-      return out.filter(Boolean);
+      cinemaPager ??= createCinemaPager(catalog);
+      return cinemaPager(genre ?? '', page);
     },
     card: (it, type) => unifiedCard(it, type),
     open: (it, type) => openUnifiedResult(it, type),
