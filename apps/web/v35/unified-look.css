@@ -186,6 +186,20 @@
 /* ── المانجا: على هيكل «المعرض» (shell.js mountDetail: #detail[data-unified]) ── */
 .v35 #detail[data-look][data-unified] .mw-amb { display: none; }
 .v35 #detail[data-look][data-unified] .mw-stage { padding-top: 0; }
+/* الغلاف ثابت مكانه بلا أي حركة (مثل الأنمي والسينما): المسرح يذوب في الصفحة (display: contents) فيلتصق
+ * الغلاف بالصفحة كلها لا بالمسرح وحده، والعنوان وما بعده يصعدون فوقه بخلفية الصفحة */
+.v35 #detail[data-look][data-unified] .mw-stage { display: contents; }
+.v35 #detail[data-look][data-unified] .mw-lift {
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  transform: none;
+}
+.v35 #detail[data-look][data-unified] > :is(.mw-acts, .mw-tabbed) {
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+}
 .v35 #detail[data-look][data-unified] .mw-stage .mw-cover {
   width: 100%;
   max-width: none;
@@ -207,7 +221,9 @@
 .v35 #detail[data-look][data-unified] .mw-center {
   position: relative;
   z-index: 2;
-  margin-top: -76px;
+  margin-top: -140px;
+  padding-top: 64px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent) 0, var(--bg) 140px);
   text-align: right;
 }
 /* العنوان من حافة الصفحة نفسها ولو كان إنجليزيًا (plaintext كان يرسل «Chainsaw Man» لليسار) */
@@ -231,7 +247,9 @@
 .v35 #detail[data-look][data-unified] #detailCover > img,
 .v35 #detail[data-look][data-unified] #detailCover > img.mw-fit { object-fit: cover; }
 .v35 #detail[data-look][data-unified] .mw-title { margin-bottom: 4px; }
-.v35 #detail[data-look][data-unified] .mw-acts { margin-top: 10px; padding-top: 0; }
+/* المسافات حشوة بخلفية الصفحة لا هامش شفاف: الهامش كان يُظهر الغلاف الثابت شريطًا بين الأقسام أثناء التمرير */
+.v35 #detail[data-look][data-unified] .mw-acts { margin-top: 0; padding-top: 10px; }
+.v35 #detail[data-look][data-unified] > .mw-tabbed { margin-top: 0; padding-top: 28px; }
 .v35 #detail[data-look][data-unified] .aw-tools {
   background: none;
   box-shadow: none;

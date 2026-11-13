@@ -21,6 +21,10 @@ describe('manga scroll depth lives in the shared depth table', () => {
     const css = readFileSync(new URL('./unified-look.css', import.meta.url), 'utf8');
     expect(css).toMatch(/\.aw\[data-style\]\[data-unified\] \.aw-hero \{\s*position: sticky;\s*top: 0;/);
     expect(css).toMatch(/\.cn-detail\[data-style\]\[data-unified\] \.cn-detail-art \{\s*position: sticky;\s*top: 0;/);
+    // المانجا: المسرح يذوب في الصفحة فيلتصق الغلاف بالصفحة كلها، والمسافات بعده حشوة لا هامش شفاف
+    expect(css).toMatch(/#detail\[data-look\]\[data-unified\] \.mw-stage \{ display: contents; \}/);
+    expect(css).toMatch(/#detail\[data-look\]\[data-unified\] \.mw-lift \{\s*position: sticky;\s*top: 0;/);
+    expect(css).toMatch(/#detail\[data-look\]\[data-unified\] > \.mw-tabbed \{ margin-top: 0; padding-top: 28px; \}/);
     // الإطار بنسبة الملصق نفسها، لا نسبة محفوظة من نمط آخر
     expect(css).not.toMatch(/data-unified\] \.aw-hero \{[^}]*var\(--aw-ratio/);
   });
