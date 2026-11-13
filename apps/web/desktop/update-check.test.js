@@ -1,6 +1,6 @@
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { newerVersion, desktopUpdateFromManifest, checkDesktopUpdate, startDesktopUpdateWatch } from './update-check.js';
+import { newerVersion, desktopUpdateFromManifest, checkDesktopUpdate, startDesktopUpdateWatch, describeInstalled } from './update-check.js';
 
 const release = {
   format:2,versionName:'0.0.140',versionCode:140,
@@ -41,63 +41,87 @@ test('Windows accepts only the matching stable platform metadata',()=>{
   ]) assert.equal(desktopUpdateFromManifest(bad,'0.0.139'),null);
 });
 
-const windowsRelease = {format:1,product:'VANTARA',platform:'win32-x64',installer:'nsis',version:'0.2.3',sha256:'b'.repeat(64),size:240000000,
-  url:'https://github.com/Meshal515/VANTARA/releases/download/windows-v0.2.3/VANTARA-0.2.3-Windows-x64-Setup.exe',notes:['الغرف والتوقيت']};
-test('Windows has a dedicated versioned installer channel independent of Android latest',()=>{
-  assert.equal(desktopUpdateFromManifest(windowsRelease,'0.1.0-preview.8')?.version,'0.2.3');
-  assert.equal(desktopUpdateFromManifest(windowsRelease,'0.2.3'),null);
-  assert.equal(desktopUpdateFromManifest(windowsRelease,'0.2.4'),null);
-  for(const change of [{version:'0.2.4'},{product:'Other'},{platform:'android'},{url:windowsRelease.url+'?file=other'},{url:windowsRelease.url.replace('windows-v0.2.3','windows-v0.2.2')},{url:windowsRelease.url.replace('github.com','github.com:444')},{size:0},{sha256:''}])
-    assert.equal(desktopUpdateFromManifest({...windowsRelease,...change},'0.2.2'),null);
+const windowsRelease = {format:1,product:'VANTARA',platform:'win32-x64',installer:'nsis',version:'0.3.18',sha256:'b'.repeat(64),size:240000000,
+  url:'https://github.com/Meshal515/VANTARA/releases/download/windows-v0.3.18/VANTARA-0.3.18-Windows-x64-Setup.exe',notes:['قناة قديمة']};
+test('root cause: Stable 0.0.N never accepts the stale 0.3.x windows-channel as an "update"',async()=>{
+  assert.equal(desktopUpdateFromManifest(windowsRelease,'0.0.215'),null);
+  assert.equal(desktopUpdateFromManifest(windowsRelease,{version:'0.0.215',channel:'stable',build:215}),null);
+  const bridge={version:'0.0.215',channel:'stable',build:215,requestResource:async({url})=>{assert.match(url,/releases\/latest\/download\/vantara-update\.json$/);return {status:200,text:JSON.stringify(windowsRelease)};}};
+  await assert.rejects(checkDesktopUpdate(bridge),/غير متاح/);
 });
-test('a missing Windows asset is unavailable, never a false up-to-date result',async()=>{
-  const bridge={version:'0.2.3',requestResource:async()=>({status:200,text:JSON.stringify(windowsRelease)})};
-  assert.equal(await checkDesktopUpdate(bridge),null);
-  await assert.rejects(checkDesktopUpdate({...bridge,requestResource:async()=>({status:200,text:JSON.stringify({format:2,versionName:'0.0.149',versionCode:149})})}),/ويندوز/);
+test('Stable compares the build number so an older stable-N is never offered',()=>{
+  assert.equal(desktopUpdateFromManifest(release,{version:'0.0.139',channel:'stable',build:139})?.build,140);
+  assert.equal(desktopUpdateFromManifest(release,{version:'0.0.140',channel:'stable',build:140}),null);
+  assert.equal(desktopUpdateFromManifest(release,{version:'0.0.141',channel:'stable',build:141}),null);
 });
-test('Settings downloads a Windows update, then offers restart or install on quit, once per version',async()=>{
+
+const debugRelease=build=>({format:3,product:'VANTARA',channel:'windows-debug',platform:'win32-x64',installer:'nsis',version:`0.4.${build}`,build,
+  sha256:'c'.repeat(64),size:230000000,sourceSha:'0123456789abcdef0123456789abcdef01234567',builtAt:'2026-11-13T12:00:00Z',
+  url:`https://github.com/Meshal515/VANTARA/releases/download/windows-debug-${build}/VANTARA-Debug-0.4.${build}-Windows-x64-Setup.exe`,notes:['تصفح عمودي']});
+test('Debug reads only its own channel, requires a strictly newer build, and rejects Stable manifests',async()=>{
+  const installed={version:'0.4.12',channel:'debug',build:12};
+  assert.equal(desktopUpdateFromManifest(debugRelease(13),installed)?.build,13);
+  for(const build of [12,11,1])assert.equal(desktopUpdateFromManifest(debugRelease(build),installed),null);
+  assert.equal(desktopUpdateFromManifest(release,installed),null);
+  for(const change of [{channel:'windows-stable'},{build:14},{version:'0.4.99'},{url:debugRelease(13).url.replace('windows-debug-13','windows-debug-12')},{format:1}])
+    assert.equal(desktopUpdateFromManifest({...debugRelease(13),...change},installed),null);
+  let asked=null;
+  const bridge={...installed,requestResource:async({url})=>{asked=url;return {status:200,text:JSON.stringify(debugRelease(13))};}};
+  assert.equal((await checkDesktopUpdate(bridge))?.version,'0.4.13');
+  assert.match(asked,/windows-debug-channel\/desktop-debug\.json$/);
+  await assert.rejects(checkDesktopUpdate({...bridge,requestResource:async()=>({status:200,text:JSON.stringify(release)})}),/Debug/);
+  assert.equal(describeInstalled({...installed,sourceSha:'abcdef1234',builtAt:'2026-11-13T12:00:00Z'}),'VANTARA Debug 0.4.12 · بناء 12 · abcdef1 · 2026-11-13');
+});
+test('Settings shows the real update first; download starts only after consent, then restart or install on quit',async()=>{
   const {parseHTML}=await import('linkedom');
-  const {document}=parseHTML('<html><body></body></html>');
-  document.visibilityState='visible';
+  const {document}=parseHTML('<html><head></head><body></body></html>');
   let listener=null,downloads=0,applied=0;
-  const release={...windowsRelease,version:'0.2.5',url:windowsRelease.url.replaceAll('0.2.3','0.2.5')};
-  const bridge={version:'0.2.4',requestResource:async()=>({status:200,text:JSON.stringify(release)}),openUpdatePage:async()=>true,
+  const bridge={version:'0.4.12',channel:'debug',build:12,requestResource:async()=>({status:200,text:JSON.stringify(debugRelease(13))}),openUpdatePage:async()=>true,
     onEvent:fn=>{listener=fn;return()=>{listener=null;};},
-    downloadUpdate:async()=>{downloads++;listener?.({type:'update/progress',received:120*1048576,total:240000000});return {ready:true,version:'0.2.5'};},
+    downloadUpdate:async()=>{downloads++;listener?.({type:'update/progress',received:120*1048576,total:230000000});return {ready:true,version:'0.4.13'};},
     applyUpdate:async()=>{applied++;return true;}};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
-  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
-  const bar=document.querySelector('[data-vantara-desktop-update]');
-  assert.match(bar.textContent,/جاهز: 0\.2\.5/);
+  const result=await watch.check({force:true});
+  assert.equal(result.status,'available');
+  let bar=document.querySelector('[data-vantara-desktop-update]');
+  assert.match(bar.textContent,/تحديث متاح: VANTARA Debug 0\.4\.13 · بناء 13/);
+  assert.match(bar.textContent,/تصفح عمودي/);
+  assert.equal(downloads,0,'no download before the user approves');
+  const [install]=bar.querySelectorAll('button');
+  assert.equal(install.textContent,'تنزيل وتثبيت');
+  install.onclick();await new Promise(r=>setTimeout(r,0));
+  assert.equal(downloads,1);
+  bar=document.querySelector('[data-vantara-desktop-update]');
+  assert.match(bar.textContent,/التحديث جاهز: VANTARA Debug 0\.4\.13/);
   const [restart,onQuit]=bar.querySelectorAll('button');
   assert.equal(restart.textContent,'أعد التشغيل وحدّث');
   restart.onclick();await new Promise(r=>setTimeout(r,0));
   assert.equal(applied,1);
   onQuit.onclick();
   assert.equal(document.querySelector('[data-vantara-desktop-update]'),null);
-  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
-  assert.equal(document.querySelector('[data-vantara-desktop-update]'),null);
-  assert.equal(downloads,1);
+  await watch.check({force:true});
+  assert.equal(document.querySelector('[data-vantara-desktop-update]'),null,'same version is not offered twice in one session');
   watch.close();
 });
 test('a portable copy or a failed download falls back to the manual installer link',async()=>{
   const {parseHTML}=await import('linkedom');
-  const {document}=parseHTML('<html><body></body></html>');
-  const release={...windowsRelease,version:'0.2.5',url:windowsRelease.url.replaceAll('0.2.3','0.2.5')};
-  const bridge={version:'0.2.4',requestResource:async()=>({status:200,text:JSON.stringify(release)}),openUpdatePage:async()=>true,downloadUpdate:async()=>({ready:false,manual:true})};
+  const {document}=parseHTML('<html><head></head><body></body></html>');
+  const bridge={version:'0.4.12',channel:'debug',build:12,requestResource:async()=>({status:200,text:JSON.stringify(debugRelease(13))}),openUpdatePage:async()=>true,downloadUpdate:async()=>({ready:false,manual:true})};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
-  await watch.check({force:true});await new Promise(r=>setTimeout(r,0));
-  assert.equal(document.querySelector('[data-vantara-desktop-update] button').textContent,'تحميل تحديث ويندوز');
+  await watch.check({force:true});
+  document.querySelector('[data-vantara-desktop-update] button').onclick();
+  await new Promise(r=>setTimeout(r,0));
+  assert.equal(document.querySelector('[data-vantara-desktop-update] button').textContent,'تحميل المثبت');
   watch.close();
 });
 
 test('Windows boot and resume never check, download or show an update', async () => {
   vi.useFakeTimers();
   const {parseHTML}=await import('linkedom');
-  const {document}=parseHTML('<html><body></body></html>');
+  const {document}=parseHTML('<html><head></head><body></body></html>');
   document.visibilityState='visible';
   let queries=0,downloads=0;
-  const bridge={version:'0.2.2',requestResource:async()=>{queries++;return {status:200,text:JSON.stringify(windowsRelease)};},openUpdatePage:async()=>true,
+  const bridge={version:'0.4.12',channel:'debug',build:12,requestResource:async()=>{queries++;return {status:200,text:JSON.stringify(debugRelease(13))};},openUpdatePage:async()=>true,
     downloadUpdate:async()=>{downloads++;return {ready:true};}};
   const watch=startDesktopUpdateWatch({bridge,doc:document});
   try {
@@ -110,7 +134,7 @@ test('Windows boot and resume never check, download or show an update', async ()
     await watch.check({force:true});
     await vi.advanceTimersByTimeAsync(0);
     assert.equal(queries,1);
-    assert.equal(downloads,1);
+    assert.equal(downloads,0,'checking alone never downloads');
     assert.ok(document.querySelector('[data-vantara-desktop-update]'));
   } finally {watch.close();vi.useRealTimers();}
 });

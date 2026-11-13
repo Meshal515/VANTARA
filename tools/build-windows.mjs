@@ -12,16 +12,27 @@ const cache = path.resolve(argument('cache', path.join(output, 'cache')));
 const sevenzip = argument('sevenzip', '7z');
 const makensis = argument('makensis', 'makensis');
 const nsisdir = argument('nsisdir', process.env.NSISDIR);
-const portable = path.join(output, 'VANTARA-Windows-x64');
+// القناة: stable (الافتراضي) أو debug. Debug هوية ومجلد ومثبّت وبيان تحديث مستقلة (apps/desktop/channel.cjs).
+const channel = argument('channel', 'stable');
+if (!['stable', 'debug'].includes(channel)) throw new Error(`Unknown Windows channel: ${channel}`);
+const debug = channel === 'debug';
+const buildNumber = argument('build') == null ? null : Number(argument('build'));
+if (buildNumber != null && (!Number.isSafeInteger(buildNumber) || buildNumber <= 0)) throw new Error('--build must be a positive integer');
+if (debug && buildNumber == null) throw new Error('A Debug build needs --build=N (monotonic build number)');
+const productName = debug ? 'VANTARA Debug' : 'VANTARA';
+const filePrefix = debug ? 'VANTARA-Debug' : 'VANTARA';
+const torrentHost = argument('torrent-host');
+const portable = path.join(output, debug ? 'VANTARA-Debug-Windows-x64' : 'VANTARA-Windows-x64');
 const app = path.join(portable, 'resources', 'app');
 const native = path.join(app, 'native');
 const videoHost = path.resolve(argument('video-host',path.join(repo,'apps/desktop/native/vantara-video-host.exe')));
 const brandedExe = argument('branded-exe');
-const icon = path.join(repo, 'apps/desktop/assets/vantara.ico');
+const icon = path.join(repo, debug ? 'apps/desktop/assets/vantara-debug.ico' : 'apps/desktop/assets/vantara.ico');
 // A Windows build must contain the real child-window host; never fall back to
 // an external mpv window when CI forgot its Windows-compiled companion.
 await fs.access(videoHost).catch(()=>{throw new Error('Missing native video host: compile tools/build-video-host.ps1 on Windows and supply --video-host=path');});
-const version = JSON.parse(await fs.readFile(path.join(repo, 'apps/desktop/package.json'), 'utf8')).version;
+const version = argument('version', JSON.parse(await fs.readFile(path.join(repo, 'apps/desktop/package.json'), 'utf8')).version);
+if (debug && !version.endsWith(`.${buildNumber}`)) throw new Error('Debug version must end with its build number (e.g. 0.4.N)');
 const artifacts = [
   { name: 'electron-v44.7.2-win32-x64.zip', url: 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip', sha256: '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4', source: 'https://github.com/electron/electron/tree/v44.7.2' },
   { name: 'rqbit.exe', url: 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe', sha256: '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea', source: 'https://github.com/ikatson/rqbit/tree/v9.0.1' },
@@ -98,12 +109,19 @@ await fs.cp(path.join(repo, 'apps', 'desktop'), app, {
   filter: filename => !/(?:^|[/\\])node_modules(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|windows\.nsi$/.test(filename),
 });
 await fs.copyFile(videoHost,path.join(native,'vantara-video-host.exe'));
+// محرك libtorrent الأصلي (tools/torrent-host): ملف تنفيذي واحد مربوط ستاتيكيًا. rqbit يبقى بجواره احتياطًا.
+if (torrentHost) await fs.copyFile(path.resolve(torrentHost), path.join(native, 'vantara-torrent.exe'));
+const sourceSha = execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim();
+const builtAt = new Date().toISOString();
+const packageFile = path.join(app, 'package.json');
+await fs.writeFile(packageFile, JSON.stringify({ ...JSON.parse(await fs.readFile(packageFile, 'utf8')), version, productName }, null, 2) + '\n');
+await fs.writeFile(path.join(app, 'channel.json'), JSON.stringify({ channel, build: buildNumber, sourceSha, builtAt }, null, 2) + '\n');
 await fs.cp(path.join(repo, 'apps', 'web'), path.join(app, 'web'), {
   recursive: true,
   filter: filename => !/\.test\.js$|(?:^|[/\\])node_modules(?:[/\\]|$)/.test(filename),
 });
-const binaries = await Promise.all(['VANTARA.exe', 'resources/app/native/rqbit.exe', 'resources/app/native/mpv.exe', 'resources/app/native/vantara-video-host.exe', 'resources/app/native/vulkan-1.dll', 'resources/app/native/vcruntime140.dll', 'resources/app/native/vcruntime140_1.dll'].map(name => pe64(path.join(portable, name))));
-const required = ['resources/app/main.cjs', 'resources/app/preload.cjs', 'resources/app/src/services.mjs', 'resources/app/web/desktop/index.html', 'resources/app/web/desktop/boot.js', 'resources/app/web/fonts/NotoSansArabic.var.woff2'];
+const binaries = await Promise.all(['VANTARA.exe', ...(torrentHost ? ['resources/app/native/vantara-torrent.exe'] : []), 'resources/app/native/rqbit.exe', 'resources/app/native/mpv.exe', 'resources/app/native/vantara-video-host.exe', 'resources/app/native/vulkan-1.dll', 'resources/app/native/vcruntime140.dll', 'resources/app/native/vcruntime140_1.dll'].map(name => pe64(path.join(portable, name))));
+const required = ['resources/app/channel.json', 'resources/app/channel.cjs', 'resources/app/main.cjs', 'resources/app/preload.cjs', 'resources/app/src/services.mjs', 'resources/app/web/desktop/index.html', 'resources/app/web/desktop/boot.js', 'resources/app/web/fonts/NotoSansArabic.var.woff2'];
 await Promise.all(required.map(name => fs.access(path.join(portable, name))));
 
 const sourceDirectory = path.join(portable, 'SOURCES');
@@ -129,10 +147,10 @@ await fs.writeFile(path.join(portable, 'THIRD-PARTY-NOTICES.txt'), `VANTARA Wind
 await fs.writeFile(path.join(portable, 'ابدأ-هنا.txt'), `VANTARA لويندوز — نسخة معاينة ${version}\n\nشغّل VANTARA.exe من هذا المجلد؛ لا تنقل الملف التنفيذي وحده. النسخة المحمولة تحفظ بياناتها وملفات التورنت في VANTARA-data بجوار البرنامج، لذلك فكها على القرص ذي المساحة الكافية مثل E.\nمن الإضافات أضف رابط Torrentio المعدّ. يمكن إكمال الإعداد داخل نافذة التطبيق؛ زر تثبيت Stremio يعيد رابط الإضافة إلى VANTARA.\nاختر الفيلم أو الحلقة ثم اختر مصدر التشغيل بنفسك.\nمحرك التورنت والمشغل مرفقان؛ لا يلزم تثبيت برامج منفصلة.\nيفحص VANTARA الأقراص الثابتة القابلة للكتابة ويختار القرص صاحب المساحة الفارغة الأكبر لكاش التورنت تلقائيًا. الكاش نافذة متحركة: يحمّل قدّام بقدر المساحة الحرة، ويبقي 50 ثانية ورا فقط ويفرّغ ما قبلها من القرص، ويوقف التنزيل مؤقتًا إذا اقتربت المساحة من الحد ثم يستأنف مع تقدّم المشاهدة. الرجوع لجزء مفرَّغ يعيد تنزيله من نفس اللحظة. كل ملفات الجلسة تُحذف بعد إغلاق المشغل. فيلم 40GB لا يحتاج 40GB فاضية.\nالمكتبة والحسابات متاحة من قائمة VANTARA، والدخول يتبع اقتران الجهاز الحالي.\nالرفيق والترجمة بالذكاء الاصطناعي خارج نسخة ويندوز؛ ترجمات الفيديو العادية مدعومة. استخدم واجهة الغرفة الأصلية للمشاهدة المشتركة واختيار مصدرك؛ وجود مزود لا يضمن توفر كل حلقة.\nهذه حزمة معاينة غير موقعة، ولم يدع الفريق تجربة جهاز ويندوز دون دليل مرفق.\n`);
 const configFile=path.join(app,'web/lib/config.js');
 await fs.writeFile(configFile,(await fs.readFile(configFile,'utf8')).replace('__VANTARA_VERSION__',version));
-await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: 'VANTARA', version, sourceSha:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(), platform: 'win32-x64', builtAt: new Date().toISOString(), signed: false, artifacts, binaries, icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
-const zip = path.join(output, `VANTARA-${version}-Windows-x64.zip`);
+await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: productName, channel, build: buildNumber, version, sourceSha, platform: 'win32-x64', builtAt, torrentEngines: torrentHost ? ['libtorrent', 'rqbit'] : ['rqbit'], signed: false, artifacts, binaries, icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
+const zip = path.join(output, `${filePrefix}-${version}-Windows-x64.zip`);
 run('python3', ['-c', 'import sys,zipfile,pathlib; root=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED,compresslevel=6); [z.write(p, str(pathlib.Path(root.name)/p.relative_to(root))) for p in sorted(root.rglob("*")) if p.is_file()]; z.close()', portable, zip]);
-const installer = path.join(output, `VANTARA-${version}-Windows-x64-Setup.exe`);
+const installer = path.join(output, `${filePrefix}-${version}-Windows-x64-Setup.exe`);
 const compiler = spawnSync(makensis, ['-VERSION'], { encoding: 'utf8', env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
 if (!compiler.error && compiler.status === 0) {
   // Delete only files supplied by this build. In particular, never recursively
@@ -147,7 +165,7 @@ if (!compiler.error && compiler.status === 0) {
   const numbers = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$/);
   if (!numbers) throw new Error(`Unsupported Windows version: ${version}`);
   const productVersion = numbers.slice(1).map(value => value ?? '0').join('.');
-  run(makensis, [`-DDIST=${portable}`, `-DOUTFILE=${installer}`, `-DICON=${icon}`, `-DAPP_VERSION=${version}`, `-DPRODUCT_VERSION=${productVersion}`, `-DUNINSTALL_FILES=${uninstallFiles}`, path.join(repo, 'apps/desktop/windows.nsi')], { env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
+  run(makensis, [`-DDIST=${portable}`, `-DOUTFILE=${installer}`, `-DICON=${icon}`, `-DAPP_VERSION=${version}`, `-DPRODUCT_VERSION=${productVersion}`, `-DUNINSTALL_FILES=${uninstallFiles}`, `-DPRODUCT_NAME=${productName}`, `-DFILE_DESCRIPTION=${debug ? 'VANTARA Debug for Windows' : 'VANTARA for Windows'}`, path.join(repo, 'apps/desktop/windows.nsi')], { env: { ...process.env, ...(nsisdir ? { NSISDIR: nsisdir } : {}) } });
 } else throw new Error('NSIS compiler is required: refusing to publish a Windows build without its installer');
 const outputs = [zip];
 if (await fs.access(installer).then(() => true, () => false)) outputs.push(installer);

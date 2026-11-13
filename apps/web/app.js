@@ -2012,11 +2012,8 @@ async function checkUpdates({ force = false } = {}) {
   }
   // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
   if (globalThis.VantaraDesktopUpdates) {
+    // التحديث المتاح يظهر في بطاقة update-check (تنزيل بموافقة)؛ «محدثة» يعرضها زر الإعدادات.
     const result = await globalThis.VantaraDesktopUpdates.check({ force });
-    if (force && !result.update) {
-      showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
-        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
-    }
     return result.update ? { desktop: result.update } : null;
   }
   const found = await findUpdate({ force });

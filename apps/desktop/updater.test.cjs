@@ -73,3 +73,25 @@ test('a new download keeps the attempt record that drives the visible retry', as
   await downloadUpdate({ update, dir, fetch: fetchOf(bytes) });
   assert.deepEqual(fs.readdirSync(dir).sort(), ['VANTARA-0.2.5-Setup.exe', 'attempt.json']);
 });
+
+test('Debug accepts only a newer Debug build from its own channel and never downgrades', () => {
+  const { acceptableUpdate, officialInstallerUrl } = require('./updater.cjs');
+  const sha256 = 'a'.repeat(64);
+  const debug = build => ({ version: `0.4.${build}`, build, sha256, size: 1000, url: `https://github.com/Meshal515/VANTARA/releases/download/windows-debug-${build}/VANTARA-Debug-0.4.${build}-Windows-x64-Setup.exe` });
+  const installed = { channel: 'debug', version: '0.4.12', build: 12 };
+  assert.equal(acceptableUpdate(debug(13), installed).build, 13);
+  for (const old of [12, 11, 3]) assert.throws(() => acceptableUpdate(debug(old), installed), /ليس أحدث/);
+  // مثبّت Stable لا يُقبل في Debug، ولا مثبّت Debug في Stable
+  assert.throws(() => acceptableUpdate({ ...debug(13), url: 'https://github.com/Meshal515/VANTARA/releases/download/stable-300/VANTARA-0.0.300-Windows-x64-Setup.exe' }, installed), /لنفس القناة/);
+  assert.throws(() => officialInstallerUrl(debug(13).url, 'stable'), /لنفس القناة/);
+  // الوسم ورقم البناء في الاسم يجب أن يتطابقا
+  assert.throws(() => officialInstallerUrl('https://github.com/Meshal515/VANTARA/releases/download/windows-debug-14/VANTARA-Debug-0.4.13-Windows-x64-Setup.exe', 'debug'), /لا يطابق/);
+  assert.throws(() => acceptableUpdate({ ...debug(13), build: undefined }, installed), /بلا رقم بناء/);
+});
+
+test('Stable rejects the stale 0.3.x channel when it is not newer by build number', () => {
+  const { acceptableUpdate } = require('./updater.cjs');
+  const update = { version: '0.0.216', build: 216, sha256: 'b'.repeat(64), size: 10, url: 'https://github.com/Meshal515/VANTARA/releases/download/stable-216/VANTARA-0.0.216-Windows-x64-Setup.exe' };
+  assert.equal(acceptableUpdate(update, { channel: 'stable', version: '0.0.215', build: 215 }).version, '0.0.216');
+  assert.throws(() => acceptableUpdate({ ...update, version: '0.0.214', build: 214, url: update.url.replaceAll('216', '214') }, { channel: 'stable', version: '0.0.215', build: 215 }), /ليس أحدث/);
+});

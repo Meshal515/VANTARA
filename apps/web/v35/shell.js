@@ -6147,6 +6147,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    // ويندوز: قناة Debug/Stable مستقلة؛ الفحص والتنزيل يدويان بالكامل (desktop/update-check.js)
+    const desktopUpdates = globalThis.VantaraDesktopUpdates?.installed ? globalThis.VantaraDesktopUpdates : null;
     if (!pane) group('عن التطبيق', [
       // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
       diagnosticsUi.visible() && globalThis.Capacitor?.Plugins?.AnimeEngine
@@ -6156,12 +6158,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       row('info', 'الإصدار', currentPlatform() === 'pwa' ? 'نسخة PWA المثبتة على هذا الجهاز' : apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
       row('spark', 'ما الجديد', `${RELEASE.product} ${globalThis.VantaraDesktop?.version ?? RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
-        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
+        ? row('refresh', desktopUpdates ? 'البحث عن تحديثات' : 'تحديث التطبيق', desktopUpdates ? desktopUpdates.installed() : 'يبحث عن نسخة أحدث', {
             run: async () => {
               toast('نبحث عن تحديث…');
               try {
                 const found = await api.checkUpdate();
-                if (!found) toast('عندك آخر نسخة');
+                if (!found) toast(desktopUpdates ? `عندك آخر نسخة · ${desktopUpdates.installed()}` : 'عندك آخر نسخة');
               } catch {
                 toast('تعذّر التحقق من التحديث — أعد المحاولة');
               }

@@ -8,15 +8,17 @@ const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
+const channelInfo = require('./channel.cjs').readChannel(__dirname);
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
-app.setName('VANTARA');
-if (process.platform === 'win32') app.setAppUserModelId('com.vantara.desktop');
+// Debug: اسم ومعرّف مستقلان ⇒ userData وقفل نسخة واحدة ومجلد تثبيت منفصلة عن Stable.
+app.setName(channelInfo.productName);
+if (process.platform === 'win32') app.setAppUserModelId(channelInfo.appId);
 if (!app.requestSingleInstanceLock()) app.exit(0);
 const previousProfile=app.getPath('userData');
 const executableFolder=path.dirname(app.getPath('exe'));
 const portable=process.platform==='win32'&&app.isPackaged&&!require('node:fs').existsSync(path.join(executableFolder,'Uninstall.exe'));
-const portableProfile=path.join(executableFolder,'VANTARA-data');
+const portableProfile=path.join(executableFolder,channelInfo.channel==='debug'?'VANTARA-Debug-data':'VANTARA-data');
 // يكتمل النقل قبل اختيار userData وقبل أول session/BrowserWindow.
 const profileReady=portable?migratePortableProfile(previousProfile,portableProfile)
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
@@ -54,7 +56,9 @@ function clearFinishedUpdate() {
 }
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
-const windowIcon = process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
+const windowIcon = channelInfo.channel === 'debug'
+  ? path.join(__dirname, process.platform === 'win32' ? 'assets/vantara-debug.ico' : 'assets/vantara-debug.png')
+  : process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
 const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
@@ -156,13 +160,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
-    let parsed;
-    try { parsed = new URL(url); } catch { throw new Error('رابط تحديث غير صالح'); }
-    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' ||
-        parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
-        !/^\/Meshal515\/VANTARA\/releases\/download\/(?:stable-\d+|windows-v\d+\.\d+\.\d+)\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(parsed.pathname))
-      throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور');
-    await shell.openExternal(parsed.href);
+    await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
     return true;
   });
   // النسخة المحمولة (ZIP) لا مثبّت لها: تبقى على فتح صفحة التنزيل
@@ -171,6 +169,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (pendingUpdate?.version === update?.version) return { ready: true, version: pendingUpdate.version };
     const file = await updater.downloadUpdate({
       update, dir: path.join(app.getPath('userData'), 'updates'),
+      installed: { channel: channelInfo.channel, version: appVersion, build: channelInfo.build },
       fetch: (url, options) => net.fetch(url, options),
       onProgress: (p) => publish({ type: 'update/progress', ...p }),
     });
@@ -194,9 +193,9 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   });
   register('player-fullscreen',({enabled}={})=>fullscreenController.set(enabled));
   window = new BrowserWindow({
-    title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
+    title: channelInfo.title, width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: windowIcon, autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--vantara-version=${require('./package.json').version}`], sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: require('./channel.cjs').rendererArguments(channelInfo, appVersion), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
   window.on?.('resize',()=>{videoHost?.resize();overlay?.place();});
   window.on?.('move',()=>{videoHost?.resize();overlay?.place();});
