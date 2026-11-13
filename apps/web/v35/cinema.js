@@ -1573,6 +1573,18 @@ export function createCinema(deps) {
     if (full.type === 'series' && !full.seasons?.some((s) => s.n === state.season)) state.season = full.seasons?.find((s) => s.n !== 0)?.n ?? full.seasons?.[0]?.n ?? 1;
     state.detail = full;
     senseSeries(full);
+    // لا يُعاد بناء الصفحة وهي تتحرك (تدخل أو تغادر): الرسم بعد انتهاء الحركة، ولا رسم لصفحة غادرها المستخدم
+    const page = q('cinema');
+    if (deps.motionActive?.(page)) {
+      deps.afterMotion(page, () => {
+        if (token !== state.token || deps.currentPage() !== 'cinema') return;
+        renderDetail(full);
+        deps.settleIn?.(q('cinemaBody'));
+        deps.workReady?.();
+      });
+      return;
+    }
+    if (deps.currentPage() !== 'cinema') return;
     // وصلت التفاصيل والصفحة ظاهرة (بدأ الانتقال بالمهلة): المحتوى الجديد يظهر بتلاشٍ في مكانه لا دفعة
     const late = deps.workShown?.() ?? false;
     renderDetail(full);

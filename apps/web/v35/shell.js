@@ -65,7 +65,7 @@ import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/ma
 import { artRatio, createArtStore } from '../lib/art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
+import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
@@ -1666,6 +1666,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!full._chapters?.length && !settled) return;
       // والقارئ مفتوح: تُحفظ النسخة الأحدث (يقرؤها القارئ بـgetWork) بلا رسم الصفحة التي خلفه
       if (currentPage() === 'reader') { state.current = full; return; }
+      // الصفحة تتحرك (تدخل أو تغادر): تُرسم الفصول حين تنتهي الحركة، لا في منتصفها (page-motion.js: afterMotion)
+      const page = q('detail');
+      if (motionActive(page)) return void afterMotion(page, () => { if (state.current?.id === work.id && currentPage() === 'detail') show(state.current?._chapters ? state.current : full, { settled }); });
+      // غادرها المستخدم: تُحفظ النسخة الأحدث بلا رسم صفحة لا تُرى
+      if (currentPage() !== 'detail') { state.current = full; return; }
       const first = !state.current?._chapters;
       state.current = full;
       // غلافٌ عرفته التفاصيل تجرّبه البطاقات التي بقيت بلا غلاف، حالًا لا بعد الرجوع
@@ -1887,13 +1892,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const live = () => cover.isConnected && cover.dataset.for === ref && String(state.current?.id) === ref;
       const paintArt = (art) => {
         if (!live()) return;
-        // النسبة الحقيقية للغلاف المحسوم: مكانه بمقاسه بلا فراغ فوقه أو تحته ولا قص
+        // النسبة الحقيقية للغلاف المحسوم: مكانه بمقاسه بلا فراغ فوقه أو تحته ولا قص. تُحسم قبل أن تُرى الصفحة فقط:
+        // بعدها يبقى مقاسه كما ظهر (كان يتغير 12px حين يصل الغلاف متأخرًا فيتحرك كل ما تحته)، ويُعرض الغلاف كاملًا داخله
         const ratio = artRatio(art);
-        if (ratio) cover.style.setProperty('--art-ratio', ratio);
+        const shown = workShown() && currentPage() === 'detail';
+        const fit = Boolean(ratio) && shown && cover.style.getPropertyValue('--art-ratio') !== ratio;
+        if (ratio && !shown) cover.style.setProperty('--art-ratio', ratio);
         const img = new Image();
         img.alt = '';
         img.decoding = 'async';
         img.classList.add('img-fade');
+        if (fit) img.classList.add('mw-fit');
         img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
@@ -5316,6 +5325,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       unifiedReturn = null;
     }
     const visual = pageMotionState(q(from));
+    // الوجهة قد تكون في منتصف حركتها (رجوع يقاطع فتحًا): تكمل من حيث هي ظاهرة الآن
+    const destVisual = from !== id ? pageMotionState(q(id)) : null;
     sourceScroll ??= visual?.scrollTop ?? window.scrollY;
     if (from !== id) scrollOf.set(from, sourceScroll);
     if(from === "utility" && id !== "utility"){sourceView?.pause?.();addonNavigation.cancel();}
@@ -5431,7 +5442,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
     if (!sectionSwitch && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
       const enter = () => {
-        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id), gate: gate?.promise });
+        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id), gate: gate?.promise, from: destVisual });
       };
       if (WORK_PAGES.has(id)) queueMicrotask(enter);
       else enter();
@@ -7165,7 +7176,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
-    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     playableSources, addSource,
     // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
     warmToday: true,
@@ -7203,7 +7214,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
-    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, currentPage, readKv, writeKv, sync,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, currentPage, readKv, writeKv, sync,
     playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
     openWorkOptions: (target) => openWorkOptions(target),

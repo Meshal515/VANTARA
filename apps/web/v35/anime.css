@@ -835,6 +835,11 @@ html[data-section='cinema'],
 .v35 .aw-bg-img--poster {
   object-position: center 18%;
 }
+/* صورة وصلت بنسبة غير نسبة البطل المحجوزة والصفحة ظاهرة: تُعرض كاملة داخله، والضباب خلفها يملأ ما حولها (anime.js) */
+.v35 .aw-hero .aw-bg-img.aw-bg-img--fit {
+  object-fit: contain;
+  object-position: center;
+}
 .v35 .aw-shade {
   position: absolute;
   inset: 0;

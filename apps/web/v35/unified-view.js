@@ -656,13 +656,16 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     (host.closest('.v35') ?? host.ownerDocument.body).append(overlay);
     // الطبقة صفحة بعقد الحركة نفسه: تلاشٍ واندفاع للداخل (page-motion.js)
     overlay.classList.add('in');
+    // الطبقة تغطي الرئيسية كلها: خلفيتها المتحركة تتوقف من أول الدخول (لا تُرى حركتها البطيئة في 400ms)
+    // ولا تُرسم تحتها، فلا تزاحم حركة الطبقة نفسها. تعود حين تُزال الطبقة.
+    silk?.setCovered?.(true);
     layerIn(overlay);
   }
   function closeSub() {
     if (!overlay || suspended) return false;
     const o = overlay; overlay = null; st.sub = null;
     o.classList.remove('in');
-    layerOut(o, () => o.remove());
+    layerOut(o, () => { o.remove(); if (!overlay) silk?.setCovered?.(false); });
     return true;
   }
   function suspend() {
@@ -690,6 +693,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     if (!suspended) return false;
     overlay?.remove();
     overlay = null; suspended = false; st.sub = null;
+    silk?.setCovered?.(false);
     return true;
   }
   function paintSub() {

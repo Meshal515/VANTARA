@@ -567,11 +567,18 @@ export function createAnime(deps) {
       state.detail = full;
       if (!isMovie(full) && full.aired > 0) senseAnime([{ ...full, episode: full.aired }]);
       if (episode) state.episodeRange = Math.floor((episode - 1) / EP_PAGE);
-      // وصلت التفاصيل والصفحة ظاهرة (بدأ الانتقال بالمهلة): المحتوى الجديد يظهر بتلاشٍ في مكانه لا دفعة
-      const late = deps.workShown?.() ?? false;
-      fillWork(full);
-      if (late && state.view?.id === m.id) deps.settleIn?.(state.view.body);
-      if (state.view?.id === m.id) { state.view.filled = true; settleWork(state.view); }
+      // لا يُعاد بناء الصفحة وهي تتحرك (تدخل أو تغادر): الملء بعد انتهاء الحركة، ولا ملء لصفحة غادرها المستخدم
+      const fill = () => {
+        if (token !== state.detailToken || deps.currentPage() !== 'anime') return;
+        // وصلت التفاصيل والصفحة ظاهرة (بدأ الانتقال بالمهلة): المحتوى الجديد يظهر بتلاشٍ في مكانه لا دفعة
+        const late = deps.workShown?.() ?? false;
+        fillWork(full);
+        if (late && state.view?.id === m.id) deps.settleIn?.(state.view.body);
+        if (state.view?.id === m.id) { state.view.filled = true; settleWork(state.view); }
+      };
+      const page = q('anime');
+      if (deps.motionActive?.(page)) deps.afterMotion(page, fill);
+      else fill();
       void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
       if (episode && (position != null || play)) playEpisode(full, episode, { position, clip });
@@ -642,6 +649,8 @@ export function createAnime(deps) {
 
     // البنر خلفية عريضة؛ الغلاف في الوسط عند حافته السفلى، واللوقو تحته، ثم المعلومات ولقطة الحلقة
     const hero = el('div', 'aw-hero');
+    const knownRatio = heroRatio.get(m.id);
+    if (knownRatio) hero.style.setProperty('--aw-ratio', knownRatio);
     const bg = el('div', 'aw-bg');
     hero.append(bg, el('div', 'aw-shade'));
     const stage = el('div', 'aw-stage');
@@ -748,6 +757,22 @@ export function createAnime(deps) {
    * سلسلة ani.zip ← AniList ← Cinemeta (ثوانٍ في عمل جديد بلا IMDb) قبل أن يُعرف رابطها.
    */
   const HERO_KEY = 'vantara.heroPick.v1';
+  // نسبة البطل لكل عمل: الفتحة التالية تحجز مقاسه الحقيقي من أول إطار، فلا يتغير ارتفاعه حين تصل صورته
+  const RATIO_KEY = 'vantara.heroRatio.v1';
+  const heroRatio = {
+    get(id) { try { return JSON.parse(globalThis.localStorage?.getItem(RATIO_KEY) ?? '{}')?.[id] ?? null; } catch { return null; } },
+    set(id, ratio) {
+      try {
+        const all = JSON.parse(globalThis.localStorage?.getItem(RATIO_KEY) ?? '{}') ?? {};
+        if (all[id] === ratio) return;
+        delete all[id];
+        all[id] = ratio;
+        const keys = Object.keys(all);
+        for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k];
+        globalThis.localStorage?.setItem(RATIO_KEY, JSON.stringify(all));
+      } catch { /* تخزين محجوب: 16:9 */ }
+    },
+  };
   const heroMemory = {
     get(id) {
       try { return JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}')?.[id] ?? null; } catch { return null; }
@@ -876,7 +901,15 @@ export function createAnime(deps) {
         requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
       }
       if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-      if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) v.hero.style.setProperty('--aw-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+      if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) {
+        const ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
+        heroRatio.set(m.id, ratio);
+        // مقاس البطل يُحسم قبل أن تُرى الصفحة ولا يتغير بعدها: كان ارتفاعه يتبع نسبة الصورة حين تصل، فيتحرك الغلاف
+        // وكل ما تحته ~20px بعد الدخول («الغلاف يهتز»). صورة بنسبة أخرى وصلت والصفحة ظاهرة تُعرض كاملة داخل المقاس
+        // نفسه (بلا قص)، والخلفية المضبّبة خلفها تملأ ما حولها؛ والفتحة التالية تبدأ بنسبتها الحقيقية.
+        if (!deps.workShown || deps.workShown() === false) v.hero.style.setProperty('--aw-ratio', ratio);
+        else img.classList.add('aw-bg-img--fit');
+      }
       // An earlier transition's delayed cleanup must never remove a newer image.
       requestAnimationFrame(() => {
         if (state.view !== v || load.shown?.img !== img) return;

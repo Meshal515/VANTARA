@@ -232,8 +232,9 @@ describe('Back keeps the bottom bar on screen (no hide-then-pop)', () => {
 
 // عقد حركة واحد (#323، قرار المالك): لا قسم مستثنى بالاسم؛ السينما تندفع كالبقية
 describe('one motion contract for every section', () => {
-  it('medium premium push: 96% in 380ms, enter and exit', () => {
-    expect(MOTION).toMatchObject({ ms: 380, push: 0.96 });
+  it('400ms both ways with one curve: entry no faster than exit (owner, 13 Nov)', () => {
+    expect(MOTION).toMatchObject({ ms: 400, push: 0.96 });
+    expect(MOTION.enter).toBe(MOTION.exit);
   });
   it('cinema gets the same push in and out as any work page', () => {
     const a = work(); a.p.id = 'cinema';
@@ -271,5 +272,57 @@ describe('the bottom bar follows the page motion contract', () => {
     dockIn(nav, { doc: doc('off') }); dockOut(nav, { doc: doc('off'), onComplete: done });
     expect(nav.anims).toEqual([]);
     expect(done).toHaveBeenCalledOnce();
+  });
+});
+
+// #323 (13 نوفمبر): أسباب القفزات المثبتة بالإطارات، كل واحد باختبار
+describe('exit freezes scroll-linked depth layers as drawn (no snap before the exit)', () => {
+  it('bakes every scroll-linked layer, finished or running, then restores it', () => {
+    const layer = { style: {}, isConnected: true };
+    const scrollTimeline = { constructor: { name: 'ScrollTimeline' } };
+    const a = page({ top: -500, left: 0, width: 390, height: 3000 });
+    const finished = { effect: { target: layer }, timeline: scrollTimeline, playState: 'finished', pause: vi.fn() };
+    a.getAnimations = () => [finished];
+    vi.stubGlobal('getComputedStyle', (n) => (n === layer ? { transform: 'matrix(0.84, 0, 0, 0.66, 0, -40)', opacity: '0.3' } : { opacity: '1' }));
+    pageOut(a, { doc: doc() });
+    expect(layer.style).toMatchObject({ animation: 'none', transform: 'matrix(0.84, 0, 0, 0.66, 0, -40)', opacity: '0.3' });
+    expect(finished.pause).not.toHaveBeenCalled();
+    finishPageMotion();
+    expect(layer.style).toMatchObject({ animation: '', transform: '', opacity: '' });
+  });
+});
+
+describe('the push is measured when the motion really starts (after the gate), not when it is requested', () => {
+  it('a page built while the gate waits is pushed from its final layout', async () => {
+    const { p, hero } = work();
+    let open;
+    const gate = new Promise((r) => { open = r; });
+    pageIn(p, { depth: true, gate, doc: doc() });
+    expect(hero.animate).not.toHaveBeenCalled();
+    open();
+    await gate; await Promise.resolve();
+    expect(hero.animate).toHaveBeenCalledTimes(1);
+    finishPageMotion();
+  });
+});
+
+describe('no page is rebuilt while it moves (afterMotion)', () => {
+  it('runs at once when still, waits while playing or leaving, and runs after', async () => {
+    const { afterMotion, motionActive } = await import('./page-motion.js');
+    const { p } = work();
+    const ran = [];
+    afterMotion(p, () => ran.push('still'));
+    expect(ran).toEqual(['still']);
+    pageIn(p, { depth: true, doc: doc() });
+    expect(motionActive(p)).toBe(true);
+    afterMotion(p, () => ran.push('later'));
+    expect(ran).toEqual(['still']);
+    finishPageMotion();
+    await Promise.resolve();
+    expect(ran).toEqual(['still', 'later']);
+    const leaving = page();
+    pageOut(leaving, { doc: doc(), gate: new Promise(() => {}) });
+    expect(motionActive(leaving)).toBe(true);
+    finishPageMotion();
   });
 });

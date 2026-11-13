@@ -291,7 +291,7 @@ function fallback(canvas, initial) {
       `linear-gradient(180deg,${c[1]},${c[0]})`;
   };
   paint(initial);
-  return { setPalette: paint, pause() {}, resume() {}, destroy() {} };
+  return { setPalette: paint, pause() {}, resume() {}, setCovered() {}, destroy() {} };
 }
 
 export function createSilk(canvas, initialPalette = null) {
@@ -390,8 +390,11 @@ export function createSilk(canvas, initialPalette = null) {
   // خارج الشاشة لا رسم (الجولة الثانية من التفتيش): كان الحرير يُرسم كل إطار ولو كان البنر فوق الشاشة
   // والقائمة تُمرَّر، فيزاحم التمرير ويستهلك البطارية. لا يتوقف إلا بخروج التطبيق كله.
   let onScreen = true;
+  // مغطّى بطبقة معتمة (صفحات الموحد الفرعية): على الشاشة عند IntersectionObserver لكنه لا يُرى. كان يُرسم كل
+  // إطار تحتها فيزاحم حركة الطبقة نفسها (6 إطارات في نصف ثانية مقابل 31 بلا رسمه، في «جدول البث»)
+  let covered = false;
   const play = () => {
-    if (frame === null && running && onScreen && !document.hidden) frame = requestAnimationFrame(draw);
+    if (frame === null && running && onScreen && !covered && !document.hidden) frame = requestAnimationFrame(draw);
   };
   const pause = () => {
     if (frame !== null) cancelAnimationFrame(frame);
@@ -431,6 +434,11 @@ export function createSilk(canvas, initialPalette = null) {
     setPalette,
     pause,
     resume: play,
+    /** تغطيه طبقة معتمة أو تنكشف عنه: لا رسم ما دام مغطّى، ولا يعيده لون جديد أو تغيّر مقاس. */
+    setCovered(on) {
+      covered = Boolean(on);
+      if (covered) pause(); else play();
+    },
     destroy() {
       running = false;
       pause();

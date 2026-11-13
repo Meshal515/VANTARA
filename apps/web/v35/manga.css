@@ -2095,3 +2095,6 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
   box-shadow: inset 0 0 0 3px var(--accent);
 }
 .v35 #detail .wt-month small { font-size: 12px; font-weight: 600; color: var(--text-4); }
+
+/* غلاف وصل بعد ظهور صفحة العمل بنسبة غير نسبة مكانه: يبقى المكان كما ظهر ويُعرض الغلاف كاملًا داخله (shell.js) */
+.v35 #detail #detailCover > img.mw-fit { object-fit: contain; }

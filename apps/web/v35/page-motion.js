@@ -2,7 +2,9 @@
  * عقد الحركة الواحد في VANTARA (قرار المالك، 12 نوفمبر): تلاشٍ مع اندفاع للداخل عند الدخول وللخارج
  * عند الخروج، هادئ فخم. كل انتقال صفحة وتسليم وتبديل لسان يقرأ من هنا؛ لا قسم مستثنى بالاسم.
  */
-export const MOTION = Object.freeze({ ms: 380, push: 0.96, enter: 'cubic-bezier(0.22, 1, 0.36, 1)', exit: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+// 400ms بمنحنى واحد للاتجاهين (قرار المالك، 13 نوفمبر): كان الدخول بمنحنى يبلغ 98% في نصف المدة فيبدو «سريعًا»
+// والخروج بمنحنى آخر، فلا يتشابهان. المدة نفسها والإيقاع نفسه في كل نمط وكل اتجاه.
+export const MOTION = Object.freeze({ ms: 400, push: 0.96, enter: 'cubic-bezier(0.4, 0, 0.2, 1)', exit: 'cubic-bezier(0.4, 0, 0.2, 1)' });
 const MS = MOTION.ms;
 const EASE = MOTION.exit;
 const EASE_IN = MOTION.enter;
@@ -13,6 +15,25 @@ export function motionReduced(doc = globalThis.document) {
 }
 const running = new Set();
 const active = new WeakMap();
+/** ما ينتظر انتهاء حركة صفحة (رسم بيانات وصلت أثناءها). */
+const waiters = new WeakMap();
+const playing = new WeakSet();
+/**
+ * هل يُمنع رسم الصفحة الآن؟ وهي تغادر (من أول لحظة، ولو كانت الحركة تنتظر البوابة: المغادرة ظاهرة كما هي)،
+ * أو وهي تدخل والحركة جارية. أما انتظار البوابة قبل الدخول فهو بالضبط وقت الرسم: الصفحة ما زالت لا تُرى.
+ */
+export const motionActive = (page) => Boolean(page && (playing.has(page) || page.classList?.contains('page-out')));
+/**
+ * لا يُعاد بناء صفحة وهي تتحرك: ما يصل من بيانات أثناء دخولها أو خروجها يُرسم حين تنتهي الحركة. كان الرسم
+ * يستبدل محتواها في منتصف الحركة، فيقفز ما فيها أو يختفي، ويختلف الخروج من مرة لأخرى بحسب وصول الشبكة.
+ * `fn` يُنادى فورًا إن لم تكن تتحرك.
+ */
+export function afterMotion(page, fn) {
+  if (!motionActive(page)) return fn();
+  const list = waiters.get(page) ?? [];
+  list.push(fn);
+  waiters.set(page, list);
+}
 /** حالة اندفاع الصفحة الجارية (وحداتها ونقطة الاندفاع): تُقرأ عند المقاطعة ليكمل الخروج من حيث وصل الدخول. */
 const pushes = new WeakMap();
 export function finishPageMotion() {
@@ -32,7 +53,7 @@ export function pageMotionState(page) {
  * دورة حياة انتقال واحدة: تبدأ الحركة حين تفتح `gate` (أو فورًا بلا بوابة)، وتنتهي بانتهاء أول حركة أو
  * بمقاطعة finishPageMotion، فتُعاد الصفحة كما كانت. الحارس الزمني يبدأ مع التشغيل لا مع التجهيز.
  */
-function track(page, animations, restore, gate = null) {
+function track(page, animations, restore, gate = null, later = null) {
   let done = false;
   let guard;
   const stop = () => {
@@ -42,12 +63,19 @@ function track(page, animations, restore, gate = null) {
     running.delete(stop);
     if (active.get(page) === stop) active.delete(page);
     pushes.delete(page);
+    playing.delete(page);
     for (const a of animations) a.cancel();
     restore();
+    const queued = waiters.get(page);
+    if (queued && !motionActive(page)) { waiters.delete(page); for (const fn of queued) queueMicrotask(() => afterMotion(page, fn)); }
   };
   running.add(stop); active.set(page, stop);
   const go = () => {
     if (done) return;
+    // ما يُقاس من الصفحة (نقطة الاندفاع وحدود الوحدات) يُقاس لحظة البدء الفعلي: قبلها قد تكون الصفحة هيكلًا
+    // بلا غلاف (0×0)، فكان المحتوى ينزلق 50–70px نحو نقطة احتياطية بدل اندفاع 4% في مكانه
+    if (later) animations.push(...later());
+    playing.add(page);
     for (const a of animations) a.play?.();
     guard = setTimeout(stop, MS + 150);
     animations[0].finished?.then(stop, stop);
@@ -123,10 +151,30 @@ function push(page, o, from, to, timing) {
   return animations;
 }
 
+const isScrollLinked = (a) => Boolean(a.timeline) && a.timeline !== globalThis.document?.timeline && a.timeline?.constructor?.name !== 'DocumentTimeline';
+/** يثبت شكل كل عنصر تحركه حركة مربوطة بالتمرير كما يُرسم الآن، ويفصله عنها. يعيد دالة الاستعادة. */
+function bakeScrollLayers(animations) {
+  const targets = [...new Set(animations.filter(isScrollLinked).map((a) => a.effect?.target).filter(Boolean))];
+  const css = globalThis.getComputedStyle;
+  // القراءة كلها أولًا ثم الكتابة: لا تخطيط بين عنصر وآخر
+  const values = targets.map((n) => { const c = css?.(n); return [n, c?.transform ?? 'none', c?.opacity ?? '1']; });
+  const undo = values.map(([n, transform, opacity]) => {
+    const prev = save(n, ['animation', 'transform', 'opacity']);
+    Object.assign(n.style, { animation: 'none', transform, opacity });
+    return prev;
+  });
+  return () => { for (const u of undo) u(); };
+}
+
 export function pageOut(page, { depth = false, visual = null, scrollTop = 0, gate = null, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
-  const frozen = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page && a.playState === 'running');
+  const sub = [...(page.getAnimations?.({subtree:true}) ?? [])].filter(a => a.effect?.target !== page);
+  // طبقات العمق مربوطة بتمرير الجذر، والجذر يعود لموضع الوجهة لحظة الرجوع. إيقافها لا يكفي: ما تجاوز مداه
+  // حالته «منتهية» فلا يُوقف، وما أُوقف قيمته نسبة من طول المستند الذي يتغير، فيقفز الغلاف قبل الخروج.
+  // تُثبَّت قيمتها المرسومة الآن على العنصر وتُفصل عن التمرير حتى تنتهي المغادرة.
+  const baked = bakeScrollLayers(sub);
+  const frozen = sub.filter(a => a.playState === 'running' && !isScrollLinked(a));
   for (const a of frozen) { const t = a.currentTime; a.pause(); if (t != null) a.currentTime = t; }
   const r = page.getBoundingClientRect();
   const origin = depth ? visual?.origin ?? originOf(page) : null;
@@ -140,11 +188,17 @@ export function pageOut(page, { depth = false, visual = null, scrollTop = 0, gat
   // بلا transform ولا contain عليها، فأشرطتها الثابتة تبقى على الشاشة كما هي دون أي تثبيت يدوي.
   Object.assign(page.style, { position:'fixed', top: `${top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(1, Math.min(r.height, viewHeight - top))}px`, minHeight: '0', overflow: 'hidden' });
   page.scrollTop = previousScroll + offset;
+  // صفحة أقصر من موضع التمرير المطلوب (الجذر كان أطول منها بحشوة الشريط): لا تمرر إليه كاملًا، فيُعوَّض الباقي
+  // بإزاحة الصفحة للأعلى. كان الباقي يظهر قفزة للأسفل لحظة الرجوع (25px في «البطاقة الطائرة»)
+  const short = previousScroll + offset - page.scrollTop;
+  // (الارتفاع كما هو: ما تحت نهاية الصفحة لم يكن منها أصلًا، وزيادته تُنقص التمرير الممكن فيعود الفرق)
+  if (short > 0.5) page.style.top = `${top - short}px`;
   const timing = {duration:MS,easing:EASE,fill:'both'};
   const fade = page.animate([{opacity:visual?.opacity ?? 1},{opacity:0}], timing);
   const pushed = depth ? push(page, origin, visual?.scale ?? 1, DEPTH, timing) : [];
   track(page, [fade, ...pushed], () => {
     page.classList.remove('page-out'); restore(); page.scrollTop = previousScroll;
+    baked();
     for (const a of frozen) if (a.effect?.target?.isConnected) a.play();
   }, gate);
 }
@@ -152,15 +206,15 @@ export function pageOut(page, { depth = false, visual = null, scrollTop = 0, gat
  * الصفحة الداخلة تبقى في تدفق المستند (لا تُثبَّت ولا تأخذ transform): تمرير الجذر وخطوطه الزمنية وأشرطتها
  * الثابتة تعمل من أول إطار. تتلاشى هي، ويندفع محتواها (motionUnits) من MOTION.push إلى حجمه.
  */
-export function pageIn(page, { depth = false, gate = null, doc = globalThis.document } = {}) {
+export function pageIn(page, { depth = false, gate = null, from = null, doc = globalThis.document } = {}) {
   active.get(page)?.();
   if (!page?.animate || motionReduced(doc)) return;
   page.classList.add('page-in');
   const timing = {duration:MS,easing:EASE_IN,fill:'both'};
-  const fade = page.animate([{opacity:0},{opacity:1}], timing);
-  // نقطة الاندفاع تُقاس عند البدء لا عند التجهيز: الغلاف قد يُرسم في أثناء الانتظار
-  const pushed = depth ? push(page, originOf(page), DEPTH, 1, timing) : [];
-  track(page, [fade, ...pushed], () => { page.classList.remove('page-in'); }, gate);
+  // رجوع يقاطع حركة: الوجهة تكمل من شفافيتها الظاهرة الآن (كانت تبدأ من صفر والمغادرة كذلك، فتُرى شاشة فارغة)
+  const fade = page.animate([{opacity:from?.opacity ?? 0},{opacity:1}], timing);
+  // الاندفاع يُبنى حين تبدأ الحركة فعلًا (بعد البوابة)، على الصفحة كما ستُرى
+  track(page, [fade], () => { page.classList.remove('page-in'); }, gate, depth ? () => push(page, originOf(page), DEPTH, 1, timing) : null);
 }
 
 /**
