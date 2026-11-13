@@ -91,24 +91,28 @@ function limited(task) {
 }
 
 const inflight = new Map();
-/** الغلاف بمحرّك مصدره، محفوظًا. `null` إن تعذّر. مرة واحدة لكل رابط في الجلسة. */
+/**
+ * الغلاف بمحرّك مصدره، محفوظًا. `null` إن تعذّر. طلب واحد في آنٍ لكل (مصدر، رابط)، والطلب يُنسى حين يستقر:
+ * الناجح محفوظ في الفهرس (يُعاد منه فورًا)، والفاشل قد ينجح لاحقًا (#311 D-004، D-020: كانت الخريطة بلا حد
+ * ومفتاحها الرابط وحده، فرابط واحد من مصدرين بترويسات مختلفة يأخذ نتيجة الأول).
+ */
 export function nativeCover(url, sourceId) {
   if (!engine.isAvailable()) return Promise.resolve(null);
-  if (inflight.has(url)) return inflight.get(url);
+  if (index[url]) return Promise.resolve(index[url]);
+  const key = `${sourceId ?? ''}|${url}`;
+  if (inflight.has(key)) return inflight.get(key);
   const promise = limited(() => engine.cover(sourceId, url))
     .then((src) => {
-      index[url] = src;
-      save();
-      return src;
+      if (src) { index[url] = src; save(); }
+      return src ?? null;
     })
-    .catch(() => {
-      // فشلٌ اليوم قد ينجح غدًا: لا يُحفظ
-      inflight.delete(url);
-      return null;
-    });
-  inflight.set(url, promise);
+    .catch(() => null)
+    .finally(() => inflight.delete(key));
+  inflight.set(key, promise);
   return promise;
 }
+/** للاختبارات: عدد الطلبات المعلقة. */
+export const _inflightCovers = () => inflight.size;
 
 // ── غلاف كل عمل، لا كل رابط ──
 // الغلاف الصحيح قد لا يُعرف إلا من تفاصيل العمل (القائمة بلا غلاف أو برابط

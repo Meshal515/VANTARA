@@ -571,10 +571,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
           },
           { rootMargin: '600px 600px' },
         );
+  /**
+   * عقد نُزعت من الصفحة قبل أن تقترب (قائمة أُعيد رسمها) لا تبقى منتظرة ولا مراقبة (#311 D-016): تُكنس حين
+   * تكبر الخريطة، فتبقى محدودة بما في الصفحة فعلًا.
+   */
+  const sweepDetached = (map, release) => {
+    if (map.size < 120) return;
+    for (const node of [...map.keys()]) if (!node.isConnected) { map.delete(node); release?.(node); }
+  };
   function nearViewport(node) {
     if (!nearObserver) return Promise.resolve();
     return new Promise((resolve) => {
       nearWaiters.get(node)?.();
+      sweepDetached(nearWaiters, (n) => nearObserver.unobserve(n));
       nearWaiters.set(node, resolve);
       nearObserver.observe(node);
     });
@@ -655,7 +664,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** ملصق أنمي بمعرّف AniList، مرة لكل أنمي في الجلسة. */
   function animePoster(id) {
     if (!animePosters.has(id)) {
-      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.poster ?? m?.posterSmall ?? null).catch(() => null));
+      // الفشل لا يُحفظ (#311 D-009): كان null يبقى طول الجلسة فلا يظهر ملصق ذلك الأنمي أبدًا
+      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.poster ?? m?.posterSmall ?? null).catch(() => null)
+        .then((url) => { if (!url) animePosters.delete(id); return url; }));
     }
     return animePosters.get(id);
   }
@@ -785,11 +796,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (container.dataset.imageToken !== token) return null;
     if (!previewShown) fallbackArt(container, titleOf(work));
     // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
-    waitingCovers.set(container, work);
+    waitCover(container, work);
     resolveCoverLater(work);
     return null;
   }
+  /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();
+  const waitCover = (container, work) => { sweepDetached(waitingCovers); waitingCovers.set(container, work); };
   onCoverKnown((workId, url) => {
     for (const [container, work] of waitingCovers) {
       if (!container.isConnected) {
