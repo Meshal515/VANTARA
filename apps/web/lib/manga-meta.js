@@ -126,7 +126,7 @@ export function matchMangaArt(title, candidates) {
  * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
  */
 export async function fetchMangaMatches(titles, { fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
-  const names = [...new Set(titles.filter(Boolean))].slice(0, 8);
+  const names = [...new Set(titles.filter(Boolean))].slice(0, 20);
   const output = new Map(names.map((title) => [title, { rating: null, art: null }]));
   if (!names.length) return output;
   const variables = Object.fromEntries(names.map((name, i) => [`q${i}`, name]));

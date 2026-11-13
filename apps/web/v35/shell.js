@@ -604,10 +604,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const run = async () => {
         artActive += 1;
         try {
-          const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
-            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
+          // الرسمي (AniList) يُطلب أولًا فيسير بالتوازي مع أغلفة المصادر، لا خلفها (كان ينتظر حتى 2.5 ثانية لها)
           const title = work?._work?.title || work?.title?.english || titleOf(work);
           const official = id.startsWith('ext:') && title ? artFor(title) : null;
+          const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
+            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
           const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
           resolve(await art.decide(id, { official, sources, wideHint }));
         } catch { resolve(null); } finally {
@@ -615,7 +616,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           artWaiting.shift()?.();
         }
       };
-      if (artActive < 3) void run();
+      // ثمانية أعمال تُحسم في آنٍ: الشبكة تحمّل 30 غلافًا بالتوازي في ربع ثانية، وثلاثة فقط كانت تجعل قائمة من
+      // ثلاثين تنتظر عشر جولات متتالية
+      if (artActive < 8) void run();
       else artWaiting.push(run);
     });
   }
@@ -842,17 +845,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     matchFor(title);
     return artPromises.get(title);
   }
+  // مطابقة AniList (التقييم والغلاف والبنر الرسمي) لكل ما ظهر من أعمال في طلب واحد: 20 عنوانًا في الطلب وطلبان في
+  // آنٍ على الأكثر، بلا انتظار بين الدفعات. القياس الحي: 30 عنوانًا بطلب واحد 170ms، وبدفعات 8 ينتظر بينها 750ms
+  // كانت 2.7 ثانية، فتنتظر أغلفة القائمة كلها خلفها.
+  const MATCH_BATCH = 20;
+  let ratingInFlight = 0;
   async function flushRatings() {
     ratingTimer = null;
-    const batch = ratingQueue.splice(0, 8);
+    if (ratingInFlight >= 2) return;
+    const batch = ratingQueue.splice(0, MATCH_BATCH);
     if (!batch.length) return;
+    ratingInFlight += 1;
+    if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 0);
     try {
       const matches = await fetchMangaMatches(batch.map((b) => b.title));
       batch.forEach(({ title, resolve, resolveArt }) => { resolve(matches.get(title)?.rating ?? null); resolveArt(matches.get(title)?.art ?? null); });
     } catch {
       batch.forEach(({ title, resolve, resolveArt }) => { ratingPromises.delete(title); artPromises.delete(title); resolve(null); resolveArt(null); });
+    } finally {
+      ratingInFlight -= 1;
     }
-    if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
+    if (ratingQueue.length) ratingTimer ??= setTimeout(flushRatings, 0);
   }
   /** «حذف العمل»: يختفي من كل القوائم والبحث وآخر التحديثات، ويبقى في أرشيف حسابك لإعادته. */
   function deleteWork(work) {
