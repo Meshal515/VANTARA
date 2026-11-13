@@ -745,9 +745,23 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
     } else {
       top.append(back, el('h1', null, 'آخر التحديثات'));
       body.append(tabs(st.subTab, UPD, (k) => { st.subTab = k; paintSub(); }));
-      const grid = el('div', 'uv-grid');
-      updates(st.subTab).forEach((u) => grid.append(u.node()));
-      body.append(grid);
+      // لسان قسم: الخط الزمني نفسه الذي في صفحة تحديثات القسم، بتحميل الأقدم من الخادم (#323 O-2)
+      if (st.subTab !== 'all' && data.timeline) {
+        const feed = el('div', 'uv-timeline');
+        body.append(feed);
+        data.timeline(feed, st.subTab);
+      } else {
+        const grid = el('div', 'uv-grid');
+        updates(st.subTab).forEach((u) => grid.append(u.node()));
+        body.append(grid);
+        // «الكل» أحدث ما في الأقسام معًا؛ الأقدم من لسان كل قسم
+        if (data.timeline && grid.childElementCount) {
+          const older = el('div', 'uv-older');
+          older.append(el('span', null, 'الأقدم في:'));
+          for (const [k, l] of UPD.slice(1)) { const b = el('button', 'uv-older-tab', l); b.type = 'button'; b.onclick = () => { st.subTab = k; paintSub(); overlay?.scrollTo?.({ top: 0, behavior: 'instant' }); }; older.append(b); }
+          body.append(older);
+        }
+      }
     }
     // D-029: preserve the tab host and header so the global tab animation
     // targets the NEW content after a tab switch instead of a detached node.

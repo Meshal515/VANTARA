@@ -225,6 +225,32 @@ describe('unified latest updates are verified releases, not catalogue listings',
     return {view,root,document,next:()=>{chapter=126;}};
   };
 
+  it('#323 O-2: لسان كل قسم خط زمني يحمّل الأقدم، و«الكل» فيه روابط الأقدم لكل قسم', () => {
+    const {view,root,document}=make();
+    const timeline = vi.fn((host, tab) => { host.append(Object.assign(document.createElement('div'), { className: 'up-list', textContent: `TL:${tab}` })); });
+    view.__data = null;
+    try {
+      // نفس البيانات مع مركِّب الخط الزمني من القشرة
+      const v2 = createUnifiedView({ el: (tag, cls, value) => { const n = document.createElement(tag); if (cls) n.className = cls; if (value != null) n.textContent = value; return n; }, glyph: () => '', now: () => NOW, reducedMotion: () => true,
+        data: { continue: () => [], animeHome: () => ({ trending: [], week: [] }), cinema: () => ({ movie: [], series: [] }), mangaPopular: () => [], mangaRecent: () => [],
+          mangaUpdates: () => [{ title: 'M', cover: null, _updateAt: NOW - 1000, _latestChapter: { chapterNumber: 3 }, raw: { id: 'ext:m' } }], seriesUpdates: () => [], movieUpdates: () => [], timeline },
+        open: { browse: () => {}, anime: () => {}, manga: () => {}, cinema: () => {} } });
+      v2.mount(root);
+      [...root.querySelectorAll('.uv-door')].find((x) => x.textContent.includes('آخر التحديثات')).onclick();
+      const modal = [...document.querySelectorAll('.uv-page')].at(-1);
+      // «الكل»: المدمج، وفي آخره روابط الأقدم للأقسام الأربعة
+      expect([...modal.querySelectorAll('.uv-older-tab')].map((b) => b.textContent)).toEqual(['المانجا', 'الأنمي', 'المسلسلات', 'الأفلام']);
+      expect(timeline).not.toHaveBeenCalled();
+      // رابط «الأقدم في: الأنمي» يفتح لسانه: الخط الزمني نفسه للقسم
+      [...modal.querySelectorAll('.uv-older-tab')].find((b) => b.textContent === 'الأنمي').onclick();
+      expect(timeline).toHaveBeenLastCalledWith(expect.anything(), 'anime');
+      expect(modal.textContent).toContain('TL:anime');
+      [...modal.querySelectorAll('.uv-tabs button')].find((b) => b.textContent === 'المسلسلات').onclick();
+      expect(timeline).toHaveBeenLastCalledWith(expect.anything(), 'series');
+      v2.destroy();
+    } finally { view.destroy(); }
+  });
+
   it('shows chapter with additional count and observation time, episode number and verified movie event', () => {
     const {view,root,document}=make();
     try {

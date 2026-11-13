@@ -176,7 +176,7 @@ export function unitLabel(g) {
  * يرسم الخط الزمني في `host` ويحمّل المزيد بالتمرير. `open(group)` يفتح العمل.
  * `empty()` ما يُعرض قبل أن يسجّل VANTARA أي تحديث لهذا القسم.
  */
-export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected }) {
+export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected, include = () => true }) {
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, bridgeNext: null, bridgeKnown: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token, active = () => token === state.token;
@@ -240,7 +240,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   }
   function paint() {
     const before = new Map([...list.children].map(n => [n.dataset.workKey, n]));
-    const next = groupEvents(state.events, canonical?.(state.events) ?? null).map(g => {
+    // include: لسان من قسم (المسلسلات أو الأفلام وحدها من خط السينما في الموحد)
+    const next = groupEvents(state.events, canonical?.(state.events) ?? null).filter(include).map(g => {
       const node = before.get(groupKey(g));
       if (node) { updateCard(node, g); return node; }
       return row(g);

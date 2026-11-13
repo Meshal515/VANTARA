@@ -264,3 +264,8 @@
 /* Unified subpages use the same 400ms page timing; app/OS reduced motion wins. */
 html[data-motion='off'] .uv-page{transition:none!important}
 @media (prefers-reduced-motion:reduce){.uv-page{transition:none!important}}
+
+/* «الكل» في آخر التحديثات الموحد: روابط الأقدم لكل قسم (#323 O-2) */
+.uv-page .uv-older{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:18px var(--uv-g,20px) 8px;color:var(--text-3,#8f8b9c);font-size:13px}
+.uv-page .uv-older-tab{color:var(--accent,#8f5cff);font-weight:650;font-size:13.5px;padding:6px 0}
+.uv-page .uv-timeline{padding:0 var(--uv-g,20px)}

@@ -4296,12 +4296,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('collectionMore').hidden = true;
     showPage('collection');
     if (section === 'manga') void sweepLatest({ minGap: 3 * 60_000 });
-    mountTimeline(q('collectionGrid'), {
+    mountTimeline(q('collectionGrid'), timelineOptions(section, () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section));
+  }
+  /**
+   * إعدادات الخط الزمني لقسم: صفحة التحديثات في كل قسم، وألسنة الأقسام في «آخر التحديثات» الموحد (#323 O-2:
+   * الأقدم بالتحميل من الخادم، لا أول دفعة فقط). خط واحد وسلوك واحد.
+   */
+  function timelineOptions(section, visible, include = undefined) {
+    return {
       section,
       el,
+      include,
       canonical: section === 'manga' ? canonicalEventWorks : null,
       mountCover: (art, g) => void mountImage(art, g.section === 'manga' ? workOfEvent(g) : workFromRef(g.work, g.title, g.cover)),
-      visible: () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section,
+      visible,
       image: (src) => {
         const img = new Image();
         img.alt = '';
@@ -4323,7 +4331,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
         return box;
       },
-    });
+    };
   }
   /** عمل مانجا من حدث: من الحساب إن عُرف، وإلا من مصادر الحدث نفسها. */
   function workOfEvent(g) {
@@ -6781,6 +6789,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       movieUpdates: () => unifiedData.movieUpdates,
       animeUpdates: () => unifiedData.animeUpdates,
       mangaUpdates: () => (state.home.updates ?? []).map(mangaView).filter(Boolean),
+      // ألسنة الأقسام في «آخر التحديثات» الموحد: الخط الزمني نفسه بتحميل الأقدم (#323 O-2)
+      timeline: (host, tab) => {
+        const [section, include] = tab === 'series' ? ['cinema', (g) => g.kind !== 'movie'] : tab === 'movie' ? ['cinema', (g) => g.kind === 'movie'] : [tab, undefined];
+        mountTimeline(host, timelineOptions(section, () => host.isConnected, include));
+      },
       animeLogo: (id) => unifiedData.logos.get(id) ?? null,
       // أغلفة المانجا بمحمّل الصور نفسه في قسم المانجا (ترويسات المصدر، البدائل، الغلاف الموحّد)
       cover: (node, x) => {
