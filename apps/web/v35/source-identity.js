@@ -6,7 +6,7 @@
  * الحكم صارم ومن مطابقات المحرك نفسه (`judgeAnimeCopy` و`judgeCopy`): عنوان ضعيف أو موسم آخر أو سنة أخرى
  * = لا هوية، ويبقى غلاف المصدر وبيانات المصدر كما هي. لا تخمين.
  *
- * طلبات قليلة: عناوين الأنمي تُجمع كل 10 في طلب AniList واحد، وCinemeta بثلاثة طلبات متوازية على الأكثر،
+ * طلبات قليلة: عناوين الأنمي تُجمع كل 10 في طلب AniList واحد، وCinemeta بستة طلبات متوازية على الأكثر،
  * والنتيجة (بما فيها «لا هوية») تُحفظ في الجلسة وفي التخزين المحلي.
  */
 import { searchAnimeBatch } from "../lib/anime-meta.js";
@@ -95,7 +95,7 @@ const cinemaSlot = (fn) => new Promise((resolve, reject) => {
     cinemaActive++;
     fn().then(resolve, reject).finally(() => { cinemaActive--; cinemaWaiting.shift()?.(); });
   };
-  if (cinemaActive < 3) run(); else cinemaWaiting.push(run);
+  if (cinemaActive < 6) run(); else cinemaWaiting.push(run);
 });
 const latinQuery = (raw) => String(raw)
   .replace(/(?:الموسم|الحلقة)\s*\S*(?:\s+عشر)?/g, " ")

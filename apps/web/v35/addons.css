@@ -1171,3 +1171,5 @@
   .v35 .addon-source .work-card[aria-busy="true"] .up-art::after { animation-duration: 1600ms; }
 }
 .v35 .addon-source .addon-source-note { margin: 0 0 12px; font-size: 13px; color: var(--text-3, #85809a); }
+.v35 .addon-source .addon-catalog-filters:empty { display: none; }
+.v35 .addon-source .addon-catalog-tabs.is-single { margin-bottom: 12px; }

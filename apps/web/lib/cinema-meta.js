@@ -56,6 +56,16 @@ export function seasonsOf(videos = []) {
     .map(([n, eps]) => ({ n, episodes: eps.sort((a, b) => a.n - b.n) }));
 }
 
+/**
+ * ملصقات IMDb (m.media-amazon.com) تصل من بحث Cinemeta بمقاس 250px (`._V1_SX250.jpg`) فتغبش على الشاشة.
+ * المقاس جزء من الرابط نفسه: نطلب 780px، أوضح بثلاث مرات بنفس الصورة. وmetahub الصغير (240px) إلى المتوسط.
+ */
+export function sharpArt(url, width = 780) {
+  if (typeof url !== 'string' || !url) return url ?? null;
+  if (/m\.media-amazon\.com\/images\//.test(url)) return url.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, `._V1_SX${width}.$1`);
+  return url.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/');
+}
+
 /** شكل واحد للعمل في كل الواجهة. */
 export function normalize(m) {
   if (!m?.id || !/^tt\d+$/.test(String(m.imdb_id ?? m.id))) return null;
@@ -64,8 +74,8 @@ export function normalize(m) {
     id: String(m.imdb_id ?? m.id),
     type: m.type === 'series' ? 'series' : 'movie',
     title: m.name,
-    poster: m.poster || null,
-    background: m.background || null,
+    poster: sharpArt(m.poster) || null,
+    background: m.background ? m.background.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, '._V1_.$1') : null,
     logo: m.logo || null,
     year: year(m),
     endYear: m.type === 'series' ? endYear(m) : null,

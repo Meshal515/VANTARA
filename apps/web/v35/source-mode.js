@@ -473,7 +473,7 @@ export function renderSourceMode({
             adopt(identity);
           };
           void resolveSourceIdentity(work, addon).then(settle);
-          setTimeout(() => settle(null), 2200);
+          setTimeout(() => settle(null), 3000);
         }
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;
