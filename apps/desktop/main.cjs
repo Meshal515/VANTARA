@@ -151,7 +151,8 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   }
   services = createDesktopServices({
     userData: app.getPath('userData'),
-    binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
+    // libtorrent أساسي إن أُرفق (قرار المشروع: مستوى APK)، وrqbit احتياطي دائم (services.engineOrder)
+    binaries: { libtorrent: process.env.VANTARA_TORRENT_HOST_BINARY || (require('node:fs').existsSync(path.join(native, 'vantara-torrent.exe')) ? path.join(native, 'vantara-torrent.exe') : null), rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
     platform: process.platform,
     videoHost,
     inputConf:path.join(__dirname,'native-host/input.conf'),

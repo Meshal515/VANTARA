@@ -184,6 +184,26 @@ export function engineArgs({apiPort,listenPort,dir,dhtPersistence=true}) {
   return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--listen-port',String(listenPort),
     ...(dhtPersistence ? [] : ['--disable-dht-persistence']),'server','start',dir,'--disable-persistence'];
 }
+/**
+ * سطر أوامر محرك libtorrent الأصلي (tools/torrent-host/vantara-torrent.cpp): نفس واجهة rqbit المحلية.
+ * --parent-pid: يخرج المحرك إن مات VANTARA (لا عملية يتيمة تحجز المنفذ والقرص). --state-dir: جدول DHT المحفوظ.
+ */
+export function libtorrentArgs({apiPort,listenPort,dir,stateDir,parentPid=process.pid,testPeer=null}) {
+  if (!Number.isSafeInteger(apiPort) || !Number.isSafeInteger(listenPort) || listenPort < 1 || listenPort > 65535 || typeof dir !== 'string') throw new Error('إعداد محرك التورنت غير صالح');
+  // testPeer: خيار اختبار يمرَّر برمجيًا فقط (لا متغير بيئة)؛ يفتح الشبكة المحلية لباذر الاختبار وحده
+  if (testPeer != null && !/^127\.0\.0\.1:\d{1,5}$/.test(testPeer)) throw new Error('باذر الاختبار يجب أن يكون محليًا');
+  return [`--api-port=${apiPort}`,`--listen-port=${listenPort}`,`--dir=${dir}`,...(stateDir?[`--state-dir=${stateDir}`]:[]),`--parent-pid=${parentPid}`,...(testPeer?['--allow-private-peers',`--test-peer=${testPeer}`]:[])];
+}
+/**
+ * ترتيب المحركات: libtorrent أولًا (قرار المشروع: مستوى APK)، وrqbit احتياطًا دائمًا. libtorrent يُتخطى إن
+ * لم يُرفق، أو طُلب rqbit صراحة (VANTARA_TORRENT_ENGINE=rqbit)، أو انهار في هذه الجلسة قبل قليل.
+ */
+export function engineOrder({binaries,preference=process.env.VANTARA_TORRENT_ENGINE,libtorrentBlockedUntil=0,now=Date.now()}) {
+  const order=[];
+  if(binaries?.libtorrent&&preference!=='rqbit'&&now>=libtorrentBlockedUntil)order.push('libtorrent');
+  if(binaries?.rqbit&&preference!=='libtorrent-only')order.push('rqbit');
+  return order;
+}
 export function selectTorrentFile(files, candidate) {
   if (!Array.isArray(files) || !files.length) throw new Error('لم يعثر المحرك على ملفات التورنت');
   if (candidate.fileIdx != null) {
@@ -353,9 +373,11 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000}) {
-  if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null}) {
+  if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
+  // انهيار libtorrent بعد جاهزيته يحجبه 10 دقائق؛ التشغيل التالي يبدأ بـrqbit مباشرة بدل تكرار الفشل.
+  let libtorrentBlockedUntil=0;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
   const lookup=dnsOverHttps?unblockingLookup:systemLookup;
   const puncher=holePuncher??createHolePuncher(platform);
@@ -647,26 +669,60 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return state.streamUrl;
   }
   /**
-   * يشغّل rqbit وينتظر واجهته. المحاولة الأولى بجدول DHT المحفوظ؛ إن خرج rqbit قبل أن يجيب (منفذ DHT
-   * المحفوظ مشغول بـrqbit آخر، أو ملف الحفظ غير مقروء — rqbit 9.0.1 يتوقف حينها ولا يتجاهل) نعيد مرة
-   * واحدة بلا حفظ DHT وبمنافذ جديدة، أي كما كان المحرك قبل هذا التعديل.
+   * يشغّل محرك التورنت وينتظر واجهته: libtorrent أولًا ثم rqbit احتياطًا (engineOrder). لكل محرك
+   * محاولتان كما كان rqbit: بجدول DHT المحفوظ ثم بدونه وبمنافذ جديدة. محرك لا يجيب خلال مهلته
+   * يُنهى ويُجرَّب التالي؛ الانتقال يظهر في مراحل التشغيل (engine-fallback) ولا يكسر التجربة.
    */
   async function launchEngine(state,dir,env,options) {
-    for(const dhtPersistence of [true,false]) {
-      const apiPort=await port();let listenPort=await port();
-      while(listenPort===apiPort)listenPort=await port();
-      assertSession(state);
-      state.api=`http://127.0.0.1:${apiPort}`;
-      let exited=false;
-      child(state,binaries.rqbit,engineArgs({apiPort,listenPort,dir,dhtPersistence}),env,message=>{if(state.engineReady)void fail(state,message);else exited=true;});
-      const deadline=Date.now()+15000;
-      while(!exited){
+    const order=engineOrder({binaries,libtorrentBlockedUntil});
+    if(!order.length)throw new Error('لا يوجد محرك تورنت مرفق');
+    let lastError=null;
+    for(const kind of order){
+      for(const dhtPersistence of kind==='rqbit'?[true,false]:[true]) {
+        const apiPort=await port();let listenPort=await port();
+        while(listenPort===apiPort)listenPort=await port();
         assertSession(state);
-        try{await localJSON(state.api,'/',{...options,timeout:1000});if(exited)break;state.engineReady=true;return;}
-        catch{if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');if(!exited)await sleep(50,state.controller.signal);}
+        state.api=`http://127.0.0.1:${apiPort}`;
+        let exited=false;
+        const args=kind==='libtorrent'
+          ?libtorrentArgs({apiPort,listenPort,dir,stateDir:join(userData,'engine-state','libtorrent'),testPeer:torrentTestPeer})
+          :engineArgs({apiPort,listenPort,dir,dhtPersistence});
+        const processChild=child(state,kind==='libtorrent'?binaries.libtorrent:binaries.rqbit,args,env,message=>{
+          if(state.engineReady&&state.engineKind===kind)void fail(state,message);
+          else exited=true;
+        });
+        // الانهيار بعد الجاهزية يُرصد من خروج العملية نفسها: طلب HTTP المقطوع قد يُنهي الجلسة قبل وصول حدث
+        // الخروج، فلا يكفي مسار fail (لا يُستدعى بعد إيقاف الجلسة).
+        // إنهاؤنا المقصود يصل دائمًا بإشارة (SIGTERM/SIGKILL؛ libuv ينقلها على ويندوز أيضًا)، والانهيار رمز خروج بلا إشارة.
+        if(kind==='libtorrent')processChild.once('exit',(code,signal)=>{if(state.engineKind==='libtorrent'&&signal==null&&code!==0)libtorrentBlockedUntil=Date.now()+10*60*1000;});
+        const deadline=Date.now()+(kind==='libtorrent'?10000:15000);
+        while(!exited){
+          assertSession(state);
+          try{
+            const info=await localJSON(state.api,'/',{...options,timeout:1000});
+            if(exited)break;
+            // منفذ مأخوذ بخادم آخر لا يُعدّ محركنا: libtorrent يعلن نفسه صراحة
+            if(kind==='libtorrent'&&info?.engine!=='libtorrent')throw new Error('ليس محرك libtorrent');
+            state.engineReady=true;state.engineKind=kind;
+            state.trace?.record('engine-kind',{engine:kind});
+            emit(state,{type:'playback/stage',stage:'engine-ready',engine:kind});
+            return kind;
+          }catch(error){
+            if(Date.now()>deadline){exited=true;lastError=error;break;}
+            if(!exited)await sleep(50,state.controller.signal);
+          }
+        }
+        // لم يجهز: أنهِ هذه العملية تحديدًا قبل تجربة غيرها (لا محركان على القرص نفسه)
+        state.children.delete(processChild);
+        await kill(processChild);
+        assertSession(state);
+      }
+      if(kind==='libtorrent'&&order.includes('rqbit')){
+        state.trace?.record('engine-fallback',{from:'libtorrent',to:'rqbit'});
+        emit(state,{type:'playback/stage',stage:'engine-fallback',from:'libtorrent',to:'rqbit'});
       }
     }
-    throw new Error('لم يبدأ محرك التورنت');
+    throw new Error('لم يبدأ محرك التورنت'+(lastError?.message?`: ${lastError.message}`:''));
   }
   /**
    * إضافة التنزيل الفعلية. rqbit لا يحتفظ بنتيجة list_only فيحل المغناطيس مرة ثانية؛ مع initial_peers
