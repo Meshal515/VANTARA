@@ -1828,10 +1828,10 @@ export function createCinema(deps) {
     art.dataset.work = String(m.id);
     const remembered = heroPick.get(m.id);
     // الموحد: البطل ملصق العمل نفسه من أول رسم (قرار المالك: لا بحث عن صور أخرى)، لا الخلفية
-    // الموحد: أوضح صورة متاحة للعمل من أول رسم. ملصق IMDb الصغير (240px) كان يُمدّ بعرض الشاشة فيغبش؛ الخلفية
-    // الأصلية (حتى 4K) بمعرّف IMDb أولًا، وإلا خلفية العمل، وإلا ملصقه بمقاسه الأكبر. لا تبديل بعد الظهور.
-    const unifiedWant = /^tt\d+$/.test(String(m.id)) ? `https://images.metahub.space/background/large/${m.id}/img`
-      : m.background ? sharpBackground(m.background, true) : (m.poster ? m.poster.replace(/(metahub\.space\/poster)\/(?:small|medium)\//, '$1/large/') : null);
+    // الموحد: الملصق بلا قص (قرار المالك، لوحة 12 نوفمبر). ملصق IMDb الصغير (240px) ممدودًا بعرض الشاشة كان سبب
+    // الغبش؛ الملصق الكبير بمعرّف IMDb (نسبته 2:3 كإطار البطل) من أول رسم، وبدائله عند الفشل فقط. لا تبديل بعد الظهور.
+    const unifiedWant = /^tt\d+$/.test(String(m.id)) ? `https://images.metahub.space/poster/large/${m.id}/img`
+      : m.poster ? m.poster.replace(/(metahub\.space\/poster)\/(?:small|medium)\//, '$1/large/') : null;
     const want = unified ? unifiedWant : remembered ?? (partial ? null : m.background ?? m.poster);
     const prior = art === priorArt ? art.querySelector('.cn-img') : null;
     let backdrop = null;
@@ -1841,7 +1841,7 @@ export function createCinema(deps) {
       backdrop.classList.add('kept');
     } else if (want) {
       backdrop = unified
-        ? image(want, 'cn-img', { eager: true, fallback: [m.background && sharpBackground(m.background, true), m.background, m.poster].filter((u) => u && u !== want) })
+        ? image(want, 'cn-img', { eager: true, fallback: [m.poster && m.poster.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/'), m.poster].filter((u) => u && u !== want) })
         : image(want, 'cn-img', { eager: true, hero: !remembered });
       backdrop.dataset.want = want;
       backdrop.addEventListener('load', () => {

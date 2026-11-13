@@ -804,9 +804,9 @@ export function createAnime(deps) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
     // الموحد: البطل غلاف العمل نفسه (قرار المالك: لا بحث عن صور أخرى)، بنسبته بلا قص
-    // الموحد: أوضح صورة للعمل (خلفية IMDb/fanart الأصلية) والغلاف بديلها. غلاف AniList (~460px) ممدودًا بعرض
-    // الشاشة كان سبب الغبش. البانر العريض (1900×400) لا يصلح لإطار طولي فلا يدخل.
-    const plan = v.unified ? { episodeStill: false, posterFallback: true, ambient: false, noBanner: true } : heroPlan(v.look);
+    // الموحد: الملصق بلا قص (قرار المالك، لوحة 12 نوفمبر). غلاف AniList (~460px) ممدودًا بعرض الشاشة كان سبب
+    // الغبش؛ ملصق IMDb الكبير بنسبته نفسها (2:3) أولًا حين يُعرف معرّف IMDb، وغلاف AniList بديله.
+    const plan = v.unified ? { episodeStill: false, posterFallback: true, ambient: false, posterOnly: true } : heroPlan(v.look);
     // كم ينتظر البطل حسم أفضل مصدر قبل أن يعرض أفضل ما جهز (المحفوظ لكل عمل يُعرض فورًا)
     const HERO_SETTLE_MS = 2500;
     const current = () => state.detail?.id === v.id ? state.detail : m;
@@ -857,7 +857,10 @@ export function createAnime(deps) {
     };
     // Ranks describe the source itself; a newly arrived HD map must improve the
     // same episode even when its earlier TVDB frame was already displayed.
-    if (plan.posterOnly) add(m.poster ?? m.posterSmall, 0, 'poster', true);
+    if (plan.posterOnly) {
+      if (/^tt\d+$/.test(imdb ?? '')) add(`https://images.metahub.space/poster/large/${imdb}/img`, -1, 'poster');
+      add(m.poster ?? m.posterSmall, 0, 'poster', true);
+    }
     else if (shot?.still) {
       for (const src of [shot.src, ...(shot.fallbacks ?? [])]) {
         const rank = src === art?.hd?.[String(ep)]?.src ? -4
@@ -877,7 +880,7 @@ export function createAnime(deps) {
     const knownRank = known?.includes('/background/large/') ? 0 : known?.includes('/background/medium/') ? 0.1 : 0.6;
     add(known, knownRank, 'backdrop', true);
     // A clear banner can appear on every viewport while preferred art is loading.
-    if (!plan.noBanner) add(m.banner, 1, 'backdrop', true);
+    add(m.banner, 1, 'backdrop', true);
     if (plan.posterFallback) add(m.poster ?? m.posterSmall, 2, 'poster', true);
     }
     candidates.sort((a, b) => a.rank - b.rank);
@@ -911,7 +914,7 @@ export function createAnime(deps) {
         requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
       }
       if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-      if (pick.kind !== 'poster' && !v.unified && img.naturalWidth && img.naturalHeight) {
+      if ((pick.kind !== 'poster' || v.unified) && img.naturalWidth && img.naturalHeight) {
         const ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
         heroRatio.set(m.id, ratio);
         // مقاس البطل يُحسم قبل أن تُرى الصفحة ولا يتغير بعدها: كان ارتفاعه يتبع نسبة الصورة حين تصل، فيتحرك الغلاف
