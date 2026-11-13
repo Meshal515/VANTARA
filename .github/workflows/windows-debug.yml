@@ -98,6 +98,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'engine does not start standalone' }
           New-Item -ItemType Directory -Force apps/desktop/native | Out-Null
           Copy-Item $exe apps/desktop/native/vantara-torrent.exe
+          # نسخة libtorrent الفعلية (vcpkg) تُختم في BUILD-MANIFEST وTHIRD-PARTY-NOTICES
+          (& (Join-Path $clean 'vantara-torrent.exe') --version | Select-Object -First 1).Trim() | Set-Content -NoNewline -Encoding ascii apps/desktop/native/vantara-torrent.version.txt
+          Get-Content apps/desktop/native/vantara-torrent.version.txt
           Get-FileHash -Algorithm SHA256 apps/desktop/native/vantara-torrent.exe
       - name: libtorrent engine integration on real Windows
         env:
@@ -128,6 +131,7 @@ jobs:
             apps/desktop/native/vantara-video-host.exe
             apps/desktop/native/VANTARA.exe
             apps/desktop/native/vantara-torrent.exe
+            apps/desktop/native/vantara-torrent.version.txt
           if-no-files-found: error
 
   fixtures:
@@ -172,12 +176,14 @@ jobs:
           set -euo pipefail
           node tools/build-windows.mjs --channel=debug --build="$BUILD" --version="$VERSION" \
             --video-host="$RUNNER_TEMP/native/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/native/VANTARA.exe" \
-            --torrent-host="$RUNNER_TEMP/native/vantara-torrent.exe" --output="$RUNNER_TEMP/debug"
+            --torrent-host="$RUNNER_TEMP/native/vantara-torrent.exe" --torrent-host-version="$(cat "$RUNNER_TEMP/native/vantara-torrent.version.txt")" --output="$RUNNER_TEMP/debug"
           cd "$RUNNER_TEMP/debug"
           sha256sum -c SHA256SUMS.txt
           test -s "VANTARA-Debug-$VERSION-Windows-x64-Setup.exe"
           test -s "VANTARA-Debug-$VERSION-Windows-x64.zip"
-          python3 -c 'import json,os; m=json.load(open("VANTARA-Debug-Windows-x64/BUILD-MANIFEST.json")); assert m["channel"]=="debug" and m["build"]==int(os.environ["BUILD"]) and m["version"]==os.environ["VERSION"] and "libtorrent" in m["torrentEngines"], m'
+          python3 -c 'import json,os,re; m=json.load(open("VANTARA-Debug-Windows-x64/BUILD-MANIFEST.json")); assert m["channel"]=="debug" and m["build"]==int(os.environ["BUILD"]) and m["version"]==os.environ["VERSION"] and m["torrentEngines"]==["libtorrent","rqbit"] and re.fullmatch(r"2\.\d+\.\d+(\.\d+)?",m["torrentEngineVersions"]["libtorrent"] or "") and m["torrentEngineVersions"]["rqbit"]=="9.0.1" and m["sourceSha"]==os.environ["GITHUB_SHA"] and m["builtAt"] and m["signed"] is False, m'
+          # التراخيص المرفقة: libtorrent BSD-3-Clause وBoost BSL-1.0 وOpenSSL Apache-2.0
+          for license in BSD-3-Clause BSL-1.0 Apache-2.0; do grep -q "$license" VANTARA-Debug-Windows-x64/THIRD-PARTY-NOTICES.txt; done
           python3 -c 'import json,os; c=json.load(open("VANTARA-Debug-Windows-x64/resources/app/channel.json")); assert c["channel"]=="debug" and c["build"]==int(os.environ["BUILD"]), c'
       - uses: actions/upload-artifact@v4
         with:
@@ -235,6 +241,8 @@ jobs:
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      previous: ${{ steps.release.outputs.previous }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -246,6 +254,7 @@ jobs:
           name: windows-debug-verification
           path: ${{ runner.temp }}/debug/verification
       - name: Create immutable Debug release, then advance the channel manifest
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -276,9 +285,33 @@ jobs:
           # البيان لا يتراجع أبدًا: رقم البناء المنشور يجب أن يكون أكبر من الموجود
           if gh release download windows-debug-channel --repo "$GITHUB_REPOSITORY" --pattern desktop-debug.json --dir current 2>/dev/null; then
             python3 -c 'import json,os,sys; old=json.load(open("current/desktop-debug.json"))["build"]; sys.exit(0 if int(os.environ["BUILD"])>old else f"build {os.environ[\"BUILD\"]} is not newer than published {old}")'
+            echo "previous=$(python3 -c 'import json; print(json.load(open("current/desktop-debug.json"))["build"])')" >> "$GITHUB_OUTPUT"
           else
             gh release create windows-debug-channel --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title 'VANTARA Windows Debug — قناة التحديث' --notes 'بيان قناة Windows Debug (desktop-debug.json). يقرؤه التطبيق فقط عند «البحث عن تحديثات».'
           fi
           gh release upload windows-debug-channel desktop-debug.json --clobber --repo "$GITHUB_REPOSITORY"
           echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+
+  update:
+    name: In-app update N -> N+1 on Windows (check, download, verify, install over, relaunch, keep data) and Debug beside Stable
+    needs: publish
+    if: needs.publish.outputs.previous != ''
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the previous published build, update it from inside the app, verify the result
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/verify-windows-update.ps1 -PreviousBuild ${{ needs.publish.outputs.previous }} -NewBuild $env:BUILD -Report (Join-Path $env:RUNNER_TEMP 'update-e2e.json')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-debug-update-e2e
+          path: ${{ runner.temp }}/update-e2e.json
+          if-no-files-found: warn

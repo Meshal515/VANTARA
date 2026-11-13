@@ -63,6 +63,7 @@ const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
 const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
+const updateReportOption=process.argv.find(x=>x.startsWith('--update-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -254,10 +255,17 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     app.quit();return;
   }
   await window.loadURL('vantara://app/index.html');
+  if (updateReportOption) {
+    // إثبات التحديث الداخلي: «البحث عن تحديثات» ← «تنزيل وتثبيت» ← «أعد التشغيل وحدّث» في الواجهة نفسها
+    const result = await require('./update-smoke.cjs').runUpdateSmoke({ window, reportPath: updateReportOption.slice('--update-smoke-report='.length), channelInfo, appVersion, updater, userData: app.getPath('userData') });
+    if (result.error) app.quit();
+    else setTimeout(() => app.quit(), 15000); // الزر يطلب الإغلاق نفسه؛ هذا احتياط فقط
+    return;
+  }
   if (reportOption) {
     setTimeout(async () => {
       try {
-        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,desktopVersion:window.VantaraDesktop?.version,hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
+        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,desktopVersion:window.VantaraDesktop?.version,desktopChannel:window.VantaraDesktop?.channel,desktopBuild:window.VantaraDesktop?.build??null,updateSmokeMarker:localStorage.getItem("vantara.updateSmoke.marker"),hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
         await fs.writeFile(reportOption.slice('--smoke-report='.length), JSON.stringify({ ...report, ...smokeDiagnostics }, null, 2));
         const image = await window.webContents.capturePage();
         await fs.writeFile(reportOption.slice('--smoke-report='.length) + '.png', image.toPNG());
