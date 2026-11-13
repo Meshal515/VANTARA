@@ -85,7 +85,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { applyAppearance, migrateAppearance, patchAppearance, toneCss, workStyleOf } from './appearance.js';
+import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
@@ -7234,7 +7234,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
-    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     playableSources, addSource,
     // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
     warmToday: true,
@@ -7272,7 +7272,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
-    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, currentPage, readKv, writeKv, sync,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), currentPage, readKv, writeKv, sync,
     playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
     openWorkOptions: (target) => openWorkOptions(target),

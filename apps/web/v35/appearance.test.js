@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCENTS, MANGA_WORK_STYLES, RETIRED_STYLES, WORK_STYLES, migrateAppearance, patchAppearance, accentOf, brandOf, stylesOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, workStyleOf, writeAppearance } from './appearance.js';
+import { ACCENTS, MANGA_WORK_STYLES, RETIRED_STYLES, WORK_STYLES, migrateAppearance, patchAppearance, accentOf, brandOf, stylesOf, applyAppearance, onAccent, paletteVars, readAppearance, toneCss, unifiedLookOn, workStyleOf, writeAppearance } from './appearance.js';
 
 const memory = () => {
   const m = new Map();
@@ -103,7 +103,7 @@ describe('المظهر', () => {
     expect(accentOf('anime', a)).toBe('#c9a227');
     expect(workStyleOf('anime', { style: { anime: 'nope' } })).toBe('core');
     s.setItem('vantara.appearance.v1', '{bad');
-    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false });
+    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false, unifiedLook: false });
   });
 
   it('اللون يصل لجذر التطبيق و<html> معًا، ويُمسح كله عند الرجوع للون المصمّم', () => {
@@ -180,5 +180,18 @@ describe('لون ما يُفتح من الواجهة (المشغّل والقا�
     // أوراق السيرفرات بنغمة القسم تلبس لون الموحد مع التوحيد
     expect(toneCss(a, { unified: true })).toContain(`[data-tone='cinema']{--accent:${hex('rose')}`);
     expect(toneCss(a)).toContain(`[data-tone='cinema']{--accent:${hex('gold')}`);
+  });
+});
+
+describe('«النمط الموحد» إعداد مستقل عن توحيد المحتوى (قرار المالك، 13 نوفمبر)', () => {
+  it('مقفل افتراضيًا، ويُحفظ ويُقرأ، ولا يمسّ أنماط الأقسام', () => {
+    const storage = memory();
+    expect(unifiedLookOn(readAppearance(storage))).toBe(false);
+    patchAppearance(() => ({ unifiedLook: true }), storage);
+    const a = readAppearance(storage);
+    expect(unifiedLookOn(a)).toBe(true);
+    expect(a.style).toEqual({});
+    patchAppearance(() => ({ unifiedLook: false }), storage);
+    expect(unifiedLookOn(readAppearance(storage))).toBe(false);
   });
 });

@@ -150,7 +150,7 @@ export const ACCENTS = Object.freeze([
 const SECTIONS = ['manga', 'anime', 'cinema'];
 
 function blank() {
-  return { style: {}, accent: {}, pureBlack: false };
+  return { style: {}, accent: {}, pureBlack: false, unifiedLook: false };
 }
 
 export function readAppearance(storage = globalThis.localStorage) {
@@ -161,11 +161,18 @@ export function readAppearance(storage = globalThis.localStorage) {
       style: v.style && typeof v.style === 'object' ? liveStyles(v.style) : {},
       accent: v.accent && typeof v.accent === 'object' ? v.accent : {},
       pureBlack: v.pureBlack === true,
+      unifiedLook: v.unifiedLook === true,
     };
   } catch {
     return blank();
   }
 }
+
+/**
+ * «النمط الموحد» (قرار المالك، 13 نوفمبر): شكل واحد لصفحة العمل في الأقسام الثلاثة، منفصل عن «توحيد المحتوى»
+ * ومتاح دائمًا. حين يُفعَّل يتقدّم على نمط كل قسم في صفحة العمل وحدها.
+ */
+export const unifiedLookOn = (a = readAppearance()) => a?.unifiedLook === true;
 
 export function writeAppearance(next, storage = globalThis.localStorage) {
   writePreference(KEY, JSON.stringify(next), storage);

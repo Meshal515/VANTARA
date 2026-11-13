@@ -212,6 +212,8 @@ export function renderAppearancePane(body, ctx) {
   const toggles = el('div', 'settings-list');
   toggles.append(
     toggleRow(ctx, 'grid', 'توحيد المحتوى', 'تطبيق واحد لكل أعمالك: رئيسية ومكتبة وبحث واستكشاف بفلتر الأنواع', structure.unifyContent, (on) => saveStructure(setUnifyContent(structure, on))),
+    // خياران منفصلان (قرار المالك): المحتوى الموحد يجمع الأقسام، والنمط الموحد شكل صفحة العمل
+    toggleRow(ctx, 'layers', 'النمط الموحد', 'صفحة عمل واحدة الشكل للمانجا والأنمي والسينما: الغلاف بعرض الصفحة، وزر واحد، وألسنة', look.unifiedLook === true, (on) => saveLook(() => ({ unifiedLook: on }))),
   );
   body.append(toggles);
   if (mode === 'independent') {

@@ -631,8 +631,11 @@ export function createAnime(deps) {
     tint(page, m.color);
     const wrap = el('article', 'aw');
     // نمط الصفحة من إعدادات المظهر: الأساسي (الغلاف في النص) أو أحد الأنماط الأربعة
-    const look = workStyleOf('anime');
+    // «النمط الموحد» (الإعدادات): هيكل «الأساسي» بلبوس unified-look.css، بلا عمق تمرير
+    const unified = deps.unifiedLook?.() ?? false;
+    const look = unified ? 'core' : workStyleOf('anime');
     wrap.dataset.style = look;
+    if (unified) wrap.dataset.unified = '';
 
     // الترويسة: رجوع، والشعار صغيرًا حين ينطوي البطل، وفي الجهة المقابلة المفضلة ورشّح والمزيد
     // رموزًا بلا كلام. تبقى ظاهرة مع التمرير؛ صلبة متى انطوى البطل (لا محتوى من خلفها)
@@ -697,7 +700,7 @@ export function createAnime(deps) {
       wrap.append(bar, hero, main);
     }
 
-    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, lw, heroRank: Infinity, heroShownRank: Infinity, heroTried: new Set(), artSettled: false, artDone: false, unbind: null };
+    state.view = { id: m.id, token, page, wrap, bar, barTitle, tools, menu, hero, bg, stage, mark, meta, genres, cover, side, still, cta, sources, about, insightHost, eps, more, body, look, lw, unified, heroRank: Infinity, heroShownRank: Infinity, heroTried: new Set(), artSettled: false, artDone: false, unbind: null };
     paintCover(m);
     paintMeta(m);
     paintCta(m);
@@ -714,7 +717,7 @@ export function createAnime(deps) {
     // العمق مع التمرير من جدول depth.js لكل الأنماط، «الأساسي» منها (كان بنسختين يدويتين في anime.css
     // وanime-depth.js). مداه في «الأساسي» ارتفاع البطل ناقص الشريط كما كان.
     const spanOf = () => (lw ? hero.offsetHeight || 300 : Math.max(1, hero.offsetHeight - bar.offsetHeight) || 300);
-    const unDepth = mountDepth('anime', look, { hero, bar, scope: `.v35 .aw[data-style='${look}']`, styleId: 'wl-motion', spanOf, active: live });
+    const unDepth = unified ? () => {} : mountDepth('anime', look, { hero, bar, scope: `.v35 .aw[data-style='${look}']`, styleId: 'wl-motion', spanOf, active: live });
     const unExtras = lw ? bindLookExtras(look, lw, { active: live }) : () => {};
     state.view.unbind = () => {
       unDepth();
@@ -800,7 +803,8 @@ export function createAnime(deps) {
   function paintHero(m) {
     const v = state.view;
     if (!v || v.id !== m?.id) return;
-    const plan = heroPlan(v.look);
+    // الموحد: البطل غلاف العمل نفسه (قرار المالك: لا بحث عن صور أخرى)، بنسبته بلا قص
+    const plan = v.unified ? { episodeStill: false, posterFallback: true, ambient: false, posterOnly: true } : heroPlan(v.look);
     // كم ينتظر البطل حسم أفضل مصدر قبل أن يعرض أفضل ما جهز (المحفوظ لكل عمل يُعرض فورًا)
     const HERO_SETTLE_MS = 2500;
     const current = () => state.detail?.id === v.id ? state.detail : m;
@@ -851,7 +855,8 @@ export function createAnime(deps) {
     };
     // Ranks describe the source itself; a newly arrived HD map must improve the
     // same episode even when its earlier TVDB frame was already displayed.
-    if (shot?.still) {
+    if (plan.posterOnly) add(m.poster ?? m.posterSmall, 0, 'poster', true);
+    else if (shot?.still) {
       for (const src of [shot.src, ...(shot.fallbacks ?? [])]) {
         const rank = src === art?.hd?.[String(ep)]?.src ? -4
           : src === art?.hd?.[String(ep)]?.mid ? -3.8
@@ -859,10 +864,11 @@ export function createAnime(deps) {
         add(src, rank, 'still');
       }
     }
-    if (/^tt\d+$/.test(imdb ?? '')) {
+    if (!plan.posterOnly && /^tt\d+$/.test(imdb ?? '')) {
       add(`https://images.metahub.space/background/large/${imdb}/img`, 0, 'backdrop');
       add(`https://images.metahub.space/background/medium/${imdb}/img`, 0.1, 'backdrop');
     }
+    if (!plan.posterOnly) {
     add(v.seriesBg, 0.3, 'backdrop');
     add(art?.fanart, 0.5, 'backdrop', true);
     // Remembered art is an immediate candidate, not an immutable quality lock.
@@ -871,6 +877,7 @@ export function createAnime(deps) {
     // A clear banner can appear on every viewport while preferred art is loading.
     add(m.banner, 1, 'backdrop', true);
     if (plan.posterFallback) add(m.poster ?? m.posterSmall, 2, 'poster', true);
+    }
     candidates.sort((a, b) => a.rank - b.rank);
     load.candidates = candidates;
     load.artKnown = Boolean(art) || Boolean(v.artDone);
@@ -902,7 +909,7 @@ export function createAnime(deps) {
         requestAnimationFrame(() => { if (state.view === v) v.hero.classList.add('amb'); });
       }
       if (pick.kind === 'backdrop' && pick.rank < 1) heroMemory.set(m.id, pick.src);
-      if (pick.kind !== 'poster' && img.naturalWidth && img.naturalHeight) {
+      if ((pick.kind !== 'poster' || v.unified) && img.naturalWidth && img.naturalHeight) {
         const ratio = `${img.naturalWidth} / ${img.naturalHeight}`;
         heroRatio.set(m.id, ratio);
         // مقاس البطل يُحسم قبل أن تُرى الصفحة ولا يتغير بعدها: كان ارتفاعه يتبع نسبة الصورة حين تصل، فيتحرك الغلاف

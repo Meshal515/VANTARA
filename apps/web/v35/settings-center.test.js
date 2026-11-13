@@ -74,11 +74,11 @@ describe('مركز الإعدادات', () => {
     expect(readAppearance(storage).style).toEqual({ anime: 'card', manga: 'resume' });
   });
 
-  it('مفتاح واحد فقط: «توحيد المحتوى» (توحيد الشاشات محذوف)، ويعمل مباشرة بلا شرط', () => {
+  it('«توحيد المحتوى» و«النمط الموحد» خياران منفصلان (توحيد الشاشات محذوف)، ويعملان مباشرة بلا شرط', () => {
     const storage = memory();
     const { body } = mount(storage);
     const switches = () => [...body.querySelectorAll('input[role="switch"]')];
-    expect(switches()).toHaveLength(2); // الخلفية، المحتوى
+    expect(switches()).toHaveLength(3); // الخلفية، المحتوى، النمط الموحد
     expect(body.textContent).not.toContain('توحيد الشاشات');
     expect(switches()[1].disabled).toBe(false);
     expect(body.querySelector('.look-tiles--static')).toBeTruthy();
@@ -87,6 +87,18 @@ describe('مركز الإعدادات', () => {
     expect(readStructure(storage).unifyContent).toBe(true);
     expect(body.querySelector('.look-tiles--static')).toBeFalsy();
     expect([...body.querySelectorAll('.look-caption')].at(-1).textContent).toContain('الموحّد');
+  });
+
+  it('«النمط الموحد» متاح دائمًا ومستقل: تفعيله لا يفعّل توحيد المحتوى', () => {
+    const storage = memory();
+    const { body } = mount(storage);
+    const look = () => [...body.querySelectorAll('input[role="switch"]')].find((s) => s.closest('.setting, label, div')?.textContent.includes('النمط الموحد'));
+    expect(look()).toBeTruthy();
+    expect(look().disabled).toBe(false);
+    look().checked = true;
+    look().onchange();
+    expect(readAppearance(storage).unifiedLook).toBe(true);
+    expect(readStructure(storage).unifyContent).toBe(false);
   });
 
   it('ألوان الأقسام الأربعة تبدأ بالأساسي البنفسجي دون خيار مستقل للعلامة', () => {
