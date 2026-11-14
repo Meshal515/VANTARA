@@ -738,7 +738,8 @@ class PlayerActivity : Activity() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             sampleUsage()
-            if (isPlaying) scheduleHide() else main.removeCallbacks(hideControls)
+            // متوقف: تُخفى الأدوات أيضًا لكن بعد مهلة أطول (قرار المالك: ترى اللقطة صافية؛ لمسة ترجعها)
+            scheduleHide()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -1347,17 +1348,18 @@ class PlayerActivity : Activity() {
         row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 28, boxDp = 52, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
-        playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 26, boxDp = 60, desc = "إيقاف مؤقت") { togglePlay() }.apply {
+        // قرار المالك (14 نوفمبر): دائرة التشغيل/الإيقاف وزرّا ±10 في منتصف الشاشة لا في الصف السفلي، وأكبر قليلًا
+        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
+        playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 30, boxDp = 72, desc = "إيقاف مؤقت") { togglePlay() }.apply {
             background = android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF),
                 GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(dp(2), Color.WHITE); setColor(0x33000000) },
                 null,
             )
         }
-        center.addView(playButton, LinearLayout.LayoutParams(dp(60), dp(60)).apply { leftMargin = dp(26); rightMargin = dp(26) })
-        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 28, boxDp = 52, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
-        row.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
+        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
+        controls.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         qualityLabel = label("HD", 12.5f, Color.WHITE, bold = true).apply {
@@ -1435,7 +1437,10 @@ class PlayerActivity : Activity() {
 
     private fun scheduleHide() {
         main.removeCallbacks(hideControls)
-        if (player.isPlaying && openSheet == null) main.postDelayed(hideControls, HIDE_AFTER_MS)
+        if (openSheet != null) return
+        if (player.isPlaying) main.postDelayed(hideControls, HIDE_AFTER_MS)
+        // إيقاف مقصود (لا تحميل ولا نهاية): الأدوات تختفي بعد 5 ث بلا لمس
+        else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) main.postDelayed(hideControls, PAUSED_HIDE_AFTER_MS)
     }
 
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
@@ -2389,6 +2394,7 @@ class PlayerActivity : Activity() {
         const val STALL_TIMEOUT_MS = 20_000L
         const val PROGRESS_EVERY_MS = 10_000L
         const val HIDE_AFTER_MS = 3_500L
+        const val PAUSED_HIDE_AFTER_MS = 5_000L
         const val SEEK_MS = 10_000L
         const val STREAK_MS = 800L
         const val BEST_WAIT_MS = 45_000L
