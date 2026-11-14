@@ -613,6 +613,11 @@
     padding: var(--ul-top) var(--gutter) 72px;
     isolation: isolate;
   }
+  /* #detail صفحة بنفسها (.page): display: grid أعلاه كان يغلب display: none للصفحات غير النشطة، فتبقى صفحة
+   * المانجا الموحدة فوق الإعدادات وكل صفحة بعدها (بلاغ المالك 14 نوفمبر). تُرى نشطةً أو أثناء حركتها فقط. */
+  .v35 #detail[data-look][data-unified]:not(.active):not(.page-out):not(.page-in) {
+    display: none;
+  }
   /* ضوء المنصة: هالة بلون القسم خلف الملصق، لا نسخة مضبّبة منه */
   .v35 :is(.aw, .cn-detail)[data-style][data-unified]::before,
   .v35 #detail[data-look][data-unified]::before {

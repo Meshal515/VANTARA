@@ -5403,6 +5403,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
+    // الإعدادات من الشريط وأنت داخل قسم منها: تبدأ من رأسها، والرجوع منها يعيدك لما قبل الإعدادات لا لقسم قديم
+    if (id === 'settings') state.stack = state.stack.filter((p) => p !== 'settings' && p !== 'settingsPane');
     // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
     const request = ++pageMotionRequest;
     // المؤشر يُقاس ويتحرك قبل أي كتابة في الصفحات: القياس بعدها كان يفرض تخطيطًا ثانيًا للصفحة كلها

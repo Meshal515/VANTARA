@@ -14,7 +14,7 @@ const deliverySeams=[
   'android/app/src/androidTest/java/com/vantara/anime/LiveDeliveryUiDeviceTest.kt',
   'apps/web/v35/anime-picker-lifecycle.test.js',
   'apps/web/v35/cinema-picker-lifecycle.test.js',
-  'apps/web/v35/server-sheet-lifecycle.test.js','apps/web/v35/work-unrunnable-sources.test.js',
+  'apps/web/v35/server-sheet-lifecycle.test.js','apps/web/v35/work-unrunnable-sources.test.js','apps/web/v35/page-visibility.test.js',
   'apps/web/v35/shell-addon-navigation.test.js',
   '.github/workflows/addon-delivery-ui-qa.yml',
 ];
