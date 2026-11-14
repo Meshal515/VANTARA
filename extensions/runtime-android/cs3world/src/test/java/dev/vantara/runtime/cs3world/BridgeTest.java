@@ -41,6 +41,22 @@ public class BridgeTest {
         for (String url : asked) assertTrue(url, url.startsWith("https://www.mediafire.com/"));
     }
 
+    @Test public void eachRequestAsksTheBrokerToFollowRedirectsAsTheLibraryAsked() throws Exception {
+        List<Object> follows = Collections.synchronizedList(new ArrayList<>());
+        Bridge.install(request -> {
+            follows.add(request.get("followRedirects"));
+            Map<String, Object> answer = new HashMap<>();
+            answer.put("url", request.get("url")); answer.put("status", 200);
+            answer.put("headers", Collections.emptyMap()); answer.put("body", new byte[0]);
+            return answer;
+        });
+        Object app = Class.forName("com.lagradost.cloudstream3.MainActivityKt").getMethod("getApp").invoke(null);
+        okhttp3.OkHttpClient base = (okhttp3.OkHttpClient) app.getClass().getMethod("getBaseClient").invoke(app);
+        base.newBuilder().followRedirects(false).build().newCall(new okhttp3.Request.Builder().url("https://a.example/x").build()).execute().close();
+        base.newBuilder().followRedirects(true).build().newCall(new okhttp3.Request.Builder().url("https://a.example/y").build()).execute().close();
+        assertEquals(java.util.Arrays.asList(Boolean.FALSE, Boolean.TRUE), follows);
+    }
+
     @Test public void aTransportRefusalIsAFailedServerNotACrash() throws Exception {
         Bridge.install(request -> { throw new RuntimeException("ORIGIN_NOT_ALLOWED"); });
         List<Map<String, Object>> links = new ArrayList<>();

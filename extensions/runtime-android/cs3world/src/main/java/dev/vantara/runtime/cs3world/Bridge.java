@@ -49,7 +49,11 @@ public final class Bridge {
                 .addInterceptor(chain -> {
                     Function<Map<String, Object>, Map<String, Object>> current = transport;
                     if (current == null) throw new java.io.IOException("TRANSPORT_UNAVAILABLE");
-                    return exchange(current, chain.request());
+                    // NiceHttp sets follow-redirects per request on its own client copy; this interceptor answers the
+                    // whole call, so the broker follows (or not) exactly as that request asked.
+                    boolean follow = !(chain.call() instanceof okhttp3.internal.connection.RealCall)
+                            || ((okhttp3.internal.connection.RealCall) chain.call()).getClient().followRedirects();
+                    return exchange(current, chain.request(), follow);
                 })
                 .build();
         MainActivityKt.getApp().setBaseClient(client);
@@ -57,7 +61,7 @@ public final class Bridge {
         installed = true;
     }
 
-    private static Response exchange(Function<Map<String, Object>, Map<String, Object>> transport, Request request) throws java.io.IOException {
+    private static Response exchange(Function<Map<String, Object>, Map<String, Object>> transport, Request request, boolean follow) throws java.io.IOException {
         Map<String, Object> out = new HashMap<>();
         out.put("url", request.url().toString());
         out.put("method", request.method());
@@ -75,8 +79,7 @@ public final class Bridge {
                 out.put("headers", headers);
             }
         }
-        // The library follows redirects itself through OkHttp; the broker answers each hop.
-        out.put("followRedirects", Boolean.FALSE);
+        out.put("followRedirects", follow);
         Map<String, Object> in;
         try { in = transport.apply(out); }
         catch (RuntimeException failure) { throw new java.io.IOException(failure.getMessage() == null ? "TRANSPORT_FAILED" : failure.getMessage()); }

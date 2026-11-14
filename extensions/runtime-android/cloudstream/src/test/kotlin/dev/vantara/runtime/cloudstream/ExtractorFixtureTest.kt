@@ -16,7 +16,7 @@ import org.junit.Test
 
 /** Offline fixtures shaped like each host's embed page. Live behaviour is checked separately by LiveExtractorProbeTest. */
 class ExtractorFixtureTest {
-    @After fun reset(){NetworkBridge.reset();WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()}
+    @After fun reset(){NetworkBridge.reset();com.lagradost.cloudstream3.utils.ExtractorRegistry.clear();WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()}
     private fun serve(pages:Map<String,String>) = NetworkBridge.install{request,_->
         val body=pages.entries.firstOrNull{request.url.toString().startsWith(it.key)}?.value
         Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(if(body==null)404 else 200).message("")
@@ -89,5 +89,18 @@ class ExtractorFixtureTest {
         // A removed file is MediaFire's error page: no button, no link (never another address on the page)
         assertNull(dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress("""<a href="https://download1.example.com/x.mp4">x</a>"""))
         assertNull("only MediaFire's own download hosts",dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress("""<a href="https://evil.example/x.mp4" id="downloadButton">x</a>"""))
+    }
+
+    // المسح الحي (14 نوفمبر، AnimeWitcher): مستخرج الإضافة الخاص بـ MediaFire فشل، فسقط السيرفر ولم يُجرَّب مستخرج VANTARA
+    @Test fun aProvidersOwnFailingExtractorNoLongerHidesTheNextOne() {
+        com.lagradost.cloudstream3.utils.ExtractorRegistry.add(object:com.lagradost.cloudstream3.utils.ExtractorApi(){
+            override val name="ProviderMediafire";override val mainUrl="https://www.mediafire.com"
+            override suspend fun getUrl(url:String,referer:String?,subtitleCallback:(com.lagradost.cloudstream3.SubtitleFile)->Unit,callback:(ExtractorLink)->Unit){ error("the provider's own extractor broke") }
+        })
+        val file="https://download2392.mediafire.com/abc/q/VERTEX_FORCE_001_480p.mp4"
+        serve(mapOf("https://www.mediafire.com/file_premium/q/" to """<a class="input popsok" href="$file" id="downloadButton">Download</a>"""))
+        val link=resolve("https://www.mediafire.com/file_premium/q/VERTEX_FORCE_001_480p.mp4/file").single()
+        assertEquals(file,link.url)
+        assertTrue("a server that resolved is not reported missing",WorkerState.takeMissingExtractors().isEmpty())
     }
 }
