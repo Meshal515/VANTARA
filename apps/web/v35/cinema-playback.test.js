@@ -41,8 +41,10 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   expect(first.className).toContain('an-srv--ready');
   expect(first.className).toContain('ss-row--torrent');
   expect(sheet.querySelector('.ss-row--top .ss-name').textContent).toBe('Torrentio');
-  expect(Boolean(sheet.querySelector('.cn-srv-wait'))).toBe(httpPending);
-  expect(sheet.querySelectorAll('.an-srv-group > .an-srv-grid .an-srv').length).toBe(6);
+  // ما يُفحص يبقى بمكانه في قسمه (لا يُطوى ثم يقفز)؛ لا قسم «تُجهَّز بالخلفية»
+  expect(Boolean(sheet.querySelector('.cn-srv-wait'))).toBe(false);
+  expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(6);
+  expect(sheet.querySelectorAll('.ss-group--direct > .an-srv-grid .an-srv').length).toBe(httpPending ? 1 : 0);
   const more=sheet.querySelector('.an-srv-group details');
   expect(more.open).toBeFalsy();
   expect(more.querySelector('summary').textContent).toContain('67');

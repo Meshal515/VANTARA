@@ -1449,3 +1449,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* الجودة والمصدر قائمتان متجاورتان (طلب المالك): زر يفتح قائمة تحته، لا صف كامل من الخيارات */
+.v35 .ss-drops {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 18px;
+}
+.v35 .ss-drop {
+  margin-inline-start: 0;
+}
+.v35 .ss-drop .ss-addon-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.v35 .ss-drop .ss-addon-btn:disabled .ss-addon-chev {
+  display: none;
+}
+.v35 .an-pick-filters .ss-tabs[hidden] {
+  display: none;
+}

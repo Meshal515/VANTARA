@@ -213,6 +213,9 @@ export function factDate(v) {
  * على الشاشة العريضة (≥ 900px): لوحتان — الصورة الكبيرة بالشعار والوصف في جهة،
  * وقائمة المصادر بمرشّحاتها وزرّ التشغيل في الجهة الأخرى تُمرَّر وحدها.
  */
+/** لمسة على صف بعد تحرّك القائمة بأقل من هذا تُهمل (لا تشغيل بالخطأ). */
+const TAP_GUARD_MS = 450;
+
 export function createServerSheet(body, o) {
   let destroyed = false;
   const frames = new Set();
@@ -491,20 +494,10 @@ export function createServerSheet(body, o) {
   listen(scroll, 'touchend', fling, { passive: true });
   listen(scroll, 'touchcancel', fling, { passive: true });
   listen(scroll, 'scrollend', handBack, { passive: true });
-  // لمسة خارج قائمة المصدر تغلقها
-  listen(body, 'click', () => {
-    addonOpen = false;
-    const w = body.querySelector('.ss-addon.open');
-    body.querySelectorAll('.ss-addon-menu').forEach((m) => m.remove());
-    if (!w) return;
-    w.classList.remove('open');
-    w.querySelector('.ss-addon-btn')?.setAttribute('aria-expanded', 'false');
-  });
+  // لمسة خارج القائمة تغلقها
+  listen(body, 'click', () => closeDrops());
 
   const filter = { q: 'all', v: null, a: 'all' };
-  // قائمة المصدر مفتوحة؟ السيرفرات تصل تباعًا وكل وصول يعيد رسم المرشّحات، فكانت القائمة تُغلق
-  // بعد فتحها مباشرة. تبقى مفتوحة (ومكان تمريرها) ويُضاف إليها كل مصدر يصل.
-  let addonOpen = false;
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
@@ -516,6 +509,11 @@ export function createServerSheet(body, o) {
   };
   const rows = new Map();
   const views = new Map();
+  const placed = new Map();
+  const folded = new Map();
+  const sectionAt = new Map();
+  let placedSeq = 0;
+  let lastFilterKey = '';
   const view = (r) => {
     // الوصف يتغيّر بتغيّر الحالة لا بغيرها: يُحسب مرة لكل نسخة من السيرفر
     const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}`;
@@ -562,11 +560,15 @@ export function createServerSheet(body, o) {
   const note = el('div', 'ss-note');
   note.setAttribute('aria-live', 'polite');
 
+  // لحظة تحرّك فيها صف موجود: لمسة بعدها مباشرة كانت تشغّل سيرفرًا غير الذي قصده الإصبع
+  let shiftedAt = 0;
   const reconcile = (parent, nodes) => {
+    const before = new Map([...parent.children].map((node, i) => [node, i]));
     nodes.forEach((node, i) => {
       if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
     });
     while (parent.children.length > nodes.length) parent.lastElementChild.remove();
+    if (nodes.some((node, i) => before.has(node) && before.get(node) !== i)) shiftedAt = Date.now();
   };
 
   // ثلاث حالات لا تختلط (lib/route-validity.js): صالح / قيد الفحص / غير متاح
@@ -674,7 +676,10 @@ export function createServerSheet(body, o) {
     const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
-    b.onclick = () => (selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r));
+    b.onclick = () => {
+      if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
+      return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
+    };
     return b;
   }
 
@@ -713,21 +718,83 @@ export function createServerSheet(body, o) {
   }
 
   // مرشّحات نصّية في سطر واحد: الجودة، ثم مترجم/مدبلج، ثم قائمة المصدر
-  const tabs = (items, active, onPick, label) => {
-    const g = el('div', 'ss-tabs');
-    g.setAttribute('role', 'group');
-    g.setAttribute('aria-label', label);
-    for (const [key, text] of items) {
-      const b = btn(`ss-tab${key === active ? ' on' : ''}`);
-      b.textContent = text;
-      b.setAttribute('aria-pressed', String(key === active));
-      b.onclick = () => onPick(key);
-      g.append(b);
-    }
-    return g;
-  };
-
   let last = { routes: [] };
+  // شريط المرشّحات يُبنى مرة واحدة ويبقى بمكانه وارتفاعه من أول لحظة (لا قفزة حين يظهر): الجودة والمصدر
+  // قائمتان متجاورتان تفتحان تحت الزر نفسه، واللغة زرّان (مترجم/مدبلج). وصول سيرفر جديد يحدّث خيارات القائمة
+  // في مكانها؛ القائمة المفتوحة لا تُغلق ولا تُعاد (كانت تُحذف وتُبنى مع كل سيرفر فتومض).
+  const drops = [];
+  const closeDrops = (except = null) => { for (const d of drops) if (d !== except) d.setOpen(false); };
+  const dropdown = (label) => {
+    const wrap = el('div', 'ss-addon ss-drop');
+    const toggle = btn('ss-addon-btn', '', label);
+    const caption = el('span');
+    caption.dir = 'auto';
+    toggle.append(caption);
+    toggle.insertAdjacentHTML('beforeend', glyph('chevron', { size: 14, cls: 'icon ss-addon-chev' }));
+    toggle.setAttribute('aria-haspopup', 'listbox');
+    toggle.setAttribute('aria-expanded', 'false');
+    const menu = el('div', 'ss-addon-menu');
+    menu.setAttribute('role', 'listbox');
+    menu.setAttribute('aria-label', label);
+    menu.hidden = true;
+    menu.onclick = (e) => e.stopPropagation();
+    wrap.append(toggle);
+    let signature = '';
+    const d = { wrap, open: false };
+    d.setOpen = (open) => {
+      if (open === d.open) return;
+      if (open) {
+        closeDrops(d);
+        const a = toggle.getBoundingClientRect?.();
+        const b = body.getBoundingClientRect?.();
+        if (a && b) {
+          menu.style.top = `${a.bottom - b.top + 4}px`;
+          menu.style.left = `${Math.max(8, Math.min(a.left - b.left, b.width - 198))}px`;
+        }
+        if (!menu.isConnected) body.append(menu);
+      }
+      d.open = open;
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      wrap.classList.toggle('open', open);
+    };
+    toggle.onclick = (e) => { e.stopPropagation(); d.setOpen(!d.open); };
+    d.set = (options, value, text, onPick) => {
+      caption.textContent = text;
+      toggle.disabled = options.length < 3; // «الكل» وخيار واحد: لا اختيار
+      const next = JSON.stringify([options, value]);
+      if (next === signature) return;
+      signature = next;
+      menu.replaceChildren(...options.map(([key, label]) => {
+        const opt = btn('ss-addon-opt', '');
+        opt.setAttribute('role', 'option');
+        opt.dataset.value = String(key);
+        opt.setAttribute('aria-selected', String(key === value));
+        const t = el('span', null, label);
+        t.dir = 'auto';
+        opt.append(el('i', 'ss-addon-dot'), t);
+        opt.onclick = (e) => { e.stopPropagation(); d.setOpen(false); onPick(key); };
+        return opt;
+      }));
+    };
+    drops.push(d);
+    return d;
+  };
+  const quality = dropdown('الجودة');
+  const source = dropdown('المصدر');
+  const drop = el('div', 'ss-drops');
+  drop.append(quality.wrap, source.wrap);
+  const lang = el('div', 'ss-tabs');
+  lang.setAttribute('role', 'group');
+  lang.setAttribute('aria-label', 'اللغة');
+  const langTabs = [['SUB', 'مترجم'], ['DUB', 'مدبلج']].map(([key, text]) => {
+    const b = btn('ss-tab');
+    b.textContent = text;
+    b.onclick = () => { filter.v = filter.v === key ? null : key; update(last); };
+    lang.append(b);
+    return [key, b];
+  });
+  filters.append(drop, lang);
   function paintFilters(routes) {
     const live = routes.filter((r) => !isDead(r));
     const qs = [...new Set(live.map((r) => view(r).q).filter((x) => x != null))].sort((a, b) => b - a);
@@ -737,67 +804,17 @@ export function createServerSheet(body, o) {
     if (!(dub && sub)) filter.v = null;
     const names = [...new Set(live.map((r) => view(r).name))];
     if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
-    const parts = [];
-    let reopen = null;
-    if (qs.length > 1) parts.push(tabs([['all', 'الكل'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q, (k) => { filter.q = k; update(last); }, 'الجودة'));
-    // اللغة زرّان يُلغى المختار منهما بلمسة ثانية
-    if (dub && sub) parts.push(tabs([['SUB', 'مترجم'], ['DUB', 'مدبلج']], filter.v, (k) => { filter.v = filter.v === k ? null : k; update(last); }, 'اللغة'));
-    if (names.length > 1) {
-      // قائمة المصدر بتصميم الورقة نفسها (كان <select> يفتح نافذة النظام البيضاء/السوداء)
-      const wrap = el('div', 'ss-addon');
-      const toggle = btn('ss-addon-btn', `<span>${filter.a === 'all' ? 'كل المصادر' : filter.a}</span>${glyph('chevron', { size: 14, cls: 'icon ss-addon-chev' })}`, 'المصدر');
-      toggle.setAttribute('aria-haspopup', 'listbox');
-      const menu = el('div', 'ss-addon-menu');
-      menu.setAttribute('role', 'listbox');
-      menu.hidden = true;
-      for (const [value, text] of [['all', 'كل المصادر'], ...names.map((n) => [n, n])]) {
-        const opt = btn('ss-addon-opt', '');
-        opt.setAttribute('role', 'option');
-        opt.dataset.value = value;
-        opt.setAttribute('aria-selected', String(value === filter.a));
-        const label = el('span', null, text);
-        label.dir = 'auto';
-        opt.append(el('i', 'ss-addon-dot'), label);
-        opt.onclick = (e) => {
-          e.stopPropagation();
-          addonOpen = false;
-          filter.a = value;
-          update(last);
-        };
-        menu.append(opt);
-      }
-      // القائمة خارج صف المرشّحات (يُمرَّر أفقيًا فيقصّ ما ينزل منه)، تحت الزر مباشرة
-      const setOpen = (open) => {
-        addonOpen = open;
-        body.querySelectorAll('.ss-addon-menu').forEach((m) => { if (m !== menu) m.remove(); });
-        if (open) {
-          const a = toggle.getBoundingClientRect?.();
-          const b = body.getBoundingClientRect?.();
-          if (a && b) {
-            menu.style.top = `${a.bottom - b.top + 4}px`;
-            menu.style.left = `${Math.max(8, a.left - b.left)}px`;
-          }
-          body.append(menu);
-        }
-        menu.hidden = !open;
-        toggle.setAttribute('aria-expanded', String(open));
-        wrap.classList.toggle('open', open);
-      };
-      toggle.onclick = (e) => {
-        e.stopPropagation();
-        setOpen(menu.hidden);
-      };
-      wrap.append(toggle);
-      parts.push(wrap);
-      reopen = addonOpen ? () => { setOpen(true); menu.scrollTop = keptScroll; } : null;
-    } else addonOpen = false;
-    const keptScroll = body.querySelector('.ss-addon-menu')?.scrollTop ?? 0;
-    body.querySelectorAll('.ss-addon-menu').forEach((m) => m.remove());
-    filters.replaceChildren(...parts);
-    reopen?.();
-    filters.hidden = !parts.length;
-    // سطر أعرض من الشاشة: يذوب طرفه إشارةً إلى أنه يُمرَّر، بدل قصّ كلمة في منتصفها
-    frame(() => filters.classList.toggle('ss-filters--more', filters.scrollWidth > filters.clientWidth + 1));
+    quality.set([['all', 'كل الجودات'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q,
+      filter.q === 'all' ? (qs.length === 1 ? qualityLabel(qs[0]) : 'كل الجودات') : qualityLabel(filter.q),
+      (k) => { filter.q = k; update(last); });
+    source.set([['all', 'كل المصادر'], ...names.map((n) => [n, n])], filter.a,
+      filter.a === 'all' ? (names.length === 1 ? names[0] : 'كل المصادر') : filter.a,
+      (k) => { filter.a = k; update(last); });
+    lang.hidden = !(dub && sub);
+    for (const [key, b] of langTabs) {
+      b.classList.toggle('on', filter.v === key);
+      b.setAttribute('aria-pressed', String(filter.v === key));
+    }
   }
   const passes = (r) => (filter.q === 'all' || view(r).q === filter.q)
     && (filter.v == null || (filter.v === 'DUB') === (r.variant === 'DUB'))
@@ -829,20 +846,35 @@ export function createServerSheet(body, o) {
     const empty = !top && Boolean(model.settled || model.missing || model.error || model.noSources);
     status.hidden = empty;
 
-    // المباشر ثم التورنت؛ ما يُجهَّز بعد (حين يوجد جاهز) وما تعذّر مطويّان
-    const pend = shown.filter(isPending);
+    // ترتيب ثابت (طلب المالك): صف ظهر لا يتحرك من مكانه ولا يختفي؛ تتغير حالته فقط (يُفحص ← صالح/تعذّر).
+    // الجديد يُضاف تحت الموجود، وما وصل في الدفعة نفسها يُرتّب بالأفضلية. «شغّل الأفضل» و«مقترح» يدلّان
+    // على الأفضل دون نقل الصفوف تحت الإصبع. والقسم الذي ظهر أولًا يبقى أولًا (التورنت يسبق عادةً).
+    // تغيير المرشّح بيد المستخدم يعيد توزيع الظاهر/الإضافي مرة؛ وصول السيرفرات لا يعيده
+    const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
+    if (filterKey !== lastFilterKey) { lastFilterKey = filterKey; folded.clear(); }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
-    const live = shown.filter((r) => isSelectable(r) || (isPending(r) && !anyReady));
-    const directLive = live.filter((r) => !view(r).torrent)
-      .map((r) => ({ r, s: isSelectable(r) ? rank(r, view(r)) : 0 }))
-      .sort((a, b) => b.s - a.s).map((x) => x.r);
-    // التورنت بترتيب الترشيح نفسه: الأول هو المقترح، وما تحته أقرب إليه
-    const torrentLive = live.filter((r) => view(r).torrent).map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : 0 })).sort((a, b) => b.s - a.s || torrentOrder(a, b)).map((x) => x.r);
+    // صف ظاهر يبقى بمكانه وإن تعذّر؛ صف مطويّ في «نسخ إضافية» يتعذّر يذهب إلى «غير متاح» (لا يُرى فلا قفزة)
+    const live = shown.filter((r) => isSelectable(r) || isPending(r) || (placed.has(r.id) && folded.get(r.id) !== false));
+    const fresh = live.filter((r) => !placed.has(r.id))
+      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : -1e9 }))
+      .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
+    for (const { r } of fresh) placed.set(r.id, ++placedSeq);
+    const bySeq = (a, b) => placed.get(a.id) - placed.get(b.id);
+    const directLive = live.filter((r) => !view(r).torrent).sort(bySeq);
+    const torrentLive = live.filter((r) => view(r).torrent).sort(bySeq);
 
     const fill = (g, items, cap, weak) => {
       const main = [];
       const extra = [];
-      for (const r of items) ((r.id !== topId && (weak?.(r) || main.length >= cap)) ? extra : main).push(row(r));
+      // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها
+      for (const r of items) {
+        let shownHere = folded.get(r.id);
+        if (shownHere == null) {
+          shownHere = !(weak?.(r) || main.length >= cap) || r.id === topId;
+          folded.set(r.id, shownHere);
+        }
+        (shownHere ? main : extra).push(row(r));
+      }
       reconcile(g.grid, main);
       reconcile(g.moreGrid, extra);
       g.more.hidden = !extra.length;
@@ -850,26 +882,29 @@ export function createServerSheet(body, o) {
       g.count.textContent = String(items.length);
       g.s.hidden = !items.length;
     };
-    fill(direct, directLive, 8);
+    fill(direct, directLive, 12);
     fill(torrent, torrentLive, 6, (r) => {
       const d = view(r);
       return d.tier === 'dead' || d.info?.source === 'CAM';
     });
-    // ترتيب الأقسام ثابت: مباشر، تورنت، يُجهَّز، غير متاح
-    const waiting = anyReady ? pend : [];
-    reconcile(wait.grid, waiting.map(row));
-    wait.summary.textContent = `تُجهَّز بالخلفية (${waiting.length})`;
-    reconcile(dead.grid, gone.map(row));
-    dead.summary.textContent = `غير متاح الآن (${gone.length})`;
+    // قسمان يظهران في الوصول نفسه: ما فيه سيرفر صالح أولًا (المباشر عند التساوي)
+    const newGroups = [[direct, directLive], [torrent, torrentLive]].filter(([g, items]) => items.length && !sectionAt.has(g))
+      .sort((a, b) => Number(b[1].some(isSelectable)) - Number(a[1].some(isSelectable)));
+    for (const [g] of newGroups) sectionAt.set(g, ++placedSeq);
+    const groups = [direct, torrent].filter((g) => sectionAt.has(g) && !g.s.hidden).sort((a, b) => sectionAt.get(a) - sectionAt.get(b));
+    // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
+    const neverShown = gone.filter((r) => !live.includes(r));
+    const waiting = [];
+    reconcile(wait.grid, waiting);
+    reconcile(dead.grid, neverShown.map(row));
+    dead.summary.textContent = `غير متاح الآن (${neverShown.length})`;
     const loading = !routes.length && !model.settled && !model.missing && !model.error && !model.noSources;
     if (empty) paintNote(model);
     const order = [
       empty ? note : null,
       loading ? skeleton : null,
-      directLive.length ? direct.s : null,
-      torrentLive.length ? torrent.s : null,
-      waiting.length ? wait.d : null,
-      gone.length ? dead.d : null,
+      ...groups.map((g) => g.s),
+      neverShown.length ? dead.d : null,
     ].filter(Boolean);
     reconcile(list, order);
     if (!order.length && routes.length) list.replaceChildren(el('p', 'ss-none', 'لا سيرفر بهذا الاختيار — جرّب جودة أو لغة أو مصدرًا آخر'));
