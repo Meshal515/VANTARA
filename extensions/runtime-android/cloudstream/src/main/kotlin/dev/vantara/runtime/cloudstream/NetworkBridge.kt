@@ -18,6 +18,18 @@ object NetworkBridge {
     fun install(transport:(Request,Boolean)->Response){synchronized(admission){check(generation==null){"Network already installed"};generation=Generation(transport)}}
     fun reset(){synchronized(admission){generation=null;admission.notifyAll()}}
     fun interceptor():Interceptor=BrokerTerminal()
+    /**
+     * Called at the start of every OkHttpClient.Builder.build() in the Debug runtime APK (a build-time hook on OkHttp,
+     * android/app/build.gradle). Inside an isolated worker a provider that builds its own client (WitAnime: its own
+     * TLS settings and cookie jar) had no network at all and failed before its first request; now every client it
+     * builds ends in this broker, with the same DNS, SNI, origin and verification policy as CloudStream's own `app`.
+     * Outside a worker no bridge is installed and this does nothing (the host app's clients are untouched).
+     */
+    @JvmStatic fun adopt(builder:OkHttpClient.Builder) {
+        if(synchronized(admission){generation==null})return
+        if(builder.interceptors().any{it is BrokerTerminal})return
+        builder.addInterceptor(BrokerTerminal())
+    }
     private fun current():Generation=synchronized(admission){generation?:throw IOException("BROKER_NOT_INSTALLED")}
     private fun checkCurrent(expected:Generation,call:Call){
         if(generation!==expected)throw IOException("BROKER_RESET")
