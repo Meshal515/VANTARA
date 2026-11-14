@@ -5,6 +5,7 @@
 //   node tools/torrent-host/swarm-ab.mjs --libtorrent=PATH --rqbit=PATH --report=out.json [--rounds=2]
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { torrentFacts } from './torrent-file.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
@@ -15,11 +16,19 @@ const opt = name => process.argv.find(a => a.startsWith(`--${name}=`))?.slice(na
 const engines = { libtorrent: opt('libtorrent'), rqbit: opt('rqbit') };
 const reportPath = opt('report') ?? 'swarm-ab.json';
 const rounds = Number(opt('rounds') ?? 2);
+// strong (Ubuntu/Debian) أو cc-by (أفلام Blender) أو all؛ السير الأساسي يكتفي بـcc-by حتى لا يطول
+const which = opt('sources') ?? 'all';
 // مصادر قانونية مشهورة البذر (WebTorrent/Blender Foundation، CC-BY 3.0)
 const SOURCES = [
   { label: 'Sintel (CC-BY)', infoHash: '08ada5a7a6183aae1e09d831df6748d566095a10', name: 'Sintel' },
   { label: 'Big Buck Bunny (CC-BY)', infoHash: 'dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c', name: 'Big Buck Bunny' },
   { label: 'Tears of Steel (CC-BY)', infoHash: '209c8226b299b308beaf2b9cd3fb49212dbd13ec', name: 'Tears of Steel' },
+];
+// أسراب قوية قانونية للمقارنة العادلة مع قياس الـAPK (11–14MB/s على سرب 866 باذرًا): ملف التورنت الرسمي لأحدث
+// إصدار يُجلب وقت التشغيل وتُحسب بصمته (infohash) منه، فلا بصمة محفوظة تتقادم.
+const STRONG = [
+  { label: 'Ubuntu desktop (latest)', listing: 'https://releases.ubuntu.com/noble/', pattern: /ubuntu-[\d.]+-desktop-amd64\.iso\.torrent/g },
+  { label: 'Debian netinst (latest)', listing: 'https://cdimage.debian.org/debian-cd/current/amd64/bt-cd/', pattern: /debian-[\d.]+-amd64-netinst\.iso\.torrent/g },
 ];
 const WEBTORRENT_TRACKERS = ['udp://tracker.leechers-paradise.org:6969', 'udp://tracker.coppersurfer.tk:6969', 'udp://explodie.org:6969', 'udp://tracker.opentrackr.org:1337/announce'];
 const BUDGET_MS = 90_000;
@@ -27,6 +36,15 @@ const auth = `ab:${Math.random().toString(36).slice(2)}`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const port = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const H = { Authorization: `Basic ${Buffer.from(auth).toString('base64')}` };
+
+async function resolveStrong({ label, listing, pattern }) {
+  const html = await (await fetch(listing)).text();
+  const files = [...new Set(html.match(pattern) ?? [])].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  if (!files.length) throw new Error(`${label}: no torrent in ${listing}`);
+  const file = files.at(-1);
+  const facts = torrentFacts(Buffer.from(await (await fetch(new URL(file, listing))).arrayBuffer()));
+  return { label: `${label}: ${facts.name}`, infoHash: facts.infoHash, name: facts.name, trackers: facts.trackers };
+}
 
 function call(base, path, { method = 'GET', body, timeout = 60000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -81,20 +99,24 @@ async function measure(kind, source) {
     const started = performance.now();
     for (let i = 0; ; i++) { try { if ((await call(base, '/', { timeout: 1000 })).status === 200) break; } catch {} if (i > 300) throw new Error('engine not ready'); await sleep(50); }
     row.engineReadyMs = Math.round(performance.now() - started);
-    const magnet = `magnet:?xt=urn:btih:${source.infoHash}&dn=${encodeURIComponent(source.name)}${mergeTrackers(WEBTORRENT_TRACKERS).map(t => `&tr=${encodeURIComponent(t)}`).join('')}`;
+    const magnet = `magnet:?xt=urn:btih:${source.infoHash}&dn=${encodeURIComponent(source.name)}${mergeTrackers([...(source.trackers ?? []), ...WEBTORRENT_TRACKERS]).map(t => `&tr=${encodeURIComponent(t)}`).join('')}`;
     const t0 = performance.now();
     const meta = await call(base, '/torrents?list_only=true', { method: 'POST', body: magnet, timeout: BUDGET_MS });
     if (meta.status !== 200) throw new Error(`metadata HTTP ${meta.status}`);
     row.metadataMs = Math.round(performance.now() - t0);
     const files = meta.json.details.files;
-    const index = files.map((f, i) => [f, i]).filter(([f]) => /\.(mp4|mkv|webm|m4v)$/i.test(f.name)).sort((a, b) => b[0].length - a[0].length)[0]?.[1];
-    if (index == null) throw new Error('no video file');
+    const byLength = files.map((f, i) => [f, i]).sort((a, b) => b[0].length - a[0].length);
+    const index = (byLength.find(([f]) => /\.(mp4|mkv|webm|m4v)$/i.test(f.name)) ?? byLength[0])?.[1];
+    if (index == null) throw new Error('no file');
     row.file = files[index].name; row.fileBytes = files[index].length;
     const added = await call(base, `/torrents?only_files=${index}`, { method: 'POST', body: magnet, timeout: BUDGET_MS });
     if (added.status !== 200) throw new Error(`add HTTP ${added.status}`);
     const url = `${base}/torrents/${added.json.id}/stream/${index}`;
     row.head4MB = await readRange(url, 0, 4 << 20, BUDGET_MS);
     row.clickToFirstByteMs = row.head4MB.firstByteMs == null ? null : Math.round(row.metadataMs + row.head4MB.firstByteMs);
+    // سرعة مستمرة تقارن بمتوسط قياس الـAPK: 32MB بعد أول 4MB مباشرة (قراءة تسلسلية كالمشغل)
+    row.sustained32MB = await readRange(url, 4 << 20, 32 << 20, 120_000);
+    row.sustainedMBps = row.sustained32MB.status === 206 && row.sustained32MB.bytes === 32 << 20 && row.sustained32MB.totalMs ? +(32 / (row.sustained32MB.totalMs / 1000)).toFixed(2) : null;
     row.seek50pct4MB = await readRange(url, Math.floor(files[index].length / 2), 4 << 20, BUDGET_MS);
     // صحيح فقط إن كان 206 بالمدى المطلوب بالضبط وبالطول كاملًا
     const exact = (r, from) => r.status === 206 && r.totalMs != null && r.bytes === 4 << 20 && r.contentRange?.startsWith(`bytes ${from}-${from + (4 << 20) - 1}/`);
@@ -109,8 +131,12 @@ async function measure(kind, source) {
 }
 
 const report = { started: new Date().toISOString(), platform: process.platform, budgetMs: BUDGET_MS, note: 'Real public swarms of CC-BY films; indicative of network conditions at run time.', runs: [] };
+const strong = [];
+for (const s of which === 'cc-by' ? [] : STRONG) { try { strong.push(await resolveStrong(s)); } catch (error) { report.runs.push({ source: s.label, error: `resolve: ${error.message}` }); } }
+const chosen = [...strong, ...(which === 'strong' ? [] : SOURCES)];
+report.sources = chosen.map(({ label, infoHash }) => ({ label, infoHash }));
 for (let round = 0; round < rounds; round++) {
-  for (const source of SOURCES) {
+  for (const source of chosen) {
     const order = round % 2 === 0 ? ['libtorrent', 'rqbit'] : ['rqbit', 'libtorrent'];
     for (const kind of order) {
       if (!engines[kind]) continue;
@@ -122,12 +148,15 @@ for (let round = 0; round < rounds; round++) {
   }
 }
 const summary = {};
+const median = list => { const v = list.filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+const strongLabels = new Set(strong.map(s => s.label));
 for (const kind of Object.keys(engines)) {
-  const rows = report.runs.filter(r => r.engine === kind && !r.error);
-  const invalid = rows.filter(r => r.head4MB?.status !== 206).length;
-  const median = list => { const v = list.filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
-  summary[kind] = { ok: rows.length - invalid, invalidStreams: invalid, failed: report.runs.filter(r => r.engine === kind && r.error).length,
-    medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)) };
+  for (const [group, pick] of [['strong', r => strongLabels.has(r.source)], ['cc-by', r => !strongLabels.has(r.source)]]) {
+    const all = report.runs.filter(r => r.engine === kind && pick(r)), rows = all.filter(r => !r.error);
+    summary[`${kind}/${group}`] = { ok: rows.filter(r => r.head4MB?.status === 206).length, failed: all.length - rows.length,
+      medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)),
+      medianSustainedMBps: median(rows.map(r => r.sustainedMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)) };
+  }
 }
 report.summary = summary;
 await writeFile(reportPath, JSON.stringify(report, null, 2));

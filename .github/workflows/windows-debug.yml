@@ -222,12 +222,14 @@ jobs:
           Get-Content (Join-Path $dir 'torrent-summary.json')
       - name: Real-swarm A/B (libtorrent vs rqbit) on legal CC-BY films — indicative
         continue-on-error: true
+        # الخطوة لا تقتل الوظيفة (45 دقيقة) ولا تمنع النشر؛ المقارنة الكاملة على أسراب قوية في windows-torrent-ab.yml
+        timeout-minutes: 20
         shell: pwsh
         run: |
           $zip = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'candidate') -Filter '*-x64.zip' | Select-Object -First 1
           $out = Join-Path $env:RUNNER_TEMP 'portable'; Expand-Archive $zip.FullName $out
           $native = Get-ChildItem $out -Recurse -Filter 'vantara-torrent.exe' | Select-Object -First 1
-          node tools/torrent-host/swarm-ab.mjs "--libtorrent=$($native.FullName)" "--rqbit=$(Join-Path $native.DirectoryName 'rqbit.exe')" "--report=$(Join-Path $env:RUNNER_TEMP 'candidate\swarm-ab.json')" --rounds=2
+          node tools/torrent-host/swarm-ab.mjs "--libtorrent=$($native.FullName)" "--rqbit=$(Join-Path $native.DirectoryName 'rqbit.exe')" "--report=$(Join-Path $env:RUNNER_TEMP 'candidate\swarm-ab.json')" --rounds=2 --sources=cc-by
       - uses: actions/upload-artifact@v4
         if: always()
         with:

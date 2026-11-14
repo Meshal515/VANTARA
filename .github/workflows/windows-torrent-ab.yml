@@ -1,0 +1,67 @@
+name: Windows torrent A/B on strong legal swarms
+# مقارنة عادلة لمحركي ويندوز (libtorrent الأساسي وrqbit الاحتياطي) على أسراب قوية قانونية (أحدث Ubuntu Desktop
+# وDebian netinst، ملفاتها الرسمية تُجلب وتُحسب بصمتها وقت التشغيل) ثم أفلام Blender (CC-BY)، جولتان بترتيب متناوب.
+# يقابل قياس الـAPK (apk-torrent-throughput: 11–14MB/s على سرب قوي). يقيس البناء المنشور نفسه (windows-debug-N)
+# كما يثبته المستخدم، ولا ينشر شيئًا ولا يلمس القناة.
+on:
+  push:
+    branches: ['ccr-81586a69-ez4f3g']
+    paths:
+      - 'tools/torrent-host/swarm-ab.mjs'
+      - 'tools/torrent-host/torrent-file.mjs'
+      - '.github/workflows/windows-torrent-ab.yml'
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 'Published windows-debug build number (empty = channel manifest)'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: windows-torrent-ab
+  cancel-in-progress: false
+jobs:
+  ab:
+    name: libtorrent vs rqbit on Ubuntu/Debian and CC-BY swarms (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Tests for the torrent-file parser
+        run: node --test tools/torrent-host/torrent-file.test.mjs
+      - name: Download the published Windows Debug build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_INPUT: ${{ inputs.build }}
+        run: |
+          $build = $env:BUILD_INPUT
+          if (-not $build) {
+            gh release download windows-debug-channel --repo $env:GITHUB_REPOSITORY --pattern desktop-debug.json --dir manifest
+            $build = (Get-Content manifest/desktop-debug.json -Raw | ConvertFrom-Json).build
+          }
+          "BUILD=$build" | Out-File -Append $env:GITHUB_ENV
+          gh release download "windows-debug-$build" --repo $env:GITHUB_REPOSITORY --pattern "VANTARA-Debug-0.4.$build-Windows-x64.zip" --dir dl
+          Expand-Archive (Get-ChildItem dl -Filter '*.zip' | Select-Object -First 1).FullName portable
+          $native = Get-ChildItem portable -Recurse -Filter 'vantara-torrent.exe' | Select-Object -First 1
+          "NATIVE=$($native.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "RQBIT=$(Join-Path $native.DirectoryName 'rqbit.exe')" | Out-File -Append $env:GITHUB_ENV
+      - name: A/B on strong legal swarms, then CC-BY films (two alternating rounds)
+        shell: pwsh
+        run: |
+          node tools/torrent-host/swarm-ab.mjs "--libtorrent=$env:NATIVE" "--rqbit=$env:RQBIT" "--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')" --rounds=2 --sources=all
+          $r = Get-Content (Join-Path $env:RUNNER_TEMP 'swarm-ab.json') -Raw | ConvertFrom-Json
+          "### Windows build $env:BUILD — libtorrent vs rqbit" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '```json' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          ($r.summary | ConvertTo-Json -Depth 5) | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '```' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-torrent-ab
+          path: ${{ runner.temp }}/swarm-ab.json
+          if-no-files-found: warn
