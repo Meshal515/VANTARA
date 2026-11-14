@@ -34,6 +34,7 @@ import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
 import {
   APK_ERRORS,
+  versionLine,
   activateStaged,
   canInstall,
   deviceInfo,
@@ -1514,7 +1515,7 @@ function screenV35(page) {
           resync: () => sync.resync(),
           checkUpdate: () => checkUpdates({ force: true }),
           resetWeb: () => resetWeb(),
-          apkVersion: async () => (await deviceInfo())?.versionName ?? null,
+          apkVersion: async () => versionLine(await deviceInfo()),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
           setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
           labels: NOTIFICATION_LABELS,
@@ -2061,11 +2062,13 @@ function showApkUpdate(apk) {
       onProgress: (p) => {
         go.textContent = `${Math.round(p * 100)}%`;
       },
-      onResult: (status) => {
+      onResult: (status, message) => {
+        // سبب أندرويد الحرفي يظهر مع الرسالة: «تعارض» لا يعني دائمًا مفتاحًا مختلفًا
+        const why = message ? ` (${message})` : '';
         if (status === 'cancelled') idle('ألغيت التثبيت. اضغط «تثبيت» متى ما بغيت');
-        else if (status === 'storage') idle('المساحة ما تكفي. فضّ مساحة وجرّب');
-        else if (status === 'conflict') idle(APK_ERRORS.INSTALLED_DIFFERENT_KEY);
-        else if (status !== 'success') idle('ما اكتمل التثبيت. جرّب مرة ثانية');
+        else if (status === 'storage') idle(`المساحة ما تكفي. فضّ مساحة وجرّب${why}`);
+        else if (status === 'conflict') idle(`أندرويد رفض التحديث لتعارض مع النسخة المثبتة${why}`);
+        else if (status !== 'success') idle(`ما اكتمل التثبيت${why}. جرّب مرة ثانية`);
       },
     });
     if (out.needsPermission) {

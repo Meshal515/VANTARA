@@ -119,3 +119,24 @@ describe('upgradeable debug APK channel', () => {
     expect(decideUpdate({...debug,versionCode:6},installed).apk).toBeNull();
   });
 });
+
+describe('تشخيص فشل تحديث الـAPK', () => {
+  it('سطر النسخة يبيّن الرقم وحالة التوقيع واسم الحزمة', async () => {
+    const { versionLine } = await import('./updater.js');
+    expect(versionLine({ versionName: '0.0.3037', versionCode: 3037, official: true, package: 'com.vantara.anime.debug' })).toBe('0.0.3037 (3037) · توقيع رسمي · com.vantara.anime.debug');
+    expect(versionLine({ versionName: '0.0.3050', versionCode: 3050, official: false, signer: 'a1b2c3d4e5f6' })).toBe('0.0.3050 (3050) · توقيع آخر a1b2c3d4e5f6');
+    expect(versionLine(null)).toBe(null);
+  });
+  it('رسالة أندرويد الحرفية تصل للواجهة مع نتيجة التثبيت', async () => {
+    const { installApk } = await import('./updater.js');
+    const listeners = {};
+    globalThis.Capacitor = { Plugins: { AppUpdate: {
+      addListener: async (name, fn) => { listeners[name] = fn; return { remove() {} }; },
+      installApk: async () => { listeners.installResult({ status: 'conflict', message: 'INSTALL_FAILED_DUPLICATE_PERMISSION: x' }); return { started: true }; },
+    } } };
+    const seen = [];
+    await installApk({ url: 'https://x', sha256: 'a', size: 1 }, { onResult: (s, m) => seen.push([s, m]) });
+    expect(seen).toEqual([['conflict', 'INSTALL_FAILED_DUPLICATE_PERMISSION: x']]);
+    delete globalThis.Capacitor;
+  });
+});
