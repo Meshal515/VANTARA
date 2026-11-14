@@ -78,7 +78,13 @@ const measure = () => {
         const r = sc.getBoundingClientRect();
         return { x: r.left, y: r.top, w: r.width, h: r.height, total: sc.scrollHeight };
       });
-      if (!box || box.none) { await page.screenshot({ path: file, fullPage: !box }); return file; }
+      if (!box || box.none) {
+        // الشريط الجانبي ممدود بطول الصفحة في لقطة الصفحة الكاملة (وإلا يبقى بارتفاع أول شاشة)
+        if (!box) await page.evaluate(() => { const H = document.documentElement.scrollHeight; for (const el of document.querySelectorAll('.drawer-backdrop, .drawer')) if (el.getBoundingClientRect().height >= innerHeight - 2) { el.style.setProperty('height', `${H}px`, 'important'); el.style.setProperty('max-height', 'none', 'important'); } });
+        await page.screenshot({ path: file, fullPage: !box });
+        await page.evaluate(() => { for (const el of document.querySelectorAll('.drawer-backdrop, .drawer')) { el.style.removeProperty('height'); el.style.removeProperty('max-height'); } });
+        return file;
+      }
       const frames = [], deltas = []; let prev = 0;
       const first = `${file}.f0.png`; await page.screenshot({ path: first }); frames.push(first);
       for (let i = 1; i < 30; i++) {

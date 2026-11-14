@@ -318,3 +318,6 @@ html.desktop-overlay .pp-stage--stalled :is(.pp-stage__mark, .pp-stage__name) { 
 html.desktop-overlay .pwa-player .pp-row-item:is(button):hover { background: rgba(255,255,255,.08); }
 html.desktop-overlay .pwa-player .pp-icon:hover { background: rgba(255,255,255,.12); border-radius: 50%; }
 html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,255,.14); }
+
+/* أسماء المصادر اللاتينية (Torrentio) لها dir=auto فتلتصق يسارًا وتفاصيلها يمينًا في صف عربي: كلاهما من البداية */
+.desktop-overlay .pp-route__text > :is(strong, small) { text-align: right; }
