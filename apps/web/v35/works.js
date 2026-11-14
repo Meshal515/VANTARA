@@ -154,6 +154,16 @@ function sources() {
   return sourcesPromise;
 }
 
+/** معرّفات المصادر التي يشغّلها هذا الجهاز الآن (ظاهرة ومضافة)، أو null إن تعذّر معرفتها (فلا نُسقط شيئًا). */
+async function runnableSourceIds() {
+  if (!available()) return null;
+  try {
+    return new Set((await sources()).map((s) => String(s.id)));
+  } catch {
+    return null;
+  }
+}
+
 /** قائمة المصادر تُعاد من المحرّك (بعد تثبيت إضافة أو إزالتها، وفي الاختبارات). */
 export function resetSources() {
   sourcesPromise = null;
@@ -831,6 +841,15 @@ export async function detail(v35work) {
       list.push({ ...list[0], sourceId: s.id, label: s.label });
     }
   }
+  // عائلة لا يملك هذا الجهاز أي مرآة منها لا تُسأل ولا تُعدّ «لم يرد»: تُرمى فورًا بلا شبكة
+  if (installed.length) {
+    const runnable = new Set(installed.map((s) => String(s.id)));
+    for (const [f, list] of families) {
+      const own = list.filter((e) => runnable.has(String(e.sourceId)));
+      if (own.length) families.set(f, own);
+      else families.delete(f);
+    }
+  }
   const heads = [...families.values()].map((list) => list[0]);
   const [primary] = heads;
   const failures = new Map();
@@ -990,7 +1009,11 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   };
   if (cached?.editions?.some((e) => e.chapters?.length)) emit();
 
-  const refresh = async (list) => {
+  const refresh = async (all) => {
+    // نسخة من مصدر لا يملكه هذا الجهاز (عرفناها من جهاز آخر أو من وصف العمل المشترك، أو مصدر غير مضاف
+    // لهذا الحساب) لا تُسأل: كانت ترمي فورًا وتظهر «لم يرد في الوقت» مع أن موقعها يعمل. فصولها المحفوظة تبقى.
+    const runnable = await runnableSourceIds();
+    const list = runnable ? all.filter((e) => runnable.has(String(e.sourceId))) : all;
     // التفاصيل (النبذة والتصنيف) من أوثق نسخة
     const primary = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
     await Promise.allSettled(
@@ -1015,8 +1038,9 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
             editions = unionEditions(editions, [edition]);
           }
           emit();
-        } catch {
-          failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label });
+        } catch (error) {
+          // السبب الحقيقي (مهلة، 403، حماية، خطأ) لا «لم يرد في الوقت» لكل شيء
+          failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label, ...failureOf(error) });
         }
       }),
     );
@@ -1237,7 +1261,7 @@ export async function withEditions(full, found) {
     _chapters: chapters,
     _editions: editions,
     _sources: sourceList(editions),
-    _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
+    _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label, ...failureOf(f.error) }))],
   };
 }
 
