@@ -128,3 +128,24 @@ it('one copy per source: a later search page of the same source is never prepare
   const extended = engine.extend.mock.calls.flatMap(([, copies]) => copies.map(c => c.sourceId));
   expect(extended).toEqual(['okanime']);
 });
+
+it('the general card tells CloudStream copies the work season, so a multi-season page is not dropped', async () => {
+  const cs3 = { sourceId: 'addon|cs3|cs3_witcher|aa|u1', url: '/frieren' };
+  const cases = [[{ id: 154587, title: 'Frieren: Beyond Journey’s End', romaji: 'Sousou no Frieren', episodes: 28 }, 1],
+    [{ id: 195604, title: 'Black Clover Season 2', episodes: 12 }, 2]];
+  for (const [work, season] of cases) {
+    engine.prepare.mockClear();
+    engine.detail.mockResolvedValue(work);
+    engine.find.mockResolvedValue({ title: work.title, copies: [cs3, { sourceId: 'anime4up', url: '/a' }] });
+    engine.addons.mockResolvedValue([]);
+    const { anime, close } = screen(); anime.play(work, 3); await vi.advanceTimersByTimeAsync(6000);
+    const [hinted, native] = lastPrepare().copies;
+    expect(hinted).toMatchObject({ sourceId: cs3.sourceId, seasonHint: season });
+    expect(native.seasonHint).toBe(season); // إضافة Aniyomi تقسّم العمل مواسم: التلميح نفسه
+    close();
+  }
+  // من صفحة المصدر نفسها يختار المستخدم الموسم: لا تلميح
+  engine.prepare.mockClear();
+  const { anime } = screen(); anime.play({ ...media, _sourceCopy: { ...rift } }, 3); await vi.advanceTimersByTimeAsync(1);
+  expect(lastPrepare().copies[0].seasonHint).toBeUndefined();
+});

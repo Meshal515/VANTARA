@@ -117,8 +117,11 @@ class RuntimeSourceAdapter(
     override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
         require(anime.sourceId==id)
         val rows=episodeRows(anime.url,consume=true).map { it.jsonObject }
+        val seasons=rows.mapNotNull { it["season"]?.jsonPrimitive?.intOrNull }.distinct()
+        // تلميح موسم الهوية (البطاقة العامة) فقط لمصدر يجمع المواسم في صفحة واحدة: صفحة موسم منفصلة لا تُرشَّح به
         val wanted=anime.requestedSeason ?: anime.seasonNumber.takeIf { it>=0 }?.toInt()
-        require(wanted!=null || rows.mapNotNull { it["season"]?.jsonPrimitive?.intOrNull }.distinct().size<=1) { "SEASON_SELECTION_REQUIRED" }
+            ?: anime.seasonHint?.takeIf { seasons.size>1 && it in seasons }
+        require(wanted!=null || seasons.size<=1) { "SEASON_SELECTION_REQUIRED" }
         return rows.filter { wanted==null || it["season"]?.jsonPrimitive?.intOrNull==wanted }.map { row ->
             val data=row.text("data");require(data.isNotBlank()) { "INVALID_EPISODE_DATA" }
             val number=row["episode"]?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() && it>=0 }

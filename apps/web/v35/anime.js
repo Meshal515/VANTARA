@@ -22,6 +22,7 @@ import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
 import { reportSource } from '../lib/source-report.js';
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, RELATION_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr } from '../lib/anime-meta.js';
+import { animeTitle } from '../lib/anime-title.js';
 import { createAnimeDiscover } from './anime-discover.js';
 import { pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
@@ -2077,6 +2078,11 @@ export function createAnime(deps) {
   const sameWork = m => state.workFor === m.id && state.workScope === workScope(m);
   // نسخة واحدة لكل مصدر: بحث متدفق قد يختار للمصدر نفسه صفحة أخرى (حلقة بدل العمل) فتتراكم نسخه، وكل نسخة
   // تجهيز كامل (حلقات وروابط) في طابور المصدر نفسه. الأولى تبقى (الجلسة بدأت بها).
+  // موسم العمل من هويته (AniList): مصدر CloudStream يجمع المواسم في صفحة واحدة، وإضافة Aniyomi تقسّم العمل مواسم، كانا يسقطان في البطاقة العامة
+  // (SEASON_SELECTION_REQUIRED) لأن أحدًا لا يختار الموسم هنا كما في صفحة المصدر. المحرك يستعمله لذلك فقط.
+  const seasonOf = (m) => [m.title, m.romaji, m.native, ...(m.synonyms ?? [])].map(t => animeTitle(t).season).find(Number.isInteger) ?? 1;
+  const withSeasonHint = (m, copies) => m._sourceCopy ? copies
+    : copies.map(c => (!String(c.sourceId).startsWith('addon|') || String(c.sourceId).startsWith('addon|cs3|')) && c.requestedSeason == null ? { ...c, seasonHint: seasonOf(m) } : c);
   const onePerSource = (copies) => copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId) === index);
   const knownWork = (id) => {
     const hit = readJson(FOUND_KEY, {})[id];
@@ -2677,7 +2683,7 @@ export function createAnime(deps) {
         // مصدر في الجلسة لا يُضاف مرة ثانية بصفحة أخرى
         const fresh = work.copies.filter(c => !(sheet.copies ?? []).some(x => x.sourceId === c.sourceId));
         sheet.copies = onePerSource([...(sheet.copies ?? []), ...work.copies]);
-        if (sheet.session && fresh.length) void engine.extend(sheet.session, fresh).catch(() => {});
+        if (sheet.session && fresh.length) void engine.extend(sheet.session, withSeasonHint(m, fresh)).catch(() => {});
       };
       workListeners.add(onWork);
       off.push(() => workListeners.delete(onWork));
@@ -2787,7 +2793,7 @@ export function createAnime(deps) {
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), pinned: Boolean(m._sourceCopy), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
+          const preparing = Promise.resolve(engine.prepare({ copies: withSeasonHint(m, copies), identity: animeAddonIdentity(m, n), pinned: Boolean(m._sourceCopy), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
           // A bridge that ignores cancellation can reply after close or deadline.
           void preparing.then(out => { if (sheet.closed || sheet.expired) closeSession(out?.session); }, () => {});
           const out = await wait(preparing, preparation.signal);

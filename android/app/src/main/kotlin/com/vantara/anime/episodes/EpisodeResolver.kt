@@ -40,15 +40,18 @@ class EpisodeResolver(
     suspend fun episodes(copy: Copy): List<SourceEpisode> {
         // Every source family can be updated or removed under the same ID.
         val runtimeAdapter=adapterOf(copy.sourceId) ?: return emptyList()
-        val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}"
+        val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}|${copy.anime.seasonHint ?: 0}"
         episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS && it.runtimeAdapter===runtimeAdapter }?.let { return it.episodes }
         val adapter = runtimeAdapter
-        val season = copy.anime.requestedSeason
+        // اختيار المستخدم أولًا، ثم موسم هوية العمل من البطاقة العامة: إضافة Aniyomi تقسّم العمل مواسم كانت تُسأل
+        // عن حلقات «الحاوية» نفسها فتعود بلا حلقة، فيسقط المصدر من البطاقة العامة وهو يعمل من صفحته.
+        val season = copy.anime.requestedSeason ?: copy.anime.seasonHint
         val selected = if (season != null && season > 0 && copy.anime.hasSeasons) {
-            adapter.seasons(copy.anime).firstOrNull {
+            val seasons = adapter.seasons(copy.anime)
+            seasons.firstOrNull {
                 if (it.seasonNumber > 0) it.seasonNumber.toInt() == season
                 else com.vantara.anime.matching.TitleNormalizer.key(it.title).season == season
-            } ?: return emptyList()
+            } ?: seasons.singleOrNull()?.takeIf { copy.anime.requestedSeason == null } ?: return emptyList()
         } else copy.anime
         val list = adapter.episodes(selected)
         if(adapterOf(copy.sourceId)!==adapter)return emptyList()

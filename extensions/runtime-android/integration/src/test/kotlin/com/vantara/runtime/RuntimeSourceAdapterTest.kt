@@ -180,6 +180,23 @@ class RuntimeSourceAdapterTest {
         val episodes=adapter.episodes(work.copy(requestedSeason=2))
         assertEquals(1,episodes.size);assertEquals(2f,episodes.single().number);assertEquals("second",episodes.single().url)
     }
+    @Test fun theGeneralCardsSeasonHintOpensAMultiSeasonWorkInsteadOfDroppingTheSource()=runBlocking {
+        // البطاقة العامة لا تسأل عن الموسم: كان المصدر كله يسقط (SEASON_SELECTION_REQUIRED) فلا يظهر له سيرفر
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"data":"s1e3","name":"Three","episode":3,"season":1},{"data":"s2e3","name":"Three","episode":3,"season":2}]}""") }
+        assertEquals(listOf("s1e3"),adapter.episodes(work.copy(seasonHint=1)).map { it.url })
+        assertEquals(listOf("s2e3"),adapter.episodes(work.copy(seasonHint=2)).map { it.url })
+        // اختيار المستخدم الصريح يغلب التلميح
+        assertEquals(listOf("s2e3"),adapter.episodes(work.copy(seasonHint=1,requestedSeason=2)).map { it.url })
+    }
+    @Test fun aSeasonHintNeverFiltersASingleSeasonPage()=runBlocking {
+        // صفحة «الموسم الثاني» المنفصلة يرقّم مصدرها حلقاتها موسمًا 1 أو بلا موسم: التلميح لا يفرّغها
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"data":"e1","name":"One","episode":1,"season":1},{"data":"e2","name":"Two","episode":2}]}""") }
+        assertEquals(listOf("e1","e2"),adapter.episodes(work.copy(seasonHint=2)).map { it.url })
+    }
+    @Test fun aHintForASeasonTheSourceDoesNotHaveStillAsksInsteadOfGuessing()=runBlocking {
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->objectOf("""{"items":[{"data":"a","episode":1,"season":1},{"data":"b","episode":1,"season":2}]}""") }
+        try { adapter.episodes(work.copy(seasonHint=5));fail("Unknown hinted season must not pick a wrong season") }catch(expected:IllegalArgumentException){assertEquals("SEASON_SELECTION_REQUIRED",expected.message)}
+    }
     @Test fun catalogueSectionsMapToExistingVantaraWorksWithoutDuplicatingUrls()=runBlocking {
         val adapter=RuntimeSourceAdapter(id,"Source") { operation,input->
             assertEquals("catalogue",operation);assertEquals(2,input.getValue("page").jsonPrimitive.int)
