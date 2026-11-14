@@ -7,11 +7,9 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   const native = { position: 0, duration: null, paused: null, buffering: false, rate: 1 };
   const expected = { pause: [], seek: [] };
   let prepared = false, failed = false, closed = false, loadingEpisode = null, scheduled = null;
-  // نية المضيف المحلية (بلاغ المالك: الإيقاف والتشغيل يتأخران عنده بقدر ذهاب الأمر للخادم ورجوعه + 300ms).
-  // الإيقاف يُطبّق فورًا، والتشغيل في موعد الخادم المتوقع (الآن + LEAD) بساعة الغرفة، دون انتظار البث. حتى يصل
-  // البث الجديد (seq أكبر) لا يُرجع align الحالة القديمة؛ وإن لم يصل خلال 1.5ث تعود الغرفة هي الحكم.
-  const LEAD_MS = 300;
-  let intent = null, intentTimer = null;
+  // أمر المتحكّم يُنفَّذ عنده فورًا ويُرسل بلحظة ضغطه بساعة الغرفة؛ حتى يصل صداه (seq أكبر) لا يُرجع align الحالة
+  // القديمة، وإن لم يصل خلال ثانيتين تعود الغرفة هي الحكم. الأصدقاء ينفّذونه لحظة وصوله (لا انتظار مصطنع).
+  let intent = null;
   // Local media timelines can differ by an intro or recap, even when the room clock is exact.
   let videoOffsetMs = Number.isFinite(initialVideoOffsetMs) && Math.abs(initialVideoOffsetMs) <= 120000 ? initialVideoOffsetMs : 0;
   const localToRoom = value => Math.max(0,Math.round(value-videoOffsetMs));
@@ -80,7 +78,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   function receive({ state }) {
     if (closed) return;
     clearTimeout(scheduled); scheduled = null;
-    if (intent && state?.seq !== intent.seq) { intent = null; clearTimeout(intentTimer); intentTimer = null; }
+    if (intent && state?.seq !== intent.seq) intent = null;
     const number = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
     if (state?.media?.key?.startsWith(`${together.mediaPrefix}#`) && number > 0 && number !== episode()) {
       if (loadingEpisode !== number) { prepared = false; failed = false; loadingEpisode = number; videoOffsetMs=0; native.duration = null; onEpisode(number); }
@@ -92,6 +90,11 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       }
     }
     lobby(); report(true);
+  }
+  function hostCommand(op, localPos) {
+    const at = room.clock.serverNow();
+    room.command(op, { pos: localToRoom(localPos), at });
+    intent = { seq: room.timeline?.seq, until: at + 2000 };
   }
   function detach() { if (closed) return; api.close(); onDetach(); }
   const offs = [room.on('state', receive), room.on('welcome', () => receive({ state: room.timeline })), room.on('roster', lobby),
@@ -107,22 +110,17 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       if (closed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       if (room.canControl && prepared) {
-        const started = !!room.timeline?.started;
-        room.command(playing ? 'play' : 'pause', { pos: started ? localToRoom(native.position) : 0, ...(playing && !started ? { countdownMs: 3000 } : {}) });
-        // بعد بدء الغرفة فقط (البداية الأولى لها عدّها التنازلي المشترك)
-        if (started) {
-          intent = { playing, seq: room.timeline?.seq, until: room.clock.serverNow() + 1500 };
-          clearTimeout(intentTimer);
-          if (!playing) pause(true);
-          else intentTimer = setTimeout(() => { intentTimer = null; if (!closed && intent?.playing) pause(false); }, LEAD_MS);
-        }
+        if (!room.timeline?.started && playing) room.command('play', { pos: 0, countdownMs: 3000 }); // البداية: عدّ مشترك
+        else if (room.instant) { hostCommand(playing ? 'play' : 'pause', native.position); pause(!playing); }
+        else room.command(playing ? 'play' : 'pause', { pos: localToRoom(native.position) }); // خادم قديم: ننتظر بثّه
       }
       else { message(prepared ? 'المضيف يتحكم بالتشغيل' : 'جاري تجهيز الفيديو…'); align(true); }
       return true;
     },
     seek(position) {
       if (closed || !synced()) return false;
-      if (live() && room.canControl && prepared) room.command('seek', { pos: localToRoom(position) });
+      if (live() && room.canControl && prepared && room.instant) { hostCommand('seek', position); native.position = clampLocal(position); command('seek', native.position); }
+      else if (live() && room.canControl && prepared) room.command('seek', { pos: localToRoom(position) });
       else { message('المضيف يتحكم بالتقديم'); align(true); }
       return true;
     },
@@ -152,7 +150,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     close() {
       if (closed) return;
       if (native.rate !== 1) command('rate', 1);
-      closed = true; clearInterval(timer); clearTimeout(scheduled); clearTimeout(intentTimer); for (const off of offs) off();
+      closed = true; clearInterval(timer); clearTimeout(scheduled); for (const off of offs) off();
       onLobby({ visible: false, prepared: false, roster: room.roster, host: room.isHost, connection: room.status });
     },
   };

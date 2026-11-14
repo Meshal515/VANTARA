@@ -173,9 +173,11 @@ class TogetherClient(
 
     fun send(o: JSONObject): Boolean = ws?.send(o.toString()) ?: false
 
-    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null, countdownMs: Long? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
+    /** at: لحظة الضغط بساعة الغرفة؛ الخادم يختم الأمر بها بدل لحظة وصوله (لا انتظار مصطنع). */
+    fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null, countdownMs: Long? = null, at: Double? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
         pos?.let { put("pos", it) }
         countdownMs?.let { put("countdownMs", it) }
+        at?.let { put("at", Math.round(it)) }
         if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", "anime").put("label", mediaLabel ?: mediaKey))
     })
 
@@ -197,7 +199,8 @@ class TogetherClient(
 
     companion object {
         private const val RESYNC_MS = 30_000L
-        private val BACKOFF = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000)
+        // أول إعادة فورية بعد انقطاع لحظي، ثم تتباعد (كانت تنتظر ثانية كاملة قبل أول محاولة)
+        private val BACKOFF = longArrayOf(0, 1_000, 2_000, 4_000, 8_000, 15_000)
 
         fun parseTimeline(o: JSONObject?): Timeline? {
             o ?: return null

@@ -57,8 +57,22 @@ describe('Together room client', () => {
     sockets[0].open();
     sockets[0].drop(1006);
     expect(room.status).toBe('reconnecting');
-    run();
+    // أول إعادة فورية (كانت بعد ثانية كاملة)، ثم تتباعد إن فشلت
+    run(0);
     expect(sockets).toHaveLength(2);
+    sockets[1].drop(1006);
+    run(0);
+    expect(sockets).toHaveLength(2);
+    run(1_000);
+    expect(sockets).toHaveLength(3);
+  });
+
+  it('commands carry the press time on the room clock when given', () => {
+    const { room, sockets } = harness();
+    sockets[0].open();
+    sockets[0].receive(welcome);
+    room.command('pause', { pos: 1200, at: 5_123.4 });
+    expect(sockets[0].sent.at(-1)).toEqual({ t: 'cmd', op: 'pause', pos: 1200, at: 5123 });
   });
 
   it('a half-dead connection (OPEN but silent) is replaced as soon as a command gets no echo', () => {

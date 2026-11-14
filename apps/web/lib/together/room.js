@@ -22,7 +22,8 @@ const HEARTBEAT_MS = 5_000;
 const SILENCE_MS = 12_000;
 const ECHO_MS = 2_500;
 const WATCH_MS = 500;
-const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+// أول إعادة فورية (انقطاع لحظي: تبدّل شبكة)، ثم تتباعد إن فشلت. كانت تنتظر ثانية كاملة قبل أول محاولة
+const BACKOFF_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 
 /**
  * ينشئ غرفة لمن اخترتهم (invite: معرّفات أو '*') ويُرجع رمزها الداخلي. الرمز لا يراه
@@ -81,6 +82,7 @@ export function joinRoom({
   let status = 'connecting';
   let lastRx = 0;
   let awaitingSince = null;
+  let proto = 1;
 
   const emit = (event, payload) => {
     for (const fn of listeners.get(event) ?? []) try { fn(payload); } catch { /* مستمع معطوب لا يوقف الغرفة */ }
@@ -173,6 +175,7 @@ export function joinRoom({
         return;
       case 'welcome':
         me = msg.you;
+        proto = Number.isFinite(msg.proto) ? msg.proto : 1;
         info = msg.room;
         roster = msg.roster ?? [];
         // تقدير أولي للساعة من رسالة الترحيب حتى تصل عينات ping
@@ -235,8 +238,9 @@ export function joinRoom({
       listeners.get(event).add(fn);
       return () => listeners.get(event)?.delete(fn);
     },
-    command(op, { pos, media, countdownMs } = {}) {
-      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
+    /** at: لحظة الضغط بساعة الغرفة (clock.serverNow) — الخادم يختم الأمر بها بدل لحظة وصوله. */
+    command(op, { pos, media, countdownMs, at } = {}) {
+      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}), ...(Number.isFinite(at) ? { at: Math.round(at) } : {}) });
       if (sent) expectReply();
       return sent;
     },
@@ -261,6 +265,8 @@ export function joinRoom({
     get info() { return info; },
     get me() { return me; },
     get status() { return status; },
+    /** الخادم يختم الأوامر بلحظة ضغطها وينفّذها الأصدقاء عند وصولها (بروتوكول 2): المتحكّم يطبّق أمره فورًا. */
+    get instant() { return proto >= 2; },
     get isHost() { return Boolean(me) && info?.hostUserId === me; },
     get canControl() { return Boolean(me) && (info?.hostUserId === me || info?.control === 'all'); },
   };

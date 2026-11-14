@@ -113,6 +113,9 @@ class TogetherPlayer(
     // لون الواجهة نفسه الذي لبسه المشغّل (Tone.use)، لا أزرق/أحمر ثابت
     private val accent: Int get() = com.vantara.anime.player.Tone.ACCENT
     private fun serverNow() = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
+    private var intentSeq = -1
+    private var intentUntil = 0L
+    private fun holdIntent(t: Timeline) { intentSeq = t.seq; intentUntil = SystemClock.elapsedRealtime() + 2000 }
     /** الغرفة بدأت لكن لحظة البدء المشتركة لم تأتِ: العدّ 3-2-1. */
     private fun counting(t: Timeline? = client.timeline) = synced && t != null && t.started && t.at - serverNow() > 400
     private var strip: LinearLayout? = null
@@ -246,7 +249,8 @@ class TogetherPlayer(
         val t = client.timeline ?: return false
         if (!synced) return false
         if (client.canControl) {
-            if (!t.started && playing) client.command("play", 0.0) else client.command(if (playing) "play" else "pause", roomPos())
+            if (!t.started && playing) client.command("play", 0.0)
+            else { client.command(if (playing) "play" else "pause", roomPos(), at = serverNow()); holdIntent(t) }
             return false
         }
         hooks.message("المضيف يتحكم بالتشغيل")
@@ -257,7 +261,7 @@ class TogetherPlayer(
     /** المستخدم قدّم/رجّع. */
     fun onUserSeek(toMs: Long) {
         if (applying || !synced) return
-        if (client.canControl) client.command("seek", roomPos(toMs))
+        if (client.canControl) { client.timeline?.let { holdIntent(it) }; client.command("seek", roomPos(toMs), at = serverNow()) }
         else hooks.message("المضيف يتحكم بالتشغيل — نرجّعك معهم")
     }
 
@@ -326,7 +330,10 @@ class TogetherPlayer(
         val p = hooks.player
         val t = client.timeline
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
-        if (t != null && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
+        // أمر المتحكّم نفسه (إيقاف/تشغيل/تقديم) نُفّذ عنده فورًا: حتى يصل صداه (seq أكبر) لا يُرجعه المؤقت للحالة
+        // القديمة. كان الإيقاف من الجوال يعود تشغيلًا لحظة قبل وصول البث (بلاغ المالك 14 نوفمبر).
+        val pendingOwn = t != null && intentSeq == t.seq && SystemClock.elapsedRealtime() < intentUntil
+        if (t != null && !pendingOwn && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
             val pos = p.currentPosition.toDouble()
             val d = ctl.step(
                 t, pos, at,

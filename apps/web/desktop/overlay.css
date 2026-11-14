@@ -52,7 +52,7 @@ html.desktop-overlay .pwa-player .pp-sheet[hidden] { display: none; }
 html.desktop-overlay .pwa-player .pp-sheet__grip { display: none; }
 html.desktop-overlay .pwa-player .pp-sheet__head { margin-bottom: 10px; }
 html.desktop-overlay .pwa-player .pp-sheet__head strong { font-size: 17px; }
-html.desktop-overlay .pwa-player .pp-sheet__body { overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+html.desktop-overlay .pwa-player .pp-sheet__body { overflow-y: auto; min-height: 0; scrollbar-width: auto; scrollbar-color: auto; }
 html.desktop-overlay .pwa-player .pp-scrim { background: transparent; }
 html.desktop-overlay .pwa-player .pp-icon { width: 36px; height: 36px; }
 html.desktop-overlay .pwa-player .pp-icon svg { width: 21px; height: 21px; }
@@ -385,3 +385,13 @@ html.desktop-overlay .pp-next__btn:hover { filter: brightness(1.12); }
 html.desktop-overlay .pwa-player .pp-row-item__face { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); color: var(--text); font-weight: 800; font-size: 13px; }
 html.desktop-overlay .pp-toast { position: absolute; z-index: 16; left: 50%; bottom: 140px; transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); color: var(--text); font-size: 13px; font-weight: 700; pointer-events: none; }
 html.desktop-overlay .pp-toast[hidden] { display: none; }
+
+/* خط التمرير في اللوحات: نحيف بلون السطح بلا أسهم ويندوز (بلاغ المالك: الشريط الافتراضي يخرّب الشكل).
+ * scrollbar-width/color لا تُضبط هنا: وجودهما يُلغي أنماط ‎::-webkit-scrollbar في Chromium، وهي وحدها تُخفي الأسهم. */
+html.desktop-overlay .pwa-player ::-webkit-scrollbar { width: 6px; height: 6px; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-track { background: transparent; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 999px; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.28); }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-corner { background: transparent; }
+html.desktop-overlay .pwa-player .pp-sheet__body { padding-inline-end: 4px; margin-inline-end: -4px; }

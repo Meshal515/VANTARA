@@ -3,7 +3,7 @@ import { createTogetherPlayer } from './together-player.js';
 
 function fixture(host = false, existingTimeline = null) {
   const events = new Map();
-  const room = { status: 'live', me: host ? 'host' : 'guest', isHost: host, canControl: host,
+  const room = { status: 'live', me: host ? 'host' : 'guest', isHost: host, canControl: host, instant: true,
     info: { mode: 'sync' }, timeline: { media: { key: 'anime:42#1', kind: 'anime' }, started: false, playing: false, pos: 0, at: 1000, seq: 0 },
     roster: [], clock: { serverNow: () => 1000 }, command: vi.fn(), report: vi.fn(),
     on: (e, fn) => { const set = events.get(e) ?? new Set(); set.add(fn); events.set(e, set); return () => set.delete(fn); },
@@ -40,7 +40,7 @@ describe('web Together player uses Android room protocol', () => {
   });
   it('keeps host controls on the wire and guest controls out of it', () => {
     vi.useFakeTimers(); const h = fixture(true); h.bridge.ready(); h.bridge.playPause(true); h.bridge.seek(80000);
-    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0, countdownMs: 3000 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });
+    expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0, countdownMs: 3000 }); expect(h.room.command).toHaveBeenCalledWith('seek', expect.objectContaining({ pos: 80000 }));
     const g = fixture(); g.bridge.ready(); g.bridge.playPause(true); g.bridge.seek(80000); expect(g.room.command).not.toHaveBeenCalled();
     h.bridge.destroy(); g.bridge.destroy();
   });
@@ -77,7 +77,7 @@ describe('web Together player uses Android room protocol', () => {
     expect(h.bridge.setOffset(10_049)).toBe(10_000);
     expect(h.video.currentTime).toBe(10);
     h.bridge.playPause(true); expect(h.room.command).toHaveBeenLastCalledWith('play', { pos: 0, countdownMs: 3000 });
-    h.bridge.seek(70_000); expect(h.room.command).toHaveBeenLastCalledWith('seek', { pos: 60_000 });
+    h.bridge.seek(70_000); expect(h.room.command).toHaveBeenLastCalledWith('seek', expect.objectContaining({ pos: 60_000 }));
     h.receive({ ...h.room.timeline, started: true, playing: false, pos: 60_000, seq: 2 });
     expect(h.video.currentTime).toBe(70);
     expect(h.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ pos: 60_000 }));
@@ -93,8 +93,8 @@ it('keeps a participant offset through pause/seek, reports room time and bounds 
   expect(typeof f.bridge.setVideoOffset).toBe('function');
   f.bridge.setVideoOffset(30000); expect(f.video.currentTime).toBe(70); expect(f.room.command).not.toHaveBeenCalled();
   expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({pos:40000,driftMs:0}));
-  f.bridge.seek(90000); expect(f.room.command).toHaveBeenLastCalledWith('seek',{pos:60000});
-  f.bridge.playPause(false); expect(f.room.command).toHaveBeenLastCalledWith('pause',{pos:40000});
+  f.bridge.seek(90000); expect(f.room.command).toHaveBeenLastCalledWith('seek',expect.objectContaining({pos:60000}));
+  f.bridge.playPause(false); expect(f.room.command).toHaveBeenLastCalledWith('pause',expect.objectContaining({pos:60000})); // التقديم نُفّذ عنده فورًا
   f.receive({...f.room.timeline,pos:1190000,seq:2}); expect(f.video.currentTime).toBe(1200);
   expect(f.bridge.setVideoOffset(121000)).toBe(false);
   f.bridge.setVideoOffset(-120000); f.receive({...f.room.timeline,pos:10000,seq:3}); expect(f.video.currentTime).toBe(0);
