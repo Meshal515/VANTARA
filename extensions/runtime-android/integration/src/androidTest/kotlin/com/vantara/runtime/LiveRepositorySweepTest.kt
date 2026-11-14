@@ -165,6 +165,29 @@ class LiveRepositorySweepTest {
                         }
                         put("playable",checked.count { it["verdict"]?.jsonPrimitive?.content?.startsWith("MEDIA")==true })
                         put("playback",JsonArray(checked))
+                        // مسار التطبيق نفسه (الدفعات + محلّل VANTARA للسيرفرات بلا مستخرج): ما تراه الورقة فعلًا وفي أي ثانية
+                        run {
+                            val t0=System.nanoTime()
+                            val ready=java.util.concurrent.ConcurrentHashMap<String,Long>()
+                            val failed=java.util.concurrent.ConcurrentHashMap<String,String>()
+                            val app=step(this,"appCandidates",90_000) {
+                                adapter.candidates(episode,trace=com.vantara.anime.adapters.ResolveTrace { r ->
+                                    val ms=(System.nanoTime()-t0)/1_000_000
+                                    if(r.state==com.vantara.anime.stream.RouteState.READY && r.candidates.isNotEmpty()) ready.putIfAbsent(r.server+"|"+r.key,ms)
+                                    else if(r.state==com.vantara.anime.stream.RouteState.UNAVAILABLE) failed[r.server]=r.reason ?: "?"
+                                })
+                            }
+                            put("appLinks",app?.size ?: 0)
+                            put("appFirstReadyMs",ready.values.minOrNull()?.let(::JsonPrimitive) ?: JsonNull)
+                            put("appReadyRoutes",JsonArray(ready.entries.sortedBy { it.value }.map { JsonPrimitive("${it.key.substringBefore('|')}@${it.value}ms") }))
+                            put("appFailedRoutes",JsonObject(failed.mapValues { JsonPrimitive(it.value.take(80)) }))
+                            val appChecked=app.orEmpty().take(8).map { c ->
+                                val verdict=runCatching { playable(c.url,c.headers) }.getOrElse { "ERR "+it.javaClass.simpleName }
+                                JsonPrimitive("${c.host} ${verdict.take(40)}")
+                            }
+                            put("appPlayback",JsonArray(appChecked))
+                            put("appPlayable",appChecked.count { it.content.substringAfter(' ').startsWith("MEDIA") })
+                        }
                         if(args.getString("vantaraNativePlayback")=="true") {
                             val facts=step(this,"nativePlayback",300_000) {
                                 com.vantara.anime.DebugVideoPlaybackProbe.run(
