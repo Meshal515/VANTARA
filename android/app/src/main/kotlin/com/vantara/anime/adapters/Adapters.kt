@@ -116,6 +116,9 @@ interface AnimeAdapter {
  * مصدر من إضافة Aniyomi كما هي. يترجم بين عالمها وعقد VANTARA، ويجمع كل
  * السيرفرات بالتوازي مع مهلة لكل سيرفر: سيرفر بطيء لا يؤخّر الباقي.
  */
+/** Source page tabs: popular and latest plus the extension's genres stay within the page's 40 tabs. */
+private const val GENRE_TABS = 38
+
 class ExtensionAdapter(
     override val id: String,
     private val source: AnimeCatalogueSource,
@@ -136,6 +139,56 @@ class ExtensionAdapter(
     override fun sections(): List<SourceSection> = buildList {
         add(SourceSection("popular", "الرائج"))
         if (source.supportsLatest) add(SourceSection("latest", "آخر التحديثات"))
+        // تصنيفات الإضافة نفسها (فلتر «النوع/التصنيف» في Aniyomi): كل تصنيف لسان، بلا طلب شبكة
+        genres().forEachIndexed { i, g -> add(SourceSection("section:$i", g.name)) }
+    }
+
+    /** One genre of the extension's own filter list: where it sits and how to select it on a fresh list. */
+    private class Genre(val name: String, val select: (AnimeFilterList) -> Boolean)
+
+    /**
+     * The extension's genre filter as Aniyomi's browse screen shows it: a Select or a Group of check boxes / tri-states
+     * named for genres. Each value is applied to a fresh getFilterList() with an empty query, as Aniyomi does.
+     */
+    private fun genres(): List<Genre> = runCatching {
+        val filters = source.getFilterList().toList()
+        val named = Regex("genre|categor|تصنيف|التصنيف|النوع|الأنواع|انواع|أنواع|الفئات|الفئة", RegexOption.IGNORE_CASE)
+        val all = Regex("^(all|any|none|-+|الكل|كل|الجميع|اختر.*|select.*|<.*>)$", RegexOption.IGNORE_CASE)
+        val out = mutableListOf<Genre>()
+        for ((fi, f) in filters.withIndex()) {
+            if (!named.containsMatchIn(f.name)) continue
+            when (f) {
+                is eu.kanade.tachiyomi.animesource.model.AnimeFilter.Select<*> -> f.values.forEachIndexed { vi, v ->
+                    val label = v.toString().trim()
+                    if (label.isNotEmpty() && !all.matches(label)) out += Genre(label) { list ->
+                        (list.getOrNull(fi) as? eu.kanade.tachiyomi.animesource.model.AnimeFilter.Select<*>)?.let { it.state = vi; true } ?: false
+                    }
+                }
+                is eu.kanade.tachiyomi.animesource.model.AnimeFilter.Group<*> -> f.state.forEachIndexed { ci, child ->
+                    val item = child as? eu.kanade.tachiyomi.animesource.model.AnimeFilter<*> ?: return@forEachIndexed
+                    if (item !is eu.kanade.tachiyomi.animesource.model.AnimeFilter.CheckBox && item !is eu.kanade.tachiyomi.animesource.model.AnimeFilter.TriState) return@forEachIndexed
+                    val label = item.name.trim()
+                    if (label.isNotEmpty() && !all.matches(label)) out += Genre(label) { list ->
+                        when (val picked = (list.getOrNull(fi) as? eu.kanade.tachiyomi.animesource.model.AnimeFilter.Group<*>)?.state?.getOrNull(ci)) {
+                            is eu.kanade.tachiyomi.animesource.model.AnimeFilter.CheckBox -> { picked.state = true; true }
+                            is eu.kanade.tachiyomi.animesource.model.AnimeFilter.TriState -> { picked.state = eu.kanade.tachiyomi.animesource.model.AnimeFilter.TriState.STATE_INCLUDE; true }
+                            else -> false
+                        }
+                    }
+                }
+                else -> {}
+            }
+            if (out.isNotEmpty()) break // one genre filter: the first the extension declares
+        }
+        out.distinctBy { it.name }.take(GENRE_TABS)
+    }.getOrDefault(emptyList())
+
+    override suspend fun section(index: Int, page: Int): SourcePage {
+        val genre = genres().getOrNull(index) ?: throw UnsupportedOperationException("SECTION_UNSUPPORTED")
+        val filters = source.getFilterList()
+        check(genre.select(filters)) { "GENRE_FILTER_CHANGED" }
+        val result = source.getSearchAnime(page, "", filters)
+        return SourcePage(result.animes.map { it.toVantara() }, result.hasNextPage)
     }
 
     override suspend fun page(listing: Listing, page: Int, query: String): SourcePage {
@@ -145,7 +198,8 @@ class ExtensionAdapter(
             // source page asked for it first and showed the whole source as failed. Say so without a request.
             Listing.LATEST -> if (source.supportsLatest) source.getLatestUpdates(page)
                 else throw UnsupportedOperationException("LATEST_UNSUPPORTED: المصدر لا يقدّم آخر التحديثات")
-            Listing.SEARCH -> source.getSearchAnime(page, query, AnimeFilterList())
+            // As Aniyomi does: the extension's default filters with the query (several read them while searching)
+            Listing.SEARCH -> source.getSearchAnime(page, query, runCatching { source.getFilterList() }.getOrElse { AnimeFilterList() })
         }
         return SourcePage(result.animes.map { it.toVantara() }, result.hasNextPage)
     }

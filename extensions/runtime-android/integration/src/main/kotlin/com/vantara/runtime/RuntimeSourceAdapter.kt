@@ -41,6 +41,12 @@ class RuntimeSourceAdapter(
      * empty = a home page without declared sections (older providers build all sections themselves).
      */
     private val mainPages: List<String>? = emptyList(),
+    /**
+     * One ceiling for all the servers VANTARA's resolver takes from this episode, queue included. Each dead server
+     * held one of the hidden browser's two slots up to 25 s, so ten of them kept the sheet spinning past 90 s
+     * (Anime4up, live sweep 14 Nov) while the working servers were already on it.
+     */
+    private val embedBudgetMs: Long = EMBED_BUDGET_MS,
     private val execute: suspend (String,JsonObject)->JsonObject,
 ) : AnimeAdapter {
     /** The provider's own home sections, in its order, as CloudStream shows them. No request. */
@@ -185,6 +191,7 @@ class RuntimeSourceAdapter(
      */
     private inner class EmbedJobs(private val scope: kotlinx.coroutines.CoroutineScope,private val now: Long,private val trace: ResolveTrace?) {
         private val gate=kotlinx.coroutines.sync.Semaphore(EMBED_PARALLEL)
+        private val deadline=System.nanoTime()+embedBudgetMs*1_000_000
         private val seen=HashSet<String>()
         private val jobs=mutableListOf<kotlinx.coroutines.Deferred<List<Candidate>>>()
         fun add(missing: JsonArray?) {
@@ -206,9 +213,16 @@ class RuntimeSourceAdapter(
             val server=host.removePrefix("www.").substringBefore('.').ifBlank { host }
             trace?.route(RouteReport(id,key,server,null,com.vantara.anime.stream.Variant.SUB,RouteState.RESOLVING))
             com.vantara.anime.net.AnimeHostRouter.markVideoHost(host)
-            val streams=gate.withPermit {
-                kotlinx.coroutines.withTimeoutOrNull(EMBED_TIMEOUT_MS) { runCatching { resolver.resolve(url,referer) }.getOrNull() }
-            }.orEmpty()
+            // The wait for a slot counts against the episode's ceiling, not only the attempt itself
+            val left=(deadline-System.nanoTime())/1_000_000
+            var timedOut=left<=0
+            val streams=if(timedOut) emptyList() else kotlinx.coroutines.withTimeoutOrNull(left) {
+                gate.withPermit {
+                    val remaining=(deadline-System.nanoTime())/1_000_000
+                    if(remaining<=0) null
+                    else kotlinx.coroutines.withTimeoutOrNull(minOf(EMBED_TIMEOUT_MS,remaining)) { runCatching { resolver.resolve(url,referer) }.getOrNull() ?: emptyList() }
+                }
+            }.also { if(it==null) timedOut=true }.orEmpty()
             val json=JsonArray(streams.map { st ->
                 com.vantara.anime.net.AnimeHostRouter.markVideoHost(runCatching { java.net.URI(st.url).host }.getOrNull().orEmpty())
                 val headers=st.headers.toMutableMap()
@@ -224,7 +238,7 @@ class RuntimeSourceAdapter(
             trace?.route(RouteReport(id,key,server,found.mapNotNull { it.quality }.maxOrNull(),
                 found.firstOrNull()?.variant ?: com.vantara.anime.stream.Variant.SUB,
                 if(found.isEmpty())RouteState.UNAVAILABLE else RouteState.READY,found,
-                if(found.isEmpty())"لم يُستخرج رابط من $host" else null))
+                if(found.isEmpty()) (if(timedOut) "انتهت مهلة $host" else "لم يُستخرج رابط من $host") else null))
             return found
         }
     }
@@ -234,6 +248,8 @@ class RuntimeSourceAdapter(
         const val MAX_EMBEDS=24
         const val EMBED_PARALLEL=4
         const val EMBED_TIMEOUT_MS=25_000L
+        /** The whole episode's VANTARA-resolved servers, from the first one named (queue and hidden browser included). */
+        const val EMBED_BUDGET_MS=40_000L
         /** ملفات مشفّرة على المتصفح (MEGA): لا رابط بث يُستخرج منها، فلا تُعرض صفوفًا «تعذّرت» ولا تحجز مستخرجًا. */
         val UNPLAYABLE=setOf("mega.nz","mega.co.nz","mega.io")
     }

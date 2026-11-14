@@ -1,0 +1,93 @@
+import java.security.MessageDigest
+
+/*
+ * CloudStream's own library (GPL-3.0, https://github.com/recloudstream/cloudstream) as a separate class-loader world
+ * for VANTARA's isolated CloudStream worker: the library, its dependencies and the Java bridge, converted to DEX and
+ * shipped as one asset. Nothing here is on any app classpath; the worker loads it on first use (LibraryWorld).
+ * Every input file is pinned by SHA-256 (world.lock): an unexpected or changed file fails the build.
+ */
+apply plugin: 'java-library'
+java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
+
+configurations {
+    // The library's full runtime graph (its POM declares most dependencies at runtime scope)
+    world {
+        canBeConsumed = false; canBeResolved = true
+        attributes { attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME)) }
+    }
+    d8 { canBeConsumed = false; canBeResolved = true }
+}
+dependencies {
+    world 'com.github.recloudstream.cloudstream:library-jvm:4.9.1'
+    compileOnly files(configurations.world)
+    testImplementation files(configurations.world)
+    d8 'com.android.tools:r8:8.7.18'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+def worldDir = layout.buildDirectory.dir('cs3world/assets/cs3world')
+def lockFile = file('world.lock')
+
+def sha256 = { File f -> MessageDigest.getInstance('SHA-256').digest(f.bytes).collect { String.format('%02x', it) }.join('') }
+
+tasks.register('verifyWorld') {
+    inputs.files(configurations.world)
+    inputs.file(lockFile)
+    doLast {
+        def expected = lockFile.readLines().findAll { it.trim() }.collectEntries { def p = it.trim().split(/\s+/); [(p[0]): p[1]] }
+        def actual = configurations.world.files.collectEntries { [(it.name): sha256(it)] }
+        if (expected != actual) {
+            def lines = actual.sort().collect { k, v -> "$k $v" }.join('\n')
+            throw new GradleException("cs3world: resolved CloudStream library files differ from world.lock.\n" +
+                "Missing/unexpected or changed: ${(expected.keySet() + actual.keySet()).findAll { expected[it] != actual[it] }.sort()}\n" +
+                "Actual lock (review before replacing):\n$lines")
+        }
+    }
+}
+
+tasks.register('worldDex', JavaExec) {
+    dependsOn 'verifyWorld', 'jar'
+    def out = worldDir.get().file('world.zip').asFile
+    inputs.files(configurations.world)
+    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
+    outputs.dir(worldDir)
+    classpath = configurations.d8
+    mainClass = 'com.android.tools.r8.D8'
+    doFirst {
+        out.parentFile.mkdirs()
+        args(['--release', '--min-api', '27', '--output', out.absolutePath, tasks.named('jar').get().archiveFile.get().asFile.absolutePath] +
+            configurations.world.files.collect { it.absolutePath }.sort())
+    }
+    doLast {
+        // D8 keeps code only. The library world also needs its jars' resources: META-INF/services (cryptography
+        // providers, Jackson modules, kotlin-reflect built-ins loaders), *.kotlin_builtins, OkHttp's public suffix list.
+        // They are appended to the same verified asset and served by LibraryWorld's resource loader.
+        def resources = new TreeMap<String, ByteArrayOutputStream>()
+        ([tasks.named('jar').get().archiveFile.get().asFile] + configurations.world.files.sort()).each { jar ->
+            new java.util.zip.ZipFile(jar).withCloseable { zip ->
+                zip.entries().each { e ->
+                    def n = e.name
+                    if (e.isDirectory() || n.endsWith('.class') || n.startsWith('META-INF/versions/') || n == 'META-INF/MANIFEST.MF' ||
+                        n ==~ /META-INF\/.*\.(SF|RSA|DSA|EC)/ || n.endsWith('module-info.class')) return
+                    def bytes = zip.getInputStream(e).bytes
+                    if (n.startsWith('META-INF/services/')) {
+                        def merged = resources.computeIfAbsent(n) { new ByteArrayOutputStream() }
+                        merged.write(bytes); merged.write('\n'.bytes)
+                    } else if (!resources.containsKey(n)) {
+                        resources[n] = new ByteArrayOutputStream().with { it.write(bytes); it }
+                    }
+                }
+            }
+        }
+        def dexed = new File(out.parentFile, 'dex-only.zip')
+        out.renameTo(dexed)
+        new java.util.zip.ZipOutputStream(new FileOutputStream(out)).withCloseable { z ->
+            new java.util.zip.ZipFile(dexed).withCloseable { dex ->
+                dex.entries().each { e -> z.putNextEntry(new java.util.zip.ZipEntry(e.name)); z << dex.getInputStream(e); z.closeEntry() }
+            }
+            resources.each { name, bytes -> z.putNextEntry(new java.util.zip.ZipEntry('res/' + name)); z.write(bytes.toByteArray()); z.closeEntry() }
+        }
+        dexed.delete()
+        new File(out.parentFile, 'world.sha256').text = sha256(out)
+    }
+}

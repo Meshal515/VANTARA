@@ -50,21 +50,26 @@ suspend fun loadExtractor(url:String,referer:String?,subtitleCallback:(SubtitleF
     if(!(parsed.scheme.equals("https",true)||parsed.scheme.equals("http",true))||parsed.rawUserInfo!=null||parsed.host==null)return false
     val host=parsed.host
     // Like the original getSafeUrl: one server's extractor failing must not stop the provider's other servers.
+    // A failing or empty extractor is not the end of the server: the next one in line still tries it.
+    var produced=0
+    val counted:(ExtractorLink)->Unit={ link->produced++;delivered(link) }
     ExtractorRegistry.find(host)?.let { e->
-        try { e.getUrl(url,referer,subtitleCallback,delivered);return true }
+        try { e.getUrl(url,referer,subtitleCallback,counted);if(produced>0)return true }
         catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}
-        catch(_:Throwable){dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer);return false}
+        catch(_:Throwable){}
     }
     dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.find(host)?.let { e->
-        val resolved=try{e.extract(url,referer,subtitleCallback,delivered)}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Throwable){false}
-        if(resolved)return true
-        dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer);return false
+        val resolved=try{e.extract(url,referer,subtitleCallback,counted)}catch(cancel:kotlinx.coroutines.CancellationException){throw cancel}catch(_:Throwable){false}
+        if(resolved&&produced>0)return true
     }
+    // A media file itself is played as it is: no extractor, no request
     val path=parsed.path?.lowercase().orEmpty()
     if(!dev.vantara.runtime.cloudstream.extractors.VantaraExtractors.isSharingPage(host)&&(path.endsWith(".m3u8")||path.endsWith(".mp4")||path.endsWith(".mpd")||path.endsWith(".mkv")||path.endsWith(".webm"))){
         val type=if(path.endsWith(".m3u8"))ExtractorLinkType.M3U8 else if(path.endsWith(".mpd"))ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
         delivered(newExtractorLink(host,host,url,type){this.referer=referer.orEmpty()});return true
     }
+    // A server page: CloudStream's own 324 extractors (cs3world), as the providers were written to expect
+    if(dev.vantara.runtime.cloudstream.LibraryWorld.extract(url,referer,subtitleCallback,counted))return true
     dev.vantara.runtime.cloudstream.WorkerState.missingExtractor(host,url,referer)
     return false
 }

@@ -1,5 +1,22 @@
 pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google(); mavenCentral()
+        // CloudStream's own library and the two dependencies it publishes there, and nothing else from JitPack.
+        // Every file is also pinned by SHA-256 in cs3world/world.lock.
+        exclusiveContent {
+            forRepository { maven { url 'https://jitpack.io' } }
+            filter {
+                includeGroup 'com.github.recloudstream.cloudstream'
+                includeGroup 'com.github.Blatzar'
+                includeGroup 'com.github.teamnewpipe'
+                includeGroup 'com.github.TeamNewPipe'
+            }
+        }
+    }
+}
 rootProject.name = 'VantaraRuntimeLab'
 include ':api', ':fixtures', ':harness', ':http', ':cloudstream', ':executor'
 include ':bootstrap'
+include ':cs3world'

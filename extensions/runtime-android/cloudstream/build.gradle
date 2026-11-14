@@ -8,7 +8,11 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget='17' }
     sourceSets.test.resources.srcDir('../../../docs/repository-compat')
+    // CloudStream's own library as a separate class-loader world (cs3world): one verified DEX asset, loaded by
+    // LibraryWorld inside the isolated worker only. It is on no classpath of this module or the app.
+    sourceSets.main.assets.srcDir(project(':cs3world').layout.buildDirectory.dir('cs3world/assets'))
 }
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn(':cs3world:worldDex') }
 dependencies {
     api project(':api')
     api 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0'

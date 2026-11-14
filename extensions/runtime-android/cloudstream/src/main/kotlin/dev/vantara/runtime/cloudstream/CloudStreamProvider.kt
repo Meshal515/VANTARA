@@ -63,7 +63,9 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             check(result.sources.isNotEmpty()){"NO_REGISTERED_SOURCES"}
             result.extractors.forEach{ExtractorRegistry.add(it)}
             sources=result.sources
-        }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();WorkerState.reset();plugin=null;throw failure}
+            // After WorkerState.install: the world reads this generation's context and broker
+            LibraryWorld.attach(http)
+        }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();WorkerState.reset();LibraryWorld.reset();plugin=null;throw failure}
     }
     override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String {
         val all=checkNotNull(sources){"PROVIDER_NOT_READY"}

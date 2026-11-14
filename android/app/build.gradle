@@ -34,6 +34,37 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
 
+/**
+ * Debug runtime only: every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
+ * Inside an isolated CloudStream worker that ends a provider's own client in VANTARA's broker; elsewhere it is a no-op.
+ */
+abstract class VantaraBrokerHook implements com.android.build.api.instrumentation.AsmClassVisitorFactory<com.android.build.api.instrumentation.InstrumentationParameters.None> {
+    @Override
+    org.objectweb.asm.ClassVisitor createClassVisitor(com.android.build.api.instrumentation.ClassContext context, org.objectweb.asm.ClassVisitor next) {
+        return new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9, next) {
+            @Override
+            org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+                def visitor = super.visitMethod(access, name, descriptor, signature, exceptions)
+                if (name != 'build' || descriptor != '()Lokhttp3/OkHttpClient;') return visitor
+                return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9, visitor) {
+                    @Override
+                    void visitCode() {
+                        super.visitCode()
+                        super.visitVarInsn(org.objectweb.asm.Opcodes.ALOAD, 0)
+                        super.visitMethodInsn(org.objectweb.asm.Opcodes.INVOKESTATIC, 'dev/vantara/runtime/cloudstream/NetworkBridge',
+                            'adopt', '(Lokhttp3/OkHttpClient$Builder;)V', false)
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    boolean isInstrumentable(com.android.build.api.instrumentation.ClassData classData) {
+        return classData.className == 'okhttp3.OkHttpClient$Builder'
+    }
+}
+
 android {
     namespace "com.vantara.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -238,6 +269,12 @@ dependencies {
 apply from: 'capacitor.build.gradle'
 
 if (runtimeDebug) {
+    androidComponents {
+        onVariants(selector().withBuildType('debug')) { variant ->
+            variant.instrumentation.transformClassesWith(VantaraBrokerHook, com.android.build.api.instrumentation.InstrumentationScope.ALL) { }
+            variant.instrumentation.setAsmFramesComputationMode(com.android.build.api.instrumentation.FramesComputationMode.COPY_FRAMES)
+        }
+    }
     // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
     android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
     android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')

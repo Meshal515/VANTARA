@@ -117,6 +117,17 @@ for (const path of animeDetailSeams) seams.add(path);
 
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
+seams.add('android/app/src/test/java/com/vantara/anime/AniyomiGenreTabsTest.kt');
+seams.add('extensions/runtime-android/cloudstream/build.gradle');
+seams.add('extensions/runtime-android/DEPENDENCIES.md');
+seams.add('extensions/runtime-android/settings.gradle');
+seams.add('package.json');
+seams.add('TRADEMARKS.md');
+seams.add('NOTICE.md');
+seams.add('LICENSE');
+seams.add('CLAUDE.md');
+seams.add('README.md');
+seams.add('CONTRIBUTING.md');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimeProtocol.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
 // اعتماد المصادر حتى «أعطال فانتارا = صفر» (6 نوفمبر 2026، موافقة المالك على النشر في Debug):
@@ -155,6 +166,8 @@ const certificationSeams = [
   // سيرفرات بلا مستخرج في عامل CloudStream تُحل بآلية فانتارا نفسها (EmbedResolver: مستخرجات، قارئ عام،
   // متصفح مخفي) بدل «لا رابط فيديو»: العامل يعيدها كاملة بمراجعها، والمحوّل يحلّها في التطبيق.
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/CloudStreamProvider.kt',
+  'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/extractors/VantaraExtractors.kt',
+  'extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/ExtractorFixtureTest.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/WorkerState.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/LinkCollector.kt',
   'extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/LinkCollectorTest.kt',

@@ -16,7 +16,7 @@ import org.junit.Test
 
 /** Offline fixtures shaped like each host's embed page. Live behaviour is checked separately by LiveExtractorProbeTest. */
 class ExtractorFixtureTest {
-    @After fun reset(){NetworkBridge.reset();WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()}
+    @After fun reset(){NetworkBridge.reset();com.lagradost.cloudstream3.utils.ExtractorRegistry.clear();WorkerState.takeMissingExtractors();WorkerState.takeMissingSamples()}
     private fun serve(pages:Map<String,String>) = NetworkBridge.install{request,_->
         val body=pages.entries.firstOrNull{request.url.toString().startsWith(it.key)}?.value
         Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(if(body==null)404 else 200).message("")
@@ -72,5 +72,35 @@ class ExtractorFixtureTest {
         val link=resolve("https://mixdrop.ag/f/abc").single()
         assertEquals("https://cdn.example/v2/abc.mp4?s=1&e=2",link.url);assertEquals("https://mixdrop.ag/",link.referer)
     }
-}
 
+    // شكل صفحة MediaFire الحقيقية (14 نوفمبر، عينة AnimeWitcher في المسح الحي): الملف نفسه على زر التحميل
+    @Test fun mediaFireReadsTheDownloadButtonAndNothingElse() {
+        val file="https://download2390.mediafire.com/zikprh3nhxog/ofkgxou9k6i0tbh/Yasei+no+Last+Boss+001+1080p.mp4"
+        val page="""<a href="https://www.mediafire.com/upgrade/" class="ad"><img src="https://cdn.example/promo.mp4"></a>
+            <a class="input popsok" aria-label="Download file" href="$file"           id="downloadButton"
+           rel="nofollow">Download (388.56MB)</a>
+            <a class="retry" href="https://www.mediafire.com/download_repair.php?qkey=ofkgxou9k6i0tbh&amp;dkey=zikprh3nhxo">repair</a>"""
+        assertEquals(file,dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress(page))
+        val scrambled="""<a class="input" href="#" data-scrambled-url="${java.util.Base64.getEncoder().encodeToString(file.toByteArray())}" id="downloadButton">x</a>"""
+        assertEquals("the scrambled form is the same file",file,dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress(scrambled))
+        serve(mapOf("https://www.mediafire.com/file_premium/ofkgxou9k6i0tbh/" to page))
+        val link=resolve("https://www.mediafire.com/file_premium/ofkgxou9k6i0tbh/Yasei_no_Last_Boss_001_1080p.mp4/file").single()
+        assertEquals(file,link.url);assertEquals(ExtractorLinkType.VIDEO,link.type)
+        // A removed file is MediaFire's error page: no button, no link (never another address on the page)
+        assertNull(dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress("""<a href="https://download1.example.com/x.mp4">x</a>"""))
+        assertNull("only MediaFire's own download hosts",dev.vantara.runtime.cloudstream.extractors.MediaFire.fileAddress("""<a href="https://evil.example/x.mp4" id="downloadButton">x</a>"""))
+    }
+
+    // المسح الحي (14 نوفمبر، AnimeWitcher): مستخرج الإضافة الخاص بـ MediaFire فشل، فسقط السيرفر ولم يُجرَّب مستخرج VANTARA
+    @Test fun aProvidersOwnFailingExtractorNoLongerHidesTheNextOne() {
+        com.lagradost.cloudstream3.utils.ExtractorRegistry.add(object:com.lagradost.cloudstream3.utils.ExtractorApi(){
+            override val name="ProviderMediafire";override val mainUrl="https://www.mediafire.com"
+            override suspend fun getUrl(url:String,referer:String?,subtitleCallback:(com.lagradost.cloudstream3.SubtitleFile)->Unit,callback:(ExtractorLink)->Unit){ error("the provider's own extractor broke") }
+        })
+        val file="https://download2392.mediafire.com/abc/q/VERTEX_FORCE_001_480p.mp4"
+        serve(mapOf("https://www.mediafire.com/file_premium/q/" to """<a class="input popsok" href="$file" id="downloadButton">Download</a>"""))
+        val link=resolve("https://www.mediafire.com/file_premium/q/VERTEX_FORCE_001_480p.mp4/file").single()
+        assertEquals(file,link.url)
+        assertTrue("a server that resolved is not reported missing",WorkerState.takeMissingExtractors().isEmpty())
+    }
+}
