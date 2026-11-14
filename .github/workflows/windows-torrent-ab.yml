@@ -30,8 +30,20 @@ concurrency:
   cancel-in-progress: false
 jobs:
   ab:
-    name: libtorrent (APK settings) vs rqbit vs one-setting variants, with per-second diagnostics (Windows)
+    name: ${{ matrix.group }} — libtorrent (APK settings) vs one-setting variants, per-second diagnostics (Windows)
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # القراءة من القرص: الـAPK يقرأ القطعة التالية مسبقًا (state.readAhead)، ويندوز لا يقرأ مسبقًا
+          - group: disk-read
+            variants: '"--lt-variant=ra1|||VANTARA_LT_READAHEAD=1" "--lt-variant=ra4|||VANTARA_LT_READAHEAD=4"'
+            rqbit: 'yes'
+          # الشبكة والنافذة: كل إعداد وحده
+          - group: network-window
+            variants: '"--lt-variant=utp|enable_outgoing_utp=true,enable_incoming_utp=true|" "--lt-variant=rqt3|request_queue_time=3|" "--lt-variant=win32||32"'
+            rqbit: 'no'
     timeout-minutes: 170
     env:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.vcpkg-cache,readwrite
@@ -76,24 +88,25 @@ jobs:
           Expand-Archive (Get-ChildItem dl -Filter '*.zip' | Select-Object -First 1).FullName portable
           $rq = Get-ChildItem portable -Recurse -Filter 'rqbit.exe' | Select-Object -First 1
           "RQBIT=$($rq.FullName)" | Out-File -Append $env:GITHUB_ENV
-      - name: A/B with per-second diagnostics (APK settings, rqbit, one-setting variants)
+      - name: A/B with per-second diagnostics (${{ matrix.group }})
         shell: pwsh
         env:
           SOURCES: ${{ inputs.sources || 'strong' }}
           ROUNDS: ${{ inputs.rounds || '2' }}
         run: |
-          node tools/torrent-host/swarm-ab.mjs "--libtorrent=$env:NATIVE" "--rqbit=$env:RQBIT" "--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')" "--rounds=$env:ROUNDS" "--sources=$env:SOURCES" `
-            "--lt-variant=utp|enable_outgoing_utp=true,enable_incoming_utp=true|" `
-            "--lt-variant=rqt3|request_queue_time=3|" `
-            "--lt-variant=win32||32"
+          $rq = if ('${{ matrix.rqbit }}' -eq 'yes') { "--rqbit=$env:RQBIT" } else { '--rqbit=' }
+          $cmd = "node tools/torrent-host/swarm-ab.mjs `"--libtorrent=$env:NATIVE`" $rq `"--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')`" `"--rounds=$env:ROUNDS`" `"--sources=$env:SOURCES`" ${{ matrix.variants }}"
+          Write-Host $cmd
+          Invoke-Expression $cmd
+          if ($LASTEXITCODE -ne 0) { throw "swarm-ab exited $LASTEXITCODE" }
           $r = Get-Content (Join-Path $env:RUNNER_TEMP 'swarm-ab.json') -Raw | ConvertFrom-Json
-          '### libtorrent (APK settings) vs rqbit vs one-setting variants' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '### ${{ matrix.group }}: libtorrent (APK settings) vs one-setting variants' | Out-File -Append $env:GITHUB_STEP_SUMMARY
           '```json' | Out-File -Append $env:GITHUB_STEP_SUMMARY
           ($r.summary | ConvertTo-Json -Depth 5) | Out-File -Append $env:GITHUB_STEP_SUMMARY
           '```' | Out-File -Append $env:GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-torrent-ab
+          name: windows-torrent-ab-${{ matrix.group }}
           path: ${{ runner.temp }}/swarm-ab.json
           if-no-files-found: warn

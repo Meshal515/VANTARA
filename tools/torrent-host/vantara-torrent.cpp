@@ -102,7 +102,10 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
 static constexpr int MAX_ANNOUNCE = 48;
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
-static int AHEAD_PIECES = 64;    // ما بعد النافذة بأولوية عادية (JS يوقف/يستأنف حسب المساحة)
+static int AHEAD_PIECES = 64;
+// قراءة القطع المكتملة التالية من القرص قبل أن يطلبها القارئ (الـAPK: state.readAhead لقطعة واحدة). 0 = السلوك الحالي
+// بلا قراءة مسبقة؛ تجربة قياس فقط عبر VANTARA_LT_READAHEAD حتى تثبت النتائج المتكررة.
+static int READAHEAD = 0;    // ما بعد النافذة بأولوية عادية (JS يوقف/يستأنف حسب المساحة)
 
 // TorrentPolicy.deadlines: القطعة المقروءة الآن أولًا (0ms)، ثم الطرفان، ثم الباقي بتدرّج يتسع.
 std::vector<std::pair<int, int>> deadlines(std::vector<int> const& window, std::vector<int> const& pendingEdges) {
@@ -203,6 +206,9 @@ struct Torrent {
     int waitingPiece = -1;
     clk::time_point waitingSince;
     std::map<int, std::shared_ptr<std::vector<char>>> pieceCache;  // read_piece (حتى 6 قطع)
+    // زمن read_piece (من الطلب إلى التنبيه): هل البطء في القرص لا في السرب؟
+    std::map<int, clk::time_point> readStart;
+    int64_t readLastMs = -1, readMaxMs = 0; double readAvgMs = 0; int readCount = 0;
     std::deque<int> cacheOrder;
     std::set<int> reading;
     std::map<int, std::string> readErrors;
@@ -400,7 +406,9 @@ public:
         int unchokedUs = 0, sending = 0, onWaiting = 0;
         std::vector<int> waitSpeeds;
         int waiting, windowStart; int64_t waitedMs = -1;
+        size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount;
         { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
+          readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount;
           if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
         for (auto const& p : peers) {
             if (bool(p.flags & lt::peer_info::interesting) && !bool(p.flags & lt::peer_info::remote_choked)) ++unchokedUs;
@@ -418,7 +426,8 @@ public:
           << ",\"waiting\":{\"piece\":" << waiting << ",\"ms\":" << waitedMs << ",\"blocks\":" << wBlocks << ",\"finished\":" << wFinished
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
-        o << "]},\"swaps\":" << swaps_ << "}";
+        o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << "},\"swaps\":" << swaps_ << "}";
         return {200, o.str()};
     }
 
@@ -655,6 +664,7 @@ private:
             auto cached = t->pieceCache.find(piece);
             if (cached != t->pieceCache.end()) {
                 if (waited && t->waitingPiece == piece) t->waitingPiece = -1;
+                prefetchLocked(*t, piece);
                 return cached->second;
             }
             if (t->readErrors.count(piece)) {
@@ -669,12 +679,27 @@ private:
                 t->h.resume();
             }
             if (t->h.have_piece(lt::piece_index_t(piece))) {
-                if (t->reading.insert(piece).second) t->h.read_piece(lt::piece_index_t(piece));
+                if (t->reading.insert(piece).second) { t->readStart[piece] = clk::now(); t->h.read_piece(lt::piece_index_t(piece)); }
+                prefetchLocked(*t, piece);
             } else if (t->waitingPiece != piece) {
                 t->waitingPiece = piece; t->waitingSince = clk::now();
             }
             waited = true;
             cv_.wait_for(lock, 250ms);
+        }
+    }
+
+    // القطع المكتملة التالية تُطلب من القرص مسبقًا بالتوازي (حتى READAHEAD)، فلا ينتظر القارئ زمن القرص لكل قطعة
+    void prefetchLocked(Torrent& t, int piece) {
+        if (policy::READAHEAD <= 0) return;
+        auto const ti = t.h.torrent_file();
+        if (!ti) return;
+        for (int k = 1; k <= policy::READAHEAD; ++k) {
+            int const p = piece + k;
+            if (p >= ti->num_pieces()) break;
+            if (t.pieceCache.count(p) || t.reading.count(p)) continue;
+            if (!t.h.have_piece(lt::piece_index_t(p))) break;
+            t.reading.insert(p); t.readStart[p] = clk::now(); t.h.read_piece(lt::piece_index_t(p));
         }
     }
 
@@ -684,11 +709,17 @@ private:
             if (t->h != a->handle) continue;
             int const p = int(static_cast<std::int32_t>(a->piece));
             t->reading.erase(p);
+            if (auto s = t->readStart.find(p); s != t->readStart.end()) {
+                int64_t const ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - s->second).count();
+                t->readLastMs = ms; t->readMaxMs = std::max(t->readMaxMs, ms); ++t->readCount;
+                t->readAvgMs += (double(ms) - t->readAvgMs) / t->readCount;
+                t->readStart.erase(s);
+            }
             if (a->error) { t->readErrors[p] = a->error.message(); break; }
             auto data = std::make_shared<std::vector<char>>(a->buffer.get(), a->buffer.get() + a->size);
             t->pieceCache[p] = data;
             t->cacheOrder.push_back(p);
-            while (t->cacheOrder.size() > 6) { t->pieceCache.erase(t->cacheOrder.front()); t->cacheOrder.pop_front(); }
+            while (t->cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t->pieceCache.erase(t->cacheOrder.front()); t->cacheOrder.pop_front(); }
             break;
         }
     }
@@ -983,6 +1014,7 @@ int main(int argc, char** argv) {
     // تجارب القياس فقط: حجم نافذة القراءة وما بعدها؛ بلا المتغيرين تبقى قيم الـAPK (12 و64)
     if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
     if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
+    if (const char* r = std::getenv("VANTARA_LT_READAHEAD")) policy::READAHEAD = std::clamp(std::atoi(r), 0, 16);
     int apiPort = 0, listenPort = 0, pieceSize = 256 * 1024;
     long parentPid = 0;
     std::string dir, stateDir, seedFile, testPeer;

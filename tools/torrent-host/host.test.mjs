@@ -150,6 +150,8 @@ test('libtorrent host: /diag reports engine rate, peers and the piece the reader
   assert.ok(diag.body.peers >= 1 || diag.body.pieces > 0, 'connected to the seeder or already downloaded from it');
   assert.ok(diag.body.window_start >= 0, 'the reader set its window');
   for (const key of ['piece', 'ms', 'blocks', 'finished', 'writing', 'requested', 'peers', 'speeds']) assert.ok(key in diag.body.waiting, `waiting.${key}`);
+  for (const key of ['in_flight', 'last_ms', 'avg_ms', 'max_ms', 'count', 'readahead']) assert.ok(key in diag.body.reads, `reads.${key}`);
+  assert.equal(diag.body.reads.readahead, Number(process.env.VANTARA_LT_READAHEAD ?? 0), 'readahead off by default');
   assert.ok((await read).body.equals(data));
 });
 

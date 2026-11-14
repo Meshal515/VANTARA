@@ -18,8 +18,10 @@ const engines = { libtorrent: opt('libtorrent'), rqbit: opt('rqbit') };
 // بنفس ملف libtorrent ومتغيرات بيئة فقط؛ الافتراضي (libtorrent) بلا أي تغيير للمقارنة.
 const variants = new Map();
 for (const a of process.argv.filter(x => x.startsWith('--lt-variant='))) {
-  const [name, settings = '', window = ''] = a.slice('--lt-variant='.length).split('|');
-  variants.set(`lt:${name}`, { settings, window });
+  // الاسم|إعدادات settings_pack|نافذة|متغيرات بيئة إضافية (KEY=VAL;KEY=VAL)، مثل VANTARA_LT_READAHEAD=1
+  const [name, settings = '', window = '', extra = ''] = a.slice('--lt-variant='.length).split('|');
+  const env = Object.fromEntries(extra.split(';').filter(Boolean).map(kv => kv.split('=')));
+  variants.set(`lt:${name}`, { settings, window, env });
   engines[`lt:${name}`] = engines.libtorrent;
 }
 const isLt = kind => kind === 'libtorrent' || kind.startsWith('lt:');
@@ -98,11 +100,12 @@ function readOnce(url, from, len, timeout, t0, meter = {}) {
 }
 
 async function measure(kind, source) {
-  const dir = await mkdtemp(join(tmpdir(), `ab-${kind}-`));
+  // اسم المجلد بلا «:» (ويندوز يرفضه في المسارات: تشغيل التجارب الأول سقط عند lt:utp)
+  const dir = await mkdtemp(join(tmpdir(), `ab-${kind.replace(/[^\w-]/g, '_')}-`));
   const apiPort = await port(); let listenPort = await port(); while (listenPort === apiPort) listenPort = await port();
   const args = isLt(kind) ? libtorrentArgs({ apiPort, listenPort, dir: join(dir, 'cache'), stateDir: join(dir, 'state') }) : engineArgs({ apiPort, listenPort, dir: join(dir, 'cache'), dhtPersistence: false });
   const v = variants.get(kind);
-  const child = spawn(engines[kind], args, { env: { ...process.env, RQBIT_HTTP_BASIC_AUTH_USERPASS: auth, ...(v?.settings ? { VANTARA_LT_SETTINGS: v.settings } : {}), ...(v?.window ? { VANTARA_LT_WINDOW: v.window } : {}) }, stdio: 'ignore', windowsHide: true });
+  const child = spawn(engines[kind], args, { env: { ...process.env, RQBIT_HTTP_BASIC_AUTH_USERPASS: auth, ...(v?.settings ? { VANTARA_LT_SETTINGS: v.settings } : {}), ...(v?.window ? { VANTARA_LT_WINDOW: v.window } : {}), ...(v?.env ?? {}) }, stdio: 'ignore', windowsHide: true });
   const base = `http://127.0.0.1:${apiPort}`;
   const row = { engine: kind, source: source.label };
   let sampler = null;
@@ -131,7 +134,7 @@ async function measure(kind, source) {
       const d = await call(base, diagPath, { timeout: 900 }).catch(() => null);
       const j = d?.json ?? {};
       timeline.push(isLt(kind)
-        ? { at, phase, delivered, rate: j.rate_bps ?? null, peers: j.peers ?? null, unchokedUs: j.unchoked_us ?? null, sending: j.sending ?? null, pieces: j.pieces ?? null, waiting: j.waiting ?? null, swaps: j.swaps ?? null }
+        ? { at, phase, delivered, rate: j.rate_bps ?? null, peers: j.peers ?? null, unchokedUs: j.unchoked_us ?? null, sending: j.sending ?? null, pieces: j.pieces ?? null, waiting: j.waiting ?? null, reads: j.reads ?? null, swaps: j.swaps ?? null }
         : { at, phase, delivered, rate: j.live?.download_speed?.mbps != null ? Math.round(j.live.download_speed.mbps * 1048576) : null, peers: j.live?.snapshot?.peer_stats?.live ?? null });
     }, 1000);
     row.timeline = timeline;
@@ -150,6 +153,10 @@ async function measure(kind, source) {
     row.headEngineMBps = headSamples.length ? +(mean(headSamples.map(s => s.rate)) / 1048576).toFixed(2) : null;
     row.headPeers = headSamples.length ? Math.round(mean(headSamples.map(s => s.peers ?? 0))) : null;
     row.headUnchokedUs = headSamples.length && headSamples[0].unchokedUs != null ? Math.round(mean(headSamples.map(s => s.unchokedUs ?? 0))) : null;
+    // زمن قراءة القرص (read_piece) آخر عينة: متوسطه وأقصاه، وكم قطعة كان القارئ ينتظر قطعة غير منزّلة
+    const lastReads = [...timeline].reverse().find(s => s.reads)?.reads;
+    row.readAvgMs = lastReads?.avg_ms ?? null; row.readMaxMs = lastReads?.max_ms ?? null; row.readCount = lastReads?.count ?? null;
+    row.headWaitingSamples = headSamples.filter(s => (s.waiting?.piece ?? -1) >= 0).length;
     // صحيح فقط إن كان 206 بالمدى المطلوب بالضبط وبالطول كاملًا
     const exact = (r, from) => r.status === 206 && r.totalMs != null && r.bytes === 4 << 20 && r.contentRange?.startsWith(`bytes ${from}-${from + (4 << 20) - 1}/`);
     const ok = r => exact(r, r === row.head4MB ? 0 : Math.floor(files[index].length / 2));
@@ -190,7 +197,7 @@ for (const kind of Object.keys(engines)) {
     summary[`${kind}/${group}`] = { ok: rows.filter(r => r.head4MB?.status === 206).length, failed: all.length - rows.length,
       medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)),
       medianSustainedMBps: median(rows.map(r => r.sustainedMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)),
-      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)) };
+      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)), medianReadAvgMs: median(rows.map(r => r.readAvgMs)), medianReadMaxMs: median(rows.map(r => r.readMaxMs)) };
   }
 }
 report.summary = summary;
