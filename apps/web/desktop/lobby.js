@@ -28,17 +28,27 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
     }
     paint(state, media);
   }
+  // renderLobby يمسح الغرفة ويبنيها من جديد، والمشغّل يناديها كل 500ms: كان البنر يُعاد تحميله والاسم يظهر ثم
+  // يُستبدل بالشعار كل نصف ثانية (الشعار «يتحرك ويتكرر» في بلاغ المالك)، والزر تحت الفأرة يُستبدل فلا يُضغط بثبات.
+  // تُرسم الغرفة فقط حين يتغير ما يُرى فيها؛ العدّ التنازلي يحدّث نفسه داخل renderLobby.
+  let painted = null;
   function paint(state, media) {
     if (closed || !latest?.visible) return;
     const roomHub = hub(), event = latest;
     const person = id => roomHub?.person?.(id) ?? { userId: id, displayName: 'صديق' };
     const roster = (event.roster ?? []).map(r => ({ ...r, avatarKey: r.avatarKey || person(r.userId).avatarKey || null }));
-    renderLobby(host, { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
+    const model = { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
       pending: pendingInvitees(event.invited, roster, event.me, person),
       kindText: mediaKind(media), episodeText: episodeLine(media, state?.episode ?? media.episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: media.kind === 'anime' ? '#3b82f6' : '#c1121f',
-    }, { avatar: (p, size) => {
+    };
+    // الموضع والزمن وانحراف كل عضو تتغير مع كل تقرير ولا تُرى في الغرفة: لا تُعيد الرسم
+    const VOLATILE = new Set(['pos', 'at', 'driftMs', 'driftP95', 'seenAt', 'lastSeen', 'rtt', 'now']);
+    const signature = JSON.stringify(model, (k, v) => (typeof v === 'function' || VOLATILE.has(k) ? undefined : v));
+    if (signature === painted && host.childElementCount) return;
+    painted = signature;
+    renderLobby(host, model, { avatar: (p, size) => {
       if (roomHub?.avatar) return roomHub.avatar(p, size);
       const fallback = doc.createElement('span'); fallback.textContent = [...(p.displayName ?? 'صديق')][0]; return fallback;
     }, start: event.start, resume: event.resume, changeServer: chooseServer, leave,

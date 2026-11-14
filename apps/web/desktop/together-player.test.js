@@ -163,3 +163,27 @@ it('Windows lobby carries the shared artwork identity and three-second start clo
   expect(f.hooks.onLobby.mock.lastCall[0].visible).toBe(false);
   f.player.close();
 });
+
+describe('تحكّم المضيف بلا تأخير', () => {
+  it('المضيف: الإيقاف يُطبّق عنده فورًا والتشغيل بعد 300ms، ولا يرجعه المؤقت للحالة القديمة قبل وصول البث', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: true, pos: 0, at: 1000, seq: 4 });
+    f.event('ready'); f.event('progress', { position: 60000, paused: false });
+    f.bridge.playbackCommand.mockClear();
+    f.player.playPause(false);
+    expect(f.room.command).toHaveBeenCalledWith('pause', expect.objectContaining({ pos: 60000 }));
+    // فورًا، قبل أي رد من الخادم
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({ session: 'mpv-session', command: 'pause', value: true });
+    f.bridge.playbackCommand.mockClear();
+    vi.advanceTimersByTime(1000); // مؤقت align كل 500ms والغرفة ما زالت «تعمل» بلا بث جديد
+    expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: false }));
+    // وصل البث (seq أكبر): الغرفة هي الحكم من جديد
+    f.state({ playing: false, pos: 60000, seq: 5 });
+    f.bridge.playbackCommand.mockClear();
+    f.player.playPause(true);
+    expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: false }));
+    vi.advanceTimersByTime(300);
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({ session: 'mpv-session', command: 'pause', value: false });
+    f.player.close();
+  });
+});
