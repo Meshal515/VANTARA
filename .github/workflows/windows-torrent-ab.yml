@@ -46,6 +46,7 @@ jobs:
           - group: direct-read
             variants: |-
               direct|||VANTARA_LT_DIRECT=1
+              directra4|||VANTARA_LT_DIRECT=1;VANTARA_LT_READAHEAD=4
             rqbit: 'no'
     timeout-minutes: 170
     env:

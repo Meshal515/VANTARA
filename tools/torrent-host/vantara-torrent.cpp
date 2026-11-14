@@ -227,7 +227,8 @@ struct Torrent {
     std::map<int, std::string> readErrors;
     std::map<int, int> readFailures;
     std::set<int> directFailed;   // قطع لم تطابق بصمتها عند القراءة المباشرة: read_piece لها فقط
-    int directHits = 0, directMisses = 0;
+    std::set<int> directPending;  // قطع في طابور القراءة المسبقة المباشرة (خيط مستقل)
+    int directHits = 0, directMisses = 0, directAhead = 0;
     int errorRecoveries = 0;
 };
 
@@ -329,6 +330,7 @@ public:
             if (listening) break;
         }
         alerts_ = std::thread([this] { alertLoop(); });
+        if (policy::DIRECT_READ) direct_ = std::thread([this] { directLoop(); });
     }
 
     ~Engine() { stop(); }
@@ -337,6 +339,7 @@ public:
         if (stopping_.exchange(true)) return;
         cv_.notify_all();
         if (alerts_.joinable()) alerts_.join();
+        if (direct_.joinable()) direct_.join();
         saveDht();
     }
 
@@ -428,9 +431,9 @@ public:
         int unchokedUs = 0, sending = 0, onWaiting = 0;
         std::vector<int> waitSpeeds;
         int waiting, windowStart; int64_t waitedMs = -1;
-        size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount, directHits, directMisses;
+        size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount, directHits, directMisses, directAhead;
         { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
-          readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount; directHits = t->directHits; directMisses = t->directMisses;
+          readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount; directHits = t->directHits; directMisses = t->directMisses; directAhead = t->directAhead;
           if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
         for (auto const& p : peers) {
             if (bool(p.flags & lt::peer_info::interesting) && !bool(p.flags & lt::peer_info::remote_choked)) ++unchokedUs;
@@ -449,7 +452,7 @@ public:
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
-          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
         return {200, o.str()};
     }
 
@@ -686,7 +689,7 @@ private:
             auto cached = t->pieceCache.find(piece);
             if (cached != t->pieceCache.end()) {
                 if (waited && t->waitingPiece == piece) t->waitingPiece = -1;
-                prefetchLocked(*t, piece);
+                prefetchLocked(t, piece);
                 return cached->second;
             }
             if (t->readErrors.count(piece)) {
@@ -701,6 +704,8 @@ private:
                 t->h.resume();
             }
             if (t->h.have_piece(lt::piece_index_t(piece))) {
+                // القطعة في يد خيط القراءة المسبقة: ننتظره (يوقظنا عند التخزين) بدل قراءتها مرتين
+                if (policy::DIRECT_READ && t->directPending.count(piece)) { waited = true; cv_.wait_for(lock, 50ms); continue; }
                 if (policy::DIRECT_READ && !t->directFailed.count(piece) && !t->reading.count(piece)) {
                     auto const started = clk::now();
                     lock.unlock();
@@ -715,7 +720,7 @@ private:
                     t->directFailed.insert(piece); ++t->directMisses;
                 }
                 if (t->reading.insert(piece).second) { t->readStart[piece] = clk::now(); t->h.read_piece(lt::piece_index_t(piece)); }
-                prefetchLocked(*t, piece);
+                prefetchLocked(t, piece);
             } else if (t->waitingPiece != piece) {
                 t->waitingPiece = piece; t->waitingSince = clk::now();
             }
@@ -725,16 +730,39 @@ private:
     }
 
     // القطع المكتملة التالية تُطلب من القرص مسبقًا بالتوازي (حتى READAHEAD)، فلا ينتظر القارئ زمن القرص لكل قطعة
-    void prefetchLocked(Torrent& t, int piece) {
+    // مع التسليم المباشر: القطع التالية تُقرأ من ملفها في خيط مستقل (لا طابور libtorrent، فلا تزاحم الكتابة)
+    void prefetchLocked(std::shared_ptr<Torrent> const& tp, int piece) {
         if (policy::READAHEAD <= 0) return;
+        Torrent& t = *tp;
         auto const ti = t.h.torrent_file();
         if (!ti) return;
         for (int k = 1; k <= policy::READAHEAD; ++k) {
             int const p = piece + k;
             if (p >= ti->num_pieces()) break;
-            if (t.pieceCache.count(p) || t.reading.count(p)) continue;
+            if (t.pieceCache.count(p) || t.reading.count(p) || t.directPending.count(p)) continue;
             if (!t.h.have_piece(lt::piece_index_t(p))) break;
+            if (policy::DIRECT_READ && !t.directFailed.count(p)) { t.directPending.insert(p); directQueue_.emplace_back(tp, p); continue; }
             t.reading.insert(p); t.readStart[p] = clk::now(); t.h.read_piece(lt::piece_index_t(p));
+        }
+    }
+
+    void directLoop() {
+        std::unique_lock<std::mutex> lock(m_);
+        while (!stopping_) {
+            if (directQueue_.empty()) { cv_.wait_for(lock, 100ms); continue; }
+            auto [weak, p] = directQueue_.front();
+            directQueue_.pop_front();
+            auto t = weak.lock();
+            if (!t || !byId_.count(t->id)) continue;
+            if (t->pieceCache.count(p)) { t->directPending.erase(p); continue; }
+            auto const h = t->h;
+            lock.unlock();
+            auto data = directRead(h, p);
+            lock.lock();
+            t->directPending.erase(p);
+            if (data) { ++t->directHits; ++t->directAhead; cacheLocked(*t, p, std::move(data)); }
+            else { t->directFailed.insert(p); ++t->directMisses; }
+            cv_.notify_all();
         }
     }
 
@@ -869,6 +897,8 @@ private:
     std::atomic<int> swaps_{0};
     std::atomic<bool> stopping_{false};
     std::thread alerts_;
+    std::thread direct_;
+    std::deque<std::pair<std::weak_ptr<Torrent>, int>> directQueue_;
     bool debug_ = std::getenv("VANTARA_TORRENT_LOG") != nullptr;
 };
 
