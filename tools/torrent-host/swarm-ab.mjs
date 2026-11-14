@@ -37,17 +37,36 @@ function call(base, path, { method = 'GET', body, timeout = 60000 } = {}) {
     req.setTimeout(timeout, () => req.destroy(new Error('timeout'))); req.on('error', reject); req.end(body);
   });
 }
-/** يقرأ [from, from+len) ويعيد زمن أول بايت وزمن الإكمال (أو null عند انتهاء المهلة). */
-function readRange(url, from, len, timeout) {
+/**
+ * يقرأ [from, from+len) ويعيد زمن أول بايت وزمن الإكمال. لا يُحسب إلا رد 206 بـContent-Range المطلوب:
+ * rqbit يرد 500 «invalid state: initializing» (~156 بايت) حتى يفتح ملف التورنت، والتطبيق يعيد المحاولة
+ * (services.mjs) فنفعل مثله هنا والزمن من أول محاولة؛ وإلا كان نص الخطأ يُقاس كأنه بيانات الفيلم.
+ */
+async function readRange(url, from, len, timeout) {
+  const t0 = performance.now(); let attempts = 0, last = null;
+  while (performance.now() - t0 < timeout) {
+    attempts++;
+    const left = Math.max(1000, timeout - (performance.now() - t0));
+    const r = await readOnce(url, from, len, left, t0);
+    if (r.status === 206 || r.timedOut || r.error) return { ...r, attempts };
+    last = r;
+    await sleep(250);
+  }
+  return { ...(last ?? {}), firstByteMs: null, totalMs: null, bytes: 0, timedOut: true, attempts };
+}
+function readOnce(url, from, len, timeout, t0) {
   return new Promise(resolve => {
-    const t0 = performance.now(); let first = null, got = 0;
+    let first = null, got = 0, status = null, contentRange = null; const body = [];
     const req = http.get(url, { headers: { ...H, Range: `bytes=${from}-${from + len - 1}` } }, res => {
-      res.on('data', c => { first ??= performance.now() - t0; got += c.length; });
-      res.on('end', () => resolve({ firstByteMs: first == null ? null : Math.round(first), totalMs: Math.round(performance.now() - t0), bytes: got }));
-      res.on('error', () => resolve({ firstByteMs: first, totalMs: null, bytes: got }));
+      status = res.statusCode; contentRange = res.headers['content-range'] ?? null;
+      res.on('data', c => { if (status === 206) { first ??= performance.now() - t0; got += c.length; } else if (body.length < 4) body.push(c); });
+      res.on('end', () => resolve(status === 206
+        ? { status, contentRange, firstByteMs: first == null ? null : Math.round(first), totalMs: Math.round(performance.now() - t0), bytes: got }
+        : { status, contentRange, firstByteMs: null, totalMs: null, bytes: 0, engineError: Buffer.concat(body).toString('utf8').slice(0, 200) }));
+      res.on('error', () => resolve({ status, contentRange, firstByteMs: first, totalMs: null, bytes: got, error: true }));
     });
-    req.setTimeout(timeout, () => { req.destroy(); resolve({ firstByteMs: first == null ? null : Math.round(first), totalMs: null, bytes: got, timedOut: true }); });
-    req.on('error', () => resolve({ firstByteMs: null, totalMs: null, bytes: got, error: true }));
+    req.setTimeout(timeout, () => { req.destroy(); resolve({ status, contentRange, firstByteMs: first == null ? null : Math.round(first), totalMs: null, bytes: got, timedOut: true }); });
+    req.on('error', () => resolve({ status, firstByteMs: null, totalMs: null, bytes: got, error: true }));
   });
 }
 
@@ -77,7 +96,9 @@ async function measure(kind, source) {
     row.head4MB = await readRange(url, 0, 4 << 20, BUDGET_MS);
     row.clickToFirstByteMs = row.head4MB.firstByteMs == null ? null : Math.round(row.metadataMs + row.head4MB.firstByteMs);
     row.seek50pct4MB = await readRange(url, Math.floor(files[index].length / 2), 4 << 20, BUDGET_MS);
-    const ok = r => r.totalMs != null && r.bytes === 4 << 20;
+    // صحيح فقط إن كان 206 بالمدى المطلوب بالضبط وبالطول كاملًا
+    const exact = (r, from) => r.status === 206 && r.totalMs != null && r.bytes === 4 << 20 && r.contentRange?.startsWith(`bytes ${from}-${from + (4 << 20) - 1}/`);
+    const ok = r => exact(r, r === row.head4MB ? 0 : Math.floor(files[index].length / 2));
     row.headMBps = ok(row.head4MB) ? +(4 / (row.head4MB.totalMs / 1000)).toFixed(2) : null;
     row.seekMBps = ok(row.seek50pct4MB) ? +(4 / (row.seek50pct4MB.totalMs / 1000)).toFixed(2) : null;
     const stats = await call(base, `/torrents/${added.json.id}/stats/v1`, { timeout: 5000 }).catch(() => null);
@@ -103,8 +124,9 @@ for (let round = 0; round < rounds; round++) {
 const summary = {};
 for (const kind of Object.keys(engines)) {
   const rows = report.runs.filter(r => r.engine === kind && !r.error);
+  const invalid = rows.filter(r => r.head4MB?.status !== 206).length;
   const median = list => { const v = list.filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
-  summary[kind] = { ok: rows.length, failed: report.runs.filter(r => r.engine === kind && r.error).length,
+  summary[kind] = { ok: rows.length - invalid, invalidStreams: invalid, failed: report.runs.filter(r => r.engine === kind && r.error).length,
     medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)) };
 }
 report.summary = summary;
