@@ -32,6 +32,14 @@ try {
     $result.skipped = "build $PreviousBuild predates the in-app update smoke; the first N->N+1 proof runs on the next published build"
     Save; Write-Warning $result.skipped; return
   }
+  # بناءات 6–9: إثبات الإقلاع فيها ينتظر الواجهة (#root .v35) وحدها، وتثبيت جديد بلا حساب يعرض شاشة الدخول
+  # (#root .gate)، فتنتهي مهلته قبل «البحث عن تحديثات» أيًّا كان التحديث (تشغيل #9). الكود قديم ومنشور فلا يُصلح؛
+  # الإثبات الحقيقي يعمل من أول بناء منشور بالإصلاح (BOOT_READY_JS) كسابق. يُسجَّل صراحة في التقرير والسجل.
+  $smokeCode = Get-Content (Join-Path $target 'resources\app\update-smoke.cjs') -Raw
+  if ($smokeCode -notmatch 'BOOT_READY_JS') {
+    $result.blocked = "build $PreviousBuild's update proof waits for the signed-in shell only (#root .v35) and times out on the fresh-install login gate; the N->N+1 proof runs from the first published build that has BOOT_READY_JS"
+    Save; Write-Warning $result.blocked; return
+  }
   # ── 2) التحديث من داخل التطبيق ──
   $smokeReport = Join-Path $dl 'update-smoke.json'
   $p = Start-Process $exe -ArgumentList "--update-smoke-report=`"$smokeReport`"" -PassThru

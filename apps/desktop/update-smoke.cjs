@@ -9,6 +9,10 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const MARKER_KEY = 'vantara.updateSmoke.marker';
+// جاهزية الإقلاع: جسر التحديث وأي شاشة من القشرة. تثبيت جديد بلا حساب يعرض شاشة الدخول (#root .gate) لا الواجهة
+// (#root .v35)؛ «البحث عن تحديثات» لا يحتاج حسابًا. انتظار الواجهة وحدها أفشل الإثبات في تشغيل #9 (فحص الإقلاع
+// العادي في main.cjs يقبل الحالتين أصلًا).
+const BOOT_READY_JS = '!!window.VantaraDesktopUpdates && !!document.querySelector("#root .v35, #root .gate")';
 async function until(fn, timeout, label) {
   const end = Date.now() + timeout;
   while (Date.now() < end) { const value = await fn(); if (value) return value; await new Promise((r) => setTimeout(r, 250)); }
@@ -22,7 +26,7 @@ async function runUpdateSmoke({ window, reportPath, channelInfo, appVersion, upd
   const save = () => fs.writeFile(reportPath, JSON.stringify(report, null, 2));
   const js = (code) => window.webContents.executeJavaScript(code);
   try {
-    await until(() => js('!!window.VantaraDesktopUpdates && !!document.querySelector("#root .v35")'), 60000, 'إقلاع الواجهة');
+    await until(() => js(BOOT_READY_JS), 60000, 'إقلاع الواجهة');
     // علامة بيانات المستخدم: يجب أن تبقى بعد التثبيت فوق المجلد نفسه وإعادة التشغيل
     report.marker = `${appVersion}#${installed.build}@${Date.now()}`;
     await fs.writeFile(path.join(userData, 'update-smoke-marker.txt'), report.marker);
@@ -76,4 +80,4 @@ async function runUpdateSmoke({ window, reportPath, channelInfo, appVersion, upd
   await save();
   return report;
 }
-module.exports = { runUpdateSmoke, MARKER_KEY };
+module.exports = { runUpdateSmoke, MARKER_KEY, BOOT_READY_JS };

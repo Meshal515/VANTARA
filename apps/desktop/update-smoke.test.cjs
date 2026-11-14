@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const updater = require('./updater.cjs');
-const { runUpdateSmoke, MARKER_KEY } = require('./update-smoke.cjs');
+const { runUpdateSmoke, MARKER_KEY, BOOT_READY_JS } = require('./update-smoke.cjs');
 
 // نافذة مزيفة: تنفّذ ما يطلبه الإثبات من الواجهة كما تفعله update-check.js، والزرّان يكتبان المثبّت ويغيّران العنوان
 function fakeWindow({ update, userData, installerBytes, failDownload = false }) {
@@ -60,4 +60,17 @@ test('فشل التنزيل يُكتب في التقرير ولا يضغط «أ�
   const report = await t.run();
   assert.match(report.error, /فشل التنزيل/);
   assert.deepEqual(t.fake.clicks(), ['تنزيل وتثبيت']);
+});
+
+// تشغيل #9 على ويندوز: تثبيت جديد بلا حساب يعرض شاشة الدخول (#root .gate) لا الواجهة (#root .v35)، فانتظر
+// الإثبات «إقلاع الواجهة» 60ث ثم فشل قبل «البحث عن تحديثات» مع أن جسر التحديث جاهز. فحص الإقلاع العادي
+// (main.cjs) يقبل الحالتين. هنا التعبير نفسه الذي يُرسل للواجهة يُقيَّم على حالة كل شاشة.
+test('إقلاع الإثبات يقبل شاشة الدخول كما يقبل الواجهة، ولا يقبل غياب جسر التحديث', () => {
+  const ready = (selectors, bridge = true) => new Function('window', 'document', `return ${BOOT_READY_JS}`)(
+    bridge ? { VantaraDesktopUpdates: {} } : {},
+    { querySelector: (s) => (s.split(',').map((x) => x.trim()).some((x) => selectors.includes(x)) ? {} : null) });
+  assert.equal(ready(['#root .gate']), true, 'login gate on a fresh install');
+  assert.equal(ready(['#root .v35']), true, 'signed-in shell');
+  assert.equal(ready([]), false, 'nothing rendered yet');
+  assert.equal(ready(['#root .gate'], false), false, 'update bridge missing');
 });
