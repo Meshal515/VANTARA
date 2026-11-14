@@ -15,7 +15,7 @@ const PICK = { anime: { want: /apothecary|frieren|jujutsu/i, card: '.an-card:not
   await page.evaluate(([sel, want]) => { const cards = [...document.querySelectorAll(sel)].filter(x => x.checkVisibility?.() && x.querySelector('img')); ((want && cards.find(x => new RegExp(want, 'i').test(x.textContent))) ?? cards[0])?.click(); }, [PICK[section].card, PICK[section].want?.source ?? null]);
   await page.waitForTimeout(8000);
   console.log(JSON.stringify(await page.evaluate(sel => {
-    const root = document.querySelector(sel || '.page.active .aw, .page.active .cn-detail, #detail.page.active') ?? document.querySelector('.page.active');
+    const root = sel?.startsWith('h2:') ? [...document.querySelectorAll('.page.active h2')].find(h => h.textContent.includes(sel.slice(3)))?.closest('section') : (document.querySelector(sel || '.page.active .aw, .page.active .cn-detail, #detail.page.active') ?? document.querySelector('.page.active'));
     const walk = (e, d) => d > 2 ? [] : [...e.children].filter(c => c.checkVisibility?.() || getComputedStyle(c).display === 'contents').flatMap(c => { const r = c.getBoundingClientRect(); return [`${'  '.repeat(d)}${c.tagName.toLowerCase()}.${String(c.className).split(' ').filter(Boolean).slice(0, 3).join('.')}${c.id ? '#' + c.id : ''} [${Math.round(r.left)},${Math.round(r.top + scrollY)} ${Math.round(r.width)}x${Math.round(r.height)}]`, ...walk(c, d + 1)]; });
     return [`ROOT ${root?.tagName}.${root?.className} data=${JSON.stringify(root?.dataset ?? {})}`, ...walk(root, 0)];
   }, selector ?? null), null, 1));

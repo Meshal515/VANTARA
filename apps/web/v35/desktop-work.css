@@ -915,3 +915,38 @@
   .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-list { grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); column-gap: 36px; }
   .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-main { grid-template-columns: clamp(200px, 46%, 260px) minmax(0, 1fr); }
 }
+
+/* ═══ «البطاقة الطائرة» و«شاشة السينما» — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══
+ * «شاشة السينما»: صف الشخصيات flex بلا التفاف ووجوه 104px؛ تسعة وجوه = 1062px في عمود 990px فخرج أول وجه
+ * خارج الحافة (x=6 بدل 64). شبكة تلتف بالمقاس نفسه.
+ * «معلومات» في النمطين: القيمة كانت في طرف الخانة والعنوان في طرفها الآخر (286px بينهما). كلاهما من البداية. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .wl-screen .wl-ring {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 22px 14px;
+    justify-content: stretch;
+  }
+  .v35 .wl-screen .wl-ring .ch { min-width: 0; }
+  .v35 .wl-screen .wl-ring :is(b, span) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* القيم اللاتينية (OLM) لها dir=auto فبدايتها اليسار، وقاعدة anime.css (start) بعد هذا الملف بالخصوصية نفسها؛
+   * «div >» يرفعها، واليمين صراحة لأن الخانة عربية */
+  .v35 :is(.wl-card, .wl-screen) .wl-s-facts .wl-facts > div > :is(small, b) { text-align: right; }
+  .v35 :is(.wl-card, .wl-screen) .wl-s-facts .wl-facts b { font-size: 15px; }
+}
+
+/* ═══ «الحلقة أولًا» — بعد المراجعة بالعين (15 نوفمبر) ═══
+ * العمودان مستقلان: الجانبي (من نفس العالم + معلومات) ينتهي على ~1700px والرئيسي يمتد إلى ~4770px، فبجانب
+ * «الشخصيات» و«إذا عجبك هذا» فراغ أسود بعرض 380px وارتفاع ~3000px، والتوصيات عمودان في 498px.
+ * الآن شبكة واحدة بالعمودين نفسيهما: القصة والحلقات بجانب «من نفس العالم»، والشخصيات بجانب «معلومات»،
+ * ثم «إذا عجبك هذا» بعرض الصفحة. الأقسام والترتيب كما هي. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .wl-episode .wl-body { grid-template-rows: auto auto auto auto; row-gap: 48px; align-items: start; }
+  .v35 .wl-episode :is(.wl-left, .wl-right) { display: contents; }
+  .v35 .wl-episode .wl-body .wl-desc { grid-column: 1; grid-row: 1; }
+  .v35 .wl-episode .wl-body .wl-s-eps { grid-column: 1; grid-row: 2; }
+  .v35 .wl-episode .wl-body .wl-s-chars { grid-column: 1; grid-row: 3; }
+  .v35 .wl-episode .wl-body .wl-s-world { grid-column: 2; grid-row: 1 / span 2; }
+  .v35 .wl-episode .wl-body .wl-s-facts { grid-column: 2; grid-row: 3; }
+  .v35 .wl-episode .wl-body .wl-s-recs { grid-column: 1 / -1; grid-row: 4; }
+}
