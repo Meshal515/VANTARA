@@ -10,6 +10,8 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  */
 
 const HIDE_AFTER_MS = 3000;
+// قرار المالك: وقت الإيقاف تختفي الأدوات بعد 5 ث بلا حركة (لترى اللقطة صافية)، ومعها زر «إخفاء الأدوات» فوري
+const PAUSED_HIDE_AFTER_MS = 5000;
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 const svg = (body, { fill = false } = {}) =>
@@ -27,6 +29,7 @@ export const ICON = {
   speed: svg('<path d="M3 14a9 9 0 0 1 18 0"/><path d="m12 14 4.5-5M3 14v4M21 14v4"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>'),
   next: svg('<path d="M5 5.5 15 12 5 18.5Z"/><rect x="16.5" y="5.5" width="2.5" height="13" rx="1"/>', { fill: true }),
   check: svg('<path d="m5 12.5 5 5L19 7"/>'),
+  hide: svg('<path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c5.2 0 9 4.7 9.8 6.6.1.3.1.5 0 .8-.4 1-1.4 2.6-3 3.9M6.6 6.6C4.4 8 2.9 10.2 2.2 11.6a1 1 0 0 0 0 .8C3 14.3 6.8 19 12 19c1.6 0 3.1-.4 4.4-1.1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
   full: svg('<path d="M3 9V5h4M17 5h4v4M21 15v4h-4M7 19H3v-4"/>'),
   fullExit: svg('<path d="M8 3v4H4M16 3v4h4M16 21v-4h4M8 21v-4H4"/>'),
   crop: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6 12h3M15 12h3M7.5 10.2 5.8 12l1.7 1.8M16.5 10.2l1.7 1.8-1.7 1.8"/>'),
@@ -91,7 +94,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
   peopleButton.onclick = () => cmd('room');
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  const hideBtn = iconButton('hide', 'إخفاء الأدوات (H)', () => hideControls()); hideBtn.hidden = true;
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -144,7 +148,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   function showControls(stay = false) {
     root.classList.add('pp--shown');
     timers.clearTimeout(hideTimer);
-    if (!stay && !state.paused && state.ready) hideTimer = timers.setTimeout(() => { if (!overControls && sheet.hidden) root.classList.remove('pp--shown'); }, HIDE_AFTER_MS);
+    if (!stay && state.ready) hideTimer = timers.setTimeout(() => { if (!overControls && sheet.hidden) root.classList.remove('pp--shown'); }, state.paused ? PAUSED_HIDE_AFTER_MS : HIDE_AFTER_MS);
   }
   const hideControls = () => { timers.clearTimeout(hideTimer); root.classList.remove('pp--shown'); };
   // حركة حقيقية فقط: Chromium يطلق mousemove وهميًا بعد كل إعادة رسم (الوقت يتغير كل ربع ثانية)،
@@ -594,6 +598,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     }
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? '')) return;
     if (sheet.hidden && ['c', 'C'].includes(e.key)) { e.preventDefault(); showSubtitles(); return; }
+    if (sheet.hidden && ['h', 'H'].includes(e.key)) { e.preventDefault(); if (root.classList.contains('pp--shown')) hideControls(); else showControls(); return; }
     if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'f', 'F', 'Escape', 'm', 'M'].includes(e.key)) { e.preventDefault(); showControls(); cmd('key', e.key); }
   });
 
@@ -724,7 +729,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (openKind === 'skips' && (previous.skipStatus !== state.skipStatus || previous.skipPending !== state.skipPending)) showSkips();
     if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
     // بدأ التشغيل أو استؤنف: يبدأ عدّاد الإخفاء (كان لا يبدأ إلا بعد إيقاف ثم تشغيل)
-    if (!state.ready || state.paused) { if (!root.classList.contains('pp--shown') || previous.ready !== state.ready || previous.paused !== state.paused) showControls(true); }
+    hideBtn.hidden = !(state.ready && state.paused);
+    if (!state.ready) { if (!root.classList.contains('pp--shown') || previous.ready !== state.ready) showControls(true); }
+    else if (state.paused) { if (previous.paused !== state.paused || previous.ready !== state.ready) showControls(); }
     else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);

@@ -25,11 +25,20 @@ it('تحديثات التقدم لا تعيد إظهار الأدوات وتظه
   expect(view.root.classList.contains('pp--shown')).toBe(true);
   vi.advanceTimersByTime(3500);expect(view.root.classList.contains('pp--shown')).toBe(false);
 });
-it('تبقى أدوات الإيقاف مرئية ثم تختفي بعد الاستئناف',()=>{
-  const {view}=fixture();view.update({ready:true,paused:true});
-  vi.advanceTimersByTime(10000);expect(view.root.classList.contains('pp--shown')).toBe(true);
-  view.update({paused:false});vi.advanceTimersByTime(3500);
-  expect(view.root.classList.contains('pp--shown')).toBe(false);
+it('وقت الإيقاف: الأدوات تختفي بعد 5 ث بلا حركة لترى اللقطة، وزر «إخفاء الأدوات» يخفيها فورًا (قرار المالك)',()=>{
+  const {document,view}=fixture();view.update({ready:true,paused:true});
+  const hide=view.root.querySelector('[data-action="hide"]');
+  expect(hide.hidden).toBe(false);
+  vi.advanceTimersByTime(4000);expect(view.root.classList.contains('pp--shown')).toBe(true);
+  vi.advanceTimersByTime(1500);expect(view.root.classList.contains('pp--shown')).toBe(false);
+  // حركة الفأرة ترجعها، والزر يخفيها فورًا
+  {const e=new document.defaultView.Event('mousemove');Object.defineProperty(e,'screenX',{value:10});Object.defineProperty(e,'screenY',{value:10});view.root.dispatchEvent(e);}
+  expect(view.root.classList.contains('pp--shown')).toBe(true);
+  hide.click();expect(view.root.classList.contains('pp--shown')).toBe(false);
+  // أثناء التشغيل لا يظهر الزر، والإخفاء بعد 3 ث كما كان
+  view.update({paused:false});expect(hide.hidden).toBe(true);
+  {const e=new document.defaultView.Event('mousemove');Object.defineProperty(e,'screenX',{value:20});Object.defineProperty(e,'screenY',{value:20});view.root.dispatchEvent(e);}
+  vi.advanceTimersByTime(3500);expect(view.root.classList.contains('pp--shown')).toBe(false);
 });
 
 it('anchors compact subtitle dialog above its button and restores focus on Escape',()=>{

@@ -395,3 +395,30 @@ html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb { background: rgba(25
 html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.28); }
 html.desktop-overlay .pwa-player ::-webkit-scrollbar-corner { background: transparent; }
 html.desktop-overlay .pwa-player .pp-sheet__body { padding-inline-end: 4px; margin-inline-end: -4px; }
+
+/* ── تحسين المشغل (قرار المالك: الأيقونات باهتة ونحيفة، شريط التقدم رفيع، العنوان بلا هرمية) ──
+ * أيقونات بيضاء أوضح بخط أثقل، شريط يتسع تحت الفأرة بمقبض وهالة، وعنوان أكبر من سطر الحلقة بوضوح. */
+html.desktop-overlay .pwa-player .pp-icon { color: rgba(255,255,255,.92); }
+html.desktop-overlay .pwa-player .pp-icon svg { width: 22px; height: 22px; }
+html.desktop-overlay .pwa-player .pp-icon svg [stroke], html.desktop-overlay .pwa-player .pp-icon svg[stroke="currentColor"] { stroke-width: 2.1; }
+html.desktop-overlay .pwa-player .pp-icon:hover { color: #fff; }
+html.desktop-overlay .pwa-player .pp-play { width: 54px; height: 54px; }
+html.desktop-overlay .pwa-player .pp-titles strong { font-size: 18px; font-weight: 800; letter-spacing: -.1px; }
+html.desktop-overlay .pwa-player .pp-titles small { font-size: 13px; color: rgba(255,255,255,.68); }
+html.desktop-overlay .pwa-player .pp-times { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pwa-player .pp-track { height: 4px; border-radius: 4px; transition: height .14s ease; }
+html.desktop-overlay .pwa-player .pp-bar:hover .pp-track { height: 6px; }
+html.desktop-overlay .pwa-player .pp-bar--drag .pp-track { height: 7px; }
+html.desktop-overlay .pwa-player .pp-thumb { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
+html.desktop-overlay .pwa-player .pp-bar:hover .pp-thumb { width: 16px; height: 16px; margin: -8px 0 0 -8px; box-shadow: 0 0 0 5px var(--accent-soft); }
+html.desktop-overlay .pwa-player .pp-hover { font-size: 12.5px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: rgba(13,17,27,.92); }
+/* الشاشات الكبيرة: كل شيء أكبر قليلًا بنفس النسب */
+@media (min-width: 1600px) {
+  html.desktop-overlay .pwa-player .pp-icon { width: 42px; height: 42px; }
+  html.desktop-overlay .pwa-player .pp-icon svg { width: 24px; height: 24px; }
+  html.desktop-overlay .pwa-player .pp-icon--big { width: 46px; height: 46px; }
+  html.desktop-overlay .pwa-player .pp-play { width: 60px; height: 60px; }
+  html.desktop-overlay .pwa-player .pp-titles strong { font-size: 20px; }
+  html.desktop-overlay .pwa-player .pp-titles small { font-size: 14px; }
+  html.desktop-overlay .pwa-player .pp-quality { font-size: 14px !important; }
+}
