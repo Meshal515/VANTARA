@@ -1,8 +1,14 @@
 # Experimental runtime dependencies
 
 The `cloudstream` implementation is original interoperability code. Public ABI names
-do not mean upstream implementation was imported. NiceHttp 0.4.18 (GPL-3.0) is not a
-dependency and its implementation is not redistributed here.
+do not mean upstream implementation was imported.
+
+`cs3world` (since 14 Nov 2026, AGPL-3.0 project license) packages CloudStream's own
+library `com.github.recloudstream.cloudstream:library-jvm:4.9.1` (GPL-3.0) with its
+runtime graph (NiceHttp 0.4.18 GPL-3.0, NewPipeExtractor GPL-3.0, Rhino MPL-2.0, Ktor,
+ksoup, cryptography-kotlin, Jackson, kotlinx: Apache-2.0/MIT) as a separate class-loader
+world for the isolated worker. Every file is pinned by SHA-256 in `cs3world/world.lock`;
+the build fails on any unexpected or changed file.
 
 Direct runtime dependencies, preserved as Maven artifacts with their license metadata:
 

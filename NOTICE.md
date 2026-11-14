@@ -23,8 +23,9 @@
 | --- | --- | --- |
 | واجهة المصادر لـ Mihon/Tachiyomi وAniyomi (مكيّفة للتوافق مع الإضافات) | `android/app/src/main/kotlin/eu/kanade/` | Apache-2.0 |
 | أسماء واجهة CloudStream للتوافق مع إضافاته (كود توافق مكتوب في VANTARA) | `extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/` | تُعامل كعمل مرتبط بـ CloudStream (GPL-3.0)، متوافق مع AGPL-3.0 |
-| مكتبة CloudStream (حين تُضمَّن في عامل CloudStream المعزول) | `extensions/runtime-android/` | GPL-3.0 — https://github.com/recloudstream/cloudstream |
-| NiceHttp (تبعية مكتبة CloudStream) | `extensions/runtime-android/` | GPL-3.0 |
+| مكتبة CloudStream ‏library-jvm 4.9.1 وتبعياتها (عالم منفصل داخل عامل CloudStream المعزول، كل ملف مثبّت ببصمته في `world.lock`) | `extensions/runtime-android/cs3world/` | GPL-3.0 — https://github.com/recloudstream/cloudstream |
+| NiceHttp (تبعية مكتبة CloudStream) | `extensions/runtime-android/cs3world/` | GPL-3.0 |
+| NewPipeExtractor وRhino وKtor وksoup وcryptography-kotlin وJackson وkotlinx (تبعيات مكتبة CloudStream) | `extensions/runtime-android/cs3world/` | GPL-3.0 / MPL-2.0 / Apache-2.0 / MIT |
 | jlibtorrent / libtorrent | `android/app/src/main/assets/notices/` | MIT / BSD |
 | OpenSSL | `android/app/src/main/assets/notices/` | Apache-2.0 |
 | hls.js | `apps/web/vendor/hls*.js` | Apache-2.0 |
