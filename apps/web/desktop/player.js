@@ -77,7 +77,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     const person=id=>hub.person?.(id)??{userId:id,displayName:'صديق'};
     const members=(room.roster??[]).slice(0,24).map(r=>{
       const p=person(r.userId),live=r.state==='playing'&&Number.isFinite(r.pos)&&Number.isFinite(r.at);
-      return {userId:String(r.userId??''),name:String(r.name||p.displayName||'صديق'),avatarKey:r.avatarKey||p.avatarKey||null,state:String(r.state||'preparing'),
+      return {userId:String(r.userId??''),name:String(r.name||p.displayName||'صديق'),avatarKey:p.avatarKey||r.avatarKey||null,state:String(r.state||'preparing'),
         host:!!r.host,me:r.userId===room.me,source:typeof r.source==='string'?r.source:null,
         posMs:Number.isFinite(r.pos)?Math.max(0,r.pos+(live?Math.max(0,now-r.at):0)):null,driftMs:Number.isFinite(r.driftMs)?r.driftMs:null,sameVersion:r.sameVersion===false?false:null};
     });
