@@ -288,3 +288,19 @@
   @container (min-width: 1420px) { .v35 .uv-sec > .uv-air-strip { --cols: 5; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 9) { display: grid; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 11) { display: none; } }
   .v35 .uv-air-days { flex-wrap: wrap; overflow: visible; }
 }
+
+/* ═══ الملف الشخصي: «أفضل 5» بعرض الصفحة (15 نوفمبر) ═══
+ * محصور في 600px بجهة البداية: نصف الشاشة الأيسر فارغ (~520px) بجانبه. الاختيار الأول والأربعة الباقية في صف
+ * واحد، والبطاقات نفسها. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .pf-top5 {
+    max-width: none;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    column-gap: 18px;
+    align-items: stretch;
+  }
+  .v35 .pf-top5 > .pf-first-slot { grid-column: 1; grid-row: 1; }
+  .v35 .pf-top5 > .pf-rest { grid-column: 2; grid-row: 1; margin-top: 0; }
+  .v35 .pf-top5 > .pf-first-slot,
+  .v35 .pf-top5 > .pf-first-slot > .pf-first { height: 100%; }
+}
