@@ -956,27 +956,31 @@
 
 /* ═══ السينما — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══ */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-  /* «الشريط العريض»: الجسم يصعد 340px فوق البنر (قاعدة الصفحة العامة) فوقع الشعار والمعلومات وسط الصورة على
-   * الوجه بلا ظل يقرأ عليه، وعنوان «الحلقات» على حافة البنر. الكتلة نفسها (شعار، أنواع، أرقام، تشغيل) في
-   * الثلث الأسفل فوق تدرج إلى var(--bg)، والحلقات تبدأ بعد البنر. */
-  .v35 .cn-detail[data-style='marquee'] .cn-detail-art::after {
-    display: block;
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 72%, transparent) 26%, transparent 52%);
-    pointer-events: none;
+  /* الظل لا يصل حافة البنر: الصورة تتحرك داخل الإطار مع التمرير (DEPTH_SPECS.cinema: نصف سرعة الصفحة و×1.12)
+   * وتلاشيها طبقة ::after بارتفاع 22% فوق خلفية الإطار (--surface-1)، فيبقى أسفل الصورة وخط حافتها ظاهرًا.
+   * القاعدة (CLAUDE.md): النافذة تملك تلاشيها؛ قناع على الإطار نفسه ينتهي بشفافية كاملة فوق var(--bg). */
+  .v35 .cn-detail:not([data-unified]):not([data-style='poster']) .cn-detail-art {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 100%);
+    background: transparent;
   }
-  .v35 .cn-detail[data-style='marquee'] .cn-detail-body { margin-top: -210px; padding-top: 0; }
-  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark { height: 84px; }
-  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-logo { max-height: 84px; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6)); }
+  /* «الشريط العريض» شريط سينمائي لا بنر عملاق: 16:9 بعرض الصفحة صار 1118×629 (وأكبر في 1920). نسبة الشريط
+   * 2.39:1 والصورة من أعلاها (الوجوه)، والقص من أسفلها الذي يتلاشى بالقناع أصلًا. الشعار والمعلومات في الثلث
+   * الأسفل، والتشغيل تحت الشريط في أول شاشة. */
+  .v35 .cn-detail.cn-detail[data-style='marquee'] .cn-detail-art { aspect-ratio: 2.39 / 1; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img { object-position: center 22%; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-body { margin-top: -170px; padding-top: 0; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark { height: 76px; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-logo { max-height: 76px; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6)); }
   .v35 .cn-detail[data-style='marquee'] .cn-genre-line { color: var(--text-2); }
   .v35 .cn-detail[data-style='marquee'] .cn-look-credits dt { color: var(--text-2); }
-  .v35 .cn-detail[data-style='marquee'] .cn-episodes { margin-top: 56px; }
+  .v35 .cn-detail[data-style='marquee'] .cn-episodes { margin-top: 48px; }
   /* شريط الأرقام (IMDb · المواسم · السنة) خارج قاعدة التوسيط بعرض 580 فانزاح لجهة البداية (498–1078 بدل 269–849):
    * نفس عمود الشعار والتشغيل */
   .v35 .cn-detail[data-style='marquee'] .cn-detail-body > .cn-look-credits { width: 100%; max-width: 580px; margin-inline: auto; }
 
+  /* القصة تحجز ثلاثة أسطر (min-height) حتى بنصّ من سطرين فيبقى سطر فارغ قبل «المزيد»؛ الحجز قبل وصول النص فقط */
+  .v35 .cn-detail .cn-synopsis.clamped:not(:empty) { min-height: 0; }
   /* زر التشغيل العريض: 580–750px شريط بعرض العمود كاملًا؛ بعرض مريح بمحاذاة بداية الهوية (في الأنماط التي هويتها
    * بالجانب) أو وسطها (الملصق والشريط والمسلسل) */
   .v35 .cn-detail[data-style='current'] .cn-detail-body > .cn-btn--play { max-width: 420px; justify-self: start; }
