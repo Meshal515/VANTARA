@@ -181,6 +181,18 @@ export function createTogether(deps) {
     return s;
   }
 
+  /**
+   * الغرفة أولًا على ويندوز (قرار المالك 14 نوفمبر): الدخول من أي مكان (إنشاء الغرفة، بطاقة المجلس، الإشعار) يفتح
+   * شاشة الغرفة قبل السيرفر، و«اختر السيرفر» منها يفتح الورقة. false = ليس ويندوز أو مانجا (الطريق القديم).
+   */
+  function presentDesktopRoom(joined, media) {
+    const desktop = desktopPlugin('AnimeEngine');
+    if (!desktop?.presentRoom || !media || media.kind === 'manga') return false;
+    desktop.presentRoom({ together: { hub: api, session: joined, mediaPrefix: media.seriesRef }, media,
+      chooseServer: () => { if (session === joined) deps.openMedia(media, joined); } });
+    return true;
+  }
+
   function leave() {
     if (!session) return;
     const s = session;
@@ -193,7 +205,8 @@ export function createTogether(deps) {
 
   // ───────────── الدعوة: اضغط على الأفاتارات ثم «أرسل» ─────────────
 
-  function openInvite(media, { onStarted = null } = {}) {
+  // roomFirst=false: الدعوة من داخل مشغّل يعمل أصلًا (ويندوز)، فالغرفة تُربط به كما هو بلا شاشة غرفة قبل السيرفر
+  function openInvite(media, { onStarted = null, roomFirst = true } = {}) {
     const picked = new Set();
     let everyone = false;
     let mode = 'sync';
@@ -260,8 +273,9 @@ export function createTogether(deps) {
           const n = everyone ? 'الكل' : picked.size === 1 ? deps.friends().find((f) => picked.has(f.userId))?.displayName : `${picked.size} أشخاص`;
           ui().toast(`انرسلت الدعوة لـ${n}`);
           start(code, media, mode, everyone ? deps.friends().map(f => f.userId) : invitees);
-          if (onStarted) onStarted(session);
-          else deps.openMedia(media, session);
+          // ويندوز: من صفحة العمل → شاشة الغرفة قبل السيرفر. من داخل المشغّل (سيرفر شغّال أصلًا) → يكمل كما هو.
+          if (onStarted && !roomFirst) onStarted(session);
+          else if (!presentDesktopRoom(session, media)) { if (onStarted) onStarted(session); else deps.openMedia(media, session); }
         } catch (error) {
           send.disabled = false;
           ui().toast(error?.status === 401 ? 'سجّل دخولك من جديد' : 'ما قدرنا ننشئ الغرفة، جرّب بعد لحظة');
@@ -329,7 +343,7 @@ export function createTogether(deps) {
         return;
       }
       const s = start(row.code, media, row.mode);
-      deps.openMedia(media, s);
+      if (!presentDesktopRoom(s, media)) deps.openMedia(media, s);
     };
     const text = el('div', 'tg-card-text');
     text.append(title, who);
@@ -471,7 +485,7 @@ export function createTogether(deps) {
     });
   }
 
-  return {
+  const api = {
     get session() { return session; },
     /** شاشة فوق الواجهة (القارئ) تستلم الأوراق والتنبيهات حتى تُغلق. */
     useSurface(surface) {
@@ -539,13 +553,10 @@ export function createTogether(deps) {
       }
       if (!media) return ui().toast('ما لقينا الدعوة، افتحها من المجلس');
       const joined = start(code, media, mode ?? 'sync');
-      const desktop = desktopPlugin('AnimeEngine');
-      if (desktop?.presentRoom && media.kind !== 'manga') {
-        desktop.presentRoom({ together: { hub: this, session: joined, mediaPrefix: media.seriesRef }, media,
-          chooseServer: () => { if (session === joined) deps.openMedia(media, joined); } });
-      } else deps.openMedia(media, joined);
+      if (!presentDesktopRoom(joined, media)) deps.openMedia(media, joined);
     },
   };
+  return api;
 }
 
 /**

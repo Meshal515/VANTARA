@@ -159,3 +159,26 @@ it('Windows invitation opens the room first and waits for choosing a source befo
  presentRoom.mock.calls[0][0].chooseServer();
  expect(openMedia).toHaveBeenCalledWith(media,hub.session);expect(room.close).not.toHaveBeenCalled();hub.leave();
 });
+
+it('Windows: إنشاء الغرفة من صفحة العمل يفتح شاشة الغرفة قبل السيرفر، والدعوة من داخل المشغّل تُربط به كما هو',async()=>{
+ const {document}=parseHTML('<html><body><div id="sheet"></div></body></html>');
+ vi.stubGlobal('document',document);
+ const presentRoom=vi.fn(),openMedia=vi.fn();
+ vi.stubGlobal('VantaraDesktop',{platform:'windows',requestResource(){},startPlayback(){},onEvent(){}});
+ vi.stubGlobal('VantaraDesktopBridges',{AnimeEngine:{presentRoom}});
+ const make=()=>createTogether({sync:{enqueue:vi.fn()},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>roomOf(),createRoomImpl:async()=> 'ABCDEF',friends:()=>[{userId:'u2',displayName:'دحمي'}],avatarNode:()=>document.createElement('span'),toast:vi.fn(),openSheet:build=>build(document.getElementById('sheet')),closeSheet:vi.fn(),openMedia});
+ const media={seriesRef:'anime:42',kind:'anime',episode:1,key:'anime:42#1'};
+ // من صفحة العمل: onStarted (ورقة السيرفرات) لا يُنادى، والغرفة تظهر أولًا
+ const work=make(),pageStarted=vi.fn();
+ work.openInvite(media,{onStarted:pageStarted});
+ document.querySelector('[data-user]').click();await document.querySelector('.tg-send').onclick();
+ expect(presentRoom).toHaveBeenCalledOnce();expect(pageStarted).not.toHaveBeenCalled();expect(openMedia).not.toHaveBeenCalled();
+ work.leave();
+ // من داخل مشغّل يعمل: يُربط به (roomFirst:false) بلا شاشة غرفة قبل السيرفر
+ document.getElementById('sheet').replaceChildren();presentRoom.mockClear();
+ const player=make(),bind=vi.fn();
+ player.openInvite(media,{roomFirst:false,onStarted:bind});
+ document.querySelector('[data-user]').click();await document.querySelector('.tg-send').onclick();
+ expect(bind).toHaveBeenCalledOnce();expect(presentRoom).not.toHaveBeenCalled();
+ player.leave();
+});

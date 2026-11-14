@@ -324,7 +324,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const media={kind:isCinema?'cinema':'anime',seriesRef:mediaPrefix,key:`${mediaPrefix}#${episode}`,
         title:args.title??'VANTARA',cover:args.poster??null,banner:args.banner??args.poster??null,logo:args.logo??null,...(isCinema?{format:args.subtitleIdentity?.kind??null}:{}),label:`${args.title??'VANTARA'} — ${isCinema&&args.subtitleIdentity?.kind==='movie'?'فيلم':'الحلقة '+episode}`,
         episode,...(isCinema&&args.subtitleIdentity?.season?{season:args.subtitleIdentity.season}:{})};
-      hub.openInvite(media,{onStarted:joined=>{
+      hub.openInvite(media,{roomFirst:false,onStarted:joined=>{
         if(!current(s)||!s.nativeReady||!joined?.room)return;
         const together={hub,session:joined,mediaPrefix};
         s.playArgs={...s.playArgs,together};
