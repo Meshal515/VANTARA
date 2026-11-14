@@ -42,11 +42,17 @@ jobs:
         include:
           # القراءة من القرص: الـAPK يقرأ القطعة التالية مسبقًا (state.readAhead)، ويندوز لا يقرأ مسبقًا
           - group: disk-read
-            variants: '"--lt-variant=ra1|||VANTARA_LT_READAHEAD=1" "--lt-variant=ra4|||VANTARA_LT_READAHEAD=4"'
+            # تجربة لكل سطر: الاسم|إعدادات|نافذة|متغيرات (بلا علامات تنصيص: تُمرر كمتغير بيئة وتُبنى مصفوفة وسائط)
+            variants: |-
+              ra1|||VANTARA_LT_READAHEAD=1
+              ra4|||VANTARA_LT_READAHEAD=4
             rqbit: 'yes'
           # الشبكة والنافذة: كل إعداد وحده
           - group: network-window
-            variants: '"--lt-variant=utp|enable_outgoing_utp=true,enable_incoming_utp=true|" "--lt-variant=rqt3|request_queue_time=3|" "--lt-variant=win32||32"'
+            variants: |-
+              utp|enable_outgoing_utp=true,enable_incoming_utp=true|
+              rqt3|request_queue_time=3|
+              win32||32
             rqbit: 'no'
     timeout-minutes: 170
     env:
@@ -107,12 +113,17 @@ jobs:
         env:
           SOURCES: ${{ inputs.sources || 'strong' }}
           ROUNDS: ${{ inputs.rounds || '2' }}
+          QUICK: ${{ inputs.quick }}
+          WITH_RQBIT: ${{ matrix.rqbit }}
+          VARIANTS: ${{ matrix.variants }}
         run: |
-          $rq = if ('${{ matrix.rqbit }}' -eq 'yes') { "--rqbit=$env:RQBIT" } else { '--rqbit=' }
-          $quick = if ('${{ inputs.quick }}' -eq 'false') { '' } else { '--quick' }
-          $cmd = "node tools/torrent-host/swarm-ab.mjs $quick `"--libtorrent=$env:NATIVE`" $rq `"--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')`" `"--rounds=$env:ROUNDS`" `"--sources=$env:SOURCES`" ${{ matrix.variants }}"
-          Write-Host $cmd
-          Invoke-Expression $cmd
+          # مصفوفة وسائط صريحة: لا Invoke-Expression ولا علامات تنصيص متداخلة (سقط التشغيل #3 بخطأ تحليل)
+          $argv = @('tools/torrent-host/swarm-ab.mjs', "--libtorrent=$env:NATIVE", "--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')", "--rounds=$env:ROUNDS", "--sources=$env:SOURCES")
+          if ($env:QUICK -ne 'false') { $argv += '--quick' }
+          if ($env:WITH_RQBIT -eq 'yes') { $argv += "--rqbit=$env:RQBIT" }
+          foreach ($line in ($env:VARIANTS -split "`n")) { $v = $line.Trim(); if ($v) { $argv += "--lt-variant=$v" } }
+          Write-Host ("node " + ($argv -join ' '))
+          & node @argv
           if ($LASTEXITCODE -ne 0) { throw "swarm-ab exited $LASTEXITCODE" }
           $r = Get-Content (Join-Path $env:RUNNER_TEMP 'swarm-ab.json') -Raw | ConvertFrom-Json
           '### ${{ matrix.group }}: libtorrent (APK settings) vs one-setting variants' | Out-File -Append $env:GITHUB_STEP_SUMMARY
