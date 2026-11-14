@@ -297,7 +297,7 @@ html.desktop-overlay .pp-stage__mark {
 html.desktop-overlay .pp-stage__mark[hidden], html.desktop-overlay .pp-stage__name[hidden] { display: none; }
 html.desktop-overlay .pp-stage__logo {
   grid-area: 1 / 1; width: 100%; height: auto; max-height: 30vh; object-fit: contain;
-  filter: drop-shadow(0 6px 24px rgba(0,0,0,.55));
+  /* بلا ظل: الـAPK (LoadingStage.kt) يظلل الاسم وحده. ظل الشعار كان يرسم هالة سوداء حوله كأنه PNG مقصوص */
 }
 /* الطبقة السفلية شفافة (imageAlpha 90 من 255 في الـAPK) */
 html.desktop-overlay .pp-stage__logo:not(.pp-stage__fill) { opacity: .35; }

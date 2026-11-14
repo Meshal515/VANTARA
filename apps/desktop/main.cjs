@@ -149,7 +149,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
   if(videoHost){
     const {createPlayerOverlay}=require('./player-overlay.cjs');
-    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>{overlayWindow=win;fullscreenController?.bindInput(win);win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(windowZoom?.factor??1));},onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>{overlayWindow=win;fullscreenController?.bindInput(win);win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(windowZoom?.factor??1));},onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',args:[`--vantara-channel=${channelInfo.channel==='debug'?'debug':'stable'}`],
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }
