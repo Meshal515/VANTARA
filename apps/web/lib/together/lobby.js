@@ -75,19 +75,19 @@ export function lobbyHeadline({ selectingSource = false, host, me = null, prepar
 }
 
 /**
- * @param {HTMLElement} host
- * @param {object} m النموذج: art, kindText, episodeText, roster, pending, me, host, prepared, failed, blocked,
- *   connection, server{code,quality}, offset, accent, countdownTo, now()
- * @param {object} a الأفعال: avatar, start, resume, changeServer, leave, setOffset
+ * تقدّم امتلاء الشعار 0..1: m.progress من مراحل التجهيز إن وُجد، وإلا زحف زمني هادئ لا يتجاوز 0.9؛ والجاهزية
+ * (أول إطار) = 1. لا ينقص أبدًا داخل نفس الحلقة.
  */
-export function renderLobby(host, m, a) {
-  clearInterval(host._countdown);
-  const moreOpen = host.querySelector('.pl-more')?.hidden === false;
-  host.replaceChildren();
-  host.classList.toggle('is-host', m.host);
-  if (m.accent) host.style.setProperty('--pl-accent', m.accent);
+function lobbyProgress(host, m) {
+  const key = host._lobbyArt?.key;
+  if (host._progressKey !== key) { host._progressKey = key; host._progressStart = Date.now(); host._progress = 0; }
+  const p = m.prepared ? 1 : Number.isFinite(m.progress) ? Math.min(0.97, Math.max(0, m.progress)) : Math.min(0.9, (Date.now() - host._progressStart) / 20000 * 0.9);
+  host._progress = Math.max(host._progress ?? 0, p);
+  return host._progress;
+}
 
-  // الخلفية: البنر صافيًا، وتعتيم من الأسفل فقط حيث النص
+/** الخلفية والشعار (أو الاسم) بطبقتين: رمادية تحت وملوّنة فوقها مقصوصة بقدر التقدّم. */
+function buildArt(m, key) {
   const bg = el('div', 'pl-bg');
   if (m.art.banner) {
     const img = new Image();
@@ -98,28 +98,58 @@ export function renderLobby(host, m, a) {
     bg.append(img);
   }
   bg.append(el('i', 'pl-shade'));
+  const hero = el('div', 'pl-hero');
+  const mark = el('div', 'pl-mark');
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', m.art.title);
+  const layers = (make) => { const ghost = make(); ghost.classList.add('pl-ghost'); const fill = make(); fill.classList.add('pl-fill'); fill.setAttribute('aria-hidden', 'true'); mark.replaceChildren(ghost, fill); return fill; };
+  const nameLayer = () => { const n = el('h1', 'pl-title', m.art.title); n.dir = 'auto'; return n; };
+  let fill = layers(nameLayer);
+  let progress = 0;
+  const paint = () => { fill.style.clipPath = `inset(0 ${Math.round((1 - progress) * 1000) / 10}% 0 0)`; };
+  if (m.art.logo) {
+    const probe = new Image();
+    probe.onload = () => {
+      if (probe.naturalWidth <= 1) return;
+      fill = layers(() => { const i = new Image(); i.className = 'pl-logo'; i.alt = ''; i.src = m.art.logo; return i; });
+      paint();
+    };
+    probe.src = m.art.logo;
+  }
+  hero.append(mark);
+  const meta = [...new Set([m.kindText, m.episodeText].filter(Boolean))];
+  if (m.art.episodeTitle) meta.push(m.art.episodeTitle);
+  if (meta.length) { const line = el('p', 'pl-meta', meta.join(' · ')); line.dir = 'auto'; hero.append(line); }
+  return { key, bg, hero, setProgress(p) { progress = p; paint(); } };
+}
+
+/**
+ * @param {HTMLElement} host
+ * @param {object} m النموذج: art, kindText, episodeText, roster, pending, me, host, prepared, failed, blocked,
+ *   connection, server{code,quality}, offset, accent, countdownTo, now()
+ * @param {object} a الأفعال: avatar, start, resume, changeServer, leave, setOffset
+ */
+export function renderLobby(host, m, a) {
+  clearInterval(host._countdown);
+  const moreOpen = host.querySelector('.pl-more')?.hidden === false;
+  host.classList.toggle('is-host', m.host);
+  if (m.accent) host.style.setProperty('--pl-accent', m.accent);
+
+  // البنر والشعار يُبنيان مرة لكل عمل وحلقة ويبقيان كما هما بين الرسمات (لا إعادة تحميل ولا تبديل الاسم بالشعار من
+  // جديد — بلاغ المالك: الشعار «يتحرك ويتكرر»). ما يتغير بعد ذلك تقدّم الامتلاء وحده.
+  const artKey = JSON.stringify([m.art.banner, m.art.logo, m.art.title, m.kindText, m.episodeText, m.art.episodeTitle]);
+  let art = host._lobbyArt;
+  if (!art || art.key !== artKey) art = host._lobbyArt = buildArt(m, artKey);
+  // الشعار رمادي ويمتلئ بلونه بقدر تجهيز فيديوك، ويكتمل لحظة جاهزية أول إطار (كشاشة تحميل المشغّل)
+  art.setProgress(lobbyProgress(host, m));
+  host.replaceChildren();
 
   // الأعلى: «مشاهدة معًا» ونقطة الاتصال · خروج
   const top = el('div', 'pl-top');
   const live = el('span', `pl-live is-${m.connection === 'live' ? 'ok' : 'warn'}`);
   live.append(el('i'), el('span', null, m.connection === 'live' ? 'مشاهدة معًا' : (m.connectionText ?? 'جاري الاتصال…')));
   top.append(live, btn('pl-close', ICON.close, a.leave, 'اطلع من الغرفة'));
-
-  // الشعار أو الاسم، وسطر واحد تحته
-  const hero = el('div', 'pl-hero');
-  const name = el('h1', 'pl-title', m.art.title);
-  name.dir = 'auto';
-  if (m.art.logo) {
-    const logo = new Image();
-    logo.className = 'pl-logo';
-    logo.alt = m.art.title;
-    logo.src = m.art.logo;
-    logo.onload = () => { if (logo.naturalWidth > 1 && name.isConnected) name.replaceWith(logo); };
-  }
-  hero.append(name);
-  const meta = [...new Set([m.kindText, m.episodeText].filter(Boolean))];
-  if (m.art.episodeTitle) meta.push(m.art.episodeTitle);
-  if (meta.length) { const line = el('p', 'pl-meta', meta.join(' · ')); line.dir = 'auto'; hero.append(line); }
+  const { bg, hero } = art;
 
   // الشريط: الوجوه · الحالة والسيرفر · ⋯ والبدء
   const bar = el('div', 'pl-bar');

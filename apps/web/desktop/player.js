@@ -215,7 +215,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')keyboard({key:'Escape',target:{},preventDefault(){}});}
     if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;netInfo=mergeNet(netInfo,event);if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
     // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
-    if(event.type==='playback/stage'){netInfo=markStage(netInfo,event.stage);const p=STAGE_PROGRESS[event.stage];if(p>loadProgress){loadProgress=p;link?.push(true);}return;}
+    if(event.type==='playback/stage'){netInfo=markStage(netInfo,event.stage);const p=STAGE_PROGRESS[event.stage];if(p>loadProgress){loadProgress=p;link?.push(true);if(roomState?.visible)void lobbyUi?.update({...roomState,progress:loadProgress});}return;}
     if(event.type==='playback/retrying')return;
     if(event.type==='playback/subtitles'){subtitleTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(subtitles,event.tracks??[],true);if(event.message)tell(event.message,true);}
     if(event.type==='playback/audio'){audioTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(audio,event.tracks??[]);}
@@ -228,7 +228,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.closed){if(event.session===session){roomState=null;void lobbyUi?.update({visible:false});viewport();}return;}
     if(!panel&&event.visible)open({session:event.session,title:event.media?.title??'VANTARA'});
     if(event.session!==session)return;
-    roomState=event;void lobbyUi?.update(event);void sources();
+    roomState=event;void lobbyUi?.update({...event,progress:loadProgress});void sources();
   });
   const entryListener=engine.addListener?.('desktopRoomEntry',event=>{
     entryView?.destroy();if(panel)void close();ensureStyles();

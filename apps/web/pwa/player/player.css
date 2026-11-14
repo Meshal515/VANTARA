@@ -911,6 +911,13 @@ html.pwa-playing body {
 .pwa-player .pl-logo { max-width: min(46vw, 520px); max-height: 22vh; object-fit: contain; object-position: right bottom; filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55)); }
 .pwa-player .pl-title { margin: 0; max-width: 60vw; font-size: clamp(30px, 4.4vw, 56px); font-weight: 800; line-height: 1.12; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
 .pwa-player .pl-meta { margin: 0; font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.78); }
+/* الشعار (أو الاسم) بطبقتين كشاشة تحميل المشغّل: رمادية شفافة تحت، وملوّنة فوقها تمتلئ من اليسار بقدر تجهيز فيديوك
+ * وتكتمل عند أول إطار. الظل على السفلية وحدها حتى لا تتضاعف الهالة. */
+.pwa-player .pl-mark { display: grid; justify-items: start; }
+.pwa-player .pl-mark > * { grid-area: 1 / 1; }
+.pwa-player .pl-mark > .pl-ghost { opacity: 0.32; filter: grayscale(1); }
+.pwa-player .pl-mark > .pl-fill { filter: none; text-shadow: none; transition: clip-path 0.3s linear; }
+@media (prefers-reduced-motion: reduce) { .pwa-player .pl-mark > .pl-fill { transition: none; } }
 
 /* الشريط السفلي الواحد */
 .pwa-player .pl-bar {
@@ -1074,6 +1081,7 @@ html.pwa-playing body {
   .pwa-player .pl-top { padding-inline: 16px; }
   .pwa-player .pl-hero { position: relative; inset: auto; margin-top: -44px; padding: 0 20px; align-items: center; text-align: center; }
   .pwa-player .pl-logo { max-width: 76vw; max-height: 15vh; object-position: center bottom; }
+  .pwa-player .pl-mark { justify-items: center; }
   .pwa-player .pl-title { max-width: 90vw; font-size: 32px; }
   /* الأشخاص والحالة في منتصف المساحة بين الشعار و«ابدأ» (الذي يبقى في الأسفل) */
   .pwa-player .pl-bar {

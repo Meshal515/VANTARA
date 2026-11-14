@@ -18,9 +18,16 @@ it('the watch-together room is not rebuilt on every 500 ms tick, only when what 
   // تقرير جديد: الموضع والزمن تغيرا فقط ⇒ نفس العناصر
   await lobby.update({ ...base, roster: [{ userId: 'a', state: 'preparing', pos: 500, at: 501 }] });
   expect(host.firstElementChild).toBe(first);
-  // تغيّر ما يُرى (العضو صار جاهزًا) ⇒ تُرسم من جديد
+  const bar = host.querySelector('.pl-bar');
+  // تغيّر ما يُرى (العضو صار جاهزًا) ⇒ الشريط يُرسم من جديد، والبنر والشعار نفسهما (لا إعادة تحميل ولا وميض)
   await lobby.update({ ...base, roster: [{ userId: 'a', state: 'ready', pos: 500, at: 502 }] });
-  expect(host.firstElementChild).not.toBe(first);
+  expect(host.querySelector('.pl-bar')).not.toBe(bar);
+  expect(host.firstElementChild).toBe(first);
+  // الشعار يمتلئ بقدر التجهيز ويكتمل عند الجاهزية (أول إطار)
+  await lobby.update({ ...base, progress: 0.4, roster: [{ userId: 'a', state: 'ready' }] });
+  expect(host.querySelector('.pl-mark .pl-fill').style.clipPath).toBe('inset(0 60% 0 0)');
+  await lobby.update({ ...base, prepared: true, progress: 0.4, roster: [{ userId: 'a', state: 'ready' }] });
+  expect(host.querySelector('.pl-mark .pl-fill').style.clipPath).toBe('inset(0 0% 0 0)');
   lobby.destroy();
   delete globalThis.document; delete globalThis.Image;
 });
