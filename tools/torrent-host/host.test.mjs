@@ -135,6 +135,24 @@ test('libtorrent host: after a seek, pieces at the read position arrive before e
   assert.ok(downloadedBefore <= Math.ceil(before.length * 0.1), `engine fetched ${downloadedBefore}/${before.length} pieces behind the read position first`);
 });
 
+test('libtorrent host: /diag reports engine rate, peers and the piece the reader waits on', { skip, timeout: 120000 }, async t => {
+  const { base, magnet, data } = await fixture(t, 32 * 1024 * 1024, { seedRate: 1024 * 1024 });
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: magnet, timeout: 30000 });
+  assert.equal(added.status, 200);
+  const read = request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: `bytes=0-${data.length - 1}` }, raw: true });
+  await sleep(1500);
+  const diag = await request(base, `/torrents/${added.body.id}/diag`);
+  t.diagnostic(`diag mid-read: ${JSON.stringify(diag.body)}`);
+  assert.equal(diag.status, 200);
+  for (const key of ['rate_bps', 'total_rate_bps', 'peers', 'seeds', 'unchoked_us', 'sending', 'pieces', 'partial', 'window_start', 'window', 'waiting', 'swaps']) assert.ok(key in diag.body, key);
+  assert.equal(diag.body.window, 12, 'APK window by default');
+  // الباذر على loopback: libtorrent يعفي الشبكة المحلية من حد السرعة فقد يكتمل الملف ويُغلق الاتصال قبل القراءة
+  assert.ok(diag.body.peers >= 1 || diag.body.pieces > 0, 'connected to the seeder or already downloaded from it');
+  assert.ok(diag.body.window_start >= 0, 'the reader set its window');
+  for (const key of ['piece', 'ms', 'blocks', 'finished', 'writing', 'requested', 'peers', 'speeds']) assert.ok(key in diag.body.waiting, `waiting.${key}`);
+  assert.ok((await read).body.equals(data));
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();

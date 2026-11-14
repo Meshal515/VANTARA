@@ -100,8 +100,9 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
     "http://tracker.opentrackr.org:1337/announce", "https://tracker.gbitt.info:443/announce",
 };
 static constexpr int MAX_ANNOUNCE = 48;
-static constexpr int WINDOW = 12;          // TorrentPolicy.window count
-static constexpr int AHEAD_PIECES = 64;    // ما بعد النافذة بأولوية عادية (JS يوقف/يستأنف حسب المساحة)
+// قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
+static int WINDOW = 12;                    // TorrentPolicy.window count
+static int AHEAD_PIECES = 64;    // ما بعد النافذة بأولوية عادية (JS يوقف/يستأنف حسب المساحة)
 
 // TorrentPolicy.deadlines: القطعة المقروءة الآن أولًا (0ms)، ثم الطرفان، ثم الباقي بتدرّج يتسع.
 std::vector<std::pair<int, int>> deadlines(std::vector<int> const& window, std::vector<int> const& pendingEdges) {
@@ -209,6 +210,24 @@ struct Torrent {
     int errorRecoveries = 0;
 };
 
+static void applyOverrides(lt::settings_pack& s, std::string const& raw) {
+    std::stringstream in(raw);
+    std::string item;
+    while (std::getline(in, item, ',')) {
+        auto const eq = item.find('=');
+        if (eq == std::string::npos) continue;
+        std::string const name = item.substr(0, eq), value = item.substr(eq + 1);
+        int const idx = lt::setting_by_name(name);
+        if (idx < 0) { std::cerr << "override: unknown setting " << name << "\n"; continue; }
+        switch (idx & lt::settings_pack::type_mask) {
+            case lt::settings_pack::string_type_base: s.set_str(idx, value); break;
+            case lt::settings_pack::int_type_base: s.set_int(idx, std::stoi(value)); break;
+            case lt::settings_pack::bool_type_base: s.set_bool(idx, value == "1" || value == "true"); break;
+        }
+        std::cerr << "override: " << name << "=" << value << "\n";
+    }
+}
+
 class Engine {
 public:
     Engine(std::string dir, std::string stateDir, int listenPort, bool allowPrivate, std::string testPeer = {})
@@ -254,6 +273,9 @@ public:
         s.set_str(lt::settings_pack::listen_interfaces, (allowPrivate_ ? "127.0.0.1:" : "0.0.0.0:") + std::to_string(listenPort) + (allowPrivate_ ? "" : ",[::]:" + std::to_string(listenPort)));
         s.set_str(lt::settings_pack::user_agent, std::string("VANTARA/") + VERSION + " libtorrent/" + lt::version());
         s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
+        // تجارب القياس فقط: VANTARA_LT_SETTINGS="اسم=قيمة,..." بأسماء settings_pack نفسها، فوق إعدادات الـAPK.
+        // بلا المتغير لا يتغير شيء. كل إعداد يُطبع على stderr حتى يُعرف ما قيس.
+        if (const char* raw = std::getenv("VANTARA_LT_SETTINGS")) applyOverrides(s, raw);
         lt::session_params params(std::move(s));
         // جدول DHT المحفوظ (مثل dht.state في APK): لا يبدأ كل تشغيل من عقد الإقلاع
         if (!stateDir_.empty()) {
@@ -364,6 +386,39 @@ public:
           << "},\"snapshot\":{\"downloaded_and_checked_bytes\":" << st.total_done << ",\"downloaded_and_checked_pieces\":" << st.num_pieces
           << ",\"peer_stats\":{\"live\":" << st.num_peers << ",\"seen\":" << (st.list_peers) << ",\"seeds\":" << st.num_seeds << "}}}"
           << ",\"waiting_piece\":" << t->waitingPiece << "}";
+        return {200, o.str()};
+    }
+
+    // تشخيص البطء (للقياس): سرعة التنزيل الفعلية، المشاركون ومن يسمح لنا بالتنزيل، النافذة والقطعة المنتظرة وكتلها،
+    // ومن يرسلها وبأي سرعة. يقارنه swarm-ab بما وصل للقارئ فعلًا في الثانية نفسها.
+    Result diag(int id) {
+        auto t = find(id);
+        if (!t) return {404, R"({"error":"not found"})"};
+        lt::torrent_status st = t->h.status();
+        std::vector<lt::peer_info> peers;
+        t->h.get_peer_info(peers);
+        int unchokedUs = 0, sending = 0, onWaiting = 0;
+        std::vector<int> waitSpeeds;
+        int waiting, windowStart; int64_t waitedMs = -1;
+        { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
+          if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
+        for (auto const& p : peers) {
+            if (bool(p.flags & lt::peer_info::interesting) && !bool(p.flags & lt::peer_info::remote_choked)) ++unchokedUs;
+            if (p.down_speed > 0) ++sending;
+            if (waiting >= 0 && int(static_cast<std::int32_t>(p.downloading_piece_index)) == waiting) { ++onWaiting; waitSpeeds.push_back(p.down_speed); }
+        }
+        std::vector<lt::partial_piece_info> queue;
+        t->h.get_download_queue(queue);
+        int wBlocks = -1, wFinished = -1, wWriting = -1, wRequested = -1;
+        for (auto const& q : queue) if (int(static_cast<std::int32_t>(q.piece_index)) == waiting) { wBlocks = q.blocks_in_piece; wFinished = q.finished; wWriting = q.writing; wRequested = q.requested; }
+        std::ostringstream o;
+        o << "{\"rate_bps\":" << st.download_payload_rate << ",\"total_rate_bps\":" << st.download_rate << ",\"peers\":" << st.num_peers
+          << ",\"seeds\":" << st.num_seeds << ",\"unchoked_us\":" << unchokedUs << ",\"sending\":" << sending << ",\"list_peers\":" << st.list_peers
+          << ",\"pieces\":" << st.num_pieces << ",\"partial\":" << queue.size() << ",\"window_start\":" << windowStart << ",\"window\":" << policy::WINDOW
+          << ",\"waiting\":{\"piece\":" << waiting << ",\"ms\":" << waitedMs << ",\"blocks\":" << wBlocks << ",\"finished\":" << wFinished
+          << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
+        for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
+        o << "]},\"swaps\":" << swaps_ << "}";
         return {200, o.str()};
     }
 
@@ -496,7 +551,7 @@ private:
         prio[size_t(index)] = lt::default_priority;
         t.h.prioritize_files(prio);
         t.h.unset_flags(lt::torrent_flags::auto_managed | lt::torrent_flags::stop_when_ready | lt::torrent_flags::upload_mode);
-        t.h.set_flags(lt::torrent_flags::sequential_download);
+        if (!std::getenv("VANTARA_LT_NO_SEQUENTIAL")) t.h.set_flags(lt::torrent_flags::sequential_download);  // تجربة قياس فقط
         if (!t.paused) t.h.resume();
         t.managed = true;
         t.file = index;
@@ -806,6 +861,7 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
         std::string const& what = parts[3];
         if (req.method == "GET" && what == "stats" && parts.size() == 5 && parts[4] == "v1") return respond(sock, engine.stats(id));
         if (req.method == "GET" && what == "haves") return respond(sock, engine.haves(id));
+        if (req.method == "GET" && what == "diag") return respond(sock, engine.diag(id));
         if (req.method == "POST" && parts.size() == 4) return respond(sock, engine.action(id, what));
         if (req.method == "GET" && what == "stream" && parts.size() == 5) {
             auto t = engine.find(id);
@@ -924,6 +980,9 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
 }
 
 int main(int argc, char** argv) {
+    // تجارب القياس فقط: حجم نافذة القراءة وما بعدها؛ بلا المتغيرين تبقى قيم الـAPK (12 و64)
+    if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
+    if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
     int apiPort = 0, listenPort = 0, pieceSize = 256 * 1024;
     long parentPid = 0;
     std::string dir, stateDir, seedFile, testPeer;
