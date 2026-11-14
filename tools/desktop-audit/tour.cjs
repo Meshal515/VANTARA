@@ -123,7 +123,18 @@ const measure = () => {
       if (sec !== 'content') await clickDrawer(`^${sec.toUpperCase()}`);
       await clickDrawer('^الرئيسية$');
       await settle(sec === 'manga' ? 9000 : 5000);
-      await record(`${mode === 'content' ? 'content' : sec}-home`);
+      const label = mode === 'content' ? 'content' : sec;
+      await record(`${label}-home`);
+      // من الرئيسية: «عرض الكل» لأول صف، وأول بلاطة تصنيف، ثم البحث
+      for (const [kind, sel, re] of [['see-all', '.page.active button, .page.active a', /^(عرض الكل|الكل|المزيد)/], ['genre', '.page.active [class*=genre] button, .page.active button[class*=genre], .page.active [class*=tile]', /./]]) {
+        const ok = await page.evaluate(([sel, src]) => { const b = [...document.querySelectorAll(sel)].find((x) => x.checkVisibility() && new RegExp(src).test(x.textContent.trim())); b?.click(); return b ? b.textContent.trim().slice(0, 20) : null; }, [sel, re.source]);
+        if (ok) { await settle(); await record(`${label}-home-${kind}`, { from: ok }); }
+        await close(); await clickDrawer('^الرئيسية$'); await page.waitForTimeout(1500);
+      }
+      if (await page.evaluate(() => { const b = [...document.querySelectorAll('button, a')].find((x) => x.checkVisibility() && /بحث/.test(x.getAttribute('aria-label') ?? x.title ?? '')); b?.click(); return !!b; })) {
+        await page.keyboard.type(sec === 'anime' ? 'frieren' : sec === 'cinema' ? 'dune' : 'solo', { delay: 30 }); await settle(4000); await record(`${label}-search`);
+        await close(); await clickDrawer('^الرئيسية$'); await page.waitForTimeout(1500);
+      }
       for (const item of await items()) {
         if (SHARED.test(item) && (sharedDone || mode === 'content')) continue;
         await visit(mode === 'content' ? 'content' : sec, item);
