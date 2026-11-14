@@ -27,7 +27,7 @@ object PlayerPageHosts:VantaraExtractor {
         PlayerPage.extract(java.net.URI(url).host.substringBefore('.').replaceFirstChar{it.uppercase()},url,referer,subtitles,links)
 }
 object VantaraExtractors {
-    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood,PlayerPageHosts,OkRu,Mixdrop)
+    private val all:List<VantaraExtractor> = listOf(Pixeldrain,Streamtape,Dood,PlayerPageHosts,OkRu,Mixdrop,MediaFire)
     private fun matches(host:String,known:String)=host.equals(known,true)||host.endsWith(".$known",true)
     fun find(host:String):VantaraExtractor?=all.firstOrNull{e->e.hosts.any{matches(host,it)}}
     /**
@@ -37,6 +37,6 @@ object VantaraExtractors {
     private val sharingPages=listOf("streamtape.com","streamtape.to","streamtape.net","dood.wf","dood.to","dood.so","dood.la","doodstream.com","d000d.com",
         "voe.sx","filemoon.sx","filemoon.to","streamwish.com","streamwish.to","vidmoly.to","vidmoly.me","mp4upload.com","uqload.com","uqload.to","mixdrop.co",
         "mixdrop.ag","ok.ru","vidhide.com","vidguard.to","upstream.to","yourupload.com","sendvid.com","vidbom.com","vidshar.com","lulustream.com","krakenfiles.com",
-        "mega.nz","drive.google.com","dailymotion.com","youtube.com","youtu.be","pixeldrain.com")
+        "mega.nz","drive.google.com","dailymotion.com","youtube.com","youtu.be","pixeldrain.com","mediafire.com")
     fun isSharingPage(host:String):Boolean=sharingPages.any{matches(host,it)}
 }
