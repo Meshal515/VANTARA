@@ -3,7 +3,8 @@ const validHost = value => typeof value === 'string' && value.length <= 253 && /
 // Native reason codes stay available for diagnostics; only these local messages
 // enter the UI. Never echo a source URL, bridge exception or cookie value.
 function verificationMessage(result={}) {
-  if(result.state==='cancelled')return 'أُلغي التحقق. تقدر تحاول مرة ثانية.';
+  // «إلغاء» من المستخدم وحده يقال إلغاءً؛ إغلاق الصفحة لسبب آخر يقول سببه
+  if(result.state==='cancelled'&&(!result.reason||result.reason==='user_cancelled'))return 'أُلغي التحقق. تقدر تحاول مرة ثانية.';
   const messages={
     unsupported_webview:'إصدار Android لا يدعم صفحة التحقق المعزولة. استخدم مصدرًا آخر.',
     unsupported_profile:'حدّث Android System WebView لدعم جلسة تحقق منفصلة لهذا المصدر. بقيت جلساتك محفوظة.',
@@ -20,6 +21,7 @@ function verificationMessage(result={}) {
     cookie_store_unavailable:'تعذّر حفظ جلسة التحقق. لم تُحذف جلساتك الحالية.',
     launch_failed:'تعذّر فتح صفحة التحقق. تقدر تعيد المحاولة يدويًا.',
     interrupted:'توقفت جلسة التحقق قبل اكتمالها.',
+    proxy_unavailable:'تعذّر فتح مسار شبكة المصدر لصفحة التحقق. حدّث Android System WebView.',
   };
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }

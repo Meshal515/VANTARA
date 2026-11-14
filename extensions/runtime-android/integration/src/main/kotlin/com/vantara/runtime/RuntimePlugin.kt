@@ -83,7 +83,8 @@ class RuntimePlugin : Plugin() {
             data.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
         if(value==null) {
             VerificationCoordinator.finish(item.host,item.token,"cancelled",if(matches)data?.getStringExtra("reason") else "interrupted")
-            call.resolve(JSObject().put("host",item.host).put("state","cancelled"));return
+            // السبب الحقيقي (حجب، مهلة، انتقال نطاق...) يصل للواجهة؛ كان كل إغلاق يُعرض «أُلغي التحقق»
+            call.resolve(JSObject().put("host",item.host).put("state","cancelled").put("reason",(if(matches)data?.getStringExtra("reason") else null) ?: "interrupted"));return
         }
         run(call) {
             try { host.completeVerification(item,value).also { VerificationCoordinator.finish(item.host,item.token,"verified") } }
