@@ -117,6 +117,7 @@ for (const path of animeDetailSeams) seams.add(path);
 
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
+seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimeProtocol.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
 // اعتماد المصادر حتى «أعطال فانتارا = صفر» (6 نوفمبر 2026، موافقة المالك على النشر في Debug):
 // تحقق Cloudflare على المضيف المتحدّي، وانتقال دومين Aniyomi، وProtoBuf للإضافات، ونظام الاعتماد
@@ -155,6 +156,8 @@ const certificationSeams = [
   // متصفح مخفي) بدل «لا رابط فيديو»: العامل يعيدها كاملة بمراجعها، والمحوّل يحلّها في التطبيق.
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/CloudStreamProvider.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/WorkerState.kt',
+  'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/LinkCollector.kt',
+  'extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/LinkCollectorTest.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt',
 ];
 for (const path of certificationSeams) seams.add(path);

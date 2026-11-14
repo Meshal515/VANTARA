@@ -531,16 +531,55 @@ class RuntimeHost(
             override fun close() { bound.close() }
         }
         val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
+        val stream=if(operation=="videoLinks") kotlin.coroutines.coroutineContext[RuntimeLinkStream] else null
         try {
             // روابط لم تكتمل (complete=false): خيوط الإضافة قد تبقى عالقة في العامل، فلا يُعاد استعماله
             val result=warmWorker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport,
-                { r -> operation!="videoLinks" || (r as? JsonObject)?.get("complete")?.jsonPrimitive?.booleanOrNull!=false }) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await()) }
+                { r -> operation!="videoLinks" || (r as? JsonObject)?.get("complete")?.jsonPrimitive?.booleanOrNull!=false }) { client ->
+                if(stream==null) RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await())
+                else stagedLinks(client,payload,stream) { synchronized(lock) { checkPackage(o,installed.packageId(),generation) } }
+            }
             synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
             // Search's published ABI returns a list; all other operations return objects.
             return if(result is JsonArray) buildJsonObject { put("items",result);put("hasNext",false) } else result.jsonObject
         } finally { transport.close() }
+    }
+    /**
+     * روابط الحلقة على دفعات من العامل نفسه: كل سيرفر يصل الورقة لحظة استخراجه (عبر [RuntimeLinkStream])، بدل أن
+     * تنتظر كل الروابط أبطأ مستخرج حتى نهاية المهلة. والسيرفرات التي لا مستخرج لها في العامل تبدأ بمحلّل VANTARA فورًا.
+     * الجواب النهائي هو مجموع الدفعات بشكل العملية القديمة نفسه (الصحة والاسترداد والمراقبة لا تتغير). دفعة فشلت بعد
+     * دفعات وصلت لا تُضيع ما وصل: يعود ناقصًا (complete=false) فلا يُعاد استعمال العامل.
+     */
+    private suspend fun stagedLinks(client: AndroidRuntimeClient,payload: JsonObject,stream: RuntimeLinkStream,check: ()->Unit): JsonObject {
+        val items=mutableListOf<JsonElement>();val subtitles=mutableListOf<JsonElement>()
+        val missing=LinkedHashSet<JsonElement>();val embeds=mutableListOf<JsonElement>()
+        val samples=LinkedHashMap<String,JsonElement>();val linkEmbeds=LinkedHashMap<String,JsonElement>()
+        var complete=false
+        var stages=0
+        var answer=RuntimeJson.parse(client.invokeJson("videoLinks",JsonObject(payload+("stage" to JsonPrimitive(true))).toString(),OPERATION_BUDGET_MS).await()).jsonObject
+        try {
+            while(true) {
+                check()
+                (answer["items"] as? JsonArray)?.let { items.addAll(it) }
+                (answer["subtitles"] as? JsonArray)?.let { subtitles.addAll(it) }
+                (answer["missingExtractors"] as? JsonArray)?.let { missing.addAll(it) }
+                (answer["missingEmbeds"] as? JsonArray)?.let { embeds.addAll(it) }
+                (answer["missingSamples"] as? JsonObject)?.forEach { (k,v) -> samples.putIfAbsent(k,v) }
+                (answer["linkEmbeds"] as? JsonObject)?.forEach { (k,v) -> linkEmbeds.putIfAbsent(k,v) }
+                try { stream.onStage(answer) } catch(cancelled: CancellationException) { throw cancelled } catch(_: Exception) {}
+                val token=(answer["pending"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+                if(token==null) { complete=answer["complete"]?.jsonPrimitive?.booleanOrNull==true;break }
+                if(++stages>=MAX_LINK_STAGES) break
+                answer=RuntimeJson.parse(client.invokeJson("videoLinksMore",buildJsonObject { put("source",payload.getValue("source"));put("token",token) }.toString(),OPERATION_BUDGET_MS).await()).jsonObject
+            }
+        } catch(cancelled: CancellationException) { throw cancelled }
+        catch(failure: Exception) { if(items.isEmpty() && embeds.isEmpty()) throw failure;complete=false }
+        return buildJsonObject {
+            put("items",JsonArray(items));put("subtitles",JsonArray(subtitles));put("missingExtractors",JsonArray(missing.toList()))
+            put("missingSamples",JsonObject(samples));put("missingEmbeds",JsonArray(embeds));put("linkEmbeds",JsonObject(linkEmbeds));put("complete",complete)
+        }
     }
     /**
      * A worker that never came up is VANTARA's failure, not the provider's or the site's: no provider code
@@ -668,6 +707,8 @@ class RuntimeHost(
          * The bound still stops a hung provider.
          */
         private const val OPERATION_BUDGET_MS=30_000L
+        /** A provider reports at most 128 links: more stages than this is a worker that never ends. */
+        private const val MAX_LINK_STAGES=200
         /** عمال معزولون معًا لعمليات المصادر (كانت 2 للكل). زيادة محدودة؛ العدالة والأولوية في RuntimeGate هي الإصلاح. */
         private const val OPERATION_SLOTS=3
         /** عمال دافئون خاملون كحد أقصى، ومدة بقاء الخامل. */

@@ -116,6 +116,49 @@ class RuntimeSourceAdapterTest {
             assertEquals("the page that linked it is sent as the server expects","https://source.example/ep1",server.takeRequest().getHeader("Referer"))
         }
     }
+    /**
+     * CloudStream calls back once per server as each extractor finishes. A staged answer reaches the sheet as it
+     * arrives: the first server is READY (and probed) while the slow one is still extracting, and the final list
+     * carries the same ids, once each.
+     */
+    @Test fun aReadyServerReachesTheSheetBeforeTheSlowestOneFinishes()=runBlocking {
+        val reports=mutableListOf<com.vantara.anime.stream.RouteReport>()
+        var readyBeforeTheEnd=0
+        val adapter=RuntimeSourceAdapter(id,"Source") { _,_->
+            val stream=requireNotNull(kotlin.coroutines.coroutineContext[RuntimeLinkStream]) { "the adapter streams its call" }
+            val fast=objectOf("""{"url":"https://fast.example/a.m3u8","name":"Fast","quality":1080,"type":"M3U8"}""")
+            val slow=objectOf("""{"url":"https://slow.example/b.mp4","name":"Slow","quality":720,"type":"VIDEO"}""")
+            stream.onStage(buildJsonObject { put("items",JsonArray(listOf(fast)));put("pending","t") })
+            readyBeforeTheEnd=reports.count { it.state==com.vantara.anime.stream.RouteState.READY }
+            stream.onStage(buildJsonObject { put("items",JsonArray(listOf(slow))) })
+            buildJsonObject { put("items",JsonArray(listOf(fast,slow)));put("complete",true) }
+        }
+        val found=adapter.candidates(SourceEpisode(id,"episode","Episode",1f),trace=ResolveTrace { reports+=it })
+        assertEquals("the first server is on the sheet before the operation ends",1,readyBeforeTheEnd)
+        assertEquals(listOf("https://fast.example/a.m3u8","https://slow.example/b.mp4"),found.map { it.url })
+        val reported=reports.filter { it.state==com.vantara.anime.stream.RouteState.READY }.flatMap { it.candidates }.map { it.id }.toSet()
+        assertEquals("stages and the final list name every link by the same id",found.map { it.id }.toSet(),reported)
+    }
+    /** A server no runtime extractor handles starts in VANTARA's resolver when the worker names it, not at the end. */
+    @Test fun aServerPageNamedInAnEarlyStageStartsResolvingBeforeTheOperationEnds()=runBlocking {
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""<html><script>var player={file:"https://media.example/early/master.m3u8"};</script></html>"""))
+            server.start()
+            val embed=server.url("/embed/early").toString()
+            val adapter=RuntimeSourceAdapter(id,"Source",null,com.vantara.anime.hosts.EmbedResolver(okhttp3.OkHttpClient())) { _,_->
+                val stream=requireNotNull(kotlin.coroutines.coroutineContext[RuntimeLinkStream])
+                val page=objectOf("""{"url":"$embed","host":"share.example"}""")
+                stream.onStage(buildJsonObject { put("items",JsonArray(emptyList()));put("missingEmbeds",JsonArray(listOf(page)));put("pending","t") })
+                // The worker is still extracting other servers: the page must already be requested.
+                val asked=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { server.takeRequest(5,java.util.concurrent.TimeUnit.SECONDS) }
+                assertNotNull("resolution started while the operation was still running",asked)
+                buildJsonObject { put("items",JsonArray(emptyList()));put("missingEmbeds",JsonArray(listOf(page)));put("complete",true) }
+            }
+            val found=adapter.candidates(SourceEpisode(id,"episode","Episode",1f))
+            assertEquals("resolved once, though the final answer names it again",listOf("https://media.example/early/master.m3u8"),found.map { it.url })
+            assertEquals(1,server.requestCount)
+        }
+    }
     @Test fun aServerVantaraCannotResolveEitherIsReportedWithItsReason()=runBlocking {
         okhttp3.mockwebserver.MockWebServer().use { server ->
             server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("<html>nothing playable</html>"))

@@ -65,6 +65,34 @@ class LinkCollectorTest {
         assertEquals("Late callbacks must not change returned results",listOf(1,1),results.map{it.links.size})
     }
 
+    /** Staged: a ready server is handed over while a slow one is still extracting, each link once, then the end. */
+    @Test fun aStagedCollectionHandsOverEachServerAsItFinishes() {
+        val slowGo=java.util.concurrent.CountDownLatch(1)
+        val live=requireNotNull(LinkCollector.startWithLimiter(5_000,java.util.concurrent.Semaphore(1)){_,cb->
+            cb(link(1))
+            while(slowGo.count>0L) delay(10)
+            cb(link(2))
+        })
+        val started=System.nanoTime()
+        val first=live.next(50)
+        assertTrue("the first server does not wait for the slow one",(System.nanoTime()-started)/1_000_000<2_000)
+        assertEquals(listOf("https://media.example/1.m3u8"),first.links.map{it.url});assertFalse(first.ended)
+        slowGo.countDown()
+        var rest=live.next(50)
+        val later=rest.links.toMutableList()
+        while(!rest.ended) { rest=live.next(50);later+=rest.links }
+        assertEquals(listOf("https://media.example/2.m3u8"),later.map{it.url})
+        assertTrue(rest.complete);assertEquals(2,rest.total)
+    }
+    /** The budget belongs to the collection: a host that stops asking cannot keep a provider running. */
+    @Test fun anAbandonedStagedCollectionStillEndsAtItsBudget() {
+        val limiter=java.util.concurrent.Semaphore(1)
+        val exited=java.util.concurrent.CountDownLatch(1)
+        requireNotNull(LinkCollector.startWithLimiter(200,limiter){_,cb-> try { cb(link(1));delay(60_000) } finally { exited.countDown() } })
+        assertTrue("cancelled at its deadline with nobody waiting",exited.await(3,java.util.concurrent.TimeUnit.SECONDS))
+        assertTrue("its provider slot is free again",limiter.tryAcquire(2,java.util.concurrent.TimeUnit.SECONDS))
+    }
+
     @Test fun aFastProviderCompletesWithAllItsLinks() {
         val result=LinkCollector.collect(5_000){_,cb->repeat(3){cb(link(it))}}
         assertEquals(3,result.links.size);assertTrue(result.complete);assertNull(result.failure)
