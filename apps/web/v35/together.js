@@ -528,6 +528,8 @@ export function createTogether(deps) {
         banner: art.banner ?? media.banner ?? media.cover ?? null,
         logo: art.logo ?? media.logo ?? null,
         episodeTitle: art.episodeTitle ?? media.episodeTitle ?? null,
+        // صورة الحلقة لزر «البدء» (الخلفية banner فن العمل)
+        episodeImage: art.episodeImage ?? null,
         season: media.season ?? null,
         // المدعوون بأسمائهم وصورهم: من لم يدخل يظهر «بانتظاره…»
         invitees: Array.isArray(invited) ? invited.map(personById) : [],

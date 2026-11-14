@@ -650,6 +650,20 @@ class PlayerActivity : Activity() {
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
             override fun leaveRoom() = finish()
             override fun openServers() = showServers()
+            // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
+            override fun loadProgress(): Float {
+                if (current == null) return 0f
+                if (firstFrameShown) return 1f
+                val ahead = player.bufferedPosition - player.currentPosition
+                val t = torrentStats()
+                return when {
+                    ahead > 1500 || (t != null && t.warmedAt > 0) -> 0.7f
+                    t != null && t.firstPieceAt > 0 -> 0.4f
+                    t == null && player.playbackState == Player.STATE_BUFFERING -> 0.4f
+                    t != null && t.metadataAt > 0 -> 0.16f
+                    else -> 0.06f
+                }
+            }
             override fun serverLabel() = current?.let { c ->
                 val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality?.takeIf { it > 0 })?.let { "${it}p" }
                 listOfNotNull(codeOf(c) ?: c.server, q).joinToString(" · ")
