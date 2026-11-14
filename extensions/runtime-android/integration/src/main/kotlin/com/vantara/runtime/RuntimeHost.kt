@@ -51,6 +51,8 @@ class RuntimeHost(
     private val directory = File(app.filesDir,"runtime-cloudstream-v1")
     private val lock = Any()
     private val slots = Semaphore(2)
+    /** عمليات المصادر: عادلة بين المصادر، والتشغيل قبل البحث (RuntimeGate). التثبيت يبقى على [slots]. */
+    private val operations = RuntimeGate(total = OPERATION_SLOTS)
     private val workers = ConcurrentHashMap<AndroidRuntimeClient,AndroidRuntimeClient.Scope>()
     private var epoch = 0L
     @Volatile private var closed=false
@@ -437,7 +439,7 @@ class RuntimeHost(
         engine.setRuntimeSources(bindings)
     }
     private suspend fun invoke(o: Owner,installed: RuntimePackageStore.Installed,source: JsonObject,id: String,operation: String,input: JsonObject): JsonObject = try {
-        slots.withPermit {
+        operations.run(installed.packageId()+"|"+id,operation in RuntimeGate.URGENT) {
         val key=DependencyKey(o.id,installed.packageId(),installed.packageHash(),id)
         val origins=RuntimeNetworkPolicy.sourceOrigins(installed.packageHash(),source.text("mainUrl"),
             synchronized(lock) { checkOwner(o);dependencyOrigins[key].orEmpty() })
@@ -449,7 +451,7 @@ class RuntimeHost(
         // Some published providers catch a denied media request and return an
         // empty result. Attested media still needs the same single scope sync.
         if(!permissionChanged || operation !in setOf("catalogue","search","details","episodes","videoLinks") || (rejected!=null && rejected.code!="ORIGIN_NOT_ALLOWED")) {
-            rejected?.let { throw it };return@withPermit initial!!
+            rejected?.let { throw it };return@run initial!!
         }
         run {
             // A permission sync replay, once, only after an attested settings
@@ -619,6 +621,8 @@ class RuntimeHost(
          * The bound still stops a hung provider.
          */
         private const val OPERATION_BUDGET_MS=30_000L
+        /** عمال معزولون معًا لعمليات المصادر (كانت 2 للكل). زيادة محدودة؛ العدالة والأولوية في RuntimeGate هي الإصلاح. */
+        private const val OPERATION_SLOTS=3
         /** One provider load (AndroidRuntimeClient.loadProfile: 30 s) plus one operation. */
         private const val REPLAY_BUDGET_MS=30_000L+OPERATION_BUDGET_MS
         fun digest(value: String)=digest(value.toByteArray())
