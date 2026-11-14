@@ -304,3 +304,16 @@
   .v35 .pf-top5 > .pf-first-slot,
   .v35 .pf-top5 > .pf-first-slot > .pf-first { height: 100%; }
 }
+
+/* ═══ مدير الإضافات على الكمبيوتر: عمودان بدل صف بعرض 928px (15 نوفمبر) ═══
+ * كل إضافة صف: الاسم في طرف والأزرار في الطرف الآخر وبينهما ~750px فارغة. أعمدة من العرض (عمودان في 1366)،
+ * والعناوين وأدوات الفلترة بعرض القائمة. تخطيط فقط؛ محرك الإضافات وسلوكه كما هما. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .addon-v7 .v7-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    column-gap: 28px;
+    align-items: start;
+  }
+  .v35 .addon-v7 .v7-list > :not(.v7-row) { grid-column: 1 / -1; }
+}
