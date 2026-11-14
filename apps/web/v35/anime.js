@@ -111,6 +111,9 @@ export function recordWatch(m, episode, position, duration, userId = null) {
  *           openSheet: Function, closeSheet: Function, showPage: (id: string) => void, goBack: () => void,
  *           currentPage: () => string, genreAr: (g: string) => string, readKv: Function, writeKv: Function }} deps
  */
+/** بعد بدء جلسة التجهيز: سقف أخير فوق 45 ث يتجاوز إنهاء المحرك الأصلي للجلسة (90 ث). */
+const SHEET_LATE_MS = 50_000;
+
 export function createAnime(deps) {
   const { q, el, toast, genreAr } = deps;
   // حسابك: القوائم وعين الحلقة وآخر المشاهدات تُزامَن مثل المانجا (وتظهر في ملفك)
@@ -2072,9 +2075,12 @@ export function createAnime(deps) {
   const FOUND_TTL = 7 * 24 * 3600e3;
   const workScope = m => JSON.stringify([m.id, m._sourceCopy?.sourceId ?? null, m._sourceCopy?.url ?? null]);
   const sameWork = m => state.workFor === m.id && state.workScope === workScope(m);
+  // نسخة واحدة لكل مصدر: بحث متدفق قد يختار للمصدر نفسه صفحة أخرى (حلقة بدل العمل) فتتراكم نسخه، وكل نسخة
+  // تجهيز كامل (حلقات وروابط) في طابور المصدر نفسه. الأولى تبقى (الجلسة بدأت بها).
+  const onePerSource = (copies) => copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId) === index);
   const knownWork = (id) => {
     const hit = readJson(FOUND_KEY, {})[id];
-    return hit?.work?.copies?.length && Date.now() - (hit.at ?? 0) < FOUND_TTL ? hit.work : null;
+    return hit?.work?.copies?.length && Date.now() - (hit.at ?? 0) < FOUND_TTL ? { ...hit.work, copies: onePerSource(hit.work.copies) } : null;
   };
   const keepWork = (id, work) => {
     const all = readJson(FOUND_KEY, {});
@@ -2118,7 +2124,7 @@ export function createAnime(deps) {
       if (controller.signal.aborted) return;
       if (!current()) return;
       const copies = [...(state.work?.copies ?? []), ...work.copies];
-      state.work = { ...work, copies: copies.filter((copy, index) => copies.findIndex(c => c.sourceId === copy.sourceId && c.url === copy.url) === index) };
+      state.work = { ...work, copies: onePerSource(copies) };
       if (!m._sourceCopy) keepWork(m.id, state.work);
       paintSources(m, 'found');
       for (const listener of workListeners) listener(m.id, state.work);
@@ -2668,14 +2674,17 @@ export function createAnime(deps) {
       const onWork = (id, work) => {
         if (sheet.closed || sheet.expired || id !== m.id || !sameWork(m)) return;
         sheet.work = work;
-        sheet.copies = [...(sheet.copies ?? []), ...work.copies].filter((c, i, all) => all.findIndex(x => x.sourceId === c.sourceId && x.url === c.url) === i);
-        if (sheet.session) void engine.extend(sheet.session, work.copies).catch(() => {});
+        // مصدر في الجلسة لا يُضاف مرة ثانية بصفحة أخرى
+        const fresh = work.copies.filter(c => !(sheet.copies ?? []).some(x => x.sourceId === c.sourceId));
+        sheet.copies = onePerSource([...(sheet.copies ?? []), ...work.copies]);
+        if (sheet.session && fresh.length) void engine.extend(sheet.session, fresh).catch(() => {});
       };
       workListeners.add(onWork);
       off.push(() => workListeners.delete(onWork));
       paint();
       let preparationComplete = false;
-      const stopDeadline = () => { if (preparationComplete && sheet.done) clearTimeout(deadline); };
+      let lateDeadline = null;
+      const stopDeadline = () => { if (preparationComplete && sheet.done) { clearTimeout(deadline); clearTimeout(lateDeadline); } };
       const fail = error => {
         state.workTrace?.record('preparation_failed', { error });
         if (sheet.closed || sheet.expired) return;
@@ -2690,19 +2699,25 @@ export function createAnime(deps) {
           state.workPending = null;
         }
         clearTimeout(deadline);
+        clearTimeout(lateDeadline);
         clearTimeout(reconciliationTimer);
         preparation.abort(error);
         for (const unsubscribe of off) unsubscribe();
         off = [];
         paint();
       };
-      const deadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), 45000);
+      // 45 ث لبدء الجلسة. بعد بدئها لا تُقتل سيرفرات ما زال المحرك يجهّزها (كانت تُعلَّم «تعذّر» عند 45 ث):
+      // المحرك الأصلي يُنهي الجلسة وحده عند 90 ث، وهذا سقف أخير بعده.
+      const deadline = setTimeout(() => {
+        if (!sheet.session) return fail(new Error('انتهت مهلة تجهيز السيرفرات'));
+        lateDeadline = setTimeout(() => fail(new Error('انتهت مهلة تجهيز السيرفرات')), SHEET_LATE_MS);
+      }, 45000);
       const buffered = [];
       // Native extractors often complete after prepare() returns. A WebView
       // listener can attach after an early native event; a single routes()
       // snapshot is also racy. Reconcile the *same* bounded session while the
       // sheet is visible. Never resurrect an expired or closed session.
-      const reconciliationEndsAt = Date.now() + 45_000;
+      const reconciliationEndsAt = Date.now() + 45_000 + SHEET_LATE_MS;
       const reconcileNativeRoutes = async () => {
         if (sheet.closed || sheet.expired || !sheet.session || reconciliationBusy) return;
         reconciliationBusy = true;
@@ -2812,6 +2827,7 @@ export function createAnime(deps) {
         sheet.closed = true;
         if (body.dataset.vantaraPlaybackSession === sheet.session) delete body.dataset.vantaraPlaybackSession;
         clearTimeout(deadline);
+        clearTimeout(lateDeadline);
         clearTimeout(cooldownTimer);
         clearTimeout(reconciliationTimer);
         if (paintFrame != null) globalThis.cancelAnimationFrame?.(paintFrame);

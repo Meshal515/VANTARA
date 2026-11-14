@@ -271,5 +271,7 @@ public final class AndroidRuntimeClient implements AutoCloseable {
         CompletableFuture<T> result=new CompletableFuture<>();result.completeExceptionally(new RuntimeFailure(code));return result;
     }
     public boolean isClosed() { return closed.get(); }
+    /** A retired worker (timeout, cancellation, crash, close) never runs another operation. */
+    public boolean isOpen() { return !closed.get(); }
     @Override public void close() { retire("WORKER_CLOSED",true); }
 }

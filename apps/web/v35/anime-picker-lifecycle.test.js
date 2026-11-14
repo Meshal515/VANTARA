@@ -116,14 +116,20 @@ it('ends hung search and hung snapshot recovery with retry instead of indefinite
   const { body, anime, close } = screen(); anime.play({ ...media, id: 190, _sourceCopy: undefined }, 1);
   await vi.advanceTimersByTimeAsync(45001); expectRetry(body); close();
   engine.routes.mockImplementation(() => new Promise(() => {}));
-  anime.play(media, 1); await vi.advanceTimersByTimeAsync(45001); expectRetry(body);
+  // جلسة بدأت: لا تُقتل عند 45 ث (المحرك ما زال يجهّز)، والسقف الأخير يُنهيها بعدها
+  anime.play(media, 1); await vi.advanceTimersByTimeAsync(45001);
+  expect(body.querySelector('.an-pick-best').textContent).not.toContain('أعد المحاولة');
+  await vi.advanceTimersByTimeAsync(50001); expectRetry(body);
 });
 
 it('keeps established READY routes playable when other routes reach the deadline', async () => {
   engine.routes.mockResolvedValue({ done: false, routes: [route(), { id: 'pending', state: 'RESOLVING', sourceId: 'shahiid', server: 'slow' }] });
   engine.pick.mockResolvedValue('chosen'); engine.open.mockResolvedValue({});
   const { body, anime } = screen(); anime.play(media, 1);
+  // عند 45 ث السيرفر الذي ما زال يُجهَّز يبقى «قيد الفحص» (كان يُعلَّم «تعذّر» والمحرك يعمل)
   await vi.advanceTimersByTimeAsync(45001);
+  expect([...body.querySelectorAll('.an-srv')].some(b => b.textContent.includes('قيد الفحص'))).toBe(true);
+  await vi.advanceTimersByTimeAsync(50001);
   expect(body.querySelector('.ss-spin')).toBeNull();
   await body.querySelector('.an-srv').onclick(); await vi.advanceTimersByTimeAsync(1);
   expect(engine.open).toHaveBeenCalledWith(expect.objectContaining({ candidate: 'chosen' }));
