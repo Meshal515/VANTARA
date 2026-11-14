@@ -982,3 +982,12 @@
   .v35 .cn-detail[data-style='current'] .cn-detail-body > .cn-btn--play { max-width: 420px; justify-self: start; }
   .v35 .cn-detail:is([data-style='poster'], [data-style='marquee'], [data-style='series']) .cn-detail-body > .cn-btn--play { max-width: 420px; }
 }
+
+/* ═══ المانجا — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══
+ * أزرار بعرض العمود كاملًا: «ابدأ القراءة» في «المعرض» 828px، و«ابدأ الآن» في «من حيث وقفت» 904px، وأزرار
+ * «أتابعها/لاحقًا/مع أصدقائك» 315px لكل منها. التصميم والترتيب كما هما؛ العرض فقط. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='gallery']:not([data-unified]) .mw-acts .mw-row { max-width: 640px; margin-inline: auto; }
+  .v35 #detail[data-look='resume']:not([data-unified]) .mw-resume .mw-cta { max-width: 460px; justify-self: start; margin-inline-end: auto; }
+  .v35 #detail[data-look='resume']:not([data-unified]) .mw-quick { max-width: 720px; }
+}
