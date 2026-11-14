@@ -501,6 +501,14 @@ private:
         t.managed = true;
         t.file = index;
         auto const edges = edgePieces(ti, index);
+        // قبل أول قارئ: الطرفان فقط (فهرس الحاوية). التسلسلي بأولوية الملف الافتراضية كان يرسل طلبات القطع 1،2،3…
+        // فور الإضافة، فإن قفز المشغل مباشرة (استئناف) انتظرت قطعة القفز خلف ما أُرسل للباذر: قيس على ويندوز 11/95
+        // قطعة قبل موضع القراءة (~2.7ث عند 1MB/s). نافذة القارئ (setWindow) تضع الأولويات لحظة وصول أول قراءة.
+        {
+            std::vector<lt::download_priority_t> pieces(size_t(ti.num_pieces()), lt::dont_download);
+            for (int p : edges) pieces[size_t(p)] = lt::top_priority;
+            t.h.prioritize_pieces(pieces);
+        }
         auto const wanted = policy::deadlines({edges.front()}, std::vector<int>(edges.begin() + 1, edges.end()));
         for (auto [piece, deadline] : wanted) {
             t.h.piece_priority(lt::piece_index_t(piece), lt::top_priority);
