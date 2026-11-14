@@ -284,7 +284,7 @@ jobs:
           PY
           # البيان لا يتراجع أبدًا: رقم البناء المنشور يجب أن يكون أكبر من الموجود
           if gh release download windows-debug-channel --repo "$GITHUB_REPOSITORY" --pattern desktop-debug.json --dir current 2>/dev/null; then
-            python3 -c 'import json,os,sys; old=json.load(open("current/desktop-debug.json"))["build"]; sys.exit(0 if int(os.environ["BUILD"])>old else f"build {os.environ[\"BUILD\"]} is not newer than published {old}")'
+            python3 -c 'import json,os,sys; old=json.load(open("current/desktop-debug.json"))["build"]; new=int(os.environ["BUILD"]); sys.exit(0 if new>old else "build %d is not newer than published %d" % (new, old))'
             echo "previous=$(python3 -c 'import json; print(json.load(open("current/desktop-debug.json"))["build"])')" >> "$GITHUB_OUTPUT"
           else
             gh release create windows-debug-channel --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
