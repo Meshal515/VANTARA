@@ -35,6 +35,7 @@ object WorkerState {
         if(url!=null&&url.length<=2048&&embeds.size<48&&embeds.none{it["url"]==url})
             embeds.add(buildMap{put("url",url);put("host",key);referer?.takeIf{it.isNotBlank()&&it.length<=2048}?.let{put("referer",it)}})
     }
+    fun hasMissingEmbeds():Boolean =embeds.isNotEmpty()
     fun takeMissingEmbeds():List<Map<String,String>> =embeds.toList().also{embeds.clear()}
     /** Video link → the server page (embed) whose extractor produced it; links the provider made itself are absent. */
     private val linkEmbeds=java.util.concurrent.ConcurrentHashMap<String,String>()

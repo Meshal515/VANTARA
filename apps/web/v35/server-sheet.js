@@ -826,10 +826,33 @@ export function createServerSheet(body, o) {
    * model: { routes, busy, settled, missing, error, noSources, status: {text, spin}, retry: null | {wait} }
    * `noSources`: لا مصدر مشاهدة في الحساب: «أضف مصدرًا لتشاهد» مكان القائمة والزر يفتح الإضافات.
    */
+  // التورنت الواحد صف واحد: Torrentio نفسه يصل من إضافة Stremio ومن إضافتي Aniyomi (Torrentio وTorrentio Anime)،
+  // فكان الإصدار نفسه يظهر ثلاث مرات ويتضاعف «غير متاح». الهوية: اسم الملف والحجم. الصف الظاهر يبقى (لا قفزة)
+  // ما لم يمت وتصل نسخة صالحة منه.
+  const torrentKey = (r) => {
+    const d = view(r);
+    const file = d.torrent ? d.info?.filename : null;
+    return file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
+  };
+  const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
+  const oneTorrent = (routes) => {
+    const best = new Map();
+    for (const r of routes) {
+      const key = torrentKey(r);
+      if (!key) continue;
+      const cur = best.get(key);
+      const take = !cur
+        || (placed.has(cur.id) ? isDead(cur) && isSelectable(r)
+          : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
+          : true);
+      if (take) best.set(key, r);
+    }
+    return routes.filter((r) => { const key = torrentKey(r); return !key || best.get(key) === r; });
+  };
   function update(model) {
     if (destroyed) return;
     last = model;
-    const routes = model.routes ?? [];
+    const routes = oneTorrent(model.routes ?? []);
     paintFilters(routes);
     const shown = routes.filter(passes);
     const ready = shown.filter(isSelectable);

@@ -121,6 +121,10 @@ class CinemaFastPathTest {
         assertEquals("/season/s02/episode1", second.single().url)
         assertEquals(listOf("/season/s01", "/season/s02"), seen)
         assertTrue(r.episodes(EpisodeResolver.Copy("egydead", parent.copy(requestedSeason = 3))).isEmpty())
+        // البطاقة العامة لا تختار موسمًا: موسم هوية العمل يفتح الحاوية بدل أن يعود المصدر بلا حلقة
+        assertEquals("/season/s02/episode1", r.episodes(EpisodeResolver.Copy("egydead", parent.copy(url = "/serie/g2", seasonHint = 2))).single().url)
+        // اختيار المستخدم يغلب التلميح
+        assertEquals("/season/s01/episode1", r.episodes(EpisodeResolver.Copy("egydead", parent.copy(url = "/serie/g3", seasonHint = 2, requestedSeason = 1))).single().url)
     }
 
     @Test fun `a probed route outranks an unprobed one and a failed probe sinks`() {

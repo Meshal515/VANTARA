@@ -15,7 +15,7 @@ final class RuntimeProtocol {
     static final int MAX_TEXT=65536, MAX_DEX=8*1024*1024;
     static final int HTTP_EXCHANGE=HELLO+1, MAX_REQUEST=1024*1024, MAX_RESPONSE=4*1024*1024;
     static final Set<String> OPERATIONS=Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-        "catalogue","search","details","episodes","chapters","pages","videoLinks","capabilities")));
+        "catalogue","search","details","episodes","chapters","pages","videoLinks","videoLinksMore","capabilities")));
     static String text(String value) {
         if(value==null || value.length()>MAX_TEXT) throw new RuntimeFailure("PAYLOAD_LIMIT");
         return value;

@@ -49,6 +49,11 @@ data class SourceAnime(
     val seasonNumber: Double = -1.0,
     /** Cinema asks for a season independently of the episode number. */
     val requestedSeason: Int? = null,
+    /**
+     * موسم العمل من هويته الرسمية (AniList) حين لا يختاره المستخدم (البطاقة العامة). يُستعمل فقط إذا جمع
+     * المصدر المواسم في صفحة واحدة؛ كان المصدر كله يسقط هنا (SEASON_SELECTION_REQUIRED) فلا يظهر له سيرفر.
+     */
+    val seasonHint: Int? = null,
 )
 
 @Serializable

@@ -33,7 +33,8 @@ it('prepares the explicitly chosen source instead of a cached copy of the same w
   cleanup?.();
   engine.prepare.mockClear();
   anime.play(m, 1); await vi.advanceTimersByTimeAsync(0);
-  expect(engine.prepare).toHaveBeenCalledWith(expect.objectContaining({ copies: [{ sourceId: 'shahiid', url: '/rezero', title: 'Re:Zero 4th Season' }] }));
+  // البطاقة العامة ترسل موسم هوية العمل تلميحًا (لمصدر يجمع المواسم في صفحة واحدة)
+  expect(engine.prepare).toHaveBeenCalledWith(expect.objectContaining({ copies: [{ sourceId: 'shahiid', url: '/rezero', title: 'Re:Zero 4th Season', seasonHint: 1 }] }));
   cleanup?.();
 });
 it('opens a movie as a movie and resolves its single playable unit without assuming episode number one', async () => {
@@ -122,7 +123,7 @@ it('joins late ordinary sources to an addon-first picker without autoplay', asyn
   state.extend.mockClear();
   const core={copies:[{sourceId:'wit',url:'/one-piece'}]};publish(core);finish(core);
   await vi.advanceTimersByTimeAsync(0);
-  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([core.copies[0]]));
+  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([expect.objectContaining(core.copies[0])]));
   expect(JSON.parse(persisted.get('vantara.anime.found.v2'))[21].work.copies.map(c => c.sourceId).sort()).toEqual(['addon|kitsu', 'wit']);
   expect(state.open).not.toHaveBeenCalled();cleanup?.();
 });
@@ -148,7 +149,7 @@ it('the first core match reaches an addon-first picker even when no later source
   state.extend.mockClear();
   const core={copies:[{sourceId:'addon|cs3|anime4up',url:'/black-lagoon'}]};finish(core);
   await vi.advanceTimersByTimeAsync(0);
-  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([core.copies[0]]));
+  expect(state.extend).toHaveBeenCalledWith('test-session',expect.arrayContaining([expect.objectContaining(core.copies[0])]));
   expect(JSON.parse(persisted.get('vantara.anime.found.v2'))[22].work.copies.map(c => c.sourceId).sort()).toEqual(['addon|cs3|anime4up', 'addon|kitsu']);
   cleanup?.();
 });

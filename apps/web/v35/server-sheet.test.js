@@ -361,3 +361,14 @@ it('a better server arriving later never moves the rows already shown (no jump u
   rowA.onclick();
   expect(onPick).toHaveBeenCalledWith(a);
 });
+
+it('one torrent release is one row even when Torrentio arrives from three providers', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceName });
+  const t = (id, sourceId, sourceName, seeds) => ({ id, sourceId, sourceName, type: 'torrent', quality: 1080, state: 'READY', runtimeReady: true,
+    label: `Sousou.no.Frieren.S01E03.1080p.WEB.mkv\nSousou.no.Frieren.S01E03.1080p.WEB.mkv\n👤 ${seeds} 💾 1.4 GB ⚙️ Nyaa` });
+  ui.update({ routes: [t('a', 'addon|torrentio', 'Torrentio', 40), t('b', 'user-torrentio', 'Torrentio (Aniyomi)', 65), t('c', 'user-torrentioanime', 'Torrentio Anime', 20)], settled: true, status: { text: '' } });
+  const rows = [...body.querySelectorAll('.ss-group--torrent .ss-row')];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].textContent).toContain('65');
+});

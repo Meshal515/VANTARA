@@ -117,8 +117,11 @@ class RuntimeSourceAdapter(
     override suspend fun episodes(anime: SourceAnime): List<SourceEpisode> {
         require(anime.sourceId==id)
         val rows=episodeRows(anime.url,consume=true).map { it.jsonObject }
+        val seasons=rows.mapNotNull { it["season"]?.jsonPrimitive?.intOrNull }.distinct()
+        // تلميح موسم الهوية (البطاقة العامة) فقط لمصدر يجمع المواسم في صفحة واحدة: صفحة موسم منفصلة لا تُرشَّح به
         val wanted=anime.requestedSeason ?: anime.seasonNumber.takeIf { it>=0 }?.toInt()
-        require(wanted!=null || rows.mapNotNull { it["season"]?.jsonPrimitive?.intOrNull }.distinct().size<=1) { "SEASON_SELECTION_REQUIRED" }
+            ?: anime.seasonHint?.takeIf { seasons.size>1 && it in seasons }
+        require(wanted!=null || seasons.size<=1) { "SEASON_SELECTION_REQUIRED" }
         return rows.filter { wanted==null || it["season"]?.jsonPrimitive?.intOrNull==wanted }.map { row ->
             val data=row.text("data");require(data.isNotBlank()) { "INVALID_EPISODE_DATA" }
             val number=row["episode"]?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() && it>=0 }
@@ -129,14 +132,42 @@ class RuntimeSourceAdapter(
     }
     override suspend fun candidates(episode: SourceEpisode,now: Long,trace: ResolveTrace?,enough: Int): List<Candidate> {
         require(episode.sourceId==id)
-        val answer=execute("videoLinks",input("data" to JsonPrimitive(episode.url)))
-        RuntimeLinkObserver.onAnswer?.let { runCatching { it(id,episode.url,answer) } }
-        val links=answer.getValue("items").jsonArray
+        val session="cs3-${now}"
+        // روابط الدفعات بترتيب وصولها: معرّف الرابط من موضعه، فالقائمة المتراكمة نفسها تعطي المعرّفات نفسها في كل دفعة وفي النهاية
+        val streamed=mutableListOf<JsonElement>()
+        return kotlinx.coroutines.coroutineScope {
+            val embedsLater=EmbedJobs(this,now,trace)
+            val answer=kotlinx.coroutines.withContext(RuntimeLinkStream { stage ->
+                val items=(stage["items"] as? JsonArray).orEmpty()
+                if(items.isNotEmpty()) synchronized(streamed) { streamed.addAll(items);report(RuntimeCandidates.parse(session,id,name,streams(JsonArray(streamed.toList())),now),trace) }
+                embedsLater.add(stage["missingEmbeds"] as? JsonArray)
+            }) { execute("videoLinks",input("data" to JsonPrimitive(episode.url))) }
+            RuntimeLinkObserver.onAnswer?.let { runCatching { it(id,episode.url,answer) } }
+            val all=synchronized(streamed) { JsonArray(streamed+answer.getValue("items").jsonArray) }
+            // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.
+            // CloudStream links as the original engine plays them: http and any port allowed (addonMediaUrl (NativeAddonMediaNetwork.kt))
+            val candidates=RuntimeCandidates.parse(session,id,name,streams(all),now)
+            // Native preparation schedules media probes from route reports. Returning
+            // a list alone only adopts the links, leaving probe-gated sessions unusable.
+            report(candidates,trace)
+            embedsLater.add(answer["missingEmbeds"] as? JsonArray)
+            candidates+embedsLater.await()
+        }
+    }
+
+    /** One route per server with every link it has so far; a later stage re-reports it with more (no duplicate rows). */
+    private fun report(candidates: List<Candidate>,trace: ResolveTrace?) {
+        candidates.groupBy { it.server }.forEach { (server,links) ->
+            trace?.route(RouteReport(id,"x"+Integer.toHexString(server.hashCode()),server,
+                links.mapNotNull { it.quality }.maxOrNull(),links.first().variant,RouteState.READY,links))
+        }
+    }
+
+    private fun streams(links: JsonArray): JsonArray {
         // سيرفرات الفيديو قد يحجبها المزوّد كما يحجب المواقع: DoH أولًا وتجزئة SNI للمشغّل كما في Aniyomi (Embeds)
-        for(raw in links) runCatching { java.net.URI(raw.jsonObject.text("url")).host }.getOrNull()?.takeIf { it.isNotBlank() }
+        for(raw in links) runCatching { java.net.URI((raw as? JsonObject)?.text("url").orEmpty()).host }.getOrNull()?.takeIf { it.isNotBlank() }
             ?.let { com.vantara.anime.net.AnimeHostRouter.markVideoHost(it) }
-        val streams=JsonArray(links.map { raw ->
-            val link=raw.jsonObject
+        return JsonArray(links.mapNotNull { it as? JsonObject }.map { link ->
             val headers=(link["headers"] as? JsonObject).orEmpty().toMutableMap()
             if(link.text("referer").isNotBlank())headers.putIfAbsent("Referer",JsonPrimitive(link.text("referer")))
             if(userAgent!=null && headers.keys.none { it.equals("User-Agent",true) })headers["User-Agent"]=JsonPrimitive(userAgent)
@@ -146,56 +177,55 @@ class RuntimeSourceAdapter(
                 put("type",mediaType(link.text("type"),link.text("url")))
             }
         })
-        // Reuses existing direct-media validation and public DNS policy. No torrent/subtitle changes.
-        // CloudStream links as the original engine plays them: http and any port allowed (addonMediaUrl (NativeAddonMediaNetwork.kt))
-        val candidates=RuntimeCandidates.parse("cs3-${now}",id,name,streams,now)
-        // Native preparation schedules media probes from route reports. Returning
-        // a list alone only adopts the links, leaving probe-gated sessions unusable.
-        candidates.groupBy { it.server }.forEach { (server,links) ->
-            trace?.route(RouteReport(id,"x"+Integer.toHexString(server.hashCode()),server,
-                links.mapNotNull { it.quality }.maxOrNull(),links.first().variant,RouteState.READY,links))
-        }
-        return candidates+viaVantara(answer["missingEmbeds"] as? JsonArray,now,trace)
     }
 
-    /** Servers the runtime could not extract, resolved by VANTARA's mechanism; each reported the moment it is ready. */
-    private suspend fun viaVantara(missing: JsonArray?,now: Long,trace: ResolveTrace?): List<Candidate> {
-        val resolver=embeds ?: return emptyList()
-        val pages=missing.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
-            val url=e.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
-            Triple(url,e.text("referer").ifBlank { null },e.text("host").ifBlank { runCatching { java.net.URI(url).host }.getOrNull().orEmpty() })
-        }.filterNot { (_,_,host) -> UNPLAYABLE.any { host==it || host.endsWith(".$it") } }.distinctBy { it.first }.take(MAX_EMBEDS)
-        if(pages.isEmpty())return emptyList()
-        val gate=kotlinx.coroutines.sync.Semaphore(EMBED_PARALLEL)
-        return kotlinx.coroutines.coroutineScope {
-            pages.map { (url,referer,host) ->
-                async {
-                    val key="e"+Integer.toHexString(url.hashCode())
-                    val server=host.removePrefix("www.").substringBefore('.').ifBlank { host }
-                    trace?.route(RouteReport(id,key,server,null,com.vantara.anime.stream.Variant.SUB,RouteState.RESOLVING))
-                    com.vantara.anime.net.AnimeHostRouter.markVideoHost(host)
-                    val streams=gate.withPermit {
-                        kotlinx.coroutines.withTimeoutOrNull(EMBED_TIMEOUT_MS) { runCatching { resolver.resolve(url,referer) }.getOrNull() }
-                    }.orEmpty()
-                    val json=JsonArray(streams.map { st ->
-                        com.vantara.anime.net.AnimeHostRouter.markVideoHost(runCatching { java.net.URI(st.url).host }.getOrNull().orEmpty())
-                        val headers=st.headers.toMutableMap()
-                        if(userAgent!=null && headers.keys.none { it.equals("User-Agent",true) })headers["User-Agent"]=userAgent
-                        buildJsonObject {
-                            put("url",st.url);put("name",server);put("title",st.label.ifBlank { server })
-                            put("quality",st.quality?.let { JsonPrimitive(it) } ?: JsonNull)
-                            put("headers",JsonObject(headers.mapValues { JsonPrimitive(it.value) }))
-                            put("type",mediaType("",st.url))
-                        }
-                    })
-                    val found=RuntimeCandidates.parse("cs3e-$now",id,name,json,now)
-                    trace?.route(RouteReport(id,key,server,found.mapNotNull { it.quality }.maxOrNull(),
-                        found.firstOrNull()?.variant ?: com.vantara.anime.stream.Variant.SUB,
-                        if(found.isEmpty())RouteState.UNAVAILABLE else RouteState.READY,found,
-                        if(found.isEmpty())"لم يُستخرج رابط من $host" else null))
-                    found
+    /**
+     * Servers the runtime could not extract, resolved by VANTARA's mechanism; each reported the moment it is ready.
+     * They start as soon as the worker names them (a staged answer), not after its slowest extractor; each page once.
+     */
+    private inner class EmbedJobs(private val scope: kotlinx.coroutines.CoroutineScope,private val now: Long,private val trace: ResolveTrace?) {
+        private val gate=kotlinx.coroutines.sync.Semaphore(EMBED_PARALLEL)
+        private val seen=HashSet<String>()
+        private val jobs=mutableListOf<kotlinx.coroutines.Deferred<List<Candidate>>>()
+        fun add(missing: JsonArray?) {
+            val resolver=embeds ?: return
+            val pages=missing.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
+                val url=e.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
+                Triple(url,e.text("referer").ifBlank { null },e.text("host").ifBlank { runCatching { java.net.URI(url).host }.getOrNull().orEmpty() })
+            }.filterNot { (_,_,host) -> UNPLAYABLE.any { host==it || host.endsWith(".$it") } }
+            synchronized(this) {
+                for((url,referer,host) in pages) {
+                    if(seen.size>=MAX_EMBEDS || !seen.add(url)) continue
+                    jobs+=scope.async { resolve(resolver,url,referer,host) }
                 }
-            }.awaitAll().flatten()
+            }
+        }
+        suspend fun await(): List<Candidate> = synchronized(this) { jobs.toList() }.awaitAll().flatten()
+        private suspend fun resolve(resolver: com.vantara.anime.hosts.EmbedResolver,url: String,referer: String?,host: String): List<Candidate> {
+            val key="e"+Integer.toHexString(url.hashCode())
+            val server=host.removePrefix("www.").substringBefore('.').ifBlank { host }
+            trace?.route(RouteReport(id,key,server,null,com.vantara.anime.stream.Variant.SUB,RouteState.RESOLVING))
+            com.vantara.anime.net.AnimeHostRouter.markVideoHost(host)
+            val streams=gate.withPermit {
+                kotlinx.coroutines.withTimeoutOrNull(EMBED_TIMEOUT_MS) { runCatching { resolver.resolve(url,referer) }.getOrNull() }
+            }.orEmpty()
+            val json=JsonArray(streams.map { st ->
+                com.vantara.anime.net.AnimeHostRouter.markVideoHost(runCatching { java.net.URI(st.url).host }.getOrNull().orEmpty())
+                val headers=st.headers.toMutableMap()
+                if(userAgent!=null && headers.keys.none { it.equals("User-Agent",true) })headers["User-Agent"]=userAgent
+                buildJsonObject {
+                    put("url",st.url);put("name",server);put("title",st.label.ifBlank { server })
+                    put("quality",st.quality?.let { JsonPrimitive(it) } ?: JsonNull)
+                    put("headers",JsonObject(headers.mapValues { JsonPrimitive(it.value) }))
+                    put("type",mediaType("",st.url))
+                }
+            })
+            val found=RuntimeCandidates.parse("cs3e-$now",id,name,json,now)
+            trace?.route(RouteReport(id,key,server,found.mapNotNull { it.quality }.maxOrNull(),
+                found.firstOrNull()?.variant ?: com.vantara.anime.stream.Variant.SUB,
+                if(found.isEmpty())RouteState.UNAVAILABLE else RouteState.READY,found,
+                if(found.isEmpty())"لم يُستخرج رابط من $host" else null))
+            return found
         }
     }
     private companion object {
@@ -213,6 +243,15 @@ class RuntimeSourceAdapter(
  * Measurement only (VANTARA's comparison with the original CloudStream, androidTest): the worker's raw answer for each
  * episode the adapter resolves, including which server each link came from (linkEmbeds). Always null in the app.
  */
+/**
+ * Receives each stage of a staged videoLinks as the worker hands it over (RuntimeHost.stagedLinks). Carried in the
+ * coroutine context of one adapter call, so only that call's episode sees its stages; any other caller (diagnostics,
+ * the live sweep) gets the one-shot operation unchanged.
+ */
+class RuntimeLinkStream(val onStage: (JsonObject)->Unit): kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key: kotlin.coroutines.CoroutineContext.Key<RuntimeLinkStream>
+}
+
 object RuntimeLinkObserver {
     @Volatile var onAnswer: ((sourceId: String, data: String, answer: JsonObject) -> Unit)? = null
 }

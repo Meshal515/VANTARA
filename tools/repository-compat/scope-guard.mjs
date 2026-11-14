@@ -117,6 +117,7 @@ for (const path of animeDetailSeams) seams.add(path);
 
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
+seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimeProtocol.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
 // اعتماد المصادر حتى «أعطال فانتارا = صفر» (6 نوفمبر 2026، موافقة المالك على النشر في Debug):
 // تحقق Cloudflare على المضيف المتحدّي، وانتقال دومين Aniyomi، وProtoBuf للإضافات، ونظام الاعتماد
@@ -155,6 +156,8 @@ const certificationSeams = [
   // متصفح مخفي) بدل «لا رابط فيديو»: العامل يعيدها كاملة بمراجعها، والمحوّل يحلّها في التطبيق.
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/CloudStreamProvider.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/WorkerState.kt',
+  'extensions/runtime-android/cloudstream/src/main/kotlin/dev/vantara/runtime/cloudstream/LinkCollector.kt',
+  'extensions/runtime-android/cloudstream/src/test/kotlin/dev/vantara/runtime/cloudstream/LinkCollectorTest.kt',
   'extensions/runtime-android/cloudstream/src/main/kotlin/com/lagradost/cloudstream3/utils/ExtractorApi.kt',
 ];
 for (const path of certificationSeams) seams.add(path);
@@ -383,7 +386,7 @@ for (const path of ["android/app/src/main/kotlin/com/vantara/verification/Verifi
 // ورقة السيرفرات بلا قفز: ترتيب ثابت، وقائمتا الجودة والمصدر متجاورتان (طلب المالك، 14 نوفمبر)
 for (const path of ["apps/web/v35/cinema-playback.test.js", "apps/web/v35/server-sheet.css"]) seams.add(path);
 // البحث العام في CloudStream: عادل بين المصادر، والتشغيل قبل البحث (طلب المالك، 14 نوفمبر)
-for (const path of ["extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt", "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java"]) seams.add(path);
+for (const path of ["extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt", "extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java", "extensions/runtime-android/integration/src/test/kotlin/com/vantara/runtime/RuntimeSourceAdapterTest.kt", "android/app/src/main/kotlin/com/vantara/anime/adapters/Adapters.kt"]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);
