@@ -117,6 +117,13 @@ for (const path of animeDetailSeams) seams.add(path);
 
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
+seams.add('package.json');
+seams.add('TRADEMARKS.md');
+seams.add('NOTICE.md');
+seams.add('LICENSE');
+seams.add('CLAUDE.md');
+seams.add('README.md');
+seams.add('CONTRIBUTING.md');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/RuntimeProtocol.java');
 seams.add('extensions/runtime-android/http/src/main/java/dev/vantara/runtime/http/HttpBroker.java');
 // اعتماد المصادر حتى «أعطال فانتارا = صفر» (6 نوفمبر 2026، موافقة المالك على النشر في Debug):
