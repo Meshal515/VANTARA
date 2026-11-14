@@ -611,7 +611,8 @@ class AnimeEngine(context: Context) {
             .build()
     }
 
-    private val probeSlots = Semaphore(4)
+    /** فحوص قصيرة (أول بايتات) مشتركة بين الجلسات: كانت 4 فتصطف سيرفرات جاهزة خلف بعضها قبل «صالح». */
+    private val probeSlots = Semaphore(8)
 
     private suspend fun probeRoute(prep: com.vantara.anime.stream.PreparedEpisode, r: com.vantara.anime.stream.RouteReport) {
         coroutineScope {

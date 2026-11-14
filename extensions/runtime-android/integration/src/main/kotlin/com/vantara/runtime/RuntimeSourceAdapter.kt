@@ -164,7 +164,7 @@ class RuntimeSourceAdapter(
         val pages=missing.orEmpty().mapNotNull { it as? JsonObject }.mapNotNull { e ->
             val url=e.text("url").takeIf { it.startsWith("http") } ?: return@mapNotNull null
             Triple(url,e.text("referer").ifBlank { null },e.text("host").ifBlank { runCatching { java.net.URI(url).host }.getOrNull().orEmpty() })
-        }.distinctBy { it.first }.take(MAX_EMBEDS)
+        }.filterNot { (_,_,host) -> UNPLAYABLE.any { host==it || host.endsWith(".$it") } }.distinctBy { it.first }.take(MAX_EMBEDS)
         if(pages.isEmpty())return emptyList()
         val gate=kotlinx.coroutines.sync.Semaphore(EMBED_PARALLEL)
         return kotlinx.coroutines.coroutineScope {
@@ -204,6 +204,8 @@ class RuntimeSourceAdapter(
         const val MAX_EMBEDS=24
         const val EMBED_PARALLEL=4
         const val EMBED_TIMEOUT_MS=25_000L
+        /** ملفات مشفّرة على المتصفح (MEGA): لا رابط بث يُستخرج منها، فلا تُعرض صفوفًا «تعذّرت» ولا تحجز مستخرجًا. */
+        val UNPLAYABLE=setOf("mega.nz","mega.co.nz","mega.io")
     }
 }
 
