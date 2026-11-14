@@ -1000,3 +1000,17 @@
   .v35 #detail[data-look='resume']:not([data-unified]) .mw-resume .mw-cta { max-width: 460px; justify-self: start; margin-inline-end: auto; }
   .v35 #detail[data-look='resume']:not([data-unified]) .mw-quick { max-width: 720px; }
 }
+
+/* «المسلسل» على الكمبيوتر (بلاغ المالك 14 نوفمبر: البنر مقصوص وعلى يساره شريط أسود). قيس (1920): wide.css يعطي
+ * .cn-detail-art ارتفاعًا ثابتًا min(76vh, 680px) ونمط المسلسل نسبة 16:9، فيُشتق العرض من الارتفاع (631×16/9 = 1123px)
+ * داخل صفحة 1205px، فيلتصق يمينًا ويبقى يساره فارغًا. الآن العرض كامل والارتفاع منه بسقف الشاشة، والصورة من أعلاها
+ * (الوجوه والعناوين لا تُقص؛ ما زاد يُقص من الأسفل الذي يتلاشى بالقناع أصلًا). المواسم والحلقات كما هي. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail[data-style='series']:not([data-unified]) .cn-detail-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: max(420px, calc(100svh - 230px));
+  }
+  .v35 .cn-detail[data-style='series']:not([data-unified]) .cn-detail-art > .cn-img { object-fit: cover; object-position: center top; }
+}
