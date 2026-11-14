@@ -6,13 +6,6 @@ import com.vantara.anime.adapters.ExtensionAdapter
 import com.vantara.anime.adapters.Listing
 import com.vantara.anime.adapters.SourceAnime
 import com.vantara.anime.adapters.SourcePage
-import com.vantara.anime.adapters.ArabSeedSiteAdapter
-import com.vantara.anime.adapters.ShahiidSiteAdapter
-import com.vantara.anime.adapters.TukTukSiteAdapter
-import com.vantara.anime.adapters.AkwamSiteAdapter
-import com.vantara.anime.adapters.EgyDeadSiteAdapter
-import com.vantara.anime.adapters.RistoAnimeSiteAdapter
-import com.vantara.anime.adapters.WitAnimeSiteAdapter
 import com.vantara.anime.hosts.EmbedResolver
 import com.vantara.anime.hosts.WebViewSniffer
 import com.vantara.anime.catalog.CatalogCrawler
@@ -79,7 +72,10 @@ class AnimeEngine(context: Context) {
     /** إضافات Aniyomi التي ثبّتها المستخدم من مستودعاته (UserAnime.kt). */
     @Volatile private var userSources: List<com.vantara.anime.registry.SourceEntry> = emptyList()
     private val adapters = ConcurrentHashMap<String, AnimeAdapter>()
+    private val publications = AnimeSourcePublication(this)
+    @Volatile private var runtimeSources: Map<String, RuntimeSourceBinding> = emptyMap()
     private val loadErrors = ConcurrentHashMap<String, String>()
+    private val loadDiagnostics = ConcurrentHashMap<String, String>()
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val sessions = ConcurrentHashMap<String, PlaybackSession>()
 
@@ -103,7 +99,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** يُنادى من الواجهة عند الإقلاع وكلما وصل بيان أحدث. */
-    fun configure(text: String): List<String> {
+    @Synchronized fun configure(text: String): List<String> {
         val parsed = ManifestParser.parse(text)
         val errors = ManifestParser.validate(parsed)
         if (errors.isNotEmpty()) return errors
@@ -113,18 +109,37 @@ class AnimeEngine(context: Context) {
     }
 
     /** المشحون + ما ثبّته المستخدم؛ يُنادى بعد كل تثبيت أو إزالة دون انتظار الواجهة. */
-    fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
+    @Synchronized fun setUserSources(list: List<com.vantara.anime.registry.SourceEntry>) {
         userSources = list
         apply()
     }
+
+    /** Experimental Debug supplies real adapters; the default/Release map stays empty. */
+    @Synchronized fun setRuntimeSources(list: List<RuntimeSourceBinding>) {
+        check(com.vantara.app.BuildConfig.DEBUG) { "RUNTIME_DEBUG_ONLY" }
+        require(list.size <= 128 && list.all { it.entry.id.startsWith("addon|cs3|") && it.adapter.id == it.entry.id })
+        require(list.map { it.entry.id }.distinct().size == list.size)
+        runtimeSources = list.associateBy { it.entry.id }
+        resolver.revokeRuntimeEpisodes()
+        apply()
+    }
+    fun runtimeSource(id: String): RuntimeSourceBinding? = runtimeSources[id]
 
     /** هل الحزمة جزء من البيان المشحون (فلا تُثبَّت مرة ثانية من مستودع)؟ */
     fun shipsPackage(pkg: String): Boolean = shipped.sources.any { it.extension?.pkg == pkg }
 
     @Synchronized private fun apply() {
-        val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources)
+        val parsed = com.vantara.anime.registry.mergeUserSources(shipped, userSources + runtimeSources.values.map { it.entry })
+        val previous = manifest.sources.associateBy { it.id }
+        val next = parsed.sources.associateBy { it.id }
+        publications.invalidate((previous.keys + next.keys).filter { previous[it] != next[it] })
+        // A verified APK update under the same source ID must invalidate its old adapter.
+        adapters.keys.removeAll { id -> previous[id] != next[id] }
+        loadErrors.keys.removeAll { id -> previous[id] != next[id] }
+        loadDiagnostics.keys.removeAll { id -> previous[id] != next[id] }
         manifest = parsed
         for (s in parsed.sources) {
+            if (runtimeSources.containsKey(s.id)) continue // Runtime owns its scoped network policy.
             AnimeHostRouter.register(s.id, s.domains.plan(null))
             // حجب «تحويل غريب» حُكم بقواعد الدومين القديمة: البيان الجديد قد يقبله
             // (بصمة أو مرآة)، فيُجرَّب المصدر من جديد بدل أن ينتظر تبريده
@@ -153,29 +168,38 @@ class AnimeEngine(context: Context) {
 
     /** المصدر جاهزًا للعمل، أو null مع سبب في [loadErrors]. */
     suspend fun adapter(id: String): AnimeAdapter? {
-        adapters[id]?.let { return it }
-        val e = entry(id) ?: return null
-        if (!e.enabled || e.disabledReason != null) return null
-        e.adapter?.let { kind -> return native(e, kind).also { adapters[id] = it } }
-        val ext = e.extension ?: return null
+        runtimeSources[id]?.let { return it.adapter.takeIf { _ -> it.entry.enabled && it.entry.disabledReason == null } }
+        synchronized(this) { adapters[id]?.let { return it } }
         return locks.getOrPut(id) { Mutex() }.withLock {
-            adapters[id] ?: runCatching {
+            val (e, generation) = synchronized(this) {
+                adapters[id]?.let { return@withLock it }
+                val current = entry(id)?.takeIf { it.enabled && it.disabledReason == null } ?: return@withLock null
+                current to publications.generation(id)
+            }
+            e.adapter?.let { kind -> return@withLock publications.publish(id, generation) {
+                native(e, kind).also { adapters[id] = it }
+            } }
+            val ext = e.extension ?: return@withLock null
+            try {
                 val source = loader.obtain(ext)
-                ExtensionAdapter(
-                    id, source,
-                    pageEmbeds = { entry(id)?.embeds },
-                    resolver = embeds,
-                    pageEpisodes = { entry(id)?.episodes },
-                ).also { a ->
-                    // مضيف `baseUrl` المكتوب في الإضافة صار «قديمًا» يُعاد توجيهه
-                    AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
-                    adapters[id] = a
-                    loadErrors.remove(id)
+                publications.publish(id, generation) {
+                    ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds },
+                        resolver = embeds, pageEpisodes = { entry(id)?.episodes }).also { a ->
+                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
+                        adapters[id] = a
+                        loadErrors.remove(id)
+                        loadDiagnostics.remove(id)
+                    }
                 }
-            }.onFailure {
-                loadErrors[id] = it.message ?: it.javaClass.simpleName
-                health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${it.message}")
-            }.getOrNull()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Throwable) {
+                publications.publish(id, generation) {
+                    if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[id] = DiscoveryFailure.describe(error)
+                    loadErrors[id] = error.message ?: error.javaClass.simpleName
+                    health.fail(HealthStore.sourceKey(id), "تحميل الإضافة: ${error.message}")
+                }
+                null
+            }
         }
     }
 
@@ -187,7 +211,7 @@ class AnimeEngine(context: Context) {
     }
 
     /** سيرفرات الفيديو المضمّنة، والمتصفح المخفي لما لا نستخرجه مباشرة. */
-    private val embeds by lazy {
+    internal val embeds by lazy { // ويستعمله محرك CloudStream لسيرفرات بلا مستخرج (RuntimeHost)
         EmbedResolver(
             sourceClient,
             WebViewSniffer(appContext, network::defaultUserAgentProvider),
@@ -196,57 +220,9 @@ class AnimeEngine(context: Context) {
     }
 
     /** محوّل VANTARA أصلي: لا تنزيل ولا تحميل كود، فيُبنى فورًا. */
-    private fun native(e: SourceEntry, kind: String): AnimeAdapter = when (kind) {
-        WitAnimeSiteAdapter.KIND -> WitAnimeSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        ArabSeedSiteAdapter.KIND -> ArabSeedSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        TukTukSiteAdapter.KIND -> TukTukSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        ShahiidSiteAdapter.KIND -> ShahiidSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        AkwamSiteAdapter.KIND -> AkwamSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-        )
-        EgyDeadSiteAdapter.KIND -> EgyDeadSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        RistoAnimeSiteAdapter.KIND -> RistoAnimeSiteAdapter(
-            id = e.id,
-            name = e.name,
-            client = sourceClient,
-            base = { AnimeHostRouter.activeBase(e.id) ?: e.domains.current },
-            embeds = embeds,
-        )
-        else -> error("محوّل غير معروف: $kind")
-    }
+    // محوّلات المواقع المدمجة حُذفت بقرار المالك (30 أكتوبر 2026): البيان لا يشحن مصادر أنمي/سينما
+    @Suppress("UNUSED_PARAMETER")
+    private fun native(e: SourceEntry, kind: String): AnimeAdapter = error("محوّل غير معروف: $kind")
 
     fun loadError(id: String): String? = loadErrors[id]
 
@@ -276,7 +252,9 @@ class AnimeEngine(context: Context) {
             ids.map { id ->
                 async {
                     val a = withTimeoutOrNull(loadTimeoutMs) { adapter(id) } ?: return@async emptyList()
-                    guarded(id, timeoutMs) { a.page(Listing.SEARCH, 1, query) }?.items.orEmpty()
+                    val items = mutableListOf<SourceAnime>()
+                    guarded(id, timeoutMs) { SearchPages.walk(a, query, maxPages = SearchPages.GENERAL_SEARCH_PAGES, enough = { page -> page.any { SearchPages.covers(query, it.title) } }) { items.addAll(it.items) } }
+                    items
                 }
             }.awaitAll().flatten()
         }
@@ -294,6 +272,10 @@ class AnimeEngine(context: Context) {
         val skipped: Boolean = false,
         /** Cloudflare يطلب إنسانًا لهذا المصدر: الواجهة تعرض «تحقّق» لحظات. */
         val needsHuman: Boolean = false,
+        val page: Int = 0,
+        val hasNext: Boolean = false,
+        val stop: String? = null,
+        val diagnostic: String? = null,
     )
 
     private fun needsHuman(id: String): Boolean = health.get(HealthStore.sourceKey(id))?.blocked == "cloudflare_interactive"
@@ -346,42 +328,68 @@ class AnimeEngine(context: Context) {
         concurrency: Int = 6,
         timeoutMs: Long = STREAM_SEARCH_TIMEOUT_MS,
         loadTimeoutMs: Long = STREAM_LOAD_TIMEOUT_MS,
+        maxPages: Int = SearchPages.GENERAL_SEARCH_PAGES,
+        /** Sources that already hold this work: a later name of the same work does not ask them again. */
+        exclude: Set<String> = emptySet(),
         onHit: (SourceHit) -> Unit,
     ) {
         val now = System.currentTimeMillis()
-        val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content }
+        val all = manifest.sources.filter { it.enabled && it.disabledReason == null && it.content == content && it.id !in exclude }
         val ordered = health.rank(all, { it.priority }) { HealthStore.sourceKey(it.id) }
-        val (cold, live) = ordered.partition { coolingDown(it.id, now) }
+        // التبريد بعد فشل متتالٍ (مهلة، خطأ شبكة) لا يُسقط المصدر من بحث فتحه المستخدم بنفسه: يُسأل بعد
+        // السليمة فلا يؤخرها. مصادر CloudStream أكثر ما يتعثر هنا (عامل معزول يُشغَّل لكل طلب)، فكانت تغيب عن
+        // ورقة السيرفرات العامة حتى ساعة وهي تعمل من صفحتها. الذي يُتخطّى فقط: موقع حجبنا صراحةً (blocked).
+        val (cold, live) = searchOrder(ordered, { coolingDown(it.id, now) }) { health.get(HealthStore.sourceKey(it.id))?.blocked != null }
         for (s in cold) {
             onHit(SourceHit(s.id, emptyList(), 0, health.get(HealthStore.sourceKey(s.id))?.lastError ?: "في التبريد", skipped = true, needsHuman = needsHuman(s.id)))
         }
         val gate = Semaphore(concurrency.coerceAtLeast(1))
         coroutineScope {
             for (s in live) launch {
-                gate.withPermit {
+                // A source holds one of the parallel slots for the normal budget only. Past it, it keeps searching
+                // outside the gate up to its ceiling and its pages still reach the sheet as they answer: the source
+                // page searches the same source with no cap, and cancelling it here at 12 s made sources that work
+                // there vanish from the general card (diagnostic: WIT ANIME, AnimeLek «لم يرد خلال 12 ثانية»).
+                SearchSlots.hold(gate, timeoutMs) {
                     val t0 = System.nanoTime()
                     val elapsed = { (System.nanoTime() - t0) / 1_000_000 }
-                    val a = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) }
+                    // A completed null lookup is different from a timed-out load.
+                    val loading = withTimeoutOrNull(loadTimeoutMs) { adapter(s.id) to true }
+                    val a = loading?.first
                     if (a == null) {
-                        onHit(SourceHit(s.id, emptyList(), elapsed(), loadErrors[s.id] ?: "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية"))
-                        return@withPermit
+                        val reason = if (loading == null) "الإضافة لم تُحمَّل خلال ${loadTimeoutMs / 1000} ثانية" else loadErrors[s.id] ?: "لا يوجد محوّل متاح للمصدر في حالته الحالية"
+                        onHit(SourceHit(s.id, emptyList(), elapsed(), reason, stop = "load_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) loadDiagnostics[s.id] ?: if (loading == null) "LOAD_TIMEOUT" else "SOURCE_ADAPTER_UNAVAILABLE" else null))
+                        return@hold
                     }
                     val key = HealthStore.sourceKey(s.id)
-                    val hit = try {
-                        val page = withTimeout(timeoutMs) { a.page(Listing.SEARCH, 1, query) }
-                        SourceHit(s.id, page.items, elapsed())
+                    var pageNumber = 0
+                    // A CloudStream source starts an isolated worker per request before the site is even asked;
+                    // 12s cut it off (and recorded the timeout against the source) on a cold or busy device.
+                    // Its hits still reach the sheet the moment each page answers.
+                    val budget = if (s.id.startsWith(RUNTIME_SOURCE_PREFIX)) maxOf(timeoutMs, RUNTIME_SEARCH_TIMEOUT_MS) else maxOf(timeoutMs, SLOW_SOURCE_SEARCH_MS)
+                    val hit: SourceHit? = try {
+                        withTimeout(budget) {
+                            // Stop at the page that already names the work; the cap is deliberate, not a failure.
+                            SearchPages.walk(a, query, maxPages = maxPages.coerceIn(1, 20), enough = { items -> items.any { SearchPages.covers(query, it.title) } }) { page ->
+                                pageNumber = page.number
+                                onHit(SourceHit(s.id, page.items, elapsed(),
+                                    error = if (page.hasNext && page.stop == "repeated_page") "توقف البحث قبل تأكيد نهاية نتائج المصدر" else null,
+                                    page = page.number, hasNext = page.hasNext, stop = page.stop))
+                            }
+                        }
+                        null
                     } catch (e: TimeoutCancellationException) {
-                        health.fail(key, "لم يرد خلال ${timeoutMs / 1000} ثانية")
-                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${timeoutMs / 1000} ثانية")
+                        health.fail(key, "لم يرد خلال ${budget / 1000} ثانية")
+                        SourceHit(s.id, emptyList(), elapsed(), "لم يرد خلال ${budget / 1000} ثانية", page = pageNumber + 1, stop = "search_timeout", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: IOException) {
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     } catch (e: Throwable) {
                         health.fail(key, "خطأ في قراءة الصفحة: ${AnimeHostRouter.describe(e)}")
-                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e))
+                        SourceHit(s.id, emptyList(), elapsed(), AnimeHostRouter.describe(e), page = pageNumber + 1, stop = "search_failed", diagnostic = if (com.vantara.app.BuildConfig.DEBUG) DiscoveryFailure.describe(e) else null)
                     }
-                    onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
+                    if (hit != null) onHit(if (hit.error != null && needsHuman(s.id)) hit.copy(needsHuman = true) else hit)
                 }
             }
         }
@@ -436,7 +444,9 @@ class AnimeEngine(context: Context) {
 
     /** يبني جلسة تشغيل للحلقة من كل النسخ؛ المشغّل يطلب «التالي» عند العطل. */
     suspend fun openSession(sessionId: String, copies: List<SourceAnime>, number: Float, prefs: Preferences): List<Candidate> {
+        // جلسة قديمة بلا تجهيز يملك تذاكر التورنت: روابط magnet لا تدخلها (كما كانت قبل دعمها في التجهيز)
         val list = resolver.candidates(copies.map { EpisodeResolver.Copy(it.sourceId, it) }, number, prefs)
+            .filterNot { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }
         sessions[sessionId] = PlaybackSession(list, health)
         sessionRequests[sessionId] = SessionRequest(copies, number, prefs)
         return list
@@ -454,7 +464,7 @@ class AnimeEngine(context: Context) {
         return resolver.candidates(
             req.copies.map { EpisodeResolver.Copy(it.sourceId, it) }, req.number, req.prefs,
             exhaustive = true,
-        )
+        ).filterNot { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }
     }
 
     private val prepared = ConcurrentHashMap<String, com.vantara.anime.stream.PreparedEpisode>()
@@ -487,6 +497,10 @@ class AnimeEngine(context: Context) {
         // Own both warm-up and later expansion so closing the session cancels both.
         prep.job = SupervisorJob(background.coroutineContext[kotlinx.coroutines.Job])
         prep.reserveAddonBatches(addonSources)
+        CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
+            kotlinx.coroutines.delay(90_000)
+            if (prepared[sessionId] === prep) prep.forceComplete()
+        }
         if (requestAddons) {
             val providers = addonProviders.filter { it.valid() && (warmSourceId == null || it.sourceId == warmSourceId) && it.endpoint(number) != null }.distinctBy { it.sourceId }.take(128)
             prep.reserveAddonBatches(providers.map { it.sourceId })
@@ -500,19 +514,28 @@ class AnimeEngine(context: Context) {
      * نسخ وصلت بعد بدء التجهيز (مصدر ردّ متأخرًا): تُضاف للجلسة نفسها وتُجهَّز
      * سيرفراتها، وما يعمل لا يتوقف. يرجع عدد النسخ الجديدة فعلًا.
      */
-    fun extendPreparation(id: String, more: List<SourceAnime>): Int {
-        val prep = prepared[id] ?: return 0
-        val req = sessionRequests[id] ?: return 0
-        val known = req.copies.map { it.sourceId to it.url }.toSet()
-        val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
-        if (fresh.isEmpty() || !prep.beginBatch()) return 0
-        sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
-        launchPreparation(prep, fresh)
-        return fresh.size
+    fun extendPreparation(id: String, more: List<SourceAnime>, generation: String? = null): Int {
+        var added = 0
+        // Replacing/closing this key cannot interleave generation validation and
+        // reservation, so a late bridge call never extends a reused session ID.
+        prepared.computeIfPresent(id) { _, prep ->
+            val req = sessionRequests[id] ?: return@computeIfPresent prep
+            val known = req.copies.map { it.sourceId to it.url }.toSet()
+            val fresh = more.filter { (it.sourceId to it.url) !in known }.distinctBy { it.sourceId to it.url }
+            if (fresh.isEmpty() || !prep.beginBatch(generation)) return@computeIfPresent prep
+            sessionRequests.computeIfPresent(id) { _, current -> current.copy(copies = (current.copies + fresh).distinctBy { it.sourceId to it.url }) }
+            launchPreparation(prep, fresh)
+            added = fresh.size
+            prep
+        }
+        return added
     }
 
     fun extendAddonSources(id: String, sourceIds: List<String>, generation: String?): Int =
         prepared[id]?.let { if (generation == null) 0 else it.reserveAddonBatches(sourceIds, generation) } ?: 0
+
+    fun finishAddonBatch(id: String, sourceId: String, generation: String?): Boolean =
+        if (generation == null) false else prepared[id]?.settleFailedAddon(sourceId, generation) ?: false
 
     fun addonProviders(id: String): List<com.vantara.addons.NativeStremioProvider> = sessionRequests[id]?.addonProviders.orEmpty()
 
@@ -533,6 +556,7 @@ class AnimeEngine(context: Context) {
     fun appendAddonStreams(id: String, sourceId: String, name: String, raw: kotlinx.serialization.json.JsonElement, provider: com.vantara.addons.NativeStremioProvider? = null, generation: String? = null): Int {
         val prep = prepared[id] ?: return 0
         if (generation == null || !prep.claimAddonBatch(sourceId, generation)) return 0
+        try {
         if (provider?.sourceId == sourceId && provider.valid()) sessionRequests.computeIfPresent(id) { _, req ->
             req.copy(addonProviders = (req.addonProviders.filter { it.sourceId != sourceId } + provider).take(128))
         }
@@ -570,6 +594,12 @@ class AnimeEngine(context: Context) {
             } finally { prep.finish() }
         }
         return list.size
+        } catch (error: Throwable) {
+            // claimAddonBatch already reserved this source; a parsing/launch error
+            // must settle it even if the reporting coroutine was never created.
+            prep.finish()
+            throw error
+        }
     }
 
     /** عميل الفحص: مهل قصيرة؛ رابط لا يرد خلال ثوانٍ لا يُعدّ «يعمل الآن». */
@@ -581,16 +611,23 @@ class AnimeEngine(context: Context) {
             .build()
     }
 
-    private val probeSlots = Semaphore(4)
+    /** فحوص قصيرة (أول بايتات) مشتركة بين الجلسات: كانت 4 فتصطف سيرفرات جاهزة خلف بعضها قبل «صالح». */
+    private val probeSlots = Semaphore(8)
 
     private suspend fun probeRoute(prep: com.vantara.anime.stream.PreparedEpisode, r: com.vantara.anime.stream.RouteReport) {
         coroutineScope {
             for (c in prep.rank(r.candidates)) if (prep.claimProbe(c.id)) launch {
                 probeSlots.withPermit {
                     val t0 = System.nanoTime()
-                    val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS + 1_000) {
-                        kotlinx.coroutines.runInterruptible {
-                            runCatching { com.vantara.anime.stream.StreamProbe.check(if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers) else probeClient, c) }.getOrDefault(false)
+                    // Up to three bounded calls for HLS: playlist, first variant, first segment (StreamProbe).
+                    val ok = withTimeoutOrNull(PROBE_TIMEOUT_MS * 3 + 1_000) {
+                        try {
+                            val client = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(probeClient, c.url, c.headers, plainMedia = c.sourceId.startsWith(RUNTIME_SOURCE_PREFIX)) else probeClient
+                            com.vantara.anime.stream.StreamProbe.checkCancellable(client, c)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            false
                         }
                     } ?: false
                     val ms = (System.nanoTime() - t0) / 1_000_000
@@ -624,31 +661,74 @@ class AnimeEngine(context: Context) {
                 val ordered = health.rank(copies, { entry(it.sourceId)?.priority ?: 0 }) { HealthStore.sourceKey(it.sourceId) }
                 coroutineScope {
                     for (copy in ordered) launch {
+                        // تتبع منظم لكل مصدر في التجهيز (معرّف الجلسة = Trace ID): أين يقف وكم أخذ ولماذا
+                        val t0 = System.nanoTime()
+                        fun trace(stage: String, detail: Any? = null) { android.util.Log.i("VantaraPrepare",
+                            "trace=${prep.id} source=${copy.sourceId.take(80)} stage=$stage ms=${(System.nanoTime() - t0) / 1_000_000}${detail?.let { " $it" } ?: ""}") }
+                        trace("start", "episode=${prep.number}")
                         runCatching {
                             withTimeout(PREPARE_TIMEOUT_MS) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
-                                val ep = resolver.pick(resolver.episodes(c), prep.number) ?: return@withTimeout
-                                val a = adapter(copy.sourceId) ?: return@withTimeout
+                                val list = resolver.episodes(c)
+                                trace("episodes", "count=${list.size} numbers=${list.take(5).map { it.number }}")
+                                val ep = resolver.pick(list, prep.number) ?: return@withTimeout trace("no-episode", "wanted=${prep.number}")
+                                val a = adapter(copy.sourceId) ?: return@withTimeout trace("no-adapter")
                                 val scope = this
-                                val trace = com.vantara.anime.adapters.ResolveTrace { r ->
+                                val tickets = TorrentTickets(prep)
+                                val trace = com.vantara.anime.adapters.ResolveTrace { raw ->
+                                    val r = tickets.report(raw)
+                                    for (c in r.candidates) if (c.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(c.id)
                                     prep.report(r)
-                                    // أول رابط جاهز يُفحص فورًا بالتوازي، والسيرفرات الباقية تكمل
-                                    if (prep.probe && r.state == com.vantara.anime.stream.RouteState.READY && r.candidates.isNotEmpty()) {
-                                        scope.launch { probeRoute(prep, r) }
+                                    // أول رابط جاهز يُفحص فورًا بالتوازي، والسيرفرات الباقية تكمل. تذكرة التورنت لا تُفحص بطلب HTTP
+                                    val http = r.candidates.filterNot { it.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME) }
+                                    if (prep.probe && r.state == com.vantara.anime.stream.RouteState.READY && http.isNotEmpty()) {
+                                        scope.launch { probeRoute(prep, r.copy(candidates = http)) }
                                     }
                                 }
                                 val links = if (copy.sourceId == preferredSourceId && preferredServer != null)
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
                                 else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
-                                prep.adopt(copy.sourceId, links)
+                                trace("links", "count=${links.size}")
+                                prep.adopt(copy.sourceId, links.mapNotNull(tickets::candidate).onEach {
+                                    if (it.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(it.id)
+                                })
                             }
-                        }.onFailure { if (it is CancellationException && it !is TimeoutCancellationException) throw it }
+                        }.onFailure {
+                            trace(if (it is TimeoutCancellationException) "timeout" else "error", "${it.javaClass.simpleName}: ${it.message?.take(160)}")
+                            if (it is CancellationException && it !is TimeoutCancellationException) throw it
+                        }
                     }
                 }
             } finally {
                 prep.finish()
                 health.flush()
             }
+        }
+    }
+
+    /**
+     * روابط magnet من محوّل (إضافة Aniyomi) تصير تذاكر يملكها التجهيز، مرة واحدة لكل رابط، بواجهة محرك التورنت
+     * العامة كما تُسجَّل تورنتات Stremio. رابط لا يُفهم يُسقط ويُذكر سببه بدل «غير قابل للتشغيل».
+     */
+    private inner class TorrentTickets(private val prep: com.vantara.anime.stream.PreparedEpisode) {
+        private val done = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<Candidate>>()
+        fun candidate(c: Candidate): Candidate? {
+            if (!com.vantara.anime.stream.MagnetLinks.isMagnet(c.url)) return c
+            return done.computeIfAbsent(c.id) { java.util.Optional.ofNullable(register(c)) }.orElse(null)
+        }
+        private fun register(c: Candidate): Candidate? {
+            val request = com.vantara.anime.stream.MagnetLinks.request(c.url) ?: return null
+            val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
+            val uri = runCatching { engine.register(request) }.getOrNull() ?: return null
+            if (!prep.ownTorrentTicket(uri.toString())) { engine.release(uri); return null }
+            return c.copy(url = uri.toString(), host = "torrent", headers = emptyMap())
+        }
+        fun report(r: com.vantara.anime.stream.RouteReport): com.vantara.anime.stream.RouteReport {
+            if (r.candidates.none { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }) return r
+            val kept = r.candidates.mapNotNull(::candidate)
+            return if (kept.isEmpty() && r.state == com.vantara.anime.stream.RouteState.READY)
+                r.copy(state = com.vantara.anime.stream.RouteState.UNAVAILABLE, candidates = emptyList(), reason = "رابط تورنت غير صالح")
+            else r.copy(candidates = kept)
         }
     }
 
@@ -697,7 +777,13 @@ class AnimeEngine(context: Context) {
     fun catalogItems(id: String): List<SourceAnime> = catalogStore.items(id)
 
     suspend fun page(id: String, listing: String, page: Int, query: String = ""): SourcePage? =
-        adapter(id)?.page(listingOf(listing), page, query)
+        adapter(id)?.let { a ->
+            if (listing.startsWith("section:")) a.section(listing.removePrefix("section:").toIntOrNull()?.takeIf { it >= 0 } ?: error("SECTION_INVALID"), page)
+            else a.page(listingOf(listing), page, query)
+        }
+
+    /** أقسام المصدر كما يعلنها (بلا طلب شبكة)، أو null إن لم يتوفر المصدر. */
+    suspend fun sections(id: String): List<com.vantara.anime.adapters.SourceSection>? = adapter(id)?.sections()
 
     private fun listingOf(s: String) = when (s) {
         "latest" -> Listing.LATEST
@@ -885,6 +971,30 @@ class AnimeEngine(context: Context) {
         const val PREPARE_TIMEOUT_MS = 90_000L
         /** البحث المتدفق: لا ينتظر أحدٌ هذه المهل، فهي سقف للمصدر وحده لا للشاشة. */
         const val STREAM_SEARCH_TIMEOUT_MS = 12_000L
+        /**
+         * CloudStream sources: the whole path, not the operation alone: a cold isolated-worker start, the provider
+         * load (≤30 s) and the search operation (≤30 s). 30 s matched only the operation and cut a cold, slow
+         * device off mid-load, recording the timeout against the source (code review, 6 Nov). Search streams, so
+         * no screen waits on this ceiling.
+         */
+        const val RUNTIME_SEARCH_TIMEOUT_MS = 60_000L
+        /**
+         * Ceiling for a slow Aniyomi source in the general search. It no longer holds a parallel slot past
+         * [STREAM_SEARCH_TIMEOUT_MS] (so it delays nobody) and the search streams, so this only decides how late a
+         * slow source may still join the sheet; beyond it the source is reported and counted as a timeout.
+         */
+        const val SLOW_SOURCE_SEARCH_MS = 45_000L
+        const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
+
+        /**
+         * ترتيب البحث العام: (المتخطّى، المسؤول). السليمة أولًا ثم المبرَّدة بعد فشل متتالٍ؛ المتخطّى فقط ما حجبه
+         * موقعه صراحةً. الترتيب داخل كل مجموعة كما أعطته الصحة.
+         */
+        fun <T> searchOrder(ordered: List<T>, cooling: (T) -> Boolean, blocked: (T) -> Boolean): Pair<List<T>, List<T>> {
+            val (cool, healthy) = ordered.partition(cooling)
+            val (skip, retry) = cool.partition(blocked)
+            return skip to healthy + retry
+        }
         const val STREAM_LOAD_TIMEOUT_MS = 25_000L
         /** محجوب بتحقق بشري: يُعاد اختباره بعد هذه المدة. */
         const val BLOCKED_RETRY_MS = 30 * 60_000L
@@ -896,5 +1006,17 @@ class AnimeEngine(context: Context) {
         @Volatile private var instance: AnimeEngine? = null
         fun get(context: Context): AnimeEngine =
             instance ?: synchronized(this) { instance ?: AnimeEngine(context).also { instance = it } }
+    }
+}
+
+/** The engine's monitor covers both generation validation and publication, including ABA reinstalls. */
+internal class AnimeSourcePublication(private val monitor: Any) {
+    private val revisions = mutableMapOf<String, Long>()
+    fun generation(id: String): Long = synchronized(monitor) { revisions[id] ?: 0 }
+    fun invalidate(ids: Collection<String>) = synchronized(monitor) {
+        ids.forEach { revisions[it] = (revisions[it] ?: 0) + 1 }
+    }
+    fun <T> publish(id: String, expected: Long, block: () -> T): T? = synchronized(monitor) {
+        if ((revisions[id] ?: 0) != expected) null else block()
     }
 }

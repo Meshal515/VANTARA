@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VANTARA isolated flying-card browser fixture — not a published preview</title>
+  <link rel="stylesheet" href="/apps/web/v35/anime.css">
+  <style>
+    :root { --bg:#0b0813; --text-1:#f8f5ff; --text-2:#c5bdd3; --text-3:#9b91b0;
+      --accent:#9058ec; --on-accent:#fff; --accent-text:#bf9aff; --accent-press:#7844d1;
+      --line:#302843; --surface-2:#20152c; --gutter:16px; color-scheme:dark; }
+    * {box-sizing:border-box} body {margin:0;background:var(--bg);color:var(--text-1);font:16px system-ui,sans-serif}
+    .v35 {width:100%} .aw {position:relative; width:min(100%,760px);margin:auto;container:aw/inline-size}
+    .aw-hero {height:300px;position:relative;background:
+      radial-gradient(ellipse at 50% 25%,#3e5e48 0%,#1c2636 48%,#0b0813 85%);}
+    .aw-hero::after {content:'';position:absolute;inset:50% 0 0;background:linear-gradient(transparent,var(--bg))}
+    .test-label {position:absolute;right:16px;top:18px;padding:6px 12px;border-radius:9px;
+      background:#21182baa;font-size:13px;letter-spacing:.04em;z-index:5}
+    .wl-card .wl-head {min-height:350px;position:relative}
+    .wl-card .wl-info {margin-top:0}
+    .wl-card .wl-stage3d {margin-top:-105px}
+    .wl-card .wl-logo-layer {top:0}
+    .wl-card .wl-logo-group img {object-fit:contain}
+  </style>
+</head>
+<body>
+  <main class="v35">
+    <article class="aw" data-style="card">
+      <div class="aw-hero"><div class="test-label">VANTARA / DEBUG UI TEST</div></div>
+      <section id="work-root"></section>
+    </article>
+  </main>
+  <script type="module">
+    import { renderLook } from '/apps/web/v35/work-looks.js';
+    const svgData = (content) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(content);
+    const logo = svgData('<svg xmlns="http://www.w3.org/2000/svg" width="490" height="100" viewBox="0 0 490 100"><text x="245" y="71" text-anchor="middle" fill="#f8b93f" stroke="#e74665" stroke-width="1.4" font-family="Georgia,serif" font-size="56" font-weight="bold">BLACK CLOVER</text></svg>');
+    const poster = svgData('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="540"><defs><linearGradient id="g" x2="0" y2="1"><stop stop-color="#26366b"/><stop offset=".55" stop-color="#a72e4c"/><stop offset="1" stop-color="#fa9a37"/></linearGradient></defs><rect width="360" height="540" fill="url(#g)"/><path d="M0 480L190 95L360 540" fill="#0a0a19" opacity=".55"/><text x="180" y="280" text-anchor="middle" fill="white" font-size="30" font-weight="bold">VANTARA</text><text x="180" y="316" text-anchor="middle" fill="white" font-size="19">VISUAL TEST</text></svg>');
+    const host = document.getElementById('work-root');
+    const ctx = {
+      m:{id:42,title:'Black Clover',poster,posterSmall:poster,description:'Browser-only component test.',genres:['Action'],recommendations:[],relations:[]},
+      glyph:()=>'<svg width="20" height="20" viewBox="0 0 20 20"><path fill="currentColor" d="M5 2L17 10 5 18Z"/></svg>',
+      logo,meta:['مسلسل','2026','8.7','5 حلقات'],genres:['أكشن','مغامرة'],genreKeys:['Action','Adventure'],
+      facts:[['الحلقات','5']],point:{episode:1,resume:true},
+      label:'تابع الحلقة 1',upcoming:false,next:null,total:5,ratio:.2,left:11,
+      seenRatio:.2,progressText:'شاهدت 1 من 5',lineDone:'20',characters:[],heroSrc:null,rangeAt:null,
+      epTitle:(n)=>'Episode '+n,epOverview:()=>null,still:()=>({src:poster,still:true,fallbacks:[]}),
+      seen:(n)=>n===1,minutes:()=> '24 د',play:(n)=>{window.played=n},
+      open:()=>{},openGenre:()=>{},openManga:()=>{},
+    };
+    window.repaint=(n=10)=>{ctx.point={episode:n,resume:true};ctx.label='تابع الحلقة '+n;
+      ctx.progressText='شاهدت 1 من 10';ctx.total=10;renderLook('card',host,ctx,{center:false})};
+    renderLook('card',host,ctx);
+    window.fixtureReady=true;
+  </script>
+</body>
+</html>

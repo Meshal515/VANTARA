@@ -32,6 +32,8 @@ class AnimeDns(
     private val preferDoh: (String) -> Boolean,
     private val system: Dns = Dns.SYSTEM,
     private val hasIpv6: () -> Boolean = ::deviceHasIpv6,
+    /** محلّلات DoH بالترتيب؛ تُحقن في الاختبارات فقط. */
+    private val dohResolvers: List<Dns>? = null,
 ) : Dns {
 
     private val bootstrap: OkHttpClient by lazy {
@@ -61,9 +63,18 @@ class AnimeDns(
 
     private val cache = ConcurrentHashMap<String, Cached>()
 
-    override fun lookup(hostname: String): List<InetAddress> {
+    override fun lookup(hostname: String): List<InetAddress> = resolve(hostname, preferDoh(hostname))
+
+    /**
+     * DoH أولًا لكل اسم: لوسيط إضافات CloudStream. مواقعه وسيرفرات فيديوه لا تُسجَّل في [preferDoh]
+     * (للإضافة سياستها المعزولة)، فكانت تُحل بـDNS المزوّد أولًا، ومزوّد يعيد عنوانًا عامًا لصفحة حجب
+     * (لا 0.0.0.0) يُقبل جوابه ويذهب الاتصال لصفحة الحجب: ما يعمل في مسار المصادر المدمجة لا يعمل هنا.
+     */
+    val dohFirst: Dns = Dns { hostname -> resolve(hostname, true) }
+
+    private fun resolve(hostname: String, dohFirst: Boolean): List<InetAddress> {
         cache[hostname]?.takeIf { it.until > System.currentTimeMillis() }?.let { return it.addresses }
-        return if (preferDoh(hostname)) {
+        return if (dohFirst) {
             runCatching { viaDoh(hostname) }.getOrNull()?.also { remember(hostname, it) }
                 ?: system.lookup(hostname)
         } else {
@@ -80,7 +91,7 @@ class AnimeDns(
 
     private fun viaDoh(hostname: String): List<InetAddress> {
         var last: Throwable? = null
-        for ((_, resolver) in resolvers) {
+        for (resolver in dohResolvers ?: resolvers.map { it.second }) {
             try {
                 val found = usable(resolver.lookup(hostname))
                 if (found.isNotEmpty() && !isSinkhole(found)) return found

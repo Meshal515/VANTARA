@@ -1,6 +1,7 @@
 import { createAddonRuntime } from "./runtime.js";
 import { createNativeTransport } from "./native-transport.js";
 import { createStore, SPACES } from "../lib/idb-store.js";
+import { createCloudStreamRepositories } from './cloudstream-runtime.js';
 let runtime;
 // كانت الإضافات في APK تُحفظ في localStorage، ومعها كل رد بث وترجمة بمفتاح خاص لكل حلقة لا يُحذف أبدًا،
 // فيمتلئ localStorage المشترك مع الوقت ويُرفض حفظ الإضافات. الآن IndexedDB بحدود وكنس، وما في
@@ -49,6 +50,8 @@ export function getNativeAddonRuntime() {
     transport = createNativeTransport(plugins?.AddonEngine),
     defs = [];
   const features = { addonStreams: false, torrentSupported: false };
+  const runtimeRepositories = createCloudStreamRepositories(plugins.VantaraRuntime).catch(() => null);
+  let profileReady = Promise.resolve();
   const ready = Promise.allSettled([
     (async () => {
       if (!plugins.AnimeEngine?.capabilities) return;
@@ -83,6 +86,7 @@ export function getNativeAddonRuntime() {
   }
   async function reload() {
     await ready;
+    await profileReady;
     const next = await collect();
     defs.splice(0, defs.length, ...next);
   }
@@ -141,6 +145,16 @@ export function getNativeAddonRuntime() {
     transport,
   });
   runtime.nativeCapabilities = () => ({ ...features });
+  const setProfile = runtime.registry.setProfile.bind(runtime.registry);
+  runtime.registry.setProfile = id => {
+    setProfile(id);
+    profileReady = profileReady.catch(() => {}).then(async () => (await runtimeRepositories)?.setProfile(id));
+    // Callers predating the new family may not await; suppress an unhandled rejection,
+    // but retain the rejecting barrier so list/reload cannot expose another profile.
+    profileReady.catch(() => {});
+    return profileReady;
+  };
+  runtime.cloudstreamRepositories = async () => { await profileReady;return runtimeRepositories; };
   runtime.nativeSubtitleProviders = () =>
     runtime.registry
       .list()

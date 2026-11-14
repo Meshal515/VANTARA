@@ -406,3 +406,113 @@ it('يستأنف التحميل المتوقف بدل ترك هياكل التح
   expect(view.querySelectorAll('.up-skel')).toHaveLength(0);
   view.close();
 });
+
+it('صفحة المصدر الموحدة: البحث أولًا، بلا زر «الإضافات»، والاسم مرة واحدة، وVANTARA القسم لشريط الصفحة', async () => {
+    globalThis.document = parseHTML("<html><body></body></html>").document;
+    const brands = [];
+    const view = renderSourceMode({
+      addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series', 'anime'], capabilities: ['home', 'search'] },
+      adapter: { home: async () => ({ items: [] }), search: async () => ({ items: [] }) },
+      onKind: (_k, brand) => brands.push(brand),
+    });
+    expect(view.firstElementChild.classList.contains('addon-source-bar')).toBe(true);
+    expect(view.querySelector('.addon-source-back')).toBe(null);
+    expect([...view.querySelectorAll('h2')].map((h) => h.textContent)).toEqual(['Akwam']);
+    expect(view.querySelector('.addon-eyebrow').textContent).toBe('مصدر أفلام ومسلسلات');
+    expect(brands.at(-1)).toBe('VANTARA Cinema');
+    expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(true);
+    view.close();
+  });
+
+it('أقسام المصدر كما يقدمها: آخر التحديثات والرائج أزرار، والرجوع لقسم فُتح فوري بلا طلب جديد', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const calls = { home: 0, popular: 0 };
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { calls.home++; return { items: [{ id: 'h', title: 'Home work' }] }; },
+      popular: async () => { calls.popular++; return { items: [{ id: 'p', title: 'Popular work' }] }; },
+    },
+  });
+  const tabs = [...view.querySelectorAll('.addon-catalog-tabs .addon-filter')];
+  expect(tabs.map((b) => b.textContent)).toEqual(['آخر التحديثات', 'الرائج']);
+  expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(false);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Home work');
+  tabs[1].click(); await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Popular work');
+  tabs[0].click(); await new Promise((r) => setTimeout(r, 0));
+  expect(view.querySelector('.up-title').textContent).toBe('Home work');
+  expect(calls).toEqual({ home: 1, popular: 1 });
+  view.close();
+});
+
+it('مصدر لا يقدّم «آخر التحديثات» (Aniyomi): القسم يُحذف ويُفتح الرائج، لا خطأ للمصدر كله', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const unsupported = Object.assign(new Error('LATEST_UNSUPPORTED: المصدر لا يقدّم آخر التحديثات'), { code: 'UnsupportedOperationException' });
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Anime4Up', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: { home: async () => { throw unsupported; }, popular: async () => ({ items: [{ id: 'p', title: 'Black Clover' }] }) },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect([...view.querySelectorAll('.addon-catalog-tabs .addon-filter')].map((b) => b.textContent)).toEqual(['الرائج']);
+  expect(view.querySelector('.addon-source-error')).toBe(null);
+  expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
+  view.close();
+});
+
+it('أقسام المصدر نفسه أولًا (CloudStream): ألسنة بأسمائها وترتيبها، والمطلوب القسم المختار وحده', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const asked = [];
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Akwam', contentTypes: ['movie', 'series'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { asked.push('home'); return { items: [] }; },
+      sections: async () => [{ key: 'section:0', name: 'أفلام أجنبية' }, { key: 'section:1', name: 'مسلسلات تركية' }],
+      section: async (key) => { asked.push(key); return { items: [{ id: key, title: `Work ${key}` }] }; },
+    },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect([...view.querySelectorAll('.addon-catalog-tabs .addon-filter')].map((b) => b.textContent)).toEqual(['أفلام أجنبية', 'مسلسلات تركية']);
+  expect(view.querySelector('.up-title').textContent).toBe('Work section:0');
+  expect(asked).not.toContain('home');
+  view.close();
+});
+
+it('Aniyomi بلا «آخر التحديثات» المعلن: لا يُطلب ولا يظهر', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  const asked = [];
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'Anime4Up', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: {
+      home: async () => { asked.push('home'); throw new Error('must not be asked'); },
+      sections: async () => [{ key: 'popular', name: 'الرائج' }],
+      section: async (key) => { asked.push(key); return { items: [{ id: 'p', title: 'Black Clover' }] }; },
+    },
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect(asked).toEqual(['popular']);
+  expect(view.querySelector('.addon-catalog-tabs').classList.contains('is-single')).toBe(true);
+  expect(view.querySelector('.up-title').textContent).toBe('Black Clover');
+  view.close();
+});
+
+it('مصدر يطلب تحقق Cloudflare: زر «تحقّق الآن» لا إعادة صامتة، وبعد التحقق يعيد الجلب', async () => {
+  globalThis.document = parseHTML('<html><body></body></html>').document;
+  let calls = 0;
+  const blocked = Object.assign(new Error(''), { code: 'CloudflareBypassException' });
+  const verify = vi.fn(async () => ({ ok: true }));
+  const view = renderSourceMode({
+    addon: { key: 'k', name: 'WitAnime', contentTypes: ['anime'], capabilities: ['home', 'search'] },
+    adapter: { home: async () => { if (++calls === 1) throw blocked; return { items: [{ id: 'w', title: 'One Piece' }] }; } },
+    onVerify: verify,
+  });
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  const button = [...view.querySelectorAll('.addon-source-error button')].find((b) => b.textContent === 'تحقّق الآن');
+  expect(button).toBeTruthy();
+  button.click();
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  expect(verify).toHaveBeenCalledTimes(1);
+  expect(view.querySelector('.up-title').textContent).toBe('One Piece');
+  view.close();
+});

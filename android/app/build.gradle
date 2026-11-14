@@ -32,6 +32,7 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 // بصمة الكود الأصلي (tools/native-fingerprint.mjs). حزمة واجهة تُعرض فقط فوق
 // الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
+def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
 
 android {
     namespace "com.vantara.app"
@@ -74,6 +75,14 @@ android {
             // نسخة الاختبار تعيش بجانب النسخة الموقعة الأساسية على نفس الهاتف.
             applicationIdSuffix '.debug'
             resValue 'string', 'app_name', 'VANTARA اختبار'
+            // Only the protected opt-in debug channel has a persistent signature.
+            // Ordinary local/debug CI builds keep the standard Android debug key.
+            if (System.getenv('VANTARA_SIGN_DEBUG_CHANNEL') == 'true') {
+                if (!keystorePath || !keystorePassword) {
+                    throw new GradleException('Upgradeable debug channel requires the persistent signing key')
+                }
+                signingConfig signingConfigs.release
+            }
         }
         release {
             minifyEnabled false
@@ -148,6 +157,10 @@ repositories {
 }
 
 dependencies {
+    if (runtimeDebug) {
+        debugImplementation 'dev.vantara.runtime:executor:1'
+        debugImplementation 'dev.vantara.runtime:bootstrap:1'
+    }
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
@@ -163,7 +176,9 @@ dependencies {
     // اعتراض Cloudflare المشترك مع الـspike يطابق بصمة Chrome (UserAgentMetadata)
     // عبر WebSettingsCompat؛ نفس الإصدار الذي مرّت به المصادر الست عشرة
     implementation "androidx.webkit:webkit:1.17.0"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+    // 1.11.0 لا 1.8.1: إضافات Keiyoushi الحديثة مبنية عليه وتنادي BuildersKt.runBlockingK (موجود من 1.11.0 فقط،
+    // ويبقى runBlocking القديم للإضافات الأقدم). بدونه NoSuchMethodError داخل اعتراض شبكة الإضافة (فحص المانجا الحي).
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
 
     // ── الترجمة على الجوال: ONNX Runtime يشغّل نماذج الرؤية وOCR داخل الجهاز ──
     // الأوزان (~430MB) ليست هنا: تُنزَّل عند الطلب (ModelStore). المكتبة نفسها
@@ -212,12 +227,24 @@ dependencies {
     implementation "com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597"
 
     testImplementation "junit:junit:$junitVersion"
+    testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
+    // شهادات TLS محلية لاختبار شبكة يحجبها فلتر SNI (CensoredNetworkTest)
+    testImplementation "com.squareup.okhttp3:okhttp-tls:$okhttpVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
 apply from: 'capacitor.build.gradle'
+
+if (runtimeDebug) {
+    // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
+    android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
+    android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
+    android.sourceSets.testDebug.resources.srcDir('../../extensions/runtime-android/integration/src/test/resources')
+    android.sourceSets.androidTest.java.srcDir('../../extensions/runtime-android/integration/src/androidTest/kotlin')
+    android.sourceSets.androidTest.assets.srcDir('../../extensions/runtime-android/harness/build/pinnedPackages')
+}
 
 try {
     def servicesJSON = file('google-services.json')

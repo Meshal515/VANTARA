@@ -14,11 +14,16 @@ export function kitsuIdFromMappings(response, request) {
   const ids = new Set(response.data.flatMap(item => item?.type === 'mappings' && item.attributes?.externalSite === request.externalSite && String(item.attributes.externalId) === request.id && item.relationships?.item?.data?.type === 'anime' ? [numericId(item.relationships.item.data.id)].filter(Boolean) : []));
   return ids.size === 1 ? [...ids][0] : null;
 }
+/**
+ * فيلم واحد لا عمل MOVIE بعدة حلقات (#323 U-02): AniList يصنّف «17-26» (8 قصص) MOVIE، وطلبه «فيلمًا»
+ * من الإضافات يعيد القصة الأولى أيًّا كانت الحلقة المختارة. `episodes` من هوية الأنمي (animeAddonIdentity).
+ */
+export const singleMovieIdentity = identity => identity?.format === 'MOVIE' && !(Number(identity?.episodes) > 1);
 export function kitsuVideoRequest(identity) {
   const id = numericId(identity?.externalIds?.kitsu);
   if (identity?.kind !== 'anime' || !id) return null;
   const workId = `kitsu:${id}`;
-  if (identity.format === 'MOVIE') return { type: 'movie', workId, videoId: workId };
+  if (singleMovieIdentity(identity)) return { type: 'movie', workId, videoId: workId };
   if (!Number.isInteger(identity.episode) || identity.episode < 1) return null;
   return { type: 'series', workId, videoId: `${workId}:${identity.episode}` };
 }

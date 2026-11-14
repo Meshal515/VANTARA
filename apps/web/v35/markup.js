@@ -14,6 +14,7 @@
  * السمات تكسرها أول سياسة CSP.
  */
 import { glyph, iconButton } from './icons.js';
+import { detailMarkup } from './manga-work.js';
 
 const bell = (extra = '') =>
   `<button class="icon-btn has-dot" type="button" data-act="navTo" data-arg="notifications" aria-label="الإشعارات" title="الإشعارات"${extra}>` +
@@ -42,57 +43,55 @@ const subTop = (title, { id, back = 'goBack', end = '' } = {}) =>
 const shortcut = (no, label, act, arg) =>
   `<button class="shortcut" type="button" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''} data-index="${arg ?? act}">` +
   `<span class="shortcut-art" aria-hidden="true"></span>` +
-  `<span class="shortcut-text"><i class="shortcut-no">${no}</i><span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
+  `<span class="shortcut-text">${no ? `<i class="shortcut-no">${no}</i>` : ''}<span class="shortcut-label">${label}</span><small class="shortcut-sub"></small></span>` +
   `${glyph('chevron', { size: 16 })}</button>`;
 
 const navItem = (page, icon, label) =>
   `<button class="nav" type="button" data-page="${page}" data-act="navTo" data-arg="${page}" aria-label="${label}">` +
-  `<span class="nav-pill">${glyph(icon)}</span><span>${label}</span></button>`;
+  `<span class="nav-pill">${glyph(icon)}<span class="nav-label">${label}</span></span></button>`;
+
+/**
+ * قسم في المبدّل: طبقة تملأ كبسولتها وتنزلق فوق أزرارها عند الفتح (الحركة في dock.js).
+ */
+const dockOption = (id, word, label) =>
+  `<button class="dock-opt" id="secOpt-${id}" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" inert data-act="pickSection" data-arg="${id}" aria-label="${label}">` +
+  `<span class="dock-opt-label"><b dir="ltr">${word}</b><small>${label}</small></span></button>`;
 
 export const SHELL_HTML = `<div class="app">
   <section class="page active" id="home">
     <header class="header">
       <div class="header-start">${iconButton('menu', 'القائمة', { act: 'openDrawer' })}</div>
       <div class="brand-box">
-        <button class="brand-switch" type="button" data-act="toggleSections" aria-haspopup="menu" aria-expanded="false" aria-controls="sectionMenu" id="brandSwitch" aria-label="أقسام VANTARA">
+        <div class="brand-lockup" id="brandLockup">
           <span class="brand">VANTARA</span>
-          <span class="brand-section"><span id="brandSectionName">MANGA</span><span class="brand-caret" aria-hidden="true">${glyph('chevron', { size: 8 })}</span></span>
-        </button>
-      </div>
-      <div class="section-scrim" id="sectionScrim" data-act="toggleSections" hidden></div>
-      <div class="section-menu" id="sectionMenu" role="menu" aria-label="أقسام VANTARA" hidden>
-        <button class="section-item section-item--manga" type="button" role="menuitemradio" aria-checked="true" data-act="pickSection" data-arg="manga">
-          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">MANGA</span></span>
-          <span class="section-sub">مانجا · مانهوا</span>
-        </button>
-        <button class="section-item section-item--anime" type="button" role="menuitemradio" aria-checked="false" data-act="pickSection" data-arg="anime">
-          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">ANIME</span></span>
-          <span class="section-sub">مسلسلات · أفلام</span>
-        </button>
-        <button class="section-item section-item--cinema" type="button" role="menuitemradio" aria-checked="false" data-act="pickSection" data-arg="cinema">
-          <span class="section-lockup"><span class="section-kicker">VANTARA</span><span class="section-word">CINEMA</span></span>
-          <span class="section-sub">أفلام · مسلسلات</span>
-        </button>
+          <span class="brand-section" id="brandSection" aria-live="polite"><span class="brand-word" id="brandSectionName">MANGA</span></span>
+        </div>
       </div>
       <div class="header-end">${iconButton('search', 'بحث', { act: 'openSearch' })}${bell()}</div>
     </header>
 
-    <div class="home-view" id="mangaHome">
-    <section class="hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
-      <div class="hero-track" id="heroTrack"></div>
+    <div class="home-view" id="mangaHome" data-home="manga">
+    <section class="mg-hero" id="hero" aria-roledescription="carousel" aria-label="أعمال مختارة">
+      <div class="mg-amb" id="heroAmb" aria-hidden="true"></div>
+      <div class="mg-stage" id="heroTrack"></div>
+      <div class="mg-copy" id="heroCopy" aria-live="polite"></div>
       <div class="hero-dots" id="heroDots"></div>
     </section>
 
-    <nav class="shortcuts" aria-label="فهرس المانجا">
-      ${shortcut('01', 'آخر التحديثات', 'openCollection', 'recent')}
-      ${shortcut('02', 'الرائج', 'openCollection', 'trending')}
-      ${shortcut('03', 'التصنيفات', 'openCategories')}
-      ${shortcut('04', 'كل الأعمال', 'openCollection', 'catalogue')}
-    </nav>
+    <section class="mg-browse" aria-labelledby="mgBrowseTitle">
+      <div class="section-head"><div class="section-titles"><h2 id="mgBrowseTitle">تصفّح</h2></div></div>
+      <nav class="shortcuts" aria-label="فهرس المانجا">
+        ${shortcut('', 'آخر التحديثات', 'openCollection', 'recent')}
+        ${shortcut('', 'الرائج', 'openCollection', 'trending')}
+        ${shortcut('', 'التصنيفات', 'openCategories')}
+        ${shortcut('', 'كل الأعمال', 'openCollection', 'catalogue')}
+      </nav>
+    </section>
     <main id="homeSections"></main>
     </div>
-    <div class="home-view anime-home" id="animeHome" hidden></div>
-    <div class="home-view cinema-home" id="cinemaHome" hidden></div>
+    <div class="home-view anime-home" id="animeHome" data-home="anime" hidden></div>
+    <div class="home-view cinema-home" id="cinemaHome" data-home="cinema" hidden></div>
+    <div class="home-view all-home" id="allHome" data-home="all" hidden></div>
   </section>
 
   <section class="page anime-page" id="anime"></section>
@@ -101,73 +100,8 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page cinema-page" id="cinema"></section>
 
-  <section class="page" id="detail">
-    <div class="detail-glow" aria-hidden="true"><i id="detailGlow"></i></div>
-    <div class="detail-top" id="detailTop">
-      ${iconButton('back', 'رجوع', { act: 'backFromDetail' })}
-      <div class="detail-top-title" id="detailTopTitle"></div>
-      <div class="detail-actions">
-        ${iconButton('users', 'اقرأ مع أصدقائك', { act: 'readTogetherCurrent' })}
-        ${iconButton('share', 'شارك العمل', { act: 'shareCurrent' })}
-        <button class="icon-btn detail-tl" type="button" id="detailTlBtn" data-act="toggleTranslateCurrent" aria-pressed="false" aria-label="ترجمة تلقائية للفصول الإنجليزية" title="ترجمة تلقائية" hidden>${glyph('translateAr', { size: 22 })}</button>
-        ${iconButton('eye', 'قراءتي السابقة', { act: 'markPreviousReading' })}
-        ${iconButton('more', 'خيارات', { act: 'openWorkMenu' })}
-      </div>
-    </div>
-
-    <!-- صفحتان متقابلتان كبانر الرئيسية: الغلاف، وفي المقابلة عدد الفصول رقمَ صفحة ثم الاسم -->
-    <div class="detail-head" data-reveal>
-      <div class="detail-cover" id="detailCover"></div>
-      <div class="detail-meta">
-        <div class="detail-folio" id="detailFolio" dir="ltr"></div>
-        <div class="detail-kicker" id="detailKicker"></div>
-        <h1 id="detailTitle">—</h1>
-        <div class="detail-sub" id="detailSub"></div>
-        <div class="chips" id="detailGenres"></div>
-      </div>
-    </div>
-
-    <div class="detail-cta" data-reveal>
-      <button class="btn btn-primary read-cta" type="button" id="readCta" data-act="readNow" disabled>
-        ${glyph('book')}<span id="readCtaLabel">جارٍ جمع الفصول</span><small id="readCtaSub"></small>
-      </button>
-    </div>
-    <!-- نفس ترتيب الأنمي: الفعل الأساسي عريضًا، وتحته ثلاثة بأسمائها -->
-    <div class="detail-quick" data-reveal>
-      <button class="quick-btn" type="button" id="libraryBtn" data-act="toggleLibraryCurrent" aria-pressed="false">${glyph('library')}<span>مكتبتي</span></button>
-      <button class="quick-btn" type="button" id="laterBtn" data-act="toggleLaterCurrent" aria-pressed="false">${glyph('clock')}<span>لاحقًا</span></button>
-      <button class="quick-btn" type="button" id="favBtn" data-act="toggleFavoriteCurrent" aria-pressed="false">${glyph('heart')}<span>المفضلة</span></button>
-    </div>
-
-    <div class="source-switch" id="sourcesBlock" hidden>
-      <div class="source-row" id="sourceRow" role="radiogroup" aria-label="المصدر"></div>
-    </div>
-
-    <div class="detail-progress" id="detailProgress">
-      <div class="progress-bar"><i id="progressFill"></i></div>
-      <div class="progress-row"><span id="progressText"></span><div class="rate" id="rateStars" role="radiogroup" aria-label="تقييمك"></div></div>
-    </div>
-    <div class="work-insights" id="detailInsights"></div>
-
-    <div class="block" id="summaryBlock">
-      <span class="section-eyebrow">STORY</span>
-      <p class="summary clamped" id="description" dir="auto"></p>
-      <button class="more-toggle" type="button" id="moreToggle" data-act="toggleSummary" hidden>المزيد</button>
-    </div>
-
-    <div class="block">
-      <div class="block-head">
-        <div class="section-titles"><span class="section-eyebrow">CHAPTERS</span><h2>الفصول<span class="count" id="chapterCount"></span></h2></div>
-        ${iconButton('sort', 'عكس الترتيب', { act: 'flipChapterOrder', cls: 'icon-btn' })}
-      </div>
-      <div id="chapterPanel"></div>
-    </div>
-
-    <div class="block">
-      <div class="block-head"><div class="section-titles"><span class="section-eyebrow">DETAILS</span><h2>معلومات</h2></div></div>
-      <div class="info-grid" id="infoGrid"></div>
-    </div>
-  </section>
+  <!-- صفحة العمل: هيكلها من manga-work.js حسب النمط المختار (الصفحة، المعرض، الملف، من حيث وقفت) -->
+  <section class="page mw" id="detail" data-look="page">${detailMarkup('page', { glyph, iconButton })}</section>
 
   <section class="page" id="collection">
     ${subTop('عرض الكل', { id: 'collectionTitle' })}
@@ -184,6 +118,7 @@ export const SHELL_HTML = `<div class="app">
     ${mainTop('مكتبتي')}
     <div class="page-body anime-only" id="animeLibrary"></div>
     <div class="page-body cinema-only" id="cinemaLibrary"></div>
+    <div class="page-body" id="unifiedLibrary"></div>
     <div class="page-body manga-only">
       <div class="segmented library-tabs" id="libraryTabs" role="tablist" aria-label="تصفية المكتبة"></div>
       <div class="toolbar" id="libraryToolbar">
@@ -200,6 +135,7 @@ export const SHELL_HTML = `<div class="app">
     ${mainTop('اكتشف')}
     <div class="page-body anime-only" id="animeDiscover"></div>
     <div class="page-body cinema-only" id="cinemaDiscover"></div>
+    <div class="page-body" id="unifiedDiscover"></div>
     <div class="page-body manga-only">
       <form class="search-bar" data-submit="discoverSearch" role="search">
         ${glyph('search')}
@@ -227,7 +163,12 @@ export const SHELL_HTML = `<div class="app">
 
   <section class="page" id="settings">
     ${subTop('الإعدادات')}
-    <div class="page-body" id="settingsBody"></div>
+    <div class="page-body settings-body" id="settingsBody"></div>
+  </section>
+
+  <section class="page" id="settingsPane">
+    ${subTop('الإعدادات', { id: 'settingsPaneTitle' })}
+    <div class="page-body settings-body" id="settingsPaneBody"></div>
   </section>
 
   <section class="page" id="insights">
@@ -236,8 +177,8 @@ export const SHELL_HTML = `<div class="app">
   </section>
 
   <section class="page" id="majlis">
-    ${mainTop('الاجتماع')}
-    <div class="social-tabs" id="socialTabs" role="tablist" aria-label="أقسام الاجتماع"></div>
+    ${mainTop('الأصدقاء')}
+    <div class="social-tabs" id="socialTabs" role="tablist" aria-label="أقسام الأصدقاء"></div>
     <div class="page-body social-friends" id="friendsBody"></div>
     <div class="page-body mj-body" id="majlisBody" hidden></div>
     <div class="page-body notif-body" id="socialNotifs" hidden></div>
@@ -264,11 +205,21 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body" id="utilityBody"></div>
   </section>
 
-  <nav class="bottom-nav" id="bottomNav" aria-label="التنقّل الرئيسي">
-    ${navItem('home', 'home', 'الرئيسية')}
-    ${navItem('library', 'library', 'مكتبتي')}
-    ${navItem('discover', 'compass', 'اكتشف')}
-    ${navItem('majlis', 'users', 'الاجتماع')}
+  <div class="dock-scrim" id="dockScrim" data-act="toggleSections" hidden></div>
+  <nav class="bottom-nav dock" id="bottomNav" aria-label="التنقّل الرئيسي">
+    <div class="dock-group" role="radiogroup" aria-label="أقسام VANTARA" aria-owns="secOpt-manga secOpt-anime secOpt-cinema"></div>
+    <div class="dock-cap dock-cap--nav">
+      <div class="cap-body"><span class="cap-ind" aria-hidden="true"></span>${navItem('home', 'home', 'الرئيسية')}${navItem('discover', 'compass', 'اكتشف')}</div>
+      ${dockOption('manga', 'MANGA', 'مانجا')}
+    </div>
+    <div class="dock-cap dock-cap--switch">
+      <button class="dock-switch" id="sectionSwitch" type="button" data-act="toggleSections" aria-expanded="false" aria-label="بدّل القسم"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq" data-arg="cinema"></span></button>
+      ${dockOption('anime', 'ANIME', 'أنمي')}
+    </div>
+    <div class="dock-cap dock-cap--nav">
+      <div class="cap-body"><span class="cap-ind" aria-hidden="true"></span>${navItem('library', 'library', 'مكتبتي')}${navItem('majlis', 'users', 'الأصدقاء')}</div>
+      ${dockOption('cinema', 'CINEMA', 'سينما')}
+    </div>
   </nav>
 </div>
 

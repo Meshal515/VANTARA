@@ -1,0 +1,28 @@
+name: VANTARA experimental Debug shell cache fingerprint (no publish)
+
+on:
+  push:
+    branches: [codex/vantara-video-repo-debug-20261101]
+    paths:
+      - 'apps/web/sw.js'
+      - 'apps/web/lib/route-family.js'
+      - 'apps/web/lib/route-validity.js'
+      - 'apps/web/v35/server-sheet.js'
+      - '.github/workflows/debug-shell-cache-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-shell-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-shell-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check exact cached shell bytes match declared digest
+        run: node --test --test-name-pattern='service worker cache name changes whenever the shell changes' tools/repository-safety.test.mjs

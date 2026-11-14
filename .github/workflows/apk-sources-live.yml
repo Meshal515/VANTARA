@@ -4,15 +4,11 @@ name: APK sources live
 # نفس كود Kotlin الذي يشغّله التطبيق، على المواقع الحقيقية من آلة GitHub (عنوان IP
 # ثابت): بحث ← حلقات ← كل السيرفرات ← أول بايتات الفيديو. لا متصفح مخفي هنا، فما
 # يحتاجه يظهر «بلا رابط». لا يقرأ أي سر ولا يكتب شيئًا؛ النتيجة في ملخص التشغيل.
+# مصادر الأنمي والسينما المدمجة حُذفت (قرار المالك) ومعها NativeSourcesLiveTest. كان هذا الفحص يعمل مع كل دفع
+# ويخبر بالنجاح دون أن يختبر شيئًا (|| true يخفي «No tests found»). صار يدويًا فقط، ويفشل بصدق إن لم يجد اختبارًا.
+# فحص مصادر الإضافات الحي هو runtime-live-sweep.yml.
 on:
   workflow_dispatch:
-  push:
-    branches: ['claude/**']
-    paths:
-      - 'android/app/src/main/kotlin/com/vantara/anime/**'
-      - 'android/app/src/test/java/com/vantara/anime/NativeSourcesLiveTest.kt'
-      - 'apps/web/anime/sources.json'
-      - '.github/workflows/apk-sources-live.yml'
 
 permissions:
   contents: read
@@ -45,7 +41,7 @@ jobs:
           VANTARA_LIVE: '1'
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'com.vantara.anime.NativeSourcesLiveTest' || true
+          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'com.vantara.anime.NativeSourcesLiveTest'
           {
             echo '## APK — المحوّلات الأصلية من آلة GitHub'
             cat app/build/reports/native-sources-live.md 2>/dev/null || echo 'لم يُنتج الجدول (راجع السجل)'

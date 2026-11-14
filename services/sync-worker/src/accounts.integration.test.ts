@@ -135,6 +135,44 @@ describe('profile PIN', () => {
     expect(second).toMatchObject({ ok: false, error: 'pin_locked' });
   });
 
+  // #323 U-22: محاولات متزامنة كانت تُحسب واحدة (قراءة ثم كتابة failed+1) فلا يُقفل الحساب أبدًا
+  it('concurrent wrong PINs are all counted and lock the account', async () => {
+    const { env, call, tokenFor, db } = await setup();
+    const token = await tokenFor(DAHMI);
+    await call('/v1/pin', { action: 'set', pin: '135790' }, token);
+    const now = Date.now();
+    const results = await Promise.all(Array.from({ length: 10 }, () => checkPin(env, DAHMI, '000000', now)));
+    const row = db.prepare('SELECT failed, locked_until FROM account_pins WHERE user_id = ?').get(DAHMI) as { failed: number; locked_until: number };
+    expect(row.failed).toBeGreaterThanOrEqual(5);
+    expect(row.locked_until).toBeGreaterThan(now);
+    expect(results.some((r) => !r.ok && r.error === 'pin_locked')).toBe(true);
+    // والصحيح بعدها مرفوض ما دام القفل قائمًا
+    expect(await checkPin(env, DAHMI, '135790', now)).toMatchObject({ ok: false, error: 'pin_locked' });
+  });
+
+  // #323 U-22 (حالة حدّية): العدّ والقفل كانا عبارتين؛ صحيح يصل بينهما (العدّاد 5 والقفل لم يُكتب) كان يمر
+  it('a correct PIN landing between the fifth wrong count and the lock is still refused', async () => {
+    const { env, call, tokenFor } = await setup();
+    const token = await tokenFor(DAHMI);
+    await call('/v1/pin', { action: 'set', pin: '135790' }, token);
+    const now = Date.now();
+    for (let i = 0; i < 4; i += 1) expect(await checkPin(env, DAHMI, '000000', now)).toMatchObject({ error: 'pin_wrong' });
+    let between: unknown = null;
+    const wrap = <T extends object>(target: T, get: (t: T, p: PropertyKey) => unknown): T =>
+      new Proxy(target, { get: (t, p) => { const own = get(t, p); if (own !== undefined) return own; const v = Reflect.get(t, p); return typeof v === 'function' ? v.bind(t) : v; } });
+    const DB = wrap(env.DB, (db, p) => (p !== 'prepare' ? undefined : (sql: string) => {
+      const statement = db.prepare(sql);
+      if (!sql.includes('failed = failed + 1')) return statement;
+      return wrap(statement, (st, q) => (q !== 'bind' ? undefined : (...args: unknown[]) => wrap(st.bind(...args), (bound, r) => (r !== 'first' ? undefined : async (...x: []) => {
+        const row = await bound.first(...x);
+        between = await checkPin(env, DAHMI, '135790', now); // الصحيح يصل في هذه اللحظة بالضبط
+        return row;
+      }))));
+    }));
+    expect(await checkPin({ ...env, DB }, DAHMI, '000000', now)).toMatchObject({ ok: false, error: 'pin_locked' });
+    expect(between).toMatchObject({ ok: false, error: 'pin_locked' });
+  });
+
   it('change and removal need the current PIN; data stays on the same identity', async () => {
     const { call, tokenFor, session, db } = await setup();
     db.prepare("INSERT INTO library (user_id, series_ref, series_title, added_at, removed, rev) VALUES (?, 'ext:s:1', 'Solo', 1, 0, 1)").run(DAHMI);

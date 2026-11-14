@@ -139,11 +139,16 @@ internal fun pageTitle(html: String?): String? =
  *  1. يعيد كتابة المضيف القديم إلى الدومين النشط.
  *  2. بعد اتباع OkHttp للتحويلات، يحكم على المضيف النهائي؛ إن كان موقعًا
  *     جديدًا مقبولًا صار هو النشط (ويُبلَّغ [onDomain] لتسجيله في الصحة)،
- *     وإن كان غريبًا رمى [ForeignRedirectException].
+ *     وإن كان غريبًا مرّت الصفحة للإضافة كما في Aniyomi دون أن يصير نشطًا، وبُلّغ [onForeign].
  */
+/** Set on a response that arrived from an unproven foreign host (the page reaches the extension as in Aniyomi). */
+const val FOREIGN_HOST_HEADER = "X-Vantara-Foreign-Host"
+
 class DomainInterceptor(
     private val plan: DomainPlan,
     private val onDomain: (String) -> Unit = {},
+    /** An unproven cross-site redirect that was passed through without being adopted (diagnosis only). */
+    private val onForeign: (ForeignRedirectException) -> Unit = {},
 ) : Interceptor {
 
     private val active = AtomicReference<HttpUrl?>(plan.currentUrl)
@@ -178,8 +183,13 @@ class DomainInterceptor(
         val html = if (isHtml) runCatching { response.peekBody(96_000).string() }.getOrNull() else null
         return when (DomainPolicy.judge(request.url, finalUrl, plan, html)) {
             DomainPolicy.Verdict.FOREIGN -> {
-                response.close()
-                throw ForeignRedirectException(request.url.host, finalUrl.host, pageTitle(html))
+                // As Aniyomi itself does: the extension gets the page it was redirected to. A site that really
+                // moved (egydead.space → a1.egydead.media) then works; a parked or fake page fails in the
+                // extension's own parser, which is the site's fault, not VANTARA's. What stays VANTARA's is the
+                // routing: an unproven host never becomes this source's active domain.
+                onForeign(ForeignRedirectException(request.url.host, finalUrl.host, pageTitle(html)))
+                // Marked so the router does not record a parked page as this source being healthy.
+                response.newBuilder().header(FOREIGN_HOST_HEADER, finalUrl.host).build()
             }
             DomainPolicy.Verdict.SAME -> response
             else -> {

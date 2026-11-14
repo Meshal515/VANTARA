@@ -13,7 +13,9 @@
 
 /* ───────────── متغيّرات الأقسام ───────────── */
 
-.v35[data-section='anime'] {
+.v35[data-section='anime'],
+html[data-section='anime'],
+.v35 [data-home='anime'] {
   --bg: #05070d;
   --bg-raised: #080b14;
   --surface-1: #0d111b;
@@ -33,7 +35,9 @@
   accent-color: #3b82f6;
   caret-color: #8fb8ff;
 }
-.v35[data-section='cinema'] {
+.v35[data-section='cinema'],
+html[data-section='cinema'],
+.v35 [data-home='cinema'] {
   --bg: #0a0707;
   --bg-raised: #0f0b0b;
   --surface-1: #141010;
@@ -60,10 +64,15 @@
 }
 
 /* ما يخصّ قسمًا يختفي في غيره */
-.v35:not([data-section='anime']) .anime-only,
-.v35:not([data-section='cinema']) .cinema-only,
-.v35[data-section='anime'] .manga-only,
-.v35[data-section='cinema'] .manga-only {
+/* داخل صفحة قسم يحكم القسمُ نفسه لا القسمُ الحالي: الصفحة الداخلة في الانتقال تبقى بأبعادها
+ * ولا تأخذ قواعد غيرها ولا لجزء من الثانية */
+.v35:not([data-section='anime']) .anime-only:not([data-home] *),
+.v35:not([data-section='cinema']) .cinema-only:not([data-home] *),
+.v35[data-section='anime'] .manga-only:not([data-home] *),
+.v35[data-section='cinema'] .manga-only:not([data-home] *),
+.v35 [data-home]:not([data-home='anime']) .anime-only,
+.v35 [data-home]:not([data-home='cinema']) .cinema-only,
+.v35 [data-home]:not([data-home='manga']) .manga-only {
   display: none !important;
 }
 
@@ -75,7 +84,7 @@
   object-fit: cover;
   display: block;
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transition: opacity var(--reveal-ms) var(--reveal-ease);
 }
 .v35 .an-img.loaded {
   opacity: 1;
@@ -112,7 +121,7 @@
 }
 .v35 .an-btn--primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 .v35 .an-btn--glass {
   background: rgba(255, 255, 255, 0.09);
@@ -826,6 +835,11 @@
 .v35 .aw-bg-img--poster {
   object-position: center 18%;
 }
+/* صورة وصلت بنسبة غير نسبة البطل المحجوزة والصفحة ظاهرة: تُعرض كاملة داخله، والضباب خلفها يملأ ما حولها (anime.js) */
+.v35 .aw-hero .aw-bg-img.aw-bg-img--fit {
+  object-fit: contain;
+  object-position: center;
+}
 .v35 .aw-shade {
   position: absolute;
   inset: 0;
@@ -963,7 +977,7 @@
   border: 0;
   border-radius: 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font: inherit;
   font-size: 15.5px;
   font-weight: 700;
@@ -1105,7 +1119,7 @@
 }
 .v35 .an-skel-text {
   display: block;
-  height: 4.9em;
+  height: 5.1em;
   font-size: 13.5px;
   background: repeating-linear-gradient(to bottom, var(--surface-1) 0 0.95em, transparent 0.95em 1.7em);
 }
@@ -1126,7 +1140,7 @@
   display: grid;
   gap: 3px;
 }
-.v35 .aw-eps-head h2 {
+.v35 .aw-episode-controls .aw-eps-head h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
@@ -1194,23 +1208,23 @@
   color: var(--text-3);
 }
 /* المواسم والمدى: ألسنة نصية بخط تحت المختار، لا صناديق */
-.v35 .an-seasons,
-.v35 .aw-ranges {
+.v35 .aw-episode-controls .an-seasons,
+.v35 .aw-episode-controls .aw-ranges {
   display: flex;
   gap: 20px;
   overflow-x: auto;
   margin-bottom: 8px;
   scrollbar-width: none;
 }
-.v35 .an-seasons::-webkit-scrollbar,
-.v35 .aw-ranges::-webkit-scrollbar {
+.v35 .aw-episode-controls .an-seasons::-webkit-scrollbar,
+.v35 .aw-episode-controls .aw-ranges::-webkit-scrollbar {
   display: none;
 }
-.v35 .aw-ranges[hidden] {
+.v35 .aw-episode-controls .aw-ranges[hidden] {
   display: none;
 }
-.v35 .an-season,
-.v35 .aw-range {
+.v35 .aw-episode-controls .an-season,
+.v35 .aw-episode-controls .aw-range {
   position: relative;
   flex: none;
   display: grid;
@@ -1225,23 +1239,23 @@
   cursor: pointer;
   transition: color 0.2s ease;
 }
-.v35 .an-season b {
+.v35 .aw-episode-controls .an-season b {
   font-size: 14px;
   font-weight: 650;
   white-space: nowrap;
 }
-.v35 .an-season span {
+.v35 .aw-episode-controls .an-season span {
   font-size: 11px;
   color: var(--text-4);
   white-space: nowrap;
 }
-.v35 .aw-range {
+.v35 .aw-episode-controls .aw-range {
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.v35 .an-season::after,
-.v35 .aw-range::after {
+.v35 .aw-episode-controls .an-season::after,
+.v35 .aw-episode-controls .aw-range::after {
   content: '';
   position: absolute;
   inset-inline: 0;
@@ -1252,13 +1266,13 @@
   transform: scaleX(0);
   transition: transform 0.25s ease;
 }
-.v35 .an-season.active,
-.v35 .aw-range.active {
+.v35 .aw-episode-controls .an-season.active,
+.v35 .aw-episode-controls .aw-range.active {
   color: var(--text-1);
   cursor: default;
 }
-.v35 .an-season.active::after,
-.v35 .aw-range.active::after {
+.v35 .aw-episode-controls .an-season.active::after,
+.v35 .aw-episode-controls .aw-range.active::after {
   transform: scaleX(1);
 }
 
@@ -1377,6 +1391,10 @@
 .v35 .an-er.seen .an-er-title {
   color: var(--text-2);
 }
+/* المشاهدة تقولها علامة ✓ وحدها؛ الصف يبهت قليلًا بدل كلمة «شوهدت» */
+.v35 .an-er.seen .an-er-art {
+  opacity: 0.62;
+}
 .v35 .an-er-icon {
   flex: none;
   width: 40px;
@@ -1480,39 +1498,7 @@
   padding-top: 32px;
 }
 
-/*
- * العمق مع التمرير مربوط بالتمرير نفسه على خيط الرسم (scroll-driven): كان JavaScript يحرّك
- * الخلفية بعد حدث scroll، والـWebView يمرّر الصفحة على خيط مستقل ويجمّع الأحداث، فتتأخر الخلفية
- * إطارًا عن الصفحة وتبدو تطلع وتنزل. نفس القيم في collapse-hero.js (heroFrame)، وهو البديل حيث
- * لا يدعم المحرك الخطّ الزمني للتمرير.
- */
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .v35 .aw-hero {
-      --aw-span: var(--hero-span, calc(clamp(380px, 112vw, 560px) - var(--top-h) - var(--safe-top)));
-    }
-    .v35 .aw-bg {
-      animation: aw-bg-depth linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 var(--aw-span);
-    }
-    .v35 .aw-head {
-      animation: aw-head-depth linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 var(--aw-span);
-    }
-  }
-}
-@keyframes aw-bg-depth {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(0, calc(var(--aw-span) * 0.5), 0) scale(1.12); }
-}
-@keyframes aw-head-depth {
-  0% { transform: perspective(800px) translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
-  20% { opacity: 1; }
-  70% { opacity: 0; }
-  100% { transform: perspective(800px) translate3d(0, calc(var(--aw-span) * -0.18), 0) rotateX(14deg) scale(0.86); opacity: 0; }
-}
+/* العمق مع التمرير لكل الأنماط: depth.js (جدول DEPTH_SPECS ومحرك واحد). */
 
 @media (prefers-reduced-motion: reduce) {
   .v35 .aw-bg-img,
@@ -1638,7 +1624,7 @@
   padding: 0 4px;
   border-radius: 99px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -2040,9 +2026,10 @@
 }
 .v35 .an-clear {
   display: block;
-  margin: 12px 0 8px;
+  min-height: 44px; /* هدف لمس كامل (كان 57×32) */
+  margin: 4px 0 0;
   margin-inline-start: auto;
-  padding: 6px 2px;
+  padding: 6px 4px;
   border: 0;
   background: none;
   color: var(--text-3);
@@ -2183,7 +2170,7 @@
   padding: 0 16px 0 14px;
   border-radius: 99px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 14px;
   font-weight: 700;
 }
@@ -2224,6 +2211,13 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.v35 .an-hc-poster--initial {
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-2);
 }
 .v35 .an-hc-info {
   flex: 1;
@@ -2511,3 +2505,1544 @@
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   }
 }
+
+/* ═══════════ أعلى صفحة العمل: البنر خلفية، الغلاف في الوسط عند حافته، واللوقو تحته ═══════════
+ * القطع مستقلة (البنر والغلاف واللوقو لا تُدمج في صورة). ومع التمرير ينطوي البنر للخلف بعمق،
+ * ويصعد الغلاف ويميل، ويتبعه اللوقو بفارق؛ كله مربوط بالتمرير نفسه فيرجع بنفس الحركة.
+ */
+.v35 .aw {
+  --cover-w: clamp(124px, 36vw, 210px);
+}
+.v35 .aw-hero {
+  height: min(clamp(230px, 64vw, 440px), 54svh);
+}
+/* خلف البنر: صورته نفسها مضبّبة ومشبعة بلون العمل، ثابتة لا تتحرك. حين يميل البنر للخلف
+   ويصغر تظهر الأطراف بألوانه (كأحمر Cyberpunk) بدل فراغ داكن */
+.v35 .aw-hero::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  background:
+    linear-gradient(color-mix(in srgb, var(--art) 24%, transparent), color-mix(in srgb, var(--art) 24%, transparent)),
+    var(--aw-amb, none) center 30% / cover no-repeat;
+  filter: blur(32px) saturate(1.6) brightness(0.72);
+  pointer-events: none;
+}
+.v35 .aw-stage {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin-top: calc(var(--cover-w) * -0.92);
+  padding-inline: var(--gutter);
+  text-align: center;
+}
+.v35 .aw.no-cover .aw-stage {
+  margin-top: -64px;
+}
+.v35 .aw-cover {
+  width: var(--cover-w);
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 30%, var(--surface-2));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 22px 44px -12px rgba(0, 0, 0, 0.7),
+    0 6px 14px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 100%;
+}
+.v35 .aw-cover .an-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.v35 .aw.no-cover .aw-cover {
+  display: none;
+}
+/* الغلاف ظاهر منفصلًا: لو لم تتوفر خلفية عريضة لا يتكرر نفسه حادًّا خلفه، بل جوًّا ضبابيًا */
+.v35 .aw:not(.no-cover):not([data-style='episode']) .aw-bg-img--poster {
+  filter: blur(26px) saturate(1.25) brightness(0.72);
+  transform: scale(1.25);
+}
+/* الشعار والاسم في خانة واحدة تتراكب: لا قفزة حين يحل الشعار محل الاسم. وبينه وبين الغلاف شبر */
+.v35 .aw-stage .an-mark {
+  display: grid;
+  justify-items: center;
+  height: auto;
+  margin-top: 14px;
+  transform-origin: 50% 100%;
+}
+.v35 .aw-stage .an-mark > * {
+  grid-area: 1 / 1;
+}
+.v35 .aw-stage .an-mark {
+  /* صندوق محجوز بارتفاع الشعار الأقصى وعرض السطر كله من أول إطار: الاسم ثم الشعار مكانه بلا حركة */
+  height: 76px;
+  justify-self: stretch;
+  /* صف واحد بارتفاع الصندوق كله: الشعار أسفله والاسم بموضع ثابت لا يتبع حجم الصف */
+  grid-template-rows: 100%;
+  align-items: end;
+}
+.v35 .aw-stage .an-mark-logo {
+  position: static;
+  max-height: 76px;
+  max-width: min(100%, 320px);
+  object-position: center bottom;
+  /* ظل قصير: شعارات كثيرة لها خلفية شبه شفافة يكبّرها الظل العريض مستطيلًا داكنًا */
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+}
+.v35 .aw-stage .an-mark-text {
+  /* عرض السطر كله وأعلى الصندوق: الاسم المختصر ثم الكامل لا يحرّك نقطة بدايته */
+  width: 100%;
+  align-self: center;
+  font-size: 24px;
+  text-align: center;
+  color: var(--text-1);
+}
+.v35 .aw-stage :is(.aw-meta, .aw-genres) {
+  justify-content: center;
+  column-gap: 14px;
+  row-gap: 2px;
+}
+.v35 .aw-stage :is(.aw-meta, .aw-genre) {
+  color: var(--text-2);
+}
+.v35 .aw-stage .aw-score b {
+  color: var(--text-1);
+}
+/* فاصل النقطة يبقى أول السطر أو آخره حين يلتف؛ المسافة وحدها تفصل هنا */
+.v35 .aw-stage :is(.aw-meta, .aw-genres) > .aw-sep {
+  display: none;
+}
+.v35 .aw-stage .aw-genres {
+  column-gap: 12px;
+  margin-top: -4px;
+}
+.v35 .aw-side[hidden],
+.v35 .aw-still[hidden] {
+  display: none !important;
+}
+.v35 .aw-next {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.v35 .aw-next b {
+  font-weight: 650;
+  color: #86e3b6;
+}
+
+/* لقطة الحلقة: الصورة تعرّفك بما ستشاهده، وزر التشغيل وحده يشغّل */
+.v35 .aw-still {
+  position: relative;
+  width: 94%;
+  max-width: 620px;
+  aspect-ratio: 16 / 9;
+  max-height: 42svh;
+  margin-top: 6px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--art) 28%, var(--surface-2));
+  color: #fff;
+  text-align: start;
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7);
+}
+.v35 .aw-still .an-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* بلا لقطة للحلقة: نفس صورة العمل التي في صفوف الحلقات، واضحة بلا ضباب */
+.v35 .aw-still--cover .an-img {
+  object-position: center 22%;
+}
+.v35 .aw-still::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.1) 55%, transparent);
+  pointer-events: none;
+}
+.v35 .aw-still-cap {
+  position: absolute;
+  inset-inline: 14px;
+  bottom: 12px;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+}
+.v35 .aw-still-play {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.2s ease;
+}
+/* glyph(play) already balances the visible triangle. A second CSS shift
+   displaced it toward the circle edge; verified in the actual core CTA. */
+.v35 .aw-still-play .icon {
+  transform: none;
+}
+.v35 .aw-still-play:active {
+  transform: scale(0.92);
+  background: var(--accent-press);
+}
+.v35 .aw-still-play.nudge {
+  animation: aw-nudge 0.42s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes aw-nudge {
+  35% { transform: scale(1.14); }
+  70% { transform: scale(0.96); }
+}
+.v35 .aw-still-cap b {
+  font-size: 15.5px;
+  font-weight: 750;
+}
+.v35 .aw-still-title {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* التشغيل في اللقطة؛ يبقى شريط التقدم تحتها، وزر «يبدأ…» وحده لعمل لم يُعرض بعد */
+.v35 .aw-stage .aw-cta {
+  width: 94%;
+  max-width: 620px;
+}
+.v35 .aw-stage .aw-play:not(.aw-play--soon) {
+  display: none;
+}
+.v35 .aw-body {
+  padding-top: 12px;
+}
+
+/* أدوات الترويسة في الجهة المقابلة للرجوع: رموز بلا كلام في حاوية واحدة، تبقى مع التمرير */
+.v35 .aw-tools {
+  position: relative;
+  /* فوق ستارة القائمة (z-index 5): النقاط تبقى ظاهرة لتُغلق بها */
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: rgba(8, 8, 12, 0.34);
+  backdrop-filter: blur(12px);
+  transition: background-color 0.22s ease;
+}
+.v35 .aw-bar.collapsed .aw-tools {
+  /* الترويسة صارت صلبة: الحاوية كانت لقراءة الرموز فوق الصورة فقط، وتحتها تصير حاوية داخل حاوية */
+  background: transparent;
+  backdrop-filter: none;
+}
+.v35 .aw-tool {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.14s ease, color 0.2s ease;
+}
+.v35 .aw-bar.collapsed .aw-tool {
+  color: var(--text-1);
+}
+.v35 .aw-tool:active {
+  transform: scale(0.9);
+}
+.v35 .aw-tool[aria-pressed='true'] {
+  color: var(--accent-text);
+}
+.v35 .aw-tool[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* «المزيد»: دوائر تنزل تحت النقاط واحدة بعد الأخرى (≈400ms كلها)، وبجانب كل دائرة اسمها */
+.v35 .aw-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  inset-inline-end: var(--gutter);
+  z-index: 5;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  pointer-events: none;
+}
+.v35 .aw-menu.open {
+  pointer-events: auto;
+}
+/* ستارة خلف القائمة: تفصل الدوائر وأسماءها عن الغلاف والبنر تحتها بلا أن تغيّر شكلها.
+   تدرّج داكن يبدأ من زاوية النقاط ويذوب نحو الصفحة، مع ضبابية خفيفة؛ يظهر ويختفي مع القائمة */
+.v35 .aw-menu::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -64px;
+  bottom: -40px;
+  inset-inline-end: calc(-1 * var(--gutter, 16px) - 6px);
+  width: max(280px, 170%);
+  border-end-start-radius: 48px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(6, 6, 10, 0.86) 0%, rgba(6, 6, 10, 0.72) 45%, rgba(6, 6, 10, 0) 100%);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: radial-gradient(130% 100% at 100% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(130% 100% at 100% 0%, #000 55%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+[dir='rtl'] .v35 .aw-menu::before,
+.v35[dir='rtl'] .aw-menu::before,
+html[dir='rtl'] .v35 .aw-menu::before {
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(6, 6, 10, 0.86) 0%, rgba(6, 6, 10, 0.72) 45%, rgba(6, 6, 10, 0) 100%);
+  -webkit-mask-image: radial-gradient(130% 100% at 0% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(130% 100% at 0% 0%, #000 55%, transparent 100%);
+}
+.v35 .aw-menu.open::before {
+  opacity: 1;
+}
+.v35 .aw-menu-item {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-12px) scale(0.6);
+  transform-origin: left center;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.v35 .aw-menu.open .aw-menu-item {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.22s ease calc(var(--i) * 45ms),
+    transform 0.26s cubic-bezier(0.2, 0.9, 0.25, 1.25) calc(var(--i) * 45ms);
+}
+.v35 .aw-menu-dot {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line);
+}
+.v35 .aw-menu-item[aria-pressed='true'] .aw-menu-dot {
+  color: var(--accent-text);
+}
+.v35 .aw-menu-label {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  box-shadow: 0 0 0 1px var(--line);
+  backdrop-filter: blur(10px);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.v35 .aw-menu-item:active .aw-menu-dot {
+  transform: scale(0.92);
+}
+
+@media (min-width: 900px) {
+  .v35 .aw {
+    --cover-w: 220px;
+  }
+  .v35 .aw-stage {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+  .v35 .aw-stage .an-mark-logo {
+    max-height: 96px;
+  }
+  .v35 .aw-stage .an-mark {
+    height: 96px;
+  }
+  .v35 .aw-body {
+    max-width: 960px;
+    margin-inline: auto;
+  }
+}
+
+/* أصل انطواء البنر في «الأساسي» (الحركة نفسها من depth.js) */
+@media (prefers-reduced-motion: no-preference) {
+  .v35 .aw .aw-bg { transform-origin: 50% 100%; }
+}
+
+/* ═══════════ ارتفاع البطل من شكل صورته، وظهور الخلفية المضبّبة تدريجيًا ═══════════
+ * البنر لا يُقص: نسبة الصورة نفسها (--aw-ratio من الصورة المختارة)، بين 200px و55% من الشاشة،
+ * وعلى الشاشة العريضة بين 40% و55%. قبل وصول الصورة 16:9 (أغلب خلفيات metahub) فلا قفزة. */
+.v35 .aw .aw-hero {
+  height: auto;
+  aspect-ratio: var(--aw-ratio, 16 / 9);
+  min-height: 200px;
+  max-height: 55svh;
+}
+@media (min-width: 900px) {
+  .v35 .aw .aw-hero {
+    min-height: 40svh;
+  }
+}
+.v35 .aw-hero::before {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.v35 .aw-hero.amb::before {
+  opacity: 1;
+}
+
+/* ═══════════ أنماط صفحة العمل (إعدادات ← المظهر)، منقولة من تصاميمها المعتمدة ═══════════
+ * البطل من صفحة العمل نفسها؛ ما تحته يرسمه work-looks.js داخل ‎.wl‎. جوال أولًا ثم الشاشة العريضة. */
+.v35 .wl { --wl-g: 16px; color: var(--text-1); }
+.v35 .wl img { display: block; object-fit: cover; }
+.v35 .wl button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: inherit; cursor: pointer; }
+.v35 .wl h2 { font-size: 21px; font-weight: 750; margin: 0 0 14px; }
+.v35 .wl-meta, .v35 .wl-genres { display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-2); font-size: 13.5px; }
+.v35 .wl-genres { color: var(--text-3); font-size: 12.5px; }
+.v35 .wl-meta b { color: var(--text-1); }
+.v35 .wl-logo { max-height: 70px; max-width: 260px; object-fit: contain !important; object-position: right; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5)); }
+.v35 .wl-name { margin: 0; font-size: 26px; line-height: 1.15; }
+.v35 .wl-desc { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.75; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-ranges { display: flex; gap: 8px; margin: -2px 0 12px; }
+.v35 .wl-ranges button { padding: 5px 11px; border-radius: 99px; font-size: 12.5px; color: var(--text-2); background: rgba(255, 255, 255, 0.05); }
+.v35 .wl-ranges button.on { background: var(--text-1); color: #000; font-weight: 700; }
+.v35 .wl .th { position: relative; overflow: hidden; border-radius: 10px; aspect-ratio: 16 / 9; background: var(--surface-2); }
+.v35 .wl .th img { width: 100%; height: 100%; }
+.v35 .wl .th em { position: absolute; bottom: 6px; left: 6px; font-style: normal; font-size: 12px; background: rgba(0, 0, 0, 0.6); padding: 1px 7px; border-radius: 5px; color: #fff; }
+.v35 .wl .th u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.v35 .wl .seen .th img { opacity: 0.55; }
+.v35 .wl .dot { display: grid; place-items: center; border-radius: 50%; }
+/* The shared play path already carries its optical correction. No second CSS offset. */
+.v35 .wl-recs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.v35 .wl-recs .rc img { width: 100%; aspect-ratio: 2 / 3; border-radius: 10px; }
+.v35 .wl-recs .rc b { display: block; font-size: 12px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-recs .rc span { font-size: 11px; color: var(--text-3); }
+.v35 .wl-dash { flex: 1; min-width: 14px; height: 2px; overflow: visible; }
+.v35 .wl-dash line { stroke: rgba(255, 255, 255, 0.28); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+
+/* ── ٢ المنصة ── */
+.v35 .wl-platform .wl-htxt { position: relative; z-index: 2; margin-top: -30px; padding: 0 var(--wl-g); display: grid; gap: 8px; }
+.v35 .wl-platform .wl-grid { display: grid; }
+.v35 .wl-platform .wl-aside { display: contents; }
+.v35 .wl-platform .wl-plate { display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 0 var(--wl-g); margin-top: 18px; align-items: center; }
+.v35 .wl-platform .wl-cover { width: 110px; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; box-shadow: 0 16px 30px -12px #000; }
+.v35 .wl-platform .wl-cover img { width: 100%; height: 100%; }
+.v35 .wl-facts { display: grid; gap: 7px; font-size: 13px; }
+.v35 .wl-facts div { display: flex; justify-content: space-between; gap: 10px; }
+.v35 .wl-facts small { color: var(--text-3); font-size: 13px; }
+.v35 .wl-platform .wl-cta, .v35 .wl-platform .wl-pg { display: none; }
+.v35 .wl-platform .wl-main { display: grid; gap: 34px; padding: 22px var(--wl-g) 120px; min-width: 0; }
+.v35 .wl-platform .wl-eprows { display: grid; gap: 10px; }
+.v35 .wl-platform .er { display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 12px; align-items: center; padding: 6px; border-radius: 12px; }
+.v35 .wl-platform .er.cur { background: rgba(255, 255, 255, 0.045); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.v35 .wl .er .tx { display: grid; min-width: 0; }
+.v35 .wl .er b { font-size: 14px; }
+.v35 .wl .er p { color: var(--text-3); font-size: 12px; line-height: 1.55; margin: 4px 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl .er .tx > span { color: var(--text-3); font-size: 11.5px; }
+.v35 .wl-platform .wl-chars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.v35 .wl-platform .wl-chars .ch { display: grid; grid-template-columns: 46px 1fr; grid-template-rows: auto auto; column-gap: 10px; align-items: center; padding: 8px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
+.v35 .wl-platform .wl-chars img { width: 46px; height: 46px; border-radius: 50%; grid-row: span 2; }
+.v35 .wl-platform .wl-chars b { font-size: 12.5px; align-self: end; }
+.v35 .wl-platform .wl-chars span { font-size: 11px; color: var(--text-3); align-self: start; }
+.v35 .wl-platform .wl-world { display: grid; position: relative; padding-inline-start: 22px; }
+.v35 .wl-platform .wl-world::before { content: ''; position: absolute; inset-inline-start: 6px; top: 18px; bottom: 18px; width: 2px; background: rgba(255, 255, 255, 0.1); }
+.v35 .wl-platform .wn { display: grid; grid-template-columns: 56px 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center; padding: 8px 0; position: relative; text-align: start; }
+.v35 .wl-platform .wn::before { content: ''; position: absolute; inset-inline-start: -21px; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: #2a3040; transform: translateY(-50%); }
+.v35 .wl-platform .wn.here::before { background: var(--text-1); }
+.v35 .wl-platform .wn img { width: 56px; height: 80px; border-radius: 8px; grid-row: span 2; }
+.v35 .wl-platform .wn b { font-size: 13.5px; align-self: end; }
+.v35 .wl-platform .wn span { font-size: 12px; color: var(--text-3); align-self: start; }
+.v35 .wl-dock { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: 44px minmax(0, 1fr) 48px; gap: 12px; align-items: center; padding: 8px 8px 8px 12px; border-radius: 20px; background: color-mix(in srgb, var(--surface-2) 92%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06); transition: transform 0.25s ease, opacity 0.25s ease; touch-action: pan-y; }
+.v35 .wl-dock[hidden] { display: none; }
+.v35 .wl-dock-cover img { width: 44px; aspect-ratio: 2 / 3; border-radius: 7px; }
+.v35 .wl-dock-text { display: grid; min-width: 0; }
+.v35 .wl-dock-text b { font-size: 14px; }
+.v35 .wl-dock-text small { color: var(--text-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-dock-text i { display: block; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); margin-top: 6px; overflow: hidden; }
+.v35 .wl-dock-text i::before { content: ''; display: block; height: 100%; width: var(--w); background: var(--accent); }
+.v35 .wl-dock .dot { width: 48px; height: 48px; background: var(--accent); color: var(--on-accent, #fff); }
+
+/* ── ٣ البطاقة الطائرة ── */
+.v35 .aw[data-style='card'] .aw-hero::after { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to bottom, transparent 55%, var(--bg)); pointer-events: none; }
+.v35 .wl-card .wl-head { display: grid; position: relative; --wl-logo-band-top: 0px; --wl-logo-color-edge: 50%; }
+.v35 .wl-card .wl-stage3d { perspective: 900px; display: grid; justify-items: center; margin-top: -96px; position: relative; z-index: 3; }
+.v35 .wl-card .wl-card { width: 168px; aspect-ratio: 2 / 3; border-radius: 16px; overflow: hidden; transform: rotateY(-18deg) rotateX(6deg); box-shadow: -24px 34px 50px -22px #000, 0 0 0 1px rgba(255, 255, 255, 0.08); will-change: transform; }
+.v35 .wl-card .wl-card img { width: 100%; height: 100%; }
+.v35 .wl-card .wl-info { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 22px var(--wl-g) 0; }
+.v35 .wl-card .wl-info .wl-logo { max-height: 72px; max-width: 280px; object-position: center; }
+.v35 .wl-card .wl-info .wl-meta, .v35 .wl-card .wl-info .wl-genres { justify-content: center; }
+.v35 .wl-card .wl-row { display: grid; justify-items: center; gap: 8px; margin-top: 6px; }
+.v35 .wl-card .wl-big { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 22px 0 8px !important; border-radius: 99px; background: var(--accent) !important; color: var(--on-accent, #fff) !important; font-weight: 800 !important; font-size: 15.5px; }
+.v35 .wl-card .wl-big .dot { width: 40px; height: 40px; background: var(--on-accent, #fff); color: var(--accent); }
+.v35 .wl-card .wl-sub { color: var(--text-3); font-size: 12.5px; }
+.v35 .wl-card .wl-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 28px 0 90px; }
+.v35 .wl-card .wl-body > * { padding: 0 var(--wl-g); min-width: 0; }
+.v35 .wl-card .wl-body > .wl-full { padding: 0; }
+.v35 .wl-card .wl-full > h2, .v35 .wl-card .wl-full > .wl-ranges { padding: 0 var(--wl-g); }
+.v35 .wl-card .wl-strip { display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding: 0 var(--wl-g); padding: 0 var(--wl-g) 6px; align-items: flex-end; scrollbar-width: none; }
+.v35 .wl-card .wl-strip::-webkit-scrollbar { display: none; }
+.v35 .wl-card .sp { flex: 0 0 150px; display: grid; gap: 6px; scroll-snap-align: center; }
+.v35 .wl-card .sp b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-card .sp > span { font-size: 11px; color: var(--text-3); }
+.v35 .wl-card .sp.seen .th img { opacity: 0.5; }
+.v35 .wl-card .sp.cur { flex-basis: 300px; }
+.v35 .wl-card .sp.cur .th { box-shadow: 0 0 0 2px var(--accent); }
+.v35 .wl-card .sp.cur b { font-size: 15.5px; }
+.v35 .wl-card .sp p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-card .wl-tall { display: flex; gap: 10px; overflow-x: auto; padding: 0 var(--wl-g); scrollbar-width: none; }
+.v35 .wl-card .wl-tall::-webkit-scrollbar { display: none; }
+.v35 .wl-card .wl-tall .ch { flex: 0 0 118px; position: relative; border-radius: 12px; overflow: hidden; aspect-ratio: 3 / 4.3; }
+.v35 .wl-card .wl-tall img { width: 100%; height: 100%; }
+.v35 .wl-card .wl-tall .ch::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent 55%); }
+.v35 .wl-card .wl-tall b, .v35 .wl-card .wl-tall span { position: absolute; z-index: 2; right: 8px; left: 8px; }
+.v35 .wl-card .wl-tall b { bottom: 22px; font-size: 12px; }
+.v35 .wl-card .wl-tall span { bottom: 7px; font-size: 10.5px; color: #c4cad6; }
+.v35 .wl-card .wl-world { display: flex; align-items: center; justify-content: center; }
+.v35 .wl-card .wn { display: grid; justify-items: center; gap: 6px; width: 110px; text-align: center; }
+.v35 .wl-card .wn img { width: 82px; height: 120px; border-radius: 10px; transform: rotate(-3deg); }
+.v35 .wl-card .wn:nth-child(4n + 3) img { transform: rotate(3deg); }
+.v35 .wl-card .wn.here img { width: 98px; height: 144px; box-shadow: 0 0 0 2px var(--text-1); }
+.v35 .wl-card .wn b { font-size: 11.5px; }
+.v35 .wl-card .wn span { font-size: 10.5px; color: var(--text-3); }
+
+/* ── ٤ شاشة السينما ── */
+.v35 .aw[data-style='screen'] { background: linear-gradient(to bottom, color-mix(in srgb, var(--art, var(--accent)) 9%, var(--bg)), var(--bg) 600px); }
+.v35 .aw[data-style='screen'] .aw-hero { margin: calc(var(--top-h, 56px) + var(--safe-top, 0px) + 8px) 14px 0; border-radius: 22px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 26px 40px -24px #000; }
+.v35 .aw[data-style='screen'] .aw-hero::before { display: none; }
+.v35 .aw[data-style='screen'] .aw-shade { background: none; }
+.v35 .wl-screen .wl-top { display: grid; grid-template-columns: 96px 1fr; grid-template-areas: 'cover mid' 'go go'; gap: 14px; padding: 0 var(--wl-g); margin-top: 20px; align-items: end; }
+.v35 .wl-screen .wl-cover { grid-area: cover; width: 96px; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; box-shadow: 0 14px 26px -12px #000; }
+.v35 .wl-screen .wl-cover img { width: 100%; height: 100%; }
+.v35 .wl-screen .wl-mid { grid-area: mid; display: grid; gap: 7px; }
+.v35 .wl-screen .wl-mid .wl-logo { max-height: 56px; max-width: 230px; }
+.v35 .wl-screen .wl-go { grid-area: go; display: flex; align-items: center; gap: 14px; margin-top: 4px; padding: 10px !important; border-radius: 18px; background: rgba(255, 255, 255, 0.04) !important; }
+.v35 .wl-screen .wl-go .dot { width: 56px; height: 56px; background: var(--accent); color: var(--on-accent, #fff); flex: none; }
+.v35 .wl-screen .wl-go b { font-size: 15.5px; display: block; }
+.v35 .wl-screen .wl-go small { font-size: 12px; color: var(--text-3); }
+.v35 .wl-screen .wl-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 34px; padding: 26px var(--wl-g) 90px; }
+.v35 .wl-screen .wl-line .wl-eprows { position: relative; display: grid; padding-inline-start: 30px; }
+.v35 .wl-screen .wl-line .wl-eprows::before { content: ''; position: absolute; inset-inline-start: 9px; top: 26px; bottom: 26px; width: 2px; background: linear-gradient(var(--accent) 0 calc(var(--done) * 1%), rgba(255, 255, 255, 0.1) 0); }
+.v35 .wl-screen .er { position: relative; display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 0; }
+.v35 .wl-screen .er::before { content: ''; position: absolute; inset-inline-start: -26px; top: 50%; width: 12px; height: 12px; border-radius: 50%; transform: translateY(-50%); background: #252b38; box-shadow: 0 0 0 3px var(--bg); }
+.v35 .wl-screen .er.seen::before { background: var(--accent); }
+.v35 .wl-screen .er.cur::before { background: #fff; box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+.v35 .wl-screen .wl-ring { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+.v35 .wl-screen .wl-ring::-webkit-scrollbar { display: none; }
+.v35 .wl-screen .wl-ring .ch { flex: 0 0 72px; display: grid; justify-items: center; text-align: center; gap: 5px; }
+.v35 .wl-screen .wl-ring img { width: 68px; height: 68px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px rgba(255, 255, 255, 0.18); }
+.v35 .wl-screen .wl-ring b { font-size: 11.5px; }
+.v35 .wl-screen .wl-ring span { font-size: 10px; color: var(--text-3); }
+.v35 .wl-screen .wl-world { display: grid; gap: 10px; }
+.v35 .wl-screen .wn { position: relative; height: 96px; border-radius: 14px; overflow: hidden; display: flex; align-items: flex-end; padding: 12px !important; background: #10131b !important; text-align: start; }
+.v35 .wl-screen .wn .bn { position: absolute; inset: 0; width: 100%; height: 100%; }
+.v35 .wl-screen .wn.banner::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to left, rgba(5, 7, 13, 0.85), rgba(5, 7, 13, 0.25) 75%); }
+.v35 .wl-screen .wn .cv { position: absolute; left: 10px; top: 10px; height: calc(100% - 20px); width: auto; aspect-ratio: 2 / 3; border-radius: 8px; }
+.v35 .wl-screen .wn.banner .cv { display: none; }
+.v35 .wl-screen .wn i { position: relative; z-index: 3; font-style: normal; font-size: 30px; font-weight: 900; opacity: 0.35; margin-inline-end: 10px; }
+.v35 .wl-screen .wn .t { position: relative; z-index: 3; display: grid; }
+.v35 .wl-screen .wn b { font-size: 14.5px; }
+.v35 .wl-screen .wn .t span { font-size: 12px; color: #c9d0dc; }
+.v35 .wl-screen .wn.here { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6); }
+
+/* ── ٥ الحلقة أولًا ── */
+.v35 .wl-episode .wl-now { position: relative; z-index: 2; margin-top: -18px; padding: 0 var(--wl-g); display: grid; gap: 8px; }
+.v35 .wl-episode .wl-now small { color: var(--text-2); font-weight: 650; font-size: 12.5px; }
+.v35 .wl-episode .wl-now h1 { margin: 0; font-size: 30px; line-height: 1.1; }
+.v35 .wl-episode .wl-now p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-episode .wl-pl { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.v35 .wl-episode .wl-pl .dot { width: 54px; height: 54px; background: #fff; color: #000; flex: none; }
+.v35 .wl-episode .wl-pl i { flex: 1; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
+.v35 .wl-episode .wl-pl i::before { content: ''; display: block; height: 100%; width: var(--w); background: var(--accent); }
+.v35 .wl-episode .wl-pl span { color: var(--text-2); font-size: 12.5px; }
+.v35 .wl-episode .wl-series { display: grid; grid-template-columns: 70px 1fr; gap: 12px; align-items: center; margin: 16px var(--wl-g) 0; padding: 10px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); }
+.v35 .wl-episode .wl-series > img { width: 70px; aspect-ratio: 2 / 3; border-radius: 8px; }
+.v35 .wl-episode .wl-series .wl-logo { max-height: 46px; max-width: 200px; }
+.v35 .wl-episode .wl-series .wl-name { font-size: 16px; }
+.v35 .wl-episode .wl-series .wl-meta { margin-top: 5px; font-size: 12px; gap: 8px; }
+.v35 .wl-episode .wl-series .wl-genres { font-size: 11.5px; gap: 8px; margin-top: 3px; }
+.v35 .wl-episode .wl-scrub { padding: 20px var(--wl-g) 0; }
+.v35 .wl-episode .wl-track { display: flex; gap: 5px; overflow-x: auto; align-items: center; scrollbar-width: none; }
+.v35 .wl-episode .wl-track::-webkit-scrollbar { display: none; }
+.v35 .wl-episode .wl-track button { flex: 0 0 64px; position: relative; border-radius: 6px; overflow: hidden; aspect-ratio: 16 / 9; background: var(--surface-2); }
+.v35 .wl-episode .wl-track img { width: 100%; height: 100%; }
+.v35 .wl-episode .wl-track .seen img { opacity: 0.45; }
+.v35 .wl-episode .wl-track .cur { flex-basis: 84px; outline: 2px solid #fff; outline-offset: -2px; }
+.v35 .wl-episode .wl-track em { position: absolute; bottom: 2px; left: 4px; font-style: normal; font-size: 10px; color: #fff; text-shadow: 0 1px 2px #000; }
+.v35 .wl-episode .wl-sline { margin-top: 10px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.v35 .wl-episode .wl-sline::before { content: ''; display: block; height: 100%; width: var(--w); background: var(--accent); }
+.v35 .wl-episode .wl-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 34px; padding: 26px var(--wl-g) 90px; }
+.v35 .wl-episode .wl-left, .v35 .wl-episode .wl-right { display: grid; grid-template-columns: minmax(0, 1fr); gap: 34px; min-width: 0; }
+.v35 .wl-episode .wl-eprows { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 10px; }
+.v35 .wl-episode .er { display: grid; gap: 6px; }
+.v35 .wl-episode .er b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-episode .wl-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.v35 .wl-episode .wl-grid4 .ch { display: grid; gap: 4px; min-width: 0; }
+.v35 .wl-episode .wl-grid4 img { width: 100%; aspect-ratio: 1; border-radius: 12px; }
+.v35 .wl-episode .wl-grid4 b { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-episode .wl-grid4 span { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-episode .wl-facts { padding: 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.03); }
+.v35 .wl-episode .wl-world { display: grid; gap: 8px; }
+.v35 .wl-episode .wn { display: grid; grid-template-columns: 48px 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center; padding: 8px !important; border-radius: 12px; text-align: start; }
+.v35 .wl-episode .wn.here { background: rgba(255, 255, 255, 0.05) !important; }
+.v35 .wl-episode .wn img { width: 48px; height: 70px; border-radius: 7px; grid-row: span 2; }
+.v35 .wl-episode .wn b { font-size: 13px; align-self: end; }
+.v35 .wl-episode .wn span { font-size: 11.5px; color: var(--text-3); align-self: start; }
+.v35 .wl-episode .wl-mini { position: fixed; z-index: 30; top: calc(var(--safe-top, 0px) + 10px); right: 50%; transform: translate(50%, -80px); opacity: 0; pointer-events: none; display: flex; align-items: center; gap: 10px; padding: 5px 12px 5px 5px; border-radius: 99px; background: rgba(14, 16, 24, 0.92); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.v35 .wl-episode .wl-mini-th img { width: 62px; height: 35px; border-radius: 99px; }
+.v35 .wl-episode .wl-mini b { font-size: 12.5px; display: block; }
+.v35 .wl-episode .wl-mini small { font-size: 10.5px; color: var(--text-3); }
+.v35 .wl-episode .wl-mini .dot { width: 34px; height: 34px; background: #fff; color: #000; }
+
+/* ═══ الشاشة العريضة: تخطيطات التصاميم العريضة نفسها ═══ */
+/* العريض يتبع عرض المحتوى لا الشاشة: الشريط الجانبي لا يضغط تخطيطًا صُمّم لعرض أكبر */
+.v35 .aw { container: aw / inline-size; }
+@container aw (min-width: 900px) {
+  .v35 .wl { --wl-g: 64px; }
+  .v35 .wl h2 { font-size: 26px; margin-bottom: 18px; }
+  .v35 .wl-desc { font-size: 16.5px; line-height: 1.85; max-width: 880px; -webkit-line-clamp: 4; }
+  .v35 .wl-meta { font-size: 17px; gap: 16px; }
+  .v35 .wl-genres { font-size: 15px; gap: 14px; }
+  .v35 .wl-logo { max-height: 100px; max-width: 460px; }
+  .v35 .wl-recs { grid-template-columns: repeat(5, 1fr); gap: 18px; }
+
+  /* المنصة: الشعار فوق أسفل البنر، وعمود ثابت يمينًا (الغلاف، تابع، التقدّم، المعلومات) والمحتوى بجانبه */
+  .v35 .wl-platform .wl-htxt { margin-top: -150px; padding: 0 430px 30px var(--wl-g); gap: 10px; }
+  .v35 .wl-platform .wl-grid { grid-template-columns: 340px minmax(0, 1fr); gap: 56px; padding: 0 var(--wl-g) 80px; }
+  .v35 .wl-platform .wl-aside { display: grid; gap: 16px; align-self: start; position: sticky; top: calc(var(--top-h, 56px) + 20px); margin-top: -200px; z-index: 3; }
+  .v35 .wl-platform .wl-plate { display: contents; }
+  .v35 .wl-platform .wl-cover { width: 100%; border-radius: 18px; box-shadow: 0 30px 70px -20px #000, 0 0 0 1px rgba(255, 255, 255, 0.07); }
+  .v35 .wl-platform .wl-facts { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.07); font-size: 14px; }
+  .v35 .wl-platform .wl-cta { display: flex; align-items: center; gap: 14px; padding: 14px 16px !important; border-radius: 18px; background: var(--accent) !important; color: var(--on-accent, #fff) !important; font-weight: 750 !important; font-size: 17px; }
+  .v35 .wl-platform .wl-cta .dot { width: 42px; height: 42px; background: rgba(255, 255, 255, 0.2); flex: none; }
+  .v35 .wl-platform .wl-cta small { display: block; font-weight: 500; opacity: 0.85; font-size: 13px; }
+  .v35 .wl-platform .wl-pg { display: grid; gap: 6px; color: var(--text-3); font-size: 13px; }
+  .v35 .wl-platform .wl-pg i { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+  .v35 .wl-platform .wl-pg i::before { content: ''; display: block; height: 100%; width: var(--w); background: var(--accent); }
+  .v35 .wl-platform .wl-main { gap: 56px; padding: 34px 0 0; }
+  .v35 .wl-platform .er { grid-template-columns: 250px minmax(0, 1fr); gap: 20px; padding: 8px; border-radius: 14px; }
+  .v35 .wl .er b { font-size: 16.5px; }
+  .v35 .wl .er p { font-size: 13.5px; line-height: 1.65; margin: 6px 0; }
+  .v35 .wl-platform .wl-chars { grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .v35 .wl-platform .wl-chars .ch { grid-template-columns: 56px 1fr; padding: 10px; border-radius: 14px; }
+  .v35 .wl-platform .wl-chars img { width: 56px; height: 56px; }
+  .v35 .wl-platform .wn { grid-template-columns: 70px 1fr; column-gap: 16px; padding: 10px 0; }
+  .v35 .wl-platform .wn img { width: 70px; height: 100px; }
+  .v35 .wl-platform .wn b { font-size: 15px; }
+  .v35 .wl-dock { display: none; }
+
+  /* البطاقة الطائرة: المعلومات يسارًا والبطاقة الكبيرة المائلة يمينًا فوق حافة البنر */
+  .v35 .wl-card .wl-head { grid-template-columns: 1fr 330px; gap: 60px; padding: 0 90px; margin-top: -210px; align-items: end; position: relative; z-index: 3; }
+  /* البطاقة على يمين الصفحة كما في الرسم (بداية السطر في RTL)، لا في وسط عمودها العريض */
+  .v35 .wl-card .wl-stage3d { order: -1; margin-top: 0; perspective: 1100px; justify-items: start; }
+  .v35 .wl-card .wl-card { width: 330px; border-radius: 20px; transform: rotateY(-20deg) rotateX(7deg) rotateZ(-1deg); }
+  .v35 .wl-card .wl-info { justify-items: start; text-align: start; padding: 0 0 20px; gap: 14px; }
+  .v35 .wl-card .wl-info .wl-logo { max-height: 110px; max-width: 480px; object-position: right; }
+  .v35 .wl-card .wl-info .wl-meta, .v35 .wl-card .wl-info .wl-genres { justify-content: flex-start; }
+  .v35 .wl-card .wl-row { display: flex; align-items: center; gap: 14px; justify-items: start; }
+  .v35 .wl-card .wl-big { height: 60px; padding: 0 26px 0 10px !important; font-size: 17px; }
+  .v35 .wl-card .wl-big .dot { width: 44px; height: 44px; }
+  .v35 .wl-card .wl-body { padding: 70px 0 90px; gap: 70px; }
+  .v35 .wl-card .wl-body > * { padding: 0 90px; }
+  .v35 .wl-card .wl-full > h2, .v35 .wl-card .wl-full > .wl-ranges { padding: 0 90px; }
+  .v35 .wl-card .wl-desc { font-size: 21px; line-height: 1.7; max-width: 1000px; -webkit-line-clamp: 3; }
+  .v35 .wl-card h2 { font-size: 34px; letter-spacing: -0.5px; }
+  .v35 .wl-card .wl-strip { gap: 18px; padding: 0 90px 6px; scroll-padding: 0 90px; }
+  .v35 .wl-card .sp { flex-basis: 250px; gap: 8px; }
+  .v35 .wl-card .sp b { font-size: 14.5px; }
+  .v35 .wl-card .sp.cur { flex-basis: 560px; }
+  .v35 .wl-card .sp.cur b { font-size: 20px; }
+  .v35 .wl-card .sp p { font-size: 14px; }
+  .v35 .wl-card .wl-tall { display: grid; grid-template-columns: repeat(8, 1fr); gap: 14px; padding: 0 90px; overflow: visible; }
+  .v35 .wl-card .wl-tall .ch:nth-child(n + 9) { display: none; }
+  .v35 .wl-card .wl-tall b { font-size: 13.5px; bottom: 26px; }
+  .v35 .wl-card .wl-tall span { font-size: 11.5px; bottom: 9px; }
+  .v35 .wl-card .wl-world { justify-content: flex-start; }
+  .v35 .wl-card .wn { width: 220px; gap: 8px; }
+  .v35 .wl-card .wn img { width: 150px; height: 220px; border-radius: 14px; }
+  .v35 .wl-card .wn.here img { width: 180px; height: 264px; }
+  .v35 .wl-card .wn b { font-size: 15px; }
+  .v35 .wl-card .wn span { font-size: 13px; }
+  .v35 .wl-card .wl-dash { flex: 0 0 90px; }
+  .v35 .wl-card .wl-recs { grid-template-columns: repeat(8, 1fr); gap: 16px; }
+
+  /* شاشة السينما: الشاشة بعرض ثابت في الوسط، وتحتها صف واحد: الغلاف، الشعار والمعلومات، والتشغيل */
+  .v35 .aw[data-style='screen'] .aw-hero { width: min(1180px, calc(100% - 128px)); margin-inline: auto; border-radius: 26px; }
+  .v35 .wl-screen .wl-top { width: min(1180px, calc(100% - 128px)); margin: -110px auto 0; position: relative; z-index: 3; grid-template-columns: 200px 1fr auto; grid-template-areas: 'cover mid go'; gap: 30px; padding: 0 36px; }
+  .v35 .wl-screen .wl-cover { width: 200px; border-radius: 16px; box-shadow: 0 30px 60px -20px #000, 0 0 0 4px var(--bg); }
+  .v35 .wl-screen .wl-mid { padding-bottom: 8px; gap: 10px; }
+  .v35 .wl-screen .wl-mid .wl-logo { max-height: 84px; max-width: 420px; }
+  .v35 .wl-screen .wl-go { display: grid; justify-items: center; gap: 10px; padding: 0 0 8px !important; background: none !important; text-align: center; }
+  .v35 .wl-screen .wl-go .dot { width: 76px; height: 76px; }
+  .v35 .wl-screen .wl-body { width: min(1180px, calc(100% - 128px)); margin: 60px auto 90px; padding: 0; gap: 64px; }
+  .v35 .wl-screen .wl-line .wl-eprows { padding-inline-start: 46px; }
+  .v35 .wl-screen .wl-line .wl-eprows::before { inset-inline-start: 15px; }
+  .v35 .wl-screen .er { grid-template-columns: 240px minmax(0, 1fr); gap: 22px; padding: 12px 0; }
+  .v35 .wl-screen .er::before { inset-inline-start: -37px; width: 14px; height: 14px; }
+  .v35 .wl-screen .wl-ring { overflow: visible; justify-content: space-between; }
+  .v35 .wl-screen .wl-ring .ch { flex: 1; }
+  .v35 .wl-screen .wl-ring img { width: 104px; height: 104px; }
+  .v35 .wl-screen .wl-ring b { font-size: 13px; }
+  .v35 .wl-screen .wl-ring span { font-size: 11.5px; }
+  .v35 .wl-screen .wl-world { grid-auto-flow: column; grid-auto-columns: 1fr; gap: 16px; }
+  .v35 .wl-screen .wn { height: 180px; padding: 18px !important; border-radius: 18px; }
+  .v35 .wl-screen .wn i { font-size: 44px; }
+  .v35 .wl-screen .wn b { font-size: 17px; }
+  .v35 .wl-screen .wn .t span { font-size: 13px; }
+  .v35 .wl-screen .wl-recs { grid-template-columns: repeat(8, 1fr); gap: 16px; }
+
+  /* الحلقة أولًا: العنوان والتشغيل فوق أسفل اللقطة يمينًا وبطاقة العمل يسارًا، ثم الشريط، ثم عمودان */
+  .v35 .wl-episode .wl-headrow { display: grid; grid-template-columns: minmax(0, 560px) 1fr 440px; grid-template-areas: 'now . series'; align-items: end; padding: 0 90px 0 64px; margin-top: -260px; position: relative; z-index: 2; }
+  .v35 .wl-episode .wl-now { grid-area: now; margin: 0; padding: 0 0 18px; gap: 12px; }
+  .v35 .wl-episode .wl-now small { color: var(--art, var(--accent)); font-size: 14px; }
+  .v35 .wl-episode .wl-now h1 { font-size: 46px; }
+  .v35 .wl-episode .wl-now p { font-size: 15.5px; line-height: 1.7; }
+  .v35 .wl-episode .wl-pl .dot { width: 64px; height: 64px; }
+  .v35 .wl-episode .wl-series { grid-area: series; margin: 0 0 18px; grid-template-columns: 96px 1fr; gap: 16px; padding: 14px; border-radius: 20px; background: rgba(10, 12, 18, 0.55); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07); }
+  .v35 .wl-episode .wl-series > img { width: 96px; border-radius: 10px; }
+  .v35 .wl-episode .wl-scrub { padding: 26px 90px 0; }
+  .v35 .wl-episode .wl-track { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; overflow: visible; }
+  .v35 .wl-episode .wl-track button { border-radius: 8px; }
+  .v35 .wl-episode .wl-track .cur { transform: scale(1.12); z-index: 2; outline-offset: 2px; }
+  .v35 .wl-episode .wl-body { grid-template-columns: minmax(0, 1fr) 380px; gap: 60px; padding: 60px 90px 90px; }
+  .v35 .wl-episode .wl-left { gap: 56px; }
+  .v35 .wl-episode .wl-right { gap: 18px; align-self: start; position: sticky; top: 90px; }
+  .v35 .wl-episode .wl-eprows { gap: 18px; }
+  .v35 .wl-episode .er b { font-size: 15px; }
+  .v35 .wl-episode .wl-grid4 { grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .v35 .wl-episode .wl-grid4 img { border-radius: 16px; }
+  .v35 .wl-episode .wl-grid4 b { font-size: 13.5px; }
+  .v35 .wl-episode .wl-grid4 span { font-size: 12px; }
+  .v35 .wl-episode .wl-facts { padding: 18px; border-radius: 18px; font-size: 14px; }
+  .v35 .wl-episode .wn { grid-template-columns: 54px 1fr; }
+  .v35 .wl-episode .wn img { width: 54px; height: 78px; border-radius: 8px; }
+  .v35 .wl-episode .wl-mini .wl-mini-th img { width: 86px; height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .wl-dock { transition: none; }
+}
+/* عناصر الأساسي المخفية تحت الأنماط: [hidden] يغلب display الخاص بها */
+.v35 .aw > [hidden] { display: none !important; }
+/* محتوى الأنماط لا يتجاوز عموده: نص الحلقة الطويل كان يمدّ العمود خارج الشاشة */
+.v35 .wl-main > *, .v35 .wl-body > *, .v35 .wl-left > *, .v35 .wl-right > *, .v35 .wl-sec { min-width: 0; }
+.v35 .wl .er { width: 100%; min-width: 0; }
+.v35 .wl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.v35 .wl-platform .wl-chars .ch:nth-child(n + 9),
+.v35 .wl-episode .wl-grid4 .ch:nth-child(n + 9) { display: none; }
+/* الحلقة أولًا على الجوال: عمود واحد بترتيب التصميم (الوصف، الحلقات، الشخصيات، العالم، المعلومات، التوصيات) */
+.v35 .wl-episode .wl-left, .v35 .wl-episode .wl-right { display: contents; }
+.v35 .wl-episode .wl-desc { order: 1; }
+.v35 .wl-episode .wl-s-eps { order: 2; }
+.v35 .wl-episode .wl-s-chars { order: 3; }
+.v35 .wl-episode .wl-s-world { order: 4; }
+.v35 .wl-episode .wl-s-facts { order: 5; }
+.v35 .wl-episode .wl-s-recs { order: 6; }
+@container aw (min-width: 900px) {
+  .v35 .wl-platform .wl-chars .ch:nth-child(-n + 10),
+  .v35 .wl-episode .wl-grid4 .ch:nth-child(-n + 10) { display: grid; }
+  .v35 .wl-episode .wl-left, .v35 .wl-episode .wl-right { display: grid; }
+}
+/* الحلقة أولًا: العنوان ومدته في سطر واحد تحت اللقطة كما في التصميم */
+.v35 .wl-episode .er .tx { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.v35 .wl-episode .er .tx b { flex: 0 1 auto; min-width: 0; }
+.v35 .wl-episode .er .tx > span { flex: none; }
+.v35 .aw[data-style='screen'] .aw-hero { transform-origin: 50% 100%; will-change: transform, opacity; }
+.v35 .aw[data-style='episode'] .aw-hero { transform-origin: 50% 0; will-change: transform, opacity; }
+/* الحلقة أولًا بلا حاوية: الحلقة هي البطل (عنوان كبير، وصف، تشغيل)، ثم العمل تحتها ثانويًا بمسافة لا صندوق */
+.v35 .wl-episode .wl-now small { color: var(--accent-text, var(--text-2)); letter-spacing: 0.2px; }
+.v35 .wl-episode .wl-series { background: none; padding: 0; border-radius: 0; margin: 28px var(--wl-g) 0; grid-template-columns: 58px 1fr; gap: 14px; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.v35 .wl-episode .wl-series > img { width: 58px; border-radius: 8px; }
+.v35 .wl-episode .wl-series .wl-logo { max-height: 44px; max-width: 220px; }
+.v35 .wl-episode .wl-series .wl-meta { flex-wrap: wrap; row-gap: 2px; }
+.v35 .wl-episode .wl-scrub { padding-top: 22px; }
+@container aw (min-width: 900px) {
+  .v35 .wl-episode .wl-series { margin: 0 0 22px; padding: 0; background: none; grid-template-columns: 84px 1fr; gap: 18px; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  .v35 .wl-episode .wl-series > img { width: 84px; }
+  .v35 .wl-episode .wl-series .wl-logo { max-height: 64px; max-width: 300px; }
+}
+/* شريط «تابع» الصغير تحت الترويسة لا فوق أزرارها، وسطر واحد */
+.v35 .wl-episode .wl-mini { top: calc(var(--top-h, 56px) + var(--safe-top, 0px) + 8px); white-space: nowrap; max-width: calc(100% - 32px); }
+.v35 .wl-episode .wl-mini > span:not(.wl-mini-th) { min-width: 0; display: grid; }
+.v35 .wl-episode .wl-mini small { overflow: hidden; text-overflow: ellipsis; }
+/* الحلقة أولًا: الغلاف والشعار والمعلومات أكبر قليلًا (طلب المالك) */
+.v35 .wl-episode .wl-series { grid-template-columns: 68px 1fr; }
+.v35 .wl-episode .wl-series > img { width: 68px; border-radius: 9px; }
+.v35 .wl-episode .wl-series .wl-logo { max-height: 52px; max-width: 250px; }
+.v35 .wl-episode .wl-series .wl-meta { font-size: 12.5px; }
+.v35 .wl-episode .wl-series .wl-genres { font-size: 12px; }
+@container aw (min-width: 900px) {
+  .v35 .wl-episode .wl-series { grid-template-columns: 100px 1fr; }
+  .v35 .wl-episode .wl-series > img { width: 100px; border-radius: 11px; }
+  .v35 .wl-episode .wl-series .wl-logo { max-height: 76px; max-width: 340px; }
+  .v35 .wl-episode .wl-series .wl-meta { font-size: 14px; }
+  .v35 .wl-episode .wl-series .wl-genres { font-size: 13px; }
+}
+
+/* حافة البطل السفلية لا تكون قصًّا حادًا: آخر 28px تتلاشى للشفافية. الظل ينتهي أصلًا بلون الصفحة فلا يتغير
+ * شيء وهو ساكن، لكن الحافة الحادة كانت تُرسم خطًا رفيعًا مضيئًا حين يتحرك البطل (حركة الدخول والخروج) أو
+ * تتمدد الصفحة (مطاطية أندرويد عند السحب)، فيبدو الظل «مقصوصًا» لجزء من الثانية (ملاحظة المالك، 13 نوفمبر).
+ * «شاشة السينما» بطلها بطاقة بحواف مستديرة وظل خارجي، فلا قناع عليها. */
+.v35 .aw:not([data-style='screen']) .aw-hero {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+/* ═══ إصلاحات الأنماط بعد التجربة على الجوال (31 أكتوبر) ═══ */
+/* ترتيب الرسم صريح: النسخة المضبّبة تحت البنر دائمًا. بلا z-index كان بعض الأجهزة يرسمها فوقه حين
+   تكتمل شفافيتها (البنر يظهر لحظة ثم يتغبّش)، ولا يحدث في الأساسي لأن حركة بنره تجعله طبقة فوقها */
+.v35 .aw-hero::before { z-index: 0; }
+.v35 .aw-hero > .aw-bg { z-index: 1; }
+.v35 .aw-hero > .aw-shade { z-index: 2; }
+
+/* «إذا عجبك هذا» شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة، يُسحب يمينًا ويسارًا */
+.v35 .wl .wl-recs { display: flex !important; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; margin-inline: calc(var(--wl-g) * -1); padding: 0 var(--wl-g) 4px; scroll-padding-inline: var(--wl-g); scrollbar-width: none; }
+.v35 .wl .wl-recs::-webkit-scrollbar { display: none; }
+.v35 .wl .wl-recs .rc { display: block !important; flex: 0 0 116px; width: 116px; scroll-snap-align: start; }
+.v35 .wl .wl-recs .rc img { width: 116px; height: 174px; aspect-ratio: auto; border-radius: 10px; }
+.v35 .wl-card .wl-body > .wl-sec.wl-s-recs, .v35 .wl-screen .wl-body > .wl-s-recs { padding-inline: var(--wl-g); }
+
+/* «من نفس العالم» في البطاقة الطائرة: شريط يُسحب، كل البطاقات بمقاس واحد، و«أنت هنا» بإطار لا بحجم أكبر؛
+   تميل قليلًا ثم تعتدل بهدوء حين تصلها */
+.v35 .wl-card .wl-world { justify-content: flex-start !important; overflow-x: auto; overscroll-behavior-x: contain; margin-inline: calc(var(--wl-g) * -1); padding: 6px var(--wl-g) 4px; scrollbar-width: none; }
+.v35 .wl-card .wl-world::-webkit-scrollbar { display: none; }
+.v35 .wl-card .wn { flex: 0 0 116px !important; width: 116px !important; }
+.v35 .wl-card .wn img, .v35 .wl-card .wn.here img { width: 96px !important; height: 144px !important; transform: rotate(-4deg); transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.v35 .wl-card .wn:nth-child(4n + 3) img { transform: rotate(4deg); }
+.v35 .wl-card .wn.in img { transform: none !important; }
+.v35 .wl-card .wn.here img { box-shadow: 0 0 0 2px var(--text-1); }
+.v35 .wl-card .wl-dash { flex: 0 0 28px !important; min-width: 28px; }
+@media (prefers-reduced-motion: reduce) { .v35 .wl-card .wn img { transform: none !important; transition: none; } }
+
+/* شريط «تابع» في «الحلقة أولًا»: بعرض الصفحة تحت الترويسة، يظهر بانتقال بعد البطل لا مع كل بكسل */
+.v35 .wl-episode .wl-mini { left: 12px !important; right: 12px !important; top: calc(var(--top-h, 56px) + var(--safe-top, 0px) + 6px) !important; max-width: none !important; transform: translateY(-14px) !important; opacity: 0 !important; pointer-events: none !important; display: grid !important; grid-template-columns: 72px minmax(0, 1fr) 42px; gap: 12px; padding: 6px 6px 6px 8px !important; border-radius: 16px !important; transition: opacity 0.22s ease, transform 0.22s ease; }
+.v35 .wl-episode .wl-mini.on { opacity: 1 !important; transform: none !important; pointer-events: auto !important; }
+.v35 .wl-episode .wl-mini-th img { width: 72px !important; height: 40px !important; border-radius: 9px !important; }
+.v35 .wl-episode .wl-mini b { font-size: 14px !important; }
+.v35 .wl-episode .wl-mini small { font-size: 12px !important; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-episode .wl-mini .dot { width: 42px !important; height: 42px !important; }
+@media (prefers-reduced-motion: reduce) { .v35 .wl-episode .wl-mini { transition: none; } }
+
+@container aw (min-width: 900px) {
+  .v35 .wl .wl-recs .rc { flex-basis: 150px; width: 150px; }
+  .v35 .wl .wl-recs .rc img { width: 150px; height: 225px; }
+  .v35 .wl-card .wn { flex-basis: 170px !important; width: 170px !important; }
+  .v35 .wl-card .wn img, .v35 .wl-card .wn.here img { width: 150px !important; height: 225px !important; }
+  .v35 .wl-episode .wl-mini { left: 50% !important; right: auto !important; width: 520px; margin-left: -260px; }
+}
+/* حلقات البطاقة الطائرة: كل البطاقات بمقاس واحد، والحالية مرفوعة قليلًا فقط (لا أكبر)، وسحب حر سلس:
+   الالتصاق الإجباري بكل بطاقة كان يشدّ الإصبع ويبدو كتعليق، والصورة 1920 للحالية كانت تثقل الشريط */
+.v35 .wl-card .wl-strip { scroll-snap-type: x proximity !important; align-items: flex-start !important; padding-top: 20px !important; padding-bottom: 22px !important; -webkit-overflow-scrolling: touch; }
+.v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex: 0 0 160px !important; scroll-snap-align: start; contain: layout; }
+.v35 .wl-card .sp.cur { transform: translateY(-14px); }
+.v35 .wl-card .sp.cur b { font-size: 12.5px !important; }
+.v35 .wl-card .sp b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .wl-card .sp p { display: none !important; }
+.v35 .wl-card .sp.cur .th { box-shadow: 0 0 0 2px var(--accent), 0 10px 22px rgba(0, 0, 0, 0.45); }
+@container aw (min-width: 900px) {
+  .v35 .wl-card .sp, .v35 .wl-card .sp.cur { flex-basis: 250px !important; }
+  .v35 .wl-card .sp.cur b { font-size: 14.5px !important; }
+}
+
+/* الكمبيوتر: بنر الأنماط بعرض الصفحة كما في رسوماتها، لا مربع 16:9 بعرض 880 في وسطها وجانباه فارغان.
+   الصورة تملؤه (cover) وارتفاعه بين 420 و640. «المحور» (الأساسي المعتمد) و«شاشة السينما» (شاشة بإطار) كما هما */
+@container aw (min-width: 900px) {
+  .v35 .aw[data-style='platform'] .aw-hero,
+  .v35 .aw[data-style='card'] .aw-hero,
+  .v35 .aw[data-style='episode'] .aw-hero { width: 100%; max-width: none; aspect-ratio: auto; height: clamp(420px, 58svh, 640px); max-height: none; margin-inline: 0; }
+}
+/* السحب بالفأرة: يد مفتوحة فوق الشريط، ومغلقة أثناء السحب، ولا يُحدَّد نص */
+@media (hover: hover) and (pointer: fine) {
+  .v35 .wl .wl-strip, .v35 .wl .wl-recs, .v35 .wl-card .wl-world { cursor: grab; }
+  .v35 .wl .dragging { cursor: grabbing; user-select: none; }
+}
+
+/* ═══ «الحلقة أولًا»: لقطة الحلقة كما هي، بلا أي ضباب ═══
+   لا نسخة مضبّبة خلف البطل ولا فلتر على أي طبقة فيه؛ بلا لقطة يبقى لون العمل (heroPlan في work-looks.js) */
+.v35 .aw[data-style='episode'] .aw-hero::before { display: none; }
+.v35 .aw[data-style='episode'] .aw-hero, .v35 .aw[data-style='episode'] .aw-bg, .v35 .aw[data-style='episode'] .aw-bg-img { filter: none !important; }
+
+/* ═══ الوظائف المشتركة في الأنماط الأربعة: موعد الحلقة القادمة، ونشاط الأصدقاء، والأنواع روابط ═══
+   نفس مصادر المحور (nextAiring وwork-insights في anime.js)؛ هنا شكلها وموضعها في كل نمط فقط */
+.v35 .wl-next { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--text-3); }
+.v35 .wl-next::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #34d399; flex: none; }
+.v35 .wl-next b { font-weight: 650; color: #86e3b6; }
+.v35 .wl-social .work-insights { margin: 0; }
+.v35 .wl-social:not(:has(.work-insights-line)) { display: none; }
+.v35 .wl-genres .wl-genre { color: inherit; font-size: inherit; }
+.v35 .wl-genres .wl-genre:hover { color: var(--text-1); }
+.v35 .wl-desc { cursor: pointer; }
+.v35 .wl-desc.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.v35 .wl-facts b { text-align: end; min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
+/* المنصة: على الجوال تحت اللوحة (الغلاف والمعلومات)، وعلى الكمبيوتر في العمود الثابت تحت التقدّم */
+.v35 .wl-platform .wl-aside > .wl-next, .v35 .wl-platform .wl-aside > .wl-social { margin: 14px var(--wl-g) 0; }
+/* البطاقة الطائرة: تحت زر المشاهدة */
+.v35 .wl-card .wl-info .wl-next { justify-content: center; }
+.v35 .wl-card .wl-info .wl-social .work-insights-line { justify-content: center; }
+.v35 .wl-card .wl-body > .wl-sec:not(.wl-full) { padding-inline: var(--wl-g); }
+/* شاشة السينما: الموعد مع المعلومات، والأصدقاء أول الجسم */
+.v35 .wl-screen .wl-mid .wl-next { margin-top: 2px; }
+/* الحلقة أولًا: الموعد تحت التشغيل، والأصدقاء بعد القصة (الجوال: نفس ترتيب العمود) */
+.v35 .wl-episode .wl-now .wl-next { margin-top: 2px; }
+.v35 .wl-episode .wl-social { order: 1; }
+@container aw (min-width: 900px) {
+  .v35 .wl-next { font-size: 14px; }
+  .v35 .wl-social .work-insights { font-size: 14px; }
+  .v35 .wl-platform .wl-aside > .wl-next, .v35 .wl-platform .wl-aside > .wl-social { margin: 0; }
+  .v35 .wl-card .wl-info .wl-next { justify-content: flex-start; }
+  .v35 .wl-card .wl-info .wl-social .work-insights-line { justify-content: flex-start; }
+  .v35 .wl-card .wl-body > .wl-sec:not(.wl-full) { padding-inline: 90px; }
+  .v35 .wl-card .wl-s-facts .wl-facts, .v35 .wl-screen .wl-s-facts .wl-facts { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 40px; font-size: 14px; }
+  .v35 .wl-card .wl-s-facts .wl-facts div, .v35 .wl-screen .wl-s-facts .wl-facts div { flex-direction: column; justify-content: flex-start; gap: 4px; }
+  .v35 .wl-card .wl-s-facts .wl-facts b, .v35 .wl-screen .wl-s-facts .wl-facts b { text-align: start; }
+}
+
+/* ═══ «المحور» على الكمبيوتر والويب (الحاوية ≥900px) ═══
+ * الجوال كما اعتمده المالك ولا يُمس. هنا: البنر بعرض الصفحة يملؤها بقصّ cover من منتصفه الأعلى (لا تشويه
+ * ولا جانبان فارغان)، والهوية نفسها (الغلاف في النص والشعار تحته)، ثم صف عريض: لقطة الحلقة بالتشغيل
+ * وبجانبها كل ما يخص العمل (الموعد، تقدّمي، القصة، الأصدقاء، معلومات)، ثم الحلقات بعمودين بعرض المحتوى. */
+@container aw (min-width: 900px) {
+  .v35 .aw[data-style='core'] .aw-hero { width: 100%; max-width: none; aspect-ratio: auto; height: clamp(380px, 54svh, 640px); min-height: 0; max-height: none; margin-inline: 0; }
+  .v35 .aw[data-style='core'] .aw-bg-img:not(.aw-bg-img--poster) { object-position: center 20%; }
+  .v35 .aw[data-style='core'] .aw-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+    /* الرأس أربعة صفوف، ثم صفوف العمود الجانبي، وآخرها مرن يأخذ ما تزيده اللقطة فلا تتباعد المعلومات */
+    grid-template-rows: auto auto auto auto auto auto auto auto auto 1fr;
+    grid-auto-flow: row dense;
+    column-gap: 48px;
+    padding: 0 max(56px, calc((100% - 1280px) / 2)) 24px;
+  }
+  .v35 .aw[data-style='core'] .aw-main > .aw-stage,
+  .v35 .aw[data-style='core'] .aw-main > .aw-body,
+  .v35 .aw[data-style='core'] .aw-main .aw-below { display: contents; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cover,
+  .v35 .aw[data-style='core'] .aw-main .an-mark,
+  .v35 .aw[data-style='core'] .aw-main .aw-meta,
+  .v35 .aw[data-style='core'] .aw-main .aw-genres { grid-column: 1 / -1; justify-self: center; position: relative; z-index: 2; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cover { grid-row: 1; margin-top: calc(var(--cover-w) * -0.92); }
+  .v35 .aw[data-style='core'] .aw-main .an-mark { grid-row: 2; }
+  .v35 .aw[data-style='core'] .aw-main .aw-meta { grid-row: 3; margin-top: 10px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-genres { grid-row: 4; margin-top: 6px; }
+  .v35 .aw[data-style='core'].no-cover .aw-main .an-mark { margin-top: -64px; }
+  /* لقطة الحلقة: العمود الأوسع، بنسبة 16:9 بلا سقف ارتفاع يقلّص عرضها */
+  .v35 .aw[data-style='core'] .aw-main .aw-still { grid-column: 1; grid-row: 5 / span 6; align-self: start; width: 100%; max-width: none; max-height: none; margin-top: 34px; }
+  /* العمود الجانبي: ما يخص العمل بدل فراغ أسود حول اللقطة */
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-side, .aw-cta, .aw-about, .work-insights, .aw-info) { grid-column: 2; text-align: start; justify-self: stretch; width: auto; max-width: none; margin: 0; padding: 0; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side { margin-top: 34px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side .aw-next { justify-content: flex-start; font-size: 14px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-cta { margin-top: 34px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-side:not([hidden]) ~ .aw-cta { margin-top: 14px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-about { margin-top: 18px; }
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis { font-size: 15px; line-height: 1.8; }
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis.clamped { -webkit-line-clamp: 5; }
+  .v35 .aw[data-style='core'] .aw-main .work-insights { margin-top: 16px; font-size: 13.5px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-info { margin-top: 26px; padding: 18px 0 0; border-top: 1px solid var(--line); }
+  .v35 .aw[data-style='core'] .aw-main .aw-info h2 { font-size: 17px; }
+  .v35 .aw[data-style='core'] .aw-main .aw-info dl { font-size: 13.5px; }
+  /* الحلقات وما بعدها بعرض المحتوى كاملًا */
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-episodes, .aw-cast, .an-rail) { grid-column: 1 / -1; min-width: 0; }
+  .v35 .aw[data-style='core'] .aw-main .aw-episodes { margin-top: 48px; max-width: none; }
+  .v35 .aw[data-style='core'] .aw-main .an-er-list { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+  .v35 .aw[data-style='core'] .aw-main .an-er-main { grid-template-columns: 176px minmax(0, 1fr); }
+  .v35 .aw[data-style='core'] .aw-main :is(.aw-cast, .an-rail) { margin-inline: calc(var(--gutter) * -1); }
+}
+
+/* A transparent, compositor-driven logo corridor behind the original floating cover.
+   The controller measures the fixed title boundary and keeps one active-distance clock. */
+.v35 .wl-card .wl-logo-layer { position: absolute; z-index: 0; inset-inline: 0; top: var(--wl-logo-band-top); height: clamp(40px, 12vw, 56px); overflow: hidden; pointer-events: none; isolation: isolate; opacity: .45; mask-image: linear-gradient(to right, transparent var(--wl-logo-fade-start, 0px), #000 var(--wl-logo-fade-end, 48px), #000 var(--wl-logo-fade-out-start, calc(100% - 24px)), transparent var(--wl-logo-fade-out-end, 100%)); }
+.v35 .wl-card .wl-logo-layer[hidden] { display: none; }
+.v35 .wl-card .wl-logo-layer:not([data-ready='true']) { visibility: hidden; }
+.v35 .wl-card .wl-logo-entry { position: absolute; inset: 0; direction: ltr; }
+.v35 .wl-card .wl-logo-train { display: flex; align-items: center; width: max-content; height: 100%; transform: translate3d(100vw, 0, 0); will-change: transform; }
+.v35 .wl-card .wl-logo-group { display: flex; align-items: center; flex: 0 0 var(--wl-logo-period); width: var(--wl-logo-period); height: 100%; gap: var(--wl-logo-gap); padding-right: var(--wl-logo-gap); box-sizing: border-box; }
+.v35 .wl-card .wl-logo-group img { flex: 0 0 var(--wl-logo-width); width: var(--wl-logo-width); max-width: none; height: 86%; object-fit: contain; filter: none; }
+.v35 .wl-card .wl-info { position: relative; z-index: 1; }
+.v35 .wl-card .wl-big:active { background: var(--accent-press) !important; }
+.v35 .wl-card .wl-big:active .dot { color: var(--accent-press); }
+.v35 .wl-card .wl-big:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 4px; }
+.v35 .aw > .an-sources { margin: 28px var(--wl-g, 16px); max-width: calc(100% - 32px); }
+.v35 .an-sources[hidden], .v35 .ss-diagnostics[hidden] { display: none; }
+.v35 .ss-diagnostics { padding: 24px 16px; border-top: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  .v35 .wl-card .wl-logo-train { transform: none !important; will-change: auto; }
+}
+@container aw (min-width: 900px) {
+  .v35 .wl-card .wl-head { --wl-logo-band-top: 210px; }
+}
+
+/* ═════════════════ رئيسية الأنمي: التصميم المعتمد (2026-11) ═════════════════
+ * قيم النموذج المعتمد كما هي (anime-today.js). البنر 16:9 بنسبة صورته، يمتد تحت الهيدر الشفاف.
+ * الهرمية بالمسافة والمحاذاة، بلا حاويات حول «تابع المشاهدة» وجدول البث. */
+
+.v35[data-section='anime'] #home > .header { position: relative; z-index: 4; }
+.v35 #animeHome .ah-hero {
+  position: relative;
+  margin-top: calc(-1 * (var(--top-h) + var(--safe-top)));
+}
+.v35 .ah-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--bg);
+}
+.v35 .ah-art-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* معتمة: ما تحتها (البنر السابق) لا يظهر من خلالها أثناء ظهورها */
+  background: var(--bg);
+  opacity: 0;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.v35 .ah-art-layer.in { opacity: 1; }
+.v35 .ah-art-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .ah-art-amb { position: absolute; left: 0; top: 0; width: 10%; height: 10%; object-fit: cover; transform-origin: 0 0; transform: scale(10); filter: blur(3px) saturate(1.3) brightness(0.7); }
+.v35 .ah-art-poster {
+  position: absolute;
+  inset-inline-end: var(--gutter);
+  top: calc(var(--top-h) + var(--safe-top) + 2px);
+  width: 100px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.6);
+  outline: 1px solid rgba(255, 255, 255, 0.12);
+  outline-offset: -1px;
+}
+.v35 .ah-art-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgba(8, 7, 12, 0.85), rgba(8, 7, 12, 0.35) 18%, transparent 34%),
+    linear-gradient(to top, var(--bg), transparent 46%);
+}
+.v35 .ah-body {
+  position: relative;
+  z-index: 3;
+  margin-top: -34px;
+  padding: 0 var(--gutter);
+  transition: opacity 0.13s ease-out;
+}
+.v35 .ah-body.swapping { opacity: 0; }
+.v35 .ah-body:not(.swapping) { transition-duration: 0.18s; }
+/* المعلومات تدخل بهدوء بعد الصورة: الشعار ثم السطر ثم الزر، شفافية مع صعود 6px (داخل البنر فقط) */
+.v35 .ah-body:not(.swapping) > * { animation: ah-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.v35 .ah-body:not(.swapping) > :nth-child(2) { animation-delay: 0.05s; }
+.v35 .ah-body:not(.swapping) > :nth-child(3) { animation-delay: 0.09s; }
+@keyframes ah-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .v35 .ah-body > * { animation: none !important; } }
+html[data-motion='off'] .v35 .ah-body > * { animation: none !important; }
+/* أبعاد ثابتة: الشعار أو الاسم في صندوق محجوز، والمعلومات سطر واحد، والزر في مكانه. اختلاف العمل لا يحرك
+ * شيئًا ولا يغيّر ارتفاع البنر. */
+.v35 .ah-mark { height: 72px; display: flex; align-items: flex-end; max-width: 78%; }
+.v35 .ah-mark .ah-logo { max-height: 72px; max-width: 100%; }
+.v35 .ah-mark .ah-name { max-width: 100%; }
+.v35 .ah-name--long { font-size: 17px; line-height: 1.3; }
+.v35 .ah-meta { flex-wrap: nowrap; height: 20px; overflow: hidden; white-space: nowrap; }
+.v35 .ah-meta > span { flex: none; }
+.v35 .ah-meta > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* الغلاف المختار ينتظر صورته: حلقة تنبض بهدوء، والبنر الحالي ثابت حتى يجهز الجديد */
+.v35 .ah-cover.sel.loading .ah-cover-img { animation: ah-wait 0.9s ease-in-out infinite alternate; }
+@keyframes ah-wait { to { outline-color: transparent; } }
+.v35 .ah-logo {
+  display: block;
+  max-width: 58%;
+  max-height: 72px;
+  object-fit: contain;
+  object-position: right bottom;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.55));
+}
+.v35 .ah-name {
+  margin: 0;
+  max-width: 80%;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.25;
+  unicode-bidi: plaintext;
+  text-align: start;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v35 .ah-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.v35 .ah-st { color: var(--accent-text); font-weight: 700; }
+.v35 .ah-st--aired { color: var(--text-2); font-weight: 600; }
+.v35 .ah-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 21px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.v35 .ah-act .icon { width: 15px; height: 15px; }
+.v35 .ah-act--quiet { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+/* التشكيلة: الأبعد أولًا ← الآن ← نزلت */
+.v35 .ah-lineup {
+  display: flex;
+  gap: 12px;
+  padding: 22px var(--gutter) 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.v35 .ah-lineup::-webkit-scrollbar { display: none; }
+.v35 .ah-cover {
+  flex: 0 0 84px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .ah-cover-img {
+  display: block;
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  outline: 1px solid rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
+}
+.v35 .ah-cover-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .ah-cover.sel .ah-cover-img { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v35 .ah-cover--aired .ah-cover-img img { filter: brightness(0.6) saturate(0.7); }
+.v35 .ah-tag {
+  position: absolute;
+  bottom: 7px;
+  left: 7px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: rgba(8, 7, 12, 0.7);
+  font-size: 10.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+}
+.v35 .ah-cover > b { display: block; margin-top: 9px; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.v35 .ah-cover--aired > b { color: var(--text-2); }
+.v35 .ah-cover-st { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.v35 .ah-cover--soon .ah-cover-st,
+.v35 .ah-cover--now .ah-cover-st { color: var(--accent-text); font-weight: 700; }
+.v35 .ah-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* تابع المشاهدة: بلا حاوية، والغلاف شارة مقطوعة في حدّ الصورة */
+.v35 .ah-cw-rail .an-strip { gap: 14px; }
+.v35 .ah-cw { flex: 0 0 74%; min-width: 0; cursor: pointer; }
+.v35 .ah-cw-img {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  overflow: hidden;
+  outline: 1px solid rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
+  background: var(--surface-2);
+}
+.v35 .ah-cw-img > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.v35 .ah-cw-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(8, 7, 12, 0.45);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+/* المثلث يُرى في الوسط حين يُزاح نحو رأسه قليلًا */
+.v35 .ah-cw-play .icon { width: 18px; height: 18px; transform: translateX(1.5px); }
+.v35 .ah-cw-bar { height: 3px; margin-top: 8px; margin-inline-start: 64px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.v35 .ah-cw-bar > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.v35 .ah-cw-row { display: flex; gap: 12px; margin-top: -11px; }
+.v35 .ah-cw-poster {
+  position: relative;
+  flex: 0 0 52px;
+  width: 52px;
+  aspect-ratio: 2 / 3;
+  margin-top: -36px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 3px var(--bg), 0 8px 16px rgba(0, 0, 0, 0.5);
+}
+.v35 .ah-cw-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .ah-cw-info { min-width: 0; flex: 1; padding-top: 16px; }
+.v35 .ah-cw-name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.v35 .ah-cw-name > b { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; text-align: start; }
+.v35 .ah-cw-name .cw-more { flex: none; }
+.v35 .ah-cw-meta { display: block; font-size: 12px; color: var(--text-3); }
+
+/* جدول البث: بلا حاويات، الهرمية بالمسافة والمحاذاة */
+.v35 .ah-days { display: flex; gap: 22px; overflow-x: auto; scrollbar-width: none; padding: 4px var(--gutter) 0; margin-bottom: 22px; }
+.v35 .ah-days::-webkit-scrollbar { display: none; }
+.v35 .ah-day {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 8px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+}
+.v35 .ah-day > b { font-size: 14px; font-weight: 700; }
+.v35 .ah-day > small { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.v35 .ah-day.on > b { color: var(--text-1); }
+.v35 .ah-day.on > small { color: var(--text-2); }
+.v35 .ah-day.on::after { content: ''; position: absolute; inset: auto 0 0 0; height: 2.5px; border-radius: 2px; background: var(--accent); }
+.v35 .ah-list { display: grid; gap: 22px; padding: 0 var(--gutter); }
+.v35 .ah-row {
+  display: grid;
+  grid-template-columns: 50px 128px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .ah-row-tm { padding-top: 2px; text-align: center; }
+.v35 .ah-row-tm > b { display: block; font-size: 16px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.v35 .ah-row-tm > small { font-size: 11px; color: var(--text-3); }
+.v35 .ah-row-th { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px; background: var(--surface-2); }
+.v35 .ah-row-th > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.v35 .ah-row-tx { min-width: 0; display: block; }
+.v35 .ah-row-tx > b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; font-weight: 700; line-height: 1.4; unicode-bidi: plaintext; text-align: start; }
+.v35 .ah-row-tx > small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.v35 .ah-row-tx > em { display: block; margin-top: 4px; font-style: normal; font-size: 12px; color: var(--text-3); }
+.v35 .ah-row--soon .ah-row-tx > em,
+.v35 .ah-row--now .ah-row-tx > em { color: var(--accent-text); font-weight: 700; }
+.v35 .ah-row--aired .ah-row-tm > b { color: var(--text-2); }
+.v35 .ah-row--aired .ah-row-th > img { filter: brightness(0.8); }
+.v35 .ah-more {
+  display: inline-flex;
+  align-items: center;
+  margin: 20px var(--gutter) 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.v35 .ah-more::after { content: ''; width: 7px; height: 7px; border-left: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(45deg); margin-inline-start: 8px; }
+.v35 .ah-more[hidden] { display: none; }
+
+/* الآيباد والكمبيوتر: البطاقة بمقاس ثابت ناضج، والبنر بكامل العرض وارتفاع محدود */
+@media (min-width: 700px) {
+  .v35 .ah-art { aspect-ratio: auto; height: min(56.25vw, 62vh); }
+  .v35 .ah-body { margin-top: -56px; padding: 0 32px; }
+  .v35 .ah-logo { max-height: 96px; max-width: 44%; }
+  .v35 .ah-mark { height: 96px; max-width: 60%; }
+  .v35 .ah-mark .ah-logo { max-height: 96px; }
+  .v35 .ah-art-poster { width: 150px; top: auto; bottom: 70px; }
+  .v35 .ah-lineup { gap: 16px; padding-inline: 32px; }
+  .v35 .ah-cover { flex-basis: 112px; }
+  .v35 .ah-cw { flex-basis: 400px; }
+  .v35 .ah-list { grid-template-columns: 1fr 1fr; gap: 26px 40px; padding: 0 32px; }
+  .v35 .ah-row { grid-template-columns: 54px 150px minmax(0, 1fr); }
+  .v35 .ah-days { padding-inline: 32px; }
+  .v35 .ah-more { margin-inline: 32px; }
+}
+@media (min-width: 1100px) {
+  .v35 .ah-art { height: min(56.25vw, 70vh); }
+  .v35 .ah-art-shade {
+    background:
+      linear-gradient(to bottom, rgba(8, 7, 12, 0.85), rgba(8, 7, 12, 0.35) 18%, transparent 34%),
+      linear-gradient(to top, var(--bg), transparent 65%),
+      linear-gradient(to left, rgba(8, 7, 12, 0.85), transparent 55%);
+  }
+  .v35 .ah-body { position: absolute; inset: auto 0 0 auto; margin: 0; padding: 0 56px 40px; max-width: 640px; }
+  .v35 .ah-stage { position: relative; }
+  .v35 .ah-logo { max-height: 120px; max-width: 420px; }
+  .v35 .ah-mark { height: 120px; max-width: 520px; }
+  .v35 .ah-mark .ah-logo { max-height: 120px; }
+  .v35 .ah-name { font-size: 34px; }
+  .v35 .ah-meta { font-size: 15px; }
+  .v35 .ah-art-poster { width: 190px; bottom: 90px; }
+  .v35 .ah-lineup { padding-inline: 56px; }
+  .v35 .ah-cover { flex-basis: 124px; }
+  .v35 .ah-cw { flex-basis: 460px; }
+  .v35 .ah-list { grid-template-columns: repeat(3, 1fr); padding: 0 56px; }
+  .v35 .ah-row { grid-template-columns: 54px 140px minmax(0, 1fr); }
+  .v35 .ah-days { padding-inline: 56px; }
+  .v35 .ah-more { margin-inline: 56px; }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .v35 .ah-cover-img, .v35 .ah-cw-img, .v35 .ah-row-th { transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1); }
+  .v35 .ah-cover:hover .ah-cover-img,
+  .v35 .ah-cw:hover .ah-cw-img,
+  .v35 .ah-row:hover .ah-row-th { transform: translateY(-6px); box-shadow: 0 18px 32px -14px rgba(0, 0, 0, 0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .ah-art-layer, .v35 .ah-body { transition: none; }
+}
+html[data-motion='off'] .v35 .ah-art-layer,
+html[data-motion='off'] .v35 .ah-body,
+html[data-motion='off'] .v35 .ah-cover-img,
+html[data-motion='off'] .v35 .ah-cw-img,
+html[data-motion='off'] .v35 .ah-row-th { transition: none !important; }
+/* هيدر الكمبيوتر (wide.css ≥1024) أطول: 76px، فالبنر يبدأ من أعلى الشاشة تحته أيضًا */
+@media (min-width: 1024px) {
+  .v35 #animeHome .ah-hero { margin-top: calc(-76px - var(--safe-top)); }
+}
+/* التصنيفات في الرئيسية كما في النموذج: شبكة 2×2 (أربعة في صف على الشاشات الأكبر)، صورة النوع كاملة
+ * وتدرج داكن من جهة الاسم. بقية الأنواع تحت «الكل» (صفحة الاكتشاف). */
+.v35 #animeHome .an-genres .ag-strip {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: 84px;
+  grid-auto-columns: auto;
+  overflow: visible;
+}
+.v35 #animeHome .an-genres .ag-strip > :nth-child(n + 5) { display: none; }
+.v35 #animeHome .an-genres .ag-card { border-radius: 14px; background: var(--surface-1); color: #fff; }
+.v35 #animeHome .an-genres .ag-face { inset: 0; width: 100%; -webkit-mask-image: none; mask-image: none; }
+.v35 #animeHome .an-genres .ag-face img { object-position: center 25%; filter: none; }
+.v35 #animeHome .an-genres .ag-face::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to left, rgba(8, 7, 12, 0.92) 30%, rgba(8, 7, 12, 0.35)); }
+.v35 #animeHome .an-genres .ag-name { font-size: 16px; font-weight: 800; }
+@media (min-width: 700px) {
+  .v35 #animeHome .an-genres .ag-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 110px; gap: 14px; padding-inline: 32px; }
+}
+@media (min-width: 1100px) {
+  .v35 #animeHome .an-genres .ag-strip { padding-inline: 56px; }
+}
+
+/* زر «شوهدت» الجانبي في الأنماط الأربعة: على زاوية لقطة الحلقة، بنفس منطق زر المحور.
+   لم تُشاهد: حلقة رفيعة على زجاج داكن؛ شوهدت: ✓ على لون القسم. لا يغيّر مقاس الصف */
+.v35 .wl .er,
+.v35 .wl .sp {
+  position: relative;
+}
+.v35 .wl-seen {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(8, 8, 12, 0.58);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.v35 .wl-seen::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.v35 .wl-seen:active {
+  transform: scale(0.9);
+}
+.v35 .wl-seen[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.v35 .wl-seen:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.v35 .wl-seen-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+.v35 .wl-platform .er .wl-seen {
+  top: 12px;
+  inset-inline-start: 12px;
+}
+.v35 .wl-screen .er .wl-seen {
+  top: 14px;
+}
+
+/* ورقة «علّم حلقات» (episode-marks.js): أوضاع التحديد شرائح، ومعاينة ما سيُعلَّم */
+.v35 .em-modes,
+.v35 .em-seasons {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 4px 0 14px;
+}
+.v35 .em-seasons {
+  margin-bottom: 10px;
+}
+.v35 .em-mode,
+.v35 .em-season {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.v35 .em-mode[aria-selected='true'],
+.v35 .em-season[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.v35 .em-fields.single {
+  grid-template-columns: 1fr;
+}
+.v35 .em-preview,
+.v35 .em-result {
+  margin: 8px 0 0;
+  min-height: 1.5em;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.v35 .em-result {
+  color: var(--accent-text);
+}
+
+/* بنر «اليوم» قبل أن يُحسم: هيكل بمقاس البنر والمعلومات نفسها (لا أسود فارغ ولا إزاحة حين يصل).
+   البريق transform فقط على طبقة داخلية، ويتوقف مع تقليل الحركة */
+.v35 .ah-art--wait::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, var(--surface-1) 0%, color-mix(in srgb, var(--surface-1) 55%, var(--bg)) 100%);
+}
+.v35 .ah-art--wait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* نبض شفافية فقط: بريق منزلق (transform) كان يُحسب إزاحة تخطيط في Chrome */
+  background: radial-gradient(80% 70% at 50% 40%, rgba(255, 255, 255, 0.06), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@keyframes ah-glow { from { opacity: 0.25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .v35 .ah-art--wait::after { animation: none; } }
+html[data-motion='off'] .v35 .ah-art--wait::after { animation: none; }
+.v35 .ah-skel-logo { display: block; width: min(62%, 260px); height: 46px; border-radius: 10px; }
+.v35 .ah-skel-line { display: block; width: min(70%, 300px); height: 12px; margin-top: 4px; border-radius: 6px; }
+.v35 .ah-act--skel { width: 156px; background: var(--surface-1); pointer-events: none; }
+/* المحفوظ يظهر في أول إطار: بلا انتقال */
+.v35 .ah-art-layer--now { transition: none; }
+
+/* ثبات التحميل في الأنماط: صندوق الشعار بارتفاعه الأقصى، وسطرا المعلومات والأنواع محجوزان قبل وصول التفاصيل */
+.v35 .wl-mark { display: flex; align-items: flex-end; height: 70px; min-width: 0; }
+.v35 .wl-mark > .wl-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .wl-meta { min-height: 20px; }
+.v35 .wl-genres { min-height: 18px; }
+.v35 .wl-card .wl-info .wl-mark { height: 72px; justify-content: center; }
+.v35 .wl-screen .wl-mid .wl-mark { height: 56px; }
+.v35 .wl-screen .wl-mid .wl-name { font-size: 22px; }
+.v35 .wl-episode .wl-series .wl-mark { height: 46px; }
+.v35 .aw-stage .aw-genres { min-height: 23px; }
+@media (min-width: 900px) {
+  .v35 .wl-mark { height: 100px; }
+  .v35 .wl-card .wl-info .wl-mark { height: 110px; justify-content: flex-start; }
+  .v35 .wl-screen .wl-mid .wl-mark { height: 84px; }
+  .v35 .wl-episode .wl-series .wl-mark { height: 44px; }
+  .v35 .wl-meta { min-height: 25px; }
+  .v35 .wl-genres { min-height: 22px; }
+}
+/* «الحلقة أولًا»: سطرا قصة الحلقة محجوزان (تصل بعد الفن) */
+.v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.6em); }
+@media (min-width: 900px) { .v35 .wl-episode .wl-now .wl-now-over { min-height: calc(2 * 1.7em); } }
+/* بطل صفحة العمل قبل حسم صورته: هيكل بمقاس البنر (نبض شفافية فقط، لا إزاحة) */
+.v35 .aw-hero.aw-wait .aw-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 80% at 50% 35%, rgba(255, 255, 255, 0.07), transparent 70%);
+  animation: ah-glow 1.4s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) { .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; } }
+html[data-motion='off'] .v35 .aw-hero.aw-wait .aw-bg::before { animation: none; }
+/* القصة: ثلاثة أسطر محجوزة دائمًا وسطر «المزيد» تحتها (الهيكل بنفس المقاس) */
+.v35 .aw-about .an-synopsis.clamped { min-height: 5.1em; }
+.v35 .aw-about .aw-link { min-height: 26px; }
+.v35 .aw-about .aw-link--idle { visibility: hidden; pointer-events: none; }
+.v35 .aw-link-space { display: block; height: 26px; margin-top: 2px; }
+@media (min-width: 900px) {
+  .v35 .aw[data-style='core'] .aw-main .an-synopsis.clamped { min-height: 9em; }
+  .v35 .aw[data-style='core'] .aw-main .an-skel-text { height: 9em; font-size: 15px; background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.8em); }
+}
+.v35 .wl-desc--wait {
+  min-height: calc(3 * 1.75em);
+  background: repeating-linear-gradient(to bottom, var(--surface-1) 0 1em, transparent 1em 1.75em);
+  border-radius: 4px;
+  animation: an-pulse 1.6s ease-in-out infinite;
+}
+@media (min-width: 900px) { .v35 .wl-desc--wait { min-height: calc(4 * 1.85em); } }

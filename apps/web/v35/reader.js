@@ -18,8 +18,10 @@ import { nativeFollowTime, setReaderTime, flushFollowTime, listenFollowForegroun
  */
 
 import { glyph, iconButton } from './icons.js';
+import { applyAppearance } from './appearance.js';
+import { readStructure } from './experience.js';
 import { countLabel } from './plural.js';
-import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, shouldAutoMark } from './reading.js';
+import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, sameChapterKey, shouldAutoMark } from './reading.js';
 import { editionRows, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
@@ -40,8 +42,11 @@ import { openShareSheet } from './share.js';
 import { readerBridge } from './together.js';
 import { createFollower } from '../lib/together/follow.js';
 import { readingPosition, readingTop } from './reader-scroll.js';
+import { clampPan, clampSides, isDoubleTap, zoomAround } from './reader-zoom.js';
 import { createReaderTranslation } from './reader-translate.js';
 import { createTapRecognizer } from './tap-gesture.js';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { createStallRecorder } from './reader-stalls.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -83,8 +88,9 @@ function sharedPages(engine, row) {
       return list;
     });
     promise.catch(() => pageLists.delete(id));
-    remember(pageLists, id, promise, MAX_CACHED_LISTS);
   }
+  // LRU لا FIFO (#311 H-001): إعادة الاستعمال تنقل الفصل لآخر الترتيب، فالمقروء باستمرار لا يُطرد أولًا
+  remember(pageLists, id, promise, MAX_CACHED_LISTS);
   return promise;
 }
 
@@ -134,6 +140,9 @@ export function openSmartReader(deps, ctx) {
     coverUrl: ctx.work?.coverImage?.large ?? ctx.row?.manga?.thumbnailUrl ?? null };
 
   const root = el('div', 'v35 rd');
+  // القارئ جذر .v35 جديد: قاعدة .v35 في core.css تعطيه البنفسجي مباشرة فلا يرث اللون المختار. يلبس لون الواجهة
+  // نفسه: لون المانجا المختار (أو البنفسجي الأساسي)، ومع توحيد المحتوى لون الموحد (ملاحظة المالك، 9 نوفمبر)
+  try { applyAppearance(readStructure().unifyContent ? 'unified' : 'manga', [root]); } catch { /* اللون تحسين لا شرط */ }
   root.setAttribute('role', 'application');
   root.setAttribute('aria-label', 'القارئ');
   root.innerHTML = `
@@ -143,6 +152,7 @@ export function openSmartReader(deps, ctx) {
       <button class="rd-titles rd-titles--chapters" type="button" data-act="chapters" aria-label="الفصول" aria-haspopup="dialog"><strong id="rdWork" dir="auto"></strong><span id="rdChapter" dir="auto"></span></button>
       <span class="rd-together" id="rdTogether" hidden></span>
       <button class="rd-tl-btn" type="button" data-act="translate" id="rdTlBtn" hidden aria-pressed="false">${glyph('translateAr', { size: 20 })}<span>ترجمة</span></button>
+      <button class="rd-tl-btn" type="button" data-act="stalls" id="rdStalls" hidden><span>وقفات 0</span></button>
       ${iconButton('camera', 'فريم', { act: 'frame', cls: 'icon-btn rd-camera' })}
       ${iconButton('more', 'خيارات', { act: 'menu' })}
     </header>
@@ -153,7 +163,7 @@ export function openSmartReader(deps, ctx) {
     </header>
     <footer class="rd-bottom" id="rdBottom">
       ${iconButton('skipPrev', 'الفصل السابق', { act: 'prevChapter', cls: 'icon-btn rd-prev' })}
-      <div class="rd-progress"><span id="rdPageLabel"></span><div class="progress-bar"><i id="rdProgress"></i></div></div>
+      <div class="rd-progress"><span id="rdPageLabel"></span><div class="progress-bar rd-scrub" id="rdScrub" role="slider" aria-label="الصفحة" tabindex="0"><i id="rdProgress"></i><b class="rd-knob" id="rdKnob"><em id="rdKnobLabel"></em></b></div></div>
       ${iconButton('skipNext', 'الفصل التالي', { act: 'nextChapter', cls: 'icon-btn rd-next' })}
     </footer>
     <div class="rd-tray" id="rdTray" hidden><div class="rd-tray-strip" id="rdTrayStrip"></div><p id="rdTrayHint">المس الصفحات لتضيفها أو تشيلها</p></div>
@@ -162,6 +172,9 @@ export function openSmartReader(deps, ctx) {
     <div class="toast rd-toast" id="rdToast" role="status" aria-live="polite"></div>`;
   deps.mount(root);
   const q = (id) => root.querySelector(`#${id}`);
+  let scrubbing = false;
+  let scrubQuietUntil = 0;
+  queueMicrotask(() => bindScrub());
   const scroll = q('rdScroll');
 
   // ───────────────────────── Together: القراءة مع الأصدقاء ─────────────────────────
@@ -173,6 +186,8 @@ export function openSmartReader(deps, ctx) {
   let followAnchor = null;
   let pendingFollow = null;
   let loadingChapter = null;
+  /** مسجّل الوقفات (reader-stalls.js): Debug مع «إظهار التشخيص» فقط، وإلا null. */
+  let stallRecorder = null;
   let scrollReportFrame = 0;
   let scrollReportTimer = null;
   let lastScrollReport = -Infinity;
@@ -441,7 +456,8 @@ export function openSmartReader(deps, ctx) {
     if (local && local.sourceId === row.sourceId && local.pages === pageCount) {
       return local.ratio >= 0.98 ? 0 : Math.min(pageCount - 1, Math.max(0, Math.floor(local.page)));
     }
-    const saved = sync.rows('progress', (r) => r.user_id === me() && r.chapter_key === key)[0];
+    // والمفتاح القديم للفصل العشري (ذيل Float قبل #323 U-28)
+    const saved = sync.rows('progress', (r) => r.user_id === me() && sameChapterKey(r.chapter_key, key)).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
     if (!saved || (saved.ratio ?? 0) >= 0.98 || !(saved.ratio > 0)) return 0;
     return Math.min(pageCount - 1, Math.max(0, Math.floor(saved.ratio * pageCount) - 1));
   }
@@ -453,7 +469,15 @@ export function openSmartReader(deps, ctx) {
       return {};
     }
   }
+  // يُكتب الموضع حين يتغير فقط، ووقت القراءة (pageMs) كل 30 ثانية على الأكثر (#323 U-08): المؤقت كل 5 ثوانٍ
+  // كان يقرأ ويكتب الخريطة كاملة (~250 KB) لكل فصل محمّل حتى بلا حركة.
+  const POSITION_REFRESH_MS = 30_000;
   function writePosition(seg) {
+    const sig = `${seg.current}|${readRatio(seg.furthest, seg.pages.length)}|${seg.pages.length}`;
+    const now = Date.now();
+    if (seg.positionSig === sig && now - (seg.positionAt ?? 0) < POSITION_REFRESH_MS) return;
+    seg.positionSig = sig;
+    seg.positionAt = now;
     try {
       const all = readPositions();
       all[keyOf(seg.row)] = { sourceId: seg.row.sourceId, pages: seg.pages.length, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length), pageMs: seg.pageMs, at: Date.now() };
@@ -634,6 +658,7 @@ export function openSmartReader(deps, ctx) {
       flushProgress();
     }
     state.seg = seg;
+    stallRecorder?.note('chapter', `دخول ${chapterLabel(seg.row)}`);
     tickActive();
     announce(seg.row);
     tl.focus(seg, seg.current, segs);
@@ -664,6 +689,7 @@ export function openSmartReader(deps, ctx) {
         seg.next = nseg;
         segs.splice(segs.indexOf(seg) + 1, 0, nseg);
         seg.el.after(nseg.el);
+        stallRecorder?.note('append', `${chapterLabel(used)} (${pages.length} صفحة)`);
         for (const s of nseg.slots) observer?.observe(s.frame);
         const count = plan.pageList ? Math.min(pages.length, plan.images) : 0;
         for (let i = 0; i < count; i++) void loadSlot(nseg, i, PRIORITY.NEXT_CHAPTER);
@@ -744,8 +770,10 @@ export function openSmartReader(deps, ctx) {
     const row = seg.row;
     const token = state.token;
     try {
+      const asked = performance.now();
       const src = await scheduler.request(imageKey(row, index), { sourceId: row.sourceId, page: slot.page }, priority);
       if (token !== state.token) return;
+      slot.waitMs = performance.now() - asked;
       await placeImage(slot, src);
       tl.onImage(seg, index);
     } catch (error) {
@@ -757,12 +785,37 @@ export function openSmartReader(deps, ctx) {
         if (token !== state.token) return;
         return loadSlot(seg, index, PRIORITY.VISIBLE);
       }
-      // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا):
-      // نفس الفصل من مصدر ثانٍ، من نفس الصفحة، بلا أن تطلب
-      if (seg === state.seg && switchSource(seg, index)) return;
+      // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا): نفس الصفحة من مصدر ثانٍ
+      // في مكانها. كان يُعاد فتح الفصل كله من المصدر الثاني: تُحذف الفصول السابقة ويرجع التمرير للأعلى،
+      // فيبدو القارئ وكأنه «طرد» القارئ وهو ينزل للفصل التالي (بلاغ المالك).
+      if (await pageFromOtherSource(seg, index, token)) return;
+      if (token !== state.token) return;
       slot.frame.replaceChildren(pageError(seg, index, error));
       slot.frame.classList.add('rd-page--error');
     }
+  }
+  /**
+   * صفحة واحدة من مصدر آخر عنده نفس الفصل بنفس عدد الصفحات (فالرقم يعني الصفحة نفسها)، توضع في إطارها
+   * دون إعادة فتح شيء: موضعك وما فوقك وما تحتك كما هو. مصدرٌ اخترته بنفسك لا يُستبدل.
+   */
+  async function pageFromOtherSource(seg, index, token) {
+    if (ctx.sourceLocked) return false;
+    const alts = otherSources(seg.row).sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
+    for (const alt of alts) {
+      try {
+        const pages = await pagesOf(alt);
+        if (token !== state.token) return false;
+        if (pages.length !== seg.pages.length) continue;
+        const src = await scheduler.request(imageKey(alt, index), { sourceId: alt.sourceId, page: pages[index] }, PRIORITY.VISIBLE);
+        if (token !== state.token) return false;
+        await placeImage(seg.slots[index], src);
+        tl.onImage(seg, index);
+        return true;
+      } catch (error) {
+        if (error?.cancelled) return false;
+      }
+    }
+    return false;
   }
   /**
    * صفحةٌ أو فصلٌ ما يتحمّل من مصدره: ننتقل للمصدر التالي بالأولوية ممن عنده
@@ -785,6 +838,38 @@ export function openSmartReader(deps, ctx) {
     void openChapter(next, { startAt: index });
     return true;
   }
+  /**
+   * صفحة فوقك اكتمل تحميلها فكبرت من ارتفاعها المؤقت إلى الحقيقي: كروم يثبّت ما تقرؤه (scroll anchoring)،
+   * وسفاري (آيفون، والـPWA عليه) لا يفعل، فكانت الصفحة التي أمامك تنزاح (قيس: 16072 بكسل في فصل واحد).
+   * حيث لا تثبيت أصلي يعوّض القارئ الفرق بنفسه لصفحةٍ كلها فوق موضعك؛ وحيث يوجد لا يضاعفه.
+   */
+  const nativeAnchoring = globalThis.CSS?.supports?.('overflow-anchor', 'auto') ?? false;
+  // والتعويض لا يُكتب والإصبع أو الزخم يحرّك الصفحة: كتابة scrollTop أثناءهما توقف زخم سفاري وتقفز الصفحة
+  // («يمشي سلس ثم يوقف جزء من الثانية ويكمل بقفزة»). صفحة فوقك اكتملت وأنت تمرّر تبقى بمقاسها المؤقت
+  // حتى يهدأ التمرير، ثم توضع بالتعويض نفسه وأنت ثابت فلا ترى شيئًا.
+  const SCROLL_SETTLE_MS = 160;
+  let scrollMoving = false;
+  let fingerDown = false;
+  let settleTimer = null;
+  const heldAbove = [];
+  function scrollActivity() {
+    scrollMoving = true;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      scrollMoving = false;
+      if (!fingerDown) for (const held of heldAbove.splice(0)) held.resolve(holdReadingPlace(held.frame, held.change));
+    }, SCROLL_SETTLE_MS);
+  }
+  function holdReadingPlace(frame, change) {
+    if (nativeAnchoring || settings.mode === 'paged') return change();
+    const top = scroll.getBoundingClientRect().top;
+    const before = frame.getBoundingClientRect();
+    if (before.bottom > top + 1) return change(); // في الشاشة أو تحتها: لا يزيح ما تقرؤه
+    if (scrollMoving || fingerDown) return new Promise((resolve) => heldAbove.push({ frame, change, resolve }));
+    change();
+    const delta = frame.getBoundingClientRect().height - before.height;
+    if (Math.abs(delta) > 0.5) scroll.scrollTop += delta;
+  }
   /** الصورة تُفكّ قبل أن توضع: الإطار يأخذ مقاسها الحقيقي دفعةً واحدة. */
   async function placeImage(slot, src) {
     const img = new Image();
@@ -792,6 +877,7 @@ export function openSmartReader(deps, ctx) {
     img.alt = '';
     img.draggable = false;
     img.src = src;
+    const decodeFrom = performance.now();
     try {
       await img.decode();
     } catch {
@@ -802,11 +888,20 @@ export function openSmartReader(deps, ctx) {
         img.onerror = () => reject(new Error('الصورة تالفة'));
       });
     }
-    if (img.naturalWidth && img.naturalHeight) {
-      slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+    const decodeMs = performance.now() - decodeFrom;
+    await holdReadingPlace(slot.frame, () => {
+      if (img.naturalWidth && img.naturalHeight) {
+        slot.frame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+      }
+      slot.frame.classList.remove('rd-page--error');
+      slot.frame.replaceChildren(img);
+    });
+    if (stallRecorder) {
+      const index = Number(slot.frame.dataset.index);
+      const here = String(state.seg?.id) === slot.frame.dataset.seg;
+      const away = here ? index - (state.current ?? 0) : null;
+      stallRecorder.note('img', `p${index + 1} (${away === null ? 'فصل آخر' : `${away >= 0 ? '+' : ''}${away} من موضعك`}) ${img.naturalWidth}×${img.naturalHeight} انتظار ${Math.round(slot.waitMs ?? 0)}ms فكّ ${Math.round(decodeMs)}ms`);
     }
-    slot.frame.classList.remove('rd-page--error');
-    slot.frame.replaceChildren(img);
     tickActive();
     slot.loaded = true;
     reportScroll();
@@ -944,10 +1039,81 @@ export function openSmartReader(deps, ctx) {
     tl.focus(seg, index, segs);
     tgPage(seg, index);
   }
+  /** الدائرة والتعبئة داخل المسار دائمًا: مركز الدائرة من 9px إلى (العرض − 9px)، فلا تُقص عند الطرفين. */
+  function paintScrub(f) {
+    const k = Math.min(1, Math.max(0, f));
+    q('rdKnob').style.insetInlineStart = `calc((100% - 18px) * ${k.toFixed(4)})`;
+    q('rdProgress').style.width = `calc((100% - 18px) * ${k.toFixed(4)} + 9px)`;
+  }
+  const fractionOf = (i, n) => (n > 1 ? i / (n - 1) : 1);
   function updateProgress() {
     const n = state.pages.length;
-    q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
-    q('rdProgress').style.width = `${n ? ((state.current + 1) / n) * 100 : 0}%`;
+    // أثناء السحب الرقم والدائرة للإصبع؛ تمرير الصفحات تحته لا يرجعهما
+    if (!scrubbing) {
+      q('rdPageLabel').textContent = n ? `${state.current + 1} / ${n}` : '';
+      paintScrub(n ? fractionOf(state.current, n) : 0);
+    }
+    q('rdScrub').setAttribute('aria-valuenow', String(state.current + 1));
+    q('rdScrub').setAttribute('aria-valuemax', String(n));
+  }
+  /**
+   * السحب على الشريط (قرار المالك): الصفحة تتحرك مع الإصبع والرقم معها، لا قفزة واحدة عند الإفلات
+   * (كانت تُسوِّد الشاشة لحظة ثم تنقلك). صفحة واحدة لكل إطار على الأكثر، والصور تُطلب أولًا بأول.
+   */
+  function scrubIndex(e) {
+    const bar = q('rdScrub'); const r = bar.getBoundingClientRect(); const n = state.pages.length;
+    const rtl = getComputedStyle(bar).direction === 'rtl';
+    const span = Math.max(1, r.width - 18);
+    const x = rtl ? r.right - 9 - e.clientX : e.clientX - r.left - 9;
+    const f = Math.min(1, Math.max(0, x / span));
+    return { i: Math.max(0, Math.min(n - 1, Math.round(f * (n - 1)))), f, n };
+  }
+  function bindScrub() {
+    const bar = q('rdScrub');
+    let shown = -1;
+    let want = -1;
+    let frame = 0;
+    const follow = () => {
+      frame = 0;
+      if (!scrubbing || want < 0 || want === shown) return;
+      shown = want;
+      jumpTo(want, false);
+    };
+    const move = (e) => {
+      const { i, f, n } = scrubIndex(e);
+      paintScrub(f);
+      q('rdKnobLabel').textContent = n ? `${i + 1}` : '';
+      q('rdPageLabel').textContent = n ? `${i + 1} / ${n}` : '';
+      want = i;
+      if (!frame) frame = requestAnimationFrame(follow);
+      return i;
+    };
+    const stop = () => {
+      scrubbing = false; scrubQuietUntil = performance.now() + 400; root.classList.remove('rd--scrubbing');
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    };
+    bar.addEventListener('pointerdown', (e) => {
+      if (!state.pages.length) return;
+      scrubbing = true; root.classList.add('rd--scrubbing');
+      shown = state.current; want = -1;
+      bar.setPointerCapture?.(e.pointerId); move(e); e.preventDefault();
+    });
+    bar.addEventListener('pointermove', (e) => { if (scrubbing) move(e); });
+    const end = (e) => {
+      if (!scrubbing) return;
+      const i = move(e);
+      stop();
+      // الصفحة غالبًا وصلت أثناء السحب؛ الإفلات يثبّت آخر موضع فقط
+      if (i !== shown) jumpTo(i, false);
+      updateProgress();
+    };
+    bar.addEventListener('pointerup', end);
+    bar.addEventListener('pointercancel', () => { stop(); updateProgress(); });
+    bar.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: 1, ArrowRight: -1, ArrowUp: -1, ArrowDown: 1 }[e.key];
+      if (d && state.pages.length) { e.preventDefault(); jumpTo(Math.max(0, Math.min(state.pages.length - 1, state.current + d)), false); }
+    });
   }
   const activeClock = createActiveClock();
   function tickActive() {
@@ -966,7 +1132,7 @@ export function openSmartReader(deps, ctx) {
     const readMs = Object.values(seg.pageMs).reduce((sum, ms) => sum + ms, 0);
     const ratio = seg.pages.length ? Object.entries(seg.pageMs).filter(([page, ms]) => Number(page) >= 0 && Number(page) < seg.pages.length && ms >= 500).length / seg.pages.length : 0;
     // معظم الصفحات مع وقت قراءة فعلي؛ السجل له حد مستقل.
-    if (shouldAutoMark({ ratio: progressRatio, alreadyRead: seg.marked })) {
+    if (shouldAutoMark({ ratio: progressRatio, alreadyRead: seg.marked, readMs, pages: seg.pages.length })) {
       seg.marked = true;
       markChapter(sync, ref, seg.row, true);
     }
@@ -1030,12 +1196,12 @@ export function openSmartReader(deps, ctx) {
     const seg = state.seg;
     if (!seg || !seg.pages.length) return;
     writePosition(seg);
-    sync.enqueue('progress.set', {
-      chapterKey: keyOf(seg.row),
-      seriesRef: ref,
-      page: seg.current,
-      ratio: readRatio(seg.furthest, seg.pages.length),
-    });
+    // نفس الموضع لا يُرسل مرتين (#323 U-07): كان progress.set يذهب للخادم كل 5 ثوانٍ بلا تغيير
+    const progress = { chapterKey: keyOf(seg.row), seriesRef: ref, page: seg.current, ratio: readRatio(seg.furthest, seg.pages.length) };
+    const sentSig = `${progress.chapterKey}|${progress.page}|${progress.ratio}`;
+    if (seg.sentSig === sentSig) return;
+    seg.sentSig = sentSig;
+    sync.enqueue('progress.set', progress);
   }
 
   function scrollToFrame(frame, smooth = true) {
@@ -1062,11 +1228,20 @@ export function openSmartReader(deps, ctx) {
     onTap: ({ x, y, target }) => onTap({ clientX: x, clientY: y }, target?.closest?.('.rd-page') ?? null),
     onDoubleTap: ({ x, y, target }) => {
       const frame = target?.closest?.('.rd-page');
-      if (frame) openZoom(frame, x, y);
+      if (frame) openZoom(frame, x, y, 2.2); // حول موضع النقرة
     },
   });
   const pointer = (e) => ({ id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), target: e.target });
-  scroll.addEventListener('scroll', () => taps.scrolled(performance.now()), { passive: true });
+  scroll.addEventListener('scroll', () => {
+    taps.scrolled(performance.now());
+    if (!nativeAnchoring) scrollActivity();
+  }, { passive: true });
+  if (!nativeAnchoring) {
+    scroll.addEventListener('touchstart', () => { fingerDown = true; }, { passive: true });
+    const lift = (e) => { if (!e.touches?.length) { fingerDown = false; scrollActivity(); } };
+    scroll.addEventListener('touchend', lift, { passive: true });
+    scroll.addEventListener('touchcancel', lift, { passive: true });
+  }
   scroll.addEventListener('scroll', () => {
     if (!tg || !state.seg || !hub?.session?.room.isHost || scrollReportFrame || scrollReportTimer != null) return;
     const delay = Math.max(0, 80 - (performance.now() - lastScrollReport));
@@ -1107,7 +1282,9 @@ export function openSmartReader(deps, ctx) {
     'scroll',
     () => {
       const y = settings.mode === 'paged' ? scroll.scrollLeft : scroll.scrollTop;
-      // التمرير يُخفي الشريط: القراءة لا تتوقف لتغلقه
+      // التمرير يُخفي الشريط: القراءة لا تتوقف لتغلقه. إلا التمرير الذي يحدثه سحب دائرة شريط الصفحات (وما يصل
+      // منه بعد رفع الإصبع): الأدوات تبقى ظاهرة حتى ينتهي السحب (ملاحظة المالك، 10 نوفمبر)
+      if (scrubbing || performance.now() < scrubQuietUntil) { lastScrollY = y; return; }
       if (state.chrome && !state.frameMode && Math.abs(y - lastScrollY) > 24) setChrome(false);
       lastScrollY = y;
     },
@@ -1116,28 +1293,45 @@ export function openSmartReader(deps, ctx) {
 
   // ── التكبير (من الإعدادات فقط) ──
 
-  const zoom = { scale: 1, x: 0, y: 0, start: null };
-  function openZoom(frame, cx, cy) {
+  // التكبير: الصفحة تبدأ من مكانها على الشاشة بلا قفزة، وتكبر وتصغر حول موضع الإصبعين، وتتحرك معهما،
+  // والسحب بإصبع لا يُخرجها من الشاشة (reader-zoom.js). كان يكبّر الصورة حول مركزها ويبدأ من نسخة في وسط الشاشة.
+  const zoom = { scale: 1, t: { x: 0, y: 0 }, base: null, view: null, pinch: null, pan: null };
+  const layerPoint = (x, y) => { const r = q('rdZoom').getBoundingClientRect(); return { x: x - r.left, y: y - r.top }; };
+  const midOf = (t) => layerPoint((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2);
+  function openZoom(frame, cx, cy, scale = 1) {
     const img = frame.querySelector('img');
-    if (!img) return;
+    if (!img) return false;
     const z = q('rdZoom');
     const zi = q('rdZoomImg');
     zi.src = img.src;
     z.hidden = false;
-    zoom.scale = 2.2;
-    zoom.x = (window.innerWidth / 2 - cx) * (zoom.scale - 1);
-    zoom.y = (window.innerHeight / 2 - cy) * (zoom.scale - 1);
+    const layer = z.getBoundingClientRect();
+    const r = img.getBoundingClientRect();
+    zoom.base = { left: r.left - layer.left, top: r.top - layer.top, width: r.width, height: r.height };
+    zoom.view = { left: 0, top: 0, width: layer.width, height: layer.height };
+    Object.assign(zi.style, { left: `${zoom.base.left}px`, top: `${zoom.base.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    zoom.scale = 1;
+    zoom.t = { x: 0, y: 0 };
+    if (scale !== 1) {
+      const p = layerPoint(cx, cy);
+      Object.assign(zoom, zoomAround({ base: zoom.base, scale: 1, t: zoom.t, from: p, to: p, ratio: scale }));
+    }
     paintZoom();
+    return true;
   }
   function closeZoom() {
     const z = q('rdZoom');
     if (z.hidden) return false;
     z.hidden = true;
     zoom.scale = 1;
+    zoom.pinch = null;
+    zoom.pan = null;
+    zoom.tap = null;
+    zoom.lastTap = null;
     return true;
   }
   function paintZoom() {
-    q('rdZoomImg').style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`;
+    q('rdZoomImg').style.transform = `translate(${zoom.t.x}px, ${zoom.t.y}px) scale(${zoom.scale})`;
   }
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   scroll.addEventListener(
@@ -1159,15 +1353,10 @@ export function openSmartReader(deps, ctx) {
       if (!pinch || e.touches.length !== 2) return;
       const d = dist(e.touches);
       if (Math.abs(d / pinch.d - 1) < 0.12) return;
-      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      openZoom(pinch.frame, cx, cy);
+      const frame = pinch.frame;
       pinch = null;
-      zoom.scale = 1;
-      zoom.x = 0;
-      zoom.y = 0;
-      zoom.start = { d, scale: 1 };
-      paintZoom();
+      // من مكان الصفحة نفسه، والإصبعان يكملان التكبير من هنا
+      if (openZoom(frame, 0, 0)) zoom.pinch = { d, mid: midOf(e.touches) };
     },
     { passive: true },
   );
@@ -1178,29 +1367,50 @@ export function openSmartReader(deps, ctx) {
   zoomEl.addEventListener(
     'touchstart',
     (e) => {
-      if (e.touches.length === 2) zoom.start = { d: dist(e.touches), scale: zoom.scale };
-      else if (e.touches.length === 1) zoom.pan = { x: e.touches[0].clientX - zoom.x, y: e.touches[0].clientY - zoom.y };
+      if (e.touches.length === 2) { zoom.pinch = { d: dist(e.touches), mid: midOf(e.touches) }; zoom.pan = null; zoom.tap = null; }
+      else if (e.touches.length === 1) {
+        zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+        zoom.tap = { x: e.touches[0].clientX, y: e.touches[0].clientY, at: performance.now() };
+      }
     },
     { passive: true },
   );
   window.addEventListener('touchmove', onZoomMove, { passive: true });
   function onZoomMove(e) {
-    if (zoomEl.hidden) return;
-    if (e.touches.length === 2 && zoom.start) {
-      zoom.scale = Math.min(5, Math.max(1, zoom.start.scale * (dist(e.touches) / zoom.start.d)));
+    if (zoomEl.hidden || !zoom.base) return;
+    if (e.touches.length === 2 && zoom.pinch) {
+      const d = dist(e.touches);
+      const mid = midOf(e.touches);
+      Object.assign(zoom, zoomAround({ base: zoom.base, scale: zoom.scale, t: zoom.t, from: zoom.pinch.mid, to: mid, ratio: d / zoom.pinch.d }));
+      zoom.t = clampSides({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view });
+      zoom.pinch = { d, mid };
       paintZoom();
     } else if (e.touches.length === 1 && zoom.pan && zoom.scale > 1) {
-      zoom.x = e.touches[0].clientX - zoom.pan.x;
-      zoom.y = e.touches[0].clientY - zoom.pan.y;
+      if (zoom.tap && Math.hypot(e.touches[0].clientX - zoom.tap.x, e.touches[0].clientY - zoom.tap.y) > 10) zoom.tap = null;
+      const p = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+      zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: { x: zoom.t.x + p.x - zoom.pan.x, y: zoom.t.y + p.y - zoom.pan.y }, view: zoom.view });
+      zoom.pan = p;
       paintZoom();
     }
   }
   zoomEl.addEventListener('touchend', (e) => {
-    if (e.touches.length === 0) {
-      zoom.start = null;
+    if (e.touches.length === 1) {
+      // رُفع إصبع من اثنين: الباقي يسحب من حيث هو
+      zoom.pinch = null;
+      zoom.pan = layerPoint(e.touches[0].clientX, e.touches[0].clientY);
+    } else if (e.touches.length === 0) {
+      zoom.pinch = null;
       zoom.pan = null;
+      // نقرتان على الصفحة المكبّرة ترجعانك للقراءة، أيًّا كان ما كبّرها (نقرتان أو إصبعان)
+      const tap = zoom.tap && performance.now() - zoom.tap.at < 250 ? zoom.tap : null;
+      zoom.tap = null;
+      if (tap) {
+        if (isDoubleTap(zoom.lastTap, tap)) { zoom.lastTap = null; closeZoom(); return; }
+        zoom.lastTap = tap;
+      }
       // الإفلات قرب الحجم الطبيعي يرجعك للقراءة
       if (zoom.scale < 1.08) closeZoom();
+      else { zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view }); paintZoom(); }
     }
   });
   zoomEl.addEventListener('click', (e) => {
@@ -1511,17 +1721,23 @@ export function openSmartReader(deps, ctx) {
       body.append(grid);
     });
   }
+  /**
+   * العمل الحي لا لقطته عند الفتح (#323 U-27): المصادر التي تصل بعد الضغطة تدخل التجاوز التلقائي
+   * و«مصدر آخر». `ctx.getWork` من القشرة يعيد آخر نسخة من العمل نفسه.
+   */
+  const workNow = () => ctx.getWork?.() ?? ctx.work;
   /** اسم مصدر الفصل؛ صفّ القارئ الذكي الإنجليزي بلا اسم فيُؤخذ من نسخته. */
   function labelOf(row) {
-    return row.label || sourceLabel(ctx.work?._editions?.find((e) => e.sourceId === row.sourceId)) || null;
+    return row.label || sourceLabel(workNow()?._editions?.find((e) => e.sourceId === row.sourceId)) || null;
   }
   /** نسخ هذا الفصل نفسه (بالرقم) عند مصادر العمل الأخرى. */
   function otherSources(row) {
-    const editions = ctx.work?._editions ?? [];
+    const work = workNow();
+    const editions = work?._editions ?? [];
     if (!Number.isFinite(row.number) || row.number < 0) return [];
     return editions
       .filter((e) => e.sourceId !== row.sourceId)
-      .map((e) => editionRows(ctx.work, e.sourceId).find((r) => r.number === row.number))
+      .map((e) => editionRows(work, e.sourceId).find((r) => r.number === row.number))
       .filter(Boolean);
   }
   function openSourceSheet() {
@@ -1607,6 +1823,36 @@ export function openSmartReader(deps, ctx) {
     });
   }
 
+  // ───────────────────────── وقفات التمرير (Debug، «إظهار التشخيص» فقط) ─────────────────────────
+  // يقيس على جهازك ما يحدث لحظة الوقفة (reader-stalls.js). بلا التشخيص لا يُنشأ ولا يكلّف شيئًا.
+  void diagnosticsUi.initialize().then(() => {
+    if (exited || !diagnosticsUi.visible()) return;
+    stallRecorder = createStallRecorder({ scroll, page: () => ({ index: state.current ?? 0, total: state.pages?.length ?? 0 }) });
+    const badge = q('rdStalls');
+    badge.hidden = false;
+    stallRecorder.onStall((n) => { badge.querySelector('span').textContent = `وقفات ${n}`; });
+  }).catch(() => {});
+  async function openStalls() {
+    if (!stallRecorder) return;
+    // الـAPK: ما طال على الخيط الرئيسي للتطبيق (MainThreadWatch)، بساعة هذه الصفحة
+    let native = [];
+    try {
+      const { blocks = [] } = (await globalThis.Capacitor?.Plugins?.SystemUi?.mainThreadStalls?.()) ?? {};
+      const at = performance.now();
+      native = blocks.map((b) => ({ end: at - b.agoMs, start: at - b.agoMs - b.ms, ms: b.ms, what: b.what, stack: b.stack ?? [] }));
+    } catch { /* المتصفح، أو Stable: لا رصد أصلي */ }
+    const text = stallRecorder.report(native);
+    openSheet((body) => {
+      body.append(el('h3', null, 'وقفات التمرير'));
+      const pre = el('pre', 'rd-stalls-report', text);
+      pre.dir = 'rtl';
+      body.append(pre);
+      body.append(sheetItem('copy', 'انسخ التقرير', () => {
+        void navigator.clipboard?.writeText(text).then(() => toast('نُسخ التقرير'), () => toast('حدّد النص وانسخه'));
+      }));
+    });
+  }
+
   // ───────────────────────── الأفعال والرجوع ─────────────────────────
 
   const actions = {
@@ -1617,6 +1863,7 @@ export function openSmartReader(deps, ctx) {
     frameNext: () => openFrameSend(),
     menu: () => openMenu(),
     translate: () => openTranslateChoice(),
+    stalls: () => openStalls(),
     prevChapter: () => {
       const { prev } = nav();
       if (!prev) return;
@@ -1698,6 +1945,8 @@ export function openSmartReader(deps, ctx) {
   }
   function destroy() {
     if (activeTimer != null) clearInterval(activeTimer);
+    clearTimeout(settleTimer);
+    stallRecorder?.stop();
     try { stopNativeLifecycle(); } catch {}
     if (nativeTime) void setReaderTime(readingOwner, false).then(() => flushFollowTime(sync)).catch(() => {});
     state.token++; // pending chapter requests cannot paint a closed reader

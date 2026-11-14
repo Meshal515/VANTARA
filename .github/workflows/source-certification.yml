@@ -1,0 +1,175 @@
+name: VANTARA source certification (30 works per source, report only, no publish)
+
+# كل مصدر على محاكي مستقل: 10 أعمال مشهورة و10 متوسطة و10 نادرة من كتالوجه، كل سيرفر «جاهز»
+# يُفتح في المشغّل الأصلي حتى أول إطار. لا نشر ولا تغيير على Debug/Stable.
+on:
+  # الدفع على فرع العمل بعد تعديل قائمة المصادر يبدأ الاعتماد (سير جديد لا يُستدعى يدويًا قبل main)
+  push:
+    branches: [claude/supernatural-addons]
+    paths:
+      - 'tools/repository-compat/certification-sources.txt'
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'kind:name:content, comma-separated (kind = cs3 | aniyomi)'
+        required: false
+        default: ''
+      per_tier:
+        description: Works per popularity tier
+        required: false
+        default: ''
+      servers:
+        description: Ready servers opened in the player per work
+        required: false
+        default: ''
+      seconds:
+        description: Seconds of playback measured per server
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-certification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      per_tier: ${{ inputs.per_tier || steps.m.outputs.per_tier || '10' }}
+      servers: ${{ inputs.servers || steps.m.outputs.servers || '3' }}
+      seconds: ${{ inputs.seconds || steps.m.outputs.seconds || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        env:
+          SOURCES: ${{ inputs.sources }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            // الاستدعاء اليدوي يمرّر القائمة؛ الدفع يقرأ ملفها (سطر لكل مصدر، والإعدادات في سطر يبدأ بـ# set)
+            const file = fs.readFileSync("tools/repository-compat/certification-sources.txt", "utf8").split("\n");
+            const settings = Object.fromEntries((file.find((l) => l.startsWith("# set ")) ?? "").slice(6).trim().split(/\s+/).filter(Boolean).map((kv) => kv.split("=")));
+            const raw = process.env.SOURCES || file.filter((l) => l.trim() && !l.startsWith("#")).join(",");
+            for (const k of ["per_tier", "servers", "seconds"]) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${settings[k] ?? ""}\n`);
+            const list = raw.split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
+              const [kind, name, content] = s.split(":").map((x) => x.trim());
+              const ok = (["cs3", "aniyomi"].includes(kind) && ["anime", "cinema"].includes(content)) || (kind === "manga" && content === "manga");
+              if (!ok || !name) throw new Error("bad source: " + s);
+              return { kind, name, content };
+            });
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: list }) + "\n");
+          '
+
+  build:
+    # يُبنى التطبيق وفحصه مرة واحدة ويُشارك: عشرون بناء متزامنًا كان يكرر 5 دقائق في كل وظيفة ويتعثر في تنزيل NDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - run: pnpm install --frozen-lockfile
+      - name: Pinned provider fixtures used by the androidTest assets directory
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Build the actual Debug app with the runtime and its instrumentation
+        run: |
+          npx cap sync android
+          for attempt in 1 2 3; do
+            bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "build attempt $attempt failed; retrying after a pause"; sleep $((attempt * 30))
+          done
+          mkdir -p apks
+          cp android/app/build/outputs/apk/debug/app-debug.apk apks/
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk apks/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cert-apks
+          path: apks/
+          retention-days: 2
+
+  certify:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 175
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.kind }} ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: cert-apks
+          path: apks/
+      # بعد Gradle يبقى قرص المشغّل قرابة 6GB والمحاكي يطلب أكثر فلا يقلع: نحرر ونحدّ قرصه كما في بوابات Debug
+      - name: Reserve disk before emulator SDK download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+      - name: KVM and a real virtual audio clock
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          # عشرون وظيفة تحدّث المرايا معًا فتأخذ apt-get update حتى 18 دقيقة: التثبيت أولًا، والتحديث عند الحاجة فقط
+          apt_install() { sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 pulseaudio pulseaudio-utils; }
+          apt_install || { sudo apt-get update -o Acquire::Retries=3 && apt_install; }
+          vantara_audio="$RUNNER_TEMP/vantara-cert-audio"
+          mkdir -p "$vantara_audio"
+          chmod 700 "$vantara_audio"
+          pulseaudio -n --daemonize=yes --use-pid-file=no --exit-idle-time=-1 \
+            --load="module-native-protocol-unix socket=$vantara_audio/native" \
+            --load="module-null-sink sink_name=vantara_cert rate=48000 channels=2"
+          echo "PULSE_SERVER=unix:$vantara_audio/native" >> "$GITHUB_ENV"
+      - name: Certify on a fresh emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          CERT_KIND: ${{ matrix.kind }}
+          CERT_NAME: ${{ matrix.name }}
+          CERT_CONTENT: ${{ matrix.content }}
+          CERT_PER_TIER: ${{ needs.plan.outputs.per_tier }}
+          CERT_SERVERS: ${{ needs.plan.outputs.servers }}
+          CERT_SECONDS: ${{ needs.plan.outputs.seconds }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6G
+          disable-animations: true
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
+          # SwiftShader GLES crashes in host RenderThread during playback; ANGLE (swangle) does not.
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-boot-anim -camera-back none
+          script: bash tools/repository-compat/run_source_certification.sh
+      - name: Source summary and raw lines
+        if: always()
+        run: |
+          node tools/repository-compat/summarize_certification.mjs . >> "$GITHUB_STEP_SUMMARY" || true
+          # سجل المحرك أولًا (VantaraRuntime/VantaraPrepare وانهيارات عملية فانتارا فقط، لا انهيارات النظام)
+          for f in cert-*/logcat.txt; do [ -f "$f" ] && grep -v '^--------- beginning' "$f" | grep -iE 'vantara|FATAL EXCEPTION: |Process: com\.vantara' | tail -n 120 | sed 's/^/VANTARA_CERT_LOG /'; done
+          for f in cert-*/instrumentation.txt; do [ -f "$f" ] && tail -n 12 "$f"; done
+          # السطور الخام آخر السجل: تجمعها الجلسة بذيل قصير من get_job_logs لجدول كل المصادر
+          for f in cert-*/cert.jsonl; do [ -f "$f" ] && grep '^{' "$f" | sed 's/^/VANTARA_CERT_LINE /'; done
+          for f in cert-*/manga.jsonl; do [ -f "$f" ] && grep '^{' "$f" | sed 's/^/VANTARA_MANGA_LINE /'; done
+          true

@@ -10,9 +10,11 @@
  */
 
 import engine from '../lib/extension-engine.js';
+import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
-import { aliasMap, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
+import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
+import { coverCandidates, pickCover } from '../lib/manga-cover.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
@@ -157,6 +159,9 @@ export function resetSources() {
   sourcesPromise = null;
   discovered.clear();
 }
+
+// مصدر أُضيف أو أُزيل (أو وصل صف الحساب من المزامنة): القائمة تُقرأ من جديد
+onEntitlementChange(() => resetSources());
 
 export const available = () => engine.isAvailable();
 
@@ -611,6 +616,13 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
  * cards when an alternate title first appears on a later source page.
  * Preserve the earliest card's position and every edition/source.
  */
+const withCover = (item, cover) => ({
+  ...item,
+  coverImage: { ...item.coverImage, extraLarge: cover, large: cover, medium: cover },
+  bannerImage: cover,
+  ...(item._work ? { _work: { ...item._work, thumbnailUrl: cover } } : {}),
+});
+
 export function mergeWorkPages(items) {
   const index = workIndex();
   const positions = new Map();
@@ -651,7 +663,7 @@ export function mergeWorkPages(items) {
   const grouped = index.list().map((work) => {
     work.editions.sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId) || String(a.sourceId).localeCompare(String(b.sourceId)));
     work.title = work.editions[0]?.manga?.title ?? work.title;
-    work.thumbnailUrl = work.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? work.thumbnailUrl;
+    work.thumbnailUrl = pickCover(work.editions.map((e) => ({ url: e.manga?.thumbnailUrl, sourceId: e.sourceId })), { rank: sourceRank }) ?? work.thumbnailUrl;
     const before = [...new Set(work.keys.flatMap((key) => [...(originalsByKey.get(key) ?? [])]))];
     const preserved = {};
     for (const item of before) for (const [key, value] of Object.entries(item)) {
@@ -682,11 +694,22 @@ export function mergeWorkPages(items) {
     return { position: Math.min(...work.keys.map((key) => positionsByKey.get(key) ?? Infinity)), item: merged };
   });
   noteRefAliases(formerRefs);
-  const seenIds = new Set();
-  return [...grouped, ...unrelated]
+  // بطاقة بلا نسخ (مرجع محفوظ من «الأكثر قراءة» أو جهاز آخر) لعمل له بطاقة بنسخ: بطاقة واحدة.
+  // التجميع بفئة المرجع (`canonicalRefOf`)، والفائزة البطاقة التي تحمل نسخًا، في موضع أسبقهما.
+  const byClass = new Map();
+  for (const entry of [...grouped, ...unrelated]) {
+    const cls = canonicalRefOf(String(entry.item.id));
+    const prior = byClass.get(cls);
+    if (!prior) { byClass.set(cls, entry); continue; }
+    let richer = !prior.item._work?.editions?.length && entry.item._work?.editions?.length ? entry.item : prior.item;
+    // غلاف واحد للعمل: الرسمي (AniList) من أيٍّ من البطاقتين يسبق غلاف المصادر
+    const cover = pickCover([...coverCandidates(prior.item), ...coverCandidates(entry.item)], { rank: sourceRank });
+    if (cover && cover !== richer.coverImage?.large) richer = withCover(richer, cover);
+    byClass.set(cls, { position: Math.min(prior.position, entry.position), item: richer });
+  }
+  return [...byClass.values()]
     .sort((a, b) => a.position - b.position)
-    .map(({ item }) => item)
-    .filter((item) => !seenIds.has(item.id) && seenIds.add(item.id));
+    .map(({ item }) => item);
 }
 
 /**
@@ -849,7 +872,7 @@ export async function detail(v35work) {
   const chapters = localizeFiller(mergeChapters(values, { rank: sourceRank }));
   const answered = new Set(values.map((v) => v.sourceId));
   // غلافٌ غاب عن القائمة وجاء مع التفاصيل يصير غلاف العمل ويُحفظ معه
-  const cover = v35work.coverImage?.large || main?.detail?.thumbnailUrl || values.find((v) => v.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const cover = v35work.coverImage?.large || pickCover(values.flatMap((v) => [{ url: v.detail?.thumbnailUrl, sourceId: v.sourceId }, { url: v.manga?.thumbnailUrl, sourceId: v.sourceId }]), { rank: sourceRank });
   const covered = cover && !v35work.coverImage?.large
     ? { coverImage: { extraLarge: cover, large: cover, medium: cover, color: null }, bannerImage: cover, _work: { ...work, thumbnailUrl: cover } }
     : {};
@@ -906,7 +929,7 @@ const FIRST_OPEN_HOLD_MS = 3500;
 /** العمل كاملًا من نسخٍ بفصولها: ما تعرضه صفحة العمل ويقرؤه القارئ. */
 function assemble(v35work, editions, detail, failed = []) {
   const chapters = localizeFiller(mergeChapters(editions, { rank: sourceRank }));
-  const cover = v35work.coverImage?.large || detail?.thumbnailUrl || editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl || null;
+  const cover = v35work.coverImage?.large || detail?.thumbnailUrl || pickCover(editions.map((e) => ({ url: e.manga?.thumbnailUrl, sourceId: e.sourceId })), { rank: sourceRank });
   const base = v35work._work ?? { key: String(v35work.id).replace(/^ext:/, ''), title: v35work.title?.english, editions: [] };
   const work = {
     ...base,
@@ -942,14 +965,19 @@ const loading = new Map();
  * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
  * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
  */
-export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false } = {}) {
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null } = {}) {
   const id = String(v35work.id);
-  const cached = await readWork(id);
+  // مصدر محدد: نسخته وحدها، ولا اكتشاف في بقية المصادر (المعرّف قد يكون مشتركًا بهوية AniList/MangaDex)
+  if (pinnedSource) discover = false;
+  const scoped = (list) => (pinnedSource ? (list ?? []).filter((e) => e?.sourceId === pinnedSource) : list);
+  const stored = await readWork(id);
+  const cached = stored && pinnedSource ? { ...stored, editions: scoped(stored.editions) } : stored;
   let editions = unionEditions(
     (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => c.sourceId === e.sourceId)?.chapters ?? null })),
     cached?.editions,
-    (v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
+    scoped(v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
   );
+  if (pinnedSource) editions = scoped(editions);
   let detail = cached?.detail ?? null;
   const failed = new Map();
   let last = null;
@@ -1000,7 +1028,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
   // (36 من العاشق وعند غيره 600). نسأل الباقين معها، ولا نعرض شيئًا حتى يردّوا
   // أو تمضي لحظة — الهيكل يبقى بلا رسالة «نبحث».
-  const lonely = !cached && editions.length <= 1;
+  const lonely = !cached && editions.length <= 1 && !pinnedSource;
   if (lonely) {
     held = true;
     setTimeout(() => {
@@ -1039,7 +1067,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const full = emit(true);
   const discoveredNow = await discovery;
   await writeWork(id, {
-    editions,
+    // المصدر المحدد يحدّث نسخته فقط، ولا يمحو نسخ المصادر الأخرى المحفوظة لنفس العمل
+    editions: pinnedSource ? unionEditions(stored?.editions, editions) : editions,
     detail,
     discoveredAt: discoveredNow ? Date.now() : cached?.discoveredAt ?? 0,
     discoveredSources: discoveredNow ? sourceIds : cached?.discoveredSources ?? (cached ? [] : sourceIds),

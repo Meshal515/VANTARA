@@ -16,13 +16,20 @@ const CARD = `id idMal title { romaji english native } coverImage { extraLarge l
   genres averageScore popularity episodes duration format status season seasonYear isAdult
   nextAiringEpisode { episode airingAt } studios(isMain: true) { nodes { name } }`;
 
+/**
+ * جدول الأسبوع كاملًا (#323 O-1): كان 40 حلقة للأيام السبعة الماضية و50 للقادمة، والأسبوع الحقيقي نحو 120
+ * في كل جهة (قِيس من AniList في 12 نوفمبر 2026)، فتغطي يومين أو ثلاثة حول «الآن» والبقية فارغة. ثلاث صفحات
+ * من 50 لكل جهة في الطلب نفسه (حد AniList للصفحة 50).
+ */
+const SCHEDULE_PAGES = [1, 2, 3];
+const schedules = (data, alias) => SCHEDULE_PAGES.flatMap((n) => data?.[`${alias}${n}`]?.airingSchedules ?? data?.[alias]?.airingSchedules ?? []).filter((e, i, all) => all.findIndex((x) => x.airingAt === e.airingAt && x.media?.id === e.media?.id && x.episode === e.episode) === i);
 const HOME_QUERY = `query ($season: MediaSeason, $year: Int, $from: Int, $to: Int, $until: Int) {
   trending: Page(perPage: 14) { media(type: ANIME, sort: TRENDING_DESC, isAdult: false) { ${CARD} description(asHtml: false) } }
   season: Page(perPage: 10) { media(type: ANIME, season: $season, seasonYear: $year, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   popular: Page(perPage: 18) { media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) { ${CARD} } }
   top: Page(perPage: 18) { media(type: ANIME, sort: SCORE_DESC, isAdult: false, popularity_greater: 40000) { ${CARD} } }
-  schedule: Page(perPage: 40) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { ${CARD} } } }
-  upcoming: Page(perPage: 50) { airingSchedules(airingAt_greater: $to, airingAt_lesser: $until, sort: TIME) { episode airingAt media { ${CARD} } } }
+  ${SCHEDULE_PAGES.map((n) => `schedule${n}: Page(page: ${n}, perPage: 50) { airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) { episode airingAt media { ${CARD} } } }`).join('\n  ')}
+  ${SCHEDULE_PAGES.map((n) => `upcoming${n}: Page(page: ${n}, perPage: 50) { airingSchedules(airingAt_greater: $to, airingAt_lesser: $until, sort: TIME) { episode airingAt media { ${CARD} } } }`).join('\n  ')}
 }`;
 
 const DETAIL_QUERY = `query ($id: Int) {
@@ -52,6 +59,8 @@ export function seasonOf(date = new Date()) {
 export const SEASON_AR = { WINTER: 'شتاء', SPRING: 'ربيع', SUMMER: 'صيف', FALL: 'خريف' };
 export const FORMAT_AR = { TV: 'مسلسل', TV_SHORT: 'حلقات قصيرة', MOVIE: 'فيلم', SPECIAL: 'حلقة خاصة', OVA: 'OVA', ONA: 'ONA', MUSIC: 'موسيقي' };
 export const STATUS_AR = { RELEASING: 'يُعرض الآن', FINISHED: 'مكتمل', NOT_YET_RELEASED: 'قريبًا', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
+/** علاقات «من نفس العالم» بكلمة قصيرة (المانجا وما يرتبط بلا تصنيف أدق من AniList). */
+export const WORLD_AR = { PREQUEL: 'الجزء السابق', SEQUEL: 'الجزء التالي', PARENT: 'الأصل', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', SUMMARY: 'ملخص', ADAPTATION: 'الأصل', SOURCE: 'الأصل', OTHER: 'عمل مرتبط' };
 export const RELATION_AR = { SEQUEL: 'الجزء التالي', PREQUEL: 'الجزء السابق', SIDE_STORY: 'قصة جانبية', SPIN_OFF: 'عمل منبثق', ALTERNATIVE: 'نسخة أخرى', PARENT: 'الأصل', SUMMARY: 'ملخص' };
 
 /** أقصر اسم مقروء: الإنجليزي إن وُجد، ثم الروماجي. */
@@ -154,8 +163,8 @@ export function parseHome(data) {
     season: list(data?.season),
     popular: list(data?.popular),
     top: list(data?.top),
-    latest: latestEpisodes(data?.schedule?.airingSchedules),
-    week: airingWeek(data?.schedule?.airingSchedules, data?.upcoming?.airingSchedules),
+    latest: latestEpisodes(schedules(data, 'schedule')),
+    week: airingWeek(schedules(data, 'schedule'), schedules(data, 'upcoming')),
   };
 }
 
@@ -168,6 +177,12 @@ export function parseDetail(data) {
     .map((e) => ({ ...normalize(e.node), relation: RELATION_AR[e.relationType] }))
     .filter((m) => m.id);
   const recommendations = (media.recommendations?.nodes ?? []).map((n) => normalize(n.mediaRecommendation)).filter(Boolean);
+  // «من نفس العالم» في أنماط الصفحة: الأعمال المرتبطة كلها أنمي ومانجا (لا الأغاني ولا ظهور الشخصيات)،
+  // بنوع العلاقة والصيغة؛ relations أعلاه تبقى كما هي للصفحة الأساسية
+  const world = (media.relations?.edges ?? [])
+    .filter((e) => WORLD_AR[e.relationType] && e.node?.format !== 'MUSIC' && (e.node?.type === 'ANIME' || e.node?.type === 'MANGA'))
+    .map((e) => ({ ...normalize(e.node), kind: e.node.type === 'MANGA' ? 'manga' : 'anime', relationType: e.relationType, relation: WORLD_AR[e.relationType] }))
+    .filter((m) => m.id);
   // الشخصيات: الرئيسية أولًا، بلا صورة AniList الافتراضية الفارغة
   const characters = (media.characters?.edges ?? [])
     .filter((e) => e?.node?.image?.large && !/\/default\.(jpg|png)$/.test(e.node.image.large))
@@ -182,6 +197,7 @@ export function parseDetail(data) {
   return {
     ...base,
     relations,
+    world,
     recommendations,
     characters,
     synonyms: media.synonyms ?? [],
@@ -227,6 +243,24 @@ export async function fetchAnimeDetail(id, opts = {}) {
 export async function searchAnime({ search, genre, page = 1 } = {}, opts = {}) {
   const data = await request(SEARCH_QUERY, { search: search || undefined, genre: genre || undefined, page }, opts);
   return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+}
+
+/**
+ * مطابقة عناوين كثيرة بطلب AniList واحد (أسماء مستعارة لكل عنوان): شبكة مصدر من 30 عملًا = 3 طلبات لا 30.
+ * يرجع لكل عنوان قائمة مرشحيه (مع أسمائه البديلة للحكم)، أو [] إن لم يجد.
+ */
+export async function searchAnimeBatch(titles, opts = {}) {
+  const list = titles.slice(0, 10);
+  if (!list.length) return [];
+  const vars = Object.fromEntries(list.map((t, i) => [`s${i}`, String(t)]));
+  const query = `query (${list.map((_, i) => `$s${i}: String`).join(', ')}) {
+  ${list.map((_, i) => `a${i}: Page(perPage: 4) { media(type: ANIME, search: $s${i}, sort: [SEARCH_MATCH], isAdult: false) { ${CARD} synonyms } }`).join('\n  ')}
+}`;
+  const data = await request(query, vars, opts);
+  return list.map((_, i) => (data?.[`a${i}`]?.media ?? []).map((raw) => {
+    const m = normalize(raw);
+    return m ? { ...m, synonyms: raw.synonyms ?? [] } : null;
+  }).filter(Boolean));
 }
 
 /**

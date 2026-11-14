@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '9ac235b86fa6307373aacea759bb684cd2449353691b864dae9803279d321950';
+const SHELL_DIGEST = 'c3712fd4724744cbaea25c66a08417ae4d595122163b6d61ca619c8bfd7e69aa';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -68,8 +68,17 @@ const KEEP = [IMAGE_CACHE, PWA_CONFIG_CACHE];
 // هذه القائمة: وحدة منسيّة تعني أن الإقلاع ينتظر الشبكة من حيث لا ندري.
 const SHELL = [
   '/lib/source-verification.js',
+  '/lib/source-report.js',
+  '/lib/runtime-capacity.js',
+  '/lib/plugin-vault.js',
+  '/lib/plugin-failure.js',
+  '/lib/host-breaker.js',
+  '/lib/route-family.js',
+  '/lib/route-validity.js',
   '/addons/native-catalog.js',
   '/v35/reader-scroll.js',
+  '/v35/reader-zoom.js',
+  '/v35/reader-stalls.js',
   '/pwa/player/together-player.js',
   '/pwa/player/together-lobby.js',
   '/pwa/player/skip-times.js',
@@ -115,19 +124,26 @@ const SHELL = [
   '/screens/add-account.js',
   '/screens/sources.js',
   '/lib/extension-engine.js',
+  '/lib/source-entitlement.js',
   '/lib/catalog.js',
   '/lib/chapter-access.js',
   '/lib/manga-aliases.js',
   '/lib/manga-alias-store.js',
+  '/lib/manga-cover.js',
+  '/lib/unified-identity.js',
   '/lib/manga-twins.js',
   '/lib/adult-filter.js',
   '/lib/manga-evidence.js',
   '/data/manga-aliases.json',
   '/lib/manga-meta.js',
+  '/lib/manga-art.js',
+  '/lib/kitsu-art.js',
+  '/lib/art.js',
   '/v35/card-reconcile.js',
   '/v35/image-loading.js',
   '/v35/text-actions.js',
   '/v35/source-latest.js',
+  '/v35/depth.js',
   '/v35/insights.js',
   '/v35/work-insights.js',
   '/v35.css',
@@ -145,6 +161,7 @@ const SHELL = [
   '/addons/manifest.js',
   '/addons/media.js',
   '/addons/native-runtime.js',
+  '/addons/cloudstream-runtime.js',
   '/addons/native-preparation.js',
   '/addons/anime-mapping.js',
   '/addons/native-transport.js',
@@ -165,6 +182,7 @@ const SHELL = [
   '/v35/addons-repos.js',
   '/v35/addons-sites.js',
   '/v35/source-mode.js',
+  '/v35/source-identity.js',
   '/vendor/hls.min.js',
   '/v35/shell.js',
   '/v35/sheet-lifecycle.js',
@@ -219,15 +237,42 @@ const SHELL = [
   '/v35/server-sheet.js',
   '/v35/manga.css',
   '/v35/anime.js',
+  '/v35/anime-today.js',
+  '/v35/anime-episodes.js',
+  '/v35/anime-episode-controls.js',
+  '/v35/anime-episodes.css',
+  '/v35/work-dom.js',
+  '/v35/episode-marks.js',
   '/v35/cinema.js',
   '/v35/watch-menu.js',
   '/lib/together/offset-controls.js',
   '/v35/collapse-hero.js',
+  '/v35/appearance.js',
+  '/v35/experience.js',
+  '/v35/settings-center.js',
+  '/v35/look-previews.js',
+  '/v35/unified-home.js',
+  '/v35/work-looks.js',
+  '/v35/manga-work.js',
+  '/v35/logo-layer.js',
   '/v35/anime-discover.js',
   '/v35/anime-account.js',
   '/v35/rafiq.js',
   '/v35/rafiq.css',
   '/v35/wide.css',
+  '/v35/experience.css',
+  '/v35/unified-view.css',
+  '/v35/unified-look.css',
+  '/v35/unified-view.js',
+  '/v35/unified-library.css',
+  '/v35/unified-library.js',
+  '/v35/unified-search.css',
+  '/v35/cards.css',
+  '/v35/unified-discover.css',
+  '/v35/unified-discover.js',
+  '/v35/unified-search.js',
+  '/v35/library-model.js',
+  '/v35/work-menu.js',
   '/v35/addons.css',
   '/v35/addons-v7.css',
   '/v35/addons-v7.js',
@@ -236,11 +281,17 @@ const SHELL = [
   '/v35/sections.js',
   '/v35/updates-view.js',
   '/v35/motion.js',
+  '/v35/page-motion.js',
+  '/v35/dock.js',
   '/vendor/gsap.esm.js',
   '/lib/anime-meta.js',
   '/lib/anime-engine.js',
+  '/lib/anime-title.js',
+  '/lib/discovery-diagnostics.js',
+  '/lib/diagnostics-ui.js',
   '/lib/anime-imdb.js',
   '/lib/anime-art.js',
+  '/lib/start-memory.js',
   '/lib/anime-genre-art.js',
   '/lib/recent-searches.js',
   '/lib/cinema-meta.js',
@@ -281,7 +332,6 @@ const SHELL = [
   '/pwa/sources/defs.json',
   '/pwa/sources/allow.json',
   '/pwa/sources/dom.js',
-  '/pwa/sources/engines/arabseed.js',
   '/pwa/sources/engines/index.js',
   '/pwa/sources/engines/madara.js',
   '/pwa/sources/engines/iken.js',
@@ -290,14 +340,6 @@ const SHELL = [
   '/pwa/sources/engines/mangathemesia.js',
   '/pwa/sources/engines/teamx.js',
   '/pwa/sources/engines/zeistmanga.js',
-  '/pwa/sources/engines/shahiid.js',
-  '/pwa/sources/engines/tuktuk.js',
-  '/pwa/sources/engines/akwam.js',
-  '/pwa/sources/engines/egydead.js',
-  '/pwa/sources/engines/ristoanime.js',
-  '/pwa/sources/engines/okanime.js',
-  '/pwa/sources/engines/video-common.js',
-  '/pwa/sources/engines/witanime.js',
   '/pwa/sources/hosts.js',
   '/pwa/sources/registry.js',
   '/pwa/sources/detect.js',
@@ -422,7 +464,7 @@ self.addEventListener('fetch', (event) => {
 // الواجهة تضع `<img src="/__img?u=…&r=…">` (pwa/cache/images.js). هنا:
 //   - موجودة في كاش الصور ⇒ تُرد فورًا، بلا شبكة (وتعمل دون اتصال).
 //   - غير موجودة ⇒ تُجلب من جالب الويب بالإذن المحفوظ، وتُحفظ إن كانت صورة.
-//   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقدم.
+//   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقل استعمالًا.
 // المفتاح رابط الصورة الأصلي وحده (بلا الإذن ولا المرجع)، فتجديد الإذن لا يفرغه.
 
 const MAX_IMAGES = 2500;
@@ -444,7 +486,12 @@ async function sourceImage(url) {
   const key = new Request(`/__img?u=${encodeURIComponent(source)}`);
   const cache = await caches.open(IMAGE_CACHE);
   const hit = await cache.match(key);
-  if (hit) return hit;
+  if (hit) {
+    // LRU تقريبي (#323 U-18): القراءة لا تغيّر ترتيب keys()، فالغلاف المفتوح كل يوم كان يُكنس قبل غلاف رأيته
+    // مرة. إعادة حفظه تنقله لآخر الترتيب؛ مرة في اليوم على الأكثر لكل صورة (لا كتابة مع كل عرض).
+    if (Date.now() - (Number(hit.headers.get(USED_HEADER)) || 0) > TOUCH_MS) void touchImage(cache, key, hit.clone());
+    return hit;
+  }
 
   const config = await pwaConfig();
   if (!config?.fetchBase || !config?.grant || !/^https?:\/\//.test(source)) return new Response(null, { status: 503 });
@@ -463,7 +510,7 @@ async function sourceImage(url) {
   const type = response.headers.get('content-type') ?? '';
   if (response.ok && type.startsWith('image/')) {
     const body = await response.blob();
-    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000' } });
+    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } });
     try {
       await cache.put(key, stored.clone());
     } catch {
@@ -476,7 +523,19 @@ async function sourceImage(url) {
   return response;
 }
 
-/** يحذف الأقدم دخولًا حتى يرجع الكاش تحت الحد (مرة كل دقيقة على الأكثر). */
+const USED_HEADER = 'x-vantara-used';
+const TOUCH_MS = 86_400_000;
+async function touchImage(cache, key, response) {
+  try {
+    const body = await response.blob();
+    const type = response.headers.get('content-type') ?? 'image/jpeg';
+    await cache.put(key, new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } }));
+  } catch {
+    // القرص ممتلئ أو الكاش أُغلق: يبقى في موضعه
+  }
+}
+
+/** يحذف الأقل استعمالًا (ترتيب keys() بعد touchImage) حتى يرجع الكاش تحت الحد (مرة كل دقيقة على الأكثر). */
 async function trimImages() {
   const now = Date.now();
   if (now - lastTrim < 60_000) return;
@@ -491,6 +550,6 @@ async function trimImages() {
   } catch {
     // بلا تقدير: العدد وحده يحكم
   }
-  // keys() بترتيب الإدخال: الأول هو الأقدم
+  // keys() بترتيب الإدخال، وtouchImage يعيد إدخال ما يُقرأ: الأول هو الأقل استعمالًا
   for (const request of keys.slice(0, Math.max(0, excess))) await cache.delete(request);
 }

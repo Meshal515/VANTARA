@@ -81,4 +81,27 @@ describe('اكتشف: الفلاتر إلى متغيّرات AniList', () => {
     ] } } });
     expect(d.characters).toEqual([{ id: 1, name: 'Frieren', image: 'https://img/f.png', main: true, voice: 'Atsumi Tanezaki' }]);
   });
+  it('«من نفس العالم»: الأنمي والمانجا المرتبطان بلا الأغاني وظهور الشخصيات، والعلاقات الأساسية كما هي', () => {
+    const node = (id, type, format, extra = {}) => ({ id, type, format, title: { english: `W${id}` }, coverImage: { large: `https://img/${id}.jpg` }, ...extra });
+    const d = parseDetail({ Media: { ...media(), relations: { edges: [
+      { relationType: 'PREQUEL', node: node(10, 'MANGA', 'MANGA') },
+      { relationType: 'OTHER', node: node(11, 'ANIME', 'ONA', { bannerImage: 'https://img/b11.jpg', seasonYear: 2026 }) },
+      { relationType: 'CHARACTER', node: node(12, 'ANIME', 'MUSIC') },
+      { relationType: 'SEQUEL', node: node(13, 'ANIME', 'TV') },
+    ] } } });
+    expect(d.world.map((w) => [w.id, w.kind, w.relationType])).toEqual([[10, 'manga', 'PREQUEL'], [11, 'anime', 'OTHER'], [13, 'anime', 'SEQUEL']]);
+    expect(d.world[1]).toMatchObject({ banner: 'https://img/b11.jpg', year: 2026, relation: 'عمل مرتبط' });
+    expect(d.relations.map((r) => r.id)).toEqual([13]);
+  });
+});
+
+// #323 O-1: الأسبوع الحقيقي ~120 حلقة لكل جهة، والطلب كان صفحة 40 وصفحة 50 فيفرغ ما بعد يومين أو ثلاثة
+describe('weekly schedule spans the whole week (several pages)', () => {
+  const page = (from, n) => ({ airingSchedules: Array.from({ length: n }, (_, i) => ({ episode: 1, airingAt: from + i * 3600, media: { id: from + i, title: { english: `S${from + i}` }, coverImage: { large: 'x' }, popularity: 5000 } })) });
+  it('merges every schedule and upcoming page, without duplicates', () => {
+    const t = 1_800_000_000;
+    const home = parseHome({ schedule1: page(t - 300 * 3600, 50), schedule2: page(t - 250 * 3600, 50), schedule3: page(t - 200 * 3600, 20), upcoming1: page(t, 50), upcoming2: page(t + 50 * 3600, 50), upcoming3: { airingSchedules: page(t + 50 * 3600, 50).airingSchedules.slice(0, 5) } });
+    expect(home.week).toHaveLength(220);
+    expect(home.latest.length).toBeGreaterThan(40);
+  });
 });

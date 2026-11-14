@@ -1,0 +1,6 @@
+--------- beginning of main
+PASS package=eu.kanade.tachiyomi.animeextension.all.animeworldindia sources=9 verified_sha256=cfed30b52a405e4d76a47a13fb988cb70d553217e9a1e5acae97fd5686bb0187
+OPERATION source=okanime;operation=search;result=FAIL;query=Meitantei Conan;expectedPath=/anime/meitantei-conan;resultCount=24
+JOURNEY_FAIL source=okanime;stage=details;code=NullPointerException;http=;upstreamComparison=NOT_TESTED
+JOURNEY_FAIL source=anime4up;stage=catalogue;code=HttpException;http=HTTP error 404;upstreamComparison=NOT_TESTED
+JOURNEY_FAIL source=witanime;stage=catalogue;code=CloudflareBypassException;http=;upstreamComparison=NOT_TESTED

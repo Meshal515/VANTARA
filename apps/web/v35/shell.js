@@ -1,3 +1,4 @@
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -18,16 +19,20 @@ import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
+import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
 import { getAddonRuntime } from '../addons/runtime.js';
+import { supportedCapabilities } from '../addons/assessment.js';
+import { entitlement } from '../lib/source-entitlement.js';
 import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
-import { sideDock } from './side-dock.js';
-import { glyph } from './icons.js';
+import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
+import { mountDepth } from './depth.js';
+import { glyph, iconButton } from './icons.js';
 import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, isChapterRead, markChapter, markChapters } from './reading.js';
+import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
@@ -49,16 +54,20 @@ import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
 import { createTogether } from './together.js';
 import { openProfileEditor } from './profile-editor.js';
-import { SECTIONS, readSection, writeSection } from './sections.js';
+import { SECTIONS, readSection, writeSection as storeSection } from './sections.js';
 import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentRange, momentStart, repositories as animeRepositories } from '../lib/anime-engine.js';
-import { fetchAnimeDetail } from '../lib/anime-meta.js';
-import { fetchMangaPopular, fetchMangaRatings } from '../lib/manga-meta.js';
+import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
+import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
+import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
+import { artRatio, createArtStore } from '../lib/art.js';
+import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
-import { heroSlideIn, menuIn, menuOut, pageIn, swapViews } from './motion.js';
+import { heroSlideIn, stripIn } from './motion.js';
+import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
+import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -68,7 +77,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { refsOf } from '../lib/manga-alias-store.js';
+import { canonicalRefOf, noteRefAliases, refsOf } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -76,6 +85,18 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
+import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { experienceView, readStructure } from './experience.js';
+import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
+import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
+import { createUnifiedView } from './unified-view.js';
+import { workMenuEntries, workOptionEntries } from './work-menu.js';
+import { EMPTY_COPY, LIBRARY_TABS, libraryShelves } from './library-model.js';
+import { createUnifiedLibrary } from './unified-library.js';
+import { createUnifiedSearch } from './unified-search.js';
+import { createCinemaPager, createUnifiedDiscover } from './unified-discover.js';
+import { GENRES_AR as CINEMA_GENRES_AR } from '../lib/cinema-meta.js';
+import { trimArtCache } from '../lib/together/art.js';
 
 const AR_GENRE = {
   Action: 'أكشن', Adventure: 'مغامرة', Fantasy: 'فانتازيا', Drama: 'دراما', Comedy: 'كوميديا', Romance: 'رومانسي',
@@ -155,6 +176,60 @@ const el = (tag, cls, text) => {
 const genreAr = (g) => AR_GENRE[g] || g;
 const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?? '؟';
 
+/** Source opening owns one cancellable lookup, shared across native/runtime hand-off. */
+export function createAddonNavigation() {
+  let current = null;
+  const cancel = () => { current?.cancel(); current = null; };
+  return {
+    cancel,
+    begin() {
+      cancel();
+      const controller = new AbortController();
+      const error = Object.assign(new Error('انتهت مهلة فتح المصدر. أعد المحاولة.'), { code: 'ADDON_TOTAL_TIMEOUT' });
+      const timer = setTimeout(() => controller.abort(error), 40_000);
+      const check = () => { if (controller.signal.aborted) throw controller.signal.reason; };
+      const operation = {
+        signal: controller.signal,
+        async wait(work, code = 'ADDON_STAGE_TIMEOUT') {
+          check();
+          try {
+            const result = await withPhaseDeadline(Promise.resolve().then(() => { check(); return work(controller.signal); }), 15_000, code, { signal: controller.signal });
+            check();
+            return result;
+          } catch (failure) {
+            const reason = controller.signal.aborted ? controller.signal.reason : failure;
+            controller.abort(reason);
+            clearTimeout(timer);
+            throw reason;
+          }
+        },
+        finish() { clearTimeout(timer); },
+        cancel() { clearTimeout(timer); controller.abort(new DOMException('ألغي فتح المصدر', 'AbortError')); },
+      };
+      current = operation;
+      return operation;
+    },
+  };
+}
+
+/** A mixed cinema catalogue can omit type; let the person choose without inventing metadata. */
+export function promptSourceWorkType(work, addon, { el, openSheet, closeSheet, sheetItem, active, onChoose }) {
+  if (work.type || !addon.contentTypes.includes('movie') || !addon.contentTypes.includes('series')) return false;
+  let selected = false;
+  openSheet(body => {
+    body.append(el('h3', null, 'اختر نوع العمل'), el('p', 'work-meta', 'المصدر لم يحدد نوع هذا العمل. كيف تريد فتحه؟'));
+    for (const [type, label, icon] of [['movie', 'فيلم', 'film'], ['series', 'مسلسل', 'layers']]) {
+      body.append(sheetItem(icon, label, () => {
+        if (selected || !active()) return;
+        selected = true;
+        closeSheet();
+        void onChoose({ ...work, type });
+      }));
+    }
+  });
+  return true;
+}
+
 /**
  * @param {{ sync: any, mount: (node: Element) => void, go: (route: object) => Promise<void>,
  *           openReader: (route: object) => void, switchAccount: () => void, version: string,
@@ -162,13 +237,18 @@ const initialOf = (text) => [...String(text || '؟').trim()][0]?.toUpperCase() ?
  *           report?: (input: object) => Promise<unknown> }} deps
  */
 export function mountV35(deps, { page = 'home' } = {}) {
+  void diagnosticsUi.initialize();
   const { sync } = deps;
   setSharedLatest(createSourceLatest(sync));
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
   connectUpdates((path, opts) => sync.translation(path, opts));
   connectSourceReports((path, opts) => sync.translation(path, opts));
   onChapters(observeMangaChapters);
+  // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
+  try { trimArtCache(); } catch { /* اختياري */ }
+  migrateAppearance();
   const root = el('div', 'v35');
+  bindTabMotion(root);
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
   const sourceVerification = createSourceVerification();
@@ -178,6 +258,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // Capacitor plugin must never strand the app on the static splash screen.
   deps.mount(root);
   let followTimeClosed = false;
+  // Optional Debug family binds its private store to the already selected profile.
+  // Shell mounting remains synchronous; unavailable bridges never block startup.
+  if(globalThis.Capacitor?.Plugins?.VantaraRuntime)queueMicrotask(()=>{
+    void getAddonRuntime().then(async addons=>{
+      // الجلسة تُقرأ من التخزين بعد الإقلاع؛ الربط قبلها يفتح مخزن «local» الفارغ فتختفي إضافات
+      // CloudStream المثبتة في الحساب من الأقسام حتى تُفتح صفحة الإضافات.
+      await addons.ready;await sync.ready?.catch?.(()=>{});if(followTimeClosed)return;
+      await addons.registry.setProfile(sync.user?.userId ?? 'local');
+      if(!followTimeClosed)await addons.reloadSources?.();
+    }).catch(()=>{});
+  });
   let stopFollowTime = () => {};
   queueMicrotask(() => {
     if (followTimeClosed) return;
@@ -188,14 +279,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   });
   const q = (id) => root.querySelector(`#${id}`);
+  /**
+   * القسم المحفوظ للمستخدم (المبدّل). في «توحيد المحتوى» لا مبدّل: فتح فيلم أو أنمي يلبس الصفحة هوية قسمها
+   * (applySection) ولا يغيّر القسم الذي اختاره صاحبه، وإلا وجد نفسه في السينما حين يطفئ الموحد (#323 U-12).
+   */
+  const writeSection = (id) => { if (root.dataset.content !== 'unified') storeSection(id); };
   // الشريط الجانبي للشاشات العريضة يُرسم بعد اكتمال الإقلاع (يقرأ رفيق والحساب)
   const wideScreen = globalThis.matchMedia?.('(min-width: 1024px)');
   let railReady = false;
-  // صفحة العمل على الكمبيوتر: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب الفصول
-  const detailDock = sideDock(
-    () => [q('detailCover'), root.querySelector('#detail .detail-cta'), root.querySelector('#detail .detail-quick'), q('detailProgress')],
-    { query: wideScreen, className: 'detail-side' },
-  );
 
   const state = {
     home: { trending: [], featured: [], recent: [], popular: [] },
@@ -307,7 +398,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function rememberWork(w) {
     const all = readJson(WORKS_KEY, {});
-    const editions = w._work.editions ?? [];
+    // عمل فُتح من مصدر محدد: تُضاف نسخته إلى المحفوظ ولا تستبدل نسخ بقية المصادر
+    const editions = w._pinnedSource ? [...(all[w.id]?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
     all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
     writeJson(WORKS_KEY, all);
     const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
@@ -353,7 +445,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     jobSheetRefresh?.();
     if (state.current) renderTranslateToggle(state.current);
-    if (currentPage() === 'settings') renderSettings();
+    if (onSettings()) renderSettings();
   });
   // بعد الدخول: ما كان شغّالًا يكمل من حيث وقف (الحساب يحتاج لحظة ليجهز)
   (function resumeJobsWhenSignedIn(tries = 0) {
@@ -448,7 +540,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     sync.enqueue('view.remove', { seriesRef: ref });
   }
   // البطاقة تقول أين وقفت: «الفصل 47» من سجلّك نفسه
-  const historyWorks = () => viewRows().map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: v.chapter_label ?? null }));
+  // «222» وحده لا يقول شيئًا: رقم الفصل يُقرأ «الفصل 222»، والاسم الحرفي يبقى كما هو
+  const chapterLabelAr = (label) => (label != null && /^\d+(\.\d+)?$/.test(String(label).trim()) ? `الفصل ${String(label).trim()}` : label ?? null);
+  // سجلّان لعمل واحد بمرجعين (قبل الدمج وبعده، أو من «الأكثر قراءة» ومن البحث): بطاقة واحدة بأحدثهما
+  const historyWorks = () => { const seen = new Set(); return viewRows().filter((v) => { const k = canonicalRefOf(v.series_ref); return !seen.has(k) && seen.add(k); }).map((v) => ({ ...workFromRef(v.series_ref, v.series_title, v.cover_url), _viewLabel: chapterLabelAr(v.chapter_label), _viewAt: v.viewed_at ?? null })); };
   // ───────────────────────── الصور والبطاقات ─────────────────────────
 
   function fallbackArt(container, label) {
@@ -477,27 +572,102 @@ export function mountV35(deps, { page = 'home' } = {}) {
           },
           { rootMargin: '600px 600px' },
         );
+  /**
+   * عقد نُزعت من الصفحة قبل أن تقترب (قائمة أُعيد رسمها) لا تبقى منتظرة ولا مراقبة (#311 D-016): تُكنس حين
+   * تكبر الخريطة، فتبقى محدودة بما في الصفحة فعلًا.
+   */
+  const sweepDetached = (map, release) => {
+    if (map.size < 120) return;
+    for (const node of [...map.keys()]) if (!node.isConnected) { map.delete(node); release?.(node); }
+  };
   function nearViewport(node) {
     if (!nearObserver) return Promise.resolve();
     return new Promise((resolve) => {
       nearWaiters.get(node)?.();
+      sweepDetached(nearWaiters, (n) => nearObserver.unobserve(n));
       nearWaiters.set(node, resolve);
       nearObserver.observe(node);
     });
   }
   /**
-   * أغلفةٌ ظهرت في هذه الجلسة: عملٌ → الرابط الذي عُرض. إعادة رسم القسم (وتتكرر
-   * مع كل تحديث للقوائم) كانت تبني الغلاف فارغًا ثم تحمّله، فيومض ويختفي
-   * ويرجع. الآن يوضع المعروف في نفس اللحظة، والذاكرة تعطيه بلا انتظار.
+   * قرار فن العمل الواحد (lib/art.js): كل شاشة تقرأ غلاف العمل من هنا، والبطاقة تحسمه أول ما تقترب من الشاشة
+   * فتجده صفحة العمل محسومًا بأبعاده (يظهر بنسبته من أول إطار، والغلاف نفسه في الخارج والداخل). كانت ثلاث
+   * قواعد (البطاقات: أول رابط يتحمّل، وصفحة العمل: بالقياس، والفهرس: بشكل الرابط) وأربع ذاكرات.
    */
-  const shownCovers = new Map();
+  const art = createArtStore();
   const failedCanonical = new Map();
+  let artActive = 0;
+  const artWaiting = [];
+  /** مرشحو غلاف عمل: غلاف الخادم الثابت، ثم غلاف البطاقة، ثم أغلفة نسخه من المصادر (لا البنر). */
+  function artSources(work) {
+    const id = String(work?.id ?? '');
+    const canonical = id ? sync.rows('works', (x) => x.series_ref === id)[0]?.cover_url ?? null : null;
+    const editions = work?._work?.editions ?? [];
+    const urls = [canonical, knownCover(id), work?.coverImage?.extraLarge, work?.coverImage?.large, work?._work?.thumbnailUrl, ...editions.map((e) => e.manga?.thumbnailUrl)];
+    const sourceOf = (url) => editions.find((e) => e.manga?.thumbnailUrl === url)?.sourceId ?? editions[0]?.sourceId ?? null;
+    return [...new Set(urls.filter((u) => typeof u === 'string' && u))].map((url) => ({ url, sourceId: sourceOf(url) }));
+  }
+  /**
+   * يحسم فن العمل مرة (ثلاثة أعمال في آنٍ على الأكثر). أغلفة المصادر بمحرّكها وترويساتها إن أمكن (ملف محفوظ
+   * على الجهاز)، والرسمي من AniList للمانجا بطلب التقييم نفسه (ثمانية عناوين في استعلام).
+   */
+  function decideArt(work) {
+    const id = String(work?.id ?? '');
+    if (!id) return Promise.resolve(null);
+    const known = art.get(id);
+    if (known?.w) return Promise.resolve(known);
+    return new Promise((resolve) => {
+      const run = async () => {
+        artActive += 1;
+        try {
+          // الرسمي (AniList) يُطلب أولًا فيسير بالتوازي مع أغلفة المصادر، لا خلفها (كان ينتظر حتى 2.5 ثانية لها)
+          const title = work?._work?.title || work?.title?.english || titleOf(work);
+          // AniList ومعه Kitsu بالهوية نفسها (رقم AniList): غلاف وبنر أعلى جودة وأخف غالبًا (lib/kitsu-art.js)
+          const official = id.startsWith('ext:') && title ? artFor(title).then(async (a) => {
+            if (!a?.id) return a;
+            const more = await Promise.race([kitsuArt(a.id), new Promise((r) => setTimeout(() => r(null), 1200))]);
+            return more ? { ...a, more: [{ cover: more.cover?.url ?? null, banner: more.banner?.url ?? null }] } : a;
+          }) : null;
+          const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
+            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
+          const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
+          resolve(await art.decide(id, { official, sources, wideHint }));
+        } catch { resolve(null); } finally {
+          artActive -= 1;
+          artWaiting.shift()?.();
+        }
+      };
+      // ثمانية أعمال تُحسم في آنٍ: الشبكة تحمّل 30 غلافًا بالتوازي في ربع ثانية، وثلاثة فقط كانت تجعل قائمة من
+      // ثلاثين تنتظر عشر جولات متتالية
+      if (artActive < 8) void run();
+      else artWaiting.push(run);
+    });
+  }
+  /** يرسم الغلاف المحسوم في حاويته بنسبته الحقيقية. `fade` لظهوره الأول فوق هيكله (لا تبديل لما ظهر). */
+  function paintDecided(container, work, d, { position = null, fade = false, onFail = null } = {}) {
+    const ratio = artRatio(d);
+    if (ratio) container.style.setProperty('--art-ratio', ratio);
+    const src = cachedCover(d.cover) ?? d.cover;
+    const current = container.querySelector(':scope > img');
+    if (current?.getAttribute('src') === src) return d.cover;
+    const img = new Image();
+    img.alt = '';
+    img.decoding = fade ? 'async' : 'sync';
+    if (fade) img.classList.add('img-fade');
+    if (position) img.style.objectPosition = position;
+    img.onerror = () => { art.forget(String(work?.id ?? '')); onFail?.(); };
+    img.src = src;
+    container.replaceChildren(img);
+    return d.cover;
+  }
   const idOf = (work) => String(work?.id ?? '');
   const animePosters = new Map();
   /** ملصق أنمي بمعرّف AniList، مرة لكل أنمي في الجلسة. */
   function animePoster(id) {
     if (!animePosters.has(id)) {
-      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.posterSmall ?? m?.poster ?? null).catch(() => null));
+      // الفشل لا يُحفظ (#311 D-009): كان null يبقى طول الجلسة فلا يظهر ملصق ذلك الأنمي أبدًا
+      animePosters.set(id, fetchAnimeDetail(id).then((m) => m?.poster ?? m?.posterSmall ?? null).catch(() => null)
+        .then((url) => { if (!url) animePosters.delete(id); return url; }));
     }
     return animePosters.get(id);
   }
@@ -505,22 +675,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function mountImage(container, work, opts = {}) {
     const token = String(Math.random());
     container.dataset.imageToken = token;
-    // غلاف العمل الموحّد واحد في كل الشاشات: غلاف الخادم (يثبّته أول من عرفه) يسبق
-    // ذاكرة هذا الجهاز، فلا تختلف نسخة Debug عن Release ولا شاشة عن شاشة
     const canonical = work?.id ? sync.rows('works', (x) => x.series_ref === String(work.id))[0]?.cover_url ?? null : null;
-    const known0 = shownCovers.get(String(work?.id ?? ''));
-    const known = known0 && (!canonical || known0 === canonical || known0 === cachedCover(canonical) || failedCanonical.get(idOf(work)) === canonical) ? known0 : null;
-    if (known) {
-      const current = container.querySelector(':scope > img');
-      if (current?.getAttribute('src') === known) return known;
-      const img = new Image();
-      img.alt = '';
-      img.decoding = 'sync';
-      img.src = known;
-      if (opts.position) img.style.objectPosition = opts.position;
-      container.replaceChildren(img);
-      return known;
+    // القرار المحسوم للعمل (من أي شاشة حسمته): يظهر فورًا بنسبته، بلا هيكل ولا انتظار
+    const fallBack = () => { if (container.dataset.imageToken === token) void mountLegacy(container, work, opts, token, canonical); };
+    const decided = art.get(idOf(work));
+    if (decided) return paintDecided(container, work, decided, { position: opts.position, onFail: fallBack });
+    // لم يُحسم بعد: هيكل بمقاسه حتى يُحسم، ثم يظهر الغلاف النهائي مرة (لا غلاف مؤقت يُستبدل)
+    if (idOf(work) && !idOf(work).startsWith('anime:') && !idOf(work).startsWith('cinema:')) {
+      container.replaceChildren(imageLoadingNode());
+      await nearViewport(container);
+      if (container.dataset.imageToken !== token) return null;
+      const d = await decideArt(work);
+      if (container.dataset.imageToken !== token) return null;
+      if (d) return paintDecided(container, work, d, { position: opts.position, fade: true, onFail: fallBack });
     }
+    return mountLegacy(container, work, opts, token, canonical);
+  }
+  /**
+   * المسار الاحتياطي حين لا يُحسم فن (كل الروابط فشلت، أو أنمي/سينما من السجل بلا ملصق): ملف محفوظ، ثم محرّك
+   * المصدر، ثم الرابط، ثم الحرف الأول وطلب التفاصيل في الخلفية. لا يحسم قرارًا ولا يتقدم على قرار.
+   */
+  async function mountLegacy(container, work, opts, token, canonical) {
     // `late`: غلافٌ ثقيل (ميغابايتان على شبكة جوال) تجاوز المهلة لا يُرمى: يكمل
     // تحميله ويحلّ محل الحرف أو المعاينة حين يصل
     const tryUrl = (url, timeoutMs, late = null) =>
@@ -549,7 +724,6 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
       if (opts.position) img.style.objectPosition = opts.position;
       container.replaceChildren(img);
-      if (id) shownCovers.set(id, img.getAttribute('src') ?? url);
       // بطاقات أخرى للعمل نفسه بقيت بحرفه (فشلت قبل أن يُعرف): تأخذه الآن
       for (const [other, waiting] of waitingCovers) {
         if (other === container || String(waiting.id) !== id) continue;
@@ -592,7 +766,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // مصدرٌ يعرض مصغّرًا خفيفًا لغلافه الكبير: يظهر فورًا والكبير يحلّ محله
     let previewShown = false;
     const preview = candidates.map((c) => coverPreview(c.url)).find(Boolean);
-    if (preview) {
+    // صفحة العمل (`final`): لا معاينة صغيرة يحلّ محلها الكبير أمام العين؛ الهيكل حتى يصل النهائي
+    if (preview && !opts.final) {
       const small = await tryUrl(preview, 4000);
       if (container.dataset.imageToken !== token) return null;
       if (small) {
@@ -605,12 +780,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const saved = await nativeCover(url, sourceId);
       if (container.dataset.imageToken !== token) return null;
       const late = (img) => {
+        if (opts.final) img.classList.add('img-fade');
         rememberCover(id, url);
         show(img, img.src, url, sourceId);
       };
       const img = (saved && (await tryUrl(saved, 6000))) || (await tryUrl(url, 9000, late));
       if (container.dataset.imageToken !== token) return null;
       if (img) {
+        // من الشبكة: يظهر بتلاشٍ واحد فوق الهيكل (المحفوظ والمعروف يظهران فورًا بلا حركة)
+        if (opts.final) img.classList.add('img-fade');
         rememberCover(id, url);
         return show(img, img.src, url, sourceId);
       }
@@ -619,11 +797,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (container.dataset.imageToken !== token) return null;
     if (!previewShown) fallbackArt(container, titleOf(work));
     // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
-    waitingCovers.set(container, work);
+    waitCover(container, work);
     resolveCoverLater(work);
     return null;
   }
+  /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();
+  const waitCover = (container, work) => { sweepDetached(waitingCovers); waitingCovers.set(container, work); };
   onCoverKnown((workId, url) => {
     for (const [container, work] of waitingCovers) {
       if (!container.isConnected) {
@@ -670,26 +850,47 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const ratingPromises = new Map();
   const ratingQueue = [];
   let ratingTimer = null;
-  function ratingFor(title) {
+  // التقييم والفن الرسمي من طلب AniList نفسه (ثمانية عناوين في استعلام): artFor لا يكلّف طلبًا إضافيًا
+  const artPromises = new Map();
+  function matchFor(title) {
     if (!ratingPromises.has(title)) {
+      let resolveArtOf;
+      artPromises.set(title, new Promise((r) => { resolveArtOf = r; }));
       ratingPromises.set(title, new Promise((resolve) => {
-        ratingQueue.push({ title, resolve });
+        ratingQueue.push({ title, resolve, resolveArt: resolveArtOf });
         ratingTimer ??= setTimeout(flushRatings, 50);
       }));
     }
+  }
+  function ratingFor(title) {
+    matchFor(title);
     return ratingPromises.get(title);
   }
+  function artFor(title) {
+    matchFor(title);
+    return artPromises.get(title);
+  }
+  // مطابقة AniList (التقييم والغلاف والبنر الرسمي) لكل ما ظهر من أعمال في طلب واحد: 20 عنوانًا في الطلب وطلبان في
+  // آنٍ على الأكثر، بلا انتظار بين الدفعات. القياس الحي: 30 عنوانًا بطلب واحد 170ms، وبدفعات 8 ينتظر بينها 750ms
+  // كانت 2.7 ثانية، فتنتظر أغلفة القائمة كلها خلفها.
+  const MATCH_BATCH = 20;
+  let ratingInFlight = 0;
   async function flushRatings() {
     ratingTimer = null;
-    const batch = ratingQueue.splice(0, 8);
+    if (ratingInFlight >= 2) return;
+    const batch = ratingQueue.splice(0, MATCH_BATCH);
     if (!batch.length) return;
+    ratingInFlight += 1;
+    if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 0);
     try {
-      const matches = await fetchMangaRatings(batch.map((b) => b.title));
-      batch.forEach(({ title, resolve }) => resolve(matches.get(title) ?? null));
+      const matches = await fetchMangaMatches(batch.map((b) => b.title));
+      batch.forEach(({ title, resolve, resolveArt }) => { resolve(matches.get(title)?.rating ?? null); resolveArt(matches.get(title)?.art ?? null); });
     } catch {
-      batch.forEach(({ title, resolve }) => { ratingPromises.delete(title); resolve(null); });
+      batch.forEach(({ title, resolve, resolveArt }) => { ratingPromises.delete(title); artPromises.delete(title); resolve(null); resolveArt(null); });
+    } finally {
+      ratingInFlight -= 1;
     }
-    if (ratingQueue.length) ratingTimer = setTimeout(flushRatings, 750);
+    if (ratingQueue.length) ratingTimer ??= setTimeout(flushRatings, 0);
   }
   /** «حذف العمل»: يختفي من كل القوائم والبحث وآخر التحديثات، ويبقى في أرشيف حسابك لإعادته. */
   function deleteWork(work) {
@@ -738,12 +939,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     frame.append(p);
     const t = el('div', 'work-title', titleOf(work));
     t.dir = 'auto';
-    const recentLabel = latestLabel(work) || null;
-    const m = el('div', 'work-meta', meta ?? recentLabel ?? '');
+    const m = el('div', 'work-meta');
+    setMeta(m, meta ?? latestLabel(work));
     const facts = el('div', 'work-facts');
     facts.append(score);
     void mountImage(p, work);
     a.append(frame, t, m, facts);
+    if (work._viewAt) a.append(el('div', 'work-when', `آخر قراءة ${agoAr(work._viewAt)}`));
     onLongPress(a, () => openCardActions(a._work));
     void nearViewport(a).then(async () => {
       if (!a.isConnected) return;
@@ -770,7 +972,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** «الفصل 401 · قبل ساعتين»: الوقت من ذاكرة VANTARA حين يكون الحدث منها. */
   function latestLabel(work) {
     const recent = work._latestChapter;
-    if (!recent) return work._viewLabel ?? '';
+    if (!recent) return work._viewLabel ?? (work.genres || []).slice(0, 2).map(genreAr).join('، ');
     const n = Number(recent.chapterNumber);
     const label = Number.isFinite(n) && n >= 0 ? `الفصل ${n}` : String(recent.name ?? '').slice(0, 44);
     // عدة فصول نزلت للعمل: بطاقة واحدة ورقم خفيف بعددها
@@ -778,12 +980,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const when = work._updatePublishedAt > 0 ? agoAr(work._updateAt) : `رُصد ${agoAr(work._updateAt)}`;
     return work._updateAt ? `${label}${more} · ${when}` : label + more;
   }
+  /** «الفصل 121 · قبل ساعة»: جزآن، فيصفّهما كل قسم كما صُمّم (سطر واحد أو الفصل يمينًا والوقت يسارًا). */
+  function setMeta(node, label) {
+    const text = String(label ?? '');
+    if (node.dataset.label === text) return;
+    node.dataset.label = text;
+    const i = text.indexOf(' · ');
+    if (i < 0) { node.textContent = text; return; }
+    node.replaceChildren(el('span', 'work-meta-main', text.slice(0, i)), el('span', 'work-meta-when', text.slice(i + 3)));
+  }
   function reconcileCards(target, items) {
     reconcileCardNodes(target, items, card, (node, work) => {
       node._work = work;
-      const label = latestLabel(work);
       const meta = node.querySelector('.work-meta');
-      if (meta && meta.textContent !== label) meta.textContent = label;
+      if (meta) setMeta(meta, latestLabel(work));
     });
   }
   const renderStrip = (target, items) => reconcileCards(target, items.slice(0, Number(target.dataset.limit) || 14));
@@ -814,6 +1024,41 @@ export function mountV35(deps, { page = 'home' } = {}) {
     target.replaceChildren(box);
   }
 
+  /**
+   * عدد المصادر التي تشغّل أو تقرأ في هذا القسم لحسابك، أو null إن لم يُعرف بعد (فلا نقول «أضف مصدرًا»
+   * لحساب موجود لم يصل صفّه من المزامنة). نموذج Stremio: الكتالوج يعرض كل عمل، والمشاهدة/القراءة من
+   * مصادر يضيفها المستخدم.
+   */
+  async function playableSources(section) {
+    if (entitlement().state === 'unknown') return null;
+    if (section === 'manga') {
+      const list = await engine.sources().catch(() => null);
+      return list ? list.filter((s) => !s.filler).length : null;
+    }
+    const addons = await getAddonRuntime().catch(() => null);
+    if (!addons) return null;
+    await addons.ready;
+    const runtimeName = addons.runtimeName ?? addons.registry.runtimeName ?? 'pwa';
+    const kinds = section === 'cinema' ? ['movie', 'series'] : ['anime', 'movie', 'series'];
+    return addons.registry.list().filter((a) => a.enabled !== false
+      && (a.contentTypes ?? []).some((t) => kinds.includes(t))
+      && (a.bundled ? (a.capabilities ?? []).includes('streams') : supportedCapabilities(a, runtimeName).includes('streams'))).length;
+  }
+  function addSource() {
+    void openAddons();
+  }
+  /** «أضف مصدرًا لتقرأ»: مكان قائمة فارغة سببها أن الحساب بلا مصادر مانجا، لا عطل مصدر. */
+  async function showAddMangaSource(target) {
+    if ((await playableSources('manga')) !== 0) return false;
+    emptyState(target, {
+      icon: 'layers',
+      title: 'أضف مصدرًا لتقرأ',
+      text: 'الأعمال تظهر من الكتالوج، والقراءة من مصادر تضيفها أنت.',
+      action: { label: 'أضف مصدرًا', icon: 'plus', run: addSource },
+    });
+    return true;
+  }
+
   // ───────────────────────── الرئيسية ─────────────────────────
 
   /**
@@ -824,12 +1069,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
    *   - الباقي: أغلفة طولية.
    */
   const HOME_LAYOUT = {
-    history: { kicker: 'CONTINUE', layout: 'resume', limit: 12 },
-    libraryReading: { kicker: 'FOLLOWING', layout: 'covers', limit: 14 },
-    friends: { kicker: 'FRIENDS', layout: 'covers', limit: 14 },
-    trending: { kicker: 'CHARTS', layout: 'chart', limit: 12 },
-    recent: { kicker: 'LATEST', layout: 'grid', limit: 9 },
-    sourcesNow: { kicker: 'FRESH', layout: 'grid', limit: 9 },
+    history: { kicker: '', layout: 'resume', limit: 12 },
+    libraryReading: { kicker: '', layout: 'covers', limit: 14 },
+    friends: { kicker: '', layout: 'covers', limit: 14 },
+    trending: { kicker: '', layout: 'chart', limit: 12 },
+    recent: { kicker: '', layout: 'grid', limit: 9 },
+    sourcesNow: { kicker: '', layout: 'grid', limit: 9 },
   };
   function sectionBlock(title, kind, items, layoutKind = kind) {
     const spec = HOME_LAYOUT[layoutKind] ?? { kicker: '', layout: 'covers', limit: 14 };
@@ -861,7 +1106,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function friendsReading() {
     const friendIds = (deps.friends?.() ?? sync.rows('accounts').map((r) => ({ userId: r.user_id }))).map((p) => p.userId);
-    return rankFriendsReading(sync.rows('work_views'), { me: me(), friendIds })
+    return rankFriendsReading(sync.rows('work_views'), { me: me(), friendIds, canonical: canonicalRefOf })
       .map((e) => workFromRef(e.ref, e.title, e.cover));
   }
   function refreshFriendsHero() {
@@ -886,7 +1131,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   const homeSnapshots = new Map();
   function homeSnapshot(kind, incoming) {
-    if (!homeSnapshots.has(kind)) homeSnapshots.set(kind, createFeedSnapshot());
+    // بمفتاح العمل لا بمعرّف البطاقة: بطاقة صار مفتاحها اسمًا آخر بعد دليل جديد تُستبدل في مكانها، لا تبقى بجانب الجديدة
+    if (!homeSnapshots.has(kind)) homeSnapshots.set(kind, createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) }));
     return homeSnapshots.get(kind).accept(incoming);
   }
   async function globalPopular(page) {
@@ -975,20 +1221,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintIndex();
     const specs = [];
     const history = historyWorks();
-    if (history.length) specs.push(['آخر المشاهدات', 'history', history.slice(0, 20)]);
+    if (history.length) specs.push(['تابع القراءة', 'history', history.slice(0, 20)]);
     const reading = libraryWorks('reading');
     if (reading.length) specs.push(['أعمال تتابعها', 'libraryReading', reading]);
     const friends = friendsReading();
     if (friends.length) specs.push(['يقرأها أصدقاؤك', 'friends', friends.slice(0, 20)]);
-    if (state.home.trending.length) specs.push(['الأكثر شهرة عالميًا', 'trending', state.home.trending]);
+    // عمل مكتمل من خارج أعلى الترتيب: لا يكرر أول ما في «الأكثر قراءة»
+    const later = state.home.trending.slice(3).filter((w) => w.status === 'FINISHED' && w.coverImage?.large);
+    const finished = later.find((w) => w.wideBanner) ?? later[0];
+    if (finished) specs.push(['مكتمل، اقرأه دفعة واحدة', 'pick', finished]);
+    if (state.home.trending.length) specs.push(['الأكثر قراءة', 'trending', state.home.trending]);
     if (state.home.updates?.length) specs.push(['آخر التحديثات', 'recent', state.home.updates]);
     else if (state.home.recent.length) specs.push(['في المصادر الآن', 'sourcesNow', state.home.recent]);
     if (!specs.length) return;
     const host = q('homeSections');
     const old = new Map([...host.children].filter((s) => s.dataset.kind).map((s) => [s.dataset.kind, s]));
     const blocks = specs.map(([title, kind, items]) => {
+      if (kind === 'pick') return pickBlock(old.get('pick'), title, items);
       const snapshot = homeSnapshot(kind, items);
       const section = old.get(kind) ?? sectionBlock(title, kind === 'friends' ? null : kind, snapshot, kind);
+      // قسم يظهر لأول مرة (وصلت بياناته) يدخل بتلاشٍ قصير لا فجأة؛ إعادة الرسم لا تحرّكه
+      if (!old.has(kind)) fadeIn(section);
       if (old.has(kind)) renderStrip(section.querySelector('.card-strip'), snapshot);
       const pending = homeSnapshots.get(kind).pending;
       let refresh = section.querySelector('.feed-refresh');
@@ -1001,12 +1254,47 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (refresh) { refresh.hidden = !pending; refresh.textContent = `${pending} أعمال جديدة`; }
       return section;
     });
-    const previousOrder = [...old.values()].filter(s => blocks.includes(s));
-    const stableBlocks = [...previousOrder, ...blocks.filter(s => !previousOrder.includes(s))];
-    stableBlocks.forEach((block, i) => {
+    // ترتيب الأقسام ثابت كما صُمّم (آخر التحديثات في الأخير)، لا بترتيب وصول بياناتها
+    blocks.forEach((block, i) => {
       if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
     });
     for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
+  }
+  /** بطاقة «مكتمل»: عمل واحد يُقرأ دفعة واحدة، بضوء من غلافه نفسه وفعل واحد. */
+  function pickBlock(existing, title, w) {
+    if (existing?.dataset.workId === String(w.id)) return existing;
+    const s = el('section', `section mg-pick${w.wideBanner ? ' mg-pick--wide' : ''}`);
+    s.dataset.kind = 'pick';
+    s.dataset.workId = String(w.id);
+    const art = el('div', 'mg-pick-art');
+    art.setAttribute('aria-hidden', 'true');
+    if (w.wideBanner) {
+      const img = new Image();
+      img.alt = '';
+      img.decoding = 'async';
+      img.loading = 'lazy';
+      img.src = w.wideBanner;
+      art.append(img);
+    } else void mountImage(art, w);
+    const copy = el('div', 'mg-pick-copy');
+    const name = el('h3', null, titleOf(w));
+    name.dir = 'auto';
+    const facts = [w.chapters ? countLabel(w.chapters, 'chapter') : null, (w.genres || []).slice(0, 2).map(genreAr).join('، ')].filter(Boolean).join(' · ');
+    const b = el('button', 'btn btn-primary', 'ابدأ القراءة');
+    b.type = 'button';
+    b.onclick = (e) => { e.stopPropagation(); void openWork(w, { autoRead: true }); };
+    copy.append(el('small', null, title), name);
+    if (facts) copy.append(el('p', null, facts));
+    copy.append(b);
+    s.append(art);
+    if (!w.wideBanner) {
+      const cover = el('div', 'mg-pick-cover');
+      void mountImage(cover, w);
+      s.append(cover);
+    }
+    s.append(copy);
+    s.onclick = () => void openWork(w);
+    return s;
   }
   function renderHomeSkeleton() {
     q('homeSections').replaceChildren(
@@ -1091,6 +1379,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (hasCache) return;
       if (!state.heroItems.length) renderHeroFallback();
       const box = el('div');
+      if (await showAddMangaSource(box)) { q('homeSections').replaceChildren(box.firstElementChild); return; }
       emptyState(box, {
         icon: 'offline',
         error: true,
@@ -1114,121 +1403,157 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * المقابلة برقم الصفحة كمجلة. لا ضباب ولا توهّج: أغلفة المصادر صغيرة، فتُعرض
    * بحجمها الصادق لا مكبّرة مشوّشة.
    */
-  function heroSlide(w, i = 0, total = 1) {
-    const s = el('div', 'hero-slide');
-    s.setAttribute('role', 'group');
-    s.setAttribute('aria-label', titleOf(w));
-    const poster = el('div', 'hero-poster');
-    void mountImage(poster, w);
-    const copy = el('div', 'hero-copy');
-    const folio = el('div', 'hero-folio');
-    folio.dir = 'ltr';
-    folio.append(el('b', null, String(i + 1).padStart(2, '0')), el('span', null, `/ ${String(total).padStart(2, '0')}`));
-    const editions = w._work?.editions ?? [];
-    const kicker = (w.genres || []).slice(0, 2).map(genreAr).join(' · ');
+  // ─── بانر المانجا: معرض الأغلفة ───
+  // الغلاف المختار في الوسط بحجمه، والسابق يمينًا والتالي يسارًا (اتجاه القراءة)، وخلفها ضوء من
+  // ألوان الغلاف نفسه. الضبابية تُخفي صغر أغلفة المصادر بدل أن تفضحها. السحب يمينًا يجلب التالي.
+  // هندسة المعرض: لكل موضع (0 الوسط، 1 التالي…) إزاحة وحجم وشفافية، وما بينها يُحسب بالتدرج، فالسحب
+  // يحرك الأغلفة مع الإصبع إطارًا بإطار، والإفلات يكمل إلى أقرب موضع. لا غلاف يختفي فجأة.
+  const HERO_GEOMETRY = [
+    { min: 1100, x: [0, 215, 400, 540], s: [1, 0.58, 0.46, 0.38], o: [1, 0.55, 0.3, 0] },
+    { min: 700, x: [0, 180, 310, 420], s: [1, 0.58, 0.46, 0.38], o: [1, 0.55, 0.28, 0] },
+    { min: 0, x: [0, 128, 214, 290], s: [1, 0.57, 0.46, 0.38], o: [1, 0.55, 0.3, 0] },
+  ];
+  const heroGeometry = () => HERO_GEOMETRY.find((g) => (globalThis.innerWidth ?? 390) >= g.min);
+  const lerpAt = (arr, t) => {
+    const k = Math.min(Math.floor(t), arr.length - 2);
+    return arr[k] + (arr[k + 1] - arr[k]) * (Math.min(t, arr.length - 1) - k);
+  };
+  /** يضع الغلاف عند موضع متصل p؛ التالي (p>0) على اليسار كاتجاه القراءة. */
+  function placeCover(c, p, animate) {
+    const g = heroGeometry();
+    const a = Math.min(Math.abs(p), 3);
+    const x = -Math.sign(p) * lerpAt(g.x, a);
+    const prev = Number(c.dataset.p ?? p);
+    c.dataset.p = String(p);
+    // الذي يلفّ من طرف إلى طرف يمرّ وهو خارج الشاشة: بلا حركة، فلا يطير عرضها
+    const jump = Math.abs(prev - p) > 2.5;
+    c.style.transition = animate && !jump ? '' : 'none';
+    c.style.transform = `translate(-50%, -50%) translateX(${x.toFixed(1)}px) scale(${lerpAt(g.s, a).toFixed(4)})`;
+    c.style.opacity = lerpAt(g.o, a).toFixed(3);
+    c.style.zIndex = String(10 - Math.round(a * 2));
+    c.style.pointerEvents = a > 2.2 ? 'none' : '';
+    if (jump && animate) { void c.offsetWidth; c.style.transition = ''; }
+  }
+  function heroCoverNode(w, i) {
+    const c = el('button', 'mg-cover');
+    c.type = 'button';
+    c.dataset.i = String(i);
+    c.dataset.workId = String(w.id);
+    c.setAttribute('aria-label', titleOf(w));
+    void mountImage(c, w);
+    c.onclick = () => {
+      if (Math.abs(state.heroDeltaX) >= 8) return;
+      if (Number(c.dataset.pos) === 0) void openWork(w);
+      else heroGoLogical(i);
+    };
+    return c;
+  }
+  function paintHeroCopy(w, animate) {
+    const copy = q('heroCopy');
+    const kicker = [(w.genres || []).slice(0, 2).map(genreAr).join('، '), STATUS_AR[w.status]].filter(Boolean).join(' · ');
     const name = el('h3', 'hero-name', titleOf(w));
     name.dir = 'auto';
-    const facts = [STATUS_AR[w.status], editions.length > 1 ? countLabel(editions.length, 'source') : editions[0]?.label].filter(Boolean).join(' · ');
-    const cue = el('span', 'hero-cue');
-    cue.innerHTML = `<span>اقرأ</span>${glyph('chevron', { size: 14 })}`;
-    copy.append(folio);
-    if (kicker) copy.append(el('div', 'hero-kicker', kicker));
-    copy.append(name);
-    if (facts) copy.append(el('div', 'hero-facts', facts));
-    copy.append(cue);
-    // السطور تصعد بهدوء مع كل صفحة (motion.heroSlideIn)
-    for (const line of copy.children) line.dataset.line = '';
-    s.append(poster, copy);
-    s.onclick = () => {
-      if (Math.abs(state.heroDeltaX) < 8) void openWork(w);
+    const acts = el('div', 'mg-acts');
+    // بقرار المالك: «اقرأ الآن» وحدها نصًا تفاعليًا بلا حاوية (التفاصيل بلمس الغلاف نفسه)
+    const read = el('button', 'mg-read');
+    read.type = 'button';
+    read.innerHTML = '<span>اقرأ الآن</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11c0 .9.98 1.45 1.74.98l8.7-5.5a1.15 1.15 0 0 0 0-1.96l-8.7-5.5A1.15 1.15 0 0 0 8 6.5z"/></svg>';
+    read.onclick = () => void openWork(w, { autoRead: true });
+    acts.append(read);
+    const lines = [kicker ? el('div', 'hero-kicker', kicker) : null, name, acts].filter(Boolean);
+    const swap = () => {
+      copy.replaceChildren(...lines);
+      copy.classList.remove('mg-swapping');
     };
-    return s;
+    clearTimeout(state.heroCopyTimer);
+    if (!animate || !copy.childElementCount) return swap();
+    // الكلام يتلاشى ثم يظهر الجديد مكانه: لا قفزة نص ولا سطور تتطاير
+    copy.classList.add('mg-swapping');
+    state.heroCopyTimer = setTimeout(swap, 140);
+  }
+  function paintHeroAmbient(w) {
+    const amb = q('heroAmb');
+    const key = String(w.id);
+    if (amb.dataset.key === key) return;
+    amb.dataset.key = key;
+    const layer = el('div', 'mg-amb-layer');
+    amb.append(layer);
+    // لا تظهر الطبقة قبل صورتها: كانت مكانها الفاتح يظهر أولًا ثم يغمق حين تصل الصورة.
+    // الطبقات معتمة داخل حاوية بشفافية ثابتة، فالتبديل انتقال ألوان بالغمق نفسه لا إضاءة ثم إطفاء.
+    const show = () => {
+      if (!layer.isConnected || amb.dataset.key !== key) return;
+      requestAnimationFrame(() => layer.classList.add('in'));
+      const old = [...amb.children].filter((n) => n !== layer);
+      setTimeout(() => old.forEach((n) => n.remove()), 1000);
+    };
+    void mountImage(layer, w).then((url) => {
+      const img = layer.querySelector(':scope > img');
+      if (!url || !img) return layer.remove();
+      if (img.complete && img.naturalWidth) show();
+      else img.decode?.().then(show, () => layer.remove()) ?? img.addEventListener('load', show, { once: true });
+    }, () => layer.remove());
   }
   function renderHero() {
     const items = state.heroItems;
     if (!items.length) return renderHeroFallback();
-    const physical = [items[items.length - 1], ...items, items[0]];
-    const logical = [items.length - 1, ...items.keys(), 0];
-    q('heroTrack').replaceChildren(...physical.map((w, k) => heroSlide(w, logical[k], items.length)));
-    q('heroDots').replaceChildren(
-      ...items.map((_, i) => {
-        const d = el('button', `hero-dot${i === 0 ? ' active' : ''}`);
-        d.type = 'button';
-        d.setAttribute('aria-label', `العمل ${i + 1} من ${items.length}`);
-        d.onclick = (e) => {
-          e.stopPropagation();
-          heroGoLogical(i);
-        };
-        return d;
-      }),
-    );
-    state.heroPhysicalIndex = 1;
+    q('hero').classList.remove('mg-hero--empty');
+    q('heroTrack').replaceChildren(...items.map((w, i) => heroCoverNode(w, i)));
+    q('heroDots').replaceChildren();
+    state.heroIndex = Math.min(state.heroIndex ?? 0, items.length - 1);
     heroPosition(false);
     bindHero();
     restartHero();
   }
   function renderHeroSkeleton() {
-    q('heroTrack').replaceChildren(el('div', 'skeleton'));
+    q('heroTrack').replaceChildren(el('div', 'skeleton mg-cover-skeleton'));
+    q('heroCopy').replaceChildren();
     q('heroDots').replaceChildren();
   }
   function renderHeroFallback() {
     state.heroItems = [];
-    const s = el('div', 'hero-slide hero-slide--empty');
-    const copy = el('div', 'hero-copy');
-    copy.append(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
-    s.append(copy);
-    q('heroTrack').replaceChildren(s);
-    q('heroTrack').style.transform = 'none';
+    q('hero').classList.add('mg-hero--empty');
+    q('heroTrack').replaceChildren();
+    q('heroAmb').replaceChildren();
+    delete q('heroAmb').dataset.key;
+    const copy = q('heroCopy');
+    copy.replaceChildren(el('div', 'hero-kicker', 'مانجا · مانهوا · مانها'), el('h3', 'hero-name', 'VANTARA'));
     q('heroDots').replaceChildren();
   }
-  function logicalIndex() {
-    const n = state.heroItems.length;
-    if (!n) return 0;
-    if (state.heroPhysicalIndex === 0) return n - 1;
-    if (state.heroPhysicalIndex === n + 1) return 0;
-    return state.heroPhysicalIndex - 1;
-  }
-  function heroPosition(anim = true) {
-    const tr = q('heroTrack');
-    tr.style.transition = anim ? 'transform .38s var(--ease-out)' : 'none';
-    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
-    const li = logicalIndex();
-    root.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === li));
-    if (anim) heroSlideIn(tr.children[state.heroPhysicalIndex]);
-    // الالتفاف لا يعتمد على transitionend وحده: صفحةٌ مخفية أو تطبيق في الخلفية
-    // لا يطلقه، فكان العدّاد يتجاوز النسخ ويعرض بانرًا فارغًا
-    clearTimeout(state.heroWrapTimer);
-    if (anim) state.heroWrapTimer = setTimeout(heroWrap, 450);
-    else heroWrap();
-  }
-  /** من النسخة الطرفية إلى الأصل بلا حركة. آمنة مهما تكرّرت. */
-  function heroWrap() {
+  /** المواضع حول المختار مع إزاحة السحب الجارية (offset بوحدة «غلاف واحد»). */
+  function layoutHero(offset, animate) {
     const n = state.heroItems.length;
     if (!n) return;
-    const i = state.heroPhysicalIndex;
-    if (i >= 1 && i <= n) return;
-    state.heroPhysicalIndex = i <= 0 ? n : 1;
-    const tr = q('heroTrack');
-    tr.style.transition = 'none';
-    tr.style.transform = `translateX(${-state.heroPhysicalIndex * 100}%)`;
-    void tr.offsetWidth;
-    const li = logicalIndex();
-    root.querySelectorAll('.hero-dot').forEach((d, k) => d.classList.toggle('active', k === li));
+    for (const c of q('heroTrack').children) {
+      if (!c.dataset.i) continue;
+      let d = (Number(c.dataset.i) - state.heroIndex + n) % n;
+      if (d > n / 2) d -= n;
+      c.dataset.pos = String(d);
+      c.tabIndex = d === 0 ? 0 : -1;
+      c.setAttribute('aria-hidden', String(Math.abs(d) > 1));
+      placeCover(c, d - offset, animate);
+    }
+  }
+  function heroPosition(anim = true) {
+    const items = state.heroItems;
+    const n = items.length;
+    if (!n) return;
+    state.heroIndex = ((state.heroIndex % n) + n) % n;
+    layoutHero(0, anim);
+    paintHeroCopy(items[state.heroIndex], anim);
+    paintHeroAmbient(items[state.heroIndex]);
   }
   function heroNext() {
     if (!state.heroItems.length) return;
-    heroWrap();
-    state.heroPhysicalIndex += 1;
+    state.heroIndex += 1;
     heroPosition(true);
   }
   function heroPrev() {
     if (!state.heroItems.length) return;
-    heroWrap();
-    state.heroPhysicalIndex -= 1;
+    state.heroIndex -= 1;
     heroPosition(true);
   }
   function heroGoLogical(i) {
-    state.heroPhysicalIndex = i + 1;
+    state.heroIndex = i;
     heroPosition(true);
     restartHero();
   }
@@ -1236,44 +1561,67 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const hero = q('hero');
     if (hero.dataset.bound) return;
     hero.dataset.bound = '1';
-    const tr = q('heroTrack');
-    tr.addEventListener('transitionend', heroWrap);
+    const stage = q('heroTrack');
+    let lastX = 0, lastT = 0, velocity = 0, frame = 0;
+    const step = () => heroGeometry().x[1];
     const start = (x) => {
+      if (!state.heroItems.length) return;
       state.heroDragging = true;
-      state.heroStartX = x;
+      state.heroStartX = lastX = x;
+      lastT = performance.now();
+      velocity = 0;
       state.heroDeltaX = 0;
       hero.classList.add('dragging');
       clearInterval(state.heroTimer);
     };
     const move = (x) => {
       if (!state.heroDragging) return;
+      const now = performance.now();
+      velocity = (x - lastX) / Math.max(1, now - lastT);
+      lastX = x;
+      lastT = now;
       state.heroDeltaX = x - state.heroStartX;
-      // الشريط يتبع الإصبع: بلا هذا يبدو البانر صورةً ثابتة حتى يُفلت
-      tr.style.transform = `translateX(calc(${-state.heroPhysicalIndex * 100}% + ${state.heroDeltaX}px))`;
+      // الأغلفة تتبع الإصبع نفسه: سحب مسافة غلاف يجلب الغلاف التالي إلى الوسط
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => layoutHero(state.heroDeltaX / step(), false));
     };
     const end = () => {
       if (!state.heroDragging) return;
       state.heroDragging = false;
+      cancelAnimationFrame(frame);
       hero.classList.remove('dragging');
-      if (state.heroDeltaX < -42) heroNext();
-      else if (state.heroDeltaX > 42) heroPrev();
-      else heroPosition(true);
+      // المسافة تحدد كم غلافًا، والنفضة القصيرة السريعة غلافًا واحدًا فقط: لا تخطٍّ لم يقصده الإصبع
+      let shift = Math.round(state.heroDeltaX / step());
+      if (!shift && (Math.abs(velocity) > 0.35 || Math.abs(state.heroDeltaX) > 24)) shift = Math.sign(state.heroDeltaX || velocity);
+      shift = Math.max(-3, Math.min(3, shift));
+      state.heroIndex += shift;
+      if (shift) heroPosition(true);
+      else layoutHero(0, true);
       setTimeout(() => (state.heroDeltaX = 0), 0);
       restartHero();
     };
-    hero.addEventListener('touchstart', (e) => start(e.touches[0].clientX), { passive: true });
-    hero.addEventListener('touchmove', (e) => move(e.touches[0].clientX), { passive: true });
-    hero.addEventListener('touchend', end);
-    hero.addEventListener('touchcancel', end);
-    hero.addEventListener('pointerdown', (e) => {
+    stage.addEventListener('touchstart', (e) => start(e.touches[0].clientX), { passive: true });
+    stage.addEventListener('touchmove', (e) => move(e.touches[0].clientX), { passive: true });
+    stage.addEventListener('touchend', end);
+    stage.addEventListener('touchcancel', end);
+    stage.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') start(e.clientX);
     });
-    hero.addEventListener('pointermove', (e) => {
+    stage.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'touch') move(e.clientX);
     });
-    hero.addEventListener('pointerup', (e) => {
+    stage.addEventListener('pointerup', (e) => {
       if (e.pointerType !== 'touch') end();
     });
+    stage.addEventListener('pointerleave', (e) => {
+      if (e.pointerType !== 'touch') end();
+    });
+    stage.addEventListener('pointercancel', (e) => {
+      if (e.pointerType !== 'touch') end();
+    });
+    stage.addEventListener('dragstart', (e) => e.preventDefault());
+    // تغيّر عرض الشاشة يغيّر المسافات: تُعاد المواضع بلا حركة
+    globalThis.addEventListener?.('resize', () => layoutHero(0, false), { passive: true });
   }
   function restartHero() {
     clearInterval(state.heroTimer);
@@ -1283,7 +1631,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1301,10 +1649,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
     state.chapterSource = null;
     state.chapterNewestFirst = true;
     state.chapterShown = CHAPTER_BATCH;
+    state.chapterRange = null;
     if (work._work?.editions?.length) rememberWork(work);
     showPage('detail');
+    mountDetail();
     renderDetail(work);
-    pageIn(q('detail'));
     renderChaptersLoading();
     if (!work._work?.editions?.length) {
       // عملٌ من المكتبة على جهاز آخر: نُسخه لم تُحفظ هنا، فيُبحث عنه بعنوانه
@@ -1314,6 +1663,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (found && state.current === work) {
           // المرجع يبقى مرجعك: مكتبتك وتقدّمك مربوطان به لا بمفتاح النتيجة
           const kept = { ...found, id: work.id, _work: { ...found._work, key: work._work.key } };
+          // مرجع «الأكثر قراءة» (اسم AniList) ومرجع المصادر عمل واحد: المكتبة والتقدّم يُقرآن من الاثنين
+          if (String(found.id) !== String(work.id)) noteRefAliases([[String(work.id), String(found.id)]]);
           work = kept;
           state.current = kept;
           rememberWork(kept);
@@ -1324,6 +1675,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (state.current !== work) return;
     if (!work._work?.editions?.length) {
+      if (await showAddMangaSource(q('chapterPanel'))) { setReadCta(null); return; }
+      if (state.current !== work) return;
       emptyState(q('chapterPanel'), {
         icon: 'search',
         title: 'ما وصلنا للمصادر الحين',
@@ -1347,8 +1700,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
     };
     const show = (full, { settled }) => {
-      if (state.current?.id !== work.id || currentPage() === 'reader') return;
+      if (state.current?.id !== work.id) return;
       if (!full._chapters?.length && !settled) return;
+      // والقارئ مفتوح: تُحفظ النسخة الأحدث (يقرؤها القارئ بـgetWork) بلا رسم الصفحة التي خلفه
+      if (currentPage() === 'reader') { state.current = full; return; }
+      // الصفحة تتحرك (تدخل أو تغادر): تُرسم الفصول حين تنتهي الحركة، لا في منتصفها (page-motion.js: afterMotion)
+      const page = q('detail');
+      if (motionActive(page)) return void afterMotion(page, () => { if (state.current?.id === work.id && currentPage() === 'detail') show(state.current?._chapters ? state.current : full, { settled }); });
+      // غادرها المستخدم: تُحفظ النسخة الأحدث بلا رسم صفحة لا تُرى
+      if (currentPage() !== 'detail') { state.current = full; return; }
       const first = !state.current?._chapters;
       state.current = full;
       // غلافٌ عرفته التفاصيل تجرّبه البطاقات التي بقيت بلا غلاف، حالًا لا بعد الرجوع
@@ -1358,10 +1718,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       renderSources(full);
       renderChapters(full);
       tryWanted(full, settled);
+      // «اقرأ الآن» من الرئيسية: ما يفعله زر القراءة هنا تمامًا (تابع من حيث وقفت، أو ابدأ)، مرة واحدة
+      if (autoRead && state.nextRow && currentPage() === 'detail') { autoRead = false; readNow(); }
       if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar' });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
@@ -1391,80 +1753,238 @@ export function mountV35(deps, { page = 'home' } = {}) {
       setReadCta(null);
     }
   }
-  /** رقم الصفحة في صفحة العمل: عدد الفصول الصحيحة (بلا الجانبية)، كبيرًا. */
-  function paintFolio(w) {
-    const host = q('detailFolio');
-    const n = w._chapters ? countMainChapters(w._chapters) : null;
-    if (!n) return void host.replaceChildren(el('b', null, '—'));
-    host.replaceChildren(el('b', null, String(n)), el('span', null, n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا'));
+  /**
+   * هيكل صفحة العمل بالنمط المختار في الإعدادات (manga-work.js). يُبنى عند كل فتح عمل؛ التحديثات بعده
+   * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
+   */
+  let unbindMangaDepth = () => {};
+  function mountDetail() {
+    unbindMangaDepth();
+    closeDetailMenu();
+    state.marking = null;
+    const page = q('detail');
+    // «النمط الموحد» (الإعدادات): هيكل «المعرض» بلبوس unified-look.css، بلا عمق تمرير
+    const unified = unifiedLookOn();
+    const look = unified ? 'gallery' : mangaLook(workStyleOf('manga'));
+    page.dataset.look = look;
+    if (unified) page.dataset.unified = '';
+    else delete page.dataset.unified;
+    // «ويبتوني» يبني على أساس «المعرض» (data-base) ويختلف بقواعده
+    if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
+    else delete page.dataset.base;
+    page.innerHTML = detailMarkup(look, { glyph, iconButton });
+    state.detailLook = look;
+    state.chapterQuery = '';
+    // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
+    const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
+    unbindMangaDepth = mountDepth('manga', unified ? 'unified' : look, { hero: stage ?? page, scope: unified ? '.v35 #detail[data-look][data-unified]' : `.v35 #detail[data-look='${look}']`, styleId: 'mw-motion', prefix: 'mw', hostOf: (h) => h?.closest('#detail'), spanOf: () => stage?.offsetHeight ?? 0, active: () => currentPage() === 'detail' });
+    if (TABBED_LOOKS.includes(look)) bindDetailTabs();
+    bindChapterSearch();
+    paintDetailTools();
+  }
+  const lookIs = (look) => state.detailLook === look;
+  function bindChapterSearch() {
+    const input = q('chapterSearch');
+    if (!input) return;
+    let timer = null;
+    input.oninput = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        state.chapterQuery = input.value;
+        if (state.current?._chapters) renderChapters(state.current);
+      }, 120);
+    };
+  }
+  /** «★ 8.4 · 201 فصلًا · 2018» (أو ثلاثة أرقام كبيرة في «الملف»). التقييم من AniList حين يُعرف. */
+  function paintStats(w) {
+    const host = q('detailStats');
+    if (!host) return;
+    const n = w._chapters ? countMainChapters(w._chapters) : Number(w.chapters) || 0;
+    // «كلاسيكي»: عدد الفصول الصحيحة كبيرًا كرقم صفحة (Stable)
+    const folio = q('detailFolio');
+    if (folio) folio.replaceChildren(el('b', null, n ? String(n) : '—'), ...(n ? [el('span', null, n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا')] : []));
+    const year = w.startDate?.year ?? null;
+    const ref = String(w.id);
+    // حقائق من عدة مصادر (lib/manga-facts.js): الحالة بالتصويت، والتقييم من AniList أو MAL؛ وما لا تقييم له
+    // يأخذ تقييم السيرفر من 5 (متوسط مستخدمي VANTARA، يبدأ 0) — لا شرطة أبدًا (قرار المالك، 9 نوفمبر)
+    const facts = state.detailFacts?.ref === ref ? state.detailFacts : null;
+    if (!facts) {
+      state.detailFacts = { ref, status: null, score: null, server: null };
+      const title = w._work?.title || w.title?.english || w.title?.romaji || titleOf(w);
+      void Promise.all([
+        import('../lib/manga-facts.js').then((m) => m.mangaFacts({ ref, title, alStatus: w.status, alScore: w.averageScore })).catch(() => null),
+        sync.ratingsAvg?.(refsOf(ref)) ?? null,
+      ]).then(([f, srv]) => {
+        if (state.detailFacts?.ref !== ref) return;
+        Object.assign(state.detailFacts, { status: f?.status ?? null, score: f?.score ?? null, server: srv ? Number(srv.score) || 0 : 0 });
+        if (state.current && String(state.current.id) === ref) { paintStats(state.current); renderInfo(state.current); }
+      });
+    }
+    const status = facts?.status ?? w.status;
+    const fromSources = Number(w.averageScore) > 0 ? Number(w.averageScore) / 10 : state.detailScore?.ref === ref ? state.detailScore.score : null;
+    const known = fromSources ?? facts?.score ?? null;
+    const server = known == null && facts?.server != null ? facts.server : null;
+    // التقييم يُسأل عنه مرة: «جارٍ» يحجز مكانه فلا يدفع ما بجانبه حين يصل
+    const pending = !(Number(w.averageScore) > 0) && !(state.detailScore?.ref === ref && state.detailScore.done);
+    const chaptersWord = n === 1 ? 'فصل' : n === 2 ? 'فصلان' : n <= 10 ? 'فصول' : 'فصلًا';
+    const reserve = (node) => {
+      node.classList.add('mw-hold');
+      return node;
+    };
+    if (lookIs('profile')) {
+      // ثلاث خانات ثابتة دائمًا: ما لم يُعرف بعد شرطة في مكانه
+      const cell = (value, label, star = false) => {
+        const d = el('div');
+        const b = el('b');
+        if (star && value !== '—') b.innerHTML = '<span class="mw-star">★</span> ';
+        b.append(String(value));
+        d.append(b, el('small', null, label));
+        return d;
+      };
+      host.replaceChildren(
+        cell(known ? known.toFixed(1) : (server ?? 0).toFixed(1), known ? 'التقييم' : 'تقييم VANTARA من 5', true),
+        cell(n || '—', n ? chaptersWord : 'فصلًا'),
+        cell(STATUS_AR[status] ?? '—', year ? String(year) : 'الحالة'),
+      );
+    } else {
+      const parts = [];
+      {
+        const s = el('span');
+        s.innerHTML = '<span class="mw-star">★</span> ';
+        s.append(el('b', null, known ? known.toFixed(1) : (server ?? 0).toFixed(1)));
+        if (!known && server != null) s.append(' من 5');
+        parts.push(known || server != null || !pending ? s : reserve(s));
+      }
+      const c = el('span');
+      c.append(el('b', null, n ? String(n) : '000'), ` ${n ? chaptersWord : 'فصلًا'}`);
+      parts.push(n ? c : reserve(c));
+      if (year) parts.push(el('span', null, String(year)));
+      host.replaceChildren(...parts);
+    }
+    if (!(Number(w.averageScore) > 0) && state.detailScore?.ref !== ref) {
+      state.detailScore = { ref, score: null, done: false };
+      void ratingFor(w._work?.title || w.title?.english || titleOf(w)).then((rated) => {
+        if (state.detailScore?.ref !== ref) return;
+        state.detailScore.done = true;
+        if (rated?.score && !rated.adult) state.detailScore.score = rated.score;
+        if (state.current && String(state.current.id) === ref) paintStats(state.current);
+      });
+    }
+  }
+  /** «مانهوا · مكتمل»: نوع العمل إن عُرف بلده، وحالته؛ وإلا تصنيفه الأول. */
+  /** الحالة بعد تصويت المصادر (manga-facts) متى وصلت، وإلا ما قاله AniList. */
+  const statusOf = (w) => (state.detailFacts?.ref === String(w?.id) && state.detailFacts.status) || w?.status;
+  function kickerOf(w) {
+    const kind = { KR: 'مانهوا', JP: 'مانجا', CN: 'مانها' }[w.countryOfOrigin] ?? null;
+    const parts = [kind, STATUS_AR[statusOf(w)]].filter(Boolean);
+    return parts.length ? parts.join(' · ') : (w.genres || []).slice(0, 1).map(genreAr).join('');
+  }
+  /** القصة: هيكل ثلاثة أسطر حتى تصل النبذة، ثم النص في المساحة نفسها (لا إزاحة). */
+  function paintStory(w) {
+    const text = clean(w.description);
+    const d = q('description');
+    const more = q('moreToggle');
+    if (w.description === undefined && !text) {
+      d.innerHTML = '<span class="mw-skel-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
+      d.classList.add('clamped');
+      more.hidden = false;
+      more.classList.add('mw-hold');
+      return;
+    }
+    d.textContent = text || 'لا توجد نبذة من المصدر.';
+    d.classList.add('clamped');
+    more.textContent = 'المزيد';
+    more.hidden = false;
+    // «المزيد» يحجز سطره دائمًا: يختفي بالشفافية لا من التخطيط
+    more.classList.add('mw-hold');
+    requestAnimationFrame(() => more.classList.toggle('mw-hold', d.scrollHeight <= d.clientHeight + 2));
   }
   /** العدد والتصنيف والنبذة تتحدّث مكانها، بلا إعادة الغلاف ولا قفزة. */
   function refreshDetailMeta(w) {
-    paintFolio(w);
-    const sub = q('detailSub');
-    sub.replaceChildren();
-    if (w.status && STATUS_AR[w.status]) {
-      const st = el('span', 'status-dot', STATUS_AR[w.status]);
-      st.dataset.status = w.status;
-      sub.append(st);
-    }
-    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
-    const editions = w._sources ?? [];
-    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
+    paintStats(w);
+    const kick = q('detailKicker');
+    if (kick) kick.textContent = kickerOf(w);
+    paintStory(w);
     renderInfo(w);
   }
   function renderDetail(w) {
     const title = titleOf(w);
-    const h1 = q('detailTitle');
-    h1.textContent = title;
-    h1.dir = 'auto';
+    q('detailTitle').textContent = title;
     q('detailTopTitle').textContent = title;
-    q('detailTopTitle').dir = 'auto';
-
-    const sub = q('detailSub');
-    sub.replaceChildren();
-    if (w.status && STATUS_AR[w.status]) {
-      const s = el('span', 'status-dot', STATUS_AR[w.status]);
-      s.dataset.status = w.status;
-      sub.append(s);
-    }
-    // عدد الفصول رقمُ الصفحة الكبير فوق؛ لا يتكرر هنا
-    const editions = w._sources ?? w._work?.editions ?? [];
-    if (editions.length > 1) sub.append(el('span', null, countLabel(editions.length, 'source')));
-
-    q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'chip', genreAr(x))));
-    q('detailKicker').textContent = (w.genres || []).slice(0, 3).map(genreAr).join(' · ');
-    paintFolio(w);
+    const kick = q('detailKicker');
+    if (kick) kick.textContent = kickerOf(w);
+    const who = q('detailWho');
+    if (who) who.textContent = unique((w.staff?.edges || []).map((e) => e.node?.name?.full).filter(Boolean)).join(' · ');
+    paintStats(w);
+    q('detailGenres').replaceChildren(...(w.genres || []).slice(0, 4).map((x) => el('span', 'mw-chip', genreAr(x))));
 
     const cover = q('detailCover');
     if (cover.dataset.for !== String(w.id)) {
       cover.dataset.for = String(w.id);
       const glow = q('detailGlow');
-      glow.classList.remove('ready');
-      glow.style.backgroundImage = '';
-      void mountImage(cover, w).then((url) => {
-        if (!url || state.current?.id !== w.id) return;
-        glow.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
-        glow.classList.add('ready');
-      });
+      glow?.classList.remove('ready');
+      glow?.removeAttribute('src');
+      // الغلاف والبنر يُحسمان في الخفاء ثم يظهران مرة واحدة (lib/manga-art.js): AniList أولًا، والمصدر فقط إن
+      // كان أعلى جودة فعلًا. ما حُسم يُحفظ للعمل فلا يتبدل في الفتحة التالية. الهيكل حتى ذلك.
+      const banner = q('detailBanner');
+      const bannerBox = banner?.closest('.mw-ban');
+      banner?.classList.remove('ready');
+      bannerBox?.classList.remove('mw-ban--art', 'mw-ban--cover');
+      const ref = String(w.id);
+      const live = () => cover.isConnected && cover.dataset.for === ref && String(state.current?.id) === ref;
+      const paintArt = (art) => {
+        if (!live()) return;
+        // النسبة الحقيقية للغلاف المحسوم: مكانه بمقاسه بلا فراغ فوقه أو تحته ولا قص. تُحسم قبل أن تُرى الصفحة فقط:
+        // بعدها يبقى مقاسه كما ظهر (كان يتغير 12px حين يصل الغلاف متأخرًا فيتحرك كل ما تحته)، ويُعرض الغلاف كاملًا داخله
+        const ratio = artRatio(art);
+        const shown = workShown() && currentPage() === 'detail';
+        const fit = Boolean(ratio) && shown && cover.style.getPropertyValue('--art-ratio') !== ratio;
+        if (ratio && !shown) cover.style.setProperty('--art-ratio', ratio);
+        const img = new Image();
+        img.alt = '';
+        img.decoding = 'async';
+        img.classList.add('img-fade');
+        if (fit) img.classList.add('mw-fit');
+        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
+        // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
+        img.onload = () => { if (live()) workReady(); };
+        img.src = cachedCover(art.cover) ?? art.cover;
+        cover.replaceChildren(img);
+        for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
+          g.onload = () => g.classList.add('ready');
+          g.src = art.cover;
+        }
+        if (banner) {
+          bannerBox?.classList.toggle('mw-ban--art', art.wide);
+          bannerBox?.classList.toggle('mw-ban--cover', !art.wide);
+          banner.onload = () => { if (live()) banner.classList.add('ready'); };
+          banner.onerror = () => { if (live() && banner.getAttribute('src') !== art.cover) { bannerBox?.classList.replace('mw-ban--art', 'mw-ban--cover'); banner.src = art.cover; } };
+          banner.src = art.banner || art.cover;
+        }
+      };
+      // القرار نفسه الذي رسمته البطاقة (lib/art.js): محسوم غالبًا قبل الفتح، فيظهر فورًا بنسبته
+      const known = art.get(ref);
+      if (known) paintArt(known);
+      else {
+        cover.replaceChildren(imageLoadingNode());
+        void decideArt(w).then((d) => {
+          if (!live()) return;
+          if (!d?.cover) { workReady(); return void mountImage(cover, w, { final: true }); }
+          rememberCover(ref, d.cover);
+          paintArt(d);
+        });
+      }
     }
-
-    const text = clean(w.description);
-    const d = q('description');
-    d.textContent = text || (w.description === undefined ? '' : 'لا توجد نبذة من المصدر.');
-    d.classList.add('clamped');
-    q('summaryBlock').hidden = w.description === undefined && !text;
-    requestAnimationFrame(() => {
-      q('moreToggle').hidden = d.scrollHeight <= d.clientHeight + 2;
-      q('moreToggle').textContent = 'المزيد';
-    });
+    paintStory(w);
     refreshLibraryDetail();
-    renderRating();
+    paintSimilarTab(w);
     renderInfo(w);
     const insightHost = q('detailInsights');
-    insightHost.dataset.ref = String(w.id);
-    insightHost.replaceChildren();
-    void paintWorkInsights(insightHost, { sync, ref: String(w.id), openProfile });
+    if (insightHost.dataset.ref !== String(w.id)) {
+      insightHost.dataset.ref = String(w.id);
+      insightHost.replaceChildren();
+      void paintWorkInsights(insightHost, { sync, ref: String(w.id), openProfile });
+    }
   }
   function toggleSummary() {
     const d = q('description');
@@ -1472,22 +1992,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('moreToggle').textContent = clamped ? 'المزيد' : 'أقل';
   }
   /**
-   * «ترجمة تلقائية» بجانب العين: تظهر فقط لعملٍ فيه فصول إنجليزية، ومقفلة
-   * افتراضيًا. مفعّلة = كل فصل إنجليزي تدخله يجهّز 30% منه بالعربي أولًا.
+   * «الترجمة العربية» في قائمة «المزيد»: تظهر فقط لعملٍ فيه فصول إنجليزية والترجمة مفعّلة في الإعدادات.
+   * مفعّلة = كل فصل إنجليزي تدخله يجهّز 30% منه بالعربي أولًا.
    */
+  function translateAvailable(w) {
+    return Boolean(w?._chapters?.some((c) => c.lang === 'en')) && readTranslateSettings().enabled && supports('translation');
+  }
   function renderTranslateToggle(w) {
-    const b = q('detailTlBtn');
-    if (!b) return;
-    const hasEnglish = Boolean(w?._chapters?.some((c) => c.lang === 'en'));
-    b.hidden = !hasEnglish || !readTranslateSettings().enabled || !supports('translation');
-    const on = translationOn(String(w?.id ?? ''));
-    b.setAttribute('aria-pressed', String(on));
-    b.classList.toggle('detail-tl--on', on);
-    const running = translationJobs.forWork(String(w?.id ?? '')).some((j) => j.status === 'running');
-    b.classList.toggle('detail-tl--busy', running);
-    const label = running ? 'الترجمة العربية: فصول تُترجم الحين' : on ? 'الترجمة العربية: شغّالة لهذا العمل' : 'الترجمة العربية';
-    b.setAttribute('aria-label', label);
-    b.title = label;
+    if (state.current === w && currentPage() === 'detail') paintDetailMenu();
   }
   function toggleReadingTranslation(w) {
     const on = !translationOn(String(w.id));
@@ -1583,11 +2095,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * ترجمتها؛ ونسخ التقرير كاملًا.
    */
   function openPerfSheet() {
+    if (!diagnosticsUi.visible()) return;
     let benchmarks = [];
     let engines = null;
     let cleaning = null;
     const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} ث`);
     const build = (body) => {
+      body.dataset.diagnosticSheet = '';
       body.append(el('h3', null, 'أداء الترجمة'));
       const entries = readPerf();
       const s = summarize(entries);
@@ -1974,7 +2488,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const pairs = [
       ['المؤلف', role('story')],
       ['الرسام', role('art')],
-      ['الحالة', STATUS_AR[w.status]],
+      ['الحالة', STATUS_AR[statusOf(w)]],
       ['الفصول', w._chapters ? String(w._chapters.length) : null],
       ['المصادر', (w._sources ?? w._work?.editions ?? []).map((s) => s.label).join('، ')],
       ['التصنيفات', (w.genres || []).map(genreAr).join('، ')],
@@ -1989,43 +2503,85 @@ export function mountV35(deps, { page = 'home' } = {}) {
     );
     // خانة وحيدة في شبكة من عمودين تترك نصفها فارغًا
     if (pairs.length % 2) grid.append(el('div', 'info-box'));
-    grid.parentElement.hidden = pairs.length === 0;
+    grid.hidden = pairs.length === 0;
   }
   function chapterMessage(text) {
     q('chapterPanel').replaceChildren(el('div', 'no-data', text));
   }
   function renderChaptersLoading() {
-    q('chapterCount').textContent = '';
-    q('sourcesBlock').hidden = true;
-    q('detailProgress').hidden = true;
-    const list = el('div', 'chapter-list');
+    const count = q('chapterCount');
+    if (count) count.textContent = ' ';
+    // كل ما سيظهر مع الفصول يحجز مكانه الآن بهيكل بشكله (لا شيء يدفع غيره حين تصل)
+    const src = q('sourcesBlock');
+    src.hidden = false;
+    q('sourceRow').replaceChildren(...[96, 84, 92].map((wpx) => {
+      const chip = el('span', 'source-chip skeleton');
+      chip.style.width = `${wpx}px`;
+      return chip;
+    }));
+    const progress = q('detailProgress');
+    if (progress) {
+      progress.hidden = false;
+      q('progressFill').style.width = '0%';
+      q('progressText').textContent = ' ';
+      q('progressNote').textContent = '';
+    }
+    const ranges = q('chapterRanges');
+    if (ranges) {
+      ranges.hidden = false;
+      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton')));
+    }
+    // الهيكل بعدد ما سيأتي: نطاق كامل (50) في الشبكة إن عُرف أن الفصول أكثر، وإلا عددها
+    const grid = lookIs('resume');
+    const known = Number(state.current?.chapters) || 0;
+    const cells = known ? Math.min(50, known) : 30;
+    const list = el('div', grid ? 'mw-grid' : 'mw-chs');
     list.setAttribute('aria-busy', 'true');
-    for (let i = 0; i < 6; i++) {
-      const row = el('div', 'chapter-row');
-      row.innerHTML =
-        '<div class="chapter-open"><span class="skeleton-line" style="width:40%;margin:0"></span><span class="skeleton-line" style="width:24%"></span></div>';
-      list.append(row);
+    for (let i = 0; i < (grid ? cells : 8); i++) {
+      if (grid) list.append(el('span', 'mw-cell skeleton'));
+      else {
+        const row = el('div', 'mw-ch mw-ch--skel');
+        row.innerHTML = '<span class="mw-ch-open"><span class="n"></span><span class="t"><span class="skeleton-line" style="width:40%;margin:0"></span><span class="skeleton-line" style="width:24%"></span></span></span>';
+        list.append(row);
+      }
     }
     q('chapterPanel').replaceChildren(list);
     setReadCta(undefined);
   }
 
+  const chapterNumberText = (r) => (Number.isFinite(r?.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
+  /** اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») لا يُكرَّر: يُكتب «الفصل 48» بالعربي. */
+  const plainChapterName = (name) => !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
+
   /**
-   * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح.
-   * `undefined` = الفصول تُجمع، `null` = لا فصول.
+   * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح ومصدره («الفصل 143 · Team X»).
+   * `undefined` = الفصول تُجمع، `null` = لا فصول. «من حيث وقفت» يكتب رقم الفصل كبيرًا فوقه.
    */
   function setReadCta(next, { started = false } = {}) {
     const btn = q('readCta');
     const label = q('readCtaLabel');
     const sub = q('readCtaSub');
+    if (!btn) return;
     btn.disabled = !next;
-    sub.textContent = '';
+    // سطر الفصل يحجز مكانه دائمًا: الاسم لا يقفز للأعلى حين يصل
+    sub.textContent = '\u00a0';
+    const resume = lookIs('resume');
     if (next === undefined) label.textContent = 'جارٍ جمع الفصول';
-    else if (next === null) label.textContent = 'لا فصول متاحة';
+    else if (next === null) {
+      label.textContent = 'لا فصول متاحة';
+      if (q('sourceRow')?.querySelector('.skeleton')) q('sourcesBlock').hidden = true;
+      if (q('chapterRanges')?.querySelector('.skeleton')) q('chapterRanges').hidden = true;
+    }
     else {
-      label.textContent = started ? 'تابع القراءة' : 'ابدأ القراءة';
-      sub.textContent = next.chapter.name || `الفصل ${next.number}`;
-      sub.dir = 'auto';
+      label.textContent = resume ? (started ? 'تابع الآن' : 'ابدأ الآن') : started ? 'تابع القراءة' : 'ابدأ القراءة';
+      const name = next.chapter?.name || '';
+      const from = next.chapter?.scanlator || (state.current?._sources ?? []).find((x) => x.sourceId === next.sourceId)?.label || '';
+      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ') || '\u00a0';
+    }
+    if (resume) {
+      q('resumeNum').textContent = next ? chapterNumberText(next) : '—';
+      q('resumeKick').textContent = next && !started ? 'ابدأ من أول فصل' : 'تابع من حيث وقفت';
+      q('resumeLabel').textContent = next && !started ? 'الفصل الأول' : 'الفصل التالي';
     }
   }
 
@@ -2123,30 +2679,90 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const refs = refsOf(ref);
     const rows = sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref));
     if (!rows.length || !base.length) return null;
-    const latest = rows.reduce((a, b) => ((b.updated_at ?? 0) > (a.updated_at ?? 0) ? b : a));
     // الترتيب من الأقدم للأحدث؛ مفتاح الفصل بمرجع صفّه نفسه (القديم إن كان منه)
     const ordered = [...base].sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
-    const at = ordered.findIndex((r) => chapterKeyOf(latest.series_ref, r) === latest.chapter_key);
-    if (at < 0) return null;
-    if ((latest.ratio ?? 0) < 0.98) return ordered[at];
-    return ordered[at + 1] ?? ordered[at];
+    return continueChapter(rows, ordered, (row, chapter) => sameChapterKey(row.chapter_key, chapterKeyOf(row.series_ref, chapter)));
+  }
+
+  /** آخر مرة قرأت فيها هذا العمل (آخر تقدم محفوظ). */
+  function lastReadAt(ref) {
+    const userId = sync.user?.userId;
+    const refs = refsOf(ref);
+    return sync.rows('progress', (r) => r.user_id === userId && refs.includes(r.series_ref)).reduce((t, r) => Math.max(t, Number(r.updated_at) || 0), 0);
+  }
+  /** شريط التقدّم وسطره بصياغة النمط: «قرأت 142 من 201» ومعه آخر قراءة، أو ما بقي. */
+  function paintProgress(w, readCount, total) {
+    const box = q('detailProgress');
+    if (!box) return;
+    box.hidden = false;
+    q('progressFill').style.width = `${Math.round((readCount / total) * 100)}%`;
+    const left = total - readCount;
+    const did = readCount ? `قرأت ${readCount} من ${total}` : 'لم تبدأ بعد';
+    let note = '';
+    let text = did;
+    if (TABBED_LOOKS.includes(state.detailLook)) text = readCount && left ? `${did} · باقي ${countLabel(left, 'chapter')}` : did;
+    else if (lookIs('resume')) note = left ? `باقي ${countLabel(left, 'chapter')}` : 'قرأته كله';
+    else {
+      const at = readCount ? lastReadAt(String(w.id)) : 0;
+      note = at ? `آخر قراءة ${agoAr(at)}` : '';
+    }
+    q('progressText').textContent = text;
+    q('progressNote').textContent = note;
+  }
+  /** نطاقات كل 50 («الملف» و«من حيث وقفت»): الأحدث أولًا مع ترتيب الفصول، ويُفتح على المختار أو الافتراضي. */
+  function paintRanges(w, rows, next) {
+    const host = q('chapterRanges');
+    if (!host) return { groups: [], at: 0 };
+    const groups = chapterGroups(rows.map((r) => Number(r.number)));
+    host.hidden = groups.length < 2;
+    if (groups.length < 2) {
+      host.replaceChildren();
+      return { groups: [], at: 0 };
+    }
+    // «من حيث وقفت» يفتح على نطاق فصلك؛ «الملف» على أول نطاق في الترتيب (الأحدث)
+    const fallback = lookIs('resume') && next ? groupIndexOf(groups, Number(next.number)) : state.chapterNewestFirst ? groups.length - 1 : 0;
+    const at = state.chapterRange !== null && state.chapterRange < groups.length ? state.chapterRange : fallback;
+    const order = groups.map((_g, i) => i);
+    if (state.chapterNewestFirst) order.reverse();
+    host.replaceChildren(
+      ...order.map((i) => {
+        const [a, b] = groups[i];
+        const btn = el('button', i === at ? 'on' : '');
+        btn.type = 'button';
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', String(i === at));
+        const label = el('bdi', null, `${a}–${b}`);
+        label.dir = 'ltr';
+        btn.append(label);
+        btn.onclick = () => {
+          state.chapterRange = i;
+          renderChapters(w);
+        };
+        return btn;
+      }),
+    );
+    return { groups, at };
   }
 
   function renderChapters(w) {
     const all = w._chapters ?? [];
     if (!all.length) {
-      q('chapterCount').textContent = '';
+      const count = q('chapterCount');
+      if (count) count.textContent = '';
       chapterMessage('المصادر لم تُرجع فصولًا لهذا العمل.');
       setReadCta(null);
       return;
     }
     const ref = String(w.id);
     const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
-    const readCount = all.filter(read).length;
+    // «قرأت X من Y» بنفس عدّ الرأس (#323 U-23): الفصول الصحيحة فقط (الجانبية 128.1 والصفوف بلا رقم
+    // تُعرض ولا تُعدّ)، وإلا ظهر «386 فصلًا» في الرأس و«قرأت 50 من 453» تحته. عمل بلا أرقام يُعدّ بصفوفه.
+    const counted = mainChapters(all);
+    const readCount = counted.filter(read).length;
     const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
     // «تابع» = آخر فصل كنت فيه فعلًا (آخر تقدم محفوظ)، ولو لم تُعلَّم الفصول قبله
     // مقروءة؛ أنهيته؟ فالذي بعده. ولا تقدم؟ فأول فصل غير مقروء من الأقدم.
-    const next = continueRow(ref, base) ?? [...base].reverse().find((r) => !read(r)) ?? base[0] ?? all[0];
+    const next = continueRow(ref, base) ?? startChapter(base, read) ?? all[0];
     state.nextRow = next;
     setReadCta(next, { started: readCount > 0 });
     // الفصل الذي سيفتحه «ابدأ/تابع» يُجهَّز الآن، لا بعد الضغطة
@@ -2156,30 +2772,60 @@ export function mountV35(deps, { page = 'home' } = {}) {
       clearTimeout(state.warmTimer);
       state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
     }
-
-    q('detailProgress').hidden = false;
-    q('progressFill').style.width = `${Math.round((readCount / all.length) * 100)}%`;
-    q('progressText').textContent = readCount ? `قرأت ${readCount} من ${all.length}` : 'لم تبدأ بعد';
+    paintProgress(w, readCount, counted.length);
+    paintStats(w);
 
     const rows = visibleRows(w);
     // العدد فصولٌ صحيحة فقط؛ الجانبية (128.1) تُعرض في القائمة ولا تُعدّ
     const main = countMainChapters(rows);
-    q('chapterCount').textContent = main < rows.length ? `${main} · +${rows.length - main} جانبي` : String(main);
-    const list = el('div', 'chapter-list');
-    const fragment = document.createDocumentFragment();
+    q('chapterCount').textContent = main < rows.length ? `${countLabel(main, 'chapter')} · +${rows.length - main} جانبي` : countLabel(main, 'chapter');
+    const sort = q('chapterSort')?.querySelector('span');
+    if (sort) sort.textContent = state.chapterNewestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا';
     const nextKey = chapterKeyOf(ref, next);
-    for (const r of rows.slice(0, state.chapterShown)) {
-      fragment.append(chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
-    }
-    list.append(fragment);
-    const parts = [list];
+    const parts = [];
     for(const source of w._lockedSources??[]){
       const note=el('p','chapter-locked-note');
       note.innerHTML=glyph('lock');
       note.append(el('span',null,`في ${source.label} فصول مقفلة حتى الفصل ${source.lockedMax}`));
-      parts.unshift(note);
+      parts.push(note);
     }
-    const rest = rows.length - state.chapterShown;
+    const ranged = lookIs('profile') || lookIs('resume');
+    const { groups, at } = ranged ? paintRanges(w, rows, next) : { groups: [], at: 0 };
+    // البحث يشمل كل الصفوف لا الدفعة المعروضة: الفصل 300 من 2000 يظهر فورًا
+    const pool = state.chapterQuery ? matchChapters(rows, state.chapterQuery) : rows;
+    if (state.chapterQuery && !pool.length) parts.push(el('p', 'mw-find-empty', 'لا فصل بهذا الرقم أو الاسم'));
+    const shown = ranged ? rowsInGroup(rows, groups, at) : pool.slice(0, state.chapterShown);
+    if (lookIs('webtoon')) paintReleaseBeat(w, rows);
+    const fragment = document.createDocumentFragment();
+    if (lookIs('resume')) {
+      const grid = el('div', 'mw-grid');
+      for (const r of shown) fragment.append(chapterCell(w, r, read(r), chapterKeyOf(ref, r) === nextKey));
+      grid.append(fragment);
+      parts.push(grid);
+    } else {
+      const list = el('div', 'mw-chs');
+      // «ويبتوني»: الفصول خط زمني، والشهر محطة عليه بعدد فصوله المعروضة
+      const timeline = lookIs('webtoon');
+      let month = null, head = null, inMonth = 0;
+      const closeMonth = () => { if (head) head.append(el('small', null, countLabel(inMonth, 'chapter'))); };
+      for (const r of shown) {
+        if (timeline) {
+          const m = monthOf(r.chapter?.dateUpload);
+          if (m && m !== month) { closeMonth(); head = el('div', 'wt-month', m); fragment.append(head); month = m; inMonth = 0; }
+          inMonth++;
+        }
+        const row = chapterRow(w, r, read(r), chapterKeyOf(ref, r) === nextKey);
+        if (timeline && Date.now() - Number(r.chapter?.dateUpload) < 14 * 86_400_000) {
+          row.classList.add('wt-new');
+          row.querySelector('.t > b')?.append(el('span', 'wt-tag', 'جديد'));
+        }
+        fragment.append(row);
+      }
+      if (timeline) closeMonth();
+      list.append(fragment);
+      parts.push(list);
+    }
+    const rest = ranged ? 0 : pool.length - state.chapterShown;
     if (rest > 0) {
       const more = el('button', 'btn btn-secondary chapter-more', `اعرض ${countLabel(rest, 'chapter')} أخرى`);
       more.type = 'button';
@@ -2189,61 +2835,213 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       parts.push(more);
     }
-    q('chapterPanel').replaceChildren(...parts);
+    const panel = q('chapterPanel');
+    // أول فصول تحل محل الهيكل والصفحة ظاهرة: تظهر في مكانه بتلاشٍ واحد، لا دفعة
+    const fromSkeleton = Boolean(panel.querySelector(':scope > [aria-busy="true"]'));
+    panel.replaceChildren(...parts);
+    if (fromSkeleton && currentPage() === 'detail') settleIn(panel);
   }
-  function chapterRow(w, r, isRead, isNext) {
-    const ref = String(w.id);
-    const row = el('div', `chapter-row${isRead ? ' is-read' : ''}${isNext ? ' is-next' : ''}`);
-    const open = el('button', 'chapter-open');
-    open.type = 'button';
-    // رقم الفصل كبيرًا في البداية كترقيم صفحات كتاب، والاسم والتاريخ بجانبه
-    const num = el('span', 'chapter-num', Number.isFinite(r.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
-    num.dir = 'ltr';
-    // اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») يتكرر بجانب الرقم الكبير:
-    // يُكتفى بالتاريخ، ويبقى الاسم حين يحمل عنوانًا
-    const name = r.chapter.name || '';
-    const plain = !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
-    const when = dateLabel(r.chapter.dateUpload);
-    const no = el('div', 'chapter-no', plain ? when || `الفصل ${r.number}` : name);
-    no.dir = 'auto';
-    const note = el(
-      'div',
-      'chapter-note',
-      (plain ? [r.chapter.scanlator] : [when, r.chapter.scanlator]).filter(Boolean).join(' · '),
+  // ── «علّم فصول»: وضع تحديد فوق القائمة أو الشبكة في الأنماط الأربعة ──
+  // لمسة الفصل تحدّده بدل أن تفتحه؛ والشريط السفلي: مقروء، غير مقروء، كل ما قبله، ما بينهما.
+  // الحفظ بالآلية نفسها (chapter.markMany في الطابور، والطبقة المتفائلة تعرضه فورًا).
+
+  function enterMarkMode() {
+    const w = state.current;
+    if (!w?._chapters?.length) return toast('انتظر لين تجهز الفصول');
+    state.marking = { picked: new Map() };
+    const page = q('detail');
+    page.classList.add('mw-marking');
+    // «المعرض»: الفصول في تبويبها
+    const tab = q('detailTabs')?.querySelector('[data-tab="chapters"]');
+    if (tab && tab.getAttribute('aria-selected') !== 'true') tab.click();
+    let bar = q('markBar');
+    if (!bar) {
+      bar = el('div', 'mw-selbar');
+      bar.dataset.motionFixed = '';
+      bar.id = 'markBar';
+      bar.setAttribute('role', 'toolbar');
+      bar.setAttribute('aria-label', 'علّم فصول');
+      page.append(bar);
+    }
+    paintMarkBar();
+    renderChapters(w);
+    q('chapterPanel')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    window.scrollBy({ top: -76, behavior: 'instant' });
+  }
+  function exitMarkMode() {
+    if (!state.marking) return;
+    state.marking = null;
+    q('detail')?.classList.remove('mw-marking');
+    q('markBar')?.remove();
+    if (state.current?._chapters && currentPage() === 'detail') renderChapters(state.current);
+  }
+  function toggleMarkPick(w, r) {
+    const key = chapterKeyOf(String(w.id), r);
+    const picked = state.marking.picked;
+    if (picked.has(key)) picked.delete(key);
+    else picked.set(key, r);
+    paintMarkBar();
+    renderChapters(w);
+  }
+  function paintMarkBar() {
+    const bar = q('markBar');
+    const m = state.marking;
+    if (!bar || !m) return;
+    const w = state.current;
+    const picked = [...m.picked.values()];
+    const n = picked.length;
+    const btn = (label, run, { primary = false, enabled = true } = {}) => {
+      const b = el('button', `mw-selbtn${primary ? ' is-primary' : ''}`, label);
+      b.type = 'button';
+      b.disabled = !enabled;
+      b.onclick = run;
+      return b;
+    };
+    const head = el('div', 'mw-selhead');
+    head.append(el('span', null, n ? `حدّدت ${countLabel(n, 'chapter')}` : 'المس الفصول لتحديدها'));
+    const close = el('button', 'mw-selclose');
+    close.type = 'button';
+    close.innerHTML = glyph('close', { size: 20 });
+    close.setAttribute('aria-label', 'أنهِ التحديد');
+    close.onclick = exitMarkMode;
+    head.append(close);
+    const all = w?._chapters ?? [];
+    const apply = (rows, read, done) => {
+      if (!rows.length) return;
+      const changed = markRows(w, rows, read, read ? latestChapter(rows) : null);
+      exitMarkMode();
+      toast(changed ? done(changed) : read ? 'كلها مقروءة من قبل' : 'ما فيها فصل معلّم');
+    };
+    const acts = el('div', 'mw-selacts');
+    acts.append(
+      btn('مقروء', () => apply(rowsForMark(all, picked), true, (c) => `علّمت ${countLabel(c, 'chapter')} مقروءة`), { primary: true, enabled: n > 0 }),
+      btn('غير مقروء', () => apply(rowsForMark(all, picked), false, (c) => `ألغيت تعليم ${countLabel(c, 'chapter')}`), { enabled: n > 0 }),
+      btn('كل ما قبله', () => apply(rowsForMark(all, picked, 'upTo'), true, (c) => `علّمت ${countLabel(c, 'chapter')} حتى الفصل ${chapterNumberText(picked[0])}`), { enabled: n === 1 }),
+      btn('ما بينهما', () => {
+        // يحدّد كل ما بين الفصلين، ثم تختار مقروء أو غير مقروء
+        for (const r of rowsForMark(all, picked, 'between')) m.picked.set(chapterKeyOf(String(w.id), r), r);
+        paintMarkBar();
+        renderChapters(w);
+      }, { enabled: n === 2 }),
     );
-    const copy = el('span', 'chapter-copy');
-    copy.append(no, note);
-    open.append(num, copy);
-    open.onclick = () => openChapter(w, r);
-    const eye = el('button', 'chapter-eye');
+    bar.replaceChildren(head, acts);
+  }
+  /** علامة الفصل في نهاية صفّه: زرّ يعلّمه مقروءًا أو يلغيه، وشكله حالة الفصل. */
+  function markButton(w, r, { isNext, onPaint }) {
+    const ref = String(w.id);
+    const eye = el('button', 'st');
     eye.type = 'button';
     const paint = (on) => {
-      eye.classList.toggle('chapter-eye--read', on);
+      eye.classList.toggle('st--read', on);
       eye.setAttribute('aria-pressed', String(on));
-      eye.innerHTML = glyph('eye') + (on ? `<span class="chapter-eye__check">${glyph('check')}</span>` : '');
+      eye.innerHTML = on
+        ? glyph('check', { size: 18 })
+        : isNext
+          ? '<span class="mw-here">وصلت هنا</span>'
+          : isNewChapter(r, on)
+            ? '<span class="mw-new">جديد</span>'
+            : glyph('eye', { size: 18 });
       const label = on ? 'مقروء — المس لإلغاء التعليم' : 'علّمه مقروءًا';
       eye.setAttribute('aria-label', label);
       eye.title = label;
-      row.classList.toggle('is-read', on);
+      onPaint(on);
     };
-    paint(isRead);
     eye.onclick = (e) => {
       e.stopPropagation();
       const on = !isChapterRead(sync, ref, chapterKeyOf(ref, r));
       markChapter(sync, ref, r, on);
       if (on) recordChapterView(w, r);
       paint(on);
-      // التقدّم وزرّ «تابع» يتبعان العين بعد لحظة، لا بعد المزامنة
-      clearTimeout(state.eyeTimer);
-      state.eyeTimer = setTimeout(() => state.current === w && renderChapters(w), 450);
+      // العلامة والتقدّم وزرّ «تابع» والشبكة تتبعها في الحال، في كل نمط
+      refreshChaptersSoon(w);
     };
+    return { eye, paint };
+  }
+  /** صف فصل كما في النموذج: الرقم كبيرًا، ثم «الفصل N» (أو عنوانه) وتاريخه، ثم حالته. */
+  /** «ويبتوني»: «يصدر أسبوعيًا · القادم 8 أبريل» من تواريخ الفصول الصحيحة، للعمل المستمر وحده. */
+  function paintReleaseBeat(w, rows) {
+    const host = q('releaseBeat');
+    if (!host) return;
+    const done = [state.detailFacts?.status, w.status].some((x) => /FINISHED|CANCELLED|COMPLETED|ENDED|HIATUS|مكتمل|منته|متوقف/i.test(String(x ?? '')));
+    const beat = done ? null : releaseBeat(mainChapters(rows).map((r) => Number(r.chapter?.dateUpload)));
+    // المكان محجوز في كل حال (manga.css): الإخفاء بالظهور لا بالإزالة، فلا يتحرك ما تحته
+    host.toggleAttribute('data-off', !beat);
+    host.setAttribute('aria-hidden', beat ? 'false' : 'true');
+    if (!beat) return host.replaceChildren();
+    const when = beat.next ? new Date(beat.next).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { day: 'numeric', month: 'long' }) : null;
+    const every = beat.weekly ? 'أسبوعيًا' : `كل ${countLabel(beat.days, 'day')} تقريبًا`;
+    host.replaceChildren(el('i'), el('span', null, `يصدر ${every}${when ? ` · القادم ${when}` : ''}`));
+  }
+  function chapterRow(w, r, isRead, isNext) {
+    const row = el('div', `mw-ch${isNext ? ' here' : ''}`);
+    const open = el('button', 'mw-ch-open');
+    open.type = 'button';
+    const num = el('span', 'n', chapterNumberText(r));
+    num.dir = 'ltr';
+    const name = r.chapter.name || '';
+    const when = dateLabel(r.chapter.dateUpload);
+    const t = el('span', 't');
+    const b = el('b', null, plainChapterName(name) ? `الفصل ${chapterNumberText(r)}` : name);
+    b.dir = 'auto';
+    t.append(b, el('span', null, [when, r.chapter.scanlator].filter(Boolean).join(' · ')));
+    open.append(num, t);
+    const picked = Boolean(state.marking?.picked.has(chapterKeyOf(String(w.id), r)));
+    if (state.marking) {
+      row.classList.toggle('picked', picked);
+      open.setAttribute('aria-pressed', String(picked));
+    }
+    open.onclick = () => (state.marking ? toggleMarkPick(w, r) : openChapter(w, r));
+    const { eye, paint } = markButton(w, r, { isNext, onPaint: (on) => row.classList.toggle('read', on) });
+    paint(isRead);
     row.append(open, eye);
     return row;
+  }
+  /**
+   * بلوك فصل في «من حيث وقفت» (قرار المالك، 10 نوفمبر): الرقم أعلى، وتحته وقت النشر، ودائرة ○ تعلّمه مقروءًا.
+   * لمسة البلوك تفتح الفصل فقط؛ الدائرة وحدها تبدّل التعليم. أُزيلت الضغطة المطوّلة: كانت تعيد رسم الشبكة
+   * والإصبع ما زال على الشاشة، فيقع رفعه على عنصر جديد ويبدو التعليم وكأنه أُلغي فورًا.
+   */
+  function chapterCell(w, r, isRead, isNext) {
+    const ref = String(w.id);
+    const cell = el('div', 'mw-cell');
+    const picked = Boolean(state.marking?.picked.has(chapterKeyOf(ref, r)));
+    const open = el('button', 'mw-cell-open');
+    open.type = 'button';
+    const num = el('b', 'mw-cell-n', chapterNumberText(r));
+    num.dir = 'ltr';
+    open.append(num, el('small', 'mw-cell-t', dateLabel(r.chapter?.dateUpload) || ' '));
+    const mark = el('button', 'mw-cell-mark');
+    mark.type = 'button';
+    let on = isRead;
+    const paint = () => {
+      cell.className = `mw-cell${isNext && !on ? ' here' : on ? ' read' : isNewChapter(r, on) ? ' new' : ''}${picked ? ' picked' : ''}`;
+      mark.innerHTML = on ? glyph('check', { size: 14 }) : '<i></i>';
+      mark.setAttribute('aria-pressed', String(on));
+      mark.setAttribute('aria-label', on ? `ألغِ تعليم الفصل ${chapterNumberText(r)}` : `علّم الفصل ${chapterNumberText(r)} مقروءًا`);
+      open.setAttribute('aria-label', `افتح الفصل ${chapterNumberText(r)}${on ? '، مقروء' : isNext ? '، وصلت هنا' : ''}`);
+    };
+    paint();
+    open.onclick = () => (state.marking ? toggleMarkPick(w, r) : openChapter(w, r));
+    mark.onclick = (e) => {
+      e.stopPropagation();
+      on = !on;
+      markChapter(sync, ref, r, on);
+      if (on) recordChapterView(w, r);
+      paint();
+      refreshChaptersSoon(w);
+    };
+    cell.append(open, mark);
+    return cell;
   }
   function dateLabel(ms) {
     if (!ms) return '';
     const days = Math.floor((Date.now() - ms) / 86_400_000);
-    if (days < 1) return 'اليوم';
+    if (days < 1) {
+      // وقت النشر بالساعات في اليوم نفسه («قبل 10 ساعات»)
+      const h = Math.floor((Date.now() - ms) / 3_600_000);
+      if (h < 1) return 'قبل دقائق';
+      return h === 1 ? 'قبل ساعة' : h === 2 ? 'قبل ساعتين' : h <= 10 ? `قبل ${h} ساعات` : `قبل ${h} ساعة`;
+    }
     if (days < 2) return 'أمس';
     if (days < 7) return `قبل ${countLabel(days, 'day')}`;
     return new Date(ms).toLocaleDateString('ar', {
@@ -2265,7 +3063,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openChapter(w, row, { inviteTogether = false } = {}) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
+    // آخر نسخة من العمل نفسه: المصادر تصل والقارئ مفتوح (#323 U-27)
+    const getWork = () => (state.current && String(state.current.id) === String(w.id) ? state.current : w);
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, getWork, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
   }
 
   /**
@@ -2337,7 +3137,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openAnimeRef(ref, { title = null, cover = null, chapter = null, play = false } = {}) {
     const rawId = ref.slice('anime:'.length);
     const id = rawId.startsWith('addon-') ? rawId : Number(rawId);
-    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) return toast('ما قدرنا نفتح هذا الأنمي');
+    if (!rawId.startsWith('addon-') && (!Number.isFinite(id) || id <= 0)) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا الأنمي'); }
     closeSheet();
     if (root.dataset.section !== 'anime') {
       writeSection('anime');
@@ -2352,25 +3152,80 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
 
   // مرجع السينما `cinema:<IMDb>` (فيلم) أو `cinema:<IMDb>:<موسم>` (مسلسل)
-  function openCinemaRef(ref, { title = null, cover = null, playAt = null } = {}) {
+  function openCinemaRef(ref, { title = null, cover = null, playAt = null, type = null } = {}) {
     const [, id, season] = ref.split(':');
-    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) return toast('ما قدرنا نفتح هذا العمل');
+    if (!/^tt\d+$/.test(id ?? '') && !id?.startsWith('addon-')) { resumeRejectedUnifiedOrigin(); return toast('ما قدرنا نفتح هذا العمل'); }
     closeSheet();
     if (root.dataset.section !== 'cinema') {
       writeSection('cinema');
       applySection('cinema');
       showHome('cinema');
     }
-    void cinema.openWork({ id, type: id.startsWith('addon-') ? null : season ? 'series' : 'movie', title: title ?? '', poster: cover }, { playAt });
+    // النوع: الممرَّر، أو الموسم في المرجع، وإلا يبقى مجهولًا فيحسمه prefetch في السينما (مسلسل أولًا ثم فيلم،
+    // مع ما عرفه الجهاز). كان كل مرجع بلا موسم يُفتح «فيلمًا» فيُعطي Cinemeta مسلسلًا ناقصًا بلا حلقات
+    // وبزر «شاهد الفيلم» (من الرئيسية الموحدة والإحصائيات والترشيحات)
+    const known = id.startsWith('addon-') ? null : type ?? (season ? 'series' : null);
+    void cinema.openWork({ id, type: known, title: title ?? '', poster: cover }, { playAt });
   }
 
   // ── ورقة المعاينة ──
   // من المجلس والملف: لمسة على عملٍ تعرض غلافه ونبذته أولًا، ثم «افتح».
   // لمسةٌ بالغلط وأنت تمرّر لا تنقلك من مكانك.
 
+  /** ورقة «افتح العمل» للأنمي والسينما: نفس ورقة المانجا بلون قسمها، فلا يُفتح عمل بلمسة خاطئة. */
+  function previewVideo(work, section, { chapter = null } = {}) {
+    let alive = true;
+    const id = String(work.id);
+    const openIt = () => (section === 'anime'
+      ? openAnimeRef(id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter })
+      : openCinemaRef(id, { title: titleOf(work), cover: work.coverImage?.large ?? null }));
+    openSheet((body) => {
+      const box = el('div', 'pv');
+      const cover = el('div', 'pv-cover');
+      void mountImage(cover, work);
+      const copy = el('div', 'pv-copy');
+      const title = el('h3', 'pv-title', titleOf(work));
+      title.dir = 'auto';
+      const meta = el('div', 'pv-meta');
+      const desc = el('p', 'pv-desc');
+      desc.innerHTML = '<span class="skeleton-line"></span><span class="skeleton-line"></span>';
+      copy.append(title, meta, desc);
+      box.append(cover, copy);
+      const actions = el('div', 'sheet-actions pv-actions');
+      const open = el('button', 'btn btn-primary btn-block');
+      open.type = 'button';
+      open.innerHTML = glyph('play', { filled: true });
+      open.append(el('span', null, section === 'anime' ? 'افتح الأنمي' : 'افتح العمل'));
+      open.onclick = () => { closeSheet(); openIt(); };
+      actions.append(open);
+      body.append(box, actions);
+      const done = (bits, text) => {
+        if (!alive) return;
+        meta.textContent = bits.filter(Boolean).join(' · ');
+        desc.textContent = text || 'لا توجد نبذة.';
+        desc.dir = 'auto';
+      };
+      const fail = () => { if (alive) desc.textContent = 'ما قدرنا نجيب النبذة الحين.'; };
+      if (section === 'anime') {
+        const aid = Number(id.split(':')[1]);
+        if (Number.isFinite(aid)) void fetchAnimeDetail(aid).then((d) => done(['أنمي', (d?.genres ?? []).slice(0, 3).map(genreAr).join(' · '), d?.episodes ? `${d.episodes} حلقة` : ''], d?.description)).catch(fail);
+        else fail();
+      } else {
+        const [, imdb] = id.split(':');
+        void import('../lib/cinema-meta.js').then(async ({ detail }) => {
+          for (const type of ['series', 'movie']) {
+            const d = await detail(type, imdb).catch(() => null);
+            if (d) return done([type === 'series' ? 'مسلسل' : 'فيلم', d.year, (d.genres ?? []).slice(0, 3).map(genreAr).join(' · ')], d.description);
+          }
+          fail();
+        }).catch(fail);
+      }
+      return () => (alive = false);
+    }, { tone: section });
+  }
   function previewWork(work, { chapter = null } = {}) {
-    if (isAnimeRef(work?.id)) return openAnimeRef(work.id, { title: titleOf(work), cover: work.coverImage?.large ?? null, chapter });
-    if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
+    if (isAnimeRef(work?.id)) return previewVideo(work, 'anime', { chapter });
+    if (String(work?.id ?? '').startsWith('cinema:')) return previewVideo(work, 'cinema');
     let alive = true;
     openSheet((body) => {
       const box = el('div', 'pv');
@@ -2606,27 +3461,217 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function refreshLibraryDetail() {
     if (!state.current) return;
     const e = libraryEntry(String(state.current.id));
-    // ثلاثة أفعال بأسمائها تحت «اقرأ»، كما في الأنمي: الحالة في الرمز الممتلئ ولون الزر
+    // صف الأفعال تحت «اقرأ» (أو الدائرتان بجانبه): الحالة في الرمز الممتلئ ولون الزر
     const paint = (id, icon, on, label, onLabel, offHint) => {
       const btn = q(id);
+      if (!btn) return;
       btn.setAttribute('aria-pressed', String(on));
-      btn.innerHTML = `${glyph(icon, { filled: on })}<span>${on ? onLabel : label}</span>`;
+      const square = btn.classList.contains('mw-square');
+      btn.innerHTML = square ? glyph(icon, { filled: on }) : `${glyph(icon, { filled: on, size: 18 })}<span>${on ? onLabel : label}</span>`;
       btn.title = on ? `${onLabel} — المس للإزالة` : offHint;
       btn.setAttribute('aria-label', btn.title);
     };
-    paint('libraryBtn', 'library', !!e?.row, 'مكتبتي', 'في مكتبتي', 'أضف إلى مكتبتي');
+    paint('libraryBtn', 'library', !!e?.row, 'أتابعها', 'في مكتبتي', 'أضف إلى «أتابعها»');
     paint('laterBtn', 'clock', !!e?.later, 'لاحقًا', 'لاحقًا', 'أقرأ لاحقًا');
-    paint('favBtn', 'heart', !!e?.favorite, 'المفضلة', 'المفضلة', 'أضف إلى المفضلة');
+    paintDetailTools();
   }
+
+  // ── شريط صفحة العمل: نفس شريط صفحة الأنمي (رجوع وحده، وكبسولة: المفضلة، رشّح، المزيد) ──
+
+  /** المفضلة ورشّح رمزان بلا كلام، و«المزيد» نقاط ثلاث تفتح دوائر بأسمائها تحتها. */
+  function paintDetailTools() {
+    const tools = q('detailTools');
+    if (!tools) return;
+    const fav = state.current ? Boolean(libraryEntry(String(state.current.id))?.favorite) : false;
+    const tool = (icon, label, act, { pressed, filled = false } = {}) => {
+      const b = el('button', 'aw-tool');
+      b.type = 'button';
+      b.innerHTML = glyph(icon, { size: 21, filled });
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      if (act) b.dataset.act = act;
+      if (pressed !== undefined) b.setAttribute('aria-pressed', String(Boolean(pressed)));
+      return b;
+    };
+    const heart = tool('heart', fav ? 'في المفضلة' : 'المفضلة', 'toggleFavoriteCurrent', { pressed: fav, filled: fav });
+    heart.id = 'favBtn';
+    const more = tool('more', 'المزيد');
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', String(q('detailMenu')?.classList.contains('open') ?? false));
+    more.onclick = () => toggleDetailMenu();
+    // المانجا وحدها فيها الأصدقاء في الشريط: القراءة الجماعية تبدأ من صفحة العمل (الأنمي من داخل الحلقة)
+    tools.replaceChildren(heart, tool('send', 'رشّح', 'shareCurrent'), tool('users', 'اقرأ مع أصدقائك', 'readTogetherCurrent'), more);
+    paintDetailMenu();
+  }
+  /**
+   * «المزيد»: قراءتي السابقة، والترجمة العربية (لعمل فيه فصول إنجليزية)، والتقييم، وخيارات العمل
+   * (أفضل 5، أكملته، بلّغ، حذف)؛ ومعها ما لا يتسع له صف أزرار النمط (لاحقًا، مع أصدقائك).
+   */
+  function paintDetailMenu() {
+    const menu = q('detailMenu');
+    const w = state.current;
+    if (!menu || !w) return;
+    const entry = (icon, label, run, { pressed = false } = {}) => {
+      const b = el('button', 'aw-menu-item');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.innerHTML = `<span class="aw-menu-dot">${glyph(icon, { size: 20, filled: pressed && icon !== 'check' })}</span><span class="aw-menu-label">${label}</span>`;
+      if (pressed) b.setAttribute('aria-pressed', 'true');
+      b.onclick = () => {
+        closeDetailMenu();
+        run();
+      };
+      return b;
+    };
+    const e = libraryEntry(String(w.id));
+    const ref = String(w.id);
+    // الترتيب والأسماء من work-menu.js (واحدة للأقسام الثلاثة)
+    const readCount = (w._chapters ?? []).filter((r) => isChapterRead(sync, ref, chapterKeyOf(ref, r))).length;
+    const run = {
+      library: toggleLibraryCurrent,
+      later: toggleLaterCurrent,
+      mark: () => enterMarkMode(),
+      previous: markPreviousReading,
+      top: () => toggleTopCurrent(),
+      translate: openTranslateMenu,
+      options: openWorkMenu,
+    };
+    const spec = workMenuEntries('manga', {
+      library: Boolean(e?.row),
+      later: Boolean(e?.later),
+      top: inCollection('top', ref),
+      previous: readCount > 0,
+      translate: translateAvailable(w) ? { available: true, on: translationOn(ref) } : null,
+    });
+    const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
+    rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
+    menu.replaceChildren(...rows);
+  }
+  function toggleDetailMenu(force) {
+    const menu = q('detailMenu');
+    if (!menu) return;
+    const open = force ?? !menu.classList.contains('open');
+    if (!open) return closeDetailMenu();
+    menu.classList.add('open');
+    q('detailScrim')?.classList.add('open');
+    q('detailTools')?.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', 'true');
+    // لمسة خارج القائمة أو Esc تغلقها
+    const away = (e) => {
+      if (e.type === 'keydown' && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && (menu.contains(e.target) || q('detailTools')?.contains(e.target))) return;
+      // Esc يغلق القائمة وحدها، لا يرجع من الصفحة أيضًا
+      if (e.type === 'keydown') e.stopPropagation();
+      closeDetailMenu();
+    };
+    detailMenuAway = away;
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', away, true);
+  }
+  let detailMenuAway = null;
+  function closeDetailMenu() {
+    q('detailMenu')?.classList.remove('open');
+    q('detailScrim')?.classList.remove('open');
+    q('detailTools')?.querySelector('[aria-haspopup]')?.setAttribute('aria-expanded', 'false');
+    if (detailMenuAway) {
+      document.removeEventListener('pointerdown', detailMenuAway, true);
+      document.removeEventListener('keydown', detailMenuAway, true);
+      detailMenuAway = null;
+    }
+  }
+
+  // ── «المعرض»: تبويبات الفصول وعن العمل ومشابهة ──
+
+  function bindDetailTabs() {
+    const bar = q('detailTabs');
+    if (!bar) return;
+    bar.addEventListener('click', (e) => {
+      const tab = e.target.closest('[role="tab"]');
+      if (!tab) return;
+      for (const t of bar.querySelectorAll('[role="tab"]')) t.setAttribute('aria-selected', String(t === tab));
+      for (const p of q('detail').querySelectorAll('.mw-tab')) p.hidden = p.dataset.panel !== tab.dataset.tab;
+      if (tab.dataset.tab === 'similar') paintSimilar();
+    });
+  }
+  /** أعمال تشاركه تصنيفًا مما في الرئيسية والاستكشاف (بلا طلب جديد)، الأكثر تقاطعًا أولًا. */
+  /**
+   * «أعمال مشابهة» للمانجا من توصيات AniList (تقييم القرّاء: قرابة حقيقية) كما «قد يعجبك» في الأنمي. كانت مطابقة
+   * أنواع داخل مخزون صغير محلي (الرائج والشائع): نتائج بلا قرابة، وأعمال لا يظهر لها التبويب أصلًا. المطابقة
+   * بالأنواع تبقى بديلًا حتى تصل التوصيات أو إن تعذّرت.
+   */
+  const similarCache = new Map();
+  function similarRecs(w) {
+    const key = String(w.id);
+    if (!similarCache.has(key)) {
+      const alId = /^al:(\d+)$/.exec(key)?.[1];
+      const title = typeof w.title === 'string' ? w.title : w.title?.english || w.title?.romaji || w.title?.native || '';
+      const job = (async () => {
+        if (!alId && !title) return [];
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            query: `query ($id: Int, $q: String) { Media(${alId ? 'id: $id' : 'search: $q'}, type: MANGA) { recommendations(perPage: 14, sort: RATING_DESC) { nodes { rating mediaRecommendation { id type isAdult title { english romaji } coverImage { large color } bannerImage genres status averageScore chapters } } } } }`,
+            variables: alId ? { id: Number(alId) } : { q: title },
+          }),
+        });
+        const nodes = (await res.json())?.data?.Media?.recommendations?.nodes ?? [];
+        return nodes.map((n) => n.mediaRecommendation).filter((m) => m && m.type === 'MANGA' && !m.isAdult && m.coverImage?.large)
+          .map((m) => ({ id: `al:${m.id}`, title: m.title, coverImage: m.coverImage, bannerImage: m.bannerImage ?? null, genres: m.genres ?? [], status: m.status, averageScore: m.averageScore, chapters: m.chapters }));
+      })().catch(() => []);
+      similarCache.set(key, { list: null, job });
+      void job.then((list) => {
+        similarCache.get(key).list = list;
+        if (String(state.current?.id) !== key) return;
+        const grid = q('similarGrid');
+        if (grid && list.length) { grid.dataset.for = ''; paintSimilar(); }
+        paintSimilarTab(w);
+      });
+    }
+    return similarCache.get(key).list;
+  }
+  function similarWorks(w) {
+    const recs = similarRecs(w);
+    if (recs?.length) return recs.slice(0, 12);
+    const genres = new Set(w.genres || []);
+    if (!genres.size) return [];
+    const pool = uniqueById([...state.home.trending, ...state.home.popular, ...state.home.featured, ...state.home.recent, ...state.catalog].filter(Boolean));
+    return pool
+      .filter((x) => String(x.id) !== String(w.id) && !isAnimeRef(String(x.id)))
+      .map((x) => ({ x, n: (x.genres || []).filter((g) => genres.has(g)).length }))
+      .filter((s) => s.n > 0)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 12)
+      .map((s) => s.x);
+  }
+  function paintSimilar() {
+    const grid = q('similarGrid');
+    const w = state.current;
+    if (!grid || !w || grid.dataset.for === String(w.id)) return;
+    grid.dataset.for = String(w.id);
+    grid.replaceChildren(...similarWorks(w).map((x) => card(x)));
+  }
+  function paintSimilarTab(w) {
+    const tab = q('similarTab');
+    if (tab) tab.hidden = !similarWorks(w).length;
+  }
+
+  // ── التقييم الشخصي وأكملته: للأقسام الثلاثة (الجدولان واحدان، `series_ref` يميّز النوع) ──
   function userRating(ref) {
-    const row = sync.rows('ratings', (r) => r.user_id === me() && r.series_ref === String(ref))[0];
+    const refs = refsOf(String(ref));
+    const row = sync.rows('ratings', (r) => r.user_id === me() && refs.includes(r.series_ref))
+      .sort((x, y) => (y.updated_at ?? 0) - (x.updated_at ?? 0))[0];
     return row?.score ? Math.round(row.score / 2) : 0;
   }
   let pendingRating = null;
-  /** التقييم نجومٌ في مكانها: لمسة واحدة، بلا نافذة. */
-  function renderRating() {
-    const box = q('rateStars');
-    const current = pendingRating?.ref === state.current?.id ? pendingRating.stars : state.current ? userRating(state.current.id) : 0;
+  const ratingOf = (ref) => (pendingRating?.ref === String(ref) ? pendingRating.stars : userRating(ref));
+  const userRatingNow = () => (state.current ? ratingOf(String(state.current.id)) : 0);
+  /** وصف عمل للكتابة: من صفحة المانجا الحالية، أو من مرجع أنمي/سينما بعنوانه وغلافه. */
+  const describeRef = ({ ref, title, cover }) => ({ seriesRef: ref, seriesTitle: title ?? null, coverUrl: cover ?? null, sourceId: null });
+  /** التقييم نجوم خمس: لمسة واحدة تحفظ (الخادم يحفظ من 10). `target` اختياري لغير المانجا. */
+  function renderRating(box, target = null) {
+    const d = target ? describeRef(target) : state.current ? descriptorOf(state.current) : null;
+    if (!d) return;
+    const current = ratingOf(d.seriesRef);
     box.replaceChildren(
       ...[1, 2, 3, 4, 5].map((i) => {
         const b = el('button', i <= current ? 'on' : '');
@@ -2634,67 +3679,73 @@ export function mountV35(deps, { page = 'home' } = {}) {
         b.setAttribute('role', 'radio');
         b.setAttribute('aria-checked', String(i === current));
         b.setAttribute('aria-label', `تقييمك ${i} من 5`);
-        b.innerHTML = glyph('star', { filled: i <= current, size: 20 });
+        b.innerHTML = glyph('star', { filled: i <= current, size: 28 });
         b.onclick = () => {
-          if (!state.current) return;
-          // الخادم يحفظ من 10؛ النجوم خمس
-          sync.enqueue('rating.set', { ...descriptorOf(state.current), score: i * 2 });
-          pendingRating = { ref: state.current.id, stars: i };
+          sync.enqueue('rating.set', { ...d, score: i * 2 });
+          pendingRating = { ref: d.seriesRef, stars: i };
           toast(`قيّمته ${i} من 5`);
-          renderRating();
+          renderRating(box, target);
+          paintDetailMenu();
         };
         return b;
       }),
     );
+    box.dataset.ref = d.seriesRef;
+    if (target) box._target = target;
+  }
+  function openRatingSheet(target = null) {
+    const title = target ? target.title : state.current ? titleOf(state.current) : null;
+    if (!target && !state.current) return;
+    openSheet((body) => {
+      const h = el('h3', null, title ?? '');
+      h.dir = 'auto';
+      body.append(h, el('p', null, 'تقييمك لهذا العمل'));
+      const box = el('div', 'rate mw-rate');
+      box.setAttribute('role', 'radiogroup');
+      box.setAttribute('aria-label', 'تقييمك');
+      renderRating(box, target);
+      body.append(box);
+    });
   }
 
-  // ── قائمة ⋮ في صفحة العمل ──
-
-  function openWorkMenu() {
-    if (!state.current) return;
-    const w = state.current;
+  /**
+   * «خيارات أخرى» واحدة للأقسام الثلاثة (work-menu.js): التقييم، أكملته، الإبلاغ، والحذف للمانجا.
+   * @param {{ ref: string, title: string, cover?: string|null }|null} target بلا هدف: عمل المانجا الحالي
+   */
+  function openWorkOptions(target = null) {
+    const w = target ? workFromRef(target.ref, target.title, target.cover) : state.current;
+    if (!w) return;
+    const ref = target ? target.ref : String(w.id);
+    const d = target ? describeRef(target) : descriptorOf(w);
     openSheet((body) => {
-      const title = el('h3', null, titleOf(w));
+      const title = el('h3', null, target ? target.title : titleOf(w));
       title.dir = 'auto';
       title.style.marginBottom = '8px';
       body.append(title);
-      body.append(
-        sheetItem('star', inCollection('top', String(w.id)) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
+      const run = {
+        rate: () => { closeSheet(); setTimeout(() => openRatingSheet(target), 0); },
+        completed: () => {
           closeSheet();
-          setTimeout(() => toggleTopCurrent(), 0);
-        }, { pressed: inCollection('top', String(w.id)) }),
-        sheetItem('check', 'أكملته', () => {
-          closeSheet();
-          const member = !inCollection('completed', String(w.id));
-          sync.enqueue('completed.set', { ...descriptorOf(w), member });
+          const member = !inCollection('completed', ref);
+          sync.enqueue('completed.set', { ...d, member });
           toast(member ? 'في «المكتمل»' : 'أزيل من «المكتمل»');
-        }, { pressed: inCollection('completed', String(w.id)) }),
-      );
-      body.append(sheetItem('trash', 'حذف العمل', () => {
-        closeSheet();
-        deleteWork(w);
-        goBack();
-      }, { danger: true }));
-      if (deps.report) {
-        body.append(
-          sheetItem('flag', 'بلّغ عن مشكلة في العمل', () => {
-            closeSheet();
-            openReport(w);
-          }),
-        );
+          target?.onChange?.();
+        },
+        report: () => { closeSheet(); openReport(w); },
+        delete: () => { closeSheet(); deleteWork(w); goBack(); },
+      };
+      for (const x of workOptionEntries({ rating: ratingOf(ref), completed: inCollection('completed', ref), canReport: Boolean(deps.report), canDelete: !target })) {
+        body.append(sheetItem(x.icon, x.label, run[x.id], { pressed: x.pressed, danger: x.danger }));
       }
     });
   }
-  // Same saved five slots as manga; media keeps its canonical section reference.
+  const openWorkMenu = () => openWorkOptions(null);
+  // أفضل 5 للأنمي والسينما: نفس الخانات الخمس، بمرجع القسم
   function openMediaWorkMenu({ ref, title, cover }) {
-    const w = workFromRef(ref, title, cover);
-    openSheet((body) => {
-      const heading = el('h3', null, title); heading.dir = 'auto'; body.append(heading);
-      body.append(sheetItem('star', inCollection('top', ref) ? 'في أفضل 5 — غيّر رقمه' : 'أضف إلى أفضل 5', () => {
-        closeSheet(); openTopPicker(w);
-      }, { pressed: inCollection('top', ref) }));
-    });
+    openTopPicker(workFromRef(ref, title, cover));
   }
+  /** حالة العمل في الجداول المشتركة: لقوائم ⋮ في الأنمي والسينما. */
+  const mediaState = (ref) => ({ top: inCollection('top', ref), completed: inCollection('completed', ref), rating: ratingOf(ref) });
   function avatarNode(person, size = 44) {
     if (person.avatarKey) {
       const img = el('img');
@@ -2716,9 +3767,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return Number.isFinite(b) && b > a ? row : best;
     }, null);
   }
+  /** بعد أي تعليم: الصفحة كلها تتحدث في الحال (القائمة أو الشبكة، التقدّم، زرّ «تابع»). */
   function refreshChaptersSoon(w) {
     clearTimeout(state.eyeTimer);
-    state.eyeTimer = setTimeout(() => state.current?.id === w.id && renderChapters(w), 30);
+    if (state.current?.id === w.id && state.current._chapters && currentPage() === 'detail') renderChapters(state.current);
   }
   /** تعليم (أو إلغاء) دفعة فصول: عملية واحدة، والصفحة تتحدث حالًا. */
   function markRows(w, rows, read, historyRow = null) {
@@ -2866,7 +3918,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function chapterRatio(userId, ref, number) {
     if (number == null) return null;
     const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
-    const row = sync.rows('progress', (r) => r.user_id === userId && r.chapter_key === key)[0];
+    const row = sync.rows('progress', (r) => r.user_id === userId && sameChapterKey(r.chapter_key, key)).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
     return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
   }
   /**
@@ -2963,8 +4015,208 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
 
+  // المكتبة الموحدة (التصميم الرابع): الجداول المشتركة نفسها، فلا ترحيل ولا نسخ
+  const unifiedLibrary = createUnifiedLibrary({
+    el, glyph,
+    shelves: () => libraryShelves(sync, me(), { qualifiesView: (v) => isMediaRef(v.series_ref) || qualifiesOwnView(v) }),
+    open: (item) => openUnified(item),
+    discover: () => navTo('discover'),
+    coverInto: (node, item) => { void mountImage(node, workFromRef(String(item.ref), item.title, item.cover)); return true; },
+    itemMenu: (item) => openRecentMenu({ ...item, ref: item.view?.series_ref ?? item.ref }),
+  });
+  function renderUnifiedLibrary() {
+    unifiedLibrary.render(q('unifiedLibrary'));
+  }
+  const unifiedCard = (it, group) => group === 'manga'
+      ? { title: titleOf(it), cover: it.coverImage?.large ?? null, sub: (it.genres ?? []).slice(0, 2).map((g) => AR_GENRE[g] ?? g).join('، ') }
+      : group === 'anime'
+        ? { title: it.title, cover: it.posterSmall ?? it.poster ?? null, sub: [it.year, it.score ? it.score.toFixed(1) : null].filter(Boolean).join(' · ') }
+        : { title: it.title, cover: it.poster ?? null, sub: [it.type === 'series' ? 'مسلسل' : 'فيلم', it.year].filter(Boolean).join(' · ') };
+  function mixedTrending(filter = 'all') {
+    const pools = [
+      ['anime', unifiedData.anime?.trending ?? []],
+      ['manga', uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])])],
+      ['cinema', unifiedData.cinema?.series ?? []],
+      ['cinema', unifiedData.cinema?.movie ?? []],
+    ].filter(([g]) => filter === 'all' || g === filter);
+    const out = [];
+    for (let i = 0; i < 12; i++) for (const [group, list] of pools) if (list[i]) out.push({ item: list[i], group });
+    return out;
+  }
+  let unifiedReturn = null;
+  const unifiedSurfaces = () => ({ discover: unifiedDiscover, view: unifiedView, search: unifiedSearch });
+  function resumeRejectedUnifiedOrigin() {
+    if (!unifiedReturn) return;
+    unifiedSurfaces()[unifiedReturn.kind]?.resume?.();
+    unifiedReturn = null;
+  }
+  /** Keep subpage DOM + its scroll when entering a work, instead of revealing Home beneath it. */
+  function suspendUnifiedOrigin() {
+    if (root.dataset.content !== 'unified' || unifiedReturn) return false;
+    const page = currentPage();
+    for (const kind of ['discover', 'view', 'search']) {
+      if (!unifiedSurfaces()[kind]?.suspend?.()) continue;
+      unifiedReturn = { kind, page };
+      return true;
+    }
+    return false;
+  }
+  function openUnifiedResult(it, group) {
+    suspendUnifiedOrigin();
+    if (group === 'anime') return openAnimeRef(`anime:${it.id}`, { title: it.title, cover: it.posterSmall ?? it.poster });
+    if (group === 'cinema') return openCinemaRef(`cinema:${it.id}`, { title: it.title, cover: it.poster, type: it.type ?? null });
+    if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+    void openWork(it);
+  }
+  // «اكتشف» الموحد: تصنيفات كل نوع بفلتره الحقيقي، والرائج المنوّع (unified-discover.js)
+  const ANIME_GENRES = ['Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Romance', 'Mystery', 'Horror', 'Psychological', 'Sci-Fi', 'Supernatural', 'Thriller', 'Sports', 'Slice of Life', 'Mecha', 'Music'];
+  const CINEMA_GENRES = ['Action', 'Drama', 'Thriller', 'Comedy', 'Crime', 'Sci-Fi', 'Horror', 'Romance', 'Adventure', 'Mystery', 'Fantasy', 'Animation', 'War', 'History', 'Documentary', 'Family'];
+  const genreLabel = (en) => AR_GENRE[en] ?? CINEMA_GENRES_AR[en] ?? GENRES.find((g) => g.en === en)?.ar ?? en;
+  const genreHue = (en) => GENRES.find((g) => g.en === en)?.hue ?? (([...en].reduce((n, c) => n + c.charCodeAt(0), 0) * 37) % 360);
+  /** صورة كل تصنيف من عمل فيه، ولا تتكرر صورة في بلاطتين (عمل مشهور يحمل تصنيفات كثيرة). */
+  function genreCover(type, en, used = new Set()) {
+    const pools = type === 'anime' ? [unifiedData.anime?.trending, unifiedData.anime?.season, unifiedData.anime?.popular]
+      : type === 'cinema' ? [unifiedData.cinema?.movie, unifiedData.cinema?.series]
+        : [state.home.trending, state.home.popular];
+    for (const list of pools) for (const x of list ?? []) {
+      if (!(x.genres ?? []).includes(en)) continue;
+      const src = type === 'manga' ? (x.wideBanner ?? null) : (x.background ?? x.backdrop ?? x.banner ?? null);
+      if (src && !used.has(src) && !genreArtUsed.has(src)) { used.add(src); genreArtUsed.add(src); return src; }
+    }
+    return null;
+  }
+  // صورة عريضة لكل تصنيف من نوعه (كما في «حسب النوع» بالسينما)، مرة لكل تصنيف، وبلا تكرار صورة بين بلاطتين
+  const genreArtCache = new Map();
+  /**
+   * صورة التصنيف تُثبَّت أول مرة تُعرف، وتُحفظ على الجهاز، ولا تتغيّر بعدها (خلل «تتبدّل وتجي»: كان كل رسم
+   * يستبعد ما اختاره الرسم السابق عبر genreArtUsed فتأخذ البلاطة صورة أخرى أو لا شيء). تصنيف بلا صورة تُجلب له مرة.
+   */
+  const GENRE_PIN_KEY = 'vantara.unified.genre-art.v1';
+  const genrePins = (() => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(GENRE_PIN_KEY) ?? '{}') ?? {})); } catch { return new Map(); } })();
+  const genreArtUsed = new Set(genrePins.values());
+  const pinGenre = (key, src) => {
+    if (genrePins.has(key)) return genrePins.get(key);
+    if (!src) return null;
+    genrePins.set(key, src);
+    genreArtUsed.add(src);
+    try { localStorage.setItem(GENRE_PIN_KEY, JSON.stringify(Object.fromEntries(genrePins))); } catch { /* تفضيل قابل للتوليد */ }
+    return src;
+  };
+  function genreArt(type, en) {
+    const key = `${type}:${en}`;
+    if (genrePins.has(key)) return Promise.resolve(genrePins.get(key));
+    const cached = genreArtCache.get(key);
+    if (cached?.promise) return cached.promise;
+    if (cached?.retryAt > Date.now()) return Promise.resolve(null);
+    {
+      const pick = (list, field) => {
+        for (const x of list ?? []) { const src = x?.[field]; if (src && !genreArtUsed.has(src)) { genreArtUsed.add(src); return src; } }
+        return null;
+      };
+      const entry = {};
+      entry.promise = (async () => {
+        if (type === 'anime') {
+          const { searchAnime } = await import('../lib/anime-meta.js');
+          return pick((await searchAnime({ genre: en }))?.items, 'banner');
+        }
+        if (type === 'cinema') {
+          const { catalog } = await import('../lib/cinema-meta.js');
+          return pick(await catalog('movie', 'top', { genre: en }), 'background');
+        }
+        // المانجا: أشهر مانجا التصنيف في AniList ببنرها العريض (وإلا غلافها). ما ليس تصنيفًا عندهم وسمٌ
+        const ANILIST_GENRES = ['Action', 'Adventure', 'Comedy', 'Drama', 'Ecchi', 'Fantasy', 'Horror', 'Mahou Shoujo', 'Mecha', 'Music', 'Mystery', 'Psychological', 'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller'];
+        const TAGS = { Isekai: 'Isekai', 'Martial Arts': 'Martial Arts', Historical: 'Historical', 'School Life': 'School' };
+        const byGenre = ANILIST_GENRES.includes(en);
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            query: `query ($v: String) { Page(perPage: 12) { media(type: MANGA, isAdult: false, sort: POPULARITY_DESC, ${byGenre ? 'genre: $v' : 'tag: $v'}) { bannerImage coverImage { large } } } }`,
+            variables: { v: byGenre ? en : (TAGS[en] ?? en) },
+          }),
+        });
+        const media = (await res.json())?.data?.Page?.media ?? [];
+        return pick(media.map((m) => ({ src: m.bannerImage })), 'src') ?? pick(media.map((m) => ({ src: m.coverImage?.large })), 'src');
+      })().then((src) => pinGenre(key, src), () => null).then((src) => {
+        if (genreArtCache.get(key) === entry) {
+          if (src) genreArtCache.delete(key);
+          else { entry.promise = null; entry.retryAt = Date.now() + 30_000; }
+        }
+        return src;
+      });
+      genreArtCache.set(key, entry);
+      return entry.promise;
+    }
+  }
+  let cinemaPager = null;
+  const unifiedDiscover = createUnifiedDiscover({
+    el, glyph,
+    genreArt,
+    mount: (node) => root.append(node),
+    genres: (type) => (type === 'anime' ? ANIME_GENRES : type === 'cinema' ? CINEMA_GENRES : GENRES.map((g) => g.en))
+      .map(((used) => (en) => ({ id: en, label: genreLabel(en), hue: genreHue(en), cover: genrePins.get(`${type}:${en}`) ?? pinGenre(`${type}:${en}`, genreCover(type, en, used)) }))(new Set())),
+    results: async (type, genre, page = 1) => {
+      if (type === 'anime') {
+        const { searchAnime } = await import('../lib/anime-meta.js');
+        return searchAnime({ ...(genre ? { genre } : {}), page });
+      }
+      if (type === 'manga') {
+        const result = await (genre ? fetchMangaGenre(genre, { page }) : fetchMangaPopular({ page }));
+        return { items: result.items, hasNext: result.hasNextPage };
+      }
+      // صفحات تالية للسينما أيضًا (#311 D-026): كانت الدفعة الأولى وحدها
+      const { catalog } = await import('../lib/cinema-meta.js');
+      cinemaPager ??= createCinemaPager(catalog);
+      return cinemaPager(genre ?? '', page);
+    },
+    card: (it, type) => unifiedCard(it, type),
+    open: (it, type) => openUnifiedResult(it, type),
+    openMangaGenre: (en) => {
+      if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+      if (!en) return void openCollection('catalogue');
+      const g = GENRES.find((x) => x.en === en);
+      if (g) void openGenre(g);
+    },
+    openSearch: () => unifiedSearch.open(),
+    trending: () => mixedTrending('all'),
+  });
+  const unifiedSearch = createUnifiedSearch({
+    el, glyph,
+    recent: recentStore('vantara.unified.recent.v1'),
+    // التصنيفات: تفتح اكتشاف القسم بالتصنيف (الكل ← الأنمي، أوسعها تصنيفًا)
+    genres: (filter) => ['Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Romance', 'Mystery', 'Horror', 'Sci-Fi', 'Psychological'].map((g) => ({
+      label: AR_GENRE[g] ?? g,
+      open: () => {
+        unifiedSearch.close();
+        const section = filter === 'all' ? 'anime' : filter;
+        if (section === 'anime') return void anime.openDiscover({ genre: g });
+        browseSection(section);
+      },
+    })),
+    // الرائج الآن منوّع: أنمي، مانجا، مسلسل، فيلم بالتناوب، ويتبع الفلتر
+    trending: (filter) => mixedTrending(filter),
+    mount: (node) => root.append(node),
+    engines: {
+      anime: (term) => import('../lib/anime-meta.js').then(({ searchAnime }) => searchAnime({ search: term })).then((r) => r?.items ?? []),
+      manga: (term) => (available() ? browseLive({ query: term }, () => {}).then((r) => r?.items ?? []) : Promise.resolve([])),
+      cinema: (term) => import('../lib/cinema-meta.js').then(({ search }) => search(term)),
+    },
+    card: (it, group) => unifiedCard(it, group),
+    open: (it, group) => openUnifiedResult(it, group),
+  });
+  let libraryRepaint = 0;
+  /** «مكتبتي» الظاهرة: الموحدة في توحيد المحتوى، وإلا مكتبة القسم بتصميمه. */
+  function renderActiveLibrary() {
+    if (root.dataset.content === 'unified') return renderUnifiedLibrary();
+    const section = root.dataset.section;
+    if (section === 'anime') anime.renderLibrary();
+    else if (section === 'cinema') cinema.renderLibrary();
+    else renderLibrary();
+  }
   function renderLibrary() {
-    const tabs = [['all', 'الكل'], ['reading', 'أتابعها'], ['history', 'آخر المشاهدات'], ['later', 'لاحقًا'], ['completed', 'المكتمل'], ['favorite', 'المفضلة']];
+    // الأسماء والترتيب من library-model.js (واحدة للأقسام الثلاثة)؛ المفاتيح القديمة للمانجا باقية
+    const KEY = { all: 'all', following: 'reading', recent: 'history', later: 'later', favorite: 'favorite', completed: 'completed' };
+    const tabs = LIBRARY_TABS.map((t) => [KEY[t.id], t.label]);
     q('libraryTabs').replaceChildren(
       ...tabs.map(([k, l]) => {
         const b = el('button', `library-tab${k === state.libraryFilter ? ' active' : ''}`, l);
@@ -2995,13 +4247,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('libraryToolbar').hidden = items.length < 2;
     q('libraryCount').textContent = countLabel(items.length, 'work');
     if (!items.length) {
-      const copy = {
-        all: ['مكتبتك فاضية', 'المس رمز المكتبة في صفحة أي عمل، ويظهر هنا على أجهزتك كلها.'],
-        reading: ['ما تتابع شي الحين', 'الأعمال اللي تضيفها لمكتبتك تظهر هنا.'],
-        later: ['القائمة فاضية', 'من قائمة الخيارات في صفحة العمل اختر «أقرأ لاحقًا».'],
-        favorite: ['ما عندك مفضلة', 'القلب في صفحة العمل يضيفه هنا.'],
-        completed: ['ما أكملت شي بعد', 'من قائمة ⋮ في صفحة العمل اختر «أكملته»، أو خلّص آخر فصل في عمل مكتمل.'],
-      }[state.libraryFilter];
+      const copy = EMPTY_COPY[{ reading: 'following' }[state.libraryFilter] ?? state.libraryFilter] ?? EMPTY_COPY.all;
       emptyState(grid, {
         icon: { favorite: 'heart', later: 'clock' }[state.libraryFilter] ?? 'library',
         title: copy[0],
@@ -3057,12 +4303,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     q('collectionMore').hidden = true;
     showPage('collection');
     if (section === 'manga') void sweepLatest({ minGap: 3 * 60_000 });
-    mountTimeline(q('collectionGrid'), {
+    mountTimeline(q('collectionGrid'), timelineOptions(section, () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section));
+  }
+  /**
+   * إعدادات الخط الزمني لقسم: صفحة التحديثات في كل قسم، وألسنة الأقسام في «آخر التحديثات» الموحد (#323 O-2:
+   * الأقدم بالتحميل من الخادم، لا أول دفعة فقط). خط واحد وسلوك واحد.
+   */
+  function timelineOptions(section, visible, include = undefined) {
+    return {
       section,
       el,
+      include,
       canonical: section === 'manga' ? canonicalEventWorks : null,
       mountCover: (art, g) => void mountImage(art, g.section === 'manga' ? workOfEvent(g) : workFromRef(g.work, g.title, g.cover)),
-      visible: () => currentPage() === 'collection' && state.collection?.kind === 'updates' && root.dataset.section === section,
+      visible,
       image: (src) => {
         const img = new Image();
         img.alt = '';
@@ -3084,7 +4338,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
         return box;
       },
-    });
+    };
   }
   /** عمل مانجا من حدث: من الحساب إن عُرف، وإلا من مصادر الحدث نفسها. */
   function workOfEvent(g) {
@@ -3108,7 +4362,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const groups = await latestGroups('manga', 14, canonicalEventWorks).catch(() => null);
     if (!groups?.length) return;
     state.home.updates = groups.map(workOfEvent);
-    if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refreshUpdates();
+    else if (currentPage() === 'home' && root.dataset.section === 'manga') renderHome();
   }
 
   async function loadMoreCollection() {
@@ -3139,6 +4394,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         });
       } else {
         renderGrid(q('collectionGrid'), state.collection.items);
+        if (page === 1) stripIn([...q('collectionGrid').children].slice(0, 9));
       }
       btn.hidden = !state.collection.hasNext;
     } catch {
@@ -3221,6 +4477,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!state.discoverQuery) renderGrid(q('discoverGrid'), state.catalog);
       btn.hidden = !state.catalogHasNext || !!state.discoverQuery;
     } catch {
+      if (!state.catalog.length && await showAddMangaSource(q('discoverGrid'))) return;
       if (!state.catalog.length) {
         emptyState(q('discoverGrid'), {
           icon: 'offline',
@@ -3256,7 +4513,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   async function runSearch(term, grid, stillWanted) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
-    const snapshot = createFeedSnapshot();
+    const snapshot = createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) });
     // حارس أخير في البحث: عمل بلا نسخة عربية واحدة، أو للكبار، لا يظهر مهما كان مساره
     const arabicOnly = (items) => items.filter((w) => !w._work || ((w._work.editions ?? []).some((e) => !isFiller(e.sourceId) && (!String(e.sourceId).includes('#') || /\.ar\./.test(String(e.sourceId)))) && !isAdult(w._work)));
     const paintSnapshot = (items) => {
@@ -3372,6 +4629,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
   }
   function openSearch() {
+    // توحيد المحتوى: بحث واحد في الأنواع الثلاثة (unified-search.js)
+    if (root.dataset.content === 'unified') return unifiedSearch.open();
     if (root.dataset.section === 'anime' || root.dataset.section === 'cinema') {
       const host = root.dataset.section === 'anime' ? 'animeDiscover' : 'cinemaDiscover';
       showPage('discover');
@@ -3596,7 +4855,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
       b.onclick = () => {
         closeDrawer();
-        pickSection(null, b);
+        selectSection(b.dataset.arg);
       };
       sections.append(b);
     }
@@ -3708,22 +4967,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   let sourceView = null, addonHubView = null, sourceSnapshot = null, addonViewGeneration = 0;
   let addonHubState = null, addonHubContext = null, addonSourcePending = false;
+  const addonNavigation = createAddonNavigation();
   function closeAddonSource() {
+    addonNavigation.cancel();
     if(addonHubView?.snapshot)addonHubState={context:addonHubContext,value:addonHubView.snapshot()};
     addonHubView?.close?.(); addonHubView=null;
     sourceView?.close?.(); sourceView=null;
     sourceSnapshot?.release(); sourceSnapshot=null;
+  }
+  function addonSourceError(error, retry) {
+    const message = error?.code?.endsWith('TIMEOUT') ? 'انتهت مهلة فتح المصدر. أعد المحاولة.' : error?.message ?? 'تعذّر فتح المصدر';
+    const button = el('button', 'addon-button', 'أعد المحاولة');
+    button.onclick = () => { void retry(); };
+    q('utilityBody').replaceChildren(el('p', 'work-meta', message), button);
   }
   async function openAddons() {
     closeAddonSource();
     addonSourcePending=false;
     addonHubContext=`${sync.user?.userId??"local"}|${root.dataset.section??"all"}`;
     const run=++addonViewGeneration;
+    const profile=sync.user?.userId??'local';
     q('utilityTitle').textContent = 'الإضافات';
     showPage('utility');
     q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
     try {
-      const addons = await getAddonRuntime(); await addons.ready; await addons.reloadSources?.(); addons.registry.setProfile(sync.user?.userId ?? "local");
+      const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local"); await addons.reloadSources?.();
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
@@ -3739,56 +5007,109 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, animeRepositories: animeRepositories(), sites: engine.sites?.() ?? null, onSourcesChanged: async () => { resetSources(); await addons.reloadSources?.().catch(() => {}); if (run === addonViewGeneration && currentPage() === 'utility') void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if(run!==addonViewGeneration || currentPage()!=='utility' || (sync.user?.userId??'local')!==profile)return; resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }
   async function openNativeAddonSource(record, sourceId) {
-    const generation=++addonViewGeneration;
-    closeAddonSource();addonSourcePending=true;showPage('utility');
+    closeAddonSource();
+    const generation=++addonViewGeneration, lookup=addonNavigation.begin();
+    const profile=sync.user?.userId??'local';
+    const active=()=>generation===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
+    addonSourcePending=true;showPage('utility');
     q('utilityTitle').textContent=record.name??'المصدر';
     q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
     try{
-      const result=await createNativeCatalog(record,{sourceId});
-      if(generation!==addonViewGeneration||currentPage()!=='utility')return;
+      const result=await lookup.wait(signal=>createNativeCatalog(record,{sourceId,signal}),'SOURCE_DISCOVERY_TIMEOUT');
+      if(!active())return;
       if(result.status==='select-source'){
         const list=el('div','addon-source-choices');
         for(const source of result.sources){const b=el('button','addon-button',source.name);b.disabled=source.enabled===false;b.onclick=()=>{void openNativeAddonSource(record,source.sourceId);};list.append(b);}
         q('utilityBody').replaceChildren(list);return;
       }
       if(result.status!=='ready')throw new Error(result.reason??'محرك المصدر غير متاح على هذه المنصة');
-      const addons=await getAddonRuntime();await addons.ready;await addons.reloadSources?.();
-      if(generation!==addonViewGeneration||currentPage()!=='utility')return;
+      const addons=await lookup.wait(()=>getAddonRuntime(),'ADDON_RUNTIME_TIMEOUT');
+      await lookup.wait(()=>addons.ready,'ADDON_READY_TIMEOUT');
+      if(!active())return;
+      await lookup.wait(()=>addons.registry.setProfile(profile),'ADDON_PROFILE_TIMEOUT');
+      await lookup.wait(signal=>addons.reloadSources?.({signal}),'ADDON_RELOAD_TIMEOUT');
+      if(!active())return;
       const canonical=addons.registry.list().find(addon=>addon.sourceId===result.sourceId);
       if(!canonical)throw new Error('المصدر مثبت، لكن المحرك لم يربطه بكتالوج صالح بعد. أعد فتح الإضافات.');
-      await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter});
-    }catch(error){if(generation===addonViewGeneration&&currentPage()==='utility')q('utilityBody').replaceChildren(el('p','work-meta',error.message??'تعذّر فتح المصدر'));}
+      await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter,lookup,generation});
+    }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openNativeAddonSource(record,sourceId));}
+    finally{lookup.finish();}
   }
-  async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter} = {}) {
-    const run=++addonViewGeneration;
-    const addons = await getAddonRuntime(); await addons.ready; addons.registry.setProfile(sync.user?.userId ?? "local");
-    if(run!==addonViewGeneration)return;
-    closeAddonSource();
-    addonSourcePending=false;
-    sourceSnapshot=addons.registry.snapshot();
-    q('utilityTitle').textContent = addon.name;
+  async function openAddonSource(addon, sourceState = {}, {adapter: nativeAdapter,lookup: continuedLookup,generation} = {}) {
+    if(!continuedLookup)closeAddonSource();
+    const run=continuedLookup?generation:++addonViewGeneration;
+    const lookup=continuedLookup??addonNavigation.begin();
+    const profile=sync.user?.userId??'local';
+    const active=()=>run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile;
+    addonSourcePending=true;
+    // شريط الصفحة: VANTARA وحدها (طلب المالك)، واسم المصدر في رأس الصفحة وحده (لا تكرار)
+    q('utilityTitle').textContent='VANTARA';
     showPage('utility');
+    q('utilityBody').replaceChildren(el('p','work-meta','جارٍ فتح المصدر…'));
+    try{
+    const addons=await lookup.wait(()=>getAddonRuntime(),'ADDON_RUNTIME_TIMEOUT');
+    await lookup.wait(()=>addons.ready,'ADDON_READY_TIMEOUT');
+    if(!active())return;
+    await lookup.wait(()=>addons.registry.setProfile(profile),'ADDON_PROFILE_TIMEOUT');
+    if(!active())return;
+    sourceSnapshot=addons.registry.snapshot();
+    addonSourcePending=false;
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState, onBack: openAddons, onOpenWork: async (item) => {
+    const openSelectedWork = async function openSelectedWork(item) {
+      if(!active())return;
+      const workLookup=addonNavigation.begin();
       try {
         const sourceId = addon.sourceId ?? `addon|${addon.key}`;
         const source = addons.sources.source(sourceId);
         if (!source || (item.type && !addon.contentTypes.includes(item.type))) throw new Error('يمكن تصفح هذا النوع من المحتوى، لكن فتحه غير مدعوم في هذا الإصدار.');
-        const copy = { ...item, url: item.url ?? item.id, type: item.type };
-        const episodes = addon.contentTypes.includes('manga') ? [] : await source.episodes(copy);
-        if(run!==addonViewGeneration)return;
-        const work = sourceWorkModel(item, { addon, episodes });
-        if (work._work) { root.dataset.section = 'manga'; buildDrawer(); await openWork(work); }
-        else if (addon.contentTypes.includes('anime')) { root.dataset.section = 'anime'; buildDrawer(); await anime.openAnime(work); }
-        else { root.dataset.section = 'cinema'; buildDrawer(); await cinema.openWork(work); }
-      } catch (error) { toast(error.message); }
-    } });
+        let copy = { ...item, url: item.url ?? item.id, type: item.type };
+        if(sourceId.startsWith('addon|cs3|') && !copy._nativeDetailsLoaded && nativeAdapter?.series){
+          const details=await workLookup.wait(signal=>nativeAdapter.series(copy,{signal}),'SOURCE_DETAILS_TIMEOUT');if(!active())return;
+          copy={...copy,...details.work,_nativeDetailsLoaded:true};
+        }
+        if (promptSourceWorkType(copy, addon, { el, openSheet, closeSheet, sheetItem, active: () => active() && !workLookup.signal.aborted, onChoose: openSelectedWork })) return;
+        if(sourceId.startsWith('addon|cs3|') && copy.hasSeasons && copy.requestedSeason==null){
+          if(!nativeAdapter?.seasons)throw new Error('اختيار مواسم هذا المصدر غير متاح في نسخة التطبيق الحالية.');
+          const seasons=await workLookup.wait(signal=>nativeAdapter.seasons(copy,{signal}),'SOURCE_SEASONS_TIMEOUT');if(!active())return;
+          if(!seasons.length)throw new Error('لم يُرجع المصدر مواسم قابلة للفتح.');
+          openSheet(body=>{
+            body.append(el('h3',null,'اختر الموسم'));
+            for(const season of seasons)body.append(sheetItem('layers',season.title,()=>{
+              closeSheet();if(active())void openSelectedWork({...copy,...season,_nativeDetailsLoaded:true});
+            }));
+          });return;
+        }
+        const episodes = addon.contentTypes.includes('manga') ? [] : await workLookup.wait(signal=>source.episodes(copy,{signal}),'SOURCE_EPISODES_TIMEOUT');
+        if(!active())return;
+        // بطاقة العمل الأصلية (هوية AniList/IMDb المحسومة غالبًا من رسم الشبكة) وسيرفرات هذا المصدر وحده
+        const identity = addon.contentTypes.includes('manga') && !addon.contentTypes.some(t => t !== 'manga') ? null
+          : await Promise.race([resolveSourceIdentity(copy, addon), new Promise(r => setTimeout(() => r(null), 1500))]);
+        if(!active())return;
+        const work = withOfficialIdentity(sourceWorkModel(sourceId.startsWith('addon|cs3|')?copy:item, { addon, episodes }), identity);
+        // كل عمل يُفتح ببطاقة نوعه هو، لا بنوع الإضافة: مصدر متنوع قد يحمل مانجا داخل واجهة أنمي
+        const itemType = String(item.type ?? '').toLowerCase();
+        if (work._work || itemType === 'manga') { applySection('manga'); buildDrawer(); await workLookup.wait(()=>openWork(work),'SOURCE_WORK_TIMEOUT'); }
+        else if (itemType === 'anime' || (!['movie', 'series', 'tv'].includes(itemType) && addon.contentTypes.includes('anime'))) { applySection('anime'); buildDrawer(); await workLookup.wait(()=>anime.openAnime(work),'SOURCE_WORK_TIMEOUT'); }
+        else { applySection('cinema'); buildDrawer(); await workLookup.wait(()=>cinema.openWork(work),'SOURCE_WORK_TIMEOUT'); }
+      } catch (error) {
+        if(!active() || error?.name==='AbortError')return;
+        toast(error.message);
+        openSheet(body=>{body.append(el('p','work-meta',error.message??'تعذّر فتح العمل'),sheetItem('refresh','أعد المحاولة',()=>{closeSheet();void openSelectedWork(item);}));});
+      } finally { workLookup.finish(); }
+    };
+    // صفحة المصدر واحدة (source-mode.js): بحث وأعمال المصدر، والرجوع إلى الإضافات من شريط الصفحة
+    sourceView?.close?.();
+    // مصدر أنمي/سينما أصلي (Aniyomi) يطلب تحقق Cloudflare: صفحة التحقق داخل التطبيق ثم إعادة الجلب
+    const verifiable = Boolean(nativeAdapter) && addon.sourceId && !String(addon.sourceId).startsWith('addon|cs3|') && !addon.contentTypes.includes('manga');
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork, onVerify: verifiable ? () => verifyAnimeSource(addon.sourceId) : null });
     q('utilityBody').replaceChildren(sourceView);
+    }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
+    finally{lookup.finish();}
   }
   // ───────────────────────── PIN وحذف الحساب ─────────────────────────
 
@@ -4005,60 +5326,134 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // في الذاكرة بعناصرها المحمّلة وفلاترها؛ كان showPage يصعد للأعلى دائمًا فيضيع المكان)
   const scrollOf = new Map();
   let scrollRestore = 0;
+  let scrollRestoreCleanup = null;
   function restoreScroll(top) {
+    scrollRestoreCleanup?.();
     const run = ++scrollRestore;
     window.scrollTo({ top, behavior: 'instant' });
     // صفحة تُرسم بعد الإظهار (المكتبة، الرئيسية): نعيد المحاولة حين يكتمل طولها، ما لم يلمس المستخدم
     let touched = false;
-    const stop = () => { touched = true; };
+    const timers = [];
+    const cleanup = () => {
+      removeEventListener('touchstart', stop);
+      removeEventListener('wheel', stop);
+      for (const timer of timers) clearTimeout(timer);
+      if (scrollRestoreCleanup === cleanup) scrollRestoreCleanup = null;
+    };
+    const stop = () => { touched = true; cleanup(); };
+    scrollRestoreCleanup = cleanup;
     addEventListener('touchstart', stop, { once: true, passive: true });
     addEventListener('wheel', stop, { once: true, passive: true });
-    for (const wait of [0, 120, 400]) setTimeout(() => {
-      if (run !== scrollRestore || touched || Math.abs(window.scrollY - top) < 2) return;
-      window.scrollTo({ top, behavior: 'instant' });
-    }, wait);
+    for (const wait of [0, 120, 400]) timers.push(setTimeout(() => {
+      if (run === scrollRestore && !touched && Math.abs(window.scrollY - top) >= 2) window.scrollTo({ top, behavior: 'instant' });
+      if (wait === 400) cleanup();
+    }, wait));
   }
-  function showPage(id, { push = true } = {}) {
+  let pageMotionRequest = 0;
+  /** القسم يعلن أن أساس صفحة العمل جاهز (البيانات والغلاف المحسوم): يبدأ الانتقال الآن لا عند المهلة. */
+  function workReady() {
+    state.workGate?.ready();
+  }
+  /** الانتقال بدأ قبل أن يكتمل أساس الصفحة (المهلة): ما يصل الآن يظهر بتلاشٍ في مكانه (settleIn). */
+  const workShown = () => !state.workGate || state.workGate.opened;
+  const WORK_PAGES = new Set(['detail', 'anime', 'cinema']);
+  function showPage(id, { push = true, sectionSwitch = false, sourceScroll = null } = {}) {
     // الإشعارات صارت قسمًا في «الاجتماع»
     if (id === 'notifications') {
       state.socialTab = 'notifications';
       id = 'majlis';
     }
     const from = currentPage();
-    if (from !== id) scrollOf.set(from, window.scrollY);
-    if(from === "utility" && id !== "utility")sourceView?.pause?.();
+    // An overlay owns the visual transition; do not animate Home beneath the old subpage.
+    const unifiedHandoff = Boolean(unifiedReturn && WORK_PAGES.has(id) && from !== id);
+    const unifiedRestore = Boolean(unifiedReturn && !push && id === unifiedReturn.page && WORK_PAGES.has(from));
+    if (unifiedReturn && push && MAIN_PAGES.includes(id) && id !== from) {
+      unifiedSurfaces()[unifiedReturn.kind]?.discardSuspended?.();
+      unifiedReturn = null;
+    }
+    const visual = pageMotionState(q(from));
+    // الوجهة قد تكون في منتصف حركتها (رجوع يقاطع فتحًا): تكمل من حيث هي ظاهرة الآن
+    const destVisual = from !== id ? pageMotionState(q(id)) : null;
+    sourceScroll ??= visual?.scrollTop ?? window.scrollY;
+    if (from !== id) scrollOf.set(from, sourceScroll);
+    if(from === "utility" && id !== "utility"){sourceView?.pause?.();addonNavigation.cancel();}
     if(MAIN_PAGES.includes(id)){addonViewGeneration++;closeAddonSource();}
     // خرجت من صفحة العمل: ينتهي تفعيل «عند الطلب» له (الفصل ليس صفحة هنا؛ الرجوع منه يبقيك فيها)
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
+    // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
+    const request = ++pageMotionRequest;
+    // المؤشر يُقاس ويتحرك قبل أي كتابة في الصفحات: القياس بعدها كان يفرض تخطيطًا ثانيًا للصفحة كلها
+    // (56ms على جوال متوسط في المقياس) قبل أن تبدأ حركة الشريط، فيتقطّع الشريط مع كل انتقال
+    const dockFirst = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && !q('bottomNav').hidden;
+    if (dockFirst) dockCtl?.activate(id);
+    const outgoing = from !== id && !sectionSwitch && !unifiedHandoff ? q(from) : null;
+    finishPageMotion();
+    // دخول صفحة عمل: الانتقال كله (خروج السابقة ودخولها) ينتظر جاهزية أساسها أو المهلة، فلا تُرى نصف مبنية
+    state.workGate?.ready();
+    const gate = WORK_PAGES.has(id) && from !== id && push && !sectionSwitch && !unifiedRestore ? readyGate() : null;
+    state.workGate = gate;
+    // رجوع إلى طبقة الموحد: العمل يغادر بالعقد نفسه (لا يُمسَك معتمًا)، والرئيسية تحت الطبقة محجوبة حتى تكتمل
+    if (outgoing) pageOut(outgoing, { depth: WORK_PAGES.has(from), visual, scrollTop: sourceScroll, gate: gate?.promise });
+    if (unifiedRestore) veil(q(id));
     root.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === id));
-    q('bottomNav').hidden = !MAIN_PAGES.includes(id);
+    const nav = q('bottomNav');
+    if (MAIN_PAGES.includes(id)) {
+      const entering = nav.hidden && from !== id;
+      nav.hidden = false;
+      if (entering) dockIn(nav);
+    } else if (!nav.hidden && !nav.inert) {
+      dockOut(nav, { onComplete: () => { if (!MAIN_PAGES.includes(currentPage())) nav.hidden = true; } });
+    }
+    playDockMotion();
+    if (!MAIN_PAGES.includes(id)) dockCtl?.close({ focus: false, instant: true });
+    if (id !== 'home') layers?.finish();
+    dockCtl?.repaint();
     root.querySelectorAll('.nav').forEach((n) => {
       const on = n.dataset.page === id;
       n.classList.toggle('active', on);
       if (on) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
-    q('detailTop').classList.remove('scrolled');
+    if (!dockFirst) dockCtl?.activate(id); // الدائرة تنتقل للوجهة الجديدة
+    q('detailTop').classList.remove('collapsed');
+    if (id !== 'detail') {
+      closeDetailMenu();
+      exitMarkMode();
+    }
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
-    if (id === 'library') inAnime ? anime.renderLibrary() : inCinema ? cinema.renderLibrary() : renderLibrary();
-    if (id === 'discover') {
+    // خلل «إعادة رسم الشريط السفلي» (8 نوفمبر): رسم الصفحة الثقيلة (40–110ms على جوال متوسط) كان يجري في
+    // الإطار نفسه الذي تبدأ فيه حركة مؤشر الشريط، فتضيع إطاراتها الأولى ويبدو الشريط كأنه يُعاد رسمه.
+    // بين وجهات الشريط: المؤشر يُسلَّم للمؤلِّف أولًا، والرسم بعد أول إطار (والصفحة الداخلة في أول تلاشيها).
+    const dockHop = from !== id && MAIN_PAGES.includes(from) && MAIN_PAGES.includes(id) && typeof requestAnimationFrame === 'function';
+    const afterDock = (fn) => {
+      if (!dockHop) return fn();
+      requestAnimationFrame(() => setTimeout(() => { if (request === pageMotionRequest && currentPage() === id) fn(); }, 0));
+    };
+    if (id === 'library') afterDock(renderActiveLibrary);
+    if (id === 'discover') afterDock(() => {
+      if (root.dataset.content === 'unified') return unifiedDiscover.render(q('unifiedDiscover'));
       if (inAnime) anime.showDiscover();
       // رجوع إلى قائمة السينما: تبقى كما تُركت (كان showList يعيد بناء الشبكة من الصفر فتضيع العناصر والموضع)
       else if (inCinema) { if (push || !q('cinemaDiscover')?.childElementCount) cinema.showDiscover(); }
       else if (!state.catalog.length) void loadMoreDiscover();
-    }
+    });
     if (id === 'rafiq' && supports('rafiq')) void rafiq.show();
-    if (id === 'home' && root.dataset.section === 'manga') {
-      if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
-      void refreshHomeUpdates();
+    // الرئيسية الموحدة لا تُبنى من جديد عند الرجوع إلا إن تغيّرت بياناتها (كانت تُبنى كل مرة: تضيع مواضع
+    // الشرائط وتُفكّ الصور من جديد، فيبدو التطبيق كأنه يعيد التحميل)
+    if (id === 'home' && from !== 'home' && root.dataset.content === 'unified') afterDock(() => renderAllHome({ ifChanged: true }));
+    if (id === 'home' && root.dataset.section === 'manga' && !sectionSwitch && root.dataset.content !== 'unified') {
+      afterDock(() => {
+        if (from !== 'home') { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); }
+        void refreshHomeUpdates();
+      });
     }
     // رفيق بلا شريط سفلي: لا مساحة محجوزة له تحت خانة الكتابة
     root.querySelector('.app')?.classList.toggle('app--chat', id === 'rafiq');
-    if (id === 'settings') {
+    if (id === 'settings' || id === 'settingsPane') {
       usageAsked = false; // الصرف يُقرأ من جديد كل مرة تفتح الإعدادات
       renderSettings();
     }
@@ -4089,8 +5484,31 @@ export function mountV35(deps, { page = 'home' } = {}) {
     paintRail();
     // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
     if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
-    else { scrollRestore++; window.scrollTo({ top: 0, behavior: 'instant' }); }
+    else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
+    // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
+    if (!sectionSwitch && !unifiedRestore && (from !== id || (push && !MAIN_PAGES.includes(id)))) {
+      const enter = () => {
+        if (request === pageMotionRequest && currentPage() === id) pageMotionIn(q(id), { depth: WORK_PAGES.has(id), gate: gate?.promise, from: destVisual });
+      };
+      if (WORK_PAGES.has(id)) queueMicrotask(enter);
+      else enter();
+    }
+    if (unifiedHandoff) {
+      const handoff = unifiedReturn;
+      // The work page is already active underneath an opaque origin modal.
+      // Fade the EXISTING origin instead of removing it on the next frame.
+      queueMicrotask(() => {
+        if (unifiedReturn !== handoff || currentPage() !== id) return;
+        const surface = unifiedSurfaces()[handoff.kind];
+        handoffSurface(surface?.motionNode?.(), {
+          gate: gate?.promise,
+          onComplete: () => {
+            if (unifiedReturn === handoff) surface?.hideSuspended?.();
+          },
+        });
+      });
+    }
   }
   function navTo(id) {
     if (id === 'notifications') return openSocial('notifications');
@@ -4178,6 +5596,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const prev = state.stack.pop();
     if (prev) {
       showPage(prev, { push: false });
+      if (unifiedReturn && prev === unifiedReturn.page && root.dataset.content === 'unified') {
+        const surface = unifiedSurfaces()[unifiedReturn.kind];
+        // showPage holds the outgoing work opaque while this origin fades in.
+        surface?.resume?.();
+        handoffSurface(surface?.motionNode?.(), {enter:true});
+        unifiedReturn = null;
+      }
       if (prev === 'detail' && state.current?._chapters) renderChapters(state.current);
       return true;
     }
@@ -4191,7 +5616,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // الإعدادات لكل واحد من العيال: ما يفهمه أي أحد فوق، والتقني تحت «النظام»
   // مطويًّا، وما قد يفصل التطبيق عن الخادم في «منطقة الخطر» بتأكيد صريح.
   // الشاشة القديمة تبقى لحالة واحدة: لا حساب بعد (أول إقلاع)، ولا واجهة أصلًا.
-  let systemOpen = false;
+  diagnosticsUi.subscribe(() => {
+    if (onSettings()) renderSettings();
+    if (!diagnosticsUi.visible() && root.querySelector('[data-diagnostic-sheet]')) closeSheet();
+  });
   let apkVersion = null;
   let apkVersionAsked = false;
   /**
@@ -4271,7 +5699,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
           .then((res) => {
             if (res.status !== 200) return;
             translateUsage = res.body;
-            if (currentPage() === 'settings') renderSettings();
+            if (onSettings()) renderSettings();
           })
           .catch(() => {});
       }
@@ -4285,7 +5713,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         );
       }
       const perf = summarize(readPerf());
-      rows.push(
+      if (diagnosticsUi.visible()) rows.push(
         row('activity', 'أداء الترجمة', 'زمن كل مرحلة على جوالك، لكل صفحة وفصل، وقياس القديم مقابل الجديد', {
           value: perf.text.median ? `${(perf.text.median / 1000).toFixed(1)} ث/صفحة` : null,
           run: openPerfSheet,
@@ -4312,7 +5740,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!modelsInfo) {
       void modelsStatus().then((info) => {
         modelsInfo = info;
-        if (currentPage() === 'settings') renderSettings();
+        if (onSettings()) renderSettings();
       });
       group('', [row('download', 'ملفات الترجمة', 'جارٍ فحص الملفات…', {})]);
       return;
@@ -4352,8 +5780,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       await downloadModels(({ received, total }) => {
         modelsBusy = { received, total };
-        const sub = q('settingsBody')?.querySelector('.setting small');
-        if (sub && currentPage() === 'settings') renderSettings();
+        const sub = q(currentPage() === 'settingsPane' ? 'settingsPaneBody' : 'settingsBody')?.querySelector('.setting small');
+        if (sub && onSettings()) renderSettings();
       });
       toast('ملفات الترجمة جاهزة');
     } catch {
@@ -4361,7 +5789,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     } finally {
       modelsBusy = null;
       modelsInfo = null;
-      if (currentPage() === 'settings') renderSettings();
+      if (onSettings()) renderSettings();
     }
   }
 
@@ -4465,12 +5893,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
       paint();
     }, { tone: 'manga' });
   }
+  /** فئة الإعدادات المفتوحة: صفحتها بنظام الصفحات نفسه (تلاشٍ ورجوع)، والرئيسية قائمة الفئات. */
+  function openSettingsPane(id) {
+    if (id === 'addons') return void openAddons();
+    state.settingsPane = id;
+    showPage('settingsPane');
+  }
+  const onSettings = () => ['settings', 'settingsPane'].includes(currentPage());
   function renderSettings() {
-    const body = q('settingsBody');
+    const pane = currentPage() === 'settingsPane' ? categoryOf(state.settingsPane)?.id ?? null : null;
+    const body = q(pane ? 'settingsPaneBody' : 'settingsBody');
+    if (!body) return;
     body.replaceChildren();
+    if (pane) q('settingsPaneTitle').textContent = categoryOf(pane).title;
+    const on = (id) => pane === id;
     const api = deps.settings;
     // عنوان المجموعة: كلمة لاتينية صغيرة فوق العنوان العربي، كأقسام الرئيسية
-    const EYEBROWS = { 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
+    const EYEBROWS = { 'المظهر': 'APPEARANCE', 'الحساب': 'ACCOUNT', 'الخصوصية': 'PRIVACY', 'التنبيهات': 'ALERTS', 'الترجمة': 'TRANSLATION', 'ملفات الترجمة على الجوال': 'MODELS', 'المساعدة': 'HELP', 'عن التطبيق': 'ABOUT', 'منطقة الخطر': 'DANGER' };
     const group = (label, rows, { note, cls } = {}) => {
       if (label) {
         const head = el('div', `settings-group-label${cls ? ` ${cls}-label` : ''}${EYEBROWS[label] ? '' : ' settings-sublabel'}`);
@@ -4534,6 +5973,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
 
     // رأس الصفحة: أنت. الصورة والاسم يفتحان ملفّك (كان صفًّا بين الصفوف)
+    if (!pane) {
     const profile = sync.rows('profiles', (p) => p.user_id === me())[0];
     const name = profile?.display_name || sync.user?.displayName || sync.user?.username || 'حسابي';
     const meCard = el('button', 'settings-me');
@@ -4550,7 +5990,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
     meCard.onclick = () => openProfile(me());
     body.append(meCard);
 
-    group('الحساب', [
+    // الفئات: كل واحدة تفتح صفحة خياراتها وحدها
+    const health = api?.health?.();
+    body.append(appearanceFeature({ el, glyph }, () => openSettingsPane('appearance')));
+    group('', CATEGORIES.filter((c) => c.id !== 'appearance').map((c) => row(c.icon, c.title, c.sub, {
+      value: c.id === 'sync' && health ? health.message : null,
+      tone: c.id === 'sync' && health ? (health.state !== 'ok' && health.state !== 'syncing' ? 'warn' : undefined) : undefined,
+      run: () => openSettingsPane(c.id),
+    })), { cls: 'settings-cats' });
+    }
+
+    // المظهر والتخصيص: البطاقات والألوان والخلفية وبنية العرض (settings-center.js)
+    if (on('appearance')) {
+      renderAppearancePane(body, {
+        el, glyph, openSheet, closeSheet, toast, patchAppearance,
+        // المظهر يغيّر الألوان فقط؛ البنية وحدها تعيد التجربة (الشريط والرئيسية). فصلهما يجعل
+        // اختيار نمط أو لون لمسة خفيفة بدل إعادة بناء الرئيسية الموحدة كل مرة
+        apply: (kind) => (kind === 'structure' ? applyExperience() : applySection(root.dataset.section)),
+        rerender: () => renderSettings(),
+      });
+      return;
+    }
+
+    if (on('accounts')) group('الحساب', [
       row('switchUser', 'تبديل الحساب', null, { run: confirmSwitchAccount }),
       sync.deleteAccount ? row('trash', 'حذف الحساب', null, { danger: true, run: confirmDeleteAccount }) : null,
       sync.approveDevice
@@ -4561,8 +6023,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           })
         : null,
     ]);
+    if (on('accounts')) group('', [el('p', 'settings-note', 'الخوادم ومساحات الأصدقاء قادمة؛ الخيارات الحالية كما هي.')]);
     // الخصوصية: قفل الحساب أولًا، ثم اتجاهان لا يختلطان — ما يراه غيري عني، وما أراه أنا
-    if (sync.setPin) {
+    if (on('privacy') && sync.setPin) {
       const digits = sync.user?.pinDigits;
       group('الخصوصية', [
         row('lock', 'رمز PIN', digits ? `${digits} أرقام — يُطلب كل ما فُتح حسابك` : 'رمز من أرقام يُطلب كل ما فُتح حسابك', {
@@ -4573,7 +6036,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
     }
     const privacy = mySettings();
-    group(
+    if (on('privacy')) group(
       'ما يراه أصدقاؤك',
       [
         toggle('activity', 'إحصائيات المتابعة', 'مدتك وتقدّمك في صفحة العمل', privacy.shareInsights === true, (on) => {
@@ -4633,7 +6096,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         ? 'آخر المشاهدات مخفية عن الأصدقاء؛ العمل الحالي ونشاط الإنهاء لهما خياران مستقلان.'
         : 'لو أخفيت العمل، عندك ساعة تحذفه من «آخر المشاهدات» قبل ما يوصلهم.' },
     );
-    group('ما تراه أنت', [
+    if (on('privacy')) group('ما تراه أنت', [
       row('activity', 'نشاط أصدقائك في القراءة', 'في «آخر ما صار». يخصّك وحدك', {
         value: privacy.feedReading === 'hide' ? 'إخفاء لدي' : 'إظهار لدي',
         run: () => {
@@ -4648,15 +6111,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sync.pendingDevices().then((n) => {
         if (n !== pendingPhones) {
           pendingPhones = n;
-          if (q('settingsBody')?.isConnected) renderSettings();
+          if (onSettings()) renderSettings();
         }
       });
     }
 
     if (api) {
       const popups = api.popups();
-      const on = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
-      group(
+      const kindsOn = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
+      if (on('privacy')) group(
         'التنبيهات',
         [
           toggle('bell', 'التنبيهات المنبثقة', 'لما يوصلك فريم أو ترشيح', popups.enabled, (enabled) => {
@@ -4664,20 +6127,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
             renderSettings();
           }),
           popups.enabled
-            ? row('sliders', 'وش يطلع لك', null, { value: on === Object.keys(api.labels).length ? 'الكل' : `${on} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
+            ? row('sliders', 'وش يطلع لك', null, { value: kindsOn === Object.keys(api.labels).length ? 'الكل' : `${kindsOn} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
             : null,
         ],
         { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
-      if (supports('translation')) renderTranslationSettings(group, row, toggle);
-      group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
-      group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
+      if (on('playback') && supports('translation')) renderTranslationSettings(group, row, toggle);
+      if (on('privacy')) group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
+      if (!pane) group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
-    group('عن التطبيق', [
+    if (on('playback') && !(api && supports('translation'))) {
+      body.append(el('p', 'settings-empty', 'لا خيارات للتشغيل أو الترجمة على هذه المنصة بعد. جودة التشغيل والسيرفر تُختار من المشغّل نفسه.'));
+    }
+    if (on('advanced') && diagnosticsUi.available()) group('أدوات Debug', [
+      toggle('activity', 'إظهار التشخيصات', 'أدوات الفحص على هذا الجهاز فقط', diagnosticsUi.visible(), async visible => {
+        await diagnosticsUi.setVisible(visible);
+        renderSettings();
+      }),
+    ]);
+
+    if (!pane) group('عن التطبيق', [
       // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
-      globalThis.Capacitor?.Plugins?.AnimeEngine
+      diagnosticsUi.visible() && globalThis.Capacitor?.Plugins?.AnimeEngine
         ? row('activity', 'أداء مصادر السينما', 'أول تشغيل صالح لكل مصدر وسيرفر', { run: () => cinema.openSourcesDebug() })
         : null,
       // بعد تحديث واجهة يسبق رقمُها رقمَ الـAPK؛ كلاهما يظهر لمن يسأل
@@ -4699,29 +6172,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     ]);
 
 
-    if (!api) return;
-    // ── النظام: مطويّ. من يفتحه يعرف أنه دخل مكانًا تقنيًّا ──
-    const toggleSystem = el('button', `system-toggle${systemOpen ? ' open' : ''}`);
-    toggleSystem.type = 'button';
-    toggleSystem.setAttribute('aria-expanded', String(systemOpen));
-    toggleSystem.innerHTML = `${glyph('settings')}<span><strong>النظام</strong><small>للمسؤول فقط: المزامنة والخادم</small></span>${glyph('chevron', { cls: 'icon chev' })}`;
-    toggleSystem.onclick = () => {
-      systemOpen = !systemOpen;
-      renderSettings();
-      if (systemOpen) q('settingsBody').querySelector('.system-toggle')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    };
-    body.append(toggleSystem);
-    if (!systemOpen) return;
-
+    if (!api || !pane) return;
     const health = api.health();
     const bad = health.state !== 'ok' && health.state !== 'syncing';
     // This code contains no account details. Make a failed recovery actionable:
     // the previous screen only said "recovery incomplete" for every cause.
     const recoveryCode = health.lastError?.code
       || (health.lastError?.status ? `HTTP ${health.lastError.status}` : 'غير محدد');
-    group('', [
+    if (on('sync')) group('', [
       row('refresh', 'حالة المزامنة', health.lastSyncAt ? `آخر مرة ${api.ago(health.lastSyncAt)}` : null, { value: health.message, tone: bad ? 'warn' : 'ok' }),
-      ...(bad ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
+      ...(bad && diagnosticsUi.visible() ? [row('refresh', 'رمز تشخيص المزامنة', 'لا يحتوي معلومات حسابك السرية', { value: recoveryCode, tone: 'warn' })] : []),
       row('send', 'زامن الآن', 'آمن: يرسل ويجيب آخر التغييرات', {
         run: async () => {
           toast('جارٍ المزامنة…');
@@ -4734,6 +6194,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    if (on('sync')) body.append(el('p', 'settings-note', 'مكتبتك وتقدّمك يُحفظان في حسابك ويصلان أجهزتك بالمزامنة.'));
+    if (!on('advanced')) return;
     if (api.resetWeb && available()) {
       // التحديثات تتراجع وحدها عن واجهة معطوبة؛ هذا للحالة التي لا يراها الكود
       group('', [
@@ -4746,9 +6208,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ]);
     }
 
-    if (available()) {
+    if (diagnosticsUi.visible() && available()) {
       group('', [row('layers', 'فحص المصادر', 'يجرّب كل مصدر: القائمة، البحث، الفصول، الصفحات، الصور، والأغلفة', { run: openSourceCheck })]);
     }
+    // «المصادر» كانت تبويبًا في مكتبة الأنمي وليست مجموعة أعمال: مكانها هنا
+    if (anime.sourcesAvailable?.()) group('', [row('activity', 'صحة مصادر الأنمي', 'نجاح كل مصدر وآخر نجاح أو فشل', { run: () => anime.openSourcesHealth() })]);
 
     // Not a general account setting: hide ALL dangerous actions for friends.
     if (canManageDangerZone(sync)) {
@@ -4768,9 +6232,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   /** فحص المصادر الستة عشر على هذا الجهاز وشبكته، خطوةً خطوة. */
   function openSourceCheck() {
+    if (!diagnosticsUi.visible()) return;
     const rows = new Map();
     const report = [];
     openSheet((body) => {
+      body.dataset.diagnosticSheet = '';
       body.append(el('h3', null, 'فحص المصادر'));
       const note = el('p', null, 'يجرّب كل مصدر كما يستعمله القارئ. ياخذ دقيقة تقريبًا.');
       note.style.marginBottom = '10px';
@@ -5013,96 +6479,427 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ───────────────────────── الأفعال المفوَّضة ─────────────────────────
 
   // ───────────────────────── مبدّل الأقسام ─────────────────────────
-  // ألغِ فتحًا مؤجَّلًا عند الإغلاق كي لا تعود طبقة كاملة لابتلاع اللمس.
-  let sectionOpenFrame = 0;
-  function setSectionsOpen(open) {
-    const menu = q('sectionMenu');
-    const scrim = q('sectionScrim');
-    const button = q('brandSwitch');
-    if (!menu || !button) return;
-    if (sectionOpenFrame) {
-      cancelAnimationFrame(sectionOpenFrame);
-      sectionOpenFrame = 0;
+  // المبدّل في قلب الشريط العائم، والانتقال طبقات (dock.js). يُنشآن عند أول استعمال
+  // لأن رئيسيات الأقسام تُبنى بعد القشرة.
+  //
+  // السلاسة أولًا: الحركة تُسلَّم للمركّب قبل أي عمل ثقيل، والأقسام تُجهَّز (تُبنى وتُخطَّط
+  // وهي مخفية) لحظة فتح المبدّل أو لمسه، وتحديث محتوى القسم يجري بعد انتهاء الحركة.
+  let dockCtl = null;
+  let layers = null;
+  const sectionViews = () => ({ manga: q('mangaHome'), anime: q('animeHome'), cinema: q('cinemaHome') });
+  const sectionLayers = () =>
+    (layers ??= createLayers({
+      views: sectionViews(),
+      host: q('home'),
+      current: root.dataset.section ?? 'manga',
+      label: createCrossfade(q('brandSection')),
+      wordOf: (id) => SECTIONS[id]?.word ?? id.toUpperCase(),
+      onSettle: (shown, from) => {
+        // سحب أُلغي: الهوية ترجع للقسم الظاهر
+        if (root.dataset.section !== shown) applySection(shown);
+        // لا إعادة رسم بعد التبديل: القسم جاهز بمحتواه، وتحديث بياناته يصل من مساراته (المزامنة)
+      },
+    }));
+  // بعد أن يُسلَّم الإطار الأول للمركّب: هنا يجري العمل الثقيل دون أن يؤخر بدء الحركة
+  const afterFirstFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
+  const idle = (fn) => (globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 60));
+  /** ارسم رئيسية القسم بمحتواها (تحديث «آخر المشاهدات» وما شابه). */
+  function renderSection(id) {
+    warmed.add(id);
+    if (id === 'anime') anime.show();
+    else if (id === 'cinema') cinema.show();
+    else {
+      for (const snapshot of homeSnapshots.values()) snapshot.refresh();
+      refreshFriendsHero();
+      renderHome();
+      restartHero();
     }
-    button.setAttribute('aria-expanded', String(open));
-    if (open) {
-      menu.style.removeProperty('pointer-events');
-      scrim.style.removeProperty('pointer-events');
-      for (const layer of [menu, scrim]) layer.hidden = false;
-      sectionOpenFrame = requestAnimationFrame(() => {
-        sectionOpenFrame = 0;
-        if (!sectionsOpen()) return;
-        menu.classList.add('open');
-        scrim.classList.add('open');
-        menuIn(menu, [...menu.querySelectorAll('.section-item')]);
-      });
-      return;
-    }
-    // تعتيم الطبقة لا يعطّل hit testing: أوقف اللمس فورًا لا بعد 240ms.
-    menu.style.pointerEvents = 'none';
-    scrim.style.pointerEvents = 'none';
-    scrim.classList.remove('open');
-    setTimeout(() => {
-      if (!scrim.classList.contains('open')) scrim.hidden = true;
-    }, 240);
-    menuOut(menu, () => {
-      if (sectionsOpen()) return;
-      menu.classList.remove('open');
-      menu.hidden = true;
+  }
+  /** أقسام رُسمت مرة: لا تحتاج رسمًا قبل الانتقال إليها، فمحتواها باقٍ في مكانه. */
+  const warmed = new Set();
+  /** جهّز الأقسام الأخرى: رسم أول مرة لما لم يُرسم، ثم تخطيطها مخفية. */
+  function prepareSections() {
+    if (currentPage() !== 'home' || root.dataset.content === 'unified') return;
+    sectionLayers().prepare();
+    for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id) && id !== root.dataset.section) renderSection(id);
+  }
+  /** ادخل قسمًا: الحركة أولًا، ثم الهوية بعد الإطار الأول، والمحتوى إن لم يُرسم قط. */
+  function beginSection(id, run) {
+    const motion = sectionLayers(); // قبل تغيير القسم: الطبقات تبدأ مما كان ظاهرًا
+    const fresh = !warmed.has(id);
+    if (fresh) renderSection(id); // أول زيارة: المحتوى يجب أن يدخل مع طبقته
+    run(motion);
+    // الهوية بعد الإطار الأول، وفقط إن بقيت الحركة متجهة لهذا القسم (سحب أُلغي قبلها لا يلبّسه هويته)
+    afterFirstFrame(() => {
+      if (root.dataset.section !== id && (motion.moving ? motion.target === id : motion.section === id)) {
+        applySection(id, { keepLabel: true });
+      }
     });
   }
-  const sectionsOpen = () => q('brandSwitch')?.getAttribute('aria-expanded') === 'true';
+  /** خارج الرئيسية: لا حركة طبقات، القسم والصفحة مباشرة. */
+  function enterSection(id) {
+    applySection(id);
+    renderSection(id);
+  }
+  // لوحة المفاتيح تقصّر نافذة WebView فيصعد كل ما هو مثبت بالأسفل. الشريط يبقى في مكانه من الشاشة
+  // الكاملة: يُزاح للأسفل بقدر ما قصُرت (فتغطيه اللوحة). الارتفاع الكامل يُحفظ لكل عرض (الدوران يغيّره).
+  {
+    let full = { w: 0, h: 0 };
+    const pin = () => {
+      const w = globalThis.innerWidth || 0;
+      const h = globalThis.innerHeight || 0;
+      if (w !== full.w || h > full.h) full = { w, h };
+      // لمس + حقل كتابة مركّز = لوحة مفاتيح؛ تصغير نافذة على الكمبيوتر لا يُخفي الشريط
+      const el = document.activeElement;
+      const typing = globalThis.matchMedia?.('(pointer: coarse)').matches && el?.matches?.('input, textarea, [contenteditable="true"]');
+      const shift = typing && full.h - h > 80 ? full.h - h : 0;
+      q('bottomNav')?.style.setProperty('--kb-shift', `${shift}px`);
+    };
+    globalThis.addEventListener?.('resize', pin, { passive: true });
+    root.addEventListener('focusin', pin);
+    root.addEventListener('focusout', () => setTimeout(pin, 0));
+    pin();
+  }
+  let standbyTimer = 0;
+  const sleepSoon = (ms) => {
+    clearTimeout(standbyTimer);
+    standbyTimer = setTimeout(() => { if (!dockCtl?.isOpen() && !layers?.moving) layers?.unprepare(); }, ms);
+  };
+  const dock = () =>
+    (dockCtl ??= createDock({
+      bar: q('bottomNav'),
+      scrim: q('dockScrim'),
+      current: root.dataset.section ?? 'manga',
+      onPrepare: () => {
+        clearTimeout(standbyTimer);
+        prepareSections();
+      },
+      // أُغلق بلا اختيار: الأقسام المجهّزة ترجع لنومها بعد هدوء الحركة
+      onClose: () => sleepSoon(600),
+      onNavigate: (page) => navTo(page),
+      onDragStart: (to) => {
+        if (currentPage() !== 'home' || !SECTIONS[to]?.ready) return;
+        beginSection(to, (motion) => motion.drag(to, 0));
+      },
+      onDrag: (to, p) => {
+        if (currentPage() === 'home' && layers?.moving) layers.drag(to, p);
+      },
+      onDragEnd: (to, commit) => {
+        // لمسة بلا سحب: تفتح المبدّل غالبًا؛ وإلا تنام الأقسام بعد قليل
+        if (!to) return sleepSoon(1500);
+        if (currentPage() !== 'home') {
+          if (commit) selectSection(to);
+          return;
+        }
+        if (!layers?.moving) return;
+        if (commit) writeSection(to);
+        layers.release(commit);
+      },
+    }));
+  function setSectionsOpen(open) {
+    if (open) dock().open();
+    else dock().close();
+  }
+  const sectionsOpen = () => dockCtl?.isOpen() ?? false;
 
   /** يلبس التطبيق هوية القسم: المتغيّرات، اسم القسم تحت الشعار، ولون شريط النظام. */
-  function applySection(id) {
+  function applySection(id, { keepLabel = false } = {}) {
     const s = SECTIONS[id] ?? SECTIONS.manga;
     root.dataset.section = s.id;
-    q('brandSectionName').textContent = s.word;
-    for (const item of root.querySelectorAll('.section-item')) item.setAttribute('aria-checked', String(item.dataset.arg === s.id));
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', s.theme);
-    document.documentElement.style.background = s.theme;
+    dockCtl?.setSection(s.id);
+    // تغيير من خارج المبدّل (فتح عمل من إضافة) يُعلم الطبقات؛ دخول القسم بالمبدّل يحرّكها هي
+    if (!keepLabel) layers?.sync(s.id);
+    // نوافذ خارج جذر التطبيق (التنبيهات، الأوراق المعلّقة على body) ترث لون القسم من <html>
+    document.documentElement.dataset.section = s.id;
+    // أثناء الانتقال يتبدّل الاسم مع الحركة (createCrossfade)، لا قبلها
+    if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
+    // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
+    const black = applyAppearance(root.dataset.content === 'unified' ? 'unified' : s.id, [root, document.documentElement]);
+    // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
+    for (const [section, home] of Object.entries(HOMES)) { const view = q(home); if (view) applyAppearance(section, [view]); }
+    // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
+    let toneTag = document.getElementById('look-tones');
+    if (!toneTag) {
+      toneTag = document.createElement('style');
+      toneTag.id = 'look-tones';
+      document.head.append(toneTag);
+    }
+    toneTag.textContent = toneCss(undefined, { unified: root.dataset.content === 'unified' });
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', black ?? s.theme);
+    document.documentElement.style.background = black ?? 'var(--bg)';
     paintRail();
   }
-  function pickSection(_e, t) {
-    const id = t.dataset.arg;
+  const pickSection = (_e, t) => selectSection(t.dataset.arg);
+  /** اختر قسمًا: الصفحة الظاهرة هي الطبقة الحالية، والوجهة دائمًا رئيسية القسم. */
+  function selectSection(id) {
     if (!SECTIONS[id]?.ready) {
       toast(`VANTARA ${SECTIONS[id]?.word ?? ''} قريبًا`);
       return;
     }
-    setSectionsOpen(false);
-    if (root.dataset.section === id) return;
+    if (!layers?.moving && root.dataset.section === id) return setSectionsOpen(false); // لمس الحالي يُغلق فقط
     writeSection(id);
-    const from = q(HOMES[root.dataset.section] ?? 'mangaHome');
-    const to = q(HOMES[id]);
-    const enter = () => {
-      if (id === 'anime') anime.show();
-      else if (id === 'cinema') cinema.show();
-      else { for (const snapshot of homeSnapshots.values()) snapshot.refresh(); refreshFriendsHero(); renderHome(); restartHero(); }
-    };
     if (currentPage() !== 'home') {
-      applySection(id);
+      const leave = root.querySelector('.page.active');
+      const y = window.scrollY;
+      setSectionsOpen(false);
+      layers?.finish();
+      beginSection(id, motion => motion.go(id, { outgoing: leave, scrollY: y }));
       showHome(id);
-      showPage('home');
-      enter();
+      showPage('home', { sectionSwitch: true, sourceScroll: y });
+      // Freeze the destination header/hero layout before the first rendered frame.
+      // Applying the section identity one frame later moved the manga cover visibly.
+      applySection(id, { keepLabel: true });
+      haptic();
       return;
     }
-    swapViews(from, to, {
-      onSwap: () => {
-        applySection(id);
-        enter();
-      },
-    });
+    // الطبقات تبدأ أولًا، والشريط يُغلق معها لا قبلها
+    beginSection(id, (motion) => motion.go(id));
+    setSectionsOpen(false);
+    haptic();
   }
   const HOMES = { manga: 'mangaHome', anime: 'animeHome', cinema: 'cinemaHome' };
-  /** رئيسية القسم وحدها ظاهرة. */
+  /** رئيسية القسم وحدها ظاهرة؛ وفي توحيد المحتوى الرئيسية المشتركة بدلها كلها. */
   function showHome(id) {
-    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = section !== id;
+    const all = root.dataset.content === 'unified';
+    for (const [section, home] of Object.entries(HOMES)) q(home).hidden = all || section !== id;
+    const shared = q('allHome');
+    if (shared) {
+      shared.hidden = !all;
+      // خارج الرئيسية (الإعدادات): البناء يؤجَّل لحين الرجوع إليها (showPage يرسمها)، فلا يثقل اللمسة
+      if (all && currentPage() === 'home') renderAllHome({ ifChanged: true });
+    }
   }
 
-  const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, workFromRef, toast });
+  // ───────────────────────── بنية التجربة (experience.js) ─────────────────────────
+  // توحيد المحتوى (`data-content`) يُخفي المبدّل ويُظهر
+  // الرئيسية المشتركة. لا شيء هنا يكتب في المكتبة أو التقدم: الرجوع يعيد كل قسم كما تُرك.
+  let dockMotion = null;
+  let experienceApplied = false;
+  /**
+   * دمج الكبسولات الثلاث في واحدة (أو فصلها): قياس واحد للحالتين ثم Web Animations على transform وopacity
+   * وحدهما، فتبقى الحركة على المؤلِّف بـ120 إطارًا حتى والصفحة مشغولة. لا تحريك لـgap/width/radius.
+   */
+  function playDockMotion() {
+    // خلل «يرتبط ثم يختفي ثم يرجع» (9 نوفمبر): الدمج كان يجعل الكبسولات الحقيقية شفافة وينتظر نسخًا خلفية
+    // تُرسم بعد الخمول، فيبقى الشريط بلا سطح لحظات. الآن الشريط بشكله الجديد مرسوم من أول إطار، وحركة
+    // واحدة عليه كله (opacity وscale فقط على المؤلِّف): لا لحظة بلا سطح، في الدمج والفصل.
+    const nav = q('bottomNav');
+    if (!dockMotion || !nav || nav.hidden) return;
+    dockMotion = null;
+    dockCtl?.activate(currentPage());
+    if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
+    const a = nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
+    // بعد الحركة: الدائرة تُوضع من جديد على مركز وجهتها بلا حركة (الشريط تغيّر عرضه)
+    a?.finished?.then(() => dockCtl?.repaint?.(true)).catch(() => {});
+  }
+  function applyExperience() {
+    const view = experienceView(readStructure());
+    delete root.dataset.screens; // «توحيد الشاشات» محذوف (قرار المالك)
+    const unified = view.home === 'all';
+    const was = root.dataset.content === 'unified';
+    if (unified) root.dataset.content = 'unified';
+    else delete root.dataset.content;
+    if (unified && !was) dockCtl?.close({ focus: false, instant: true });
+    if (unified !== was) applyAppearance(unified ? 'unified' : (root.dataset.section ?? 'manga'), [root, document.documentElement]);
+    // دمج الكبسولات أو فصلها: يُشغَّل أول ما يظهر الشريط (التبديل يتم من الإعدادات والشريط مخفي هناك)
+    // لا عند فتح التطبيق: فقط حين يبدّل المستخدم
+    if (unified !== was && experienceApplied) { dockMotion = unified ? 'dock-merge' : 'dock-split'; playDockMotion(); }
+    experienceApplied = true;
+    q('brandSectionName').textContent = unified ? 'ALL' : (SECTIONS[root.dataset.section] ?? SECTIONS.manga).word;
+    // الخروج من الموحد: القسم المحفوظ يعود (فتح عمل من الموحد يغيّر data-section مؤقتًا فقط، #323 U-12)
+    if (was && !unified && root.dataset.section !== readSection()) applySection(readSection());
+    showHome(root.dataset.section ?? 'manga');
+    // الخروج من الموحد: الإقلاع الموحد لا يرسم أي قسم (#323 U-06)، فالقسم الذي ظهر الآن يُرسم هنا وإلا
+    // بقيت رئيسية الأنمي أو السينما فارغة (showPage لا يرسمهما عند الرجوع، وprepareSections يتخطى الحالي).
+    if (was && !unified && !warmed.has(root.dataset.section ?? 'manga')) renderSection(root.dataset.section ?? 'manga');
+    // الشريط تغيّر عرضه (المبدّل ظهر أو اختفى): مؤشر الوجهة يُعاد لموضعها بعد التخطيط
+    requestAnimationFrame(() => dockCtl?.activate(currentPage()));
+  }
+
+  // الرئيسية المشتركة: كل العناصر تمر من unifiedFeed (منع التكرار عبر الأقسام)، والنوع يحدد صفحة التفاصيل
+  let identityAsked = false;
+  /**
+   * الضغط المطوّل على عمل في «آخر المشاهدات»: افتحه، أضفه لمكتبتك (أو هو فيها)، أو أزله من السجل.
+   * الإزالة تخفي صف المشاهدة وحده (view.remove): لا تمسّ المكتبة ولا التقدّم ولا تعليم الفصول.
+   */
+  function openRecentMenu(item) {
+    const ref = String(item.ref ?? '');
+    if (!ref) return;
+    const inLib = sync.rows('library', (r) => r.user_id === me() && !r.removed && r.series_ref === ref).length > 0;
+    const d = { seriesRef: ref, seriesTitle: item.title ?? null, coverUrl: item.cover ?? null, sourceId: null };
+    openSheet((body) => {
+      const h = el('h3', null, item.title || 'عمل');
+      h.dir = 'auto';
+      h.style.marginBottom = '8px';
+      body.append(h,
+        sheetItem(item.section === 'manga' ? 'book' : 'play', item.section === 'manga' ? 'تابع القراءة' : 'تابع المشاهدة', () => { closeSheet(); openUnified(item); }),
+        inLib
+          ? sheetItem('check', 'في مكتبتي', () => closeSheet(), { pressed: true })
+          : sheetItem('plus', 'أضف إلى مكتبتي', () => { closeSheet(); sync.enqueue('library.add', d); toast('أضيف إلى «أتابعها»'); }),
+        sheetItem('close', 'أزل من آخر المشاهدات', () => {
+          closeSheet();
+          sync.enqueue('view.remove', { seriesRef: ref });
+          toast('أُزيل من آخر المشاهدات');
+          renderAllHome({ ifChanged: true });
+        }),
+      );
+    });
+  }
+  function openUnified(item) {
+    suspendUnifiedOrigin();
+    if (item.section === 'anime') return openAnimeRef(item.ref, { title: item.title, cover: item.cover });
+    if (item.section === 'cinema') return openCinemaRef(item.ref, { title: item.title, cover: item.cover });
+    if (root.dataset.section !== 'manga') {
+      writeSection('manga');
+      applySection('manga');
+    }
+    void openWork(workFromRef(item.ref, item.title, item.cover));
+  }
+  function browseSection(id) {
+    writeSection(id);
+    applySection(id);
+    navTo('discover');
+  }
+  // الرئيسية الموحدة المعتمدة (unified-view.js): القشرة تملك البيانات والتنقل، والعرض هناك
+  const unifiedData = { anime: null, cinema: null, series: [], movieUpdates: [], animeUpdates: [], logos: new Map(), asked: false };
+  /** شعارات أنمي البنر من مصدر صفحة العمل نفسه (ani.zip ← metahub)، لأول سبعة رائجة فقط. */
+  async function loadHeroLogos(trending) {
+    const { loadAnimeArt } = await import('../lib/anime-art.js');
+    await Promise.all((trending ?? []).slice(0, 7).map((x) => loadAnimeArt(x.id).then((art) => { if (art?.logo) unifiedData.logos.set(x.id, art.logo); }).catch(() => {})));
+  }
+  const mangaView = (w) => w && !isAdult(w) ? {
+    title: titleOf(w), cover: w.coverImage?.extraLarge || w.coverImage?.large || w._work?.thumbnailUrl || null,
+    color: w.coverImage?.color ?? null, genres: w.genres ?? [], score: w.averageScore ? w.averageScore / 10 : null,
+    chapters: w.chapters ?? null, _latestChapter: w._latestChapter ?? null, _updateAt: w._updateAt ?? null,
+    _updatePublishedAt: w._updatePublishedAt ?? 0, _newCount: w._newCount ?? 1, raw: w,
+  } : null;
+  const openManga = (w) => {
+    suspendUnifiedOrigin();
+    if (root.dataset.section !== 'manga') { writeSection('manga'); applySection('manga'); }
+    void openWork(w.raw ?? w);
+  };
+  let artMod = null;
+  void import('../lib/anime-art.js').then((m) => { artMod = m; }).catch(() => {});
+  const unifiedView = createUnifiedView({
+    el, glyph, genreAr: (g) => AR_GENRE[g] ?? g,
+    reducedMotion: () => document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    data: {
+      continue: () => unifiedFeed(collectItems((t, pick) => sync.rows(t, pick), { userId: me(), cinemaTypes: readJson('vantara.cinema.types.v2', {}) })),
+      animeHome: () => unifiedData.anime,
+      cinema: () => unifiedData.cinema,
+      seriesUpdates: () => unifiedData.series,
+      movieUpdates: () => unifiedData.movieUpdates,
+      animeUpdates: () => unifiedData.animeUpdates,
+      mangaUpdates: () => (state.home.updates ?? []).map(mangaView).filter(Boolean),
+      // ألسنة الأقسام في «آخر التحديثات» الموحد: الخط الزمني نفسه بتحميل الأقدم (#323 O-2)
+      timeline: (host, tab) => {
+        const [section, include] = tab === 'series' ? ['cinema', (g) => g.kind !== 'movie'] : tab === 'movie' ? ['cinema', (g) => g.kind === 'movie'] : [tab, undefined];
+        mountTimeline(host, timelineOptions(section, () => host.isConnected, include));
+      },
+      animeLogo: (id) => unifiedData.logos.get(id) ?? null,
+      // أغلفة المانجا بمحمّل الصور نفسه في قسم المانجا (ترويسات المصدر، البدائل، الغلاف الموحّد)
+      cover: (node, x) => {
+        const w = x?.raw ?? (x?.ref ? workFromRef(String(x.ref), x.title, x.cover) : x?.coverImage ? x : null);
+        if (!w) return false;
+        void mountImage(node, w);
+        return true;
+      },
+      // جدول البث: لقطة الحلقة لما لا بنر له (نفس سلسلة صور صفحة العمل)، والكتابة كسولة
+      animeArt: (id) => import('../lib/anime-art.js').then(({ loadAnimeArt }) => loadAnimeArt(id)),
+      episodeStill: (...a) => artMod?.episodeStill(...a) ?? null,
+      mangaRecent: () => (state.home.recent ?? []).map(mangaView).filter(Boolean),
+      mangaPopular: () => uniqueById([...(state.home.trending ?? []), ...(state.home.popular ?? [])]).map(mangaView).filter(Boolean),
+    },
+    open: {
+      item: (it) => openUnified(it),
+      manga: openManga,
+      anime: (x) => { suspendUnifiedOrigin(); return openAnimeRef(`anime:${x.id}`, { title: x.title, cover: x.poster }); },
+      cinema: (x) => { suspendUnifiedOrigin(); return openCinemaRef(`cinema:${x.id}`, { title: x.title, cover: x.poster, type: x.type ?? null }); },
+      browse: (id) => browseSection(id),
+      // «عرض الكل» لآخر المشاهدات: السجل كاملًا في المكتبة الموحدة
+      recent: () => { unifiedLibrary.state.tab = 'recent'; navTo('library'); },
+      itemMenu: (it) => openRecentMenu(it),
+      // التصنيفات وكل الأعمال: صفحة الاكتشاف (للتوحيد اكتشاف قسمه الحالي إلى أن يُبنى الاكتشاف الموحد)
+      categories: () => navTo('discover'),
+      discover: () => unifiedDiscover.openAll(),
+    },
+  });
+  function loadUnifiedData() {
+    if (unifiedData.asked) return;
+    unifiedData.asked = true;
+    void fetchAnimeHome().then((d) => {
+      unifiedData.anime = d;
+      // صور جدول البث (خلفية IMDb/fanart) تُطلب مع وصول الجدول لا عند رسم البطاقة، فتكون جاهزة قبل ظهورها
+      // الأقرب لـ«الآن» أولًا (اليوم ثم أمس وغدًا): كانت تُطلب بترتيب الأسبوع فتتأخر بطاقات اليوم خلف الأمس
+      void import('../lib/anime-art.js').then(({ loadAnimeArt }) => {
+        const t = Date.now();
+        const near = [...(d?.week ?? [])].filter((e) => Math.abs(e.airingAt - t) < 36 * 3600_000).sort((a, b) => Math.abs(a.airingAt - t) - Math.abs(b.airingAt - t));
+        const ids = [...new Set(near.map((e) => e.id))].slice(0, 12); // داخل سقف كاش الصور (art.js)
+        // دفعات صغيرة: لا تزاحم طلبات الصفحة الأولى
+        const next = () => { const batch = ids.splice(0, 4); if (batch.length) void Promise.all(batch.map((id) => loadAnimeArt(id).catch(() => null))).then(next); };
+        next();
+      });
+      unifiedView.refresh();
+      unifiedDiscover.refreshTrending(); // «اكتشف» الظاهر قبل وصول البيانات لا يبقى على «نجهّز الرائج…» (#323 U-05)
+      return loadHeroLogos(d?.trending).then(() => unifiedView.refresh());
+    }).catch(() => { unifiedData.asked = false; });
+    void import('../lib/cinema-meta.js').then(({ catalog }) => Promise.all([catalog('movie', 'top'), catalog('series', 'top')]))
+      .then(([movie, series]) => {
+        unifiedData.cinema = { movie, series };
+        unifiedView.refresh();
+        unifiedDiscover.refreshTrending();
+      }).catch(() => {});
+  }
+  /** تحديثات الأفلام المؤكدة من Update Engine نفسه؛ لا نستنتجها من ترتيب Cinemeta. */
+  let movieUpdatesAskedAt = 0;
+  async function refreshMovieUpdates() {
+    if (Date.now() - movieUpdatesAskedAt < 120_000) return;
+    movieUpdatesAskedAt = Date.now();
+    // المصدر نفسه الذي يقرؤه قسما السينما والأنمي (#323 U-03/O-1): حلقات المسلسلات كانت تُستنتج من أول 16
+    // مسلسلًا في كتالوج Cinemeta «top» (أشهرها عالميًا لا ما رصده Update Engine)، والأنمي غائب كليًا.
+    const [groups, animeGroups] = await Promise.all([latestGroups('cinema', 60).catch(() => null), latestGroups('anime', 60).catch(() => null)]);
+    const real = (g) => Number.isFinite(g.at) && g.at > 0;
+    if (groups) { // Outage: preserve last verified events rather than showing false updates.
+      unifiedData.movieUpdates = groups
+        .filter((g) => g.kind === 'movie' && /^cinema:[^:]+$/.test(String(g.work ?? '')) && real(g))
+        .slice(0, 30)
+        .map((g) => ({
+          x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'movie' },
+          at: g.at,
+          publishedAt: g.publishedAt ?? null,
+        }));
+      unifiedData.series = groups
+        .filter((g) => g.kind === 'episode' && /^cinema:/.test(String(g.work ?? '')) && real(g) && Number.isFinite(g.high))
+        .slice(0, 30)
+        .map((g) => ({ x: { id: String(g.work).slice('cinema:'.length), title: g.title, poster: g.cover, type: 'series' }, season: g.season ?? 1, episode: g.high, released: g.at }));
+    }
+    if (animeGroups) {
+      unifiedData.animeUpdates = animeGroups
+        .filter((g) => g.kind === 'episode' && /^anime:\d+$/.test(String(g.work ?? '')) && real(g))
+        .slice(0, 30)
+        .map((g) => ({ x: { id: Number(String(g.work).slice('anime:'.length)), title: g.title, poster: g.cover }, episode: g.high, more: g.events?.length ?? 1, at: g.at }));
+    }
+    if (currentPage() === 'home' && root.dataset.content === 'unified') unifiedView.refreshUpdates();
+  }
+
+  let unifiedMounted = false;
+  function renderAllHome({ ifChanged = false } = {}) {
+    const host = q('allHome');
+    if (!host) return;
+    if (!identityAsked) {
+      identityAsked = true;
+      void loadIdentity().then((found) => { if (found && root.dataset.content === 'unified') renderAllHome(); });
+    }
+    loadUnifiedData();
+    void refreshHomeUpdates();
+    void refreshMovieUpdates();
+    if (!unifiedMounted || !host.firstChild) { unifiedView.mount(host); unifiedMounted = true; } else unifiedView.refresh({ ifChanged });
+  }
+
+  const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, previewWork: (w) => previewWork(w), workFromRef, toast });
 
   const actions = {
-    toggleSections: () => setSectionsOpen(!sectionsOpen()),
+    toggleSections: () => dock().consumeDrag() || dock().toggle(),
     toggleRail,
     railLogo,
     pickSection,
@@ -5166,7 +6963,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ترويسة صفحة العمل تكتسي خلفية عند التمرير، وعنوان العمل يظهر فيها
   const onScroll = () => {
-    if (currentPage() === 'detail') q('detailTop').classList.toggle('scrolled', window.scrollY > 170);
+    // كما في نموذج المالك: الشريط يصير صلبًا مع الاسم بعد 220px
+    if (currentPage() === 'detail') q('detailTop').classList.toggle('collapsed', window.scrollY > 220);
   };
   window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -5182,13 +6980,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
         renderHome();
       }
     }
+    // المكتبة الظاهرة تتحدّث فورًا (كانت تبقى قديمة حتى تُفتح من جديد)، بإطار واحد مهما تتابعت الكتابات
+    if (currentPage() === 'library' && tables.some((t) => ['library', 'collections', 'completions', 'work_views', 'ratings'].includes(t))) {
+      if (!libraryRepaint) libraryRepaint = requestAnimationFrame(() => { libraryRepaint = 0; if (currentPage() === 'library') renderActiveLibrary(); });
+    }
     if (tables.some((t) => ['library', 'collections', 'completions'].includes(t))) {
       refreshLibraryDetail();
       if (currentPage() === 'home') renderHome();
     }
     if (tables.includes('ratings')) {
       pendingRating = null;
-      renderRating();
+      paintDetailMenu();
+      const rate = root.querySelector('.mw-rate') ?? document.querySelector('.mw-rate');
+      if (rate) renderRating(rate, rate._target ?? null);
     }
     if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
     majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
@@ -5204,9 +7008,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   /** زرّ الرجوع (أندرويد وEsc): الورقة ثم الدرج ثم الصفحة السابقة. */
   function handleBack() {
     if (editor?.open) return editor.handleBack();
+    if (unifiedSearch.close()) return true;
+    if (unifiedDiscover.back()) return true;
+    if (unifiedView.back()) return true;
     if (sectionsOpen()) return setSectionsOpen(false) ?? true;
     // الورقة فوق المحادثة تُغلق أولًا، ثم المحادثة نفسها (لبابها في الأصدقاء)
     if (majlis.closeBar() || closeSheet() || closeDrawer() || room.close()) return true;
+    // صفحة العمل: قائمة «المزيد» ثم وضع «علّم فصول» يُغلقان قبل الرجوع
+    if (currentPage() === 'detail' && q('detailMenu')?.classList.contains('open')) return closeDetailMenu() ?? true;
+    if (currentPage() === 'detail' && state.marking) return exitMarkMode() ?? true;
     return goBack();
   }
 
@@ -5335,7 +7145,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         if (res.status === 200 && typeof res.body?.allowed === 'boolean') setTranslationLocked(!res.body.allowed);
         else if (res.status === 403 && res.body?.error === 'translation_locked') setTranslationLocked(true);
         else return;
-        if (currentPage() === 'settings') renderSettings();
+        if (onSettings()) renderSettings();
       })
       .catch(() => {});
   setTimeout(checkTranslationAccess, 1500);
@@ -5424,10 +7234,23 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
-    root, q, el, toast, openSheet, closeSheet, showPage, goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
+    playableSources, addSource,
+    // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
+    warmToday: true,
     openUpdates: (section) => openUpdates(section),
     sync,
     openWorkMenu: openMediaWorkMenu,
+    openWorkOptions: (target) => openWorkOptions(target),
+    mediaState,
+    // «من نفس العالم»: مانجا العمل تُفتح في قسم المانجا ببحث عن اسمها في مصادر المستخدم
+    openMangaTitle: (title) => {
+      writeSection('manga');
+      applySection('manga');
+      buildDrawer();
+      openSearch();
+      searchFor(title);
+    },
     restoreSourceWork: restoreAddonWork,
     openProfile,
     friends: () => deps.friends?.() ?? [],
@@ -5449,8 +7272,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
-    root, q, el, toast, openSheet, closeSheet, showPage, currentPage, readKv, writeKv, sync,
+    root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), currentPage, readKv, writeKv, sync,
+    playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,
+    openWorkOptions: (target) => openWorkOptions(target),
+    mediaState,
     restoreSourceWork: restoreAddonWork,
     together: () => together,
     // ترشيح فيلم أو مسلسل: نفس ورقة المانجا والأنمي، بمرجع `cinema:` يفتحه المجلس في قسمه
@@ -5566,9 +7392,30 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const startSection = readSection();
   applySection(startSection);
+  applyExperience();
   showHome(startSection);
-  if (startSection === 'anime') anime.show();
-  if (startSection === 'cinema') cinema.show();
+  dock().activate(currentPage());
+  warmed.add(startSection);
+  // الأقسام الثلاثة جاهزة قبل أول تبديل: تُرسم مرة في وقت فراغ بعد الإقلاع، ثم التبديل حركة طبقة فقط
+  setTimeout(() => idle(() => {
+    // المحتوى الموحد يعرض واجهته هو والأقسام الثلاثة مخفية: لا تُرسم في الخلفية (#323 U-06؛ كان رسمها
+    // يقع أثناء التنقل في الموحد فيهبط الرجوع إلى 13 إطارًا). تُرسم عند أول دخول للقسم (beginSection).
+    if (root.dataset.content === 'unified') return;
+    for (const id of ['manga', 'anime', 'cinema']) if (!warmed.has(id)) renderSection(id);
+    // Built is not laid out: a hidden section gets its first style and layout at the moment of the first switch
+    // (measured: one 270 ms task, 142 ms layout + 78 ms style, on cinema), the jank owners saw only on the first
+    // switch on weak devices. In a later idle slot the sections stand by off-screen once so that cost is paid here.
+    idle(() => {
+      if (currentPage() !== 'home' || dockCtl?.isOpen() || layers?.moving || root.dataset.content === 'unified') return;
+      const motion = sectionLayers();
+      motion.prepare();
+      void q('home')?.offsetHeight; // the off-screen layout itself
+    });
+  }), 2500);
+  if (root.dataset.content !== 'unified') {
+    if (startSection === 'anime') anime.show();
+    if (startSection === 'cinema') cinema.show();
+  } else warmed.delete(startSection); // يُرسم عند أول دخول له لا في الإقلاع الموحد
 
   paintNotifyDots();
   refreshFriendsHero();
@@ -5595,15 +7442,20 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openWork,
     /** عمل من مرجعه وحده (إشعار، رابط): صفحته في الواجهة لا الشاشة القديمة. */
     openRef: (ref, title, cover) => void openWork(workFromRef(ref, title, cover)),
+    // أنمي أو سينما من مرجعه (لقطات المعاينة في tools/ui-previews تفتح صفحة العمل بها)
+    openAnimeRef,
+    openCinemaRef,
     openMajlis,
     openProfile,
     handleBack,
     pause() {
+      scrollRestore++; scrollRestoreCleanup?.();
       savedScroll = window.scrollY;
       majlis.hide();
       clearInterval(state.heroTimer);
       closeDrawer();
       closeSheet();
+      closeDetailMenu();
     },
     resume(target) {
       const current = currentPage();
@@ -5619,9 +7471,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChapters();
     },
     destroy() {
+      scrollRestore++; scrollRestoreCleanup?.();
+      unbindMangaDepth();
+      ++pageMotionRequest;
+      finishPageMotion();
       sourceVerification.close();
       addonViewGeneration++;closeAddonSource();
-      detailDock.destroy();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
       majlis.hide();
@@ -5631,6 +7486,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       document.removeEventListener('visibilitychange', refreshChapters);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll);
+      // مستمعات القسمين الدائمة (#311 D-011، D-013)
+      cinema.destroy?.();
+      anime.destroy?.();
       unsubscribe?.();
     },
   };

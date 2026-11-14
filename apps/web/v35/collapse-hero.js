@@ -31,10 +31,34 @@ export function heroFrame(scrollY, p, { still = false } = {}) {
 }
 
 /**
- * @param {{ hero: HTMLElement, bar: HTMLElement, bg?: HTMLElement|null, head?: HTMLElement|null, active: () => boolean }} o
+ * طبقة عمق إضافية لها معادلة CSS نفسها: `range(span, vh)` يعطي بداية المدى ونهايته بالبكسل،
+ * و`at(t, span)` قيم الطبقة عند نسبة t من 0 إلى 1. يُكتب منها فقط حين لا يدعم المحرك الخط الزمني،
+ * أو أثناء الانزلاق بعد رفع الإصبع؛ فالمعادلتان يجب أن تتطابقا وإلا قفزت الطبقة عند التسليم.
+ * @typedef {{ node: HTMLElement, range: (span: number, vh: number) => [number, number], at: (t: number, span: number) => { transform: string, opacity: number } }} DepthLayer
+ */
+
+/** قيمة خطية بين a وb عند t (نفس استيفاء CSS لـkeyframes ذات الدوال المتطابقة). */
+export const lerp = (a, b, t) => a + (b - a) * t;
+/** نسبة التقدم داخل مدى [start, end] من التمرير، محصورة بين 0 و1. */
+export const rangeProgress = (y, [start, end]) => clamp((y - start) / Math.max(1, end - start));
+
+/**
+ * هل يحبس هذا المحرك الانزلاق مع حركة مربوطة بالتمرير؟ الخلل في Android WebView وحده (crbug 572898003):
+ * WebView يدمج تحديثات التمرير المحبوسة ويختمها بزمن الإطار الأحدث فلا تمر أبدًا. Chrome نفسه وبقية
+ * المتصفحات لا تحتاج التسليم، فتبقى على CSS دائمًا: لا كتابة من JavaScript، ولا اهتزاز.
+ */
+export function flingHoldRisk(ua = globalThis.navigator?.userAgent ?? '', cap = globalThis.Capacitor) {
+  if (/; wv\)/.test(ua)) return true;
+  return Boolean(cap?.isNativePlatform?.() && cap?.getPlatform?.() === 'android');
+}
+
+/**
+ * `bar` اختياري: صفحة تملك طيّ شريطها بنفسها (المانجا) تمرّر null فلا يُلمس شريطها ولا يُطرح من المدى.
+ * @param {{ hero: HTMLElement, bar?: HTMLElement|null, bg?: HTMLElement|null, head?: HTMLElement|null, layers?: DepthLayer[], active: () => boolean, flingHold?: boolean }} o
  * @returns {() => void} فكّ الربط
  */
-export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }) {
+export function bindCollapsingHero({ hero, bar = null, bg = null, head = null, layers = [], active, flingHold = flingHoldRisk() }) {
+  const barHeight = () => bar?.offsetHeight ?? 0;
   let queued = false;
   let last = null;
   const still = reduced();
@@ -42,10 +66,15 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
   // من هنا متأخرة إطارًا عن التمرير وهي سبب الاهتزاز. يبقى هذا المسار للمحركات التي لا تدعمه.
   const scrollDriven = (node) => !!node && (globalThis.getComputedStyle?.(node)?.animationName ?? 'none') !== 'none';
   const cssBg = scrollDriven(bg), cssHead = scrollDriven(head);
-  const cssNodes = [cssBg ? bg : null, cssHead ? head : null].filter(Boolean);
+  // طبقة قد تكون دالة تُرجع العنصر الحالي: أنماط الصفحة تعيد رسم محتواها حين تصل البيانات
+  const nodeOf = (l) => (typeof l.node === 'function' ? l.node() : l.node);
+  const cssLayers = layers.filter((l) => scrollDriven(nodeOf(l)));
+  const fixedCss = [cssBg ? bg : null, cssHead ? head : null].filter(Boolean);
+  const cssNodesNow = () => [...fixedCss, ...cssLayers.map(nodeOf)].filter(Boolean);
+  const cssNodes = cssNodesNow();
   // WebView من 153 إلى 156 يحبس الانزلاق بعد رفع الإصبع ما دامت على الصفحة حركة مربوطة بالتمرير
   // ثم يلقيه دفعة واحدة (crbug 572898003). فالسحب بالإصبع لـCSS، والانزلاق بعده لهذا المسار
-  // بنفس القيم حتى يتوقف، ثم يعود CSS.
+  // بنفس القيم حتى يتوقف، ثم يعود CSS. في غير WebView لا تسليم أصلًا (flingHoldRisk).
   let handed = false;
   let span = 0;
   let touching = false;
@@ -55,11 +84,11 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     queued = false;
     if (!active() || !hero.isConnected) return;
     const y = window.scrollY;
-    const next = Math.max(1, hero.offsetHeight - bar.offsetHeight);
+    const next = Math.max(1, hero.offsetHeight - barHeight());
     // مدى CSS هو مدى هذا المسار نفسه: لا قفزة عند التسليم بينهما
     if (cssNodes.length && next !== span) hero.style.setProperty?.('--hero-span', `${next}px`);
     span = next;
-    const p = collapseProgress(y, hero.offsetHeight, bar.offsetHeight);
+    const p = collapseProgress(y, hero.offsetHeight, barHeight());
     // CSS يثبت عند نهاية المدى، فالمسار حين يتسلّم منه يثبت مثله
     const f = heroFrame(handed ? Math.min(y, span) : y, p, { still });
     if (bg && f.bg && (!cssBg || handed)) bg.style.transform = f.bg;
@@ -67,9 +96,18 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
       if (f.head) head.style.transform = f.head;
       head.style.opacity = String(f.headOpacity);
     }
+    const vh = globalThis.innerHeight || window.innerHeight || 800;
+    for (const l of layers) {
+      if (still || (cssLayers.includes(l) && !handed)) continue;
+      const node = nodeOf(l);
+      if (!node) continue;
+      const v = l.at(rangeProgress(y, l.range(span, vh)), span);
+      node.style.transform = v.transform;
+      node.style.opacity = String(v.opacity);
+    }
     if (f.collapsed !== last) {
       last = f.collapsed;
-      bar.classList.toggle('collapsed', f.collapsed);
+      bar?.classList.toggle('collapsed', f.collapsed);
     }
   };
   const handBack = () => {
@@ -77,12 +115,12 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     idle = null;
     if (!handed) return;
     handed = false;
-    for (const n of cssNodes) n.style.animation = '';
+    for (const n of cssNodesNow()) n.style.animation = '';
     // حركة CSS العائدة تبدأ معلّقة إطارًا تُرسم فيه بلا قيمها (البنر في أعلاه لحظة)؛ القيم
     // المكتوبة تبقى تحتها حتى تعمل، فهي تغطيها ما دامت فاعلة
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (handed) return;
-      for (const n of cssNodes) {
+      for (const n of cssNodesNow()) {
         n.style.transform = '';
         n.style.opacity = '';
       }
@@ -100,7 +138,10 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     requestAnimationFrame(frame);
   };
   let startY = 0;
+  let takeover = null;
   const onTouchStart = (e) => {
+    if (takeover != null) globalThis.cancelAnimationFrame?.(takeover);
+    takeover = null;
     touching = true;
     moved = false;
     startY = e?.touches?.[0]?.clientY ?? 0;
@@ -113,14 +154,22 @@ export function bindCollapsingHero({ hero, bar, bg = null, head = null, active }
     const endY = e?.changedTouches?.[0]?.clientY;
     if (endY != null && Math.abs(endY - startY) > 6) moved = true;
     if (!moved || !cssNodes.length || !active() || !hero.isConnected) return;
-    handed = true;
-    frame();
-    for (const n of cssNodes) n.style.animation = 'none';
-    settle(180);
+    // التسلّم عند حد الإطار التالي لا في حدث الرفع نفسه: الرفع يصل الخيط الرئيسي بين إطارين وscrollY فيه
+    // متأخر عن موضع المؤلِّف بآخر حركة للإصبع، فكانت القيمة المكتوبة أقدم مما يرسمه CSS فيرتد الغلاف بقدرها
+    // (0.35 من آخر خطوة في «ويبتوني»: ~15px في زحلقة سريعة) مع كل رفع. في بداية الإطار يكون الموضع قد
+    // تزامن، والانزلاق نفسه محبوس ما دامت الحركة مربوطة (الخلل)، فتُكتب القيمة المرسومة نفسها ثم تُفصل.
+    takeover = requestAnimationFrame(() => {
+      takeover = null;
+      if (touching || !active() || !hero.isConnected) return;
+      handed = true;
+      frame();
+      for (const n of cssNodesNow()) n.style.animation = 'none';
+      settle(180);
+    });
   };
   const touch = { passive: true };
   window.addEventListener('scroll', onScroll, { passive: true });
-  if (cssNodes.length) {
+  if (cssNodes.length && flingHold) {
     window.addEventListener('touchstart', onTouchStart, touch);
     window.addEventListener('touchend', onTouchEnd, touch);
     window.addEventListener('touchcancel', onTouchEnd, touch);

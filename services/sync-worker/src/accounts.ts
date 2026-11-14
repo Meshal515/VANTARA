@@ -34,6 +34,8 @@ const USERNAME = /^[a-z0-9_.]{3,20}$/;
 const PIN = /^(\d{4}|\d{6})$/;
 /** بعد كل 5 محاولات خاطئة: قفل يتصاعد. */
 const LOCKS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+/** مدة القفل للجولة رقم (failed+1)/5 داخل SQL، من LOCKS_MS نفسه (آخرها لما بعدها). */
+const LOCK_STEP_SQL = `(CASE MIN((failed + 1) / 5 - 1, ${LOCKS_MS.length - 1}) ${LOCKS_MS.map((ms, i) => `WHEN ${i} THEN ${ms}`).join(' ')} END)`;
 
 const encoder = new TextEncoder();
 
@@ -91,18 +93,34 @@ export async function checkPin(env: Env, userId: string, pin: unknown, now: numb
   if (row.locked_until > now) return { ok: false, error: 'pin_locked', retryAt: row.locked_until, digits: row.digits };
   const given = typeof pin === 'string' ? pin : '';
   const hash = await hmacHex(pepperOf(env), `pin:${row.salt}:${given}`);
+  // العدّاد يُحدَّث ذريًا داخل SQL (#323 U-22): القراءة ثم كتابة failed+1 من الذاكرة كانت تجعل عشر
+  // محاولات متزامنة تُحسب واحدة، فلا يُقفل الحساب أبدًا بالطلبات المتوازية. وكل خطوة مشروطة بأن القفل
+  // لم يُضرب في الأثناء، فتخمين صحيح وصل بعد القفل لا يمر.
+  const locked = async (): Promise<PinCheck> => {
+    const latest = await pinOf(env, userId);
+    return { ok: false, error: 'pin_locked', retryAt: latest?.locked_until ?? now, digits: row.digits };
+  };
   if (validPin(given) && given.length === row.digits && sameHex(hash, row.pin_hash)) {
     if (row.failed || row.locked_until) {
-      await env.DB.prepare('UPDATE account_pins SET failed = 0, locked_until = 0 WHERE user_id = ?').bind(userId).run();
+      const reset = await env.DB.prepare('UPDATE account_pins SET failed = 0, locked_until = 0 WHERE user_id = ? AND locked_until <= ?')
+        .bind(userId, now).run();
+      if (!reset.meta?.changes) return locked();
+    } else {
+      const still = await pinOf(env, userId);
+      if (still && still.locked_until > now) return locked();
     }
     return { ok: true };
   }
-  const failed = row.failed + 1;
-  const lockedUntil = failed % 5 === 0 ? now + LOCKS_MS[Math.min(failed / 5 - 1, LOCKS_MS.length - 1)]! : 0;
-  await env.DB.prepare('UPDATE account_pins SET failed = ?, locked_until = ? WHERE user_id = ?').bind(failed, lockedUntil, userId).run();
-  return lockedUntil
-    ? { ok: false, error: 'pin_locked', retryAt: lockedUntil, digits: row.digits }
-    : { ok: false, error: 'pin_wrong', digits: row.digits };
+  // العدّ والقفل في عبارة واحدة: كانا عبارتين، فصحيحٌ يصل بينهما (العدّاد بلغ 5 والقفل لم يُكتب بعد) يمر.
+  const counted = await env.DB.prepare(
+    `UPDATE account_pins SET failed = failed + 1,
+       locked_until = CASE WHEN (failed + 1) % 5 = 0 THEN ? + ${LOCK_STEP_SQL} ELSE locked_until END
+     WHERE user_id = ? AND locked_until <= ? RETURNING failed, locked_until`,
+  )
+    .bind(now, userId, now).first<{ failed: number; locked_until: number }>();
+  if (!counted) return locked();
+  if (counted.locked_until <= now) return { ok: false, error: 'pin_wrong', digits: row.digits };
+  return { ok: false, error: 'pin_locked', retryAt: counted.locked_until, digits: row.digits };
 }
 
 /** إذن الجهاز بعد PIN صحيح: يُرجع للعميل مرة، ويُخزَّن هنا مُجزّأً فقط. */
@@ -264,7 +282,7 @@ const PERSONAL: ReadonlyArray<readonly [string, string]> = [
   ['rafiq_messages', 'user_id'], ['rafiq_conversations', 'user_id'],
   ['rafiq_prefs', 'user_id'], ['rafiq_recs', 'user_id'], ['rafiq_profile', 'user_id'], ['rafiq_usage', 'user_id'],
   ['rafiq_external', 'user_id'], ['majlis_message_receipts', 'user_id'], ['majlis_messages', 'sender_id'],
-  ['majlis_hidden', 'user_id'], ['majlis_reads', 'user_id'], ['usage_sections', 'user_id'], ['work_insights', 'user_id'],
+  ['majlis_hidden', 'user_id'], ['majlis_reads', 'user_id'], ['usage_sections', 'user_id'], ['work_insights', 'user_id'], ['insight_hidden', 'user_id'],
   ['view_privacy', 'user_id'], ['together_invites', 'host_id'], ['account_pins', 'user_id'], ['trusted_devices', 'user_id'], ['applied_ops', 'user_id'],
 ];
 

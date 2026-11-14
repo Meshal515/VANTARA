@@ -274,7 +274,7 @@
 }
 .v35 .rf-btn--primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   box-shadow: none;
 }
 .v35 .rf-btn:disabled {
@@ -361,7 +361,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 .v35 .rf-send:disabled {
   background: var(--surface-3);

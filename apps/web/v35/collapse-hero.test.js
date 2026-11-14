@@ -66,7 +66,7 @@ describe('العمق المربوط بالتمرير في CSS', () => {
     g.getComputedStyle = (n) => ({ animationName: n.anim });
     g.requestAnimationFrame = (f) => f();
     try {
-      const unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => true });
+      const unbind = bindCollapsingHero({ hero, bar, bg, head, active: () => true, flingHold: true });
       expect(props['--hero-span']).toBe('400px');
       // لمسة بلا تمرير: لا تسليم
       on.touchstart(); on.touchend();
@@ -88,10 +88,101 @@ describe('العمق المربوط بالتمرير في CSS', () => {
       expect(Object.keys(on)).toEqual([]);
       // زحلقة سريعة: حدث scroll يصل بعد رفع الإصبع، والتسليم يحدث بحركة الإصبع وحدها
       const bg3 = node('aw-bg-depth');
-      bindCollapsingHero({ hero, bar, bg: bg3, head: null, active: () => true });
+      bindCollapsingHero({ hero, bar, bg: bg3, head: null, active: () => true, flingHold: true });
       on.touchstart({ touches: [{ clientY: 700 }] });
       on.touchend({ changedTouches: [{ clientY: 520 }] });
       expect(bg3.style.animation).toBe('none');
+    } finally { Object.assign(g, saved); }
+  });
+});
+
+describe('طبقات العمق الإضافية (الغلاف واللوقو) تدخل التسليم نفسه', () => {
+  it('لا تُكتب مع الإصبع، وبعد رفعه تُكتب بقيم معادلتها ثم تعود لـCSS', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const g = globalThis;
+    const saved = { window: g.window, getComputedStyle: g.getComputedStyle, requestAnimationFrame: g.requestAnimationFrame, innerHeight: g.innerHeight };
+    const node = (anim, h = 460) => ({ style: { setProperty() {} }, isConnected: true, offsetHeight: h, classList: { toggle() {} }, anim });
+    const hero = node('none'), bar = node('none', 60), cover = node('aw-cover-out');
+    const on = {};
+    g.window = { scrollY: 0, addEventListener: (k, f) => (on[k] = f), removeEventListener: (k) => delete on[k] };
+    g.innerHeight = 1000;
+    g.getComputedStyle = (n) => ({ animationName: n.anim });
+    g.requestAnimationFrame = (f) => f();
+    try {
+      const layer = { node: cover, range: (_, vh) => [0, vh * 0.5], at: (t) => ({ transform: `t=${t}`, opacity: 1 - t }) };
+      const unbind = bindCollapsingHero({ hero, bar, layers: [layer], active: () => true, flingHold: true });
+      on.touchstart();
+      g.window.scrollY = 250; on.scroll();
+      expect(cover.style.transform).toBeUndefined();
+      on.touchend();
+      expect(cover.style.animation).toBe('none');
+      expect(cover.style.transform).toBe('t=0.5');
+      expect(cover.style.opacity).toBe('0.5');
+      unbind();
+      expect(cover.style.animation).toBe('');
+    } finally { Object.assign(g, saved); }
+  });
+});
+
+describe('التسليم لـJavaScript في WebView وحده، وعند حد الإطار', () => {
+  const setup = () => {
+    const g = globalThis;
+    const saved = { window: g.window, getComputedStyle: g.getComputedStyle, requestAnimationFrame: g.requestAnimationFrame, innerHeight: g.innerHeight };
+    const node = (anim, h = 460) => ({ style: { setProperty() {} }, isConnected: true, offsetHeight: h, classList: { toggle() {} }, anim });
+    const on = {};
+    const frames = [];
+    g.window = { scrollY: 0, addEventListener: (k, f) => (on[k] = f), removeEventListener: (k) => delete on[k] };
+    g.innerHeight = 1000;
+    g.getComputedStyle = (n) => ({ animationName: n.anim });
+    g.requestAnimationFrame = (f) => { frames.push(f); return frames.length; };
+    const flush = () => { while (frames.length) frames.shift()(); };
+    return { g, saved, node, on, flush };
+  };
+  it('يعرف WebView من علامته، وتطبيق أندرويد الأصلي، ولا يعدّ Chrome نفسه منها', async () => {
+    const { flingHoldRisk } = await import('./collapse-hero.js');
+    expect(flingHoldRisk('Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/155.0.8000.10 Mobile Safari/537.36', null)).toBe(true);
+    expect(flingHoldRisk('Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.8000.10 Mobile Safari/537.36', null)).toBe(false);
+    expect(flingHoldRisk('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/155.0', { isNativePlatform: () => true, getPlatform: () => 'android' })).toBe(true);
+    expect(flingHoldRisk('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/155.0', { isNativePlatform: () => true, getPlatform: () => 'electron' })).toBe(false);
+  });
+  it('خارج WebView لا يُسجَّل مستمع لمس ولا يُكتب شيء على طبقة يحرّكها CSS مهما مرّر المستخدم', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const { g, saved, node, on, flush } = setup();
+    try {
+      const cover = node('mw-webtoon-0');
+      const layer = { node: cover, range: () => [0, 500], at: (t) => ({ transform: `t=${t}`, opacity: 1 }) };
+      bindCollapsingHero({ hero: node('none'), layers: [layer], active: () => true, flingHold: false });
+      flush();
+      expect(on.touchstart).toBeUndefined();
+      expect(on.touchend).toBeUndefined();
+      for (const y of [120, 300, 80]) { g.window.scrollY = y; on.scroll(); flush(); }
+      expect(cover.style.transform).toBeUndefined();
+      expect(cover.style.animation).toBeUndefined();
+    } finally { Object.assign(g, saved); }
+  });
+  it('في WebView: القيمة المكتوبة عند التسلّم هي موضع الإطار التالي لا موضع حدث الرفع المتأخر', async () => {
+    const { bindCollapsingHero } = await import('./collapse-hero.js');
+    const { g, saved, node, on, flush } = setup();
+    try {
+      const cover = node('mw-webtoon-0');
+      const layer = { node: cover, range: () => [0, 500], at: (t) => ({ transform: `t=${t}`, opacity: 1 }) };
+      bindCollapsingHero({ hero: node('none'), layers: [layer], active: () => true, flingHold: true });
+      flush();
+      on.touchstart({ touches: [{ clientY: 700 }] });
+      g.window.scrollY = 200; // ما يعرفه الخيط الرئيسي لحظة الرفع
+      on.touchend({ changedTouches: [{ clientY: 300 }] });
+      expect(cover.style.animation).toBeUndefined(); // لا فصل قبل حد الإطار
+      g.window.scrollY = 250; // تزامن مع المؤلِّف في بداية الإطار
+      flush();
+      expect(cover.style.animation).toBe('none');
+      expect(cover.style.transform).toBe('t=0.5');
+      // لمسة جديدة قبل الإطار تلغي التسلّم المعلّق
+      on.scrollend(); flush();
+      on.touchstart({ touches: [{ clientY: 700 }] });
+      on.touchend({ changedTouches: [{ clientY: 300 }] });
+      on.touchstart({ touches: [{ clientY: 300 }] });
+      flush();
+      expect(cover.style.animation).toBe('');
     } finally { Object.assign(g, saved); }
   });
 });

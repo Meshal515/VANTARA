@@ -1,0 +1,176 @@
+name: VANTARA Runtime actual Debug app integration (experimental)
+on:
+  push:
+    branches: [feat/runtime-debug-integration-20261028, fix/witcher-verified-origin-refresh-20261029, fix/witcher-pixeldrain-extraction-20261029, fix/debug-runner-emulator-disk-20261104]
+    paths:
+      - 'android/**'
+      - 'extensions/runtime-android/**'
+      - 'apps/web/**'
+      - 'tools/repository-compat/**'
+      - '.github/workflows/runtime-app-debug.yml'
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: runtime-app-debug-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  actual-app:
+    if: ${{ !startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Preserve protected engines and verify current web shell
+        run: |
+          node tools/repository-compat/scope-guard.mjs
+          node --test tools/repository-compat/debug-native-inputs.test.mjs
+          pnpm --filter @vantara/domain build
+          pnpm test:web
+          pnpm test:safety
+      - name: Pinned original provider fixtures (offline, not a source-site health check)
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Package this branch's actual web assets
+        run: npx cap sync android
+      - name: Compile actual optional Debug integration and all app unit tests
+        run: bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Prove Release cannot resolve the Debug-only runtime
+        run: |
+          set -euo pipefail
+          bash android/gradlew -p android :app:dependencies --configuration releaseRuntimeClasspath --no-daemon > release-runtime-classpath.txt
+          if rg 'dev\.vantara\.runtime:|project :runtime-android' release-runtime-classpath.txt; then exit 1; fi
+      - name: Reserve runner disk before emulator system-image download
+        run: bash tools/repository-compat/prepare_emulator_disk.sh 14
+      - name: Enable KVM
+        run: |
+          nproc
+          lscpu
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Provide a real virtual audio clock for playback validation
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils
+          vantara_audio="$RUNNER_TEMP/vantara-ci-audio"
+          mkdir -p "$vantara_audio"
+          chmod 700 "$vantara_audio"
+          pulseaudio -n --daemonize=yes --use-pid-file=no --exit-idle-time=-1 \
+            --log-target="file:$GITHUB_WORKSPACE/runtime-pulse-log.txt" \
+            --load="module-native-protocol-unix socket=$vantara_audio/native" \
+            --load="module-null-sink sink_name=vantara_ci rate=48000 channels=2"
+          export PULSE_SERVER="unix:$vantara_audio/native"
+          pactl set-default-sink vantara_ci
+          pactl set-default-source vantara_ci.monitor
+          pactl info > runtime-pulse-info.txt
+          pactl list short sinks >> runtime-pulse-info.txt
+          printf 'PULSE_SERVER=%s\nQEMU_AUDIO_DRV=pa\n' "$PULSE_SERVER" >> "$GITHUB_ENV"
+      - name: Execute published provider through the actual VANTARA app adapter
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          # This runner renders and decodes in software. The two-vCPU guest
+          # produced global UI stalls and a24.553s/30s playback clock, so use
+          # four vCPUs while retaining the exact clock/frame/seek assertions.
+          cores: 4
+          ram-size: 4096M
+          # Hosted runner had 5.8GB free after Gradle; the default data disk
+          # requested 7.37GB and Android emulator aborted before any test ran.
+          # Limit only virtual userdata storage, NOT the test coverage, RAM,
+          # CPU, API level, video decoder or playback thresholds.
+          disk-size: 6G
+          disable-animations: true
+          # -noaudio yielded ranchu pcmWrite I/O errors while media data was
+          # already buffered. Keep audio enabled against the private null sink;
+          # the app's real audio/video synchronization remains under test.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          # SDK image download consumed ~4.7 GiB AFTER the earlier disk check.
+          # Verify/reclaim again after AVD creation, immediately before launch.
+          pre-emulator-launch-script: bash tools/repository-compat/prepare_emulator_disk.sh 9
+          script: bash tools/repository-compat/run_app_integration.sh
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true # optional evidence upload only
+        if: always()
+        with:
+          name: actual-debug-integration-evidence-NOT-live-playback-or-upgrade
+          path: |
+            android/app/build/outputs/androidTest-results/
+            android/app/build/reports/androidTests/
+            android/app/build/test-results/
+            runtime-app-logcat.txt
+            runtime-pulse-log.txt
+            runtime-pulse-info.txt
+            runtime-app-webview/
+            release-runtime-classpath.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  visual-ui:
+    if: ${{ github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/codex/visual-diagnostics-')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Verify web UI regressions and repository protection
+        run: |
+          pnpm --filter @vantara/domain build
+          pnpm test:web
+          node tools/repository-compat/scope-guard.mjs
+          pnpm test:safety
+      - name: Verify native diagnostics gate in Debug and Release builds
+        run: |
+          npx cap sync android
+          bash android/gradlew -p android :app:testDebugUnitTest --tests '*DiagnosticVisibilityTest' :app:testReleaseUnitTest --tests '*DiagnosticVisibilityTest' --no-daemon --stacktrace
+      - name: Render actual production components in Chromium
+        env:
+          VANTARA_UI_EVIDENCE: ${{ runner.temp }}/visual-ui-evidence
+        run: |
+          npm install --prefix "$RUNNER_TEMP/visual-qa" --no-save playwright@1.56.1
+          export VANTARA_PLAYWRIGHT_MODULE="$RUNNER_TEMP/visual-qa/node_modules/playwright/index.mjs"
+          export VANTARA_CHROMIUM="$(command -v google-chrome || command -v chromium)"
+          node tools/repository-compat/visual-ui.mjs "$GITHUB_WORKSPACE" after
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true # optional evidence upload only
+        if: always()
+        with:
+          retention-days: 1
+          name: visual-ui-and-native-gate-evidence-NO-APK
+          path: |
+            ${{ runner.temp }}/visual-ui-evidence/
+            android/app/build/test-results/
+            android/app/build/reports/tests/
+          if-no-files-found: warn

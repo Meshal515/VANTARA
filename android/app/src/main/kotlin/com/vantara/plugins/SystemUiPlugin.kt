@@ -21,6 +21,44 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "SystemUi")
 class SystemUiPlugin : Plugin() {
 
+    /** The sole local preference, shared with native playback UI. Stable is denied in Kotlin. */
+    @PluginMethod
+    fun diagnostics(call: PluginCall) {
+        val requested = call.getBoolean("visible")
+        if (requested != null && !com.vantara.app.BuildConfig.DEBUG) {
+            call.reject("Diagnostics are available in Debug builds only", "DEBUG_ONLY")
+            return
+        }
+        if (requested != null) DiagnosticVisibility.set(context, requested)
+        val visible = DiagnosticVisibility.visible(context)
+        if (requested != null) { if (visible) MainThreadWatch.start() else MainThreadWatch.stop() }
+        call.resolve(JSObject().put("debug", com.vantara.app.BuildConfig.DEBUG).put("visible", visible))
+    }
+
+    // رصد الخيط الرئيسي (MainThreadWatch): يعمل مع «إظهار التشخيص» في Debug فقط، من الإقلاع
+    override fun load() {
+        if (DiagnosticVisibility.visible(context)) MainThreadWatch.start()
+        // Bridge's main WebView owns the OS-drawn scroll indicator. Keep scrolling,
+        // touch input and scroll restoration untouched: hide only that indicator.
+        activity?.runOnUiThread {
+            bridge?.webView?.let { web ->
+                web.isVerticalScrollBarEnabled = false
+                web.isHorizontalScrollBarEnabled = false
+            }
+        }
+    }
+
+    /** الرسائل الطويلة على الخيط الرئيسي مؤخرًا، لتقرير وقفات القارئ. Debug فقط. */
+    @PluginMethod
+    fun mainThreadStalls(call: PluginCall) {
+        if (!com.vantara.app.BuildConfig.DEBUG) return call.reject("Diagnostics are available in Debug builds only", "DEBUG_ONLY")
+        val list = com.getcapacitor.JSArray()
+        for ((ago, block) in MainThreadWatch.recent()) {
+            list.put(JSObject().put("agoMs", ago).put("ms", block.ms).put("what", block.what).put("stack", com.getcapacitor.JSArray(block.stack)))
+        }
+        call.resolve(JSObject().put("blocks", list))
+    }
+
     /**
      * معرّف أندرويد الثابت لنفس (مفتاح توقيع التطبيق + المستخدم + الجهاز).
      *

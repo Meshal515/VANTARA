@@ -1,7 +1,6 @@
 package com.vantara.anime
 
 import com.vantara.anime.adapters.ResolveTrace
-import com.vantara.anime.adapters.ShahiidSiteAdapter
 import com.vantara.anime.adapters.SourceEpisode
 import com.vantara.anime.health.HealthStore
 import com.vantara.anime.hosts.EmbedResolver
@@ -84,28 +83,6 @@ class RockResolutionTest {
         for (route in ready) assertTrue(prep.candidatesOf(route.id).all { it.quality == route.quality })
     }
 
-    @Test fun `Shahiid publishes the first MegaMax mirror before waiting for the others`() = runBlocking {
-        val waiting = CompletableDeferred<Unit>()
-        val ready = CompletableDeferred<List<Candidate>>()
-        val dispatch = OkHttpClient.Builder().addInterceptor { chain ->
-            val req = chain.request()
-            val body = when {
-                req.url.host == "slow.test" -> { runBlocking { waiting.await() }; "File was deleted" }
-                req.header("X-Inertia") != null -> """{"props":{"streams":{"data":[{"label":"720p","mirrors":[{"driver":"earnvids","link":"https://fast.test/e/1"},{"driver":"mixdrop","link":"https://slow.test/e/1"}]}]}}}"""
-                req.url.encodedPath.contains("admin-ajax") -> "<iframe src='https://share4max.net/iframe/x'></iframe>"
-                req.url.host == "shahiid.test" -> "<a class='buttosn' data-post='1' data-serv='x' data-frameserver='x'>Megamax متعدد</a>"
-                req.url.host == "share4max.net" -> """<script data-page>{"version":"v"}</script>"""
-                else -> "<video src='https://cdn.test/720.mp4'></video>"
-            }
-            Response.Builder().request(req).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody("text/html".toMediaType())).build()
-        }.build()
-        val adapter = ShahiidSiteAdapter("shahiid", "Shahiid", dispatch, { "https://shahiid.test" }, EmbedResolver(dispatch), serverTimeoutMs = 2000)
-        val job = async { adapter.candidates(SourceEpisode("shahiid", "/ep/1", "1", 1f), trace = ResolveTrace { if (it.state == RouteState.READY) ready.complete(it.candidates) }) }
-        try {
-            assertTrue(withTimeout(500) { ready.await() }.isNotEmpty())
-            assertFalse("other qualities continue in background", job.isCompleted)
-        } finally { waiting.complete(Unit); job.await() }
-    }
     @Test fun `maintained primary page resolution preserves Aniyomi as fallback on HTTP failure`() = runBlocking {
         val calls = AtomicInteger()
         val http = OkHttpClient.Builder().addInterceptor { throw java.io.IOException("page temporarily offline") }.build()

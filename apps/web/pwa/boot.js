@@ -23,7 +23,7 @@ function lazyPlugin(load, pick) {
         return async (...args) => {
           const target = await get();
           const fn = target?.[method];
-          if (typeof fn !== 'function') throw new Error(`${String(method)} غير متاح في نسخة الويب`);
+          if (typeof fn !== 'function') throw Object.assign(new Error(`${String(method)} غير متاح في نسخة الويب`), { code: 'UNSUPPORTED_ON_WEB' });
           return fn.apply(target, args);
         };
       },

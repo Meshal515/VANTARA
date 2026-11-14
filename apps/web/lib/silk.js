@@ -291,7 +291,7 @@ function fallback(canvas, initial) {
       `linear-gradient(180deg,${c[1]},${c[0]})`;
   };
   paint(initial);
-  return { setPalette: paint, pause() {}, resume() {}, destroy() {} };
+  return { setPalette: paint, pause() {}, resume() {}, setCovered() {}, destroy() {} };
 }
 
 export function createSilk(canvas, initialPalette = null) {
@@ -364,7 +364,8 @@ export function createSilk(canvas, initialPalette = null) {
   };
   const resize = () => {
     const r = canvas.getBoundingClientRect();
-    const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    // تدرّج ناعم بلا حواف: كثافة 1 مطابقة بصريًا وأخف بأربعة أضعاف على شاشات 2x (الجولة الثانية)
+    const dpr = 1;
     canvas.width = Math.max(1, Math.round(r.width * dpr));
     canvas.height = Math.max(1, Math.round(r.height * dpr));
     cw = canvas.width;
@@ -386,8 +387,14 @@ export function createSilk(canvas, initialPalette = null) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     frame = !reduce?.matches || transition ? requestAnimationFrame(draw) : null;
   };
+  // خارج الشاشة لا رسم (الجولة الثانية من التفتيش): كان الحرير يُرسم كل إطار ولو كان البنر فوق الشاشة
+  // والقائمة تُمرَّر، فيزاحم التمرير ويستهلك البطارية. لا يتوقف إلا بخروج التطبيق كله.
+  let onScreen = true;
+  // مغطّى بطبقة معتمة (صفحات الموحد الفرعية): على الشاشة عند IntersectionObserver لكنه لا يُرى. كان يُرسم كل
+  // إطار تحتها فيزاحم حركة الطبقة نفسها (6 إطارات في نصف ثانية مقابل 31 بلا رسمه، في «جدول البث»)
+  let covered = false;
   const play = () => {
-    if (frame === null && running) frame = requestAnimationFrame(draw);
+    if (frame === null && running && onScreen && !covered && !document.hidden) frame = requestAnimationFrame(draw);
   };
   const pause = () => {
     if (frame !== null) cancelAnimationFrame(frame);
@@ -412,6 +419,13 @@ export function createSilk(canvas, initialPalette = null) {
   observer.observe(canvas);
   const visibility = () => (document.hidden ? pause() : play());
   document.addEventListener('visibilitychange', visibility);
+  const seen = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => {
+      onScreen = entries.some((e) => e.isIntersecting);
+      if (onScreen) play(); else pause();
+    })
+    : null;
+  seen?.observe(canvas);
   resize();
   upload(current);
   play();
@@ -420,10 +434,16 @@ export function createSilk(canvas, initialPalette = null) {
     setPalette,
     pause,
     resume: play,
+    /** تغطيه طبقة معتمة أو تنكشف عنه: لا رسم ما دام مغطّى، ولا يعيده لون جديد أو تغيّر مقاس. */
+    setCovered(on) {
+      covered = Boolean(on);
+      if (covered) pause(); else play();
+    },
     destroy() {
       running = false;
       pause();
       observer.disconnect();
+      seen?.disconnect();
       document.removeEventListener('visibilitychange', visibility);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);

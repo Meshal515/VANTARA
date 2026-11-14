@@ -3,9 +3,11 @@ const validHost = value => typeof value === 'string' && value.length <= 253 && /
 // Native reason codes stay available for diagnostics; only these local messages
 // enter the UI. Never echo a source URL, bridge exception or cookie value.
 function verificationMessage(result={}) {
-  if(result.state==='cancelled')return 'أُلغي التحقق. تقدر تحاول مرة ثانية.';
+  // «إلغاء» من المستخدم وحده يقال إلغاءً؛ إغلاق الصفحة لسبب آخر يقول سببه
+  if(result.state==='cancelled'&&(!result.reason||result.reason==='user_cancelled'))return 'أُلغي التحقق. تقدر تحاول مرة ثانية.';
   const messages={
     unsupported_webview:'إصدار Android لا يدعم صفحة التحقق المعزولة. استخدم مصدرًا آخر.',
+    unsupported_profile:'حدّث Android System WebView لدعم جلسة تحقق منفصلة لهذا المصدر. بقيت جلساتك محفوظة.',
     isolation_unavailable:'تعذّر عزل صفحة التحقق بأمان. بقيت جلساتك محفوظة.',
     renderer_gone:'توقفت صفحة التحقق. بقي المصدر مثبتًا وتقدر تعيد المحاولة يدويًا.',
     webview_unavailable:'تعذّر فتح صفحة التحقق. تحقق من تحديث Android System WebView.',
@@ -19,13 +21,14 @@ function verificationMessage(result={}) {
     cookie_store_unavailable:'تعذّر حفظ جلسة التحقق. لم تُحذف جلساتك الحالية.',
     launch_failed:'تعذّر فتح صفحة التحقق. تقدر تعيد المحاولة يدويًا.',
     interrupted:'توقفت جلسة التحقق قبل اكتمالها.',
+    proxy_unavailable:'تعذّر فتح مسار شبكة المصدر لصفحة التحقق. حدّث Android System WebView.',
   };
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }
 export function nativeVerificationPlugin() {
   return globalThis.Capacitor?.getPlatform?.() === 'android' ? globalThis.Capacitor?.Plugins?.Verification ?? null : null;
 }
-export function createSourceVerification({plugin=nativeVerificationPlugin(),document=globalThis.document}={}) {
+export function createSourceVerification({plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime,document=globalThis.document}={}) {
   let closed=false;
   const pending=new Map(),active=new Map(),handles=[],listeners=new Set();
   // Background network challenges update the Add-ons list only. No toast,
@@ -44,7 +47,10 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
     const item=pending.get(host);
     const job=(async()=>{
       try{
-        const result=await plugin.begin({host});if(closed)return {ok:false,cancelled:true};
+        const result=item.kind==='cloudstream'
+          ? await (runtimePlugin?.verify?.({host}) ?? Promise.reject(new Error('Private verification unavailable')))
+          : await plugin.begin({host});
+        if(closed)return {ok:false,cancelled:true};
         if(result?.host!==host||result?.state!=='verified'){
           const failure=result?.host===host?result:{state:'failed',reason:'invalid_result'};
           const message=verificationMessage(failure);
@@ -53,7 +59,7 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
         pending.delete(host);render();
         // One callback per explicitly opened verification, never per state event.
         try {
-          const retried=typeof item.retry==='function'?await item.retry():null;
+          const retried=item.kind!=='cloudstream'&&typeof item.retry==='function'?await item.retry():null;
           return retried??{ok:true,...result};
         } catch {
           // Verification succeeded; a separate content error is not another challenge.
@@ -90,14 +96,16 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),docu
 }
 
 /** Existing anime Verify button: choose the exact source domain, then one retry. */
-export async function verifySourceDomains({domains,sourceName,retry,plugin=nativeVerificationPlugin()}={}) {
+export async function verifySourceDomains({domains,sourceName,retry,plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime}={}) {
   if(!plugin)return {ok:false,error:'التحقق داخل التطبيق يحتاج نسخة Android محدثة'};
   try{
     const hosts=new Set((domains??[]).map(url=>{try{return new URL(url).hostname.toLowerCase();}catch{return null;}}).filter(Boolean));
     const out=await plugin.pending(),match=(out?.pending??[]).find(x=>hosts.has(x.host));
     if(!match)return {ok:false,error:'لا يوجد تحدي تحقق مسجّل لهذا المصدر. أعد فحصه أولًا.'};
-    const result=await plugin.begin({host:match.host});
+    const result=match.kind==='cloudstream'
+      ? await (runtimePlugin?.verify?.({host:match.host}) ?? Promise.reject(new Error('Private verification unavailable')))
+      : await plugin.begin({host:match.host});
     if(result?.host!==match.host||result?.state!=='verified')return {ok:false,error:verificationMessage(result?.host===match.host?result:{})};
-    return typeof retry==='function'?await retry():{ok:true};
+    return match.kind!=='cloudstream'&&typeof retry==='function'?await retry():{ok:true};
   }catch{return {ok:false,error:`تعذّر التحقق من ${sourceName||'المصدر'}`};}
 }

@@ -514,3 +514,15 @@ it.each(['success', 'failure'])('ignores late pre-reinstall resource %s when upd
   release(); await expect(pending).rejects.toThrow();
   expect(a.registry.list()[0].health.subtitles.state).toBe('unknown');
 });
+it('opens an installed CloudStream source from the native registry instead of looking it up as a web add-on',async()=>{
+ const id='addon|cs3|cs3_0123456789abcdef0123456789abcdef|Animewitcher|local';
+ const def={id,label:'Animewitcher',content:'anime',version:3,user:true};
+ const native={episodes:async()=>[{url:'ep-1'}]};
+ const r={ready:Promise.resolve(),store:createStore({indexedDB:null}),registry:{list:()=>[def],def:(x)=>x===id?def:null,source:(x)=>x===id?native:null,call:async(x,run)=>run(native),cooling:()=>false}};
+ const a=createAddonRuntime({runtime:r,transport:{}});await a.ready;
+ expect(a.sources.def(id)).toBe(def);
+ expect(a.sources.source(id)).toBe(native);
+ expect(await a.sources.call(id,(s)=>s.episodes())).toEqual([{url:'ep-1'}]);
+ // A real web add-on id is still resolved by the web registry, not the native one.
+ expect(a.sources.source('addon|https://example.org|missing')).toBeNull();
+});

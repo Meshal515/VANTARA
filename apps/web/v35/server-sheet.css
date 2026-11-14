@@ -313,14 +313,14 @@
   color: var(--text-3);
 }
 
-/* ── المصادر: رأس ومرشّحات نصّية ثابتة عند التمرير ── */
+/* ── المصادر: رأس ومرشّحات نصّية تمرّ مع القائمة (لا تلحق القارئ فوق السيرفرات: قرار المالك) ── */
 .v35 .ss-src {
+  /* مرساة قوائم الجودة والمصدر: تُمرَّر معه فتبقى تحت أزرارها */
+  position: relative;
   padding: 0 var(--gutter) 24px;
 }
 .v35 .ss-tools {
-  position: sticky;
-  top: var(--ss-bar-h);
-  z-index: 2;
+  position: static;
   margin-top: 20px;
   background: var(--bg);
 }
@@ -413,30 +413,79 @@
   align-items: center;
   margin-inline-start: auto;
 }
-.v35 .ss-addon-select {
-  max-width: 150px;
-  padding-block: 11px 12px;
-  padding-inline: 0 20px;
+.v35 .ss-addon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 170px;
+  padding: 11px 0 12px;
   border: 0;
   background: none;
+  font: inherit;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-2);
-  text-overflow: ellipsis;
-  appearance: none;
-  field-sizing: content;
   cursor: pointer;
 }
-.v35 .ss-addon-select option {
+.v35 .ss-addon-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* قائمة المصدر: تنزل من الزر نفسه بتصميم الورقة، لا نافذة النظام */
+.v35 .ss-addon-menu {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 14px;
   background: var(--surface-2);
+  box-shadow: 0 18px 40px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line);
+  animation: ss-menu-in 0.18s var(--ease, ease) both;
+}
+.v35 .ss-addon-menu[hidden] {
+  display: none;
+}
+@keyframes ss-menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+.v35 .ss-addon-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
   color: var(--text-1);
+  text-align: start;
+  cursor: pointer;
+}
+.v35 .ss-addon-opt:active {
+  background: var(--surface-1);
+}
+.v35 .ss-addon-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+.v35 .ss-addon-opt[aria-selected='true'] .ss-addon-dot {
+  box-shadow: inset 0 0 0 5px var(--accent);
 }
 .v35 .ss-addon-chev {
-  position: absolute;
-  inset-inline-end: 0;
+  flex: none;
   color: var(--text-3);
   transform: rotate(-90deg);
-  pointer-events: none;
+  transition: transform 0.18s ease;
+}
+.v35 .ss-addon.open .ss-addon-chev {
+  transform: rotate(90deg);
 }
 
 /* ── القائمة ── */
@@ -477,7 +526,7 @@
 .v35 .ss-row {
   position: relative;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   width: calc(100% + 16px);
@@ -822,7 +871,7 @@
   border: 0;
   border-radius: var(--r-md);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: var(--fs-body-lg);
   font-weight: 700;
 }
@@ -1081,7 +1130,7 @@
     font-size: 15px;
   }
   .v35 .ss-tab,
-  .v35 .ss-addon-select,
+  .v35 .ss-addon-btn,
   .v35 .sheet .ss-none,
   .v35 .an-pick-together {
     font-size: 15.5px;
@@ -1099,4 +1148,327 @@
   .v35 .an-pick {
     grid-template-columns: clamp(480px, 32vw, 600px) minmax(0, 1fr);
   }
+}
+
+/* سهم التفاصيل في طرف صف التورنت: يفتح المواصفات تحته، ولمسه لا يشغّل */
+.v35 .ss-chev {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-inline: -4px -6px;
+  border-radius: 50%;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+.v35 .ss-row--open .ss-chev {
+  color: var(--text-1);
+  transform: rotate(90deg);
+}
+.v35 .ss-details {
+  grid-column: 2 / -1;
+  display: none;
+  gap: 4px;
+  padding-bottom: 2px;
+  font-size: var(--fs-caption, 12px);
+  color: var(--text-3);
+  cursor: default;
+  user-select: text;
+}
+.v35 .ss-row--open .ss-details {
+  display: grid;
+}
+.v35 .ss-detail {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.v35 .ss-detail b {
+  flex: none;
+  min-width: 64px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.v35 .ss-detail bdi {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* الصورة والشعار مع تمرير الورقة على خيط الرسم (بنفس معادلات --ss-y/--ss-p أعلاه)؛ أثناء
+   الانزلاق بعد رفع الإصبع (.ss-handed) تتوقف لتعمل المتغيرات فلا يُحبس الانزلاق في WebView */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) and (max-width: 899px) {
+    .v35 .an-pick-scroll {
+      scroll-timeline: --ss-scroll block;
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-art-img {
+      animation: ss-art-depth linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-brand {
+      animation: ss-brand-depth linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+  }
+}
+@keyframes ss-art-depth {
+  from { transform: translate3d(0, 0px, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--ss-span, 300px) * 0.5), 0) scale(1.06); }
+}
+@keyframes ss-brand-depth {
+  from { transform: translate3d(0, 0px, 0) scale(1); }
+  to { transform: translate3d(0, calc(var(--ss-span, 300px) * 0.3), 0) scale(0.78); }
+}
+
+/* ═══ الهاتف: أعلى الورقة بلغة صفحة عمل الأنمي، بلا ترويسة ولا عناوين أقسام ولا حاويات ═══
+ * جوّ من لقطة الحلقة نفسها خلفها (ضبابي داكن)، والشعار فوق بطاقة اللقطة في المنتصف، وعليها
+ * دائرة «شغّل الأفضل» وسببها. مع التمرير تميل البطاقة للخلف وتغيب (نفس نظام صفحة العمل). */
+@media (max-width: 899px) {
+  .v35 .ss-bar::before,
+  .v35 .ss-bar-mark {
+    display: none;
+  }
+  .v35 .ss-bar-extras {
+    margin-inline-start: auto;
+    display: flex;
+  }
+  .v35 .ss-bar-extras .an-pick-together {
+    width: var(--tap);
+    height: var(--tap);
+    padding: 0;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.42);
+    color: #fff;
+  }
+  .v35 .ss-bar-extras .an-pick-together span {
+    display: none;
+  }
+  .v35 .ss-info {
+    display: grid;
+    justify-items: center;
+    padding-top: calc(var(--safe-top) + 64px);
+    overflow: hidden;
+  }
+  .v35 .ss-art,
+  .v35 .ss-brand {
+    aspect-ratio: auto;
+  }
+  .v35 .ss-art {
+    position: static;
+    width: 100%;
+    display: grid;
+    justify-items: center;
+    overflow: visible;
+    background: none;
+    order: 2;
+  }
+  .v35 .ss-art::after {
+    display: none;
+  }
+  .v35 .ss-amb {
+    position: absolute;
+    inset: -40px -40px auto;
+    height: 440px;
+    width: calc(100% + 80px);
+    object-fit: cover;
+    filter: blur(42px) saturate(1.35) brightness(0.55);
+    opacity: 0;
+    transition: opacity var(--dur-slow) var(--ease);
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent);
+    mask-image: linear-gradient(to bottom, #000 40%, transparent);
+  }
+  .v35 .ss-amb.loaded {
+    opacity: 0.9;
+  }
+  .v35 .ss-card {
+    position: relative;
+    z-index: 1;
+    width: calc(100% - 2 * var(--gutter));
+    max-width: 560px;
+    aspect-ratio: 16 / 9;
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--surface-1);
+    box-shadow: 0 24px 50px -18px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    transform-origin: 50% 100%;
+    transform: perspective(900px) translate3d(0, calc(var(--ss-y) * -0.1), 0) rotateX(calc(var(--ss-p) * 30deg)) scale(calc(1 - var(--ss-p) * 0.12));
+    opacity: calc(1 - var(--ss-p) * 0.9);
+  }
+  .v35 .ss-card::after {
+    display: none;
+  }
+  .v35 .ss-art-img,
+  .v35 .ss-art-img.loaded {
+    transform: none;
+  }
+  .v35 .ss-art-img.loaded {
+    opacity: 1;
+  }
+  .v35 .ss-brand {
+    position: relative;
+    inset: auto;
+    z-index: 1;
+    order: 1;
+    width: 100%;
+    padding: 0 28px 16px;
+    transform: perspective(700px) translate3d(0, calc(var(--ss-y) * -0.06), 0) rotateX(calc(var(--ss-p) * 40deg)) scale(calc(1 - var(--ss-p) * 0.14));
+    opacity: calc(1 - var(--ss-p) * 1.2);
+  }
+  .v35 .ss-logo {
+    max-width: min(66%, 260px);
+    max-height: 64px;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+  }
+  .v35 .ss-title {
+    font-size: 22px;
+  }
+  .v35 .ss-about {
+    order: 3;
+    width: 100%;
+    justify-items: start;
+    padding-top: 16px;
+  }
+  /* «شغّل الأفضل» تحت البطاقة مباشرة: دائرة التشغيل بلا توهج، وبجانبها الفعل وسببه */
+  .v35 .ss-art > .an-pick-best,
+  .v35 .ss-art > .an-pick-best.waiting,
+  .v35 .ss-art > .an-pick-best:disabled {
+    position: relative;
+    z-index: 1;
+    width: calc(100% - 2 * var(--gutter));
+    max-width: 560px;
+    justify-content: flex-start;
+    gap: 12px;
+    height: auto;
+    margin-top: 14px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--text-1);
+  }
+  .v35 .ss-art > .an-pick-best > .icon {
+    box-sizing: content-box;
+    width: 20px;
+    height: 20px;
+    padding: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+  }
+  .v35 .ss-art > .an-pick-best.waiting > .icon,
+  .v35 .ss-art > .an-pick-best:disabled > .icon {
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .v35 .ss-art > .an-pick-best:not(:disabled):active > .icon {
+    background: var(--accent-press);
+    transform: scale(0.94);
+  }
+  .v35 .ss-art > .an-pick-best .ss-best-copy small {
+    color: var(--text-3);
+    opacity: 1;
+  }
+  /* المصادر بلا عنوان ولا خطوط: المرشّحات ثم الصفوف مباشرة */
+  .v35 .ss-tools {
+    top: calc(var(--safe-top) + 56px);
+    margin-top: 12px;
+  }
+  .v35 .ss-tools-head {
+    min-height: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .v35 .ss-tools-head:has(> .an-srv-status[hidden]) {
+    display: none;
+  }
+  .v35 .an-pick-filters {
+    border-bottom: 0;
+  }
+  .v35 .an-srv-q {
+    display: none;
+  }
+  .v35 .an-srv-group + .an-srv-group {
+    margin-top: 10px;
+  }
+}
+/* رمز نوع السيرفر تحت جودته: ⚡ مباشر يبدأ فورًا، ومغناطيس للتورنت */
+.v35 .ss-q small {
+  display: inline-flex;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.v35 .ss-q small .icon {
+  width: 15px;
+  height: 15px;
+}
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) and (max-width: 899px) {
+    .v35 .an-pick:not(.ss-handed) .ss-art-img {
+      animation: none;
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-card {
+      animation: ss-card-depth linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+    .v35 .an-pick:not(.ss-handed) .ss-brand {
+      animation: ss-brand-tilt linear both;
+      animation-timeline: --ss-scroll;
+      animation-range: 0 var(--ss-span, 300px);
+    }
+  }
+}
+/* نفس معادلتي .ss-card و.ss-brand أعلاه عند p=1 (y=المدى): لا قفزة عند تسليم الانزلاق */
+@keyframes ss-card-depth {
+  from { transform: perspective(900px) translate3d(0, 0px, 0) rotateX(0deg) scale(1); opacity: 1; }
+  to { transform: perspective(900px) translate3d(0, calc(var(--ss-span, 300px) * -0.1), 0) rotateX(30deg) scale(0.88); opacity: 0.1; }
+}
+@keyframes ss-brand-tilt {
+  from { transform: perspective(700px) translate3d(0, 0px, 0) rotateX(0deg) scale(1); opacity: 1; }
+  to { transform: perspective(700px) translate3d(0, calc(var(--ss-span, 300px) * -0.06), 0) rotateX(40deg) scale(0.86); opacity: 0; }
+}
+/* «أضف مصدرًا لتشاهد»: زر واحد واضح تحت الجملة، نص أبيض مقروء */
+.v35 .sheet .ss-note .ss-add-source {
+  margin-top: 12px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text-1);
+  color: var(--bg, #000);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* سبب عدم التوفر في السطر: سطر واحد يُقصّ لا يدفع الاسم */
+.v35 .ss-end .ss-bad {
+  max-width: 11em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* الجودة والمصدر قائمتان متجاورتان (طلب المالك): زر يفتح قائمة تحته، لا صف كامل من الخيارات */
+.v35 .ss-drops {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 18px;
+}
+.v35 .ss-drop {
+  margin-inline-start: 0;
+}
+.v35 .ss-drop .ss-addon-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.v35 .ss-drop .ss-addon-btn:disabled .ss-addon-chev {
+  display: none;
+}
+.v35 .an-pick-filters .ss-tabs[hidden] {
+  display: none;
 }

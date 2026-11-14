@@ -18,6 +18,19 @@ function fixture(){
 }
 
 describe('explicit source verification without unsolicited overlay',()=>{
+  it('never routes a private runtime challenge to the legacy shared-cookie verifier',async()=>{
+    const f=fixture(),retry=vi.fn(),runtimePlugin={verify:vi.fn(async({host})=>({host,state:'verified',ok:true}))};
+    const c=createSourceVerification({...f,runtimePlugin});await c.ready;
+    c.require({host:'source.example',kind:'cloudstream',state:'required',retry});
+    expect(f.plugin.begin).not.toHaveBeenCalled();
+    expect(await c.begin('source.example')).toMatchObject({ok:true});
+    expect(runtimePlugin.verify).toHaveBeenCalledWith({host:'source.example'});expect(f.plugin.begin).not.toHaveBeenCalled();expect(retry).not.toHaveBeenCalled();c.close();
+  });
+  it('keeps a private challenge pending when its private bridge is absent',async()=>{
+    const f=fixture(),c=createSourceVerification({...f,runtimePlugin:null});await c.ready;
+    c.require({host:'source.example',kind:'cloudstream',state:'required'});
+    expect(await c.begin('source.example')).toMatchObject({ok:false});expect(f.plugin.begin).not.toHaveBeenCalled();expect(c.list()).toHaveLength(1);c.close();
+  });
   it('keeps an expired challenge pending silently until explicit verification succeeds',async()=>{
     const f=fixture(),c=createSourceVerification(f);await c.ready;
     c.require({host:'source.example',state:'required'});
@@ -122,4 +135,12 @@ it('never exposes another host verification as success to the caller',async()=>{
  const result=await c.begin('source.example');
  expect(result.ok).toBe(false);expect(result.state).toBe('failed');
  expect(c.list()).toMatchObject([{host:'source.example'}]);expect(retry).not.toHaveBeenCalled();c.close();
+});
+it('a CloudStream verification closed by the page (not the user) shows its real reason, not «cancelled»',async()=>{
+ const plugin={pending:async()=>({pending:[{host:'rift.example',kind:'cloudstream'}]})};
+ const reasons={unsafe_endpoint:'عنوان صفحة التحقق غير مدعوم بأمان.',network_error:'تعذّر تحميل صفحة التحقق من المصدر. حاول لاحقًا.',user_cancelled:'أُلغي التحقق. تقدر تحاول مرة ثانية.'};
+ for(const [reason,message] of Object.entries(reasons)){
+  const runtimePlugin={verify:async({host})=>({host,state:'cancelled',reason})};
+  expect(await verifySourceDomains({plugin,runtimePlugin,domains:['https://rift.example/']})).toEqual({ok:false,error:message});
+ }
 });

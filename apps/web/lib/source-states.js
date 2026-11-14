@@ -1,3 +1,4 @@
+import { failureCode, failureText } from './route-validity.js';
 /**
  * حالات المصدر في التشخيص، منفصلة لأن علاج كل واحدة مختلف:
  *
@@ -99,5 +100,6 @@ export function routeFailureMessage(reason) {
   if (/UPSTREAM_HTTP_403|المضيف ردّ?\s*403/i.test(text)) return 'رفض مضيف الفيديو الوصول (403)';
   if (/RESOLVER_EMPTY/.test(text)) return 'لم يوفر هذا السيرفر رابط فيديو صالحًا';
   if (/الإضافة.*HTTP\s*403/.test(text)) return 'الإضافة رفضت الطلب (403)';
-  return text || 'لم ينجح فحص رابط الفيديو';
+  // بقية الأسباب بفئاتها الصادقة (الشبكة، تعطل الموقع، الجلسة، التحقق، المضيف، الملف، الحذف)
+  return failureCode(text) ? failureText(text) : text || 'لم ينجح فحص رابط الفيديو';
 }

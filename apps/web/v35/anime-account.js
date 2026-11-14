@@ -1,3 +1,4 @@
+import { isSingleMovie } from './anime-episodes.js';
 /**
  * الأنمي في حسابك — نفس جداول المانجا بمرجع `anime:<AniList id>`، لا نظام موازٍ.
  *
@@ -80,7 +81,7 @@ export function createAnimeAccount(sync) {
     const k = `${me()}:${m.id}:${episode}`;
     if (viewed.has(k)) return;
     viewed.add(k);
-    sync.enqueue('view.add', { ...descriptor(m), chapterLabel: `الحلقة ${episode}`, chapterNumber: episode });
+    sync.enqueue('view.add', { ...descriptor(m), chapterLabel: isSingleMovie(m) ? 'الفيلم' : `الحلقة ${episode}`, chapterNumber: episode });
   }
 
   /** «أنهى الحلقة N» للأصدقاء (حسب خصوصيتك في الخادم). مرة لكل حلقة في الجلسة. */

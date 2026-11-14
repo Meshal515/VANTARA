@@ -1,0 +1,13 @@
+/* All work layouts reuse the core episode header and text tabs from anime.css.
+   Cards, banners, cover shadows and motion remain owned by each layout. */
+.v35 .aw-episode-controls { min-width: 0; }
+.v35 .aw-episode-controls h2 { margin-bottom: 0; }
+.v35 .aw-episode-controls :is(.aw-ranges,.an-seasons) { display: flex; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; overscroll-behavior-inline: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.v35 .aw-episode-controls :is(.aw-range,.an-season) { flex: 0 0 auto; white-space: nowrap; }
+.v35 .aw-episode-controls .aw-range { direction: ltr; unicode-bidi: isolate; }
+.v35 .aw-episode-controls [hidden] { display: none; }
+.v35 .wl-card .wl-full > [data-slot='episode-controls'] { padding-inline: var(--wl-g); }
+.v35 .wl .wl-episode-empty { color: var(--text-3); padding: 14px 0; }
+.v35 .wl-ranges { overflow-x: auto; flex-wrap: nowrap; max-width: 100%; scrollbar-width: none; }
+.v35 .wl-ranges button { flex: 0 0 auto; white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+@container aw (min-width: 900px) { .v35 .wl-card .wl-full > [data-slot='episode-controls'] { padding-inline: 90px; } }
