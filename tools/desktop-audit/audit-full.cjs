@@ -119,7 +119,7 @@ async function settleWork(page) {
         m.work = work; m.errors = errors.slice(0, 3);
         const slug = `${style}-${view.id}`;
         await page.screenshot({ path: `${out}/${slug}.png` });
-        if (view.full) await page.screenshot({ path: `${out}/${slug}-full.png`, fullPage: true });
+        if (view.full || process.env.FULLALL) await page.screenshot({ path: `${out}/${slug}-full.png`, fullPage: true });
         if (view.journey) {
           m.enterCls = +(await page.evaluate(() => window.__cls ?? 0)).toFixed(4);
           // تبديل الموسم: كم عنصرًا أُزيل/أضيف، وكم صورة طُلبت، ولقطات
