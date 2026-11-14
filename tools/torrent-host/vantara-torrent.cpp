@@ -226,7 +226,11 @@ struct Torrent {
     std::set<int> reading;
     std::map<int, std::string> readErrors;
     std::map<int, int> readFailures;
-    std::set<int> directFailed;   // قطع لم تطابق بصمتها عند القراءة المباشرة: read_piece لها فقط
+    // قطعة لم تطابق بصمتها (الكتابة لم تصل الملف بعد): تُعاد مباشرة كل 150ms حتى 20 مرة، وread_piece معها احتياطًا.
+    // بعد 20 محاولة: read_piece وحدها. قياس #7: 7 من 24 قطعة لم تطابق أول مرة ثم رجعت للطريق البطيء كله.
+    struct DirectRetry { int attempts = 0; clk::time_point next; };
+    std::map<int, DirectRetry> directRetry;
+    std::set<int> directFailed;   // استنفدت المحاولات: read_piece لها فقط
     std::set<int> directPending;  // قطع في طابور القراءة المسبقة المباشرة (خيط مستقل)
     int directHits = 0, directMisses = 0, directAhead = 0;
     int errorRecoveries = 0;
@@ -706,7 +710,9 @@ private:
             if (t->h.have_piece(lt::piece_index_t(piece))) {
                 // القطعة في يد خيط القراءة المسبقة: ننتظره (يوقظنا عند التخزين) بدل قراءتها مرتين
                 if (policy::DIRECT_READ && t->directPending.count(piece)) { waited = true; cv_.wait_for(lock, 50ms); continue; }
-                if (policy::DIRECT_READ && !t->directFailed.count(piece) && !t->reading.count(piece)) {
+                auto const retry = t->directRetry.find(piece);
+                bool const directDue = retry == t->directRetry.end() || clk::now() >= retry->second.next;
+                if (policy::DIRECT_READ && !t->directFailed.count(piece) && directDue) {
                     auto const started = clk::now();
                     lock.unlock();
                     auto data = directRead(t->h, piece);
@@ -717,7 +723,10 @@ private:
                         cacheLocked(*t, piece, std::move(data));
                         continue;
                     }
-                    t->directFailed.insert(piece); ++t->directMisses;
+                    ++t->directMisses;
+                    auto& r = t->directRetry[piece];
+                    if (++r.attempts >= 20) t->directFailed.insert(piece);
+                    r.next = clk::now() + 150ms;
                 }
                 if (t->reading.insert(piece).second) { t->readStart[piece] = clk::now(); t->h.read_piece(lt::piece_index_t(piece)); }
                 prefetchLocked(t, piece);
@@ -725,7 +734,7 @@ private:
                 t->waitingPiece = piece; t->waitingSince = clk::now();
             }
             waited = true;
-            cv_.wait_for(lock, 250ms);
+            cv_.wait_for(lock, policy::DIRECT_READ && t->directRetry.count(piece) && !t->directFailed.count(piece) ? 150ms : 250ms);
         }
     }
 
@@ -741,6 +750,7 @@ private:
             if (p >= ti->num_pieces()) break;
             if (t.pieceCache.count(p) || t.reading.count(p) || t.directPending.count(p)) continue;
             if (!t.h.have_piece(lt::piece_index_t(p))) break;
+            if (auto r = t.directRetry.find(p); r != t.directRetry.end() && clk::now() < r->second.next) continue;
             if (policy::DIRECT_READ && !t.directFailed.count(p)) { t.directPending.insert(p); directQueue_.emplace_back(tp, p); continue; }
             t.reading.insert(p); t.readStart[p] = clk::now(); t.h.read_piece(lt::piece_index_t(p));
         }
@@ -761,7 +771,7 @@ private:
             lock.lock();
             t->directPending.erase(p);
             if (data) { ++t->directHits; ++t->directAhead; cacheLocked(*t, p, std::move(data)); }
-            else { t->directFailed.insert(p); ++t->directMisses; }
+            else { ++t->directMisses; auto& r = t->directRetry[p]; ++r.attempts; r.next = clk::now() + 150ms; }
             cv_.notify_all();
         }
     }
@@ -797,6 +807,7 @@ private:
     }
 
     void cacheLocked(Torrent& t, int p, std::shared_ptr<std::vector<char>> data) {
+        t.directRetry.erase(p);
         t.pieceCache[p] = std::move(data);
         t.cacheOrder.push_back(p);
         while (t.cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t.pieceCache.erase(t.cacheOrder.front()); t.cacheOrder.pop_front(); }
