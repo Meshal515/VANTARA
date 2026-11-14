@@ -25,6 +25,7 @@ import { FORMAT_AR, RELATION_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAn
 import { createAnimeDiscover } from './anime-discover.js';
 import { pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
+import { isNative } from '../pwa/platform.js';
 import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
@@ -2462,7 +2463,9 @@ export function createAnime(deps) {
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;
-    sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
+    // الغرفة أولًا (قرار المالك 14 نوفمبر): في الجوال، داخل غرفة، لا تشغيل تلقائي ولا ورقة سيرفرات قبل الغرفة.
+    // حين تبدأ جلسة التجهيز يُفتح المشغّل الأصلي على الغرفة بلا سيرفر (pick)، والكل يختار سيرفره منها.
+    sheet.roomFirst = Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop && isNative();
     let paintQueued = false;
     let paintFrame = null;
     let off = [];
@@ -2640,11 +2643,6 @@ export function createAnime(deps) {
           status: statusLine(),
           retry: exhausted() ? { wait: retryWait } : null,
         });
-        // «دخول» من بطاقة الغرفة: أول سيرفر جاهز يشتغل وحده، وجاري التجهيز يظهر في المشغّل
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.routes.some(isValid)) {
-          sheet.autoTogether = false;
-          queueMicrotask(() => { if (!sheet.closed) ui.best.onclick(); });
-        }
       };
       const queuePaint = () => {
         if (sheet.closed || paintQueued) return;
@@ -2778,6 +2776,7 @@ export function createAnime(deps) {
           sheet.done = Boolean(out.done);
           sheet.retryAt = Math.max(sheet.retryAt, Number(out.retryAt) || 0);
           for (const { type, event } of buffered) applyEvent(type, event);
+          if (sheet.roomFirst && !sheet.launched) { sheet.roomFirst = false; queueMicrotask(() => { if (!sheet.closed) void launch(null, null); }); }
           paint();
           if (sameWork(m) && state.work) onWork(m.id, state.work);
           const snap = await wait(engine.routes(out.session, { signal: preparation.signal }), preparation.signal);
@@ -2859,7 +2858,8 @@ export function createAnime(deps) {
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
         ...(globalThis.VantaraDesktop && hub ? { roomHub:hub } : {}),
-        ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
+        // pick: دخل الغرفة بلا سيرفر، فالمشغّل يعرض «اختر سيرفر» بدل أن يختار الأفضل وحده
+        ...(hub?.matches(togetherRef) ? { together: { ...hub.handOff(togetherRef), pick: candidate == null } } : {}),
       });
     }
   }

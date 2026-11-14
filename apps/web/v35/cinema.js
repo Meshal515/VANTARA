@@ -16,6 +16,7 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { isNative } from '../pwa/platform.js';
 import { addonName, createServerSheet } from './server-sheet.js';
 import { isChecking, isUnavailable, isValid, validity } from '../lib/route-validity.js';
 import { isTorrentRoute } from '../lib/route-family.js';
@@ -2222,7 +2223,8 @@ export function createCinema(deps) {
     const hub = deps.together?.() ?? null;
     const togetherRef = `cinema:${playKey(m, season)}`;
     const togetherEp = m.type === 'movie' ? 1 : n;
-    sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
+    // الغرفة أولًا في الجوال: المشغّل الأصلي يُفتح على الغرفة بلا سيرفر حين تجهز جلسة التجهيز
+    sheet.roomFirst = Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop && isNative();
     let off = [];
     let queued = false;
     let paintFrame = null;
@@ -2340,9 +2342,9 @@ export function createCinema(deps) {
         queued = false;
         if (sheet.closed) return;
         const ready = sheet.routes.filter(routeSelectable).length;
-        if (sheet.autoTogether && !sheet.launched && !sheet.busy && sheet.session && ready) {
-          sheet.autoTogether = false;
-          queueMicrotask(() => { if (!sheet.closed) best.onclick(); });
+        if (sheet.roomFirst && !sheet.launched && !sheet.busy && sheet.session) {
+          sheet.roomFirst = false;
+          queueMicrotask(() => { if (!sheet.closed) void launch(null, null); });
         }
         // كل سيرفر معروف انتهى (فشل) والبحث في المصادر انتهى: لا انتظار بلا نهاية
         // ولو لم تُعلن جلسة التجهيز انتهاءها (كانت الورقة تبقى على «نجهّز أول سيرفر»)
@@ -2463,7 +2465,7 @@ export function createCinema(deps) {
         presenceDeviceId: presence?.deviceId ?? null,
         presenceDeviceCredential: presence?.deviceCredential ?? null,
         ...(globalThis.VantaraDesktop && hub ? { roomHub:hub } : {}),
-        ...(hub?.matches(togetherRef) ? { together: hub.handOff(togetherRef) } : {}),
+        ...(hub?.matches(togetherRef) ? { together: { ...hub.handOff(togetherRef), pick: candidate == null } } : {}),
       });
     }
   }

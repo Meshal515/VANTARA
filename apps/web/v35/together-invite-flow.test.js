@@ -15,9 +15,16 @@ describe('الدعوة من ورقة السيرفرات تدخل الغرفة', 
   });
   // قرار المالك (14 نوفمبر): بعد إنشاء الغرفة تبقى ورقة السيرفرات العادية (سيدرز وسرب) والمضيف يختار؛
   // التشغيل التلقائي لأول سيرفر جاهز للمدعو الداخل من البطاقة أو الإشعار فقط.
-  it('المضيف يختار السيرفر بنفسه، والمدعو يدخل تلقائيًا', () => {
-    expect(source('anime.js')).toContain('sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, n))');
-    expect(source('cinema.js')).toContain('sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, togetherEp))');
+  // تحديث القرار نفسه (14 نوفمبر، لاحقًا): الغرفة أولًا للجميع — لا تشغيل تلقائي لأحد. في الجوال يُفتح المشغّل الأصلي
+  // على الغرفة بلا سيرفر (pick) فور بدء جلسة التجهيز، والمضيف والمدعو يختاران سيرفرهما منها.
+  it('الغرفة أولًا للجميع: بلا تشغيل تلقائي، والمشغّل الأصلي يُفتح بلا سيرفر ليختار من الغرفة', () => {
+    for (const name of ['anime.js', 'cinema.js']) {
+      const src = source(name);
+      expect(src).not.toContain('autoTogether');
+      expect(src).toContain('sheet.roomFirst = Boolean(hub?.matches(');
+      expect(src).toContain('void launch(null, null)');
+      expect(src).toContain('pick: candidate == null');
+    }
   });
   it('ورقة جديدة تغلق السابقة (سبب إعادة الفتح)', () => {
     // Lifecycle lives in sheet-lifecycle.js: new sheet calls close() first.

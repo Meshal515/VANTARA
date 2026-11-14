@@ -31,12 +31,56 @@ env:
   VERSION: 0.4.${{ github.run_number }}
   TAG: windows-debug-${{ github.run_number }}
 jobs:
+  # قرار المالك (14 نوفمبر): كل اختبار له غرض بما تغيّر فعلًا، كما في بناء الجوال. الأساس = commit آخر نسخة
+  # Debug منشورة (sourceSha في desktop-debug.json). بلا أساس، أو عند تعديل هذا السير، أو التشغيل اليدوي = كل شيء.
+  changes:
+    name: What changed since the published Debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.diff.outputs.base }}
+      engine: ${{ steps.diff.outputs.engine }}
+      desktop: ${{ steps.diff.outputs.desktop }}
+      web: ${{ steps.diff.outputs.web }}
+      updater: ${{ steps.diff.outputs.updater }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          base=''
+          if gh release download windows-debug-channel --repo "$GITHUB_REPOSITORY" --pattern desktop-debug.json --dir "$RUNNER_TEMP/m" 2>/dev/null; then
+            base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("sourceSha",""))' "$RUNNER_TEMP/m/desktop-debug.json")
+          fi
+          all=false
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then all=true; base=''; fi
+          files=$( [ -n "$base" ] && git diff --name-only "$base" HEAD || true )
+          if grep -qx '.github/workflows/windows-debug.yml' <<<"$files"; then all=true; fi
+          pick() { if [ "$all" = true ] || grep -qE "$1" <<<"$files"; then echo true; else echo false; fi; }
+          {
+            echo "base=$base"
+            # المحرك: يعيد بناء libtorrent واختباره وتشغيل التورنت 1080p/2K/4K ومقارنة السرب
+            echo "engine=$(pick '^tools/torrent-host/(vantara-torrent\.cpp|CMakeLists\.txt|host\.test\.mjs)$|^apps/desktop/src/(torrent|services|libtorrent)')"
+            echo "desktop=$(pick '^apps/desktop/')"
+            echo "web=$(pick '^apps/web/')"
+            # التحديث داخل التطبيق N -> N+1: فقط حين يتغير ما يمسّه
+            echo "updater=$(pick '^apps/desktop/(updater|update-smoke|channel|main)\.cjs$|^apps/desktop/windows\.nsi$|^apps/web/desktop/update-check\.js$|^tools/(build-windows\.mjs|verify-windows-update\.ps1)$')"
+          } >> "$GITHUB_OUTPUT"
+          echo "الأساس: ${base:-لا يوجد (كل الاختبارات)}"; cat "$GITHUB_OUTPUT"
+
   checks:
-    name: Tests and libtorrent engine on Linux
+    name: Tests for what changed (Linux)
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
@@ -47,26 +91,35 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build libtorrent engine (system libtorrent-rasterbar 2.0)
+        if: needs.changes.outputs.engine == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y libtorrent-rasterbar-dev libboost-dev ninja-build
           cmake -S tools/torrent-host -B "$RUNNER_TEMP/torrent-host" -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/torrent-host"
           "$RUNNER_TEMP/torrent-host/vantara-torrent" --version
-      - name: Engine integration (real seeder + engine) and desktop services with fallback
+      - name: Engine integration (real seeder + engine)
+        if: needs.changes.outputs.engine == 'true'
         env:
           VANTARA_TORRENT_HOST_BINARY: ${{ runner.temp }}/torrent-host/vantara-torrent
-        run: |
-          node --test --test-concurrency=1 --test-timeout=120000 tools/torrent-host/host.test.mjs
-          node --test --test-concurrency=1 --test-timeout=90000 apps/desktop/*.test.cjs apps/desktop/src/*.test.mjs tools/windows-icon-resources.test.mjs
-      - name: Renderer, update channel and desktop regression tests
+        run: node --test --test-concurrency=1 --test-timeout=120000 tools/torrent-host/host.test.mjs
+      - name: Desktop main-process tests
+        if: needs.changes.outputs.desktop == 'true'
+        run: node --test --test-concurrency=1 --test-timeout=90000 apps/desktop/*.test.cjs apps/desktop/src/*.test.mjs tools/windows-icon-resources.test.mjs
+      - name: Renderer tests related to the changed files
+        if: needs.changes.outputs.web == 'true'
+        env:
+          BASE: ${{ needs.changes.outputs.base }}
         run: |
           pnpm --filter @vantara/domain build
-          pnpm exec vitest run apps/web/desktop apps/web/lib apps/web/v35 apps/web/pwa/player
+          # vitest --changed: الاختبارات المرتبطة بالملفات المتغيرة منذ آخر نسخة منشورة فقط؛ بلا أساس = الكل
+          if [ -n "$BASE" ]; then pnpm exec vitest run --changed "$BASE" apps/web/desktop apps/web/lib apps/web/v35 apps/web/pwa/player
+          else pnpm exec vitest run apps/web/desktop apps/web/lib apps/web/v35 apps/web/pwa/player; fi
       - name: Repository safety
         run: pnpm test:safety
 
   native:
     name: Native Windows binaries (video host, branded exe, libtorrent engine)
+    needs: changes
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -76,13 +129,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      # الملفات الأصلية الأربعة تُبنى مرة لكل نسخة من مصادرها؛ بلا تغيير تُستعاد كما هي (لا vcpkg ولا اختبار محرك)
+      - name: Restore native binaries built from the same sources
+        id: built
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/desktop/native/vantara-video-host.exe
+            apps/desktop/native/VANTARA.exe
+            apps/desktop/native/vantara-torrent.exe
+            apps/desktop/native/vantara-torrent.version.txt
+          key: windows-native-electron-44.7.2-${{ hashFiles('tools/torrent-host/vantara-torrent.cpp', 'tools/torrent-host/CMakeLists.txt', 'apps/desktop/native-host/**', 'tools/build-video-host.ps1', 'tools/brand-windows-executable.ps1', 'tools/windows-icon-resources.mjs', 'apps/desktop/assets/vantara-debug.ico') }}
       - name: Restore vcpkg binary cache
+        if: steps.built.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: .vcpkg-cache
           key: vcpkg-libtorrent-x64-windows-static-${{ hashFiles('tools/torrent-host/CMakeLists.txt') }}-v1
           restore-keys: vcpkg-libtorrent-x64-windows-static-
       - name: Build libtorrent (vcpkg, static) and vantara-torrent.exe
+        if: steps.built.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
@@ -106,10 +172,12 @@ jobs:
           Get-Content apps/desktop/native/vantara-torrent.version.txt
           Get-FileHash -Algorithm SHA256 apps/desktop/native/vantara-torrent.exe
       - name: libtorrent engine integration on real Windows
+        if: steps.built.outputs.cache-hit != 'true'
         env:
           VANTARA_TORRENT_HOST_BINARY: ${{ github.workspace }}\apps\desktop\native\vantara-torrent.exe
         run: node --test --test-concurrency=1 --test-timeout=120000 tools/torrent-host/host.test.mjs
       - name: Compile video host and Windows-only tests
+        if: steps.built.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           ./tools/build-video-host.ps1
@@ -117,6 +185,7 @@ jobs:
           node --test apps/desktop/video-host.test.cjs apps/desktop/src/torrent-window.win.test.mjs apps/desktop/src/torrent-window.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed' }
       - name: Brand pinned Electron with the white VANTARA Debug identity
+        if: steps.built.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $zip=Join-Path $env:RUNNER_TEMP 'electron.zip'
@@ -139,6 +208,8 @@ jobs:
 
   fixtures:
     name: Owned 1080p / 2K / 4K test videos
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -199,8 +270,9 @@ jobs:
           if-no-files-found: error
 
   verify:
-    name: Install, boot, embedded MPV, and libtorrent playback on Windows
-    needs: [package, fixtures]
+    name: Install, boot, embedded MPV (and torrent playback when the engine changed)
+    needs: [changes, package, fixtures]
+    if: always() && needs.package.result == 'success' && (needs.fixtures.result == 'success' || needs.fixtures.result == 'skipped')
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -213,17 +285,22 @@ jobs:
           name: windows-debug-candidate
           path: ${{ runner.temp }}/candidate
       - uses: actions/download-artifact@v4
+        if: needs.changes.outputs.engine == 'true'
         with:
           name: windows-debug-fixtures
           path: ${{ runner.temp }}/fixtures
-      - name: Install, upgrade-in-place, boot, embedded MPV, torrent 1080p/2K/4K, uninstall
+      - name: Install, upgrade-in-place, boot, embedded MPV (+ torrent 1080p/2K/4K when the engine changed), uninstall
         shell: pwsh
+        env:
+          ENGINE: ${{ needs.changes.outputs.engine }}
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'candidate'
-          ./tools/verify-windows-runtime.ps1 -CandidateDir $dir -Version $env:VERSION -Product 'VANTARA Debug' -TorrentFixtures (Join-Path $env:RUNNER_TEMP 'fixtures')
+          $fixtures = if ($env:ENGINE -eq 'true') { Join-Path $env:RUNNER_TEMP 'fixtures' } else { '' }
+          ./tools/verify-windows-runtime.ps1 -CandidateDir $dir -Version $env:VERSION -Product 'VANTARA Debug' -TorrentFixtures $fixtures
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) { throw 'Windows verification failed' }
-          Get-Content (Join-Path $dir 'torrent-summary.json')
+          if (Test-Path (Join-Path $dir 'torrent-summary.json')) { Get-Content (Join-Path $dir 'torrent-summary.json') }
       - name: Real-swarm A/B (libtorrent vs rqbit) on legal CC-BY films — indicative
+        if: needs.changes.outputs.engine == 'true'
         continue-on-error: true
         # الخطوة لا تقتل الوظيفة (45 دقيقة) ولا تمنع النشر؛ المقارنة الكاملة على أسراب قوية في windows-torrent-ab.yml
         timeout-minutes: 20
@@ -242,8 +319,8 @@ jobs:
 
   publish:
     name: Publish to the Windows Debug channel (never Stable, never main)
-    needs: verify
-    if: github.event_name == 'push' || inputs.publish
+    needs: [changes, verify]
+    if: always() && needs.verify.result == 'success' && (github.event_name == 'push' || inputs.publish)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
@@ -300,8 +377,8 @@ jobs:
 
   update:
     name: In-app update N -> N+1 on Windows (check, download, verify, install over, relaunch, keep data) and Debug beside Stable
-    needs: publish
-    if: needs.publish.outputs.previous != ''
+    needs: [changes, publish]
+    if: needs.publish.outputs.previous != '' && needs.changes.outputs.updater == 'true'
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
