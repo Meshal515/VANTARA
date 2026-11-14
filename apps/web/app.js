@@ -52,6 +52,7 @@ import {
   NOTIFICATION_LABELS,
   popupPatch,
   popupSettings,
+  togetherInvite,
   toastable,
   unreadCount,
 } from './lib/notifications.js';
@@ -2202,14 +2203,22 @@ function toastNewNotifications() {
     else if (row.kind === 'REACTION' && majlisKind) {
       title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
       body = '';
-    } else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    } else if (row.kind === 'TOGETHER') title = togetherInvite(row, actor).title;
+    else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    // دعوة «مشاهدة معًا»: الضغط يدخل الغرفة لا صفحة العمل (بلاغ المالك)
+    const togetherCode = togetherInvite(row, actor)?.code ?? null;
     showToast({
       title,
       body,
       avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        if (frameId) void go({ name: 'frame', id: frameId });
+        if (togetherCode) {
+          // الضغط يدخلك الغرفة نفسها (كبطاقة الدعوة في الإشعارات والمجلس)، لا صفحة العمل
+          screenV35(null);
+          const invite = sync.rows('together_invites', (x) => x.code === togetherCode)[0] ?? null;
+          void v35?.together?.joinByCode?.(togetherCode, invite);
+        } else if (frameId) void go({ name: 'frame', id: frameId });
         else if (majlisKind) void go({ name: 'majlis' });
         else if (row.series_ref) {
           screenV35(null);
