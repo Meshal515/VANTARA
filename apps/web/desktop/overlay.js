@@ -35,6 +35,7 @@ export const ICON = {
   audio: svg('<path d="M3 10v4M6 7.5v9M9 5v14M12 7.5v9M15 9.5v5M18 6v12M21 10v4"/>'),
   subtitles: svg('<rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M6.5 13.5h4M13 13.5h4.5M6.5 16h7"/>'),
   network: svg('<path d="M4 18h2.5v-4H4ZM9 18h2.5V10H9ZM14 18h2.5V7H14ZM19 18h2.5V4H19Z" fill="currentColor"/>'),
+  send: svg('<path d="M4 12 20 4l-5 16-3.5-6.5Z"/><path d="m11.5 13.5 3-3"/>'),
   users: svg('<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0"/><path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M18.5 19.5a6.5 6.5 0 0 0-3-5.5"/>'),
 };
 
@@ -134,8 +135,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const sheetScrim = el('div', 'pp-scrim'); sheetScrim.hidden = true;
   const sheet = el('div', 'pp-sheet'); sheet.dir = 'rtl'; sheet.hidden = true;
   sheetScrim.onclick = () => closeSheet();
-  // Like Android's pp-together strip: the participants stay visible even when
-  // playback controls fade after three seconds.
+  // صور الأصحاب فوق mpv في طبقة ويندوز؛ تظهر وتختفي مع الأدوات (قرار المالك، overlay.css).
   root.append(stage, retry,gestures, spinner, status, controls, peopleButton, skipBtn, sheetScrim, sheet);
   doc.body.append(root);
 
@@ -203,7 +203,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   doc.addEventListener('keydown', () => { keyboardNav = true; }, true);
   doc.addEventListener('pointerdown', () => { keyboardNav = false; }, true);
   // لوحات «المزيد» الفرعية (التخطي والشبكة) تنبثق من زرّه نفسه كما تُفتح من ورقته في الـAPK
-  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${['skips', 'network'].includes(kind) ? 'more' : kind}"]`);
+  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${['skips', 'network', 'recommend'].includes(kind) ? 'more' : kind}"]`);
   function positionSheet() {
     if (sheet.hidden || !anchorButton) return;
     const bounds = root.getBoundingClientRect?.() ?? {left:0,top:0}, anchor = anchorButton.getBoundingClientRect?.() ?? {top:690,right:1000};
@@ -215,7 +215,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     sheet.style.right = `${Math.max(12, Math.min(width - measured - 12, width - (anchor.right - bounds.left)))}px`;
     sheet.style.bottom = `${Math.min(height - 100, bottom)}px`;
     sheet.style.maxHeight = `${Math.max(80, height - bottom - 12)}px`;
-    if (['more', 'skips', 'network'].includes(openKind)) {
+    if (['more', 'skips', 'network', 'recommend'].includes(openKind)) {
       const top = Math.max(12, (anchor.bottom ?? anchor.top) - bounds.top + 10);
       sheet.style.top = `${top}px`; sheet.style.bottom = 'auto';
       sheet.style.maxHeight = `${Math.max(80, height - top - 12)}px`;
@@ -441,6 +441,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     openSheet('more', 'المزيد', null, (body) => {
       if (state.skipStatus) body.append(sheetRow('تخطي المقدمة والنهاية', state.skipStatus, { lead: 'next', onClick: () => showSkips() }));
       body.append(sheetRow('الشبكة', netSummary(), { lead: 'servers', onClick: () => showNetwork() }));
+      // PlayerActivity.showMore: «رشّح الحلقة لصديق» ← «الجميع» ثم الأصدقاء، وتصله في المجلس
+      if (state.canRecommend) body.append(sheetRow(state.movie ? 'رشّح الفيلم لصديق' : 'رشّح الحلقة لصديق', 'تصله في المجلس ويفتحها من عندك', { lead: 'send', onClick: () => showRecommend() }));
+      // PlayerActivity.showMore: «الحلقة التالية تلقائيًا» إيقاف/5/10/15 ث (الافتراضي 10)
+      if (!state.movie && Number(state.total) > 1) {
+        body.append(sectionLabel('الحلقة التالية تلقائيًا'));
+        const cur = autoNextSeconds();
+        body.append(chips([['إيقاف', cur === 0, 0], ['5 ث', cur === 5, 5], ['10 ث', cur === 10, 10], ['15 ث', cur === 15, 15]], (v) => { setAutoNext(v); showMore(); }));
+      }
       if (state.together) {
         body.append(sectionLabel('مع أصدقائك'));
         const paintOffset = () => `${(state.videoOffsetMs ?? 0) > 0 ? '+' : (state.videoOffsetMs ?? 0) < 0 ? '−' : ''}${Math.abs((state.videoOffsetMs ?? 0) / 1000).toFixed(1)} ث`;
@@ -450,6 +458,24 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       }
     });
   }
+  // PlayerActivity.pickFriend: «الجميع» (المجلس) أولًا ثم الأصدقاء؛ الاختيار يرسل فورًا ويؤكد برسالة قصيرة
+  function showRecommend() {
+    openSheet('recommend', state.movie ? 'رشّح الفيلم' : `رشّح الحلقة ${state.episode ?? ''}`, 'تصله في المجلس ويفتحها من عندك', (body) => {
+      const send = (id, name) => { closeSheet(); cmd('recommend', id); toast(id ? `انرسلت لـ ${name}` : 'انرسلت للمجلس'); };
+      body.append(sheetRow('الجميع', 'كل أصدقائك في المجلس', { lead: 'users', onClick: () => send(null, 'الجميع') }));
+      for (const f of state.friends ?? []) {
+        const row = sheetRow(f.displayName, null, { onClick: () => send(f.userId, f.displayName) });
+        const face = el('span', 'pp-row-item__face', Array.from(f.displayName || '؟')[0]);
+        row.prepend(face);
+        body.append(row);
+      }
+      if (!(state.friends ?? []).length) body.append(el('p', 'pp-note', 'ما عندك أصدقاء بعد؛ «الجميع» يوصلها للمجلس.'));
+    });
+  }
+  // رسالة قصيرة فوق الأدوات (Toast كالـAPK message())
+  const toastEl = el('div', 'pp-toast'); toastEl.setAttribute('role', 'status'); toastEl.hidden = true; root.append(toastEl);
+  let toastTimer = 0;
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; timers.clearTimeout(toastTimer); toastTimer = timers.setTimeout(() => { toastEl.hidden = true; }, 2600); }
   // PlayerActivity.showSkips
   function showSkips() {
     openSheet('skips', 'تخطي المقدمة والنهاية', null, (body) => {
@@ -513,6 +539,36 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   function showNetwork() {
     networkBody = openSheet('network', 'الشبكة', 'قياس حي من طلبات هذا الفيديو نفسها', (body) => paintNetwork(body), 'pp-sheet--network');
   }
+  // ── الحلقة التالية تلقائيًا (PlayerActivity.onEnded): بطاقة أسفل اليسار بعدّ تنازلي، «شغّل الآن» و«إلغاء» ──
+  const AUTO_NEXT_KEY = 'vantara.player.autoNext';
+  let autoMemory = null;
+  const autoNextSeconds = () => { try { const v = globalThis.localStorage?.getItem(AUTO_NEXT_KEY); if (v != null && [0, 5, 10, 15].includes(Number(v))) return Number(v); } catch {} return autoMemory ?? 10; };
+  const setAutoNext = (v) => { autoMemory = v; try { globalThis.localStorage?.setItem(AUTO_NEXT_KEY, String(v)); } catch {} };
+  const nextCard = el('div', 'pp-next'); nextCard.dir = 'rtl'; nextCard.hidden = true; nextCard.setAttribute('role', 'status');
+  const nextKicker = el('small', null, 'الحلقة التالية'), nextTitle = el('strong'), nextCount = el('span');
+  const nextRow = el('div', 'pp-next__row');
+  const nextNow = el('button', 'pp-next__btn pp-next__btn--primary', 'شغّل الآن'), nextCancel = el('button', 'pp-next__btn', 'إلغاء');
+  nextNow.type = nextCancel.type = 'button';
+  nextRow.append(nextNow, nextCancel);
+  nextCard.append(nextKicker, nextTitle, nextCount, nextRow);
+  root.append(nextCard);
+  let nextTimer = 0;
+  const stopNext = () => { timers.clearInterval?.(nextTimer); nextTimer = 0; nextCard.hidden = true; };
+  const playNext = (n) => { stopNext(); cmd('episode', n); };
+  nextNow.onclick = (e) => { e.stopPropagation(); playNext(Number(state.episode) + 1); };
+  nextCancel.onclick = (e) => { e.stopPropagation(); stopNext(); };
+  function startNext() {
+    showControls(true);
+    const seconds = autoNextSeconds(), n = Number(state.episode) + 1;
+    // الغرفة يتحكم بها المضيف، والفيلم والحلقة الأخيرة بلا تالية
+    if (seconds <= 0 || state.together || state.movie || !(Number(state.total) >= n) || state.canChangeEpisode === false) return;
+    let left = seconds;
+    nextTitle.textContent = `الحلقة ${n}`;
+    const tick = () => { if (left <= 0) return playNext(n); nextCount.textContent = `تبدأ خلال ${left} ث`; left--; };
+    nextCard.hidden = false; tick();
+    timers.clearInterval?.(nextTimer); nextTimer = timers.setInterval?.(tick, 1000) ?? 0;
+  }
+
   // شريحة القياس فوق الفيديو (netChip في الـAPK): تبقى ظاهرة أثناء المشاهدة متى فُعّلت
   const netChip = el('div', 'pp-netchip'); netChip.dir = 'rtl'; netChip.hidden = true; netChip.setAttribute('aria-hidden', 'true');
   root.append(netChip);
@@ -662,6 +718,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
     paintChip();
+    if (state.ended && !previous.ended) startNext();
+    else if (!state.ended && previous.ended) stopNext();
     if (openKind === 'network' && networkBody && JSON.stringify([previous.net, previous.serverCode]) !== JSON.stringify([state.net, state.serverCode])) paintNetwork(networkBody);
     if (openKind === 'skips' && (previous.skipStatus !== state.skipStatus || previous.skipPending !== state.skipPending)) showSkips();
     if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
@@ -670,7 +728,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);
-  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore, skips: showSkips, network: showNetwork } };
+  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore, skips: showSkips, network: showNetwork, recommend: () => showRecommend() } };
 }
 
 // تشغيل حقيقي داخل نافذة الطبقة (overlay-preload.cjs يعرّف VantaraOverlay)

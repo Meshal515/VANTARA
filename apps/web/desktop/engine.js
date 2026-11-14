@@ -18,6 +18,7 @@ function playbackScore(candidate, session) {
 /** AnimeEngine desktop: البيانات تأتي من adapter، واختيار التشغيل صريح. */
 export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRuntime } = {}) {
   const sessions = new Map(), listeners = new Map(), searches = new Map();
+  const outbox = [];
   const emit = (name, event) => { for (const fn of listeners.get(name) ?? []) { try { fn(event); } catch { /* المستمع لا يوقف تنظيف الجلسة */ } } };
   const snapshot = s => ({ copies: [...s.copies.values()], routes: [...s.routes.values()].map(r => ({ ...r, candidates: [...r.candidates] })), done: s.done, retryAt: 0 });
   const current = s => !s.closed && sessions.get(s.id) === s;
@@ -283,7 +284,9 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const s=sessionOf(session);
       return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,backdrop:s.playArgs?.backdrop??null,logo:s.playArgs?.logo??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
         total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
-        sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0};
+        sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0,
+        // «رشّح الحلقة لصديق» (PlayerActivity.pickFriend): الأصدقاء كما مرّرتهم صفحة الأنمي، والسينما بلا ترشيح هنا
+        canRecommend:s.playArgs?.section!=='cinema'&&!!s.playArgs?.animeId&&!!(s.playArgs?.presenceUserId??s.playArgs?.usageUserId),friends:(Array.isArray(s.playArgs?.friends)?s.playArgs.friends:[]).filter(f=>f?.userId).slice(0,200).map(f=>({userId:String(f.userId),displayName:String(f.displayName??'صديق')}))};
     },
     async playerCommand({session,command,value}) {
       const s=sessionOf(session);
@@ -414,7 +417,18 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       }
     },
     async closeSession({ session }) { const s = sessions.get(session); if (s) await finish(s, { stop: true }); },
-    async outbox() { return { items: [] }; },
+    // صندوق صادر كالـAPK (Outbox): الترشيح من المشغّل يُحفظ هنا ويُطلق «outbox»، وanime.js يسحبه إلى طابور
+    // المزامنة (recommendation.send) الذي يعيد المحاولة وحده. لا شبكة من المشغّل نفسه.
+    queueRecommendation({session,toId=null}) {
+      const s=sessionOf(session),a=s.playArgs??{};
+      const owner=a.presenceUserId??a.usageUserId;
+      if(a.section==='cinema'||!a.animeId||!owner)throw new Error('الترشيح من المشغّل متاح للأنمي مع حسابك');
+      const episode=Number(s.context?.episode??s.episode??a.episode)||1;
+      outbox.push({id:`win-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,type:'episode',animeId:String(a.animeId),title:a.title??'أنمي',poster:a.poster??null,episode,toId:typeof toId==='string'&&toId?toId:null,userId:String(owner)});
+      emit('outbox',{});
+      return true;
+    },
+    async outbox({userId}={}) { const mine=outbox.filter(i=>!userId||i.userId===userId); for(const i of mine)outbox.splice(outbox.indexOf(i),1); return { items: mine }; },
     async unblock() {}, async crawl() {}, async stopCrawl() {},
     async verify() { return { ok: false, error: 'التحقق اليدوي لمصادر Android غير متاح على ويندوز' }; },
     async diagnose() { return { steps: [{ label: 'المصدر', state: 'warn', detail: 'افحص الإضافة من مدير الإضافات' }] }; },

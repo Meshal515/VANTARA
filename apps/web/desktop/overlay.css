@@ -368,3 +368,20 @@ html.desktop-overlay .pp-url input { flex: 1; min-width: 0; height: 38px; box-si
 html.desktop-overlay .pp-url input:focus { outline: none; border-color: var(--accent-line); }
 html.desktop-overlay .pp-url__go { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; }
 html.desktop-overlay .pp-url__go:hover { filter: brightness(1.1); }
+/* قرار المالك (14 نوفمبر): صور الأصحاب وحالاتهم تظهر مع الأدوات وتختفي معها؛ أثناء المشاهدة فراغ كامل */
+html.desktop-overlay .pp-people { transition: opacity .22s ease; }
+html.desktop-overlay .pwa-player:not(.pp--shown) .pp-people { opacity: 0; pointer-events: none; }
+/* بطاقة «الحلقة التالية» (onEnded في الـAPK: 240dp، سطح E6 بحدّ، أسفل البداية فوق الأدوات) */
+html.desktop-overlay .pp-next { position: absolute; z-index: 14; left: 28px; bottom: 150px; width: 260px; box-sizing: border-box; display: grid; gap: 4px; padding: 14px 16px; border-radius: 18px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 90%, transparent); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+html.desktop-overlay .pp-next[hidden] { display: none; }
+html.desktop-overlay .pp-next small { font-size: 12px; font-weight: 700; color: var(--text-3); }
+html.desktop-overlay .pp-next strong { font-size: 17px; font-weight: 800; color: var(--text); }
+html.desktop-overlay .pp-next span { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pp-next__row { display: flex; gap: 8px; margin-top: 10px; }
+html.desktop-overlay .pp-next__btn { flex: 1; min-height: 40px; border-radius: 20px; background: var(--surface-3); color: #fff; font-weight: 700; font-size: 13.5px; }
+html.desktop-overlay .pp-next__btn--primary { background: var(--accent); }
+html.desktop-overlay .pp-next__btn:hover { filter: brightness(1.12); }
+/* اختيار صديق: حرف أول في دائرة كـavatar() في الـAPK (36dp بلون SURFACE_3) */
+html.desktop-overlay .pwa-player .pp-row-item__face { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); color: var(--text); font-weight: 800; font-size: 13px; }
+html.desktop-overlay .pp-toast { position: absolute; z-index: 16; left: 50%; bottom: 140px; transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); color: var(--text); font-size: 13px; font-weight: 700; pointer-events: none; }
+html.desktop-overlay .pp-toast[hidden] { display: none; }

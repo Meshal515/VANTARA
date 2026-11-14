@@ -215,3 +215,50 @@ it('التوقف أثناء المشاهدة: بعد 450ms فقط، والشعا
   view.update({ready:false,buffering:false,status:{text:'تعذّر',error:true}});
   expect(stage.hidden).toBe(true);expect(view.root.querySelector('.pp-retry').hidden).toBe(false);
 });
+
+it('auto-next like the APK: countdown card at the end, plays the next episode, cancel and settings work',()=>{
+ const {view,send}=fixture();
+ view.update({ready:true,paused:false,episode:3,total:12,ended:false});
+ view.update({ended:true});
+ const card=view.root.querySelector('.pp-next');
+ expect(card.hidden).toBe(false);
+ expect(card.textContent).toContain('الحلقة 4');
+ expect(card.textContent).toContain('تبدأ خلال 10 ث');
+ vi.advanceTimersByTime(10000);
+ expect(send).toHaveBeenCalledWith({name:'episode',value:4});
+ expect(card.hidden).toBe(true);
+ // إلغاء
+ send.mockClear();view.update({ended:false,episode:4});view.update({ended:true});
+ [...card.querySelectorAll('button')].find(b=>b.textContent==='إلغاء').click();
+ vi.advanceTimersByTime(20000);
+ expect(send).not.toHaveBeenCalledWith({name:'episode',value:5});
+ // الإعداد من «المزيد»: إيقاف ⇒ لا بطاقة
+ view.open.more();
+ [...view.root.querySelectorAll('.pp-sheet button')].find(b=>b.textContent==='إيقاف').click();
+ view.closeSheet();view.update({ended:false});view.update({ended:true});
+ expect(card.hidden).toBe(true);
+ try{localStorage.removeItem('vantara.player.autoNext');}catch{}
+});
+
+it('auto-next never fires in a watch-together room, for a movie, or on the last episode',()=>{
+ for(const s of [{together:true,episode:1,total:3},{movie:true,episode:1,total:1},{episode:3,total:3}]){
+  const {view,send}=fixture();view.update({ready:true,...s,ended:false});view.update({ended:true});
+  expect(view.root.querySelector('.pp-next').hidden).toBe(true);vi.advanceTimersByTime(20000);
+  expect(send).not.toHaveBeenCalledWith(expect.objectContaining({name:'episode'}));
+ }
+});
+
+it('recommend popover: «الجميع» then friends, sends and confirms (PlayerActivity.pickFriend)',()=>{
+ const {view,send}=fixture();
+ view.update({ready:true,episode:5,total:12,canRecommend:true,friends:[{userId:'u2',displayName:'سارة'}]});
+ view.open.more();
+ [...view.root.querySelectorAll('.pp-sheet button')].find(b=>b.textContent.includes('رشّح الحلقة لصديق')).click();
+ const sheet=view.root.querySelector('.pp-sheet');
+ expect(sheet.dataset.kind).toBe('recommend');
+ expect([...sheet.querySelectorAll('.pp-row-item strong')].map(n=>n.textContent)).toEqual(['الجميع','سارة']);
+ [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('سارة')).click();
+ expect(send).toHaveBeenCalledWith({name:'recommend',value:'u2'});
+ expect(view.root.querySelector('.pp-toast').textContent).toBe('انرسلت لـ سارة');
+ view.update({canRecommend:false});view.open.more();
+ expect(view.root.querySelector('.pp-sheet').textContent).not.toContain('رشّح');
+});

@@ -14,6 +14,7 @@ const STATE = {
   subtitles: [{ id: 1, lang: 'ar', label: 'العربية', selected: true }, { id: 2, lang: 'en', label: 'English' }],
   audio: [{ id: 1, lang: 'ja', label: 'Japanese', selected: true }, { id: 2, lang: 'en', label: 'English' }],
   routes: [{ id: 'a', sourceName: 'Torrentio', server: 'تورنت', quality: 1080, label: 'WEB-DL', state: 'READY', candidates: ['a1080'] }, { id: 'b', sourceName: 'AnimeKai', server: 'MegaUp', quality: 1080, state: 'READY' }, { id: 'c', sourceName: 'Anizone', quality: 720, state: 'READY' }, { id: 'd', sourceName: 'HiAnime', server: 'HD-2', state: 'RESOLVING' }],
+  canRecommend: true, friends: [{ userId: 'u1', displayName: 'سارة' }, { userId: 'u2', displayName: 'خالد' }],
   skipStatus: 'المقدمة 1:30–3:00 · النهاية 22:10–23:40', skipPending: false,
   net: { openAt: 0, stages: { 'engine-start': 300, 'engine-ready': 1400, downloading: 2100, 'player-start': 2600, ready: 3900 }, torrentBps: 1750000, peers: 58, seeds: 45, aheadMs: 41000, inputBps: 1690000, videoBps: 4200000, videoHeight: 1080 },
   routesDone: true, people: [{ userId: 'u1', name: 'سارة', host: true, state: 'playing' }, { userId: 'u2', name: 'خالد', state: 'ready' }],
@@ -41,7 +42,7 @@ const STATE = {
     await page.mouse.move(w / f / 2, h / f / 2); await page.mouse.move(w / f / 2 + 10, h / f / 2 + 10);
     await page.waitForTimeout(900);
     await page.screenshot({ path: path.join(out, `مشغل-الأدوات-${w}.jpg`), quality: 85 });
-    for (const sheet of ['servers', 'quality', 'subtitles', 'audio', 'speed', 'episodes', 'more', 'skips', 'network']) {
+    for (const sheet of ['servers', 'quality', 'subtitles', 'audio', 'speed', 'episodes', 'more', 'skips', 'network', 'recommend']) {
       await page.evaluate((k) => { window.VantaraOverlayView.closeSheet(); window.VantaraOverlayView.open[k](); }, sheet);
       await page.waitForTimeout(500);
       await page.screenshot({ path: path.join(out, `مشغل-${sheet}-${w}.jpg`), quality: 85 });

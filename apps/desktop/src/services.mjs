@@ -869,7 +869,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const freeMemory=freemem();
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -924,6 +924,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             emitSubtitleTracks(state);autoArabic(state);
           }
           // قياس المشغل للوحة «الشبكة» (كالـAPK): الجاهز أمامك، وسرعة ما يصل للمشغل، ومعدل الفيديو. تُرفق بتقدم الوقت التالي.
+          // نهاية الحلقة (keep-open): المشغل يبقى على آخر إطار كالـAPK ليعرض «الحلقة التالية» بعدّ تنازلي؛
+          // الرجوع للخلف بعد النهاية يعيدها false. الإغلاق صار بيد المستخدم وحده.
+          if(event.name==='eof-reached'&&typeof event.data==='boolean'&&state.ready&&state.ended!==event.data){state.ended=event.data;emit(state,{type:'playback/ended',ended:event.data,...state.progress});}
           const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
           if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
@@ -933,7 +936,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         }
       }
     });
-    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
+    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate','eof-reached'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     emit(state,{type:'playback/stage',stage:'first-frame'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
