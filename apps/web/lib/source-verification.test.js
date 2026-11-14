@@ -136,3 +136,11 @@ it('never exposes another host verification as success to the caller',async()=>{
  expect(result.ok).toBe(false);expect(result.state).toBe('failed');
  expect(c.list()).toMatchObject([{host:'source.example'}]);expect(retry).not.toHaveBeenCalled();c.close();
 });
+it('a CloudStream verification closed by the page (not the user) shows its real reason, not «cancelled»',async()=>{
+ const plugin={pending:async()=>({pending:[{host:'rift.example',kind:'cloudstream'}]})};
+ const reasons={unsafe_endpoint:'عنوان صفحة التحقق غير مدعوم بأمان.',network_error:'تعذّر تحميل صفحة التحقق من المصدر. حاول لاحقًا.',user_cancelled:'أُلغي التحقق. تقدر تحاول مرة ثانية.'};
+ for(const [reason,message] of Object.entries(reasons)){
+  const runtimePlugin={verify:async({host})=>({host,state:'cancelled',reason})};
+  expect(await verifySourceDomains({plugin,runtimePlugin,domains:['https://rift.example/']})).toEqual({ok:false,error:message});
+ }
+});

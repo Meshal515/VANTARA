@@ -59,13 +59,14 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   expect(top[0].textContent).toContain('مترجم عربي');
   expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل الأفضل');
   expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · عربي · يبدأ فورًا');
-  // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ لا رموز ثلاثية في أي صف
+  // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ ما يُفحص يبقى بمكانه تحت الجاهز (لا يُطوى فتقفز القائمة)
   const direct = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
-  expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload']);
+  expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload', 'HG Cloud']);
+  expect(direct[2].textContent).toContain('قيد الفحص');
   expect(body.textContent).not.toMatch(/\b(?:SWH|MPU|TRR|HGC)\b/);
   expect(body.querySelector('.ss-group--torrent .ss-row .ss-name').textContent).toBe('Torrentio');
-  // ما يُجهَّز وما تعذّر مطويّان بعد أول جاهز
-  expect(body.querySelector('.cn-srv-wait summary').textContent).toContain('1');
+  // ما تعذّر قبل أن يظهر مطويّ في الأسفل
+  expect(body.querySelector('.cn-srv-wait')).toBeNull();
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
   expect(onPick).toHaveBeenCalledWith(routes[2]);
@@ -130,12 +131,15 @@ it('a movie without logo or episode shows its name as text and no episode line',
   expect(body.querySelector('.ss-art').className).toContain('ss-art--none');
 });
 
-const choose = (body, value) => {
-  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
-  [...body.querySelectorAll('.ss-addon-opt')].find((o) => o.dataset.value === value).onclick({ stopPropagation() {} });
+// القائمتان متجاورتان: [0] الجودة، [1] المصدر
+const dropBtn = (body, i) => body.querySelectorAll('.ss-drop .ss-addon-btn')[i];
+const menuOpts = (body) => [...body.querySelectorAll('.ss-addon-menu:not([hidden]) .ss-addon-opt')];
+const choose = (body, value, i = 1) => {
+  dropBtn(body, i).onclick({ stopPropagation() {} });
+  menuOpts(body).find((o) => o.dataset.value === String(value)).onclick({ stopPropagation() {} });
 };
 
-it('filters by quality, language and source as quiet tabs plus one source menu', () => {
+it('filters by quality and source as two side-by-side menus, and language as two buttons', () => {
   const { el, body } = dom();
   const onPick = vi.fn();
   const ui = createServerSheet(body, { el, onPick, sourceName: (r) => ({ witanime: 'WitAnime' })[r.sourceId] ?? r.sourceId });
@@ -146,11 +150,19 @@ it('filters by quality, language and source as quiet tabs plus one source menu',
     { id: 'c', sourceId: COMET, sourceName: 'Comet', quality: 2160, state: 'READY', runtimeReady: true, label: 'X.2160p.WEB-DL\n👤 20 💾 5 GB ⚙️ Nyaa' },
   ];
   ui.update({ routes, settled: true, status: { text: '4 جاهزة' } });
-  const tabs = [...body.querySelectorAll('.ss-tab')].map((b) => b.textContent);
-  expect(tabs).toEqual(['الكل', '4K', '1080p', '720p', 'مترجم', 'مدبلج']);
-  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
-  expect([...body.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
-  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  // لا صف جودات كامل: زر واحد يفتح قائمة بالجودات المتوفرة
+  expect([...body.querySelectorAll('.ss-tab')].map((b) => b.textContent)).toEqual(['مترجم', 'مدبلج']);
+  expect(dropBtn(body, 0).textContent).toContain('كل الجودات');
+  dropBtn(body, 0).onclick({ stopPropagation() {} });
+  expect(menuOpts(body).map((o) => o.textContent)).toEqual(['كل الجودات', '4K', '1080p', '720p']);
+  dropBtn(body, 0).onclick({ stopPropagation() {} });
+  dropBtn(body, 1).onclick({ stopPropagation() {} });
+  expect(menuOpts(body).map((o) => o.textContent)).toEqual(['كل المصادر', 'WitAnime', 'Torrentio', 'Comet']);
+  dropBtn(body, 1).onclick({ stopPropagation() {} });
+  choose(body, 720, 0);
+  expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
+  expect(dropBtn(body, 0).textContent).toContain('720p');
+  choose(body, 'all', 0);
   choose(body, 'Comet');
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-name').textContent)).toEqual(['Comet']);
   // المقترح والزر يتبعان المرشّح
@@ -160,8 +172,7 @@ it('filters by quality, language and source as quiet tabs plus one source menu',
   choose(body, 'all');
   [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
-  expect(body.querySelector('.ss-tab.on').textContent).toBe('الكل');
-  expect([...body.querySelectorAll('.ss-tab.on')].map((b) => b.textContent)).toEqual(['الكل', 'مدبلج']);
+  expect([...body.querySelectorAll('.ss-tab.on')].map((b) => b.textContent)).toEqual(['مدبلج']);
 });
 
 it('says plainly when nothing is ready, without a hero card, and offers a retry', () => {
@@ -249,7 +260,7 @@ it('native CloudStream media routes are direct even when the runtime reported th
   expect(describeRoute({ id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', runtimeReady: true }).torrent).toBe(true);
 });
 
-it('live-installed CloudStream sources appear above torrents immediately and automatically populate filter', () => {
+it('CloudStream sources that arrive after torrents join quietly below them (no jump) and populate the source menu', () => {
   const { body, el } = dom(), onPick = vi.fn();
   const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
   const torrent = { id: 'torrent', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true,
@@ -259,14 +270,19 @@ it('live-installed CloudStream sources appear above torrents immediately and aut
   const anime4up = { id: 'fourup', sourceId: CS3_4UP, sourceName: 'Anime4up', state: 'READY', server: 'mp4upload',
     quality: 720, variant: 'SUB', runtimeReady: true, probed: true, probeMs: 800 };
   ui.update({ routes: [torrent], settled: false, status: { text: '1 جاهز' } });
-  expect(body.querySelector('.ss-addon-btn')).toBeNull(); // one source only
+  expect(dropBtn(body, 1).disabled).toBe(true); // one source only: the menu is there (no later jump) but has nothing to choose
+  const torrentRow = body.querySelector('.ss-group--torrent .ss-row');
   ui.update({ routes: [torrent, rift, anime4up], settled: true, status: { text: '3 جاهزة' } });
+  // التورنت ظهر أولًا فيبقى أولًا وصفّه نفسه بمكانه؛ المباشر يُضاف تحته
+  expect(body.querySelector('.an-srv-list').firstElementChild.className).toContain('ss-group--torrent');
+  expect(body.querySelector('.ss-group--torrent .ss-row')).toBe(torrentRow);
   const direct = [...body.querySelectorAll('.ss-group--direct .ss-row')];
   expect(direct.map(r => r.querySelector('.ss-name').textContent)).toEqual(['AnimeRift', 'Anime4up']);
   expect([...body.querySelectorAll('.ss-group--torrent .ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Torrentio']);
-  expect(body.querySelector('.ss-addon-btn').textContent).toContain('كل المصادر');
-  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
-  expect([...body.querySelectorAll('.ss-addon-opt')].map(o => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'AnimeRift', 'Anime4up']);
+  expect(dropBtn(body, 1).textContent).toContain('كل المصادر');
+  dropBtn(body, 1).onclick({ stopPropagation() {} });
+  expect(menuOpts(body).map(o => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'AnimeRift', 'Anime4up']);
+  dropBtn(body, 1).onclick({ stopPropagation() {} });
   // No user filter interaction needed: all 3 are visible, directly selectable.
   body.querySelector('.ss-group--direct .ss-row').onclick();
   expect(onPick).toHaveBeenCalledWith(rift);
@@ -310,13 +326,38 @@ it('قائمة المصدر المفتوحة تبقى مفتوحة حين يصل
   const ui = createServerSheet(body, { el, onPick() {} });
   const r = (id, name) => ({ id, sourceId: id, sourceName: name, state: 'READY', quality: 1080, runtimeReady: true, probed: true });
   ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime')], settled: false, status: { text: '2' } });
-  body.querySelector('.ss-addon-btn').onclick({ stopPropagation() {} });
+  dropBtn(body, 1).onclick({ stopPropagation() {} });
+  const menu = body.querySelector('.ss-addon-menu:not([hidden])');
   ui.update({ routes: [r('a', 'Torrentio'), r('b', 'ArabAnime'), r('c', 'AnimeRift')], settled: false, status: { text: '3' } });
-  const menu = body.querySelector('.ss-addon-menu');
-  expect(menu && !menu.hidden).toBe(true);
+  // القائمة نفسها (لا تُحذف وتُعاد فتومض) ما زالت مفتوحة، وفيها المصدر الجديد
+  expect(body.querySelector('.ss-addon-menu:not([hidden])')).toBe(menu);
   expect([...menu.querySelectorAll('.ss-addon-opt')].map((o) => o.textContent)).toEqual(['كل المصادر', 'Torrentio', 'ArabAnime', 'AnimeRift']);
-  expect(body.querySelector('.ss-addon-btn').getAttribute('aria-expanded')).toBe('true');
+  expect(dropBtn(body, 1).getAttribute('aria-expanded')).toBe('true');
   // اختيار مصدر يغلقها كالعادة
   menu.querySelector('[data-value="AnimeRift"]').onclick({ stopPropagation() {} });
-  expect(body.querySelector('.ss-addon-menu')).toBeNull();
+  expect(menu.hidden).toBe(true);
+});
+
+it('a better server arriving later never moves the rows already shown (no jump under the finger)', () => {
+  const { el, body } = dom();
+  const onPick = vi.fn();
+  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
+  const a = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
+  const b = { id: 'b', sourceId: 'witanime', server: 'videa', quality: 480, state: 'RESOLVING' };
+  ui.update({ routes: [a, b], settled: false, status: { text: '…' } });
+  const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
+  const [rowA, rowB] = rows();
+  const filtersHeight = body.querySelector('.an-pick-filters');
+  // سيرفر أفضل (1080p وأسرع) يصل، والثاني يتعذّر: الصفّان بمكانهما والجديد تحتهما
+  const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
+  ui.update({ routes: [a, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
+  expect(rows().slice(0, 2)).toEqual([rowA, rowB]);
+  expect(rows()[2].querySelector('.ss-name').textContent).toBe('okanime');
+  // الأفضل يُعرف بكلمة «مقترح» وبالزر، لا بنقل الصفوف
+  expect(rows()[2].className).toContain('ss-row--top');
+  // شريط المرشّحات هو نفسه من أول لحظة (لا يظهر متأخرًا فيدفع القائمة)
+  expect(body.querySelector('.an-pick-filters')).toBe(filtersHeight);
+  expect(filtersHeight.hidden).toBe(false);
+  rowA.onclick();
+  expect(onPick).toHaveBeenCalledWith(a);
 });

@@ -23,6 +23,8 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.LinearLayout
 import androidx.webkit.WebViewCompat
+import androidx.webkit.ProxyConfig
+import androidx.webkit.ProxyController
 import androidx.webkit.WebViewFeature
 import android.widget.TextView
 import java.io.ByteArrayInputStream
@@ -38,6 +40,9 @@ class VerificationActivity : Activity() {
     private var initialClearance: String? = null
     private var selectedCookies: CookieManager? = null
     private var runtimeProfile: String? = null
+    /** CloudStream: شبكة المحرك نفسها (DoH وتجزئة SNI) لصفحة التحقق؛ غيره يبقى على شبكة النظام كما هو. */
+    @Volatile private var tunnel: VerificationTunnel? = null
+    private fun isPublic(host: String): Boolean = tunnel?.let { it.publicAddress(host) != null } ?: VerificationPolicy.publicDns(host)
     private var completed = false
     private var resumed = false
     private var navigations = 0
@@ -82,10 +87,20 @@ class VerificationActivity : Activity() {
         main.postDelayed(timeout, SESSION_MS)
         showHeader(current)
         worker.execute {
-            val safe = VerificationPolicy.publicDns(current.host)
+            if (runtimeProfile != null && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE))
+                tunnel = runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull()
+            val safe = isPublic(current.host)
             main.post {
                 if (!completed && !isFinishing && !isDestroyed) {
-                    if (safe) createBrowser() else complete("failed", "unsafe_endpoint")
+                    if (!safe) complete("failed", "unsafe_endpoint")
+                    else tunnel?.let { t ->
+                        // يُطبَّق على WebView هذه العملية المعزولة وحدها، ويُزال عند الإغلاق
+                        runCatching {
+                            ProxyController.getInstance().setProxyOverride(ProxyConfig.Builder().addProxyRule("127.0.0.1:${t.port}").build(), mainExecutor) {
+                                if (!completed && !isFinishing && !isDestroyed) createBrowser()
+                            }
+                        }.onFailure { complete("failed", "proxy_unavailable") }
+                    } ?: createBrowser()
                 }
             }
         }
@@ -156,7 +171,7 @@ class VerificationActivity : Activity() {
                 }
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val target = VerificationPolicy.endpoint(request.url.toString())
-                    if (target == null || !VerificationPolicy.publicDns(target.host)) {
+                    if (target == null || !isPublic(target.host)) {
                         if (request.isForMainFrame) main.post { complete("failed", "unsafe_endpoint") }
                         return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     }
@@ -196,7 +211,15 @@ class VerificationActivity : Activity() {
         if (state == "verified" && clearance != null) result.putExtra("clearance", clearance)
         setResult(if (state == "verified") RESULT_OK else RESULT_CANCELED, result)
         releaseBrowser()
+        releaseTunnel()
         finish()
+    }
+
+    private fun releaseTunnel() {
+        val t = tunnel ?: return
+        tunnel = null
+        runCatching { ProxyController.getInstance().clearProxyOverride(mainExecutor) {} }
+        worker.execute { t.close() }
     }
 
     private fun releaseBrowser() {
@@ -215,6 +238,7 @@ class VerificationActivity : Activity() {
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
         releaseBrowser()
+        tunnel?.close(); tunnel = null
         worker.shutdownNow()
         super.onDestroy()
     }

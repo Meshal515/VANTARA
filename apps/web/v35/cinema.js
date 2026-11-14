@@ -1144,7 +1144,7 @@ export function createCinema(deps) {
     const adoptRoute = route => {
       w.routes = engine.upsertRoute(w.routes, route);
       w.run.route(route);
-      if (route.state === 'READY' && route.probed === true && !w.remembered) {
+      if (route.state === 'READY' && route.probed === true && !w.remembered && !h.pinned) {
         w.remembered = true;
         memory.remember(key, h.found.copies, h.found.copies.find(copy => copy.sourceId === route.sourceId));
       }
@@ -1198,7 +1198,8 @@ export function createCinema(deps) {
     void (async () => {
       try {
         const identity = {canonicalId:m.canonicalId??`cinema:${m.id}`,kind:m.type,externalIds:m.externalIds??{imdb:/^tt\d+$/.test(m.id)?m.id:null},season,episode:n};
-        const found = await waitFor(engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identity)), w.controller.signal);
+        // مصدر محدد: نسخته وحدها، بلا اكتشاف إضافات من الهوية (لا Torrentio في ورقة مصدر آخر)
+        const found = await waitFor(h.pinned ? h.first : engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identity)), w.controller.signal);
         if (w.closed || w.expired) return;
         if (!found.copies.length) {
           if (!found.answered && Object.values(found.sources ?? {}).some(source => source.error || source.skipped)) throw new Error('تعذّر البحث في المصادر');
@@ -1213,7 +1214,7 @@ export function createCinema(deps) {
         w.run.prepared();
         const initial = [...found.copies];
         engine.warmArt([m.background, m.logo]);
-        const preparing = Promise.resolve(engine.prepare({ session, copies: forPreparation(initial), identity, episode, preferredSourceId: pref?.sourceId ?? null, preferredServer: pref?.server ?? null, probe: true, signal: w.controller.signal }));
+        const preparing = Promise.resolve(engine.prepare({ session, copies: forPreparation(initial), identity, pinned: Boolean(h.pinned), episode, preferredSourceId: pref?.sourceId ?? null, preferredServer: pref?.server ?? null, probe: true, signal: w.controller.signal }));
         void preparing.then(out => { if (w.closed || w.expired) closeSession(out?.session); }, () => {});
         const out = await waitFor(preparing, w.controller.signal);
         if (w.closed || w.expired) return;

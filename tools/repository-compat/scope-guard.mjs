@@ -376,6 +376,14 @@ for (const path of ["services/sync-worker/src/progress-touch.integration.test.ts
 for (const path of ["apps/web/lib/manga-art.js", "apps/web/lib/manga-art.test.js", "apps/web/lib/kitsu-art.js", "apps/web/lib/kitsu-art.test.js"]) seams.add(path);
 // قواعد الحركة والأغلفة للوكلاء في CLAUDE.md (طلب المالك، 13 نوفمبر)
 seams.add("CLAUDE.md");
+// عزل المصدر المحدد في الأنمي والسينما والمانجا (طلب المالك، 14 نوفمبر): اختبارات منع التراجع بأسمائها
+for (const path of ["apps/web/lib/anime-engine-source-scope.test.js", "apps/web/v35/anime-source-scope.test.js", "apps/web/v35/manga-source-scope.test.js", "docs/addons/SOURCE_SCOPE_20261114.ar.md"]) seams.add(path);
+// تحقق CloudStream بمسار شبكة المحرك (DoH وتجزئة SNI) وسببه الحقيقي في الواجهة (طلب المالك، 14 نوفمبر)
+for (const path of ["android/app/src/main/kotlin/com/vantara/verification/VerificationTunnel.kt", "android/app/src/test/java/com/vantara/verification/VerificationTunnelTest.kt", "android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt", "extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimePlugin.kt", "apps/web/lib/source-verification.test.js"]) seams.add(path);
+// ورقة السيرفرات بلا قفز: ترتيب ثابت، وقائمتا الجودة والمصدر متجاورتان (طلب المالك، 14 نوفمبر)
+for (const path of ["apps/web/v35/cinema-playback.test.js", "apps/web/v35/server-sheet.css"]) seams.add(path);
+// البحث العام في CloudStream: عادل بين المصادر، والتشغيل قبل البحث (طلب المالك، 14 نوفمبر)
+for (const path of ["extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt"]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);

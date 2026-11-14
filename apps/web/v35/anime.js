@@ -2616,16 +2616,25 @@ export function createAnime(deps) {
         if (!sheet.session) {
           if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
           if (sheet.work === false) return { text: 'غير متوفر في المصادر العربية حاليًا' };
-          return { text: 'نبحث في المصادر العربية والإضافات…', spin: true };
+          return { text: m._sourceCopy ? `نجهّز سيرفرات ${sourceName(m._sourceCopy.sourceId) || 'هذا المصدر'}…` : 'نبحث في المصادر العربية والإضافات…', spin: true };
         }
         if (!sheet.done && ready) return { text: `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'} من ${total} · البقية تصل`, spin: true };
         if (!sheet.done) return { text: 'نجهّز السيرفرات…', spin: true };
         return { text: ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${total > ready ? ` من ${total}` : ''}` : 'لم يجهز أي سيرفر لهذه الحلقة الآن' };
       };
 
+      // قياس من لمسة الحلقة (Debug فقط، محلي): أول سيرفر يظهر، وأول سيرفر صالح قابل للاختيار
+      const tappedAt = Date.now();
+      const timing = { first: false, ready: false };
+      const measure = () => {
+        if (!timing.first && sheet.routes.length) { timing.first = true; state.workTrace?.record('sheet_first_route', { ms: Date.now() - tappedAt, pinned: Boolean(m._sourceCopy), sourceId: sheet.routes[0].sourceId }); }
+        const ready = !timing.ready && sheet.routes.find(isValid);
+        if (ready) { timing.ready = true; state.workTrace?.record('sheet_first_valid_route', { ms: Date.now() - tappedAt, pinned: Boolean(m._sourceCopy), sourceId: ready.sourceId, server: ready.server }); }
+      };
       const paint = () => {
         paintQueued = false;
         if (sheet.closed) return;
+        measure();
         clearTimeout(cooldownTimer);
         const retryWait = exhausted() ? engine.retrySeconds(sheet.retryAt) : 0;
         if (retryWait) cooldownTimer = setTimeout(paint, 1000);
@@ -2763,13 +2772,14 @@ export function createAnime(deps) {
             ? [...work.copies].sort((a, b) => Number(b.sourceId === previousServer.sourceId) - Number(a.sourceId === previousServer.sourceId))
             : work.copies;
           engine.warmArt([state.view?.id === m.id ? state.view.heroSrc : null, artOf(m)?.fanart, artOf(m)?.logo]);
-          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
+          const preparing = Promise.resolve(engine.prepare({ copies, identity: animeAddonIdentity(m, n), pinned: Boolean(m._sourceCopy), episode: isMovie(m) ? -1 : n, preferredSourceId: previousServer?.sourceId, preferredServer: previousServer?.server, probe: true, signal: preparation.signal }));
           // A bridge that ignores cancellation can reply after close or deadline.
           void preparing.then(out => { if (sheet.closed || sheet.expired) closeSession(out?.session); }, () => {});
           const out = await wait(preparing, preparation.signal);
           if (sheet.closed || sheet.expired) return;
           if (!out?.session) throw new Error('لم تبدأ جلسة تجهيز السيرفرات');
           sheet.session = out.session;
+          state.workTrace?.record('sheet_session_started', { ms: Date.now() - tappedAt, pinned: Boolean(m._sourceCopy), copies: (out.copies ?? copies).map(c => c.sourceId) });
           // Associate this visible server sheet with its actual native playback session.
           // The delivery QA must never count READY from another or previous sheet.
           body.dataset.vantaraPlaybackSession = out.session;
