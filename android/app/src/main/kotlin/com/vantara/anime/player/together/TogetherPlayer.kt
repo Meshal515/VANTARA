@@ -49,6 +49,8 @@ data class TogetherLaunch(
     val episodeTitle: String? = null,
     val season: Int? = null,
     val invitees: List<Invitee> = emptyList(),
+    /** الغرفة أولًا: دخل بلا سيرفر، فالغرفة تعرض «اختر سيرفر» حتى يختار (لا اختيار تلقائي). */
+    val pick: Boolean = false,
 )
 
 @Serializable
@@ -109,6 +111,8 @@ class TogetherPlayer(
     private var lobbyMore: View? = null
     private var lobbyCount: TextView? = null
     private var countdownAt = 0.0
+    /** الغرفة أولًا: لم يختر سيرفره بعد. تبقى الغرفة ظاهرة (حتى لو بدأت) لأنه لا فيديو يُشاهد بلا سيرفر. */
+    private var awaitingPick = launch.pick
     /** لون القسم: أحمر السينما، ولون الأنمي للأنمي. */
     // لون الواجهة نفسه الذي لبسه المشغّل (Tone.use)، لا أزرق/أحمر ثابت
     private val accent: Int get() = com.vantara.anime.player.Tone.ACCENT
@@ -165,7 +169,7 @@ class TogetherPlayer(
         main.post(tick)
         // غرفة متزامنة: شاشة الغرفة من أول لحظة (الأصدقاء، سيرفرك وزر «غيّر»)، لا شاشة سوداء
         // تنتظر الإطار الأول. إن كانت الغرفة بدأت فعلًا يخفيها الترحيب ويقفز للثانية الحالية.
-        if (launch.mode == "sync") showLobby()
+        if (launch.mode == "sync" || awaitingPick) showLobby()
     }
 
     fun destroy() {
@@ -196,6 +200,7 @@ class TogetherPlayer(
     // ───────────── أحداث المشغّل ─────────────
 
     fun onPreparing() {
+        awaitingPick = false
         ready = false
         failedSource = null
         if (synced && client.timeline?.started != true) { mute(true); showLobby() }
@@ -272,7 +277,8 @@ class TogetherPlayer(
         // Reconcile that first frame with the room instead of playing behind the lobby.
         val t = client.timeline
         // دخول متأخر (الغرفة بدأت) أو غرفة منفصلة: لا شاشة انتظار
-        if (counting(t)) startCountdown(t!!.at) else if (!synced || t?.started == true) hideLobby() else showLobby()
+        if (awaitingPick) showLobby()
+        else if (counting(t)) startCountdown(t!!.at) else if (!synced || t?.started == true) hideLobby() else showLobby()
         if (synced && ready && t != null) {
             if (!t.started) withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
             else jumpToRoom(t)
@@ -288,7 +294,8 @@ class TogetherPlayer(
             if (synced || by == client.hostUserId) { ready = false; hooks.switchToEpisode(ep) }
             return
         }
-        if (counting(timeline)) { mute(false); startCountdown(timeline.at) }
+        if (awaitingPick) showLobby()
+        else if (counting(timeline)) { mute(false); startCountdown(timeline.at) }
         else if (timeline.started) { hideLobby(); mute(false) } else if (synced && ready) showLobby()
         if (synced && timeline.started && ready && by != client.me) jumpToRoom(timeline)
         paintLobby()
@@ -297,7 +304,7 @@ class TogetherPlayer(
     override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
     override fun onMode(mode: String) {
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
-        if (mode != "sync") { hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
+        if (mode != "sync") { if (!awaitingPick) hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
     }
     override fun onStatus(userId: String, name: String, state: String, source: String?) {
         if (userId == client.me) return
@@ -496,6 +503,7 @@ class TogetherPlayer(
     private fun headline(): Pair<String, Boolean> {
         fun names(list: List<String>) = list.take(2).joinToString(" و") + if (list.size > 2) " و${list.size - 2} غيرهم" else ""
         if (!connected) return "جاري الاتصال بالغرفة…" to false
+        if (awaitingPick) return "اختر سيرفرك عشان نبدأ" to false
         if (failedSource != null) return "تعذّر سيرفرك · اختر سيرفرًا آخر" to true
         if (!ready) return "نجهّز فيديوك…" to false
         val others = client.roster.filter { it.userId != client.me }
@@ -852,10 +860,13 @@ class TogetherPlayer(
         val (line, bad) = headline()
         info.addView(context.label(line, 15f, if (bad) 0xFFFF8B8E.toInt() else Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         val server = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(2), 0, 0) }
-        server.addView(context.label(hooks.serverLabel() ?: "سيرفرك", 12.5f, 0xD9FFFFFF.toInt(), bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR; maxLines = 1 })
-        val (stText, stColor) = when { failedSource != null -> "تعذّر" to 0xFFFF8B8E.toInt(); ready -> "جاهز" to 0xFF6FE3A1.toInt(); else -> "يتجهّز…" to 0xFFF5C76A.toInt() }
-        server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
-        server.addView(context.label(stText, 12.5f, stColor, bold = true))
+        if (awaitingPick) server.addView(context.label("لم تختر سيرفر بعد", 12.5f, 0xB3FFFFFF.toInt(), bold = true))
+        else {
+            server.addView(context.label(hooks.serverLabel() ?: "سيرفرك", 12.5f, 0xD9FFFFFF.toInt(), bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR; maxLines = 1 })
+            val (stText, stColor) = when { failedSource != null -> "تعذّر" to 0xFFFF8B8E.toInt(); ready -> "جاهز" to 0xFF6FE3A1.toInt(); else -> "يتجهّز…" to 0xFFF5C76A.toInt() }
+            server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
+            server.addView(context.label(stText, 12.5f, stColor, bold = true))
+        }
         info.addView(server)
         details.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
@@ -879,7 +890,8 @@ class TogetherPlayer(
             gravity = Gravity.CENTER
             maxLines = 1
             setPadding(context.dp(18), 0, context.dp(18), 0)
-            background = rounded(0x1AFFFFFF, context.dp(24).toFloat(), context.dp(1), 0x38FFFFFF)
+            // الخطوة الحالية بالأزرق وحدها: قبل الاختيار هذا هو الزر الأزرق الوحيد في الشاشة
+            background = if (awaitingPick) rounded(accent, context.dp(24).toFloat()) else rounded(0x1AFFFFFF, context.dp(24).toFloat(), context.dp(1), 0x38FFFFFF)
             contentDescription = "اختر السيرفر"
             setOnClickListener { hooks.openServers() }
         }

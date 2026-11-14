@@ -609,8 +609,14 @@ class PlayerActivity : Activity() {
         }
         val startAt = clipWatch?.first ?: launch.positionMs
         val picked = launch.candidate?.let { s.take(it) }
+        // الغرفة أولًا (قرار المالك): دخل الغرفة بلا سيرفر، فلا يُختار له شيء؛ الغرفة تعرض «اختر سيرفر» والورقة من زرها
+        val roomPick = picked == null && launch.together?.let { raw ->
+            runCatching { json.decodeFromString(com.vantara.anime.player.together.TogetherLaunch.serializer(), raw).pick }.getOrNull()
+        } == true
         if (picked != null) {
             start(picked, startAt)
+        } else if (roomPick) {
+            loading(false)
         } else if (prep != null) {
             loading(true)
             message("نجهّز أفضل سيرفر…", long = true)
