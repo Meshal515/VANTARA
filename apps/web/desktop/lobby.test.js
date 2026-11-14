@@ -57,3 +57,23 @@ it('room art is decided once: nothing is painted before the art settles, and a f
   lobby.destroy();
   delete globalThis.document; delete globalThis.Image;
 });
+
+it('«الحلقات» للمضيف: لوحة جانبية، الحالية مميّزة، والاختيار ينقل الغرفة كلها عبر changeEpisode', async () => {
+  const { document } = parseHTML('<html><body><main><div id="h"></div></main></body></html>');
+  const host = document.getElementById('h');
+  globalThis.document = document; globalThis.Image = function Image() { return document.createElement('img'); };
+  const changes = [];
+  const engine = { playerState: async () => ({ media: { kind: 'cinema', title: 'X', seriesRef: 'cinema:tt1:1', episode: 2 }, episode: 2, total: 8 }), roomHub: () => null, changeEpisode: async (a) => { changes.push(a); } };
+  const lobby = createDesktopLobby({ host, engine, session: 's', chooseServer() {}, leave() {}, visibility() {}, resolveArtImpl: async () => ({ title: 'X' }) });
+  await lobby.update({ visible: true, prepared: true, host: true, connection: 'live', me: 'a', roster: [{ userId: 'a', state: 'ready', host: true }] });
+  await new Promise((r) => setTimeout(r, 0));
+  host.querySelector('.pl-episodes').click();
+  const rows = document.querySelectorAll('.pl-side .pl-ep');
+  expect(rows.length).toBe(8);
+  expect(rows[1].classList.contains('is-on')).toBe(true);
+  rows[4].click();
+  expect(changes).toEqual([{ session: 's', episode: 5 }]);
+  expect(document.querySelector('.pl-side')).toBeNull();
+  lobby.destroy();
+  delete globalThis.document; delete globalThis.Image;
+});

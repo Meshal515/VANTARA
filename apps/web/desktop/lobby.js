@@ -1,5 +1,5 @@
 import { renderLobby, pendingInvitees } from '../lib/together/lobby.js';
-import { episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
+import { aniZipArt, episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 
 /** Same room renderer as the web/APK design; MPV stays prepared behind it. */
 export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
@@ -40,7 +40,54 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
   // renderLobby يمسح الغرفة ويبنيها من جديد، والمشغّل يناديها كل 500ms: كان البنر يُعاد تحميله والاسم يظهر ثم
   // يُستبدل بالشعار كل نصف ثانية (الشعار «يتحرك ويتكرر» في بلاغ المالك)، والزر تحت الفأرة يُستبدل فلا يُضغط بثبات.
   // تُرسم الغرفة فقط حين يتغير ما يُرى فيها؛ العدّ التنازلي يحدّث نفسه داخل renderLobby.
-  let painted = null;
+  let painted = null, side = null;
+  // «الحلقات» للمضيف: لوحة جانبية بصور الحلقات وعناوينها، والاختيار ينقل الغرفة كلها (engine.changeEpisode ← أمر load)
+  function closeEpisodes() { side?.remove(); side = null; }
+  function openEpisodes(state, media) {
+    closeEpisodes();
+    const total = Math.min(2000, Number(state?.total) || 0), current = Number(state?.episode ?? media.episode) || 1;
+    if (total < 2 || !host.parentNode) return;
+    const wrap = doc.createElement('div'); wrap.className = 'pl-side-wrap';
+    const scrim = doc.createElement('div'); scrim.className = 'pl-side-scrim'; scrim.onclick = closeEpisodes;
+    const panel = doc.createElement('aside'); panel.className = 'pl-side'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'الحلقات');
+    const head = doc.createElement('div'); head.className = 'pl-side-head';
+    const t = doc.createElement('div'); t.className = 'pl-side-title';
+    const h = doc.createElement('strong'); h.textContent = 'الحلقات';
+    const sub = doc.createElement('small'); sub.textContent = 'اختيارك ينقل الغرفة كلها';
+    t.append(h, sub);
+    const x = doc.createElement('button'); x.type = 'button'; x.className = 'pl-side-close'; x.setAttribute('aria-label', 'إغلاق'); x.textContent = '×'; x.onclick = closeEpisodes;
+    head.append(t, x);
+    const list = doc.createElement('div'); list.className = 'pl-side-list';
+    const rows = [];
+    for (let n = 1; n <= total; n++) {
+      const row = doc.createElement('button'); row.type = 'button'; row.className = `pl-ep${n === current ? ' is-on' : ''}`;
+      const img = doc.createElement('span'); img.className = 'pl-ep-img';
+      const txt = doc.createElement('span'); txt.className = 'pl-ep-text';
+      const b = doc.createElement('b'); b.textContent = `الحلقة ${n}`;
+      const small = doc.createElement('small'); small.dir = 'auto';
+      txt.append(b, small);
+      if (n === current) { const now = doc.createElement('em'); now.textContent = 'الآن'; txt.prepend(now); }
+      row.append(img, txt);
+      row.onclick = () => { closeEpisodes(); if (n !== current) void Promise.resolve(engine.changeEpisode?.({ session, episode: n })).catch(() => {}); };
+      rows.push([row, img, small]);
+      list.append(row);
+    }
+    panel.append(head, list);
+    wrap.append(scrim, panel);
+    host.parentNode.append(wrap);
+    side = wrap;
+    rows[current - 1]?.[0].scrollIntoView?.({ block: 'center' });
+    // صور الحلقات وعناوينها من ani.zip (نفس مصدر فن الغرفة، مخزّن)
+    const anilist = media?.kind === 'anime' ? Number(/^anime:(\d+)/.exec(media.seriesRef ?? '')?.[1]) : 0;
+    if (anilist > 0) void aniZipArt(anilist).then(z => {
+      if (side !== wrap) return;
+      rows.forEach(([, img, small], i) => {
+        const e = z?.episodes?.[String(i + 1)];
+        if (e?.title) small.textContent = e.title;
+        if (e?.image) { const im = doc.createElement('img'); im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.src = e.image; im.onerror = () => im.remove(); img.append(im); }
+      });
+    }).catch(() => {});
+  }
   function paint(state, media) {
     if (closed || !latest?.visible) return;
     const roomHub = hub(), event = latest;
@@ -61,9 +108,10 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       if (roomHub?.avatar) return roomHub.avatar(p, size);
       const fallback = doc.createElement('span'); fallback.textContent = [...(p.displayName ?? 'صديق')][0]; return fallback;
     }, start: event.start, resume: event.resume, changeServer: chooseServer, leave,
+    episodes: event.host && Number(state?.total) > 1 && typeof engine.changeEpisode === 'function' ? () => openEpisodes(state, media) : null,
     setOffset: ms => event.setVideoOffset?.(Math.max(-120000, Math.min(120000, ms))) });
   }
-  return { update, destroy() { closed = true; revision++; clearInterval(host._countdown); host.remove(); } };
+  return { update, destroy() { closed = true; revision++; clearInterval(host._countdown); closeEpisodes(); host.remove(); } };
 }
 
 /** Invitation entry: no MPV process, no automatic source pick, no duplicate room socket. */
