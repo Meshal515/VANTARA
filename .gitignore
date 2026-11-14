@@ -58,3 +58,4 @@ spike/**/.gradle/
 spike/**/gradlew
 spike/**/gradlew.bat
 spike/**/gradle/wrapper/gradle-wrapper.jar
+tools/desktop-audit/logs/

@@ -973,6 +973,9 @@
   .v35 .cn-detail[data-style='marquee'] .cn-genre-line { color: var(--text-2); }
   .v35 .cn-detail[data-style='marquee'] .cn-look-credits dt { color: var(--text-2); }
   .v35 .cn-detail[data-style='marquee'] .cn-episodes { margin-top: 56px; }
+  /* شريط الأرقام (IMDb · المواسم · السنة) خارج قاعدة التوسيط بعرض 580 فانزاح لجهة البداية (498–1078 بدل 269–849):
+   * نفس عمود الشعار والتشغيل */
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-body > .cn-look-credits { width: 100%; max-width: 580px; margin-inline: auto; }
 
   /* زر التشغيل العريض: 580–750px شريط بعرض العمود كاملًا؛ بعرض مريح بمحاذاة بداية الهوية (في الأنماط التي هويتها
    * بالجانب) أو وسطها (الملصق والشريط والمسلسل) */
