@@ -7,6 +7,9 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   const native = { position: 0, duration: null, paused: null, buffering: false, rate: 1 };
   const expected = { pause: [], seek: [] };
   let prepared = false, failed = false, closed = false, loadingEpisode = null, scheduled = null;
+  // أمر المتحكّم يُنفَّذ عنده فورًا ويُرسل بلحظة ضغطه بساعة الغرفة؛ حتى يصل صداه (seq أكبر) لا يُرجع align الحالة
+  // القديمة، وإن لم يصل خلال ثانيتين تعود الغرفة هي الحكم. الأصدقاء ينفّذونه لحظة وصوله (لا انتظار مصطنع).
+  let intent = null;
   // Local media timelines can differ by an intro or recap, even when the room clock is exact.
   let videoOffsetMs = Number.isFinite(initialVideoOffsetMs) && Math.abs(initialVideoOffsetMs) <= 120000 ? initialVideoOffsetMs : 0;
   const localToRoom = value => Math.max(0,Math.round(value-videoOffsetMs));
@@ -61,6 +64,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   function align(force = false) {
     const t = room.timeline, now = room.clock.serverNow();
     if (closed || !prepared || !synced() || !live() || !t || t.media?.key !== key()) return;
+    if (intent && t.seq === intent.seq && now < intent.until) return;
     if (!t.started) { if (!keepPlayingWhileRoomStarts) pause(true); return; }
     if (now < t.at) return;
     if (native.buffering) return;
@@ -74,6 +78,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   function receive({ state }) {
     if (closed) return;
     clearTimeout(scheduled); scheduled = null;
+    if (intent && state?.seq !== intent.seq) intent = null;
     const number = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
     if (state?.media?.key?.startsWith(`${together.mediaPrefix}#`) && number > 0 && number !== episode()) {
       if (loadingEpisode !== number) { prepared = false; failed = false; loadingEpisode = number; videoOffsetMs=0; native.duration = null; onEpisode(number); }
@@ -85,6 +90,11 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       }
     }
     lobby(); report(true);
+  }
+  function hostCommand(op, localPos) {
+    const at = room.clock.serverNow();
+    room.command(op, { pos: localToRoom(localPos), at });
+    intent = { seq: room.timeline?.seq, until: at + 2000 };
   }
   function detach() { if (closed) return; api.close(); onDetach(); }
   const offs = [room.on('state', receive), room.on('welcome', () => receive({ state: room.timeline })), room.on('roster', lobby),
@@ -99,13 +109,18 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     playPause(playing) {
       if (closed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
-      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? localToRoom(native.position) : 0, ...(playing && !room.timeline?.started ? { countdownMs: 3000 } : {}) });
+      if (room.canControl && prepared) {
+        if (!room.timeline?.started && playing) room.command('play', { pos: 0, countdownMs: 3000 }); // البداية: عدّ مشترك
+        else if (room.instant) { hostCommand(playing ? 'play' : 'pause', native.position); pause(!playing); }
+        else room.command(playing ? 'play' : 'pause', { pos: localToRoom(native.position) }); // خادم قديم: ننتظر بثّه
+      }
       else { message(prepared ? 'المضيف يتحكم بالتشغيل' : 'جاري تجهيز الفيديو…'); align(true); }
       return true;
     },
     seek(position) {
       if (closed || !synced()) return false;
-      if (live() && room.canControl && prepared) room.command('seek', { pos: localToRoom(position) });
+      if (live() && room.canControl && prepared && room.instant) { hostCommand('seek', position); native.position = clampLocal(position); command('seek', native.position); }
+      else if (live() && room.canControl && prepared) room.command('seek', { pos: localToRoom(position) });
       else { message('المضيف يتحكم بالتقديم'); align(true); }
       return true;
     },

@@ -1,7 +1,9 @@
-import { loadSkipTimes, activeSegment } from '../lib/skip-times.js';
+import { loadSkipTimes, activeSegment, skipStatusText } from '../lib/skip-times.js';
 import { glyph } from '../v35/icons.js';
 import { createServerSheet } from '../v35/server-sheet.js';
 import { createDesktopLobby, openDesktopRoomEntry } from './lobby.js';
+import { pendingInvitees } from '../lib/together/lobby.js';
+import { resolveArt } from '../lib/together/art.js';
 import { createOverlayLink } from './overlay-link.js';
 const safeMessage=value=>String(value??'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi,'[رابط الخدمة]');
 const clock=ms=>{const s=Math.max(0,Math.floor((ms??0)/1000));return `${Math.floor(s/3600)?`${Math.floor(s/3600)}:`:''}${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;};
@@ -10,9 +12,18 @@ const clock=ms=>{const s=Math.max(0,Math.floor((ms??0)/1000));return `${Math.flo
 export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engine,skipLoader=loadSkipTimes}={}) {
   if(!g.document?.body||typeof bridge?.playerViewport!=='function')return null;
   const doc=g.document;
-  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,sourceRevision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null;
+  let panel,video,status,seek,time,pause,subtitles,audio,source,timing,releaseRoomSurface=null,roomModal=null,roomModalCleanup=null,session=null,position=0,duration=0,paused=false,ready=false,fullscreen=false,observer,previousFocus,revision=0,sourceRevision=0,lobbyUi=null,roomState=null,settings=null,serverSheet=null,entryView=null,playerInfo=null,nextEpisode=null,episodeSelect=null,speed=null,skipButton=null,skipResult=null,skipKey=null,skipController=null,skipPending=false,ended=false,thumbInfo=null,serverBusy=false;
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
-  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA',subtitleCommandRevision=0;
+  let link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA',subtitleCommandRevision=0,loadProgress=0,loadEpoch=0,lastVolume=100;
+  // مراحل المحرك الفعلية ← نسبة امتلاء شعار شاشة التحميل (كما يقيس الـAPK البيانات التي وصلت لا وقتًا وهميًا)
+  const STAGE_PROGRESS={'engine-start':.06,'cache-selected':.1,'metadata':.16,'engine-ready':.22,'file-selected':.3,'downloading':.4,'player-start':.7,'first-frame':.95};
+  // قياس المشغل للوحة «الشبكة» كالـAPK (PlayerActivity.showNetwork): كل حقل يُحدّث من حدثه ويبقى آخر قيمة معروفة.
+  // stages: زمن كل مرحلة منذ فتح الجلسة (تجهيز ← المحرك ← التحميل ← المشغل ← أول إطار).
+  const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};
+  function freshNet(prev){return {openAt:Date.now(),stages:{},server:prev?.server??null};}
+  function mergeNet(prev,event){const next={...(prev??freshNet(null))};for(const [from,to] of Object.entries(NET_FIELDS))if(Number.isFinite(event[from])&&event[from]>=0)next[to]=event[from];return next;}
+  function markStage(prev,stage){const next={...(prev??freshNet(null))};if(next.stages[stage]==null)next.stages={...next.stages,[stage]:Date.now()-next.openAt};return next;}
+  const httpsArt=url=>typeof url==='string'&&/^https:\/\//i.test(url)?url:null;
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
   const command=async(name,value)=>{if(!session)return;if(!ready){if(!failed)tell('انتظر بدء الفيديو…');return;}const id=session,rev=revision,subtitleChoice=['subtitle-select','subtitle-off','subtitle-load'].includes(name),choice=subtitleChoice?++subtitleCommandRevision:0;try{if(engine.playerCommand)await engine.playerCommand({session:id,command:name,value});else await bridge.playbackCommand({session:id,command:name,value});}catch(error){if(session===id&&revision===rev&&(!subtitleChoice||choice===subtitleCommandRevision))tell(error.message,true);}};
@@ -31,14 +42,15 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(!playerInfo||playerInfo.section==='cinema'||duration<=0||(!playerInfo.malId&&!playerInfo.anilistId))return;
     const key=`${session}:${playerInfo.episode}:${Math.round(duration/1000)}`;if(skipKey===key)return;
     skipKey=key;skipController?.abort();skipController=new AbortController();
-    void skipLoader({malId:playerInfo.malId,anilistId:playerInfo.anilistId,episode:Number(playerInfo.episode),durationMs:duration,signal:skipController.signal}).then(result=>{if(skipKey!==key||!panel)return;skipResult=result;refreshSkip();}).catch(()=>{});
+    skipPending=true;link?.push(true);
+    void skipLoader({malId:playerInfo.malId,anilistId:playerInfo.anilistId,episode:Number(playerInfo.episode),durationMs:duration,signal:skipController.signal}).then(result=>{if(skipKey!==key||!panel)return;skipPending=false;skipResult=result;refreshSkip();link?.push(true);}).catch(()=>{if(skipKey===key){skipPending=false;skipResult={status:'FAILED'};link?.push(true);}});
   };
   const episode=async n=>{const id=session;try{await engine.changeEpisode?.({session:id,episode:Number(n)});}catch(error){if(session===id)tell(error.message,true);}};
   const update=()=>{if(!panel)return;pause.innerHTML=glyph(paused?'play':'pause',{size:30,filled:true});pause.setAttribute('aria-label',paused?'تشغيل الفيديو':'إيقاف الفيديو مؤقتًا');seek.max=String(duration||1);seek.value=String(Math.min(position,duration||position));seek.style.setProperty('--seek',`${duration?Math.min(100,position/duration*100):0}%`);seek.disabled=!ready||!duration;time.textContent=`${clock(position)} / ${clock(duration)}`;refreshSkip();link?.push();};
   const closeRoomSheet=()=>{
     const cleanup=roomModalCleanup;roomModalCleanup=null;roomModal?.remove();roomModal=null;
     try{cleanup?.();}catch{}
-    serverSheet=null;viewport();
+    serverSheet=null;serverBusy=false;viewport();
   };
   const dismiss=()=>{link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
   const close=async()=>{const id=session;if(!id)return;engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
@@ -56,14 +68,31 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
         avatarKey:r.avatarKey||person?.avatarKey||null,state:String(r.state||'preparing'),host:!!r.host};
     });
   };
+  // لوحة الغرفة داخل طبقة المشغّل كالـAPK (TogetherPlayer.openPanel): الأعضاء بحالتهم ومصدرهم وموضعهم، ومن لم يدخل
+  // بعد، والوضع ومغادرة الغرفة — بدل نافذة فوق شاشة سوداء تُخفي الفيديو وزر «إغلاق» نصي.
+  const overlayRoom=()=>{
+    const hub=session&&engine.roomHub?.({session}),room=hub?.session?.room;
+    if(!room||room.status==='closed'||!playerInfo?.together)return null;
+    const now=room.clock?.serverNow?.()??Date.now(),media=room.timeline?.media??hub.session.media??{};
+    const person=id=>hub.person?.(id)??{userId:id,displayName:'صديق'};
+    const members=(room.roster??[]).slice(0,24).map(r=>{
+      const p=person(r.userId),live=r.state==='playing'&&Number.isFinite(r.pos)&&Number.isFinite(r.at);
+      return {userId:String(r.userId??''),name:String(r.name||p.displayName||'صديق'),avatarKey:p.avatarKey||r.avatarKey||null,state:String(r.state||'preparing'),
+        host:!!r.host,me:r.userId===room.me,source:typeof r.source==='string'?r.source:null,
+        posMs:Number.isFinite(r.pos)?Math.max(0,r.pos+(live?Math.max(0,now-r.at):0)):null,driftMs:Number.isFinite(r.driftMs)?r.driftMs:null,sameVersion:r.sameVersion===false?false:null};
+    });
+    const pending=pendingInvitees(room.info?.invited??hub.session.invited,room.roster??[],room.me,person).slice(0,24)
+      .map(p=>({userId:String(p.userId),name:String(p.displayName??'صديق'),avatarKey:p.avatarKey??null}));
+    return {mode:room.info?.mode??hub.session.mode??'sync',host:!!room.isHost,status:String(room.status??''),label:String(media.label??''),members,pending};
+  };
   const overlaySnapshot=()=>{
     const info=playerInfo??{},server=info.server??null,movie=info.section==='cinema'&&!(Number(info.total)>1);
     const code=server?.code??null,q=Number(server?.quality)||null;
     return {title:info.title??titleText,subtitle:movie?'فيلم':`الحلقة ${info.episode??''}`,
       tone:info.section==='cinema'||info.media?.kind==='cinema'?'cinema':'anime',position,duration,paused,ready,buffering,
       status:{text:status?.textContent??'',error:status?.dataset.error==='true'},total:Number(info.total)||0,episode:Number(info.episode)||1,movie,canChangeEpisode:info.canChangeEpisode!==false,
-      sources:info.sources??[],candidate:info.candidate??null,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
-      skip:skipLabel,net:netInfo,people:overlayPeople(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
+      sources:info.sources??[],candidate:info.candidate??null,art:{backdrop:httpsArt(info.backdrop)??httpsArt(info.media?.banner),logo:httpsArt(info.logo)??httpsArt(info.media?.logo)},loadProgress,loadEpoch,quality:q,serverCode:code,subtitles:subtitleTrackList,audio:audioTrackList,speed:speedValue,fit:fitValue,volume:volumeValue,fullscreen,
+      thumb:thumbInfo,ended,canRecommend:info.canRecommend===true,friends:Array.isArray(info.friends)?info.friends:[],skip:skipLabel,skipStatus:playerInfo?.section==='cinema'?null:skipStatusText(skipResult,skipPending,sec=>{const s=Math.max(0,Math.floor(sec));return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}),skipPending,net:netInfo,bufferedMs:Number.isFinite(netInfo?.aheadMs)?position+netInfo.aheadMs:null,people:overlayPeople(),room:overlayRoom(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
   const switchTo=async(id,find)=>{const rev=revision,choice=++sourceRevision;try{const selected=await find();if(session===id&&revision===rev&&sourceRevision===choice&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id&&revision===rev&&sourceRevision===choice)tell(error.message,true);}};
   const overlayCommand=message=>{
@@ -76,7 +105,15 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'close':void close();break;
       case 'fullscreen':panel?.querySelector('[data-action="fullscreen"]')?.click();break;
       case 'room':engine.openPlayerRoom?.({session:id});break;
+      case 'room-mode':if(value==='sync'||value==='free')engine.roomHub?.({session:id})?.session?.room?.setMode?.(value);break;
+      case 'room-leave':engine.leavePlayerRoom?.({session:id});tell('طلعت من الغرفة');link?.push(true);break;
       case 'settings':showSettings();break;
+      // من لوحات المشغل (كالـAPK): ترجمة إضافية برابط HTTPS، وإعادة جلب توقيت المقدمة والنهاية
+      case 'subtitle-load':if(typeof value==='string'&&/^https:\/\/\S+$/i.test(value)&&value.length<=2048)void command('subtitle-load',{url:value,lang:'ar',label:'ترجمة إضافية',select:true});break;
+      case 'recommend':void Promise.resolve().then(()=>engine.queueRecommendation?.({session:id,toId:typeof value==='string'&&value?value:null})).catch(error=>tell(error.message,true));break;
+      // صورة شريط التقدم: تُطلب من المحرك (إطار مصغّر لكل 10 ث) وتصل الطبقة مع الحالة التالية
+      case 'thumb':if(Number.isFinite(value)&&typeof bridge.previewFrame==='function'){const want=Math.round(value/10000)*10000;if(thumbInfo?.ms===want)break;void bridge.previewFrame({session:id,positionMs:want}).then(r=>{if(session===id&&r?.available&&r.src){thumbInfo={ms:r.positionMs,src:r.src};link?.push(true);}}).catch(()=>{});}break;
+      case 'skip-refetch':skipKey=null;skipResult=null;refreshSkip();break;
       case 'fit':if(value==='fit'||value==='fill'){fitValue=value;void command('video-fit',value);link?.push(true);}break;
       case 'volume':if(Number.isFinite(value)){volumeValue=Math.max(0,Math.min(100,Math.round(value)));void command('volume',volumeValue);link?.push(true);}break;
       case 'speed':if(Number.isFinite(value)){speedValue=value;void command('speed',value);link?.push(true);}break;
@@ -114,26 +151,38 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   async function showServers() {
     const id=session,rev=revision;if(!id)return;
     let state;try{state=await engine.playerState?.({session:id});}catch(error){if(session===id)tell(error.message,true);return;}if(session!==id||revision!==rev)return;
+    // نفس ورقة السيرفرات العادية بفنها: بنر الحلقة وشعار العمل (كان المضيف من الغرفة يرى نصف شاشة أسود واسم العمل فقط).
+    // الفن نفسه الذي تعرضه الغرفة (resolveArt)، ولا ننتظره أكثر من 700ms: بعدها البنر/الغلاف المتاح.
+    const hubMedia=engine.roomHub?.({session:id})?.session?.media??{};
+    const baseMedia={...(state?.media??{}),...hubMedia,episode:state?.episode??hubMedia.episode,title:hubMedia.title??state?.media?.title??state?.title};
+    const art=await Promise.race([resolveArt(baseMedia).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),700))]);if(session!==id||revision!==rev)return;
+    const movie=(state?.section==='cinema'||baseMedia.kind==='cinema')&&!(Number(state?.total)>1);
+    const sheetMedia={title:state?.title??baseMedia.title??'VANTARA',logo:art?.logo??baseMedia.logo??null,
+      backdrop:art?.banner??baseMedia.banner??state?.poster??baseMedia.cover??null,backdropFallback:state?.poster??baseMedia.cover??null,
+      label:movie?'فيلم':`الحلقة ${state?.episode??baseMedia.episode??''}`,episodeTitle:art?.episodeTitle??baseMedia.episodeTitle??null};
     showSheet(body=>{
       const el=(tag,cls,text)=>{const n=node(tag,text);if(cls)n.className=cls;return n;};
+      // الاختيار يبقى ظاهرًا وهو يتجهّز: الصف المختار «يبدأ…» والزر «نجهّز التشغيل…» إلى أن يبدأ المحرك تحويل المصدر،
+      // ثم تُغلق الورقة والغرفة تكمل التقدم (الشعار يتلوّن). كانت تُغلق فورًا فلا يُعرف هل أخذ الاختيار أم لا.
       const pick=async route=>{
-        try{const selected=await engine.pick({session:id,route:route.id});if(session!==id||serverSheet!==ui||!selected.candidate)return;
-          closeRoomSheet();await engine.switchSource({session:id,candidate:selected.candidate,position});}
-        catch(error){tell(error.message,true);}
+        if(serverBusy)return;serverBusy=true;void refreshServers();
+        try{const selected=await engine.pick({session:id,route:route.id});if(session!==id||serverSheet!==ui||!selected.candidate){serverBusy=false;void refreshServers();if(session===id&&serverSheet===ui&&!selected?.candidate)tell('هذا السيرفر ما اشتغل، جرّب غيره',true);return;}
+          await engine.switchSource({session:id,candidate:selected.candidate,position});serverBusy=false;if(serverSheet===ui)closeRoomSheet();}
+        catch(error){serverBusy=false;void refreshServers();tell(error.message,true);}
       };
-      const ui=serverSheet=createServerSheet(body,{el,title:state?.title??'VANTARA',kicker:'اختر نسختك',onBack:closeRoomSheet,onPick:pick,
-        onBest:async()=>{try{const best=await engine.best({session:id});if(session===id&&serverSheet===ui&&best.candidate){closeRoomSheet();await engine.switchSource({session:id,candidate:best.candidate,position});}}catch(error){tell(error.message,true);}}});
+      const ui=serverSheet=createServerSheet(body,{el,title:sheetMedia.title,kicker:sheetMedia.label,media:sheetMedia,onBack:closeRoomSheet,onPick:pick,
+        onBest:async()=>{if(serverBusy)return;serverBusy=true;void refreshServers();try{const best=await engine.best({session:id});if(session===id&&serverSheet===ui&&best.candidate){await engine.switchSource({session:id,candidate:best.candidate,position});serverBusy=false;if(serverSheet===ui)closeRoomSheet();}else{serverBusy=false;void refreshServers();}}catch(error){serverBusy=false;void refreshServers();tell(error.message,true);}}});
       void refreshServers();
     },true);
   }
-  async function refreshServers(){const ui=serverSheet,id=session;if((!ui&&!overlayServers)||!id)return;try{const data=await engine.routes({session:id});if(session!==id)return;if(ui&&serverSheet===ui)ui.update({routes:data.routes,settled:data.done,status:{text:data.done?'':'نجلب السيرفرات…',spin:!data.done}});if(overlayServers){overlayRoutes=data.routes;overlayRoutesDone=!!data.done;link?.push(true);}}catch(error){if(session===id)tell(error.message,true);}}
+  async function refreshServers(){const ui=serverSheet,id=session;if((!ui&&!overlayServers)||!id)return;try{const data=await engine.routes({session:id});if(session!==id)return;if(ui&&serverSheet===ui)ui.update({routes:data.routes,settled:data.done,busy:serverBusy,status:{text:serverBusy?'نجهّز السيرفر اللي اخترته…':data.done?'':'نجلب السيرفرات…',spin:serverBusy||!data.done}});if(overlayServers){overlayRoutes=data.routes;overlayRoutesDone=!!data.done;link?.push(true);}}catch(error){if(session===id)tell(error.message,true);}}
   async function sources(){const id=session,rev=revision;try{const state=await engine.playerState?.({session:id});if(session!==id||revision!==rev||!source||!state)return;playerInfo=state;if(nextEpisode){nextEpisode.hidden=!(state.total>1);nextEpisode.disabled=state.canChangeEpisode===false||Number(state.episode)>=state.total;nextEpisode.onclick=()=>void episode(Number(state.episode)+1);}if(episodeSelect){episodeSelect.parentElement.hidden=!(state.total>1);episodeSelect.disabled=state.canChangeEpisode===false;episodeSelect.replaceChildren();for(let n=1;n<=Math.min(3000,state.total||0);n++){const o=node('option',`الحلقة ${n}`,{value:n});if(n===Number(state.episode))o.selected=true;episodeSelect.append(o);}}if(speed)speed.disabled=!!state.synced;refreshSkip();panel.dataset.tone=state.section==='cinema'||state.media?.kind==='cinema'?'cinema':'anime';const heading=panel.querySelector('header h2');if(heading)heading.textContent=state.title??heading.textContent;source.replaceChildren();for(const item of state.sources??[]){const o=node('option',item.label,{value:item.id});if(item.id===state.candidate)o.setAttribute('selected','');source.append(o);}source.disabled=(state.sources?.length??0)<2;
       if(timing){timing.disabled=!state.together||typeof engine.setVideoOffset!=='function';timing.value=String((state.videoOffsetMs??0)/1000);}
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){revision++;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;tell('');void sources();return;}
-    dismiss();previousFocus=doc.activeElement;session=event.session;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;netInfo=null;skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
+    if(panel&&session===event.session){revision++;ended=false;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;loadProgress=0;loadEpoch++;netInfo=freshNet(netInfo);tell('');void sources();return;}
+    dismiss();previousFocus=doc.activeElement;session=event.session;loadProgress=0;loadEpoch++;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;ended=false;thumbInfo=null;netInfo=freshNet(null);skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
     const header=node('header');header.append(iconButton('عودة','close','back',()=>void close()),node('h2',event.title??'VANTARA'));
@@ -195,11 +244,14 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='window/fullscreen'){fullscreen=event.enabled===true;viewport();g.requestAnimationFrame?.(()=>viewport());link?.push(true);return;}
     if(event.type==='playback/preparing')open(event);
     if(event.session!==session)return;
-    if(event.type==='playback/ready'){ready=true;failed=false;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
+    // نهاية الحلقة: المشغل يبقى على آخر إطار، والطبقة تعرض «الحلقة التالية» بعدّ تنازلي (كالـAPK)
+    if(event.type==='playback/ended'){ended=event.ended===true;link?.push(true);return;}
+    if(event.type==='playback/ready'){netInfo=markStage(netInfo,'ready');ready=true;failed=false;viewport();video.querySelector('.desktop-player-placeholder')?.remove();tell('');update();}
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')keyboard({key:'Escape',target:{},preventDefault(){}});}
-    if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;if(Number.isFinite(event.downloadSpeed)||Number.isFinite(event.peers))netInfo={kbps:Number.isFinite(event.downloadSpeed)?event.downloadSpeed/1024:netInfo?.kbps??null,peers:Number.isFinite(event.peers)?event.peers:netInfo?.peers??null};if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
+    if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;netInfo=mergeNet(netInfo,event);if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
     // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
-    if(event.type==='playback/stage'||event.type==='playback/retrying')return;
+    if(event.type==='playback/stage'){netInfo=markStage(netInfo,event.stage);const p=STAGE_PROGRESS[event.stage];if(p>loadProgress){loadProgress=p;link?.push(true);if(roomState?.visible)void lobbyUi?.update({...roomState,progress:loadProgress});}return;}
+    if(event.type==='playback/retrying')return;
     if(event.type==='playback/subtitles'){subtitleTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(subtitles,event.tracks??[],true);if(event.message)tell(event.message,true);}
     if(event.type==='playback/audio'){audioTrackList=(event.tracks??[]).map(({id,label,lang,selected})=>({id,label,lang,selected}));link?.push(true);tracks(audio,event.tracks??[]);}
     if(event.type==='playback/error'){ready=false;failed=true;tell(event.message,true);viewport();update();}
@@ -211,14 +263,16 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.closed){if(event.session===session){roomState=null;void lobbyUi?.update({visible:false});viewport();}return;}
     if(!panel&&event.visible)open({session:event.session,title:event.media?.title??'VANTARA'});
     if(event.session!==session)return;
-    roomState=event;void lobbyUi?.update(event);void sources();
+    roomState=event;void lobbyUi?.update({...event,progress:loadProgress});void sources();
   });
   const entryListener=engine.addListener?.('desktopRoomEntry',event=>{
     entryView?.destroy();if(panel)void close();ensureStyles();
     entryView=openDesktopRoomEntry({document:doc,...event});
   });
   const noticeListener=engine.addListener?.('desktopNotice',event=>{if(event.session===session)tell(event.message,true);});
-  const keyboard=e=>{if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','f','F','F11','Escape'].includes(e.key))e.preventDefault();if(e.key==='F11'){panel.querySelector('[data-action="fullscreen"]')?.click();return;}if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
+  // الصوت من لوحة المفاتيح (↑↓ و M) ومن الطبقة: قيمة واحدة تُرسل لـmpv وتُرسم في شريط الصوت
+  const setVolume=v=>{volumeValue=Math.max(0,Math.min(100,Math.round(v)));if(volumeValue>0)lastVolume=volumeValue;void command('volume',volumeValue);link?.push(true);};
+  const keyboard=e=>{if(entryView?.active&&e.key==='Escape'){e.preventDefault();entryView.leave();return;}if(!panel||/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName))return;if([' ','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','f','F','m','M','F11','Escape'].includes(e.key))e.preventDefault();if(e.key==='ArrowUp'||e.key==='ArrowDown'){setVolume(volumeValue+(e.key==='ArrowUp'?5:-5));return;}if(e.key==='m'||e.key==='M'){if(volumeValue>0){lastVolume=volumeValue;setVolume(0);}else setVolume(lastVolume||100);return;}if(e.key==='F11'){panel.querySelector('[data-action="fullscreen"]')?.click();return;}if(e.key===' ')void command('pause',!paused);if(e.key==='ArrowLeft')void command('seek',Math.max(0,position-10000));if(e.key==='ArrowRight')void command('seek',Math.min(duration||position+10000,position+10000));if(e.key==='f'||e.key==='F')panel.querySelector('[data-action="fullscreen"]').click();if(e.key==='Escape'&&roomModal){closeRoomSheet();return;}if(e.key==='Escape'&&settings&&!settings.hidden){settings.hidden=true;viewport();return;}if(e.key==='Escape')fullscreen?panel.querySelector('[data-action="fullscreen"]').click():void close();};
   g.addEventListener?.('keydown',keyboard);g.addEventListener?.('resize',viewport);
   return {close,dispose(){entryView?.destroy();void close();off?.();void routeListener?.remove?.();void preparedListener?.remove?.();void togetherListener?.remove?.();void noticeListener?.remove?.();void entryListener?.remove?.();g.removeEventListener?.('keydown',keyboard);g.removeEventListener?.('resize',viewport);}};
 }

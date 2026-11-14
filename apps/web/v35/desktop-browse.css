@@ -1,0 +1,338 @@
+/*
+ * التصفح على الكمبيوتر (ويندوز والمتصفح بالماوس): شبكات عمودية بدل الشرائط الأفقية.
+ *
+ * قيس قبل التعديل (1366×768، ويندوز/ويب): الأنمي 6 شرائط أفقية والسينما 5، مثل «الأشهر على الإطلاق»
+ * 18 بطاقة في عرض 1118px ومحتوى 2372px، وبطاقة الأنمي 116px. اللف الأفقي جُرّب على الكمبيوتر ولم ينجح:
+ * العجلة عمودية، ولا يرى المستخدم إلا ثلث الصف.
+ *
+ * القاعدة:
+ *  - النطاق: شاشة ≥1024 بمؤشر دقيق وhover فقط. الجوال والتابلت باللمس (وAPK) يبقيان على السحب الأفقي
+ *    الذي ينجح هناك؛ لا يتغير عليهم سطر.
+ *  - عدد الأعمدة من عرض القسم الفعلي (Container Queries) لا من عرض النافذة: فتح الشريط الجانبي وطيّه
+ *    وتكبير النافذة وملء الشاشة تعيد الحساب وحدها بلا breakpoints جامدة.
+ *  - الرئيسية: معاينة متزنة (صفّان) و«الكل» يفتح الشبكة الكاملة. صفحة العمل («مشابهة»، «من نفس العالم»،
+ *    «قد يعجبك»): كل البطاقات في صفوف، لأنه لا «الكل» هناك.
+ *  - هويات الأنماط كما هي: Top 10 بأرقامه، الجدول ببطاقاته العريضة، الأنواع ببلاطها، الرائج بقائمته.
+ *    الذي يتغير الاتجاه والمقاس فقط.
+ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* الحاوية: القسم نفسه (لا .page: احتواء التخطيط هناك يغيّر مرجع العناصر الثابتة) */
+  .v35 .an-rail,
+  .v35 .cn-rail,
+  .v35 #homeSections .section,
+  .v35 section:has(> .card-strip),
+  .v35 :is(div, section):has(> .an-strip, > .cn-strip) {
+    container-type: inline-size;
+  }
+
+  /* ── الأساس المشترك: شبكة عمودية بلا تمرير أفقي ── */
+  /* .card-strip--grid (آخر التحديثات) شبكة صفوف كاملة أصلًا في wide.css: لا تُلمس */
+  .v35 .an-strip,
+  .v35 .cn-strip,
+  .v35 .card-strip:not(.card-strip--grid) {
+    display: grid;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr));
+    grid-auto-columns: auto;
+    grid-template-rows: none;
+    gap: 26px 18px;
+    overflow: visible;
+    scroll-snap-type: none;
+    padding-bottom: 0;
+  }
+  .v35 #homeSections .card-strip--covers {
+    gap: 26px 18px;
+  }
+  .v35 .an-strip > *,
+  .v35 .cn-strip > *,
+  .v35 .card-strip > * {
+    width: auto;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .an-card,
+  .v35 .cn-poster {
+    width: auto;
+  }
+  .v35 .an-card-title {
+    font-size: 13.5px;
+  }
+  .v35 .an-card-meta {
+    font-size: 12px;
+  }
+
+  /* بطاقات الأغلفة (أنمي/سينما/مانجا): الأعمدة من عرض القسم */
+  @container (max-width: 859px) { .v35 :where(.an-strip, .cn-strip, .card-strip--covers, .card-strip:not([class*='--'])) { --cols: 4; } }
+  @container (min-width: 860px) and (max-width: 1139px) { .v35 :where(.an-strip, .cn-strip, .card-strip--covers, .card-strip:not([class*='--'])) { --cols: 5; } }
+  @container (min-width: 1140px) and (max-width: 1419px) { .v35 :where(.an-strip, .cn-strip, .card-strip--covers, .card-strip:not([class*='--'])) { --cols: 6; } }
+  @container (min-width: 1420px) and (max-width: 1699px) { .v35 :where(.an-strip, .cn-strip, .card-strip--covers, .card-strip:not([class*='--'])) { --cols: 7; } }
+  @container (min-width: 1700px) { .v35 :where(.an-strip, .cn-strip, .card-strip--covers, .card-strip:not([class*='--'])) { --cols: 8; } }
+
+  /* الرئيسية فقط: صفّان، والباقي خلف «الكل» */
+  @container (max-width: 859px) { .v35 :is(.an-home .an-rail:not(.an-rail--top) > .an-strip:not(.an-air-strip), .cn-home .cn-strip, #homeSections .card-strip--covers) > :nth-child(n + 9) { display: none; } }
+  @container (min-width: 860px) and (max-width: 1139px) { .v35 :is(.an-home .an-rail:not(.an-rail--top) > .an-strip:not(.an-air-strip), .cn-home .cn-strip, #homeSections .card-strip--covers) > :nth-child(n + 11) { display: none; } }
+  @container (min-width: 1140px) and (max-width: 1419px) { .v35 :is(.an-home .an-rail:not(.an-rail--top) > .an-strip:not(.an-air-strip), .cn-home .cn-strip, #homeSections .card-strip--covers) > :nth-child(n + 13) { display: none; } }
+  @container (min-width: 1420px) and (max-width: 1699px) { .v35 :is(.an-home .an-rail:not(.an-rail--top) > .an-strip:not(.an-air-strip), .cn-home .cn-strip, #homeSections .card-strip--covers) > :nth-child(n + 15) { display: none; } }
+  @container (min-width: 1700px) { .v35 :is(.an-home .an-rail:not(.an-rail--top) > .an-strip:not(.an-air-strip), .cn-home .cn-strip, #homeSections .card-strip--covers) > :nth-child(n + 17) { display: none; } }
+
+  /* ── Top 10: الأرقام الكبيرة تبقى؛ صفّان من خمسة = العشرة كاملة بلا لف ── */
+  .v35 .an-rail--top .an-strip {
+    --cols: 5;
+    gap: 22px 10px;
+    padding-top: 6px;
+  }
+  @container (max-width: 859px) { .v35 .an-rail--top .an-strip { --cols: 4; } }
+  .v35 .an-card--ranked {
+    width: auto;
+  }
+  .v35 .an-card--ranked .an-ranked-row {
+    height: auto;
+    align-items: flex-end;
+  }
+  .v35 .an-card--ranked .an-poster {
+    flex: 1 1 auto;
+    width: auto;
+    height: auto;
+    aspect-ratio: 2 / 3;
+    min-width: 0;
+  }
+  /* حصة الرقم كما في البطاقة الأصلية (54 من 160 ≈ 34%) حتى لا يدخل «10» في البوستر */
+  .v35 .an-card--ranked .an-rank {
+    flex: none;
+    width: 36%;
+    font-size: clamp(88px, 8cqi, 132px);
+  }
+
+  /* ── جدول البث: البطاقات العريضة بشبكة، صفّان ── */
+  .v35 .an-air-strip {
+    --cols: 4;
+    gap: 22px 16px;
+  }
+  @container (max-width: 999px) { .v35 .an-air-strip { --cols: 3; } .v35 .an-home .an-air-strip > :nth-child(n + 7) { display: none; } }
+  @container (min-width: 1000px) and (max-width: 1399px) { .v35 .an-home .an-air-strip > :nth-child(n + 9) { display: none; } }
+  @container (min-width: 1400px) { .v35 .an-air-strip { --cols: 5; } .v35 .an-home .an-air-strip > :nth-child(n + 11) { display: none; } }
+  .v35 .an-air-strip .an-slot {
+    width: auto;
+  }
+
+  /* ── الأنواع: البلاط نفسه بإيقاع أعمدة الأغلفة؛ صفّان متزنان في الرئيسية و«الكل» للبقية ── */
+  .v35 .ag-strip {
+    --cols: 5;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    grid-template-rows: none;
+    grid-auto-rows: 76px;
+    grid-auto-columns: auto;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .ag-strip > * {
+    scroll-snap-align: none;
+  }
+  @container (max-width: 859px) { .v35 .ag-strip { --cols: 4; } .v35 .an-home .ag-strip > :nth-child(n + 9) { display: none; } }
+  @container (min-width: 860px) and (max-width: 1139px) { .v35 .an-home .ag-strip > :nth-child(n + 11) { display: none; } }
+  @container (min-width: 1140px) and (max-width: 1419px) { .v35 .ag-strip { --cols: 6; } .v35 .an-home .ag-strip > :nth-child(n + 13) { display: none; } }
+  @container (min-width: 1420px) and (max-width: 1699px) { .v35 .ag-strip { --cols: 7; } .v35 .an-home .ag-strip > :nth-child(n + 15) { display: none; } }
+  @container (min-width: 1700px) { .v35 .ag-strip { --cols: 8; } .v35 .an-home .ag-strip > :nth-child(n + 17) { display: none; } }
+
+  /* ── القوائم المرتّبة (IMDb في السينما، الرائج في المانجا): أعمدة متجاورة كل منها ثلاثة صفوف ── */
+  .v35 .cn-chart-grid,
+  .v35 .card-strip--chart {
+    --cols: 3;
+    grid-auto-flow: column;
+    grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    grid-template-rows: repeat(3, auto);
+    grid-auto-columns: minmax(0, 1fr);
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .cn-chart-grid {
+    gap: 14px 28px;
+  }
+  .v35 .card-strip--chart {
+    gap: 0 28px;
+  }
+  @container (max-width: 999px) { .v35 :is(.cn-chart-grid, .card-strip--chart) { --cols: 2; } .v35 :is(.cn-chart-grid, .card-strip--chart) > :nth-child(n + 7) { display: none; } }
+  @container (min-width: 1000px) and (max-width: 1449px) { .v35 :is(.cn-chart-grid, .card-strip--chart) > :nth-child(n + 10) { display: none; } }
+  @container (min-width: 1450px) { .v35 :is(.cn-chart-grid, .card-strip--chart) { --cols: 4; } .v35 :is(.cn-chart-grid, .card-strip--chart) > :nth-child(n + 13) { display: none; } }
+
+  /* ── «آخر المشاهدات» في المانجا: البطاقة العريضة نفسها، صفّان ── */
+  .v35 .card-strip--resume {
+    --cols: 3;
+    gap: 14px 16px;
+  }
+  @container (max-width: 999px) { .v35 .card-strip--resume { --cols: 2; } .v35 .card-strip--resume > :nth-child(n + 5) { display: none; } }
+  @container (min-width: 1000px) and (max-width: 1399px) { .v35 .card-strip--resume > :nth-child(n + 7) { display: none; } }
+  @container (min-width: 1400px) { .v35 .card-strip--resume { --cols: 4; } .v35 .card-strip--resume > :nth-child(n + 9) { display: none; } }
+
+  /* ── الماوس ولوحة المفاتيح: رفع هادئ للغلاف وإطار تركيز واضح، بلا مؤثرات استعراضية ── */
+  .v35 :is(.an-card, .cn-poster) :is(.an-poster, .cn-img) {
+    transition: transform var(--dur, 0.18s) var(--ease-out, ease), box-shadow var(--dur, 0.18s) var(--ease-out, ease);
+  }
+  .v35 :is(.an-card, .cn-poster):hover :is(.an-poster, .cn-img) {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.85);
+  }
+  .v35 :is(.an-card, .cn-poster, .an-slot, .ag-card, .cn-chart-row, .work-card):focus-visible {
+    outline: 2px solid var(--accent-text, #bba2ff);
+    outline-offset: 4px;
+    border-radius: 12px;
+  }
+}
+
+/* شاشات عريضة جدًا (4K بتكبير 100%، أو شاشات عريضة): مساحة أكبر بضابط، لا تمدد بلا حد */
+@media (min-width: 2200px) and (hover: hover) and (pointer: fine) {
+  .v35 {
+    --wide-max: 1880px;
+  }
+}
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .v35 :is(.an-card, .cn-poster):hover :is(.an-poster, .cn-img) {
+    transform: none;
+  }
+}
+
+/* V7: جدول البث صار «تشكيلة» أغلفة داخل بطل الرئيسية (11 غلافًا 124px = 1636px في 1118px). على الكمبيوتر
+ * صف واحد يتسع لها كلها بلا تمرير: كل غلاف يأخذ نصيبه من العرض حتى 124px، بنسبته كاملة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* قيس (بلاغ المالك 14 نوفمبر، 1366): 18 حلقة في صف واحد = ~60px للغلاف، والأوقات و«بعد 47 دقيقة» تتداخل. الآن
+   * شبكة بأعمدة من العرض الفعلي، الغلاف 108px على الأقل، والزائد ينزل صفًا ثانيًا (لا تمرير أفقي: قانون الكمبيوتر). */
+  .v35 .ah-lineup {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    grid-auto-flow: row;
+    gap: 18px 14px;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .ah-lineup > .ah-cover {
+    width: auto;
+    min-width: 0;
+    max-width: 150px;
+    flex: none;
+  }
+  .v35 .ah-lineup > .ah-cover > b { white-space: nowrap; font-size: 14px; }
+  .v35 .ah-lineup .ah-cover-st { overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+}
+
+/* ═══ أبطال الرئيسيات بأسلوب منصات البث (نفس قاعدة صفحات العمل في desktop-work.css) ═══
+ * قيس قبل (1366×768، الشريط مفتوح): بطل الأنمي 1118×538 بتركيز الوسط = 85% من الصورة (16:9).
+ * بنر رئيسية السينما يبقى كما اعتمده المالك (21:9 من cinema.css وأول صف ظاهر تحته): لا يُمس هنا.
+ * هنا: بعرض الصفحة، بلا ضباب ولا أشرطة، الإطار بنسبة الصورة (16:9) والصورة مثبتة من أعلاها (الوجوه
+ * والعناوين لا تُقص)، والسقف = الشاشة ناقص سطر المعلومات تحت البطل؛ ما يُقص إن بلغ السقف من الأسفل الذي
+ * يذوب في الصفحة أصلًا. الشعار وزر التشغيل يبقيان في الشاشة الأولى.
+ * غلاف بلا صورة عريضة في الأنمي (ah-art-layer--poster) يبقى كما هو: ضوء ألوان الغلاف هوية APK لتلك الحالة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* width صريح: بدونه ينتقل max-height عبر aspect-ratio إلى العرض فيضيق البطل ويترك شريطًا أسود (قيس: 1099 من 1290) */
+  .v35 .ah-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: max(420px, calc(100svh - 150px));
+  }
+  .v35 .ah-art-img {
+    object-position: center top;
+  }
+  /* البطل بعرض المحتوى كاملًا لا بعرض العمود: wide.css يحد كل ما في الصفحة بـ--wide-max (1640) فبقي حول
+   * البطل شريطان داكنان حين يتسع المحتوى (قيس: 1920 بالشريط المقفل، محتوى 1844 والبطل 1640). هنا البطل وحده
+   * يمتد، وكل ما سواه (الأقسام، التشكيلة، سطر المعلومات) على حواف العمود نفسها كما كان. */
+  .v35 #home:not(#detail):not(#anime):not(#cinema) > #animeHome {
+    max-width: none;
+  }
+  .v35 .an-home > :not(.ah-hero),
+  .v35 .ah-hero > .ah-lineup {
+    width: min(100%, var(--wide-max));
+    margin-inline: auto;
+    box-sizing: border-box;
+  }
+  .v35 .ah-body {
+    right: max(0px, calc((100% - var(--wide-max)) / 2));
+  }
+  /* رئيسية المانجا بلا رائج بعد (أول تشغيل أو AniList متعثر): مسرح فارغ 120px فوق «VANTARA» كان فراغًا
+   * بلا محتوى أعلى الشاشة. على الكمبيوتر العنوان وحده، والمسرح يظهر حين تصل الأغلفة. */
+  .v35 #mangaHome .mg-hero--empty .mg-stage {
+    height: 0;
+  }
+}
+
+/* ═══ «المجلس» على الكمبيوتر: عمود محادثة مقروء (15 نوفمبر) ═══
+ * المحادثة ورقة بعرض النافذة: الرسائل على طرفي 1366px وحقل الكتابة 1250px. عمود 920px في الوسط كتطبيقات
+ * المحادثة على الكمبيوتر؛ الرأس بعرض النافذة كما هو. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .mc .mc-list,
+  .v35 .mc .mc-bar {
+    width: 100%;
+    max-width: 920px;
+    margin-inline: auto;
+  }
+}
+
+/* ═══ رئيسية «المحتوى الموحد» على الكمبيوتر: لا لف أفقي (قانون الكمبيوتر، بند 1) ═══
+ * قيس في جولة الصفحات (15 نوفمبر): «جدول البث» 18 بطاقة (1118→5538px) و«الأنمي/المانجا الرائجة» و«مسلسلات»
+ * و«أفلام» 12 غلافًا (1118→2034px) شرائط أفقية بعجلة عمودية. الشبكة نفسها التي في رئيسيات الأقسام: أعمدة من
+ * عرض القسم، صفّان في الرئيسية، والباقي خلف «الكل». */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .uv-sec:has(> .uv-rail) { container-type: inline-size; }
+  .v35 .uv-sec > .uv-rail {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+    gap: 26px 18px;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .uv-sec > .uv-rail > * { width: auto; min-width: 0; scroll-snap-align: none; }
+  .v35 .uv-sec > .uv-rail .uv-art { width: 100%; height: auto; aspect-ratio: 2 / 3; }
+  @container (max-width: 859px) { .v35 .uv-sec > .uv-rail { --cols: 4; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 9) { display: none; } }
+  @container (min-width: 860px) and (max-width: 1139px) { .v35 .uv-sec > .uv-rail { --cols: 5; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 11) { display: none; } }
+  @container (min-width: 1140px) and (max-width: 1419px) { .v35 .uv-sec > .uv-rail { --cols: 6; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 13) { display: none; } }
+  @container (min-width: 1420px) { .v35 .uv-sec > .uv-rail { --cols: 7; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 15) { display: none; } }
+  /* جدول البث: بطاقات عريضة 16:9، أربعة أعمدة (خمسة في الأعرض)، صفّان */
+  .v35 .uv-sec > .uv-air-strip { --cols: 4; gap: 22px 16px; }
+  .v35 .uv-sec > .uv-air-strip > :nth-child(n + 9) { display: none; }
+  @container (min-width: 1420px) { .v35 .uv-sec > .uv-air-strip { --cols: 5; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 9) { display: grid; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 11) { display: none; } }
+  .v35 .uv-air-days { flex-wrap: wrap; overflow: visible; }
+}
+
+/* ═══ الملف الشخصي: «أفضل 5» بعرض الصفحة (15 نوفمبر) ═══
+ * محصور في 600px بجهة البداية: نصف الشاشة الأيسر فارغ (~520px) بجانبه. الاختيار الأول والأربعة الباقية في صف
+ * واحد، والبطاقات نفسها. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .pf-top5 {
+    max-width: none;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    column-gap: 18px;
+    align-items: stretch;
+  }
+  .v35 .pf-top5 > .pf-first-slot { grid-column: 1; grid-row: 1; }
+  .v35 .pf-top5 > .pf-rest { grid-column: 2; grid-row: 1; margin-top: 0; }
+  .v35 .pf-top5 > .pf-first-slot,
+  .v35 .pf-top5 > .pf-first-slot > .pf-first { height: 100%; }
+}
+
+/* ═══ مدير الإضافات على الكمبيوتر: عمودان بدل صف بعرض 928px (15 نوفمبر) ═══
+ * كل إضافة صف: الاسم في طرف والأزرار في الطرف الآخر وبينهما ~750px فارغة. أعمدة من العرض (عمودان في 1366)،
+ * والعناوين وأدوات الفلترة بعرض القائمة. تخطيط فقط؛ محرك الإضافات وسلوكه كما هما. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .addon-v7 .v7-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    column-gap: 28px;
+    align-items: start;
+  }
+  .v35 .addon-v7 .v7-list > :not(.v7-row) { grid-column: 1 / -1; }
+}
+
+/* «تابع المشاهدة» في الأنمي على الكمبيوتر (بلاغ المالك 14 نوفمبر: الغلاف طويل ومتداخل والبطاقات صغيرة). قيس (1366):
+ * 6 أعمدة بعرض ~195px والغلاف 52px يصعد −36px فوق الصورة فيغطي الاسم. هنا: بطاقات أعرض (4 أعمدة في 1366، 6 في 1920)،
+ * والغلاف الصغير بجانب الاسم في سطر مرتب تحت الصورة بلا تراكب، وشريط التقدم بعرض البطاقة. الجوال كما هو. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .ah-cw-rail .an-strip { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 24px 18px; }
+  .v35 .ah-cw-bar { margin-inline-start: 0; margin-top: 10px; height: 3px; }
+  .v35 .ah-cw-row { margin-top: 10px; align-items: center; gap: 12px; }
+  .v35 .ah-cw-poster { flex: 0 0 40px; width: 40px; margin-top: 0; box-shadow: var(--card-ring); }
+  .v35 .ah-cw-info { padding-top: 0; }
+  .v35 .ah-cw-name > b { font-size: 15px; text-align: right; }
+  .v35 .ah-cw-meta { font-size: 12.5px; margin-top: 2px; }
+  .v35 .ah-cw-play { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+}

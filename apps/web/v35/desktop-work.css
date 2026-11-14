@@ -1,0 +1,1016 @@
+/*
+ * قانون الكمبيوتر لصفحات العمل: لا لف أفقي لتصفح المجموعات.
+ *
+ * النطاق: شاشة ≥1024 بمؤشر دقيق وhover (ويندوز والمتصفح بالفأرة). الجوال والتابلت باللمس (وAPK) يبقون
+ * على السحب الذي صُمم لهم؛ هذا الملف لا يغيّر عليهم سطرًا.
+ *
+ * قيس قبل التعديل على 1366×768 (V7): «إذا عجبك هذا» شريط أفقي في الأنماط الخمسة (12 عملًا، 2060px في
+ * عرض 626–1086px)، و«الشخصيات» في المحور، و«الحلقات» و«من نفس العالم» في البطاقة الطائرة. الشرائط كانت
+ * مقصودة («شريط أفقي بمقاس ثابت في كل الأنماط والأجهزة» في anime.css) وتسحب بالفأرة؛ على الكمبيوتر
+ * العجلة عمودية، فتصير شبكات بأعمدة من العرض الفعلي (auto-fill) تملأ عمود النمط أيًّا كان عرضه.
+ *
+ * هوية كل نمط باقية: ميلان «من نفس العالم» وإطار «أنت هنا»، والحلقة الحالية مرفوعة بإطار اللون،
+ * ووجوه الشخصيات المستديرة. الذي يتغير الاتجاه والمقاس فقط.
+ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── البنر بنسبة صورته، بلا قص ولا أشرطة ──
+   * السبب الجذري: التصميم يقصد «البنر لا يُقص: نسبة الصورة نفسها» (anime.css)، لكن الحد max-height: 55svh
+   * (و58svh الثابت في المنصة/البطاقة/الحلقة) يقصّر الارتفاع والعرض باقٍ، فتنكسر النسبة: على 1366×768 صار
+   * البنر 1118×445 (2.5:1) وخلفيات 16:9 يقصّها cover ثلثها، وإطار «شاشة السينما» 990×422 (2.35:1) فظهرت
+   * أشرطة جانبية حول الصورة. القص كان يتبع ارتفاع النافذة، لذلك يختلف من جهاز لآخر.
+   * هنا: الأنماط بعرض الصفحة تأخذ نسبة الصورة بحد 80% من النافذة (لا 55%)، ومركز الصورة أعلى قليلًا حتى لا
+   * تنقص الوجوه إن بلغ الحد؛ و«شاشة السينما» عرضها من ارتفاعها × نسبة الصورة فيطابق الإطار الصورة دائمًا. */
+  /* أسلوب منصات البث على التلفزيون: البنر بعرض الصفحة بلا ضباب ولا أشرطة، نقطة التركيز أعلى الصورة (الوجوه
+   * لا تُقص)، وما يُقص إن لزم من الأسفل الذي يتلاشى في الصفحة أصلًا. الارتفاع = نسبة الصورة بحد «الشاشة
+   * ناقص سطر المعلومات»، فالبنر والغلاف والشعار وزر التشغيل في الشاشة الأولى على كل مقاس. */
+  .v35 .aw:not([data-style='screen']):not([data-unified]) .aw-hero {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: max(380px, calc(100svh - 260px)) !important;
+    aspect-ratio: var(--aw-ratio, 16 / 9) !important;
+  }
+  .v35 .aw:not([data-style='screen']):not([data-unified]) .aw-hero .aw-bg-img:not(.aw-bg-img--poster) {
+    object-fit: cover !important;
+    object-position: center 12% !important;
+  }
+  /* «الحلقة أولًا»: زر التشغيل داخل البنر نفسه، فيأخذ الشاشة إلا شريطًا صغيرًا */
+  .v35 .aw[data-style='episode'] .aw-hero {
+    max-height: max(420px, calc(100svh - 120px)) !important;
+  }
+  .v35 .aw[data-style='screen'] .aw-hero {
+    width: min(1180px, calc(100% - 128px), calc(66svh * var(--aw-ratio, 16 / 9))) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    aspect-ratio: var(--aw-ratio, 16 / 9) !important;
+    margin-inline: auto !important;
+  }
+
+  /* ── «إذا عجبك هذا» في الأنماط الأربعة (wl) ── */
+  .v35 .wl .wl-recs {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    margin-inline: 0;
+    padding: 0;
+    overflow: visible;
+    scroll-snap-type: none;
+    cursor: auto;
+  }
+  .v35 .wl .wl-recs .rc {
+    flex: none !important;
+    width: auto !important;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .wl .wl-recs .rc img {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 2 / 3 !important;
+    object-fit: cover;
+  }
+  .v35 .wl .wl-recs .rc b {
+    font-size: 13px;
+  }
+  .v35 .wl .wl-recs .rc span {
+    font-size: 12px;
+  }
+
+  /* ── حلقات «البطاقة الطائرة»: نفس البطاقة، والحالية مرفوعة بإطار اللون، بشبكة بدل شريط ── */
+  .v35 .wl-card .wl-strip {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 30px 18px;
+    padding: 22px var(--wl-g) 8px !important;
+    overflow: visible;
+    scroll-snap-type: none !important;
+    align-items: start !important;
+    cursor: auto;
+  }
+  .v35 .wl-card .sp,
+  .v35 .wl-card .sp.cur {
+    flex: none !important;
+    width: auto;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .wl-card .sp.cur {
+    transform: translateY(-8px);
+  }
+
+  /* ── «من نفس العالم» في البطاقة الطائرة: الميلان و«أنت هنا» كما هما؛ الوصلات بين البطاقات للشريط فقط ── */
+  .v35 .wl-card .wl-world {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 28px 16px;
+    justify-items: center;
+    margin-inline: 0;
+    padding: 10px 0 4px;
+    overflow: visible;
+    cursor: auto;
+  }
+  .v35 .wl-card .wl-world .wl-dash {
+    display: none !important;
+  }
+  .v35 .wl-card .wn {
+    flex: none !important;
+    width: 100% !important;
+    min-width: 0;
+  }
+  .v35 .wl-card .wn img,
+  .v35 .wl-card .wn.here img {
+    width: min(100%, 150px) !important;
+    height: auto !important;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+  }
+
+  /* ── الشخصيات الطويلة في البطاقة الطائرة ── */
+  .v35 .wl-card .wl-tall {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 14px;
+    overflow: visible;
+  }
+  .v35 .wl-card .wl-tall .ch {
+    flex: none;
+    width: auto;
+  }
+
+  /* ── «المحور»: الشخصيات وجوه مستديرة بشبكة، و«إذا عجبك هذا» أغلفة بشبكة ── */
+  .v35 .aw .an-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    overflow: visible;
+    scroll-snap-type: none;
+    padding-bottom: 0;
+  }
+  .v35 .aw .an-strip > * {
+    width: auto;
+    min-width: 0;
+    scroll-snap-align: none;
+  }
+  .v35 .aw .an-strip.aw-cast-strip {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 20px 12px;
+  }
+  .v35 .aw .aw-cast-strip .aw-person {
+    width: auto;
+  }
+  .v35 .aw .an-strip .an-card {
+    width: auto;
+  }
+}
+
+/* ═══ المانجا «كلاسيكي» على الكمبيوتر: صفحة Stable كما كانت (wide.css في main) ═══
+ * تراجع ثبت بالقياس: V7 نسخ core.css وmanga.css للنمط ولم ينسخ قواعد wide.css، وسقط استدعاء side-dock.js،
+ * فصار الغلاف 477px (نصف الصفحة) والاسم في زاوية وما حولهما فارغ. هنا عمودان كما في Stable: عمود يلتصق
+ * بالشاشة (الغلاف، اقرأ، مكتبتي/لاحقًا/مع أصدقائك، التقدم) وعمود رئيسي (الاسم، المصادر، القصة، الفصول). */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='page'] {
+    --side: 300px;
+    --side-gap: 48px;
+    max-width: 1440px;
+    margin-inline: auto;
+    padding: 0 var(--gutter) 56px;
+  }
+  .v35 #detail[data-look='page'].page.active {
+    display: flow-root;
+  }
+  .v35 #detail[data-look='page'] .detail-top,
+  .v35 #detail[data-look='page'] > .aw-bar {
+    margin-inline: calc(var(--gutter) * -1);
+  }
+  .v35 #detail[data-look='page'] .detail-head {
+    display: contents;
+  }
+  .v35 #detail[data-look='page'] .detail-side {
+    float: right;
+    width: var(--side);
+    position: sticky;
+    top: 72px;
+    margin-top: 12px;
+    padding-bottom: 24px;
+  }
+  .v35 #detail[data-look='page'] .detail-side > * {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+  /* الغلاف كامل بنسبته، ولا يدفع الأزرار خارج الشاشة القصيرة */
+  .v35 #detail[data-look='page'] .detail-cover {
+    width: min(100%, calc((100svh - 330px) * 0.7));
+    height: auto;
+    margin-inline: auto;
+  }
+  .v35 #detail[data-look='page'] .detail-cover img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: auto;
+    object-fit: contain;
+  }
+  .v35 #detail[data-look='page'] .detail-cta {
+    padding-top: 18px;
+  }
+  .v35 #detail[data-look='page'] .read-cta {
+    min-height: 56px;
+    border-radius: 10px;
+  }
+  .v35 #detail[data-look='page'] .detail-quick {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 12px;
+  }
+  .v35 #detail[data-look='page'] .quick-btn:hover {
+    background: var(--surface-1);
+  }
+  .v35 #detail[data-look='page'] .detail-progress {
+    margin-top: 16px;
+  }
+  .v35 #detail[data-look='page'] :is(.detail-meta, .source-switch, .work-insights, .block) {
+    margin-left: 0;
+    margin-right: calc(var(--side) + var(--side-gap));
+    padding-left: 0;
+    padding-right: 0;
+    width: auto;
+  }
+  .v35 #detail[data-look='page'] .detail-meta {
+    margin-top: 12px;
+    padding: 0 0 22px;
+    border-bottom: 1px solid var(--line);
+    gap: 10px;
+    height: auto;
+  }
+  .v35 #detail[data-look='page'] .detail-meta h1 {
+    font-size: 44px;
+    line-height: 1.12;
+    letter-spacing: -0.5px;
+  }
+  .v35 #detail[data-look='page'] .detail-meta .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .v35 #detail[data-look='page'] .source-switch {
+    padding-top: 18px;
+  }
+  .v35 #detail[data-look='page'] .source-row {
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+  }
+  .v35 #detail[data-look='page'] #summaryBlock {
+    margin-top: 26px;
+  }
+  .v35 #detail[data-look='page'] .summary {
+    font-size: 15.5px;
+    line-height: 1.85;
+    max-width: 75ch;
+  }
+  .v35 #detail[data-look='page'] .chapter-row:hover {
+    background: var(--surface-1);
+  }
+  /* الشريط الجانبي مطوي: المساحة تكفي، فالفصول عمودان */
+  .v35.rail-collapsed #detail[data-look='page'] .chapter-list {
+    column-count: 2;
+    column-gap: 48px;
+    column-rule: 1px solid var(--line);
+  }
+  .v35.rail-collapsed #detail[data-look='page'] .chapter-row {
+    break-inside: avoid;
+  }
+}
+@media (min-width: 1440px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='page'] {
+    --side: 340px;
+    --side-gap: 64px;
+  }
+}
+
+/* ═══ «ويبتوني» على الكمبيوتر: «ألواح الكوميكس» (تصميم مكتبي مستقل، لا تركيب «الموحد») ═══
+ * الهوية من الجوال: الفن طوليًا كاملًا، والاسم والتقييم والتصنيفات الزجاجية فوق أسفله، وإيقاع الإصدار،
+ * والفصول خط زمني بالشهور.
+ * الكمبيوتر: البطل بعرض الصفحة ثلاثة ألواح كصفحة ويبتون: الأوسط الغلاف كاملًا بلا قص (القطعة الرئيسية)،
+ * والجانبيان لقطتان مكبّرتان من الفن نفسه (object-view-box) بإضاءة أخفت تذوبان في الصفحة. الاسم وما معه في
+ * المنتصف فوق أسفل الألواح، ثم القراءة، ثم الخط الزمني بعمود فقري في المنتصف والفصول على جانبيه.
+ * العمق (depth.js DESKTOP_DEPTH_SPECS): كل لوح بسرعة، كأنك تنزل في الصفحة. الجوال لا يتغير. */
+.v35 #detail .wt-panels {
+  display: none;
+}
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='webtoon']:not([data-unified]) {
+    --wt-h: clamp(460px, calc(100svh - 270px), 880px);
+    --wt-gap: 14px;
+    padding: 0 0 72px;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-rows: var(--wt-h) auto;
+    column-gap: var(--wt-gap);
+    padding: 64px var(--gutter) 0;
+    overflow: visible;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-stage::after {
+    display: none;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-panels {
+    display: contents;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-p {
+    grid-row: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    border-radius: 18px;
+    object-fit: cover;
+    filter: brightness(0.58) saturate(1.08);
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    /* اللوح يذوب في الصفحة من أسفله وحافته الخارجية: النافذة تملك التلاشي */
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-p[src] {
+    opacity: 1;
+  }
+  /* لقطتان مختلفتان من الفن: أعلاه (الوجه غالبًا) وأوسطه */
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-p:first-child {
+    grid-column: 1;
+    object-view-box: inset(4% 22% 46% 8%);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-p:last-child {
+    grid-column: 3;
+    object-view-box: inset(34% 6% 16% 30%);
+  }
+  /* الغلاف: كاملًا بنسبته بارتفاع الألواح */
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-lift {
+    grid-column: 2;
+    grid-row: 1;
+    height: var(--wt-h);
+    z-index: 1;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-stage .mw-cover {
+    width: auto;
+    height: 100%;
+    max-height: none;
+    aspect-ratio: var(--art-ratio, 2 / 3);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 40px 80px -30px #000;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-stage .mw-cover::after {
+    background: linear-gradient(180deg, transparent 52%, rgba(8, 7, 12, 0.62) 76%, var(--bg));
+  }
+  /* الهوية في المنتصف فوق أسفل الألواح، كما فوق أسفل الفن على الجوال */
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-center {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    position: relative;
+    z-index: 2;
+    margin: -84px auto 0;
+    padding: 0;
+    max-width: 760px;
+    text-align: center;
+    justify-items: center;
+    gap: 12px;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-title {
+    font-size: clamp(40px, 3.6vw, 60px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-shadow: 0 8px 36px rgba(0, 0, 0, 0.7);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) :is(.mw-stats, .mw-chips, .wt-beat) {
+    justify-content: center;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-stats {
+    font-size: 15px;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-beat[data-off] {
+    display: none;
+  }
+  /* القراءة في المنتصف بعرض مريح */
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-acts {
+    max-width: 560px;
+    margin: 22px auto 0;
+    padding-inline: 0;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-tabbed {
+    max-width: 1180px;
+    margin: 30px auto 0;
+    padding-inline: var(--gutter);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-tabs {
+    justify-content: center;
+    position: sticky;
+    top: 56px;
+    z-index: 4;
+    background: var(--bg);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) :is(.mw-tab, .mw-tabs) {
+    padding-inline: 0;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-find {
+    max-width: 560px;
+    margin-inline: auto;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) :is(.mw-src-row, .mw-shead) {
+    justify-content: center;
+  }
+
+  /* الخط الزمني: العمود الفقري في المنتصف، الشهر محطة عليه، والفصول على جانبيه */
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-chs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 88px;
+    row-gap: 6px;
+    padding-inline-start: 0;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-chs::before {
+    inset-inline-start: calc(50% - 1px);
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-month {
+    grid-column: 1 / -1;
+    position: sticky;
+    top: 104px;
+    z-index: 3;
+    justify-content: center;
+    margin: 26px 0 10px;
+    padding: 30px 0 10px;
+    background: linear-gradient(var(--bg) 80%, transparent);
+    font-size: 18px;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .wt-month::before {
+    inset-inline-start: calc(50% - 8px);
+    top: 8px;
+    margin-top: 0;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-ch {
+    border-radius: 14px;
+    padding: 6px 10px;
+    background: color-mix(in srgb, var(--surface-1) 55%, transparent);
+    transition: background-color 0.16s ease, transform 0.16s ease;
+  }
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-ch:hover {
+    background: var(--surface-2, var(--surface-1));
+    transform: translateY(-1px);
+  }
+}
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .v35 #detail[data-look='webtoon']:not([data-unified]) .mw-ch:hover {
+    transform: none;
+  }
+}
+
+/* ═══ أنماط صفحة عمل السينما الخمسة: «البطولة» و«قد يعجبك» شبكات بدل شرائط ═══
+ * قيس على 1366: البطولة 10 وجوه (946px في 660px) و«قد يعجبك» 14 ملصقًا (2310px في 760px) في الأنماط الخمسة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail .cn-cast-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 20px 12px;
+    margin-inline: 0;
+    padding-inline: 0;
+    overflow: visible;
+  }
+  .v35 .cn-detail .cn-person {
+    flex: none;
+    width: auto;
+    min-width: 0;
+  }
+  .v35 .cn-detail .cn-face {
+    width: 76px;
+    height: 76px;
+  }
+  .v35 .cn-detail .cn-similar .cn-rail {
+    margin-inline: 0;
+  }
+  .v35 .cn-detail .cn-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 26px 16px;
+    padding-inline: 0;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .cn-detail .cn-strip > .cn-poster {
+    width: auto;
+    min-width: 0;
+    flex: none;
+  }
+}
+
+/* ═══ صفحة عمل السينما: الصفحة غنية بلا فراغ (بند 4) ═══
+ * wide.css يحصر كل ما في الجسم بعرض 580px (منطقي للشعار والزر فوق الصورة كمنصات البث)، لكنه حصر معه
+ * القصة والبطولة والطاقم والحلقات، فبقي نصف الصفحة فارغًا بجانبها على الكمبيوتر. الشعار والمعلومات والزر
+ * باقية 580px فوق الصورة؛ القصة بعرض مقروء، والبطولة والطاقم والحلقات بعرض الصفحة. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail-body > :is(.cn-cast, .cn-credits, .cn-episodes, .cn-seasons) {
+    max-width: none;
+  }
+  .v35 .cn-detail-body > .cn-about {
+    max-width: 760px;
+    margin-inline: 0;
+    text-align: start;
+  }
+  .v35 .cn-detail-body > .cn-credits {
+    grid-template-columns: repeat(auto-fill, minmax(110px, max-content) minmax(220px, 1fr));
+    column-gap: 18px;
+  }
+}
+
+/* ═══ السينما: البنر بأسلوب منصات البث، والجسم بعرض مريح، و«العرض الأول» بتركيب كمبيوتر ═══ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* البنر: نسبة الصورة (16:9 لخلفيات TMDB) بحد «الشاشة ناقص سطر المعلومات»، والتركيز أعلى الصورة.
+   * قيس قبل: 680px ثابتة فظهر 73% فقط على 1920 من خلفية «الأساسي». */
+  .v35 .cn-detail:not([data-style='poster']):not([data-style='series']):not([data-unified]) .cn-detail-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: max(380px, calc(100svh - 230px));
+  }
+  .v35 .cn-detail .cn-detail-art > .cn-img {
+    object-position: center top;
+  }
+  /* «الشريط العريض» هويته البنر كاملًا بلا قص (#323، قرار المالك: 16:9). cinema.css يعود ويفرض 2.39:1 على
+   * ≥700 فيقص ربع الصورة (قيس: 74%)؛ هنا 16:9 بلا سقف على الكمبيوتر. */
+  .v35 .cn-detail.cn-detail[data-style='marquee'] .cn-detail-art {
+    aspect-ratio: 16 / 9;
+    max-height: none;
+  }
+
+  /* الأنماط الوسطية كانت محصورة في 760px وسط الشاشة: الجسم 1180px، والشعار والمعلومات والزر بعرض 580 في الوسط */
+  .v35 .cn-detail:not([data-style='current']) .cn-detail-body {
+    max-width: min(1180px, 100%);
+  }
+  .v35 .cn-detail:is([data-style='poster'], [data-style='marquee'], [data-style='series']) .cn-detail-body > :is(.cn-detail-mark, .cn-facts, .cn-genre-line, .cn-btn--play, .cn-sources) {
+    max-width: 580px;
+    margin-inline: auto;
+  }
+
+  /* «العرض الأول»: الملصق في البداية، والشعار والمعلومات بجانبه، وبطاقة التشغيل في النهاية، كلها فوق أسفل الخلفية */
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-body {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr) minmax(0, 440px);
+    grid-template-areas:
+      'poster mark play'
+      'poster facts play'
+      'poster genre play'
+      'sources sources sources'
+      'about about about'
+      'episodes episodes episodes'
+      'cast cast cast'
+      'credits credits credits'
+      'similar similar similar';
+    column-gap: 40px;
+    align-items: end;
+    margin-top: -330px;
+    text-align: start;
+  }
+  .v35 .cn-detail[data-style='premiere'] .cn-look-poster { grid-area: poster; align-self: end; margin: 0; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark { grid-area: mark; justify-content: flex-start; height: auto; margin: 0; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-logo { margin-inline: 0; max-width: 100%; max-height: 110px; object-position: right bottom; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-text { text-align: start; font-size: 40px; }
+  .v35 .cn-detail[data-style='premiere'] .cn-detail-body > .cn-facts { grid-area: facts; justify-content: flex-start; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-genre-line { grid-area: genre; text-align: start; max-width: none; }
+  .v35 .cn-detail[data-style='premiere'] .cn-btn--play { grid-area: play; max-width: none; align-self: end; }
+  .v35 .cn-detail[data-style='premiere'] .cn-sources { grid-area: sources; }
+  .v35 .cn-detail[data-style='premiere'] .cn-about { grid-area: about; margin-top: 36px; }
+  /* الحلقات بلا مساحة في الشبكة كانت تقع تلقائيًا في عمود الملصق (200px: صور 60px وعناوين «A Little …») */
+  .v35 .cn-detail[data-style='premiere'] .cn-episodes { grid-area: episodes; margin-top: 40px; }
+  .v35 .cn-detail[data-style='premiere'] .cn-cast { grid-area: cast; }
+  .v35 .cn-detail[data-style='premiere'] .cn-credits { grid-area: credits; }
+  .v35 .cn-detail[data-style='premiere'] .cn-similar { grid-area: similar; }
+}
+
+/* ═══ «النمط الموحد» على الكمبيوتر: «منصة العرض» (تصميم مكتبي مستقل؛ appearance.unifiedLook) ═══
+ * الهوية من الجوال: الملصق بطلًا كاملًا بنسبته بلا قص، زر أساسي واحد، والمحتوى يصعد فوق الملصق.
+ * الكمبيوتر (قرار المالك: ليس «ملصقًا بجانب نصوص»): الملصق في مركز منصة بعرض الصفحة تحت ضوء خافت بلون
+ * القسم (لا ضباب للصورة)، وعلى جناحيه عند مستوى نظره: جناح الهوية (الشعار/الاسم، السطر، الأنواع) وجناح
+ * الفعل (الزر الأساسي وما يليه)، كلاهما يميل نحو الملصق فتصير المنصة كتلة واحدة متزنة. تحتها الألسنة
+ * والمحتوى بعرض مقروء في المنتصف. العمق (DESKTOP_DEPTH_SPECS): الملصق يتراجع والمحتوى يصعد نحوه.
+ * الأقسام الثلاثة على المنصة نفسها؛ الجوال لا يتغير. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified],
+  .v35 #detail[data-look][data-unified] {
+    --ul-poster: clamp(240px, min(26vw, calc((100svh - 190px) * 2 / 3)), 460px);
+    --ul-top: 76px;
+    --ul-wing: minmax(0, 1fr);
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--ul-wing) var(--ul-poster) var(--ul-wing);
+    /* صفّا المنصة: الأول ينتهي عند الثلث السفلي للملصق، والثاني تحته؛ السينما قبلهما صف شريطها الملتصق */
+    --ul-r1: 1;
+    --ul-r2: 2;
+    grid-template-rows: minmax(0, 1fr) auto;
+    column-gap: clamp(28px, 3.4vw, 64px);
+    row-gap: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 1760px;
+    margin-inline: auto;
+    padding: var(--ul-top) var(--gutter) 72px;
+    isolation: isolate;
+  }
+  /* #detail صفحة بنفسها (.page): display: grid أعلاه كان يغلب display: none للصفحات غير النشطة، فتبقى صفحة
+   * المانجا الموحدة فوق الإعدادات وكل صفحة بعدها (بلاغ المالك 14 نوفمبر). تُرى نشطةً أو أثناء حركتها فقط. */
+  .v35 #detail[data-look][data-unified]:not(.active):not(.page-out):not(.page-in) {
+    display: none;
+  }
+  /* ضوء المنصة: هالة بلون القسم خلف الملصق، لا نسخة مضبّبة منه */
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified]::before,
+  .v35 #detail[data-look][data-unified]::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0 0 auto;
+    height: calc(var(--ul-poster) * 1.5 + 260px);
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 46% 60% at 50% 38%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 70%),
+      linear-gradient(to bottom, transparent 70%, var(--bg));
+  }
+  .v35 .cn-detail[data-style][data-unified] {
+    --ul-r1: 2;
+    --ul-r2: 3;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    padding-top: 0;
+  }
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-bar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    margin-inline: calc(var(--gutter) * -1);
+    margin-bottom: 18px;
+  }
+  /* الهيكل يذوب: كل جزء يأخذ مكانه في المنصة مباشرة */
+  .v35 .aw[data-style][data-unified] :is(.aw-main, .aw-stage, .aw-body, .aw-below),
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-body,
+  .v35 #detail[data-look][data-unified] .mw-stage {
+    display: contents;
+  }
+  .v35 #detail[data-look][data-unified] :is(.mw-amb, .mw-stage::after) {
+    display: none;
+  }
+
+  /* ── الملصق: مركز المنصة، كاملًا بنسبته ── */
+  .v35 .aw[data-style][data-unified] > .aw-hero,
+  .v35 .cn-detail[data-style][data-unified] > .cn-detail-art,
+  .v35 #detail[data-look][data-unified] .mw-lift {
+    grid-column: 2;
+    grid-row: var(--ul-r1) / span 2;
+    position: relative;
+    width: 100%;
+    height: auto;
+    max-height: none;
+    aspect-ratio: 2 / 3;
+    margin: 0;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 50px 90px -40px #000, 0 20px 40px -24px rgba(0, 0, 0, 0.7);
+  }
+  .v35 #detail[data-look][data-unified] .mw-stage .mw-cover {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    aspect-ratio: auto;
+    border-radius: 0;
+    margin: 0;
+  }
+  .v35 :is(.aw[data-style][data-unified] .aw-hero .aw-bg-img, .cn-detail[data-style][data-unified] .cn-detail-art > .cn-img, #detail[data-look][data-unified] .mw-stage .mw-cover > img) {
+    object-fit: cover;
+    object-position: center;
+  }
+  :is(.v35 .aw[data-style][data-unified] .aw-hero, .v35 .cn-detail[data-style][data-unified] .cn-detail-art, .v35 #detail[data-look][data-unified] .mw-stage .mw-cover)::after,
+  .v35 .aw[data-style][data-unified] .aw-hero .aw-shade {
+    content: none;
+    display: none;
+  }
+
+  /* ── جناح الهوية (بداية الصفحة): يميل نحو الملصق ويستقر عند ثلثه السفلي ── */
+  .v35 .aw[data-style][data-unified] :is(.an-mark, .aw-meta, .aw-genres),
+  .v35 .cn-detail[data-style][data-unified] :is(.cn-detail-mark, .cn-facts, .cn-genre-line),
+  .v35 #detail[data-look][data-unified] .mw-center {
+    grid-column: 1;
+    justify-self: end;
+    text-align: end;
+    max-width: 520px;
+    margin: 0;
+    padding: 0;
+    width: auto;
+  }
+  .v35 .aw[data-style][data-unified] .an-mark,
+  .v35 .cn-detail[data-style][data-unified] .cn-detail-mark,
+  .v35 #detail[data-look][data-unified] .mw-center {
+    grid-row: var(--ul-r1);
+    align-self: end;
+  }
+  .v35 .aw[data-style][data-unified] .aw-meta,
+  .v35 .cn-detail[data-style][data-unified] .cn-facts {
+    grid-row: var(--ul-r2);
+    align-self: start;
+    margin-top: 14px;
+  }
+  .v35 .aw[data-style][data-unified] .aw-genres,
+  .v35 .cn-detail[data-style][data-unified] .cn-genre-line {
+    grid-row: var(--ul-r2);
+    align-self: start;
+    margin-top: 46px;
+  }
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified] :is(.an-mark, .cn-detail-mark) {
+    justify-content: flex-end;
+    height: auto;
+  }
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified] :is(.an-mark-logo, .cn-mark-logo) {
+    max-height: 140px;
+    max-width: min(100%, 460px);
+    margin-inline: 0;
+    object-position: left bottom;
+  }
+  .v35 :is(.aw, .cn-detail)[data-style][data-unified] :is(.an-mark-text, .cn-mark-text),
+  .v35 #detail[data-look][data-unified] .mw-title {
+    font-size: clamp(30px, 2.8vw, 54px);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+    letter-spacing: -0.02em;
+    text-align: end;
+  }
+  .v35 .aw[data-style][data-unified] :is(.aw-meta, .aw-genres),
+  .v35 .cn-detail[data-style][data-unified] .cn-facts,
+  .v35 #detail[data-look][data-unified] :is(.mw-stats, .mw-chips) {
+    justify-content: flex-end;
+  }
+  .v35 #detail[data-look][data-unified] .mw-center {
+    display: grid;
+    gap: 12px;
+    justify-items: end;
+  }
+
+  /* ── جناح الفعل (نهاية الصفحة): الزر الأساسي وما يليه، يميل نحو الملصق ── */
+  .v35 .aw[data-style][data-unified] :is(.aw-cta, .aw-side),
+  .v35 .cn-detail[data-style][data-unified] :is(.cn-btn--play, .cn-sources),
+  .v35 #detail[data-look][data-unified] > .mw-acts {
+    grid-column: 3;
+    justify-self: start;
+    width: min(100%, 420px);
+    max-width: 420px;
+    margin: 0;
+    padding: 0;
+  }
+  .v35 .aw[data-style][data-unified] .aw-cta,
+  .v35 .cn-detail[data-style][data-unified] .cn-btn--play,
+  .v35 #detail[data-look][data-unified] > .mw-acts {
+    grid-row: var(--ul-r1);
+    align-self: end;
+  }
+  .v35 .aw[data-style][data-unified] .aw-side,
+  .v35 .cn-detail[data-style][data-unified] .cn-sources {
+    grid-row: var(--ul-r2);
+    align-self: start;
+    margin-top: 16px;
+  }
+  .v35 .cn-detail[data-style][data-unified] .cn-btn--play {
+    min-height: 56px;
+    border-radius: 14px;
+  }
+
+  /* المانجا: زر القراءة بعرض الجناح، وزرّا المكتبة والقراءة مع الأصدقاء تحته (كانا يضغطانه في جناح ضيق) */
+  .v35 #detail[data-look][data-unified] > .mw-acts .mw-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .v35 #detail[data-look][data-unified] > .mw-acts .mw-cta {
+    order: -1;
+    flex: 1 0 100%;
+  }
+  .v35 #detail[data-look][data-unified] > .mw-acts .mw-square {
+    flex: 1 1 0;
+  }
+
+  /* ── تحت المنصة: الألسنة والمحتوى بعرض مقروء في المنتصف ── */
+  .v35 .aw[data-style][data-unified] :is(.aw-about, .work-insights, .aw-episodes, .aw-cast, .aw-info, .an-rail, .aw-below > *),
+  .v35 .cn-detail[data-style][data-unified] :is(.cn-about, .cn-cast, .cn-credits, .cn-episodes, .cn-seasons, .cn-similar, .cn-season-list),
+  .v35 #detail[data-look][data-unified] > .mw-tabbed {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    width: 100%;
+    max-width: 1180px;
+    justify-self: center;
+    margin-inline: 0;
+    padding-inline: 0;
+    text-align: start;
+  }
+  .v35 .aw[data-style][data-unified] .aw-about,
+  .v35 .cn-detail[data-style][data-unified] .cn-about,
+  .v35 #detail[data-look][data-unified] > .mw-tabbed {
+    margin-top: 56px;
+  }
+  .v35 .aw[data-style][data-unified] .aw-about,
+  .v35 .cn-detail[data-style][data-unified] .cn-about {
+    max-width: 860px;
+  }
+}
+
+/* ═══ ضبط الكمبيوتر بعد الفحص الشامل ببيانات حقيقية (14 نوفمبر) ═══
+ * المقاسات على تطبيق ويندوز صارت 1366–1600 بعرض CSS (window-zoom.cjs يكبّر الشاشات الأكبر بتناسب)، فهذا
+ * الضبط لذلك المدى، والشريط الجانبي مفتوح ومقفل. الهوية كما هي؛ المقاس والتوزيع فقط. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* «المنصة»: التشغيل كان تحت الغلاف (340×510) والمعلومات، فيقع على ~800px خارج أول شاشة 768. يتقدم فوق
+   * الغلاف في العمود الملتصق نفسه (الغلاف والتشغيل يرافقانك كما هما)، والمعلومات بعدهما. */
+  .v35 .wl-platform .wl-aside > .wl-cta { order: -1; }
+  .v35 .wl-platform .wl-facts { order: 2; }
+  /* «من نفس العالم» في المنصة: صفوف صغيرة لاصقة بجهة واحدة وبجانبها فراغ؛ صارت أعمدة من عرض المحتوى، والنقطة
+   * لكل عمل باقية (الخط الواصل للعمود الواحد فقط) */
+  .v35 .wl-platform .wl-world {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    column-gap: 40px;
+  }
+  .v35 .wl-platform .wl-world::before { content: none; }
+  /* «شاشة السينما»: بطاقات «من نفس العالم» تحمل بنر العمل العريض؛ في صف واحد بعرض 128px كان يظهر منه 15–40%.
+   * بطاقات عرضية بنسبة قريبة من البنر (4:1) كالجوال، في أعمدة من العرض */
+  .v35 .wl-screen .wl-world {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+  .v35 .wl-screen .wn {
+    height: auto;
+    aspect-ratio: 4 / 1;
+    min-height: 96px;
+  }
+  /* وجوه الشخصيات والبطولة: 66–76px كانت صغيرة في صفوف عريضة (11 وجهًا في الصف وصف ثانٍ بوجهين) */
+  .v35 .aw .an-strip.aw-cast-strip,
+  .v35 .cn-detail .cn-cast-strip {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 24px 14px;
+  }
+  .v35 .aw .aw-face { width: 92px; height: 92px; }
+  .v35 .aw .aw-person-name { font-size: 13px; }
+  .v35 .aw .aw-person-va { font-size: 11.5px; }
+  .v35 .cn-detail .cn-face { width: 92px; height: 92px; }
+  /* «المحور»: صور الحلقات 176px داخل صفوف بنصف عرض الصفحة؛ أكبر بتناسب الصف */
+  .v35 .aw[data-style='core'] .aw-main .an-er-main { grid-template-columns: clamp(176px, 40%, 240px) minmax(0, 1fr); }
+  /* الأغلفة في «إذا عجبك هذا» و«قد يعجبك» و«من نفس العالم»: حد أدنى أكبر قليلًا فلا تصير عشرة أعمدة صغيرة */
+  .v35 .wl .wl-recs,
+  .v35 .wl-card .wl-world,
+  .v35 .aw .an-strip:not(.aw-cast-strip),
+  .v35 .cn-detail .cn-strip {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  }
+  .v35 .wl-card .wn img,
+  .v35 .wl-card .wn.here img { width: min(100%, 200px) !important; }
+
+  /* السينما — المواسم في «المسلسل أولًا» شريط أفقي (flex + overflow-x): بثلاثة مواسم لا يظهر، بعشرة لف أفقي.
+   * شبكة بلقطات أكبر بدل 150px */
+  .v35 .cn-sf-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 18px 14px;
+    overflow: visible;
+    margin-inline: 0;
+    padding: 2px 0 4px;
+    scroll-snap-type: none;
+  }
+  .v35 .cn-sf-season { width: auto; min-width: 0; }
+  /* الحلقات: صف بعرض الصفحة (1038px) وصورة 132×74 ووصف بسطر طويل؛ عمودان بصور أكبر */
+  .v35 .cn-detail:not([data-unified]) .cn-eps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 32px;
+    row-gap: 8px;
+  }
+  .v35 .cn-detail .cn-ep-row { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+  .v35 .cn-detail .cn-ep-art { border-radius: 8px; }
+
+  /* صفوف أدوات تصير لفًّا أفقيًا مع البيانات الطويلة فقط (لم يُظهرها الفحص بعمل من 3 مواسم و200 فصل):
+   * نطاقات الحلقات وتبويبات المواسم (One Piece أكثر من 1100 حلقة)، ونطاقات الفصول والمصادر في المانجا
+   * (1000+ فصل)، ورقائق الأنواع. على الكمبيوتر تلتف أسطرًا بدل التمرير الأفقي. */
+  .v35 :is(.aw-episode-controls .aw-ranges, .aw-episode-controls .an-seasons, .wl-ranges, .em-seasons, #detail .mw-ranges, #detail[data-look='page'] .source-row, .cn-chips) {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 8px;
+  }
+}
+
+/* ═══ «المنصة» على الكمبيوتر — بعد المراجعة بالعين (15 نوفمبر) ═══
+ * الشخصيات خمسة أعمدة ثابتة في عمود 594px وبطاقة الوجه تحتاج ~140px: الصف 695px فخرج يسارًا خارج الصفحة
+ * (وجوه مقصوصة على الحافة). «من نفس العالم» بقيت عمودًا واحدًا (300px×2 لا تدخل 594px) ونصف العرض فارغ. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .wl-platform .wl-chars { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+  .v35 .wl-platform .wl-chars .ch { min-width: 0; }
+  .v35 .wl-platform .wl-chars :is(b, span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v35 .wl-platform .wl-world { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); column-gap: 28px; }
+}
+
+/* ═══ «المحور» على الكمبيوتر: التصميم نفسه (الغلاف في الوسط والشعار تحته)، أحجام أكبر وفراغات محسوبة ═══
+ * قرار المالك (15 نوفمبر): لا تغيير في تركيب أنماط الأنمي؛ تكبير وضبط فقط.
+ * قيس قبل: الغلاف 220px على كل المقاسات، وصور الحلقات 176px (قاعدة 40% السابقة لم تطبق: قاعدة الحاوية في
+ * anime.css أخص منها)، ولقطة التشغيل 575×323 بجانب عمود معلومات أطول منها بـ~170px فارغة تحتها.
+ * :not([data-unified]) يرفع الخصوصية فوق قاعدة الحاوية بلا !important. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .aw[data-style='core']:not([data-unified]) {
+    --cover-w: clamp(240px, 17.5vw, 300px);
+  }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-cover { width: var(--cover-w); }
+  /* البنر أقصر قليلًا (الحد العام 100svh−260) فيصعد الشعار والمعلومات إلى أول شاشة؛ الصورة من أعلاها والقص من
+   * أسفلها الذي يتلاشى أصلًا */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-hero { max-height: max(380px, calc(100svh - 330px)) !important; }
+  /* اللقطة أعرض فيقترب ارتفاعها من عمود المعلومات بجانبها */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main { grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still-play { width: 56px; height: 56px; }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still-cap b { font-size: 17px; }
+  /* الحلقات: أعمدة من العرض (عمودان في 1366، ثلاثة في الأعرض) فلا يتمدد الصف 700px وبين العنوان ودائرة
+   * «شوهدت» فراغ يصل 300px */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-list { grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); column-gap: 36px; }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-main { grid-template-columns: clamp(200px, 46%, 260px) minmax(0, 1fr); }
+}
+
+/* ═══ «البطاقة الطائرة» و«شاشة السينما» — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══
+ * «شاشة السينما»: صف الشخصيات flex بلا التفاف ووجوه 104px؛ تسعة وجوه = 1062px في عمود 990px فخرج أول وجه
+ * خارج الحافة (x=6 بدل 64). شبكة تلتف بالمقاس نفسه.
+ * «معلومات» في النمطين: القيمة كانت في طرف الخانة والعنوان في طرفها الآخر (286px بينهما). كلاهما من البداية. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .wl-screen .wl-ring {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 22px 14px;
+    justify-content: stretch;
+  }
+  .v35 .wl-screen .wl-ring .ch { min-width: 0; }
+  .v35 .wl-screen .wl-ring :is(b, span) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* القيم اللاتينية (OLM) لها dir=auto فبدايتها اليسار، وقاعدة anime.css (start) بعد هذا الملف بالخصوصية نفسها؛
+   * «div >» يرفعها، واليمين صراحة لأن الخانة عربية */
+  .v35 :is(.wl-card, .wl-screen) .wl-s-facts .wl-facts > div > :is(small, b) { text-align: right; }
+  .v35 :is(.wl-card, .wl-screen) .wl-s-facts .wl-facts b { font-size: 15px; }
+}
+
+/* ═══ «الحلقة أولًا» — بعد المراجعة بالعين (15 نوفمبر) ═══
+ * العمودان مستقلان: الجانبي (من نفس العالم + معلومات) ينتهي على ~1700px والرئيسي يمتد إلى ~4770px، فبجانب
+ * «الشخصيات» و«إذا عجبك هذا» فراغ أسود بعرض 380px وارتفاع ~3000px، والتوصيات عمودان في 498px.
+ * الآن شبكة واحدة بالعمودين نفسيهما: القصة والحلقات بجانب «من نفس العالم»، والشخصيات بجانب «معلومات»،
+ * ثم «إذا عجبك هذا» بعرض الصفحة. الأقسام والترتيب كما هي. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .wl-episode .wl-body { grid-template-rows: auto auto auto auto; row-gap: 48px; align-items: start; }
+  .v35 .wl-episode :is(.wl-left, .wl-right) { display: contents; }
+  .v35 .wl-episode .wl-body .wl-desc { grid-column: 1; grid-row: 1; }
+  .v35 .wl-episode .wl-body .wl-s-eps { grid-column: 1; grid-row: 2; }
+  .v35 .wl-episode .wl-body .wl-s-chars { grid-column: 1; grid-row: 3; }
+  .v35 .wl-episode .wl-body .wl-s-world { grid-column: 2; grid-row: 1 / span 2; }
+  .v35 .wl-episode .wl-body .wl-s-facts { grid-column: 2; grid-row: 3; }
+  .v35 .wl-episode .wl-body .wl-s-recs { grid-column: 1 / -1; grid-row: 4; }
+}
+
+/* ═══ السينما — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* الظل لا يصل حافة البنر: الصورة تتحرك داخل الإطار مع التمرير (DEPTH_SPECS.cinema: نصف سرعة الصفحة و×1.12)
+   * وتلاشيها طبقة ::after بارتفاع 22% فوق خلفية الإطار (--surface-1)، فيبقى أسفل الصورة وخط حافتها ظاهرًا.
+   * القاعدة (CLAUDE.md): النافذة تملك تلاشيها؛ قناع على الإطار نفسه ينتهي بشفافية كاملة فوق var(--bg). */
+  .v35 .cn-detail:not([data-unified]):not([data-style='poster']) .cn-detail-art {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 100%);
+    background: transparent;
+  }
+  /* «الشريط العريض» شريط سينمائي لا بنر عملاق: 16:9 بعرض الصفحة صار 1118×629 (وأكبر في 1920). نسبة الشريط
+   * 2.39:1 والصورة من أعلاها (الوجوه)، والقص من أسفلها الذي يتلاشى بالقناع أصلًا. الشعار والمعلومات في الثلث
+   * الأسفل، والتشغيل تحت الشريط في أول شاشة. */
+  .v35 .cn-detail.cn-detail[data-style='marquee'] .cn-detail-art { aspect-ratio: 2.39 / 1; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img { object-position: center 22%; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-body { margin-top: -170px; padding-top: 0; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark { height: 76px; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-logo { max-height: 76px; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6)); }
+  .v35 .cn-detail[data-style='marquee'] .cn-genre-line { color: var(--text-2); }
+  .v35 .cn-detail[data-style='marquee'] .cn-look-credits dt { color: var(--text-2); }
+  .v35 .cn-detail[data-style='marquee'] .cn-episodes { margin-top: 48px; }
+  /* شريط الأرقام (IMDb · المواسم · السنة) خارج قاعدة التوسيط بعرض 580 فانزاح لجهة البداية (498–1078 بدل 269–849):
+   * نفس عمود الشعار والتشغيل */
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-body > .cn-look-credits { width: 100%; max-width: 580px; margin-inline: auto; }
+
+  /* القصة تحجز ثلاثة أسطر (min-height) حتى بنصّ من سطرين فيبقى سطر فارغ قبل «المزيد»؛ الحجز قبل وصول النص فقط */
+  .v35 .cn-detail .cn-synopsis.clamped:not(:empty) { min-height: 0; }
+  /* زر التشغيل العريض: 580–750px شريط بعرض العمود كاملًا؛ بعرض مريح بمحاذاة بداية الهوية (في الأنماط التي هويتها
+   * بالجانب) أو وسطها (الملصق والشريط والمسلسل) */
+  .v35 .cn-detail[data-style='current'] .cn-detail-body > .cn-btn--play { max-width: 420px; justify-self: start; }
+  .v35 .cn-detail:is([data-style='poster'], [data-style='marquee'], [data-style='series']) .cn-detail-body > .cn-btn--play { max-width: 420px; }
+}
+
+/* ═══ المانجا — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══
+ * أزرار بعرض العمود كاملًا: «ابدأ القراءة» في «المعرض» 828px، و«ابدأ الآن» في «من حيث وقفت» 904px، وأزرار
+ * «أتابعها/لاحقًا/مع أصدقائك» 315px لكل منها. التصميم والترتيب كما هما؛ العرض فقط. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='gallery']:not([data-unified]) .mw-acts .mw-row { max-width: 640px; margin-inline: auto; }
+  .v35 #detail[data-look='resume']:not([data-unified]) .mw-resume .mw-cta { max-width: 460px; justify-self: start; margin-inline-end: auto; }
+  .v35 #detail[data-look='resume']:not([data-unified]) .mw-quick { max-width: 720px; }
+}
+
+/* «المسلسل» على الكمبيوتر (بلاغ المالك 14 نوفمبر: البنر مقصوص وعلى يساره شريط أسود). قيس (1920): wide.css يعطي
+ * .cn-detail-art ارتفاعًا ثابتًا min(76vh, 680px) ونمط المسلسل نسبة 16:9، فيُشتق العرض من الارتفاع (631×16/9 = 1123px)
+ * داخل صفحة 1205px، فيلتصق يمينًا ويبقى يساره فارغًا. الآن العرض كامل والارتفاع منه بسقف الشاشة، والصورة من أعلاها
+ * (الوجوه والعناوين لا تُقص؛ ما زاد يُقص من الأسفل الذي يتلاشى بالقناع أصلًا). المواسم والحلقات كما هي. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .cn-detail[data-style='series']:not([data-unified]) .cn-detail-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: max(420px, calc(100svh - 230px));
+  }
+  .v35 .cn-detail[data-style='series']:not([data-unified]) .cn-detail-art > .cn-img { object-fit: cover; object-position: center top; }
+}

@@ -8,15 +8,17 @@ const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
+const channelInfo = require('./channel.cjs').readChannel(__dirname);
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
-app.setName('VANTARA');
-if (process.platform === 'win32') app.setAppUserModelId('com.vantara.desktop');
+// Debug: اسم ومعرّف مستقلان ⇒ userData وقفل نسخة واحدة ومجلد تثبيت منفصلة عن Stable.
+app.setName(channelInfo.productName);
+if (process.platform === 'win32') app.setAppUserModelId(channelInfo.appId);
 if (!app.requestSingleInstanceLock()) app.exit(0);
 const previousProfile=app.getPath('userData');
 const executableFolder=path.dirname(app.getPath('exe'));
 const portable=process.platform==='win32'&&app.isPackaged&&!require('node:fs').existsSync(path.join(executableFolder,'Uninstall.exe'));
-const portableProfile=path.join(executableFolder,'VANTARA-data');
+const portableProfile=path.join(executableFolder,channelInfo.channel==='debug'?'VANTARA-Debug-data':'VANTARA-data');
 // يكتمل النقل قبل اختيار userData وقبل أول session/BrowserWindow.
 const profileReady=portable?migratePortableProfile(previousProfile,portableProfile)
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
@@ -24,6 +26,8 @@ let window;
 let services;
 let videoHost;
 let overlay=null;
+let overlayWindow=null;
+let windowZoom=null; // window-zoom.cjs: حجم الواجهة من عرض النافذة
 let fullscreenController;
 let playbackSession=null;
 let quitting = false;
@@ -54,10 +58,14 @@ function clearFinishedUpdate() {
 }
 const settingsWindows = new Set();
 const assets = path.join(__dirname, 'web');
-const windowIcon = process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
+const windowIcon = channelInfo.channel === 'debug'
+  ? path.join(__dirname, process.platform === 'win32' ? 'assets/vantara-debug.ico' : 'assets/vantara-debug.png')
+  : process.platform === 'win32' ? path.join(__dirname, 'assets/vantara.ico') : path.join(assets, 'icons/icon-512.png');
 const native = path.join(__dirname, 'native');
 const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
+const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
+const updateReportOption=process.argv.find(x=>x.startsWith('--update-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -141,28 +149,23 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   // طبقة أدوات المشغل بتصميم الـAPK فوق الفيديو الأصلي (player-overlay.cjs)؛ ويندوز فقط
   if(videoHost){
     const {createPlayerOverlay}=require('./player-overlay.cjs');
-    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>fullscreenController?.bindInput(win),onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',
+    overlay=createPlayerOverlay({BrowserWindow,getWindow:()=>window,onWindow:win=>{overlayWindow=win;fullscreenController?.bindInput(win);win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(windowZoom?.factor??1));},onFullscreen:(enabled,win)=>videoHost?.fullscreen(enabled,win.getNativeWindowHandle()),preload:path.join(__dirname,'overlay-preload.cjs'),url:'vantara://app/desktop/overlay.html',args:[`--vantara-channel=${channelInfo.channel==='debug'?'debug':'stable'}`],
       onCommand:message=>{if(window&&!window.isDestroyed())window.webContents.send('vantara:overlay-command',message);}});
     ipcMain.handle('vantara:overlay-command',(event,args)=>overlay.command(event,args));
   }
   services = createDesktopServices({
     userData: app.getPath('userData'),
-    binaries: { rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
+    // libtorrent أساسي إن أُرفق (قرار المشروع: مستوى APK)، وrqbit احتياطي دائم (services.engineOrder)
+    binaries: { libtorrent: process.env.VANTARA_TORRENT_HOST_BINARY || (require('node:fs').existsSync(path.join(native, 'vantara-torrent.exe')) ? path.join(native, 'vantara-torrent.exe') : null), rqbit: process.env.VANTARA_RQBIT_BINARY || path.join(native, 'rqbit.exe'), mpv: process.env.VANTARA_MPV_BINARY || path.join(native, 'mpv.exe') },
     platform: process.platform,
     videoHost,
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
   });
-  for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand']]) register(name, args => services[method](args));
+  for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['preview-frame', 'previewFrame']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
-    let parsed;
-    try { parsed = new URL(url); } catch { throw new Error('رابط تحديث غير صالح'); }
-    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' ||
-        parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
-        !/^\/Meshal515\/VANTARA\/releases\/download\/(?:stable-\d+|windows-v\d+\.\d+\.\d+)\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/.test(parsed.pathname))
-      throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور');
-    await shell.openExternal(parsed.href);
+    await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
     return true;
   });
   // النسخة المحمولة (ZIP) لا مثبّت لها: تبقى على فتح صفحة التنزيل
@@ -171,6 +174,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (pendingUpdate?.version === update?.version) return { ready: true, version: pendingUpdate.version };
     const file = await updater.downloadUpdate({
       update, dir: path.join(app.getPath('userData'), 'updates'),
+      installed: { channel: channelInfo.channel, version: appVersion, build: channelInfo.build },
       fetch: (url, options) => net.fetch(url, options),
       onProgress: (p) => publish({ type: 'update/progress', ...p }),
     });
@@ -194,9 +198,9 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   });
   register('player-fullscreen',({enabled}={})=>fullscreenController.set(enabled));
   window = new BrowserWindow({
-    title: 'VANTARA · ويندوز', width: 1400, height: 950, minWidth: 760, minHeight: 560,
+    title: channelInfo.title, width: 1400, height: 950, minWidth: 760, minHeight: 560,
     backgroundColor: '#08080a', show: false, icon: windowIcon, autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--vantara-version=${require('./package.json').version}`], sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: require('./channel.cjs').rendererArguments(channelInfo, appVersion), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
   });
   window.on?.('resize',()=>{videoHost?.resize();overlay?.place();});
   window.on?.('move',()=>{videoHost?.resize();overlay?.place();});
@@ -231,12 +235,13 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   window.webContents.setWindowOpenHandler(({ url }) => { if (/^https:/i.test(url)) void openSettings(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!isAppFrame(url)) { event.preventDefault(); if (/^https:/i.test(url)) void openSettings(url); } });
   window.once('ready-to-show', () => window.show());
+  windowZoom = require('./window-zoom.cjs').attachWindowZoom(window, { also: () => [overlayWindow] });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'VANTARA', submenu: [
       { label: 'الواجهة الرئيسية', click: () => void window.loadURL('vantara://app/index.html') },
       { type: 'separator' }, { label: 'خروج', role: 'quit' },
     ] },
-    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', role: 'zoomIn' }, { label: 'تصغير', role: 'zoomOut' }, { label: 'الحجم الأصلي', role: 'resetZoom' }] },
+    { label: 'عرض', submenu: [{ label: 'إعادة تحميل', role: 'reload' }, { label: 'ملء الشاشة', accelerator: 'F11', click: ()=>fullscreenController.toggle() }, { label: 'تكبير', accelerator: 'CmdOrCtrl+=', click: () => windowZoom?.zoomIn() }, { label: 'تصغير', accelerator: 'CmdOrCtrl+-', click: () => windowZoom?.zoomOut() }, { label: 'الحجم المناسب للشاشة', accelerator: 'CmdOrCtrl+0', click: () => windowZoom?.reset() }] },
   ]));
   if(videoReportOption){
     if(!videoHost)throw new Error('إثبات HWND المدمج يحتاج Windows');
@@ -245,11 +250,25 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     await require('./video-smoke.cjs').runEmbeddedVideoSmoke({window,videoHost,playerOverlay:overlay,native,fixture:fixtureOption.slice('--native-video-smoke-fixture='.length),reportPath:videoReportOption.slice('--native-video-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
     app.quit();return;
   }
+  if(torrentReportOption){
+    if(!videoHost)throw new Error('إثبات التورنت المدمج يحتاج Windows');
+    const fixtureOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-fixture='));
+    if(!fixtureOption)throw new Error('إثبات التورنت يحتاج fixture مؤلفًا');
+    await require('./torrent-smoke.cjs').runEmbeddedTorrentSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-torrent-smoke-fixture='.length),reportPath:torrentReportOption.slice('--native-torrent-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
+    app.quit();return;
+  }
   await window.loadURL('vantara://app/index.html');
+  if (updateReportOption) {
+    // إثبات التحديث الداخلي: «البحث عن تحديثات» ← «تنزيل وتثبيت» ← «أعد التشغيل وحدّث» في الواجهة نفسها
+    const result = await require('./update-smoke.cjs').runUpdateSmoke({ window, reportPath: updateReportOption.slice('--update-smoke-report='.length), channelInfo, appVersion, updater, userData: app.getPath('userData') });
+    if (result.error) app.quit();
+    else setTimeout(() => app.quit(), 15000); // الزر يطلب الإغلاق نفسه؛ هذا احتياط فقط
+    return;
+  }
   if (reportOption) {
     setTimeout(async () => {
       try {
-        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,desktopVersion:window.VantaraDesktop?.version,hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
+        const report = await window.webContents.executeJavaScript('(async()=>{const r=window.VantaraDesktopBridges?.SourceRuntime?.getRuntime();await r?.ready;return {title:document.title,url:location.href,text:document.body.innerText.slice(0,8000),desktop:window.VantaraDesktop?.platform,desktopVersion:window.VantaraDesktop?.version,desktopChannel:window.VantaraDesktop?.channel,desktopBuild:window.VantaraDesktop?.build??null,updateSmokeMarker:localStorage.getItem("vantara.updateSmoke.marker"),hasBridge:!!window.VantaraDesktopBridges,canonical:!!document.querySelector("#root .v35"),gate:!!document.querySelector("#root .gate"),section:document.querySelector("#root .v35")?.dataset.section??null,sourceCount:r?.registry.list().length??0,defaultAddons:window.VantaraDesktopDefaults?.statuses().map(({name,state,httpStatus})=>({name,state,httpStatus}))??[]}})()');
         await fs.writeFile(reportOption.slice('--smoke-report='.length), JSON.stringify({ ...report, ...smokeDiagnostics }, null, 2));
         const image = await window.webContents.capturePage();
         await fs.writeFile(reportOption.slice('--smoke-report='.length) + '.png', image.toPNG());

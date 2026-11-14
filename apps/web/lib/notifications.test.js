@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  togetherInvite,
   NOTIFICATION_KINDS,
   NOTIFICATION_LABELS,
   popupPatch,
@@ -130,5 +131,15 @@ describe('toastable', () => {
 
   it('returns nothing from an empty inbox', () => {
     expect(toastable([], { viewerId: ME, settings: ON })).toEqual([]);
+  });
+});
+
+describe('togetherInvite (التنبيه المنبثق لدعوة «مشاهدة معًا»)', () => {
+  it('says who invites and to what, and carries the room code (not just the work name)', () => {
+    expect(togetherInvite({ kind: 'TOGETHER', link: '#together=ABC234', series_ref: 'anime:52991', body: 'Frieren' }, 'مشعل'))
+      .toEqual({ code: 'ABC234', title: 'مشعل يدعوك تشاهد معه' });
+    expect(togetherInvite({ kind: 'TOGETHER', link: '#together=ABC234', series_ref: 'cinema:tt123' }, 'مشعل').title).toBe('مشعل يدعوك تشاهد معه');
+    expect(togetherInvite({ kind: 'TOGETHER', link: '#together=ABC234', series_ref: 'ext:berserk' }, 'مشعل').title).toBe('مشعل يدعوك تقرأ معه');
+    expect(togetherInvite({ kind: 'RECOMMENDATION' }, 'مشعل')).toBeNull();
   });
 });

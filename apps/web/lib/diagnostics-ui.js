@@ -14,10 +14,18 @@ export function webDiagnosticsBridge(version, storage = globalThis.localStorage)
     return { debug, visible };
   } };
 }
+/** ويندوز: Debug بالقناة لا برقم النسخة؛ Stable لا يُظهر الأدوات ولا يقرأ التفضيل. */
+export function desktopDiagnosticsBridge(channel, storage = globalThis.localStorage) {
+  return webDiagnosticsBridge(channel === 'debug' ? 'web-debug-desktop' : '', storage);
+}
 function platformBridge() {
   const capacitor = globalThis.Capacitor;
   // The native build gate wins even when an APK loads newer Debug web assets.
   if (capacitor?.Plugins?.SystemUi || capacitor?.getPlatform?.() === 'android') return capacitor?.Plugins?.SystemUi;
+  // ويندوز: رقم النسخة 0.4.N لا يحمل «debug»، فكانت أدوات Debug مخفية فيه دائمًا. القناة من العملية الرئيسية
+  // (النافذة الرئيسية وطبقة المشغل كلتاهما) هي الحكم، والتفضيل نفسه في التخزين المحلي المشترك بينهما.
+  const channel = globalThis.VantaraDesktop?.channel ?? globalThis.VantaraOverlay?.channel;
+  if (channel === 'debug' || channel === 'stable') return desktopDiagnosticsBridge(channel);
   return webDiagnosticsBridge(appVersion());
 }
 export function createDiagnosticsVisibility(bridge = platformBridge) {

@@ -184,6 +184,26 @@ export function engineArgs({apiPort,listenPort,dir,dhtPersistence=true}) {
   return ['-v','error','--http-api-listen-addr',`127.0.0.1:${apiPort}`,'--disable-lsd','--listen-port',String(listenPort),
     ...(dhtPersistence ? [] : ['--disable-dht-persistence']),'server','start',dir,'--disable-persistence'];
 }
+/**
+ * سطر أوامر محرك libtorrent الأصلي (tools/torrent-host/vantara-torrent.cpp): نفس واجهة rqbit المحلية.
+ * --parent-pid: يخرج المحرك إن مات VANTARA (لا عملية يتيمة تحجز المنفذ والقرص). --state-dir: جدول DHT المحفوظ.
+ */
+export function libtorrentArgs({apiPort,listenPort,dir,stateDir,parentPid=process.pid,testPeer=null}) {
+  if (!Number.isSafeInteger(apiPort) || !Number.isSafeInteger(listenPort) || listenPort < 1 || listenPort > 65535 || typeof dir !== 'string') throw new Error('إعداد محرك التورنت غير صالح');
+  // testPeer: خيار اختبار يمرَّر برمجيًا فقط (لا متغير بيئة)؛ يفتح الشبكة المحلية لباذر الاختبار وحده
+  if (testPeer != null && !/^127\.0\.0\.1:\d{1,5}$/.test(testPeer)) throw new Error('باذر الاختبار يجب أن يكون محليًا');
+  return [`--api-port=${apiPort}`,`--listen-port=${listenPort}`,`--dir=${dir}`,...(stateDir?[`--state-dir=${stateDir}`]:[]),`--parent-pid=${parentPid}`,...(testPeer?['--allow-private-peers',`--test-peer=${testPeer}`]:[])];
+}
+/**
+ * ترتيب المحركات: libtorrent أولًا (قرار المشروع: مستوى APK)، وrqbit احتياطًا دائمًا. libtorrent يُتخطى إن
+ * لم يُرفق، أو طُلب rqbit صراحة (VANTARA_TORRENT_ENGINE=rqbit)، أو انهار في هذه الجلسة قبل قليل.
+ */
+export function engineOrder({binaries,preference=process.env.VANTARA_TORRENT_ENGINE,libtorrentBlockedUntil=0,now=Date.now()}) {
+  const order=[];
+  if(binaries?.libtorrent&&preference!=='rqbit'&&now>=libtorrentBlockedUntil)order.push('libtorrent');
+  if(binaries?.rqbit&&preference!=='libtorrent-only')order.push('rqbit');
+  return order;
+}
 export function selectTorrentFile(files, candidate) {
   if (!Array.isArray(files) || !files.length) throw new Error('لم يعثر المحرك على ملفات التورنت');
   if (candidate.fileIdx != null) {
@@ -353,9 +373,11 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000}) {
-  if (typeof userData!=='string'||!binaries?.rqbit||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null}) {
+  if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
+  // انهيار libtorrent بعد جاهزيته يحجبه 10 دقائق؛ التشغيل التالي يبدأ بـrqbit مباشرة بدل تكرار الفشل.
+  let libtorrentBlockedUntil=0;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
   const lookup=dnsOverHttps?unblockingLookup:systemLookup;
   const puncher=holePuncher??createHolePuncher(platform);
@@ -636,37 +658,71 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
-      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
+      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live,seeds=stats.live?.snapshot?.peer_stats?.seeds;
         const snapshot=stats.live?.snapshot,range=state.latestDemand;
         state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
         if(peers>0)state.trace.once('peer-connected');
-        emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
+        emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{}),...(Number.isFinite(seeds)?{seeds}:{})});
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
     return state.streamUrl;
   }
   /**
-   * يشغّل rqbit وينتظر واجهته. المحاولة الأولى بجدول DHT المحفوظ؛ إن خرج rqbit قبل أن يجيب (منفذ DHT
-   * المحفوظ مشغول بـrqbit آخر، أو ملف الحفظ غير مقروء — rqbit 9.0.1 يتوقف حينها ولا يتجاهل) نعيد مرة
-   * واحدة بلا حفظ DHT وبمنافذ جديدة، أي كما كان المحرك قبل هذا التعديل.
+   * يشغّل محرك التورنت وينتظر واجهته: libtorrent أولًا ثم rqbit احتياطًا (engineOrder). لكل محرك
+   * محاولتان كما كان rqbit: بجدول DHT المحفوظ ثم بدونه وبمنافذ جديدة. محرك لا يجيب خلال مهلته
+   * يُنهى ويُجرَّب التالي؛ الانتقال يظهر في مراحل التشغيل (engine-fallback) ولا يكسر التجربة.
    */
   async function launchEngine(state,dir,env,options) {
-    for(const dhtPersistence of [true,false]) {
-      const apiPort=await port();let listenPort=await port();
-      while(listenPort===apiPort)listenPort=await port();
-      assertSession(state);
-      state.api=`http://127.0.0.1:${apiPort}`;
-      let exited=false;
-      child(state,binaries.rqbit,engineArgs({apiPort,listenPort,dir,dhtPersistence}),env,message=>{if(state.engineReady)void fail(state,message);else exited=true;});
-      const deadline=Date.now()+15000;
-      while(!exited){
+    const order=engineOrder({binaries,libtorrentBlockedUntil});
+    if(!order.length)throw new Error('لا يوجد محرك تورنت مرفق');
+    let lastError=null;
+    for(const kind of order){
+      for(const dhtPersistence of kind==='rqbit'?[true,false]:[true]) {
+        const apiPort=await port();let listenPort=await port();
+        while(listenPort===apiPort)listenPort=await port();
         assertSession(state);
-        try{await localJSON(state.api,'/',{...options,timeout:1000});if(exited)break;state.engineReady=true;return;}
-        catch{if(Date.now()>deadline)throw new Error('لم يبدأ محرك التورنت');if(!exited)await sleep(50,state.controller.signal);}
+        state.api=`http://127.0.0.1:${apiPort}`;
+        let exited=false;
+        const args=kind==='libtorrent'
+          ?libtorrentArgs({apiPort,listenPort,dir,stateDir:join(userData,'engine-state','libtorrent'),testPeer:torrentTestPeer})
+          :engineArgs({apiPort,listenPort,dir,dhtPersistence});
+        const processChild=child(state,kind==='libtorrent'?binaries.libtorrent:binaries.rqbit,args,env,message=>{
+          if(state.engineReady&&state.engineKind===kind)void fail(state,message);
+          else exited=true;
+        });
+        // الانهيار بعد الجاهزية يُرصد من خروج العملية نفسها: طلب HTTP المقطوع قد يُنهي الجلسة قبل وصول حدث
+        // الخروج، فلا يكفي مسار fail (لا يُستدعى بعد إيقاف الجلسة).
+        // إنهاؤنا المقصود يصل دائمًا بإشارة (SIGTERM/SIGKILL؛ libuv ينقلها على ويندوز أيضًا)، والانهيار رمز خروج بلا إشارة.
+        if(kind==='libtorrent')processChild.once('exit',(code,signal)=>{if(state.engineKind==='libtorrent'&&signal==null&&code!==0)libtorrentBlockedUntil=Date.now()+10*60*1000;});
+        const deadline=Date.now()+(kind==='libtorrent'?10000:15000);
+        while(!exited){
+          assertSession(state);
+          try{
+            const info=await localJSON(state.api,'/',{...options,timeout:1000});
+            if(exited)break;
+            // منفذ مأخوذ بخادم آخر لا يُعدّ محركنا: libtorrent يعلن نفسه صراحة
+            if(kind==='libtorrent'&&info?.engine!=='libtorrent')throw new Error('ليس محرك libtorrent');
+            state.engineReady=true;state.engineKind=kind;
+            state.trace?.record('engine-kind',{engine:kind});
+            emit(state,{type:'playback/stage',stage:'engine-ready',engine:kind});
+            return kind;
+          }catch(error){
+            if(Date.now()>deadline){exited=true;lastError=error;break;}
+            if(!exited)await sleep(50,state.controller.signal);
+          }
+        }
+        // لم يجهز: أنهِ هذه العملية تحديدًا قبل تجربة غيرها (لا محركان على القرص نفسه)
+        state.children.delete(processChild);
+        await kill(processChild);
+        assertSession(state);
+      }
+      if(kind==='libtorrent'&&order.includes('rqbit')){
+        state.trace?.record('engine-fallback',{from:'libtorrent',to:'rqbit'});
+        emit(state,{type:'playback/stage',stage:'engine-fallback',from:'libtorrent',to:'rqbit'});
       }
     }
-    throw new Error('لم يبدأ محرك التورنت');
+    throw new Error('لم يبدأ محرك التورنت'+(lastError?.message?`: ${lastError.message}`:''));
   }
   /**
    * إضافة التنزيل الفعلية. rqbit لا يحتفظ بنتيجة list_only فيحل المغناطيس مرة ثانية؛ مع initial_peers
@@ -805,6 +861,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function player(state,url,title,position,pause) {
     state.trace.record('player-start');
+    state.playUrl=url;state.thumbs=new Map();
     if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
     if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
@@ -813,7 +870,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const freeMemory=freemem();
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=no','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -842,7 +899,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           state.restarted=true;
           ipcCommand(state,['get_property','video-out-params']).then(params=>{
             if(state.stopped)return;
-            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0)ready();
+            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0){state.progress.videoHeight=params.h;ready();}
             else fail(state,'المصدر لا يوفر إطار فيديو قابلًا للتشغيل؛ قد يكون صوتًا فقط');
           }).catch(()=>{if(!state.stopped)fail(state,'تعذر التحقق من إطار الفيديو في المشغل');});
         }
@@ -867,6 +924,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             if(untagged){state.embeddedArabicChosen=true;state.subtitleExpectedSelection={lang:untagged.lang,label:untagged.label};ipcCommand(state,['set_property','sid',untagged.id]).catch(()=>{});}
             emitSubtitleTracks(state);autoArabic(state);
           }
+          // قياس المشغل للوحة «الشبكة» (كالـAPK): الجاهز أمامك، وسرعة ما يصل للمشغل، ومعدل الفيديو. تُرفق بتقدم الوقت التالي.
+          // نهاية الحلقة (keep-open): المشغل يبقى على آخر إطار كالـAPK ليعرض «الحلقة التالية» بعدّ تنازلي؛
+          // الرجوع للخلف بعد النهاية يعيدها false. الإغلاق صار بيد المستخدم وحده.
+          if(event.name==='eof-reached'&&typeof event.data==='boolean'&&state.ready&&state.ended!==event.data){state.ended=event.data;emit(state,{type:'playback/ended',ended:event.data,...state.progress});}
+          const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
+          if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
           if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);}
@@ -874,7 +937,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         }
       }
     });
-    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
+    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate','eof-reached'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     emit(state,{type:'playback/stage',stage:'first-frame'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
@@ -1173,9 +1236,52 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return ipcCommand(state,['script-message',eventName]);
   }
   // Internal verification only: not registered on the renderer IPC bridge.
+  /**
+   * صورة مصغرة لشريط التقدم (طلب المالك، كـCloudStream): إطار واحد مصغّر (320px) من نفس رابط الحلقة عبر mpv ثانٍ خفيف
+   * بلا صوت ولا نافذة، مرة لكل 10 ث ومحفوظ للجلسة. التورنت: فقط حيث القطع نازلة أصلًا، فلا يطلب المحرك قطعًا جديدة
+   * تزاحم المشاهدة. طلب واحد في كل لحظة والأحدث يفوز.
+   */
+  async function previewFrame({session,positionMs}={}){
+    const s=current;
+    if(!s||s.session!==session||s.stopped||!s.ready||!s.playUrl)return {available:false};
+    const duration=Number(s.progress.duration)||0;
+    const ms=Math.max(0,Math.round(Number(positionMs)/10000)*10000);
+    if(!Number.isFinite(ms)||(duration&&ms>duration))return {available:false};
+    if(s.thumbs.has(ms))return {available:true,positionMs:ms,src:s.thumbs.get(ms)};
+    if(s.torrentId&&s.win&&duration>0){
+      try{
+        const {bits}=await localBitfield(s.api,`/torrents/${s.torrentId}/haves`,{auth:s.auth,signal:s.controller.signal,timeout:2000});
+        const start=s.win.fileOffset+Math.floor(ms/duration*s.win.fileLength),len=s.win.pieceLength||1;
+        for(let p=Math.floor(start/len);p<=Math.floor((start+2*1024*1024)/len);p++)if(!hasPiece(bits,p))return {available:false,positionMs:ms,reason:'not-downloaded'};
+      }catch{return {available:false};}
+    }
+    const seq=s.thumbSeq=(s.thumbSeq??0)+1;
+    try{await s.thumbBusy;}catch{}
+    if(seq!==s.thumbSeq||s.stopped||current!==s)return {available:false,stale:true};
+    const job=(async()=>{
+      const dir=await fs.mkdtemp(join(tmpdir(),'vantara-thumb-'));
+      try{
+        const args=['--no-config','--terminal=no','--really-quiet','--no-audio','--no-sub','--vo=image','--vo-image-format=jpg','--vo-image-jpg-quality=72',`--vo-image-outdir=${dir}`,'--frames=1',`--start=${(ms/1000).toFixed(1)}`,'--hr-seek=no','--vf=scale=320:-2','--untimed',s.playUrl];
+        await new Promise(resolveDone=>{
+          const p=spawn(binaries.mpv,args,{env:cleanEnv(),stdio:'ignore',windowsHide:true,shell:false});
+          const kill=setTimeout(()=>{try{p.kill();}catch{}},6000);
+          p.once('exit',()=>{clearTimeout(kill);resolveDone();});p.once('error',()=>{clearTimeout(kill);resolveDone();});
+        });
+        const file=(await fs.readdir(dir)).find(n=>/\.jpe?g$/i.test(n));
+        if(!file)return null;
+        const src=`data:image/jpeg;base64,${(await fs.readFile(join(dir,file))).toString('base64')}`;
+        if(s.thumbs.size>240)s.thumbs.delete(s.thumbs.keys().next().value);
+        s.thumbs.set(ms,src);
+        return src;
+      }finally{await rm(dir,{recursive:true,force:true}).catch(()=>{});}
+    })();
+    s.thumbBusy=job;
+    const src=await job.catch(()=>null);
+    return src?{available:true,positionMs:ms,src}:{available:false,positionMs:ms};
+  }
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
   async function close(){closed=true;await dropPrewarm();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
-  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,smokeMpvBinding,close};
+  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,previewFrame,smokeMpvBinding,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {

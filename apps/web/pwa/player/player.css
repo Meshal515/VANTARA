@@ -911,6 +911,13 @@ html.pwa-playing body {
 .pwa-player .pl-logo { max-width: min(46vw, 520px); max-height: 22vh; object-fit: contain; object-position: right bottom; filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55)); }
 .pwa-player .pl-title { margin: 0; max-width: 60vw; font-size: clamp(30px, 4.4vw, 56px); font-weight: 800; line-height: 1.12; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6); }
 .pwa-player .pl-meta { margin: 0; font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.78); }
+/* الشعار (أو الاسم) بطبقتين كشاشة تحميل المشغّل: رمادية شفافة تحت، وملوّنة فوقها تمتلئ من اليسار بقدر تجهيز فيديوك
+ * وتكتمل عند أول إطار. الظل على السفلية وحدها حتى لا تتضاعف الهالة. */
+.pwa-player .pl-mark { display: grid; justify-items: start; }
+.pwa-player .pl-mark > * { grid-area: 1 / 1; }
+.pwa-player .pl-mark > .pl-ghost { opacity: 0.32; filter: grayscale(1); }
+.pwa-player .pl-mark > .pl-fill { filter: none; text-shadow: none; transition: clip-path 0.3s linear; }
+@media (prefers-reduced-motion: reduce) { .pwa-player .pl-mark > .pl-fill { transition: none; } }
 
 /* الشريط السفلي الواحد */
 .pwa-player .pl-bar {
@@ -1074,6 +1081,7 @@ html.pwa-playing body {
   .pwa-player .pl-top { padding-inline: 16px; }
   .pwa-player .pl-hero { position: relative; inset: auto; margin-top: -44px; padding: 0 20px; align-items: center; text-align: center; }
   .pwa-player .pl-logo { max-width: 76vw; max-height: 15vh; object-position: center bottom; }
+  .pwa-player .pl-mark { justify-items: center; }
   .pwa-player .pl-title { max-width: 90vw; font-size: 32px; }
   /* الأشخاص والحالة في منتصف المساحة بين الشعار و«ابدأ» (الذي يبقى في الأسفل) */
   .pwa-player .pl-bar {
@@ -1117,3 +1125,56 @@ html.pwa-playing body {
 }
 .pwa-player .pp-offset__btn:hover { filter: brightness(1.2); }
 .pwa-player .pp-offset__value { min-width: 84px; text-align: center; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ── تصميم الغرفة المعتمد (14 نوفمبر، tools/together/mockups/room-mockup.html) ──
+   زر أزرق واحد للخطوة الحالية، أزرار بزوايا 14px لا بيضاوية، الحاضرون يمينًا ثم ⋯ والحلقات والسيرفر والبدء.
+   الشعار محجوز ومخفي حتى يُحسم (لا اسم ثم شعار)، ورقم الحلقة كبير واضح، ومراحل التجهيز بأسمائها. */
+.pwa-player .pl-mark { min-height: clamp(64px, 11vw, 150px); visibility: hidden; align-items: end; }
+.pwa-player .pl-mark[data-ready] { visibility: visible; }
+.pwa-player .pl-logo { max-width: min(36vw, 460px); max-height: 20vh; object-position: left bottom; }
+.pwa-player .pl-kind { margin: 4px 0 0; font-size: 14px; font-weight: 700; color: rgba(255, 255, 255, 0.6); }
+.pwa-player .pl-episode { margin: 0; font-size: clamp(30px, 3.2vw, 48px); font-weight: 900; line-height: 1.1; text-shadow: 0 3px 18px rgba(0, 0, 0, 0.45); }
+.pwa-player .pl-episode-title { display: block; font-size: clamp(14px, 1.3vw, 19px); font-weight: 600; color: rgba(255, 255, 255, 0.78); }
+.pwa-player .pl-steps { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 13.5px; font-weight: 700; color: rgba(255, 255, 255, 0.72); }
+.pwa-player .pl-step-bars { display: flex; gap: 4px; direction: ltr; }
+.pwa-player .pl-step-bars i { width: 24px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.16); transition: background 0.3s ease; }
+.pwa-player .pl-step-bars i.is-done { background: rgba(255, 255, 255, 0.8); }
+.pwa-player .pl-step-bars i.is-now { background: var(--pl-accent); }
+.pwa-player .pl-icon { border-radius: 14px; width: 50px; height: 50px; background: rgba(10, 12, 20, 0.55); border-color: rgba(255, 255, 255, 0.16); }
+.pwa-player .pl-icon svg { width: 24px; height: 24px; }
+.pwa-player .pl-go { border-radius: 14px; height: 50px; padding: 0 20px; color: #fff; background: rgba(10, 12, 20, 0.55); border-color: rgba(255, 255, 255, 0.16); }
+.pwa-player .pl-choose-server { padding-inline: 18px; border-color: rgba(255, 255, 255, 0.16); background: rgba(10, 12, 20, 0.55); }
+.pwa-player .pl-go.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); }
+.pwa-player .pl-server-val { font-weight: 700; font-size: 14px; color: rgba(255, 255, 255, 0.8); }
+/* البدء: صورة الحلقة ← دائرة بمثلث (متمركز بصريًا: المثلث مزاح نحو رأسه) ← «البدء» */
+.pwa-player .pl-start {
+  display: inline-flex; align-items: center; gap: 10px; height: 50px; padding: 4px 18px 4px 4px; box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; background: rgba(10, 12, 20, 0.55);
+  color: rgba(255, 255, 255, 0.55); font: inherit; font-size: 16px; font-weight: 900; cursor: pointer;
+}
+.pwa-player .pl-start.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; }
+.pwa-player .pl-start:disabled { cursor: default; }
+.pwa-player .pl-start-thumb { width: 72px; height: 40px; object-fit: cover; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.pwa-player .pl-start:not(.is-primary) .pl-start-thumb { filter: grayscale(0.7) brightness(0.55); }
+.pwa-player .pl-start-play { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
+.pwa-player .pl-start.is-primary .pl-start-play { background: #fff; color: var(--pl-accent); }
+.pwa-player .pl-start-play svg { width: 14px; height: 14px; }
+.pwa-player .pl-start-label { padding-inline-end: 4px; }
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .pwa-player .pl-hero { inset-inline-start: 56px; bottom: 132px; gap: 12px; }
+  .pwa-player .pl-bar { padding-inline: 56px; gap: 12px; }
+  .pwa-player .pl-go, .pwa-player .pl-start { height: 56px; font-size: 17px; border-radius: 16px; }
+  .pwa-player .pl-icon { width: 56px; height: 56px; border-radius: 16px; }
+  .pwa-player .pl-start-thumb { width: 84px; height: 46px; border-radius: 11px; }
+  .pwa-player .pl-start-play { width: 32px; height: 32px; }
+  .pwa-player .pl-face { width: 46px; height: 46px; }
+  .pwa-player .pl-status { font-size: 17px; }
+  .pwa-player .pl-server { font-size: 14px; }
+}
+@media (max-height: 500px) {
+  .pwa-player .pl-mark { min-height: 56px; }
+  .pwa-player .pl-episode { font-size: 26px; }
+  .pwa-player .pl-go, .pwa-player .pl-start { height: 44px; font-size: 14px; border-radius: 12px; }
+  .pwa-player .pl-icon { width: 44px; height: 44px; border-radius: 12px; }
+  .pwa-player .pl-start-thumb { width: 58px; height: 34px; border-radius: 9px; }
+}

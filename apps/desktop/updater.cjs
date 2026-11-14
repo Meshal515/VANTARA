@@ -10,26 +10,53 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const OFFICIAL_PATH = /^\/Meshal515\/VANTARA\/releases\/download\/(?:stable-\d+|windows-v\d+\.\d+\.\d+)\/VANTARA-[^/]+-Windows-x64-Setup\.exe$/;
+// كل قناة تقبل مثبّتها فقط: Debug لا يثبّت Stable فوقه ولا العكس (مجلد وهوية مختلفان).
+const OFFICIAL_PATHS = {
+  stable: /^\/Meshal515\/VANTARA\/releases\/download\/(?:stable-\d+|windows-v\d+\.\d+\.\d+)\/VANTARA-\d[^/]*-Windows-x64-Setup\.exe$/,
+  debug: /^\/Meshal515\/VANTARA\/releases\/download\/windows-debug-(\d+)\/VANTARA-Debug-\d+\.\d+\.(\d+)-Windows-x64-Setup\.exe$/,
+};
 const MAX_SIZE = 1024 * 1024 * 1024;
 
-function officialInstallerUrl(value) {
+function officialInstallerUrl(value, channel = 'stable') {
   let u;
   try { u = new URL(value); } catch { throw new Error('رابط تحديث غير صالح'); }
-  if (u.protocol !== 'https:' || u.hostname !== 'github.com' || u.username || u.password || u.port || u.search || u.hash || !OFFICIAL_PATH.test(u.pathname))
-    throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور');
+  const pattern = OFFICIAL_PATHS[channel];
+  const match = pattern?.exec(u.pathname);
+  if (u.protocol !== 'https:' || u.hostname !== 'github.com' || u.username || u.password || u.port || u.search || u.hash || !match)
+    throw new Error('التحديث يجب أن يكون مثبت VANTARA الرسمي المنشور لنفس القناة');
+  // وسم Debug ورقم البناء في اسم المثبّت يجب أن يكونا الرقم نفسه
+  if (channel === 'debug' && match[1] !== match[2]) throw new Error('رقم بناء التحديث لا يطابق وسمه');
   return u.href;
 }
 
 /** يتحقق من عنصر البيان ويعيده بشكل ثابت. */
-function validUpdate(update) {
+function validUpdate(update, channel = 'stable') {
   const version = String(update?.version ?? '');
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version)) throw new Error('رقم إصدار التحديث غير صالح');
   const sha256 = String(update?.sha256 ?? '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('بصمة التحديث غير صالحة');
   const size = Number(update?.size);
   if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_SIZE) throw new Error('حجم التحديث غير صالح');
-  return { version, sha256, size, url: officialInstallerUrl(update?.url) };
+  const build = update?.build == null ? null : Number(update.build);
+  if (build != null && (!Number.isSafeInteger(build) || build <= 0)) throw new Error('رقم بناء التحديث غير صالح');
+  return { version, sha256, size, build, url: officialInstallerUrl(update?.url, channel) };
+}
+
+/**
+ * حارس الرجوع في العملية الرئيسية (لا نثق بالواجهة وحدها): التحديث يجب أن يكون أحدث في رقم
+ * الإصدار، وفي رقم البناء حين تعرفه القناة. مساوٍ أو أقدم = رفض، فلا يُثبَّت إصدار قديم أبدًا.
+ */
+function acceptableUpdate(update, installed) {
+  const u = validUpdate(update, installed.channel);
+  if (!newer(u.version, installed.version)) throw new Error('التحديث ليس أحدث من النسخة المثبتة');
+  if (installed.channel === 'debug') {
+    if (u.build == null) throw new Error('تحديث Debug بلا رقم بناء');
+    if (installed.build != null && u.build <= installed.build) throw new Error('رقم بناء التحديث ليس أحدث من المثبت');
+    if (!u.url.includes(`/windows-debug-${u.build}/`)) throw new Error('رقم بناء التحديث لا يطابق رابطه');
+  } else if (installed.build != null && u.build != null && u.build <= installed.build) {
+    throw new Error('رقم بناء التحديث ليس أحدث من المثبت');
+  }
+  return u;
 }
 
 function hashFile(file) {
@@ -43,8 +70,8 @@ function hashFile(file) {
  * ينزّل المثبّت إلى `dir` ويعيد مساره بعد التحقق. ملف سابق مطابق يُعاد بلا تنزيل.
  * `fetch` هو net.fetch في Electron (يتبع تحويل GitHub إلى خادم الملفات).
  */
-async function downloadUpdate({ update, dir, fetch, onProgress = () => {} }) {
-  const u = validUpdate(update);
+async function downloadUpdate({ update, dir, fetch, onProgress = () => {}, installed = null }) {
+  const u = installed ? acceptableUpdate(update, installed) : validUpdate(update);
   await fs.promises.mkdir(dir, { recursive: true });
   const target = path.join(dir, `VANTARA-${u.version}-Setup.exe`);
   const stat = await fs.promises.stat(target).catch(() => null);
@@ -110,4 +137,4 @@ function attemptFailed(attempt, installed) {
   return !!attempt && typeof attempt.version === 'string' && newer(attempt.version, installed);
 }
 
-module.exports = { officialInstallerUrl, validUpdate, downloadUpdate, installCommand, attemptFailed, newer, hashFile };
+module.exports = { officialInstallerUrl, validUpdate, acceptableUpdate, downloadUpdate, installCommand, attemptFailed, newer, hashFile };

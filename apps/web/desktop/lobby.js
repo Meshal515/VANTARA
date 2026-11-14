@@ -2,8 +2,8 @@ import { renderLobby, pendingInvitees } from '../lib/together/lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 
 /** Same room renderer as the web/APK design; MPV stays prepared behind it. */
-export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility }) {
-  let latest = null, closed = false, revision = 0, artKey = null, art = null;
+export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
+  let latest = null, closed = false, revision = 0, artKey = null, art = null, lastState = null, lastMedia = null;
   const doc = host.ownerDocument;
   const hub = () => engine.roomHub?.({ session });
   async function update(event) {
@@ -17,28 +17,47 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
     if (closed || token !== revision || !latest?.visible) return;
     const roomHub = hub();
     const media = { ...(state?.media ?? {}), ...(roomHub?.session?.media ?? {}), ...(event.media ?? {}) };
-    const initial = { banner: media.banner ?? media.cover ?? state?.poster ?? null, logo: media.logo ?? null,
-      title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
-    const key = `${media.seriesRef}|${state?.episode ?? media.episode}|${initial.banner}|${initial.logo}`;
+    // قرار فن واحد لكل حلقة (CLAUDE.md، ووميض مثبت في tools/together/lobby-flicker.cjs): الغرفة لا تُرسم حتى يُحسم الفن
+    // (resolveArt، بحد 1.2 ث ثم المتاح)، ثم لا يتبدل. المفتاح من حلقة الغرفة نفسها لا من نداء playerState الذي قد يفشل
+    // (كان فشل نداء واحد يعيد الغلاف ثم البنر: وميض متكرر).
+    const episode = media.episode ?? state?.episode;
+    const key = `${media.seriesRef}|${episode}`;
     if (key !== artKey) {
-      artKey = key; art = initial;
-      void resolveArt(media).then(value => {
-        if (!closed && artKey === key) { art = { ...initial, ...value, banner: value.banner ?? initial.banner, title: value.title || initial.title }; paint(state, media); }
-      });
+      artKey = key; art = null;
+      const initial = { banner: media.backdrop ?? media.banner ?? media.cover ?? state?.poster ?? null, episodeImage: media.episodeImage ?? null, logo: media.logo ?? null,
+        title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
+      const decide = value => {
+        if (closed || artKey !== key || art) return;
+        art = { ...initial, ...(value ?? {}), banner: value?.banner ?? initial.banner, episodeImage: value?.episodeImage ?? initial.episodeImage, title: value?.title || initial.title };
+        if (latest?.visible) paint(lastState, lastMedia);
+      };
+      void resolveArtImpl({ ...media, episode }).then(decide, () => decide(null));
+      setTimeout(() => decide(null), 1200);
     }
-    paint(state, media);
+    lastState = state; lastMedia = media;
+    if (art) paint(state, media);
   }
+  // renderLobby يمسح الغرفة ويبنيها من جديد، والمشغّل يناديها كل 500ms: كان البنر يُعاد تحميله والاسم يظهر ثم
+  // يُستبدل بالشعار كل نصف ثانية (الشعار «يتحرك ويتكرر» في بلاغ المالك)، والزر تحت الفأرة يُستبدل فلا يُضغط بثبات.
+  // تُرسم الغرفة فقط حين يتغير ما يُرى فيها؛ العدّ التنازلي يحدّث نفسه داخل renderLobby.
+  let painted = null;
   function paint(state, media) {
     if (closed || !latest?.visible) return;
     const roomHub = hub(), event = latest;
     const person = id => roomHub?.person?.(id) ?? { userId: id, displayName: 'صديق' };
     const roster = (event.roster ?? []).map(r => ({ ...r, avatarKey: r.avatarKey || person(r.userId).avatarKey || null }));
-    renderLobby(host, { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
+    const model = { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
       pending: pendingInvitees(event.invited, roster, event.me, person),
       kindText: mediaKind(media), episodeText: episodeLine(media, state?.episode ?? media.episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: media.kind === 'anime' ? '#3b82f6' : '#c1121f',
-    }, { avatar: (p, size) => {
+    };
+    // الموضع والزمن وانحراف كل عضو تتغير مع كل تقرير ولا تُرى في الغرفة: لا تُعيد الرسم
+    const VOLATILE = new Set(['pos', 'at', 'driftMs', 'driftP95', 'seenAt', 'lastSeen', 'rtt', 'now']);
+    const signature = JSON.stringify(model, (k, v) => (typeof v === 'function' || VOLATILE.has(k) ? undefined : v));
+    if (signature === painted && host.childElementCount) return;
+    painted = signature;
+    renderLobby(host, model, { avatar: (p, size) => {
       if (roomHub?.avatar) return roomHub.avatar(p, size);
       const fallback = doc.createElement('span'); fallback.textContent = [...(p.displayName ?? 'صديق')][0]; return fallback;
     }, start: event.start, resume: event.resume, changeServer: chooseServer, leave,

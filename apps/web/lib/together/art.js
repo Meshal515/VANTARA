@@ -247,25 +247,30 @@ export async function imdbFromCinemeta({ names = [], year = null, movie = false 
  * @returns {Promise<{banner: string|null, logo: string|null, title: string, episodeTitle: string|null}>}
  */
 export async function resolveArt(media, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
+  // تصميم الغرفة المعتمد (14 نوفمبر): الخلفية فن العمل نفسه بنسبة 16:9 (fanart)، وصورة الحلقة تنتقل لزر «البدء».
+  // media.banner من صفحة العمل قد يكون صورة الحلقة (قديمًا) فيبقى احتياطًا للخلفية فقط.
   const art = {
-    banner: media?.banner ?? null,
+    banner: media?.backdrop ?? null,
+    episodeImage: media?.episodeImage ?? null,
     logo: media?.logo ?? null,
     title: media?.title ?? media?.label ?? '',
     episodeTitle: media?.episodeTitle ?? null,
   };
   try {
     const anilist = media?.kind === 'anime' ? Number(/^anime:(\d+)/.exec(media.seriesRef ?? '')?.[1]) : null;
-    if (anilist > 0 && (!art.logo || !art.banner || !art.episodeTitle)) {
+    if (anilist > 0 && (!art.logo || !art.banner || !art.episodeImage || !art.episodeTitle)) {
       const z = await aniZipArt(anilist, { fetchImpl, now });
       const e = z?.episodes?.[String(media.episode)];
       art.logo ??= logoOfImdb(z?.imdb);
-      art.banner ??= e?.image ?? null;
+      art.banner ??= z?.fanart ?? null;
+      art.episodeImage ??= e?.image ?? null;
       art.episodeTitle ??= e?.title ?? null;
     }
     if (!art.logo && media?.kind === 'cinema') art.logo = logoOfImdb(/(tt\d+)/.exec(media.seriesRef ?? '')?.[1]);
   } catch {
     // بلا شبكة: البنر والغلاف الذي جاء مع الدعوة يكفيان
   }
-  art.banner ??= media?.cover ?? null;
+  art.banner ??= media?.banner ?? art.episodeImage ?? media?.cover ?? null;
+  art.episodeImage ??= media?.banner ?? null;
   return art;
 }

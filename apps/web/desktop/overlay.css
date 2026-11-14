@@ -52,7 +52,7 @@ html.desktop-overlay .pwa-player .pp-sheet[hidden] { display: none; }
 html.desktop-overlay .pwa-player .pp-sheet__grip { display: none; }
 html.desktop-overlay .pwa-player .pp-sheet__head { margin-bottom: 10px; }
 html.desktop-overlay .pwa-player .pp-sheet__head strong { font-size: 17px; }
-html.desktop-overlay .pwa-player .pp-sheet__body { overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+html.desktop-overlay .pwa-player .pp-sheet__body { overflow-y: auto; min-height: 0; scrollbar-width: auto; scrollbar-color: auto; }
 html.desktop-overlay .pwa-player .pp-scrim { background: transparent; }
 html.desktop-overlay .pwa-player .pp-icon { width: 36px; height: 36px; }
 html.desktop-overlay .pwa-player .pp-icon svg { width: 21px; height: 21px; }
@@ -269,3 +269,197 @@ html.desktop-overlay .pp-people:focus-visible { outline: 2px solid var(--accent)
 html.desktop-overlay .pwa-player.pp--loading{background:#000}
 
 html.desktop-overlay .pp-retry{position:absolute;left:50%;top:58%;transform:translateX(-50%);z-index:10;border-radius:24px;padding:12px 22px;background:var(--accent);color:white;font:inherit;cursor:pointer}html.desktop-overlay .pp-retry[hidden]{display:none}
+
+/* ── شاشة التحميل (LoadingStage.kt في الـAPK) ──
+ * البداية: أسود، وبنر العمل بعرض الشاشة معتّمًا (0x99 = 60%)، والشعار في الوسط بعرض 32% (حد 30% من الارتفاع)
+ * نسختان فوق بعض: شفافة تحت، وكاملة اللون فوقها مقصوصة من اليمين فيمتلئ من اليسار كما في Stremio.
+ * التوقف أثناء المشاهدة: بلا أسود ولا بنر، تعتيم 55% فوق آخر إطار، والشعار كاملًا يومض (750ms). */
+html.desktop-overlay .pp-stage {
+  /* z-index 0 وأول عنصر في الطبقة: كل ما بعده (الأدوات والحالة وزر الإعادة والقوائم) يُرسم فوقه */
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  display: grid; place-items: center; overflow: hidden;
+  background: transparent; opacity: 1; transition: opacity .24s ease .06s;
+}
+html.desktop-overlay .pp-stage[hidden] { display: none; }
+html.desktop-overlay .pp-stage--startup { background: #000; }
+html.desktop-overlay .pp-stage--out { opacity: 0; }
+html.desktop-overlay .pp-stage__bg {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top;
+  opacity: 0; transition: opacity .16s ease;
+}
+html.desktop-overlay .pp-stage--startup.pp-stage--bg .pp-stage__bg { opacity: 1; }
+html.desktop-overlay .pp-stage--stalled .pp-stage__bg { display: none; }
+html.desktop-overlay .pp-stage__scrim { position: absolute; inset: 0; background: rgba(0,0,0,.6); }
+html.desktop-overlay .pp-stage--stalled .pp-stage__scrim { background: rgba(0,0,0,.55); }
+html.desktop-overlay .pp-stage__mark {
+  position: relative; display: grid; width: min(32vw, 64vh); max-width: 520px;
+}
+html.desktop-overlay .pp-stage__mark[hidden], html.desktop-overlay .pp-stage__name[hidden] { display: none; }
+html.desktop-overlay .pp-stage__logo {
+  grid-area: 1 / 1; width: 100%; height: auto; max-height: 30vh; object-fit: contain;
+  /* بلا ظل: الـAPK (LoadingStage.kt) يظلل الاسم وحده. ظل الشعار كان يرسم هالة سوداء حوله كأنه PNG مقصوص */
+}
+/* الطبقة السفلية شفافة (imageAlpha 90 من 255 في الـAPK) */
+html.desktop-overlay .pp-stage__logo:not(.pp-stage__fill) { opacity: .35; }
+html.desktop-overlay .pp-stage__fill { transition: clip-path .25s linear; }
+html.desktop-overlay .pp-stage__name {
+  position: relative; max-width: min(45vw, 720px); text-align: center; color: #fff;
+  font-size: clamp(24px, 2.6vw, 40px); font-weight: 800; line-height: 1.25;
+  text-shadow: 0 2px 16px #000; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+html.desktop-overlay .pp-stage--stalled :is(.pp-stage__mark, .pp-stage__name) { animation: pp-stage-pulse .75s ease-in-out infinite alternate; }
+@keyframes pp-stage-pulse { from { opacity: 1; } to { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) {
+  html.desktop-overlay .pp-stage--stalled :is(.pp-stage__mark, .pp-stage__name) { animation: none; opacity: .75; }
+  html.desktop-overlay .pp-stage__fill { transition: none; }
+}
+
+/* الفأرة: صفوف القوائم الصغيرة وأزرار الأيقونات تستجيب بوضوح قبل النقر */
+html.desktop-overlay .pwa-player .pp-row-item:is(button):hover { background: rgba(255,255,255,.08); }
+html.desktop-overlay .pwa-player .pp-icon:hover { background: rgba(255,255,255,.12); border-radius: 50%; }
+html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,255,.14); }
+
+/* أسماء المصادر اللاتينية (Torrentio) لها dir=auto فتلتصق يسارًا وتفاصيلها يمينًا في صف عربي: كلاهما من البداية */
+.desktop-overlay .pp-route__text > :is(strong, small) { text-align: right; }
+
+/* ── اللوحات المنبثقة (Popover) بتصميم أوراق الـAPK ومقاس الكمبيوتر ──
+ * المرجع: Ui.kt (VSheet وsheetRow وsectionLabel) وPlayerActivity.kt (metricRow وnetChip وglyphView).
+ * الجوال 56dp للصف و15sp للعنوان؛ الكمبيوتر بالفأرة 48px و14px بنفس الألوان والترتيب والزوايا المتناسبة. */
+html.desktop-overlay .pwa-player .pp-sheet { padding: 16px 16px 14px; border-radius: 18px; background: color-mix(in srgb, var(--surface) 95%, transparent); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="more"] { width: min(320px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="skips"] { width: min(340px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="network"] { width: min(380px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet__head { display: grid; gap: 4px; margin-bottom: 12px; }
+html.desktop-overlay .pwa-player .pp-sheet__head strong { font-size: 17px; font-weight: 800; color: var(--text); }
+html.desktop-overlay .pwa-player .pp-sheet__head small { font-size: 12.5px; color: var(--text-3); }
+html.desktop-overlay .pwa-player .pp-row-item { min-height: 48px; padding: 10px 12px; border-radius: 12px; gap: 12px; margin-bottom: 6px; }
+html.desktop-overlay .pwa-player button.pp-row-item:hover:not(.is-on) { background: var(--surface-3) !important; }
+html.desktop-overlay .pwa-player .pp-row-item__text { min-width: 0; }
+html.desktop-overlay .pwa-player .pp-row-item__text strong { font-size: 14px; font-weight: 700; }
+html.desktop-overlay .pwa-player .pp-row-item.is-on .pp-row-item__text strong { color: var(--accent-text); }
+html.desktop-overlay .pwa-player .pp-row-item__text small { font-size: 12px; color: var(--text-3); line-height: 1.45; }
+html.desktop-overlay .pwa-player .pp-row-item__lead { flex: none; display: grid; place-items: center; width: 22px; height: 22px; color: var(--text-2); }
+html.desktop-overlay .pwa-player .pp-row-item__lead svg { width: 20px; height: 20px; }
+html.desktop-overlay .pwa-player .pp-section { font-size: 12px; font-weight: 700; color: var(--text-3); margin: 10px 4px 6px; }
+html.desktop-overlay .pwa-player .pp-note { font-size: 12.5px; line-height: 1.6; color: var(--text-3); margin: 4px 2px 10px; }
+/* metricRow: الاسم 13.5 بلون TEXT_2 والقيمة 14.5 عريضة بلون حالتها، من اليسار */
+html.desktop-overlay .pwa-player .pp-metric { display: flex; align-items: center; justify-content: flex-start; gap: 16px; min-height: 0; margin: 0; padding: 8px 2px; border-radius: 0; background: none; }
+/* سطر طويل (تسلسل البدء): الاسم فوق والقيمة تحته بعرض اللوحة، لا تتراكب */
+html.desktop-overlay .pwa-player .pp-metric--wide { flex-direction: column; align-items: stretch; gap: 4px; }
+html.desktop-overlay .pwa-player .pp-metric--wide b { white-space: normal; line-height: 1.5; text-align: start; }
+html.desktop-overlay .pp-metric span { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text-2); }
+html.desktop-overlay .pp-metric b { font-size: 14.5px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); }
+html.desktop-overlay .pp-metric--ok b { color: var(--ok); }
+html.desktop-overlay .pp-metric--warn b { color: var(--warn); }
+html.desktop-overlay .pp-metric--bad b { color: var(--bad); }
+html.desktop-overlay .pp-metric--soft b { color: var(--text-2); font-size: 13.5px; }
+html.desktop-overlay .pp-metric--mute b { color: var(--text-3); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="network"] .pp-row-item { margin-top: 10px; }
+/* شريحة القياس فوق الفيديو: تحت الشريط العلوي حين يظهر، وفي الزاوية حين يختفي */
+html.desktop-overlay .pp-netchip { position: absolute; z-index: 12; top: 68px; left: 20px; padding: 5px 10px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 75%, transparent); color: #fff; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none; transition: top .2s ease; }
+html.desktop-overlay .pwa-player:not(.pp--shown) .pp-netchip { top: 18px; }
+html.desktop-overlay .pp-netchip[hidden] { display: none; }
+/* الجودة نص أبيض كالـAPK (qualityLabel: 12.5sp عريض بلا خلفية، تموّج دائري عند الضغط) لا كبسولة بيضاء */
+html.desktop-overlay .pwa-player .pp-quality { background: transparent !important; color: #fff !important; min-width: 44px; height: 36px; margin: 0 2px; padding: 0 8px; border-radius: 18px; font-size: 13px !important; font-weight: 800 !important; }
+html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,255,.12) !important; }
+/* ترجمات إضافية برابط */
+html.desktop-overlay .pp-url { display: flex; gap: 8px; margin: 2px 0 6px; }
+html.desktop-overlay .pp-url input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; }
+html.desktop-overlay .pp-url input:focus { outline: none; border-color: var(--accent-line); }
+html.desktop-overlay .pp-url__go { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; }
+html.desktop-overlay .pp-url__go:hover { filter: brightness(1.1); }
+/* قرار المالك (14 نوفمبر): صور الأصحاب وحالاتهم تظهر مع الأدوات وتختفي معها؛ أثناء المشاهدة فراغ كامل */
+html.desktop-overlay .pp-people { transition: opacity .22s ease; }
+html.desktop-overlay .pwa-player:not(.pp--shown) .pp-people { opacity: 0; pointer-events: none; }
+/* بطاقة «الحلقة التالية» (onEnded في الـAPK: 240dp، سطح E6 بحدّ، أسفل البداية فوق الأدوات) */
+html.desktop-overlay .pp-next { position: absolute; z-index: 14; left: 28px; bottom: 150px; width: 260px; box-sizing: border-box; display: grid; gap: 4px; padding: 14px 16px; border-radius: 18px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 90%, transparent); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+html.desktop-overlay .pp-next[hidden] { display: none; }
+html.desktop-overlay .pp-next small { font-size: 12px; font-weight: 700; color: var(--text-3); }
+html.desktop-overlay .pp-next strong { font-size: 17px; font-weight: 800; color: var(--text); }
+html.desktop-overlay .pp-next span { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pp-next__row { display: flex; gap: 8px; margin-top: 10px; }
+html.desktop-overlay .pp-next__btn { flex: 1; min-height: 40px; border-radius: 20px; background: var(--surface-3); color: #fff; font-weight: 700; font-size: 13.5px; }
+html.desktop-overlay .pp-next__btn--primary { background: var(--accent); }
+html.desktop-overlay .pp-next__btn:hover { filter: brightness(1.12); }
+/* اختيار صديق: حرف أول في دائرة كـavatar() في الـAPK (36dp بلون SURFACE_3) */
+html.desktop-overlay .pwa-player .pp-row-item__face { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); color: var(--text); font-weight: 800; font-size: 13px; }
+html.desktop-overlay .pp-toast { position: absolute; z-index: 16; left: 50%; bottom: 140px; transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); color: var(--text); font-size: 13px; font-weight: 700; pointer-events: none; }
+html.desktop-overlay .pp-toast[hidden] { display: none; }
+
+/* خط التمرير في اللوحات: نحيف بلون السطح بلا أسهم ويندوز (بلاغ المالك: الشريط الافتراضي يخرّب الشكل).
+ * scrollbar-width/color لا تُضبط هنا: وجودهما يُلغي أنماط ‎::-webkit-scrollbar في Chromium، وهي وحدها تُخفي الأسهم. */
+html.desktop-overlay .pwa-player ::-webkit-scrollbar { width: 6px; height: 6px; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-track { background: transparent; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 999px; }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.28); }
+html.desktop-overlay .pwa-player ::-webkit-scrollbar-corner { background: transparent; }
+html.desktop-overlay .pwa-player .pp-sheet__body { padding-inline-end: 4px; margin-inline-end: -4px; }
+
+/* ── تحسين المشغل (قرار المالك: الأيقونات باهتة ونحيفة، شريط التقدم رفيع، العنوان بلا هرمية) ──
+ * أيقونات بيضاء أوضح بخط أثقل، شريط يتسع تحت الفأرة بمقبض وهالة، وعنوان أكبر من سطر الحلقة بوضوح. */
+html.desktop-overlay .pwa-player .pp-icon { color: rgba(255,255,255,.92); }
+html.desktop-overlay .pwa-player .pp-icon svg { width: 22px; height: 22px; }
+html.desktop-overlay .pwa-player .pp-icon svg [stroke], html.desktop-overlay .pwa-player .pp-icon svg[stroke="currentColor"] { stroke-width: 2.1; }
+html.desktop-overlay .pwa-player .pp-icon:hover { color: #fff; }
+html.desktop-overlay .pwa-player .pp-play { width: 54px; height: 54px; }
+html.desktop-overlay .pwa-player .pp-titles strong { font-size: 18px; font-weight: 800; letter-spacing: -.1px; }
+html.desktop-overlay .pwa-player .pp-titles small { font-size: 13px; color: rgba(255,255,255,.68); }
+html.desktop-overlay .pwa-player .pp-times { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pwa-player .pp-track { height: 4px; border-radius: 4px; transition: height .14s ease; }
+html.desktop-overlay .pwa-player .pp-bar:hover .pp-track { height: 6px; }
+html.desktop-overlay .pwa-player .pp-bar--drag .pp-track { height: 7px; }
+html.desktop-overlay .pwa-player .pp-thumb { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
+html.desktop-overlay .pwa-player .pp-bar:hover .pp-thumb { width: 16px; height: 16px; margin: -8px 0 0 -8px; box-shadow: 0 0 0 5px var(--accent-soft); }
+html.desktop-overlay .pwa-player .pp-hover { font-size: 12.5px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: rgba(13,17,27,.92); }
+/* الشاشات الكبيرة: كل شيء أكبر قليلًا بنفس النسب */
+@media (min-width: 1600px) {
+  html.desktop-overlay .pwa-player .pp-icon { width: 42px; height: 42px; }
+  html.desktop-overlay .pwa-player .pp-icon svg { width: 24px; height: 24px; }
+  html.desktop-overlay .pwa-player .pp-icon--big { width: 46px; height: 46px; }
+  html.desktop-overlay .pwa-player .pp-play { width: 60px; height: 60px; }
+  html.desktop-overlay .pwa-player .pp-titles strong { font-size: 20px; }
+  html.desktop-overlay .pwa-player .pp-titles small { font-size: 14px; }
+  html.desktop-overlay .pwa-player .pp-quality { font-size: 14px !important; }
+}
+/* الصورة المصغرة فوق شريط التقدم: تظهر بتلاشٍ وتكبير من 92% (ناعم لا فجأة)، 16:9 بعرض 220px، والوقت تحتها */
+html.desktop-overlay .pp-preview { position: absolute; bottom: calc(100% + 8px); left: 0; width: 220px; transform: translateX(-50%) translateY(6px) scale(.92); transform-origin: 50% 100%; opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .2s cubic-bezier(.2,.8,.2,1); display: grid; justify-items: center; gap: 6px; z-index: 3; }
+html.desktop-overlay .pp-preview.is-on { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+html.desktop-overlay .pp-preview__img { width: 220px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; border: 2px solid rgba(255,255,255,.9); background: #0d111b; box-shadow: 0 10px 28px rgba(0,0,0,.55); display: none; }
+html.desktop-overlay .pp-preview.has-img .pp-preview__img { display: block; }
+html.desktop-overlay .pp-preview__time { padding: 4px 10px; border-radius: 8px; background: rgba(13,17,27,.92); color: #fff; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { html.desktop-overlay .pp-preview { transition: none; } }
+/* المقبض يكبر أثناء السحب كـCloudStream */
+html.desktop-overlay .pwa-player .pp-bar--drag .pp-thumb { width: 20px; height: 20px; margin: -10px 0 0 -10px; box-shadow: 0 0 0 7px var(--accent-soft); }
+/* لوحة الغرفة كـTogetherPlayer.openPanel في الـAPK: صف لكل عضو بحدود ناعمة، نقطة حالة على الصورة، والوقت والوسوم في الطرف */
+html.desktop-overlay .pp-sheet--room { width: min(440px, calc(100vw - 32px)); }
+html.desktop-overlay .pp-room__live { margin: 0 0 10px; font-size: 12.5px; font-weight: 700; color: var(--text-3, #9aa3b2); }
+html.desktop-overlay .pp-room__live[data-on="true"] { color: #34d399; }
+html.desktop-overlay .pp-room__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; margin-bottom: 6px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); }
+html.desktop-overlay .pp-room__row.is-pending { background: transparent; border-color: transparent; }
+html.desktop-overlay .pp-room__who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+html.desktop-overlay .pp-room__face { position: relative; flex: none; width: 36px; height: 36px; border-radius: 50%; overflow: visible; background: #1d2433; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 14px; }
+html.desktop-overlay .pp-room__face.is-pending { opacity: .55; }
+html.desktop-overlay .pp-room__img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+html.desktop-overlay .pp-room__dot { position: absolute; inset-block-end: -1px; inset-inline-start: -1px; width: 11px; height: 11px; border-radius: 50%; background: #34d399; border: 2px solid #0f0d16; z-index: 1; }
+html.desktop-overlay .pp-room__face.is-preparing .pp-room__dot, html.desktop-overlay .pp-room__face.is-buffering .pp-room__dot { background: #f5b942; }
+html.desktop-overlay .pp-room__face.is-failed .pp-room__dot { background: #f05252; }
+html.desktop-overlay .pp-room__face.is-paused .pp-room__dot { background: #9aa3b2; }
+html.desktop-overlay .pp-room__names { display: grid; gap: 2px; min-width: 0; }
+html.desktop-overlay .pp-room__names strong { font-size: 14px; color: #fff; }
+html.desktop-overlay .pp-room__names small { font-size: 12px; color: #34d399; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.desktop-overlay .pp-room__state.is-preparing, html.desktop-overlay .pp-room__state.is-buffering { color: #f5b942; }
+html.desktop-overlay .pp-room__state.is-failed { color: #f05252; }
+html.desktop-overlay .pp-room__state.is-paused { color: #9aa3b2; }
+html.desktop-overlay .pp-room__where { display: grid; justify-items: end; gap: 3px; flex: none; }
+html.desktop-overlay .pp-room__where b { font-size: 14px; color: #fff; font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pp-room__tags { display: flex; gap: 4px; }
+html.desktop-overlay .pp-room__tags em { font-style: normal; font-size: 11px; color: #9aa3b2; }
+html.desktop-overlay .pp-room__tags em.is-host { color: #93c5fd; }
+html.desktop-overlay .pp-room__tags em.is-warn { color: #f5b942; }
+html.desktop-overlay .pp-room__wait { font-size: 13px; color: #9aa3b2; }
+html.desktop-overlay .pp-room__offset { margin-top: 8px; }
+html.desktop-overlay .pp-room__actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 12px; }
+html.desktop-overlay .pp-room__btn { min-height: 44px; border-radius: 22px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #fff; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; transition: background .15s ease; }
+html.desktop-overlay .pp-room__btn:hover { background: rgba(255,255,255,.11); }
+html.desktop-overlay .pp-room__btn.is-leave { color: #fca5a5; border-color: rgba(240,82,82,.35); }

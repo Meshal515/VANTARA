@@ -154,6 +154,16 @@ function sources() {
   return sourcesPromise;
 }
 
+/** معرّفات المصادر التي يشغّلها هذا الجهاز الآن (ظاهرة ومضافة)، أو null إن تعذّر معرفتها (فلا نُسقط شيئًا). */
+async function runnableSourceIds() {
+  if (!available()) return null;
+  try {
+    return new Set((await sources()).map((s) => String(s.id)));
+  } catch {
+    return null;
+  }
+}
+
 /** قائمة المصادر تُعاد من المحرّك (بعد تثبيت إضافة أو إزالتها، وفي الاختبارات). */
 export function resetSources() {
   sourcesPromise = null;
@@ -831,6 +841,15 @@ export async function detail(v35work) {
       list.push({ ...list[0], sourceId: s.id, label: s.label });
     }
   }
+  // عائلة لا يملك هذا الجهاز أي مرآة منها لا تُسأل ولا تُعدّ «لم يرد»: تُرمى فورًا بلا شبكة
+  if (installed.length) {
+    const runnable = new Set(installed.map((s) => String(s.id)));
+    for (const [f, list] of families) {
+      const own = list.filter((e) => runnable.has(String(e.sourceId)));
+      if (own.length) families.set(f, own);
+      else families.delete(f);
+    }
+  }
   const heads = [...families.values()].map((list) => list[0]);
   const [primary] = heads;
   const failures = new Map();
@@ -986,6 +1005,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     if (held && !settled) return last;
     const withChapters = editions.filter((e) => e.chapters?.length);
     const full = assemble(v35work, withChapters.length ? withChapters : editions, detail, [...failed.values()]);
+    // ردّ كل من يمكن أن يردّ ولا نبذة: نص فارغ («لا توجد نبذة من المصدر») لا undefined يُبقي القصة هيكلًا للأبد
+    if (settled && full.description === undefined) full.description = '';
     if (!settled && last && (full._chapters?.length ?? 0) === (last._chapters?.length ?? 0) && full.description === last.description) return last;
     last = full;
     onUpdate(full, { settled });
@@ -993,7 +1014,11 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   };
   if (cached?.editions?.some((e) => e.chapters?.length)) emit();
 
-  const refresh = async (list) => {
+  const refresh = async (all) => {
+    // نسخة من مصدر لا يملكه هذا الجهاز (عرفناها من جهاز آخر أو من وصف العمل المشترك، أو مصدر غير مضاف
+    // لهذا الحساب) لا تُسأل: كانت ترمي فورًا وتظهر «لم يرد في الوقت» مع أن موقعها يعمل. فصولها المحفوظة تبقى.
+    const runnable = await runnableSourceIds();
+    const list = runnable ? all.filter((e) => runnable.has(String(e.sourceId))) : all;
     // التفاصيل (النبذة والتصنيف) من أوثق نسخة
     const primary = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
     await Promise.allSettled(
@@ -1018,11 +1043,31 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
             editions = unionEditions(editions, [edition]);
           }
           emit();
-        } catch {
-          failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label });
+        } catch (error) {
+          // السبب الحقيقي (مهلة، 403، حماية، خطأ) لا «لم يرد في الوقت» لكل شيء
+          failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label, ...failureOf(error) });
         }
       }),
     );
+    // أوثق نسخة لم تُعد التفاصيل (فشل أو مهلة): النبذة والتصنيف من التالية بالترتيب، واحدة بعد واحدة (حد اثنتين).
+    // كانت القصة تبقى هيكلًا للأبد لأن التفاصيل تُطلب من نسخة واحدة فقط.
+    if (!detail) {
+      const rest = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).filter((e) => e !== primary).slice(0, 2);
+      for (const edition of rest) {
+        try {
+          const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+          if (!out?.manga) continue;
+          if (isWesternManga(out.manga)) learnWestern(v35work._work?.key);
+          if (adultManga(out.manga)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
+          learnDetailAliases(v35work._work?.key, out.manga);
+          detail = out.manga;
+          emit();
+          break;
+        } catch {
+          // التالية
+        }
+      }
+    }
   };
 
   // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
@@ -1222,7 +1267,7 @@ export async function withEditions(full, found) {
     _chapters: chapters,
     _editions: editions,
     _sources: sourceList(editions),
-    _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label }))],
+    _failedSources: [...(full._failedSources ?? []), ...failed.filter((f) => !isFiller(f.source.sourceId)).map((f) => ({ sourceId: f.source.sourceId, label: f.source.label, ...failureOf(f.error) }))],
   };
 }
 

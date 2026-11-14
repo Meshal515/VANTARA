@@ -86,6 +86,7 @@ import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { sideDock } from './side-dock.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
 import { collectItems, loadIdentity, unifiedFeed } from './unified-home.js';
@@ -1363,10 +1364,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
     onLatest = ({ items }) => live('recent')({ items });
     latestListeners.add(onLatest);
     try {
-      const [tr, re] = await Promise.all([
-        globalPopular(1),
-        latestFirstPage(),
-      ]);
+      // الرائج (AniList) يُرسم فور وصوله: كان ينتظر أبطأ مصدر في Promise.all، فبقيت الرئيسية هياكل
+      // فارغة حتى تنتهي مهلة آخر مصدر (قيس: 78 ث مقابل أقل من ثانية للرائج نفسه).
+      const trending = globalPopular(1).then((result) => {
+        if (result.items.length) {
+          state.home.trending = result.items;
+          paint();
+        }
+        return result;
+      });
+      const [tr, re] = await Promise.all([trending, latestFirstPage()]);
       // ردّ فارغ من مصادر متعثّرة لا يمحو بطاقات سبق تأكيدها.
       if (tr.items.length) state.home.trending = tr.items;
       if (re.items.length) state.home.recent = recentFromLatest(re.items, state.home.recent);
@@ -1758,6 +1765,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * (وصول الفصول، المكتبة، التقييم) تملأ العناصر نفسها بلا إعادة بناء.
    */
   let unbindMangaDepth = () => {};
+  const desktopPointer = globalThis.matchMedia?.('(min-width: 1024px) and (hover: hover) and (pointer: fine)') ?? null;
+  let classicDock = null;
   function mountDetail() {
     unbindMangaDepth();
     closeDetailMenu();
@@ -1772,8 +1781,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // «ويبتوني» يبني على أساس «المعرض» (data-base) ويختلف بقواعده
     if (TABBED_LOOKS.includes(look)) page.dataset.base = 'gallery';
     else delete page.dataset.base;
+    classicDock?.destroy();
+    classicDock = null;
     page.innerHTML = detailMarkup(look, { glyph, iconButton });
     state.detailLook = look;
+    // «كلاسيكي» هو صفحة Stable كما هي، وعلى الكمبيوتر كانت عمودين: الغلاف وأفعاله عمود يلتصق بالشاشة بجانب
+    // الاسم والفصول (side-dock.js). سقط الاستدعاء مع الأنماط فصار الغلاف بنصف الشاشة وما حوله فارغ؛ يُعاد له
+    // وحده، على شاشة الفأرة وحدها (قانون الكمبيوتر). الجوال واللمس: العناصر في أماكنها حرفيًا.
+    if (look === 'page' && !unified) {
+      classicDock = sideDock(
+        () => [q('detailCover'), page.querySelector('.detail-cta'), page.querySelector('.detail-quick'), q('detailProgress')],
+        { query: desktopPointer, className: 'detail-side' },
+      );
+    }
     state.chapterQuery = '';
     // عمق التمرير من جدول depth.js كبقية الأقسام؛ لكل نمط مانجا صفه (قرار المالك). البطل: أول مسرح في النمط
     const stage = page.querySelector('.mw-stage, .mw-ban, .mw-resume, .detail-head');
@@ -1950,6 +1970,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
         cover.replaceChildren(img);
+        // ألواح «ويبتوني» على الكمبيوتر تأخذ الغلاف المحسوم نفسه (لا مسار غلاف ثانٍ)
+        for (const panel of document.querySelectorAll('#detail [data-wt-panel]')) panel.src = img.src;
         for (const g of document.querySelectorAll('#detail [id="detailGlow"]')) {
           g.onload = () => g.classList.add('ready');
           g.src = art.cover;
@@ -5382,6 +5404,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (from === 'detail' && id !== 'detail' && state.current) endWorkSession(String(state.current.id));
     if (MAIN_PAGES.includes(id)) state.stack = [];
     else if (push && from !== id) state.stack.push(from);
+    // الإعدادات من الشريط وأنت داخل قسم منها: تبدأ من رأسها، والرجوع منها يعيدك لما قبل الإعدادات لا لقسم قديم
+    if (id === 'settings') state.stack = state.stack.filter((p) => p !== 'settings' && p !== 'settingsPane');
     // تلاشٍ مع حركة: الخارجة للخارج والداخلة للداخل، والرجوع عكسه. تبديل القسم الرئيسي له حركته، فيُنهي الجاري
     const request = ++pageMotionRequest;
     // المؤشر يُقاس ويتحرك قبل أي كتابة في الصفحات: القياس بعدها كان يفرض تخطيطًا ثانيًا للصفحة كلها
@@ -6148,6 +6172,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    // ويندوز: قناة Debug/Stable مستقلة؛ الفحص والتنزيل يدويان بالكامل (desktop/update-check.js)
+    const desktopUpdates = globalThis.VantaraDesktopUpdates?.installed ? globalThis.VantaraDesktopUpdates : null;
     if (!pane) group('عن التطبيق', [
       // محرك السينما غير محرك المانجا: صفّه يظهر متى وُجد هو، خارج «النظام» المطويّ
       diagnosticsUi.visible() && globalThis.Capacitor?.Plugins?.AnimeEngine
@@ -6157,12 +6183,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
       row('info', 'الإصدار', currentPlatform() === 'pwa' ? 'نسخة PWA المثبتة على هذا الجهاز' : apkVersion && apkVersion !== deps.version ? `أندرويد ${apkVersion}` : null, { value: deps.version || RELEASE.version }),
       row('spark', 'ما الجديد', `${RELEASE.product} ${globalThis.VantaraDesktop?.version ?? RELEASE.version}`, { run: openWhatsNew }),
       api?.checkUpdate
-        ? row('refresh', 'تحديث التطبيق', 'يبحث عن نسخة أحدث', {
+        ? row('refresh', desktopUpdates ? 'البحث عن تحديثات' : 'تحديث التطبيق', desktopUpdates ? desktopUpdates.installed() : 'يبحث عن نسخة أحدث', {
             run: async () => {
               toast('نبحث عن تحديث…');
               try {
                 const found = await api.checkUpdate();
-                if (!found) toast('عندك آخر نسخة');
+                if (!found) toast(desktopUpdates ? `عندك آخر نسخة · ${desktopUpdates.installed()}` : 'عندك آخر نسخة');
               } catch {
                 toast('تعذّر التحقق من التحديث — أعد المحاولة');
               }

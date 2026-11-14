@@ -178,9 +178,10 @@ export async function installApk(apk, { onProgress = () => {}, onResult = () => 
   const progress = await native.addListener?.('progress', ({ received, total }) => {
     if (total > 0) onProgress(Math.min(1, received / total));
   });
-  const result = await native.addListener?.('installResult', ({ status }) => {
+  const result = await native.addListener?.('installResult', ({ status, message }) => {
     void result?.remove?.();
-    onResult(status);
+    // رسالة PackageInstaller الحرفية: السبب الحقيقي لرفض أندرويد (تعارض، مساحة، حزمة…)
+    onResult(status, typeof message === 'string' ? message.slice(0, 200) : '');
   });
   try {
     const out = await native.installApk({ url: apk.url, sha256: apk.sha256, size: apk.size });
@@ -192,6 +193,13 @@ export async function installApk(apk, { onProgress = () => {}, onResult = () => 
   } finally {
     await progress?.remove?.();
   }
+}
+
+/** سطر النسخة في الإعدادات: الإصدار ورقمه وحالة التوقيع، لتشخيص «فشل التثبيت» من الجوال نفسه. */
+export function versionLine(info) {
+  if (!info?.versionName) return null;
+  const sign = info.official ? 'توقيع رسمي' : `توقيع آخر ${info.signer || '؟'}`;
+  return `${info.versionName} (${info.versionCode ?? '؟'}) · ${sign}${info.package ? ` · ${info.package}` : ''}`;
 }
 
 export async function canInstall() {
