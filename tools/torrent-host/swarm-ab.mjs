@@ -136,7 +136,7 @@ async function measure(kind, source) {
       const d = await call(base, diagPath, { timeout: 900 }).catch(() => null);
       const j = d?.json ?? {};
       timeline.push(isLt(kind)
-        ? { at, phase, delivered, rate: j.rate_bps ?? null, peers: j.peers ?? null, unchokedUs: j.unchoked_us ?? null, sending: j.sending ?? null, pieces: j.pieces ?? null, waiting: j.waiting ?? null, reads: j.reads ?? null, swaps: j.swaps ?? null }
+        ? { at, phase, delivered, rate: j.rate_bps ?? null, peers: j.peers ?? null, unchokedUs: j.unchoked_us ?? null, sending: j.sending ?? null, pieces: j.pieces ?? null, waiting: j.waiting ?? null, reads: j.reads ?? null, diskIo: j.disk_io ?? null, swaps: j.swaps ?? null }
         : { at, phase, delivered, rate: j.live?.download_speed?.mbps != null ? Math.round(j.live.download_speed.mbps * 1048576) : null, peers: j.live?.snapshot?.peer_stats?.live ?? null });
     }, 1000);
     row.timeline = timeline;
@@ -158,6 +158,7 @@ async function measure(kind, source) {
     // زمن قراءة القرص (read_piece) آخر عينة: متوسطه وأقصاه، وكم قطعة كان القارئ ينتظر قطعة غير منزّلة
     const lastReads = [...timeline].reverse().find(s => s.reads)?.reads;
     row.readAvgMs = lastReads?.avg_ms ?? null; row.readMaxMs = lastReads?.max_ms ?? null; row.readCount = lastReads?.count ?? null;
+    row.diskIo = timeline.find(s => s.diskIo)?.diskIo ?? null;
     row.headWaitingSamples = headSamples.filter(s => (s.waiting?.piece ?? -1) >= 0).length;
     // صحيح فقط إن كان 206 بالمدى المطلوب بالضبط وبالطول كاملًا
     const exact = (r, from) => r.status === 206 && r.totalMs != null && r.bytes === 4 << 20 && r.contentRange?.startsWith(`bytes ${from}-${from + (4 << 20) - 1}/`);
@@ -173,8 +174,9 @@ async function measure(kind, source) {
 
 const report = { started: new Date().toISOString(), platform: process.platform, budgetMs: BUDGET_MS, note: 'Real public swarms of CC-BY films; indicative of network conditions at run time.', runs: [] };
 const strong = [];
-for (const s of which === 'cc-by' ? [] : STRONG) { try { strong.push(await resolveStrong(s)); } catch (error) { report.runs.push({ source: s.label, error: `resolve: ${error.message}` }); } }
-const chosen = [...strong, ...(which === 'strong' ? [] : SOURCES)];
+// ubuntu: سرب واحد فقط (أقوى سرب) للفرز السريع، نصف الوقت
+for (const s of which === 'cc-by' ? [] : which === 'ubuntu' ? STRONG.slice(0, 1) : STRONG) { try { strong.push(await resolveStrong(s)); } catch (error) { report.runs.push({ source: s.label, error: `resolve: ${error.message}` }); } }
+const chosen = [...strong, ...(which === 'strong' || which === 'ubuntu' ? [] : SOURCES)];
 report.sources = chosen.map(({ label, infoHash }) => ({ label, infoHash }));
 for (let round = 0; round < rounds; round++) {
   for (const source of chosen) {
@@ -199,7 +201,7 @@ for (const kind of Object.keys(engines)) {
     summary[`${kind}/${group}`] = { ok: rows.filter(r => r.head4MB?.status === 206).length, failed: all.length - rows.length,
       medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)),
       medianSustainedMBps: median(rows.map(r => r.sustainedMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)),
-      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)), medianReadAvgMs: median(rows.map(r => r.readAvgMs)), medianReadMaxMs: median(rows.map(r => r.readMaxMs)) };
+      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)), medianReadAvgMs: median(rows.map(r => r.readAvgMs)), medianReadMaxMs: median(rows.map(r => r.readMaxMs)), diskIo: [...new Set(rows.map(r => r.diskIo).filter(Boolean))] };
   }
 }
 report.summary = summary;

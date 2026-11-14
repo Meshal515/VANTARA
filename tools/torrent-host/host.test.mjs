@@ -152,6 +152,8 @@ test('libtorrent host: /diag reports engine rate, peers and the piece the reader
   for (const key of ['piece', 'ms', 'blocks', 'finished', 'writing', 'requested', 'peers', 'speeds']) assert.ok(key in diag.body.waiting, `waiting.${key}`);
   for (const key of ['in_flight', 'last_ms', 'avg_ms', 'max_ms', 'count', 'readahead']) assert.ok(key in diag.body.reads, `reads.${key}`);
   assert.equal(diag.body.reads.readahead, Number(process.env.VANTARA_LT_READAHEAD ?? 0), 'readahead off by default');
+  // محرك القرص المختار فعلًا (القياس يثبت أي واحد قيس)؛ بلا المتغير يبقى اختيار libtorrent الافتراضي
+  assert.equal(diag.body.disk_io, process.env.VANTARA_LT_DISK || 'default', 'disk_io reported');
   assert.ok((await read).body.equals(data));
 });
 

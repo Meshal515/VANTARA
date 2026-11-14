@@ -33,6 +33,12 @@
 #include <libtorrent/create_torrent.hpp>
 #include <libtorrent/load_torrent.hpp>
 #include <libtorrent/version.hpp>
+#include <libtorrent/mmap_disk_io.hpp>
+#include <libtorrent/posix_disk_io.hpp>
+#if __has_include(<libtorrent/pread_disk_io.hpp>)
+#include <libtorrent/pread_disk_io.hpp>
+#define VANTARA_HAS_PREAD 1
+#endif
 #include <boost/asio.hpp>
 
 #include <algorithm>
@@ -106,6 +112,9 @@ static int AHEAD_PIECES = 64;
 // قراءة القطع المكتملة التالية من القرص قبل أن يطلبها القارئ (الـAPK: state.readAhead لقطعة واحدة). 0 = السلوك الحالي
 // بلا قراءة مسبقة؛ تجربة قياس فقط عبر VANTARA_LT_READAHEAD حتى تثبت النتائج المتكررة.
 static int READAHEAD = 0;    // ما بعد النافذة بأولوية عادية (JS يوقف/يستأنف حسب المساحة)
+// محرك القرص: الافتراضي ما تختاره libtorrent (default). قياس فقط عبر VANTARA_LT_DISK=mmap|posix|pread، لأن
+// قياس ويندوز أظهر read_piece يتأخر 6–12 ث بينما التنزيل 6–9MB/s (القرص هو عنق الزجاجة، لا السرب).
+static std::string DISK_IO = "default";
 
 // TorrentPolicy.deadlines: القطعة المقروءة الآن أولًا (0ms)، ثم الطرفان، ثم الباقي بتدرّج يتسع.
 std::vector<std::pair<int, int>> deadlines(std::vector<int> const& window, std::vector<int> const& pendingEdges) {
@@ -283,6 +292,13 @@ public:
         // بلا المتغير لا يتغير شيء. كل إعداد يُطبع على stderr حتى يُعرف ما قيس.
         if (const char* raw = std::getenv("VANTARA_LT_SETTINGS")) applyOverrides(s, raw);
         lt::session_params params(std::move(s));
+        if (policy::DISK_IO == "mmap") params.disk_io_constructor = lt::mmap_disk_io_constructor;
+        else if (policy::DISK_IO == "posix") params.disk_io_constructor = lt::posix_disk_io_constructor;
+#ifdef VANTARA_HAS_PREAD
+        else if (policy::DISK_IO == "pread") params.disk_io_constructor = lt::pread_disk_io_constructor;
+#endif
+        else policy::DISK_IO = "default";
+        std::cerr << "disk_io: " << policy::DISK_IO << "\n";
         // جدول DHT المحفوظ (مثل dht.state في APK): لا يبدأ كل تشغيل من عقد الإقلاع
         if (!stateDir_.empty()) {
             std::ifstream in(fs::u8path(stateDir_) / "dht.state", std::ios::binary);
@@ -427,7 +443,7 @@ public:
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
-          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << "},\"swaps\":" << swaps_ << "}";
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
         return {200, o.str()};
     }
 
@@ -1015,6 +1031,7 @@ int main(int argc, char** argv) {
     if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
     if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
     if (const char* r = std::getenv("VANTARA_LT_READAHEAD")) policy::READAHEAD = std::clamp(std::atoi(r), 0, 16);
+    if (const char* d = std::getenv("VANTARA_LT_DISK")) policy::DISK_IO = d;
     int apiPort = 0, listenPort = 0, pieceSize = 256 * 1024;
     long parentPid = 0;
     std::string dir, stateDir, seedFile, testPeer;

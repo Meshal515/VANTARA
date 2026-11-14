@@ -12,13 +12,14 @@ on:
     paths:
       - 'tools/torrent-host/swarm-ab.mjs'
       - 'tools/torrent-host/torrent-file.mjs'
+      - 'tools/torrent-host/vantara-torrent.cpp'
       - '.github/workflows/windows-torrent-ab.yml'
   workflow_dispatch:
     inputs:
       sources:
-        description: 'strong | cc-by | all'
+        description: 'ubuntu | strong | cc-by | all'
         type: string
-        default: 'strong'
+        default: 'ubuntu'
       quick:
         description: 'Quick screening: first 4MB only, 45 s budget'
         type: boolean
@@ -40,19 +41,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # القراءة من القرص: الـAPK يقرأ القطعة التالية مسبقًا (state.readAhead)، ويندوز لا يقرأ مسبقًا
-          - group: disk-read
-            # تجربة لكل سطر: الاسم|إعدادات|نافذة|متغيرات (بلا علامات تنصيص: تُمرر كمتغير بيئة وتُبنى مصفوفة وسائط)
+          # محرك القرص: القياس السابق أظهر read_piece يتأخر 6–12 ث (وحتى 55 ث) والتنزيل 6–9MB/s، والقراءة المسبقة
+          # زادته سوءًا (طابور القرص). تجربة واحدة لكل محرك قرص، على سرب واحد قوي، ضد الأساسي كما هو.
+          - group: disk-io
             variants: |-
-              ra1|||VANTARA_LT_READAHEAD=1
-              ra4|||VANTARA_LT_READAHEAD=4
-            rqbit: 'yes'
-          # الشبكة والنافذة: كل إعداد وحده
-          - group: network-window
-            variants: |-
-              utp|enable_outgoing_utp=true,enable_incoming_utp=true|
-              rqt3|request_queue_time=3|
-              win32||32
+              posix|||VANTARA_LT_DISK=posix
+              pread|||VANTARA_LT_DISK=pread
             rqbit: 'no'
     timeout-minutes: 170
     env:
@@ -111,9 +105,10 @@ jobs:
       - name: A/B with per-second diagnostics (${{ matrix.group }})
         shell: pwsh
         env:
-          SOURCES: ${{ inputs.sources || 'strong' }}
+          SOURCES: ${{ inputs.sources || 'ubuntu' }}
           ROUNDS: ${{ inputs.rounds || '2' }}
           QUICK: ${{ inputs.quick }}
+          # pread غير موجود في كل نسخ libtorrent: /diag يكشف المحرك الفعلي لكل تشغيل
           WITH_RQBIT: ${{ matrix.rqbit }}
           VARIANTS: ${{ matrix.variants }}
         run: |
