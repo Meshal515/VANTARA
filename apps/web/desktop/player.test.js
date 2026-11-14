@@ -76,16 +76,18 @@ it('shows the cinematic room before native playback and hides its HWND until the
  f.lobby({session:'one',visible:true,host:true,prepared:false,connection:'live',me:'host',invited:['mansour'],roster:[],start,setVideoOffset});
  await new Promise(resolve=>setTimeout(resolve,0));
  const lobby=f.document.querySelector('.desktop-player .pp-lobby');
- expect(lobby?.querySelector('.pl-title')?.textContent).toBe('فيلم التجربة');
+ // الشعار يُحسم مرة (CLAUDE.md): مكانه محجوز باسم العمل للقارئ الآلي، ولا يظهر الاسم ثم يُستبدل بالشعار
+ expect(lobby?.querySelector('.pl-mark')?.getAttribute('aria-label')).toBe('فيلم التجربة');
+ expect(lobby?.querySelector('.pl-mark')?.dataset.ready).toBeUndefined();
  expect(lobby?.querySelector('.pl-bg img')?.src).toBe('https://images.example/banner.jpg');
- expect(lobby?.textContent).toContain('اختر السيرفر');expect(lobby?.querySelector('.pl-go[aria-label="ابدأ للجميع"]').disabled).toBe(true);
+ expect(lobby?.textContent).toContain('اختر سيرفر');expect(lobby?.querySelector('.pl-start[aria-label="ابدأ للجميع"]').disabled).toBe(true);
  expect(avatar).toHaveBeenCalledWith(expect.objectContaining({displayName:'منصور',avatarKey:'/avatars/mansour.webp'}),44);
  f.event({type:'playback/preparing',session:'one',title:'فيلم التجربة'});
  f.event({type:'playback/ready',session:'one',embedded:true});
  expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:true}));
  f.lobby({session:'one',visible:true,host:true,prepared:true,connection:'live',me:'host',invited:[],roster:[],start,setVideoOffset});
  await new Promise(resolve=>setTimeout(resolve,0));
- f.document.querySelector('.pl-go[aria-label="ابدأ للجميع"]').click();expect(start).toHaveBeenCalledOnce();
+ f.document.querySelector('.pl-start[aria-label="ابدأ للجميع"]').click();expect(start).toHaveBeenCalledOnce();
  f.lobby({session:'one',visible:false,prepared:true,roster:[]});
  expect(f.document.querySelector('.pp-lobby').hidden).toBe(true);
  expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:false}));

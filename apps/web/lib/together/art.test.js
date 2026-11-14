@@ -25,15 +25,23 @@ describe('room art', () => {
     const fetchImpl = async () => { calls++; return { ok: true, json: async () => ({ mappings: { imdb_id: 'tt22248376' }, episodes: { 5: { image: 'https://img/5.jpg', title: { en: 'Phantoms of the Dead' } } } }) }; };
     const media = { kind: 'anime', seriesRef: 'anime:154587', episode: 5, title: 'Frieren', cover: 'https://img/cover.jpg' };
     const a = await resolveArt(media, { fetchImpl });
-    expect(a).toEqual({ banner: 'https://img/5.jpg', logo: logoOfImdb('tt22248376'), title: 'Frieren', episodeTitle: 'Phantoms of the Dead' });
+    // بلا fanart: الخلفية صورة الحلقة احتياطًا، وصورة الحلقة نفسها لزر «البدء»
+    expect(a).toEqual({ banner: 'https://img/5.jpg', episodeImage: 'https://img/5.jpg', logo: logoOfImdb('tt22248376'), title: 'Frieren', episodeTitle: 'Phantoms of the Dead' });
     await resolveArt(media, { fetchImpl });
     expect(calls).toBe(1);
+  });
+
+  it('room background is the series art (16:9 fanart); the episode still goes to the Start button', async () => {
+    const fetchImpl = async () => ({ ok: true, json: async () => ({ mappings: { imdb_id: 'tt0434665' }, images: [{ coverType: 'Fanart', url: 'https://img/fanart.jpg' }], episodes: { 1: { image: 'https://img/ep1.jpg', title: { en: 'A Shinigami is Born!' } } } }) });
+    const a = await resolveArt({ kind: 'anime', seriesRef: 'anime:269', episode: 1, title: 'Bleach', banner: 'https://img/ep1-from-page.jpg' }, { fetchImpl });
+    expect(a.banner).toBe('https://img/fanart.jpg');
+    expect(a.episodeImage).toBe('https://img/ep1.jpg');
   });
 
   it('keeps what the invite sent and never guesses without data', async () => {
     const offline = async () => { throw new TypeError('offline'); };
     const a = await resolveArt({ kind: 'anime', seriesRef: 'anime:1', episode: 2, title: 'X', cover: 'c.jpg' }, { fetchImpl: offline });
-    expect(a).toEqual({ banner: 'c.jpg', logo: null, title: 'X', episodeTitle: null });
+    expect(a).toEqual({ banner: 'c.jpg', episodeImage: null, logo: null, title: 'X', episodeTitle: null });
     const b = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt0903747:2', banner: 'b.jpg', logo: 'l.png', title: 'Breaking Bad' }, { fetchImpl: offline });
     expect(b.logo).toBe('l.png');
     const c = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt0903747:2', title: 'Breaking Bad' }, { fetchImpl: offline });

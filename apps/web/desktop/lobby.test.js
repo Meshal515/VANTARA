@@ -10,9 +10,11 @@ it('the watch-together room is not rebuilt on every 500 ms tick, only when what 
   // renderLobby يبني بـdocument وImage العامّين كما في المتصفح
   globalThis.document = document; globalThis.Image = function Image() { return document.createElement('img'); };
   const engine = { playerState: async () => ({ media: { kind: 'anime', title: 'Frieren', seriesRef: 'anime:1', episode: 3 }, episode: 3 }), roomHub: () => null };
-  const lobby = createDesktopLobby({ host, engine, session: 's', chooseServer() {}, leave() {}, visibility() {} });
+  const lobby = createDesktopLobby({ host, engine, session: 's', chooseServer() {}, leave() {}, visibility() {}, resolveArtImpl: async () => ({ title: 'Frieren' }) });
   const base = { visible: true, prepared: false, host: true, connection: 'live', me: 'a', invited: ['b'], roster: [{ userId: 'a', state: 'preparing', pos: 0, at: 1 }] };
   await lobby.update(base);
+  // الفن يُحسم أولًا ثم تُرسم الغرفة مرة واحدة (لا غلاف ثم بنر، ولا اسم ثم شعار)
+  await new Promise((r) => setTimeout(r, 0));
   const first = host.firstElementChild;
   expect(first).not.toBeNull();
   // تقرير جديد: الموضع والزمن تغيرا فقط ⇒ نفس العناصر
@@ -28,6 +30,30 @@ it('the watch-together room is not rebuilt on every 500 ms tick, only when what 
   expect(host.querySelector('.pl-mark .pl-fill').style.clipPath).toBe('inset(0 60% 0 0)');
   await lobby.update({ ...base, prepared: true, progress: 0.4, roster: [{ userId: 'a', state: 'ready' }] });
   expect(host.querySelector('.pl-mark .pl-fill').style.clipPath).toBe('inset(0 0% 0 0)');
+  lobby.destroy();
+  delete globalThis.document; delete globalThis.Image;
+});
+
+// وميض الغرفة (مثبت بـtools/together/lobby-flicker.cjs): كانت تُرسم بالغلاف ثم تُبدّل للبنر عند وصول ani.zip، وفشل نداء
+// playerState واحد يعيدها للغلاف. الآن لا تُرسم قبل حسم الفن، ونداء فاشل لا يغيّر شيئًا.
+it('room art is decided once: nothing is painted before the art settles, and a failed playerState call does not repaint it', async () => {
+  const { document } = parseHTML('<html><body><div id="h"></div></body></html>');
+  const host = document.getElementById('h');
+  globalThis.document = document; globalThis.Image = function Image() { return document.createElement('img'); };
+  let fail = false, settle;
+  const engine = { playerState: async () => { if (fail) throw new Error('ipc'); return { media: { kind: 'anime', title: 'Bleach', seriesRef: 'anime:269', episode: 1, cover: 'cover.jpg' }, episode: 1 }; }, roomHub: () => null };
+  const lobby = createDesktopLobby({ host, engine, session: 's', chooseServer() {}, leave() {}, visibility() {}, resolveArtImpl: () => new Promise((r) => { settle = r; }) });
+  const base = { visible: true, prepared: false, host: true, connection: 'live', me: 'a', roster: [{ userId: 'a', state: 'preparing' }] };
+  await lobby.update(base);
+  expect(host.childElementCount).toBe(0); // لا غلاف مؤقت
+  settle({ banner: 'fanart.jpg', episodeImage: 'ep1.jpg', title: 'Bleach' });
+  await new Promise((r) => setTimeout(r, 0));
+  const img = host.querySelector('.pl-bg img');
+  expect(img.getAttribute('src')).toBe('fanart.jpg');
+  expect(host.querySelector('.pl-start-thumb').getAttribute('src')).toBe('ep1.jpg');
+  fail = true;
+  await lobby.update({ ...base, roster: [{ userId: 'a', state: 'ready' }] });
+  expect(host.querySelector('.pl-bg img')).toBe(img); // نفس الصورة، لا رجوع للغلاف
   lobby.destroy();
   delete globalThis.document; delete globalThis.Image;
 });

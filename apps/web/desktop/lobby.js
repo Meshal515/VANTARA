@@ -2,8 +2,8 @@ import { renderLobby, pendingInvitees } from '../lib/together/lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 
 /** Same room renderer as the web/APK design; MPV stays prepared behind it. */
-export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility }) {
-  let latest = null, closed = false, revision = 0, artKey = null, art = null;
+export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
+  let latest = null, closed = false, revision = 0, artKey = null, art = null, lastState = null, lastMedia = null;
   const doc = host.ownerDocument;
   const hub = () => engine.roomHub?.({ session });
   async function update(event) {
@@ -17,16 +17,25 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
     if (closed || token !== revision || !latest?.visible) return;
     const roomHub = hub();
     const media = { ...(state?.media ?? {}), ...(roomHub?.session?.media ?? {}), ...(event.media ?? {}) };
-    const initial = { banner: media.banner ?? media.cover ?? state?.poster ?? null, logo: media.logo ?? null,
-      title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
-    const key = `${media.seriesRef}|${state?.episode ?? media.episode}|${initial.banner}|${initial.logo}`;
+    // قرار فن واحد لكل حلقة (CLAUDE.md، ووميض مثبت في tools/together/lobby-flicker.cjs): الغرفة لا تُرسم حتى يُحسم الفن
+    // (resolveArt، بحد 1.2 ث ثم المتاح)، ثم لا يتبدل. المفتاح من حلقة الغرفة نفسها لا من نداء playerState الذي قد يفشل
+    // (كان فشل نداء واحد يعيد الغلاف ثم البنر: وميض متكرر).
+    const episode = media.episode ?? state?.episode;
+    const key = `${media.seriesRef}|${episode}`;
     if (key !== artKey) {
-      artKey = key; art = initial;
-      void resolveArt(media).then(value => {
-        if (!closed && artKey === key) { art = { ...initial, ...value, banner: value.banner ?? initial.banner, title: value.title || initial.title }; paint(state, media); }
-      });
+      artKey = key; art = null;
+      const initial = { banner: media.backdrop ?? media.banner ?? media.cover ?? state?.poster ?? null, episodeImage: media.episodeImage ?? null, logo: media.logo ?? null,
+        title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
+      const decide = value => {
+        if (closed || artKey !== key || art) return;
+        art = { ...initial, ...(value ?? {}), banner: value?.banner ?? initial.banner, episodeImage: value?.episodeImage ?? initial.episodeImage, title: value?.title || initial.title };
+        if (latest?.visible) paint(lastState, lastMedia);
+      };
+      void resolveArtImpl({ ...media, episode }).then(decide, () => decide(null));
+      setTimeout(() => decide(null), 1200);
     }
-    paint(state, media);
+    lastState = state; lastMedia = media;
+    if (art) paint(state, media);
   }
   // renderLobby يمسح الغرفة ويبنيها من جديد، والمشغّل يناديها كل 500ms: كان البنر يُعاد تحميله والاسم يظهر ثم
   // يُستبدل بالشعار كل نصف ثانية (الشعار «يتحرك ويتكرر» في بلاغ المالك)، والزر تحت الفأرة يُستبدل فلا يُضغط بثبات.

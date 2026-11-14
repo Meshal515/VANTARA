@@ -33,6 +33,7 @@ const ICON = {
   more: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>',
   play: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5.5 19 12 8 18.5Z"/></svg>',
   server: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M12 7.25h5M12 16.75h5"/></svg>',
+  episodes: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M8 10h8M8 14h5"/></svg>',
   clock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
 };
 
@@ -86,7 +87,23 @@ function lobbyProgress(host, m) {
   return host._progress;
 }
 
-/** الخلفية والشعار (أو الاسم) بطبقتين: رمادية تحت وملوّنة فوقها مقصوصة بقدر التقدّم. */
+/** مراحل التجهيز الحقيقية بأسمائها (لا نسبة مزعومة): العتبات من STAGE_PROGRESS في desktop/player.js. */
+export const LOBBY_STEPS = [['اتصال', 0.06], ['بيانات الحلقة', 0.16], ['أول قطعة', 0.4], ['تخزين', 0.7], ['أول إطار', 1]];
+export function lobbyStep(m, progress) {
+  if (m.selectingSource) return { done: 0, text: 'بانتظار سيرفرك' };
+  if (m.failed) return { done: 0, text: 'تعذّر سيرفرك' };
+  if (m.prepared) return { done: LOBBY_STEPS.length, text: 'جاهز للبدء' };
+  const done = LOBBY_STEPS.filter(([, at]) => at < 1 && progress >= at).length;
+  return { done, text: `${LOBBY_STEPS[Math.min(done, LOBBY_STEPS.length - 1)][0]}…` };
+}
+
+const arabic = (text) => /[؀-ۿ]/.test(String(text ?? ''));
+
+/**
+ * الخلفية والشعار ومعلومات الحلقة. قرار فن واحد (CLAUDE.md): الشعار يُحسم مرة — صورة الشعار إن حُمّلت خلال
+ * 1.2 ث، وإلا اسم العمل — ومكانه محجوز ومخفي حتى الحسم، فلا يظهر الاسم ثم يُستبدل بالشعار أمام المستخدم.
+ * الامتلاء بطبقتين (رمادية تحت وملوّنة فوق) في اتجاه الكتابة نفسها: الشعار اللاتيني من اليسار، والاسم العربي من اليمين.
+ */
 function buildArt(m, key) {
   const bg = el('div', 'pl-bg');
   if (m.art.banner) {
@@ -102,25 +119,51 @@ function buildArt(m, key) {
   const mark = el('div', 'pl-mark');
   mark.setAttribute('role', 'img');
   mark.setAttribute('aria-label', m.art.title);
-  const layers = (make) => { const ghost = make(); ghost.classList.add('pl-ghost'); const fill = make(); fill.classList.add('pl-fill'); fill.setAttribute('aria-hidden', 'true'); mark.replaceChildren(ghost, fill); return fill; };
-  const nameLayer = () => { const n = el('h1', 'pl-title', m.art.title); n.dir = 'auto'; return n; };
-  let fill = layers(nameLayer);
-  let progress = 0;
-  const paint = () => { fill.style.clipPath = `inset(0 ${Math.round((1 - progress) * 1000) / 10}% 0 0)`; };
+  let fill = null, rtl = false, progress = 0;
+  const paint = () => {
+    if (!fill) return;
+    const cut = `${Math.round((1 - progress) * 1000) / 10}%`;
+    fill.style.clipPath = rtl ? `inset(0 0 0 ${cut})` : `inset(0 ${cut} 0 0)`;
+  };
+  const layers = (make, isRtl) => {
+    const ghost = make(); ghost.classList.add('pl-ghost');
+    fill = make(); fill.classList.add('pl-fill'); fill.setAttribute('aria-hidden', 'true');
+    rtl = isRtl;
+    mark.replaceChildren(ghost, fill);
+    mark.dataset.ready = 'true';
+    paint();
+  };
+  const showName = () => layers(() => { const n = el('h1', 'pl-title', m.art.title); n.dir = 'auto'; return n; }, arabic(m.art.title));
   if (m.art.logo) {
+    let settled = false;
     const probe = new Image();
-    probe.onload = () => {
-      if (probe.naturalWidth <= 1) return;
-      fill = layers(() => { const i = new Image(); i.className = 'pl-logo'; i.alt = ''; i.src = m.art.logo; return i; });
-      paint();
+    const decide = (ok) => {
+      if (settled) return; settled = true; clearTimeout(timer);
+      if (ok) layers(() => { const i = new Image(); i.className = 'pl-logo'; i.alt = ''; i.src = m.art.logo; return i; }, false);
+      else showName();
     };
+    const timer = setTimeout(() => decide(false), 1200);
+    probe.onload = () => decide(probe.naturalWidth > 1);
+    probe.onerror = () => decide(false);
     probe.src = m.art.logo;
-  }
+  } else showName();
   hero.append(mark);
-  const meta = [...new Set([m.kindText, m.episodeText].filter(Boolean))];
-  if (m.art.episodeTitle) meta.push(m.art.episodeTitle);
-  if (meta.length) { const line = el('p', 'pl-meta', meta.join(' · ')); line.dir = 'auto'; hero.append(line); }
-  return { key, bg, hero, setProgress(p) { progress = p; paint(); } };
+  // النوع صغيرًا، ثم رقم الحلقة بخط كبير واضح، ثم عنوان الحلقة (معزول الاتجاه: «A Shinigami is Born!» لا «!A …»)
+  if (m.kindText) hero.append(el('p', 'pl-kind', m.kindText));
+  if (m.episodeText && m.episodeText !== m.kindText) hero.append(el('p', 'pl-episode', m.episodeText));
+  if (m.art.episodeTitle) { const t = el('bdi', 'pl-episode-title', m.art.episodeTitle); hero.append(t); }
+  const steps = el('div', 'pl-steps');
+  const bars = el('span', 'pl-step-bars');
+  for (let i = 0; i < LOBBY_STEPS.length; i++) bars.append(el('i'));
+  const stepText = el('span', 'pl-step-text');
+  steps.append(bars, stepText);
+  hero.append(steps);
+  return { key, bg, hero, setProgress(p, m2) {
+    progress = p; paint();
+    const { done, text } = lobbyStep(m2, p);
+    [...bars.children].forEach((b, i) => { b.className = i < done ? 'is-done' : i === done && !m2.selectingSource && !m2.failed ? 'is-now' : ''; });
+    stepText.textContent = text;
+  } };
 }
 
 /**
@@ -141,7 +184,7 @@ export function renderLobby(host, m, a) {
   let art = host._lobbyArt;
   if (!art || art.key !== artKey) art = host._lobbyArt = buildArt(m, artKey);
   // الشعار رمادي ويمتلئ بلونه بقدر تجهيز فيديوك، ويكتمل لحظة جاهزية أول إطار (كشاشة تحميل المشغّل)
-  art.setProgress(lobbyProgress(host, m));
+  art.setProgress(lobbyProgress(host, m), m);
   host.replaceChildren();
 
   // الأعلى: «مشاهدة معًا» ونقطة الاتصال · خروج
@@ -180,11 +223,21 @@ export function renderLobby(host, m, a) {
   const cta = el('div', 'pl-cta');
   const moreBtn = btn('pl-icon', ICON.more, () => { more.hidden = !more.hidden; moreBtn.setAttribute('aria-expanded', String(!more.hidden)); }, 'المزيد');
   moreBtn.setAttribute('aria-expanded', String(moreOpen));
-  cta.append(moreBtn, btn('pl-go pl-choose-server', `${ICON.server}<span>اختر السيرفر</span>`, a.changeServer, 'اختر السيرفر'));
-  if (m.blocked) cta.append(btn('pl-go', `${ICON.play}<span>تابع معهم</span>`, a.resume));
+  cta.append(moreBtn);
+  if (m.host && a.episodes) cta.append(btn('pl-go pl-episodes', `${ICON.episodes}<span>الحلقات</span>`, a.episodes, 'الحلقات'));
+  // زر أزرق واحد في الشاشة = الخطوة التي أنت فيها: السيرفر قبل الاختيار، والبدء بعد الجاهزية
+  const picking = Boolean(m.selectingSource) || m.failed;
+  const serverText = !picking && m.server?.code ? `${m.server.code}${m.server.quality ? ` · ${m.server.quality}` : ''}` : null;
+  const serverBtn = btn(`pl-go pl-choose-server${picking ? ' is-primary' : ''}`, `${ICON.server}${serverText ? `<bdi class="pl-server-val">${serverText.replace(/[<>&]/g, '')}</bdi>` : '<span>اختر سيرفر</span>'}`, a.changeServer, 'اختر السيرفر');
+  cta.append(serverBtn);
+  if (m.blocked) cta.append(btn('pl-go is-primary', `${ICON.play}<span>تابع معهم</span>`, a.resume));
   else if (m.host) {
-    const go = btn('pl-go', `${ICON.play}<span>ابدأ</span>`, a.start, 'ابدأ للجميع');
-    go.disabled = !m.prepared || m.connection !== 'live';
+    const ready = m.prepared && m.connection === 'live' && !picking;
+    const go = btn(`pl-start${ready ? ' is-primary' : ''}`, '', a.start, 'ابدأ للجميع');
+    if (m.art.episodeImage) { const thumb = new Image(); thumb.className = 'pl-start-thumb'; thumb.alt = ''; thumb.decoding = 'async'; thumb.src = m.art.episodeImage; thumb.onerror = () => thumb.remove(); go.append(thumb); }
+    const playDot = el('span', 'pl-start-play'); playDot.innerHTML = ICON.play;
+    go.append(playDot, el('span', 'pl-start-label', 'البدء'));
+    go.disabled = !ready;
     cta.append(go);
   } else cta.append(el('span', 'pl-wait', 'بانتظار المضيف'));
   bar.append(faces, info, cta);
