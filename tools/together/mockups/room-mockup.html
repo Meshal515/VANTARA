@@ -5,183 +5,190 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>تصميم غرفة المشاهدة</title>
 <!-- نموذج تصميم للموافقة (ليس كود التطبيق): غرفة «مشاهدة معًا» بكل حالاتها على الجوال والكمبيوتر، ببيانات Bleach الحقيقية.
-     الحالة من الرابط: ?s=pick|servers|preparing|ready|countdown|episodes|version|player&d=phone|pc -->
+     ?s=pick|servers|preparing|ready|countdown|episodes|version|player&d=phone|pc
+     قواعد هذه النسخة (ملاحظات المالك 14 نوفمبر):
+     - الأزرق للخطوة التي أنت فيها فقط (زر واحد أزرق في الشاشة)، بلا هالات ولا لمعان.
+     - الترتيب من اليمين بخطوات القراءة: السيرفر أولًا يمينًا، والبدء آخرًا يسارًا.
+     - ما هو زمني أو لاتيني يمشي من اليسار لليمين: تعبئة الشعار، شريط التقدم، الأوقات.
+     - لا عنصر فوق عنصر: البنر في جهة، والمعلومات على خلفية داكنة في الجهة الأخرى.
+     - السيرفرات والحلقات لوحة جانبية بسيطة في الجوال والكمبيوتر. -->
 <style>
 @font-face{font-family:'VS';src:url('/apps/web/fonts/NotoSansArabic.var.woff2') format('woff2');font-weight:100 900}
 @font-face{font-family:'VL';src:url('/apps/web/fonts/Inter-Latin.var.woff2') format('woff2');font-weight:100 900}
-:root{--bg:#05070d;--accent:#3b82f6;--accent-text:#8fb8ff;--accent-soft:rgba(59,130,246,.16);--line:rgba(255,255,255,.1);--t2:rgba(255,255,255,.72);--t3:rgba(255,255,255,.5);--ok:#34d399;--warn:#f5b942;--bad:#f87171}
+:root{--bg:#07090f;--panel:#0d111a;--row:#131824;--accent:#3b82f6;--accent-soft:rgba(59,130,246,.14);--line:rgba(255,255,255,.08);--t1:#fff;--t2:rgba(255,255,255,.7);--t3:rgba(255,255,255,.45);--ok:#34d399;--warn:#f5b942}
 *{box-sizing:border-box;margin:0}
-html,body{height:100%;background:var(--bg);color:#fff;font-family:'VL','VS',system-ui,sans-serif;overflow:hidden}
-.room{position:fixed;inset:0;overflow:hidden}
-/* الخلفية: بنر الأنمي كاملًا يذوب في الخلفية من جهة المعلومات ومن الأسفل */
-.bg{position:absolute;inset:0}
-.bg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 30%}
-.bg::after{content:"";position:absolute;inset:0;background:linear-gradient(to left,rgba(5,7,13,.96) 0%,rgba(5,7,13,.86) 30%,rgba(5,7,13,.45) 55%,rgba(5,7,13,.15) 80%,rgba(5,7,13,.3) 100%),linear-gradient(to top,var(--bg) 0%,rgba(5,7,13,.6) 26%,rgba(5,7,13,0) 55%)}
-/* أعلى: حالة الاتصال والخروج */
-.top{position:absolute;top:0;inset-inline:0;display:flex;align-items:center;justify-content:space-between;padding:16px 24px}
-.live{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px;color:var(--t2)}
-.live i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(52,211,153,.18)}
-.x{width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,.4);display:grid;place-items:center;border:1px solid var(--line)}
-/* البطل: الشعار في مكانه المحجوز، ثم النوع، ثم رقم الحلقة بخط واضح */
-.hero{position:absolute;inset-inline-start:40px;bottom:132px;width:min(44%,520px);display:grid;gap:10px;justify-items:start}
-.mark{position:relative;width:min(100%,380px);aspect-ratio:3.1/1}
-.mark img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:right center}
-.mark .ghost{filter:grayscale(1) brightness(.75);opacity:.35}
-.mark .fill{clip-path:inset(0 0 0 var(--cut,0%));transition:clip-path .5s ease}
-.kind{font-size:13px;font-weight:800;color:var(--t2);letter-spacing:.2px}
-.ep{display:flex;align-items:baseline;gap:12px}
-.ep b{font-size:34px;font-weight:900;line-height:1}
-.ep span{font-size:15px;font-weight:600;color:var(--t2);font-family:'VL'}
-.stage{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--t2)}
-.dots{display:flex;gap:5px}.dots i{width:22px;height:4px;border-radius:2px;background:rgba(255,255,255,.18)}.dots i.on{background:var(--accent)}
-/* الشريط السفلي */
-.bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:16px;padding:16px 28px 20px;border-top:1px solid rgba(255,255,255,.07);background:linear-gradient(to top,rgba(5,7,13,.9),rgba(5,7,13,.5))}
-.faces{display:flex}.face{width:40px;height:40px;border-radius:50%;border:2px solid var(--bg);background:#1d2433;display:grid;place-items:center;font-weight:800;margin-inline-start:-10px;position:relative}
+html,body{height:100%;background:var(--bg);color:var(--t1);font-family:'VL','VS',system-ui,sans-serif;overflow:hidden}
+bdi{unicode-bidi:isolate}
+.room{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
+.bg{position:absolute;top:0;bottom:0;left:0;width:72%}
+.bg img{width:100%;height:100%;object-fit:cover;object-position:center 30%;filter:brightness(.62) saturate(.95)}
+.bg::after{content:"";position:absolute;inset:0;background:linear-gradient(to left,var(--bg) 0%,rgba(7,9,15,.75) 22%,rgba(7,9,15,0) 55%),linear-gradient(to top,var(--bg) 0%,rgba(7,9,15,0) 40%),linear-gradient(to bottom,rgba(7,9,15,.6) 0%,rgba(7,9,15,0) 18%)}
+.top{position:absolute;top:0;inset-inline:0;display:flex;align-items:center;justify-content:space-between;padding:18px 28px}
+.live{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--t2)}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.icon{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid var(--line);display:grid;place-items:center}
+.icon svg{width:18px;height:18px}
+.hero{position:absolute;inset-inline-start:40px;bottom:120px;width:min(38%,460px);display:grid;gap:12px;justify-items:start}
+.mark{position:relative;width:min(100%,340px);aspect-ratio:3.1/1;direction:ltr}
+.mark img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:left center}
+.mark .ghost{filter:grayscale(1) brightness(.9);opacity:.28}
+.mark .fill{clip-path:inset(0 var(--cut,0%) 0 0)}
+.kind{font-size:13px;font-weight:700;color:var(--t3)}
+.ep{display:grid;gap:4px}
+.ep b{font-size:32px;font-weight:900;line-height:1.1}
+.ep span{font-size:15px;font-weight:600;color:var(--t2)}
+.steps{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--t2);margin-top:2px}
+.steps .bars{display:flex;gap:4px;direction:ltr}.steps .bars i{width:20px;height:3px;border-radius:2px;background:rgba(255,255,255,.14)}
+.steps .bars i.done{background:rgba(255,255,255,.75)}.steps .bars i.now{background:var(--accent)}
+.bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:12px;padding:16px 28px 20px;border-top:1px solid var(--line);background:var(--bg)}
+.btn{height:46px;border-radius:23px;padding:0 18px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);white-space:nowrap;color:var(--t1)}
+.btn svg{width:19px;height:19px}
+.btn.icononly{width:46px;padding:0;justify-content:center}
+.btn.primary{background:var(--accent);border-color:var(--accent)}
+.btn .val{font-family:'VL';font-weight:700;color:var(--t2);font-size:13px}
+.who{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding-inline:6px}
+.faces{display:flex}.face{width:36px;height:36px;border-radius:50%;border:2px solid var(--bg);background:#1c2333;display:grid;place-items:center;font-weight:800;font-size:14px;margin-inline-start:-9px;position:relative}
 .face:first-child{margin-inline-start:0}.face.wait{opacity:.4}
-.face em{position:absolute;bottom:-1px;inset-inline-start:-1px;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg);background:var(--ok)}
+.face em{position:absolute;bottom:-1px;inset-inline-start:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg);background:var(--ok)}
 .face em.busy{background:var(--warn)}
-.info{flex:1;min-width:0;display:grid;gap:3px}
-.info strong{font-size:15px}.info small{font-size:12.5px;color:var(--t2);font-weight:700;font-family:'VL','VS'}
-.info small b{color:var(--warn)}.info small b.ok{color:var(--ok)}
-.btn{height:48px;border-radius:24px;padding:0 20px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);white-space:nowrap}
-.btn svg{width:20px;height:20px}
-.btn.glow{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 0 rgba(59,130,246,.55),0 0 22px rgba(59,130,246,.45);animation:pulse 1.6s ease-in-out infinite}
-@keyframes pulse{50%{box-shadow:0 0 0 7px rgba(59,130,246,0),0 0 30px rgba(59,130,246,.6)}}
-/* زر البدء: صورة الحلقة الصغيرة، ثم دائرة فيها مثلث، ثم «البدء» */
-.start{height:56px;border-radius:28px;padding:4px 6px 4px 22px;display:flex;align-items:center;gap:12px;background:var(--accent);font-weight:900;font-size:16px;box-shadow:0 10px 30px rgba(59,130,246,.35)}
-.start img{width:84px;height:48px;object-fit:cover;border-radius:22px 8px 8px 22px}
-.start .play{width:30px;height:30px;border-radius:50%;background:#fff;display:grid;place-items:center}
-.start .play svg{width:13px;height:13px;margin-inline-end:-2px;fill:var(--accent)}
-.start.off{background:rgba(255,255,255,.1);box-shadow:none;color:var(--t3)}
-.start.off img{filter:grayscale(.8) brightness(.6)}.start.off .play{background:rgba(255,255,255,.25)}.start.off .play svg{fill:#0b0e16}
-/* ورقة السيرفرات (نفس الورقة العادية): جانبية في الكمبيوتر وسفلية بعرض الشاشة في الجوال الأفقي */
-.scrim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
-.sheet{position:absolute;top:0;bottom:0;inset-inline-end:0;width:480px;background:#0b0e16;border-inline-start:1px solid var(--line);display:flex;flex-direction:column}
-.sh-head{padding:18px 22px 10px;display:flex;align-items:center;justify-content:space-between}
-.sh-head strong{font-size:18px}.sh-head small{color:var(--t2);font-size:13px;font-weight:700}
-.tabs{display:flex;gap:18px;padding:0 22px 10px;border-bottom:1px solid var(--line);font-weight:800;font-size:14px;color:var(--t3);font-family:'VL','VS'}
-.tabs b{color:#fff;border-bottom:2px solid var(--accent);padding-bottom:8px}
-.rows{flex:1;overflow:hidden;padding:8px 14px}
-.grp{display:flex;justify-content:space-between;padding:10px 8px 6px;font-size:13px;color:var(--t2);font-weight:800}
-.row{display:flex;align-items:center;gap:12px;padding:12px;border-radius:14px}
-.row.top{background:rgba(255,255,255,.05)}.row.picked{background:var(--accent-soft);outline:1px solid var(--accent)}
-.row .q{font-family:'VL';font-weight:900;font-size:16px}
-.row .t{flex:1;min-width:0;display:grid;gap:3px}.row .t b{font-family:'VL';font-size:15px}.row .t small{font-size:12.5px;color:var(--t2);font-family:'VL','VS'}
-.tag{font-size:11px;font-weight:800;color:var(--accent-text);background:var(--accent-soft);border-radius:6px;padding:1px 6px;margin-inline-start:6px}
-.peers{display:flex;align-items:center;gap:6px;font-family:'VL';font-weight:800;font-size:14px}
-.sig{display:flex;gap:2px;align-items:flex-end}.sig i{width:3px;background:var(--ok);border-radius:1px}.sig i.off{background:rgba(255,255,255,.2)}
-.spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
-.sh-foot{padding:14px 18px 18px;border-top:1px solid var(--line)}
-.best{height:56px;border-radius:16px;background:var(--accent);display:flex;align-items:center;justify-content:center;gap:2px;flex-direction:column;font-weight:900}
-.best small{font-size:12px;font-weight:700;opacity:.85;font-family:'VL','VS'}
-/* ورقة الحلقات للمضيف: المواسم شرائح، والحلقات شبكة بصورها */
-.chips{display:flex;gap:8px;padding:6px 22px 12px}.chip{padding:7px 14px;border-radius:18px;border:1px solid var(--line);font-weight:800;font-size:13px}.chip.on{background:#fff;color:#000}
-.eps{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:4px 18px}
-.epc{border-radius:12px;overflow:hidden;background:rgba(255,255,255,.04);border:1px solid var(--line)}
-.epc img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}.epc div{padding:8px 10px;display:grid;gap:2px}.epc b{font-size:13px}.epc small{font-size:11.5px;color:var(--t2);font-family:'VL'}
-.epc.on{outline:2px solid var(--accent)}
-/* العدّ */
-.count{position:absolute;inset:0;display:grid;place-items:center;background:rgba(5,7,13,.45)}
-.count b{font-size:160px;font-weight:900;font-family:'VL';text-shadow:0 10px 50px rgba(0,0,0,.6)}
-.count small{position:absolute;bottom:22%;font-size:16px;font-weight:800;color:var(--t2)}
-/* تنبيه نسخة مختلفة */
-.warn{position:absolute;top:70px;inset-inline-start:50%;transform:translateX(50%);background:rgba(18,16,8,.92);border:1px solid rgba(245,185,66,.45);border-radius:16px;padding:14px 18px;display:flex;gap:14px;align-items:center;max-width:620px}
-.warn p{font-size:14px;font-weight:700;line-height:1.6}.warn p b{color:var(--warn)}
-.warn .btn{height:40px}
-/* المشغّل: صورة مصغرة فوق شريط التقدم */
+.status{display:grid;gap:2px;min-width:0}.status strong{font-size:14.5px}.status small{font-size:12.5px;color:var(--t2);font-weight:600}
+.status small .ok{color:var(--ok)}.status small .busy{color:var(--warn)}
+.start{height:52px;border-radius:26px;padding:4px 20px 4px 4px;display:flex;align-items:center;gap:10px;font-weight:900;font-size:15px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:var(--t3)}
+.start img{width:78px;height:44px;object-fit:cover;border-radius:22px 6px 6px 22px;order:3;filter:grayscale(.7) brightness(.55)}
+.start .play{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;order:2}
+.start .play svg{width:11px;height:11px;fill:var(--bg);margin-left:2px}
+.start span.l{order:1}
+.start.primary{background:var(--accent);border-color:var(--accent);color:#fff}.start.primary img{filter:none}.start.primary .play{background:#fff}.start.primary .play svg{fill:var(--accent)}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.side{position:absolute;top:0;bottom:0;inset-inline-start:0;width:440px;background:var(--panel);border-inline-end:1px solid var(--line);display:flex;flex-direction:column}
+.side-head{display:flex;align-items:center;gap:12px;padding:16px 18px 10px}
+.side-head .t{flex:1;display:grid;gap:2px}.side-head strong{font-size:17px}.side-head small{font-size:12.5px;color:var(--t2);font-weight:600}
+.filters{display:flex;flex-wrap:wrap;gap:6px;padding:4px 18px 12px;border-bottom:1px solid var(--line)}
+.chip{white-space:nowrap;flex:none;height:32px;padding:0 13px;border-radius:16px;border:1px solid var(--line);display:flex;align-items:center;font-size:13px;font-weight:700;color:var(--t2);font-family:'VL','VS'}
+.chip.on{background:#fff;color:#000;border-color:#fff}
+.chip.sep{border:0;padding:0 2px;color:var(--t3)}
+.list{flex:1;overflow:hidden;padding:8px 10px;display:grid;align-content:start;gap:4px}
+.grp{padding:10px 8px 4px;font-size:12px;color:var(--t3);font-weight:800;display:flex;justify-content:space-between}
+.row{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;border:1px solid transparent}
+.row.on{border-color:var(--accent);background:var(--accent-soft)}
+.row .q{min-width:52px;font-family:'VL';font-weight:800;font-size:13px;color:var(--t2);direction:ltr;text-align:center;border:1px solid var(--line);border-radius:8px;padding:3px 0}
+.row .t{flex:1;min-width:0;display:grid;gap:2px}.row .t b{font-size:14.5px}.row .t small{font-size:12px;color:var(--t2);font-weight:600}
+.row .t b em{font-style:normal;font-size:11px;font-weight:800;color:var(--t2);margin-inline-start:6px}
+.row .p{display:grid;justify-items:end;gap:1px;font-family:'VL';font-weight:800;font-size:13.5px}
+.row .p small{font-family:'VS';font-size:11px;color:var(--t3);font-weight:700}
+.row .p.good{color:var(--ok)}
+.side-foot{padding:12px 14px 16px;border-top:1px solid var(--line)}
+.side-foot .btn{width:100%;justify-content:center;height:50px;border-radius:14px}
+.side-foot small{display:block;text-align:center;margin-top:7px;font-size:12px;color:var(--t3);font-weight:600}
+.eps{display:grid;gap:6px;padding:8px 10px;overflow:hidden}
+.epr{display:flex;gap:12px;align-items:center;padding:6px;border-radius:12px;border:1px solid transparent}
+.epr img{width:112px;aspect-ratio:16/9;object-fit:cover;border-radius:8px}
+.epr div{display:grid;gap:2px}.epr b{font-size:14px}.epr small{font-size:12px;color:var(--t2)}
+.epr.on{border-color:var(--accent);background:var(--accent-soft)}
+.epr .now{font-size:11px;font-weight:800;color:#fff;background:var(--accent);border-radius:6px;padding:1px 7px;justify-self:start}
+.count{position:absolute;inset:0;display:grid;place-items:center;align-content:center;gap:8px;background:rgba(7,9,15,.82)}
+.count b{font-size:150px;font-weight:900;font-family:'VL';line-height:1}
+.count small{font-size:16px;font-weight:700;color:var(--t2)}
+.note{position:absolute;inset-inline:28px;bottom:96px;display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:14px;background:var(--row);border:1px solid var(--line)}
+.note i{width:8px;height:8px;border-radius:50%;background:var(--warn);flex:none}
+.note p{flex:1;font-size:13.5px;font-weight:600;color:var(--t2)}.note p b{color:var(--t1)}
+.note .btn{height:36px;padding:0 14px;font-size:13px}
+.version .hero{bottom:176px}
 .vid{position:absolute;inset:0;background:url('https://artworks.thetvdb.com/banners/v4/episode/155071/screencap/63bb5a37e5344.jpg') center/cover}
 .vid::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0) 40%)}
-.ctl{position:absolute;bottom:0;inset-inline:0;padding:0 28px 22px;z-index:2}
-.times{display:flex;justify-content:space-between;font-family:'VL';font-weight:800;font-size:13px;margin-bottom:10px}
-.track{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.22)}
-.track .buf{position:absolute;inset-block:0;right:0;width:58%;background:rgba(255,255,255,.4);border-radius:3px}
-.track .pl{position:absolute;inset-block:0;right:0;width:22%;background:var(--accent);border-radius:3px}
-.track .th{position:absolute;top:50%;right:47%;width:20px;height:20px;margin:-10px -10px 0 0;border-radius:50%;background:#fff;box-shadow:0 0 0 7px rgba(59,130,246,.3)}
-.pv{position:absolute;bottom:22px;right:47%;transform:translateX(50%);display:grid;justify-items:center;gap:6px}
-.pv img{width:240px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;border:2px solid rgba(255,255,255,.9);box-shadow:0 12px 30px rgba(0,0,0,.6)}
-.pv span{background:rgba(13,17,27,.92);border-radius:8px;padding:4px 10px;font-family:'VL';font-weight:800;font-size:13px}
-.label{position:absolute;top:12px;inset-inline-start:50%;transform:translateX(50%);background:rgba(0,0,0,.6);border:1px solid var(--line);border-radius:10px;padding:6px 14px;font-size:13px;font-weight:800;z-index:9}
-/* الجوال الأفقي: نفس الهوية بمقاسات اللمس */
-.phone .hero{inset-inline-start:24px;bottom:96px;width:46%;gap:6px}
-.phone .mark{width:min(100%,260px)}
-.phone .ep b{font-size:26px}.phone .ep span{font-size:13px}
-.phone .bar{padding:10px 20px 12px;gap:10px}
-.phone .face{width:34px;height:34px}
-.phone .info strong{font-size:13.5px}.phone .info small{font-size:11.5px}
-.phone .btn{height:42px;padding:0 14px;font-size:13px}
-.phone .start{height:48px;font-size:15px;padding-inline-start:16px}.phone .start img{width:68px;height:40px}
+.ctl{position:absolute;bottom:0;left:0;right:0;padding:0 28px 26px;z-index:2;direction:ltr}
+.times{display:flex;justify-content:space-between;font-family:'VL';font-weight:700;font-size:13px;margin-top:12px;color:var(--t2)}
+.track{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.2)}
+.track .buf{position:absolute;top:0;bottom:0;left:0;width:58%;background:rgba(255,255,255,.35);border-radius:3px}
+.track .pl{position:absolute;top:0;bottom:0;left:0;width:47%;background:var(--accent);border-radius:3px}
+.track .th{position:absolute;top:50%;left:47%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#fff}
+.pv{position:absolute;bottom:100%;margin-bottom:18px;left:47%;transform:translateX(-50%);display:grid;justify-items:center;gap:6px}
+.pv img{width:220px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;border:1.5px solid rgba(255,255,255,.85)}
+.pv span{background:rgba(13,17,27,.92);border-radius:7px;padding:3px 9px;font-family:'VL';font-weight:800;font-size:13px}
+.label{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--t2);z-index:9}
+.phone .bg{width:68%}
 .phone .top{padding:10px 18px}
-.phone .sheet{width:100%;top:auto;height:86%;border-radius:20px 20px 0 0;border-inline-start:0;border-top:1px solid var(--line)}
-.phone .rows{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;align-content:start;padding:4px 12px}.phone .grp{grid-column:1/-1;padding:6px 8px 2px}.phone .row{padding:8px 10px}.phone .sheet{height:94%}.phone .sh-head{padding:8px 18px 4px}.phone .sh-head br{display:none}.phone .sh-head small{margin-inline-start:10px}.phone .sh-head .x{width:34px;height:34px}.phone .tabs{padding-bottom:6px}.phone .tabs b{padding-bottom:5px}.phone .sh-foot{padding:8px 14px 10px}.phone .best{height:54px}.phone .chips{padding:4px 18px 8px}
-.phone .eps{grid-template-columns:repeat(4,1fr)}
-.phone .count b{font-size:120px}
-.phone .warn{top:54px;max-width:86%}
+.phone .hero{inset-inline-start:22px;bottom:84px;width:40%;gap:7px}
+.phone .mark{width:min(100%,230px)}
+.phone .ep b{font-size:24px}.phone .ep span{font-size:13px}
+.phone .bar{padding:8px 16px 10px;gap:8px}
+.phone .btn{height:42px;padding:0 13px;font-size:13px}.phone .btn.icononly{width:42px}
+.phone .face{width:32px;height:32px;font-size:12px}
+.phone .status strong{font-size:13px}.phone .status small{font-size:11.5px}
+.phone .start{height:46px;font-size:14px;padding-inline-end:4px;padding-inline-start:16px}.phone .start img{width:64px;height:38px}
+.phone .side{width:min(440px,54%)}.phone .filters{flex-wrap:nowrap;overflow:hidden}.phone .side-head .t{display:flex;align-items:baseline;gap:10px}.phone .list{gap:2px;padding:4px 8px}.phone .grp{padding:6px 8px 2px}.phone .side-foot{padding:8px 12px 10px}.phone .side-foot .btn{height:44px}.phone .side-foot small{margin-top:4px}
+.phone .side-head{padding:10px 14px 6px}.phone .filters{padding:2px 14px 8px}.phone .chip{height:28px;font-size:12px;padding:0 10px}
+.phone .row{padding:8px 10px}.phone .row .t b{font-size:13.5px}
+.phone .epr img{width:92px}
+.phone .note{bottom:70px;inset-inline:16px;padding:8px 12px}.phone.version .hero{bottom:142px}
+.phone .count b{font-size:110px}
 </style>
 </head>
 <body>
 <script>
 const q=new URLSearchParams(location.search),S=q.get('s')||'pick',D=q.get('d')||'pc';
 document.documentElement.classList.add(D);
-const BANNER='https://s4.anilist.co/file/anilistcdn/media/anime/banner/269-08ar2HJOUAuL.jpg';
+// خلفية العمل بنسبة 16:9 (fanart من ani.zip/TVDB) — بنر AniList شريط عريض جدًا يُقص فيه الوجه على الشاشة الكاملة، فيبقى احتياطًا
+const BANNER='https://artworks.thetvdb.com/banners/fanart/original/74796-1.jpg';
 const LOGO='https://images.metahub.space/logo/medium/tt0434665/img';
-const EP=n=>['https://artworks.thetvdb.com/banners/v4/episode/155071/screencap/63bb5a37e5344.jpg','https://artworks.thetvdb.com/banners/v4/episode/155072/screencap/63bb5a688e7b1.jpg','https://artworks.thetvdb.com/banners/v4/episode/155073/screencap/63bb5a9e8add6.jpg','https://artworks.thetvdb.com/banners/v4/episode/155074/screencap/63bb5b0a87246.jpg'][(n-1)%4];
-const play='<svg viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg>';
+const SHOTS=['https://artworks.thetvdb.com/banners/v4/episode/155071/screencap/63bb5a37e5344.jpg','https://artworks.thetvdb.com/banners/v4/episode/155072/screencap/63bb5a688e7b1.jpg','https://artworks.thetvdb.com/banners/v4/episode/155073/screencap/63bb5a9e8add6.jpg','https://artworks.thetvdb.com/banners/v4/episode/155074/screencap/63bb5b0a87246.jpg'];
+const TITLES=['A Shinigami is Born!','Pay or Play','Sibling Rivalry','And Your Bird Can Speak'];
+const EP=n=>SHOTS[(n-1)%4];
 const ic={server:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
- eps:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M8 5v5M16 5v5"/></svg>',
- x:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
- more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>'};
-const stages=['اتصال','بيانات الحلقة','أول قطعة','تخزين','جاهز'];
-const st={pick:{n:0,line:'اختر سيرفرك عشان نبدأ التجهيز',server:'لم تختر سيرفر بعد',sb:''},
- servers:{n:0,line:'اختر سيرفرك عشان نبدأ التجهيز',server:'لم تختر سيرفر بعد',sb:''},
- preparing:{n:3,line:'نجهّز فيديوك… أول قطعة وصلت',server:'Torrentio · 1080p',sb:'يتجهّز'},
- ready:{n:5,line:'الكل جاهز',server:'Torrentio · 1080p',sb:'جاهز'},
- countdown:{n:5,line:'الكل جاهز',server:'Torrentio · 1080p',sb:'جاهز'},
- episodes:{n:5,line:'الكل جاهز',server:'Torrentio · 1080p',sb:'جاهز'},
- version:{n:5,line:'الكل جاهز',server:'Torrentio · 1080p',sb:'جاهز'}}[S]||{};
-const names={pick:'1 · الغرفة أولًا: اختر سيرفر',servers:'2 · ورقة السيرفرات (نفس العادية)',preparing:'3 · التجهيز: الشعار يتلوّن مع التحميل',ready:'4 · جاهز: زر البدء يلمع',countdown:'5 · العدّ المشترك في نص الشاشة',episodes:'6 · تبديل الحلقة والموسم (المضيف)',version:'7 · تنبيه نسخة مختلفة',player:'8 · الصورة المصغرة فوق شريط التقدم'};
+ eps:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M8 10h8M8 14h5"/></svg>',
+ x:'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+ more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+ play:'<svg viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg>'};
+const STAGES=['اتصال','بيانات الحلقة','أول قطعة','تخزين','أول إطار'];
+const conf={pick:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
+ servers:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
+ preparing:{n:3,line:'نجهّز فيديوك',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="busy">أول قطعة وصلت</span>'},
+ ready:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
+ countdown:{n:5,line:'الكل جاهز',sub:''},episodes:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
+ version:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'}}[S];
+const NAMES={pick:'1 · الغرفة أولًا',servers:'2 · السيرفرات',preparing:'3 · التجهيز',ready:'4 · جاهز',countdown:'5 · العدّ',episodes:'6 · الحلقات',version:'7 · نسخة مختلفة',player:'8 · الصورة المصغرة'};
 let h='';
 if(S==='player'){
- h=`<div class="vid"></div><div class="ctl"><div class="pv"><img src="${EP(3)}"><span>11:42</span></div><div class="times"><span>05:12</span><span>24:00</span></div><div class="track"><i class="buf"></i><i class="pl"></i><i class="th"></i></div></div>`;
+ h=`<div class="vid"></div><div class="ctl"><div class="track"><i class="buf"></i><i class="pl"></i><i class="th"></i><div class="pv"><img src="${EP(3)}"><span>11:17</span></div></div><div class="times"><span>11:17</span><span>24:00</span></div></div>`;
 }else{
- const cut=(1-st.n/5)*100;
- const dots=stages.map((_,i)=>`<i class="${i<st.n?'on':''}"></i>`).join('');
- const stageText=st.n===0?'بانتظار اختيار السيرفر':st.n<5?stages[st.n-1]+' ✓ · التالي: '+stages[st.n]:'أول إطار جاهز';
- const ready=st.n===5;
+ const n=conf.n,ready=n===5,picking=S==='pick'||S==='servers';
+ const bars=STAGES.map((_,i)=>`<i class="${i<n?'done':i===n&&!picking?'now':''}"></i>`).join('');
+ const stepText=picking?'بانتظار سيرفرك':ready?'جاهز للبدء':`${STAGES[n]}…`;
  h=`<div class="bg"><img src="${BANNER}"></div>
- <div class="top"><span class="live"><i></i>مشاهدة معًا · متصل</span><span class="x">${ic.x}</span></div>
- <div class="hero"><div class="mark" style="--cut:${cut}%"><img class="ghost" src="${LOGO}"><img class="fill" src="${LOGO}"></div>
+ <div class="top"><span class="live"><i></i>مشاهدة معًا · متصل</span><span class="icon">${ic.x}</span></div>
+ <div class="hero"><div class="mark" style="--cut:${(1-n/5)*100}%"><img class="ghost" src="${LOGO}"><img class="fill" src="${LOGO}"></div>
   <span class="kind">أنمي · الموسم 1</span>
-  <div class="ep"><b>الحلقة 1</b><span>A Shinigami is Born!</span></div>
-  <div class="stage"><span class="dots">${dots}</span><span>${stageText}</span></div></div>
- <div class="bar"><div class="faces"><span class="face">م<em></em></span><span class="face">د<em class="${S==='preparing'||S==='pick'||S==='servers'?'busy':''}"></em></span><span class="face wait">ن</span></div>
-  <div class="info"><strong>${st.line}</strong><small>${st.server}${st.sb?` · <b class="${ready?'ok':''}">${st.sb}</b>`:''}</small></div>
-  <span class="btn">${ic.more}</span>
+  <div class="ep"><b>الحلقة 1</b><span><bdi>${TITLES[0]}</bdi></span></div>
+  <div class="steps"><span class="bars">${bars}</span><span>${stepText}</span></div></div>
+ <div class="bar">
+  <span class="btn ${picking?'primary':''}">${ic.server}${picking?'اختر سيرفر':'<bdi class="val">Torrentio · 1080p</bdi>'}</span>
+  <div class="who"><div class="faces"><span class="face">م<em></em></span><span class="face">د<em class="${ready?'':'busy'}"></em></span><span class="face wait">ن</span></div>
+   <div class="status"><strong>${conf.line}</strong>${conf.sub?`<small>${conf.sub}</small>`:''}</div></div>
   <span class="btn">${ic.eps}الحلقات</span>
-  <span class="btn ${S==='pick'?'glow':''}">${ic.server}${S==='pick'||S==='servers'?'اختر سيرفر':'السيرفر'}</span>
-  <span class="start ${ready?'':'off'}"><img src="${EP(1)}"><span class="play">${play}</span><span>البدء</span></span></div>`;
+  <span class="btn icononly">${ic.more}</span>
+  <span class="start ${ready?'primary':''}"><span class="l">البدء</span><span class="play">${ic.play}</span><img src="${EP(1)}"></span></div>`;
  if(S==='servers'){
-  const row=(q,s,n,d,p,cls='',tg='')=>`<div class="row ${cls}"><span class="q">${q}</span><div class="t"><b>${s}${tg}</b><small>${d}</small></div><span class="peers">${p}<span class="sig">${[6,9,12,15].map((hh,i)=>`<i style="height:${hh}px" class="${i<n?'':'off'}"></i>`).join('')}</span></span></div>`;
-  h+=`<div class="scrim"></div><div class="sheet"><div class="sh-head"><div><strong>اختر سيرفرك</strong><br><small>Bleach · الحلقة 1 — الغرفة تنتظرك</small></div><span class="x">${ic.x}</span></div>
-  <div class="tabs"><b>الكل</b><span>1080p</span><span>720p</span><span>SD</span></div>
-  <div class="rows"><div class="grp"><span>تورنت · 76</span><span>يبدأ أبطأ · جودة وحجم أعلى</span></div>
-  ${row('1080p','Torrentio',4,'853 MB · ترجمات متعددة','156','picked','<span class="tag">مقترح</span>')}
-  ${row('1080p','Torrentio',4,'180 MB · صوت متعدد','113')}
-  ${row('1080p','Torrentio',3,'938 MB · صوت متعدد · ترجمات متعددة','23')}
-  ${row('1080p','Torrentio',2,'562 MB','18')}
+  const row=(q,src,d,p,pl,cls='',tag='')=>`<div class="row ${cls}"><span class="q">${q}</span><div class="t"><b><bdi>${src}</bdi>${tag}</b><small>${d}</small></div><span class="p ${pl==='سرب قوي'?'good':''}">${p}<small>${pl}</small></span></div>`;
+  h+=`<div class="scrim"></div><div class="side"><div class="side-head"><div class="t"><strong>اختر سيرفرك</strong><small>الحلقة 1 · الغرفة تنتظرك</small></div><span class="icon">${ic.x}</span></div>
+  <div class="filters"><span class="chip on">الكل</span><span class="chip">1080p</span><span class="chip">720p</span><span class="chip">SD</span><span class="chip">تورنت</span><span class="chip">مباشر</span><span class="chip">مترجم عربي</span></div>
+  <div class="list"><div class="grp"><span>تورنت · 76</span><span>جودة أعلى · يبدأ أبطأ</span></div>
+  ${row('1080p','Torrentio','853 MB · ترجمات متعددة','156','سرب قوي','on','<em>مقترح</em>')}
+  ${row('1080p','Torrentio','180 MB · صوت متعدد','113','سرب قوي')}
+  ${row('1080p','Torrentio','938 MB · صوت وترجمات متعددة','23','مشارك')}
   <div class="grp"><span>مباشر · 12</span><span>يبدأ أسرع</span></div>
-  ${row('1080p','AnimeKai',4,'MegaUp · مترجم عربي','<span class="spin"></span>')}
-  ${row('720p','WitAnime',3,'StreamWish · مترجم عربي','جاهز')}
-  </div><div class="sh-foot"><div class="best">شغّل الأفضل<small>Torrentio · 1080p · 156 مشارك · سرب قوي · 853 MB</small></div></div></div>`;
+  ${row('1080p','AnimeKai','MegaUp · مترجم عربي','جاهز','')}
+  ${row('720p','WitAnime','StreamWish · مترجم عربي','جاهز','')}
+  </div><div class="side-foot"><span class="btn primary">شغّل المقترح</span><small><bdi>Torrentio · 1080p · 853 MB</bdi> · 156 مشارك</small></div></div>`;
  }
  if(S==='episodes'){
-  const cards=[1,2,3,4,5,6,7,8].map(n=>`<div class="epc ${n===1?'on':''}"><img src="${EP(n)}"><div><b>الحلقة ${n}</b><small>${['A Shinigami is Born!','Pay or Play','Sibling Rivalry','And Your Bird Can Speak'][(n-1)%4]}</small></div></div>`).join('');
-  h+=`<div class="scrim"></div><div class="sheet"><div class="sh-head"><div><strong>الحلقات</strong><br><small>اختيارك ينقل الغرفة كلها، والكل يتجهّز من جديد</small></div><span class="x">${ic.x}</span></div>
-  <div class="chips"><span class="chip on">الموسم 1</span><span class="chip">الموسم 2</span><span class="chip">الموسم 3</span><span class="chip">الموسم 4</span></div><div class="eps">${cards}</div></div>`;
+  const rows=[1,2,3,4,5].map(k=>`<div class="epr ${k===1?'on':''}"><img src="${EP(k)}"><div>${k===1?'<span class="now">الآن</span>':''}<b>الحلقة ${k}</b><small><bdi>${TITLES[(k-1)%4]}</bdi></small></div></div>`).join('');
+  h+=`<div class="scrim"></div><div class="side"><div class="side-head"><div class="t"><strong>الحلقات</strong><small>اختيارك ينقل الغرفة كلها</small></div><span class="icon">${ic.x}</span></div>
+  <div class="filters"><span class="chip on">الموسم 1</span><span class="chip">الموسم 2</span><span class="chip">الموسم 3</span><span class="chip">الموسم 4</span></div><div class="eps">${rows}</div></div>`;
  }
  if(S==='countdown') h+=`<div class="count"><b>3</b><small>نبدأ كلنا مع بعض</small></div>`;
- if(S==='version') h+=`<div class="warn"><p>نسخة <b>دحمي</b> أقصر من نسختك بـ<b>20 ثانية</b> (غالبًا بدون المقدمة).<br>نقترح ديلاي ‎−20 ث عنده عشان تتطابقون.</p><span class="btn glow">طبّق الاقتراح</span></div>`;
+ if(S==='version'){document.documentElement.classList.add('version');h+=`<div class="note"><i></i><p>نسخة <b>دحمي</b> أقصر من نسختك بـ<b>20 ثانية</b>، غالبًا بدون المقدمة.</p><span class="btn">اضبط الديلاي عنده</span></div>`;}
 }
-document.body.innerHTML=`<div class="room">${h}</div><div class="label">${names[S]} · ${D==='phone'?'الجوال (أفقي)':'الكمبيوتر'}</div>`;
+document.body.innerHTML=`<div class="room">${h}</div><div class="label">${NAMES[S]} · ${D==='phone'?'الجوال':'الكمبيوتر'}</div>`;
 </script>
 </body>
 </html>
