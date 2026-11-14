@@ -262,3 +262,29 @@
     margin-inline: auto;
   }
 }
+
+/* ═══ رئيسية «المحتوى الموحد» على الكمبيوتر: لا لف أفقي (قانون الكمبيوتر، بند 1) ═══
+ * قيس في جولة الصفحات (15 نوفمبر): «جدول البث» 18 بطاقة (1118→5538px) و«الأنمي/المانجا الرائجة» و«مسلسلات»
+ * و«أفلام» 12 غلافًا (1118→2034px) شرائط أفقية بعجلة عمودية. الشبكة نفسها التي في رئيسيات الأقسام: أعمدة من
+ * عرض القسم، صفّان في الرئيسية، والباقي خلف «الكل». */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .uv-sec:has(> .uv-rail) { container-type: inline-size; }
+  .v35 .uv-sec > .uv-rail {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+    gap: 26px 18px;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .v35 .uv-sec > .uv-rail > * { width: auto; min-width: 0; scroll-snap-align: none; }
+  .v35 .uv-sec > .uv-rail .uv-art { width: 100%; height: auto; aspect-ratio: 2 / 3; }
+  @container (max-width: 859px) { .v35 .uv-sec > .uv-rail { --cols: 4; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 9) { display: none; } }
+  @container (min-width: 860px) and (max-width: 1139px) { .v35 .uv-sec > .uv-rail { --cols: 5; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 11) { display: none; } }
+  @container (min-width: 1140px) and (max-width: 1419px) { .v35 .uv-sec > .uv-rail { --cols: 6; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 13) { display: none; } }
+  @container (min-width: 1420px) { .v35 .uv-sec > .uv-rail { --cols: 7; } .v35 .uv-sec > .uv-rail:not(.uv-air-strip) > :nth-child(n + 15) { display: none; } }
+  /* جدول البث: بطاقات عريضة 16:9، أربعة أعمدة (خمسة في الأعرض)، صفّان */
+  .v35 .uv-sec > .uv-air-strip { --cols: 4; gap: 22px 16px; }
+  .v35 .uv-sec > .uv-air-strip > :nth-child(n + 9) { display: none; }
+  @container (min-width: 1420px) { .v35 .uv-sec > .uv-air-strip { --cols: 5; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 9) { display: grid; } .v35 .uv-sec > .uv-air-strip > :nth-child(n + 11) { display: none; } }
+  .v35 .uv-air-days { flex-wrap: wrap; overflow: visible; }
+}
