@@ -40,24 +40,24 @@ bdi{unicode-bidi:isolate}
 .steps{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--t2);margin-top:2px}
 .steps .bars{display:flex;gap:4px;direction:ltr}.steps .bars i{width:20px;height:3px;border-radius:2px;background:rgba(255,255,255,.14)}
 .steps .bars i.done{background:rgba(255,255,255,.75)}.steps .bars i.now{background:var(--accent)}
-.bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:10px;padding:16px 40px 24px}.bar .who{order:9;justify-content:flex-end}
-.btn{height:48px;border-radius:24px;padding:0 18px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);backdrop-filter:blur(8px);white-space:nowrap;color:var(--t1)}
+.bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:10px;padding:16px 40px 24px}
+.btn{height:48px;border-radius:14px;padding:0 18px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);backdrop-filter:blur(8px);white-space:nowrap;color:var(--t1)}
 .btn svg{width:19px;height:19px}
-.btn.icononly{width:46px;padding:0;justify-content:center}
+.btn.icononly{width:48px;padding:0;justify-content:center}
 .btn.primary{background:var(--accent);border-color:var(--accent)}
 .btn .val{font-family:'VL';font-weight:700;color:var(--t2);font-size:13px}
-.who{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding-inline:6px;flex-direction:row-reverse}.who .status{text-align:left}
+.who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .faces{display:flex}.face{width:36px;height:36px;border-radius:50%;border:2px solid var(--bg);background:#1c2333;display:grid;place-items:center;font-weight:800;font-size:14px;margin-inline-start:-9px;position:relative}
 .face:first-child{margin-inline-start:0}.face.wait{opacity:.4}
 .face em{position:absolute;bottom:-1px;inset-inline-start:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg);background:var(--ok)}
 .face em.busy{background:var(--warn)}
 .status{display:grid;gap:2px;min-width:0}.status strong{font-size:14.5px}.status small{font-size:12.5px;color:var(--t2);font-weight:600}
 .status small .ok{color:var(--ok)}.status small .busy{color:var(--warn)}
-.start{height:48px;border-radius:24px;padding:3px 18px 3px 3px;display:flex;align-items:center;gap:10px;font-weight:900;font-size:15px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);color:var(--t3)}
-.start img{width:72px;height:42px;object-fit:cover;border-radius:22px 6px 6px 22px;order:3;filter:grayscale(.7) brightness(.55)}
-.start .play{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;order:2}
-.start .play svg{width:11px;height:11px;fill:var(--bg);margin-left:2px}
-.start span.l{order:1}
+.start{height:48px;border-radius:14px;padding:4px 4px 4px 18px;display:flex;align-items:center;gap:10px;font-weight:900;font-size:15px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);color:var(--t3)}
+.start img{width:70px;height:40px;object-fit:cover;border-radius:10px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);filter:grayscale(.7) brightness(.55)}
+.start .play{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center}
+.start .play svg{width:11px;height:11px;fill:var(--bg);transform:translateX(1.5px)}
+.start span.l{padding-inline-end:6px}
 .start.primary{background:var(--accent);border-color:var(--accent);color:#fff}.start.primary img{filter:none}.start.primary .play{background:#fff}.start.primary .play svg{fill:var(--accent)}
 .scrim{position:absolute;inset:0;background:rgba(0,0,0,.5)}
 .side{position:absolute;top:0;bottom:0;inset-inline-start:0;width:440px;background:var(--panel);border-inline-end:1px solid var(--line);display:flex;flex-direction:column}
@@ -115,7 +115,7 @@ bdi{unicode-bidi:isolate}
 .phone .btn{height:42px;padding:0 13px;font-size:13px}.phone .btn.icononly{width:42px}
 .phone .face{width:32px;height:32px;font-size:12px}
 .phone .status strong{font-size:13px}.phone .status small{font-size:11.5px}
-.phone .start{height:42px;font-size:13.5px;padding:3px 14px 3px 3px}.phone .start img{width:58px;height:36px}
+.phone .start{height:42px;font-size:13.5px;padding:3px 3px 3px 14px}.phone .start img{width:56px;height:34px;border-radius:9px}.phone .btn{border-radius:12px}.phone .start{border-radius:12px}
 .phone .side{width:min(440px,54%)}.phone .filters{flex-wrap:nowrap;overflow:hidden}.phone .side-head .t{display:flex;align-items:baseline;gap:10px}.phone .list{gap:2px;padding:4px 8px}.phone .grp{padding:6px 8px 2px}.phone .side-foot{padding:8px 12px 10px}.phone .side-foot .btn{height:44px}.phone .side-foot small{margin-top:4px}
 .phone .side-head{padding:10px 14px 6px}.phone .filters{padding:2px 14px 8px}.phone .chip{height:28px;font-size:12px;padding:0 10px}
 .phone .row{padding:8px 10px}.phone .row .t b{font-size:13.5px}
@@ -147,6 +147,22 @@ bdi{unicode-bidi:isolate}
 .phone .ss{width:min(440px,54%)}.phone .ss-top{padding:8px 16px 0;gap:4px}.phone .ss-back{font-size:20px}.phone .ss-tabs{font-size:13.5px}.phone .ss-tabs>*{padding-bottom:7px}
 .phone .sr{padding:7px 8px}.phone .sr-t b{font-size:13.5px}.phone .sr-t small{font-size:11.5px}.phone .ss-grp{padding:6px 8px 2px}.phone .ss-more{padding:7px 8px}
 .phone .ss-foot{padding:8px 12px 10px}.phone .ss-best{height:46px}.phone .ss-best b{font-size:14px}
+
+.pc .hero{inset-inline-start:56px;bottom:124px;width:min(40%,620px);gap:14px}
+.pc .mark{width:min(100%,440px)}
+.pc .kind{font-size:15px}.pc .ep b{font-size:46px}.pc .ep span{font-size:18px}
+.pc .steps{font-size:14px}.pc .steps .bars i{width:26px;height:4px}
+.pc .top{padding:22px 56px}.pc .live{font-size:15px}.pc .icon{width:46px;height:46px}
+.pc .bar{padding:20px 56px 30px;gap:12px}
+.pc .btn{height:56px;font-size:16px;padding:0 22px;border-radius:16px}.pc .btn svg{width:22px;height:22px}.pc .btn.icononly{width:56px}
+.pc .start{height:56px;font-size:17px;border-radius:16px;padding:5px 5px 5px 22px}.pc .start img{width:84px;height:46px;border-radius:11px}
+.pc .start .play{width:32px;height:32px}.pc .start .play svg{width:13px;height:13px}
+.pc .face{width:44px;height:44px;font-size:16px}.pc .status strong{font-size:17px}.pc .status small{font-size:14px}
+.pc .note{inset-inline:56px;bottom:112px;padding:14px 20px}.pc .note p{font-size:15px}
+.pc .count b{font-size:190px}.pc .count small{font-size:19px}
+.pc .ss{width:520px}.pc .ss-tabs{font-size:16px}.pc .sr-t b{font-size:16px}.pc .sr-t small{font-size:13.5px}.pc .ss-best{height:62px}
+.pc .side{width:500px}.pc .epr img{width:132px}.pc .epr b{font-size:15px}
+.pc .pv img{width:280px}
 </style>
 </head>
 <body>
@@ -186,12 +202,12 @@ if(S==='player'){
   <div class="ep"><b>الحلقة 1</b><span><bdi>${TITLES[0]}</bdi></span></div>
   <div class="steps"><span class="bars">${bars}</span><span>${stepText}</span></div></div>
  <div class="bar">
-  <span class="btn ${picking?'primary':''}">${ic.server}${picking?'اختر سيرفر':'<bdi class="val">Torrentio · 1080p</bdi>'}</span>
-  <span class="btn">${ic.eps}الحلقات</span>
-  <span class="btn icononly">${ic.more}</span>
-  <span class="start ${ready?'primary':''}"><span class="l">البدء</span><span class="play">${ic.play}</span><img src="${EP(1)}"></span>
   <div class="who"><div class="faces"><span class="face">م<em></em></span><span class="face">د<em class="${ready?'':'busy'}"></em></span><span class="face wait">ن</span></div>
-   <div class="status"><strong>${conf.line}</strong>${conf.sub?`<small>${conf.sub}</small>`:''}</div></div></div>`;
+   <div class="status"><strong>${conf.line}</strong>${conf.sub?`<small>${conf.sub}</small>`:''}</div></div>
+  <span class="btn icononly">${ic.more}</span>
+  <span class="btn">${ic.eps}الحلقات</span>
+  <span class="btn ${picking?'primary':''}">${ic.server}${picking?'اختر سيرفر':'<bdi class="val">Torrentio · 1080p</bdi>'}</span>
+  <span class="start ${ready?'primary':''}"><img src="${EP(1)}"><span class="play">${ic.play}</span><span class="l">البدء</span></span></div>`;
  if(S==='servers'){
   // نفس ورقة سيرفرات الكمبيوتر الحالية (المعتمدة من المالك) كلوحة جانبية: تبويبات الجودة، مجموعات، صف لكل نسخة، «شغّل الأفضل»
   const sig=n=>`<span class="sg">${[5,8,11,14].map((hh,i)=>`<i style="height:${hh}px" class="${i<n?'':'off'}"></i>`).join('')}</span>`;
