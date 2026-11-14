@@ -33,6 +33,7 @@
 #include <libtorrent/create_torrent.hpp>
 #include <libtorrent/load_torrent.hpp>
 #include <libtorrent/version.hpp>
+#include <libtorrent/hasher.hpp>
 #include <libtorrent/mmap_disk_io.hpp>
 #include <libtorrent/posix_disk_io.hpp>
 #if __has_include(<libtorrent/pread_disk_io.hpp>)
@@ -115,6 +116,9 @@ static int READAHEAD = 0;    // ما بعد النافذة بأولوية عاد
 // محرك القرص: الافتراضي ما تختاره libtorrent (default). قياس فقط عبر VANTARA_LT_DISK=mmap|posix|pread، لأن
 // قياس ويندوز أظهر read_piece يتأخر 6–12 ث بينما التنزيل 6–9MB/s (القرص هو عنق الزجاجة، لا السرب).
 static std::string DISK_IO = "default";
+// تسليم مباشر (قياس فقط عبر VANTARA_LT_DIRECT=1): بعد have_piece تُقرأ القطعة من الملف مباشرة وتُطابق بصمتها SHA-1
+// مع التورنت قبل التسليم، فلا تنتظر خلف طابور القرص في libtorrent. أي فشل أو عدم تطابق يرجع إلى read_piece.
+static bool DIRECT_READ = false;
 
 // TorrentPolicy.deadlines: القطعة المقروءة الآن أولًا (0ms)، ثم الطرفان، ثم الباقي بتدرّج يتسع.
 std::vector<std::pair<int, int>> deadlines(std::vector<int> const& window, std::vector<int> const& pendingEdges) {
@@ -222,6 +226,8 @@ struct Torrent {
     std::set<int> reading;
     std::map<int, std::string> readErrors;
     std::map<int, int> readFailures;
+    std::set<int> directFailed;   // قطع لم تطابق بصمتها عند القراءة المباشرة: read_piece لها فقط
+    int directHits = 0, directMisses = 0;
     int errorRecoveries = 0;
 };
 
@@ -422,9 +428,9 @@ public:
         int unchokedUs = 0, sending = 0, onWaiting = 0;
         std::vector<int> waitSpeeds;
         int waiting, windowStart; int64_t waitedMs = -1;
-        size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount;
+        size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount, directHits, directMisses;
         { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
-          readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount;
+          readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount; directHits = t->directHits; directMisses = t->directMisses;
           if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
         for (auto const& p : peers) {
             if (bool(p.flags & lt::peer_info::interesting) && !bool(p.flags & lt::peer_info::remote_choked)) ++unchokedUs;
@@ -443,7 +449,7 @@ public:
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
-          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
         return {200, o.str()};
     }
 
@@ -695,6 +701,19 @@ private:
                 t->h.resume();
             }
             if (t->h.have_piece(lt::piece_index_t(piece))) {
+                if (policy::DIRECT_READ && !t->directFailed.count(piece) && !t->reading.count(piece)) {
+                    auto const started = clk::now();
+                    lock.unlock();
+                    auto data = directRead(t->h, piece);
+                    lock.lock();
+                    if (data) {
+                        ++t->directHits;
+                        recordReadLocked(*t, std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - started).count());
+                        cacheLocked(*t, piece, std::move(data));
+                        continue;
+                    }
+                    t->directFailed.insert(piece); ++t->directMisses;
+                }
                 if (t->reading.insert(piece).second) { t->readStart[piece] = clk::now(); t->h.read_piece(lt::piece_index_t(piece)); }
                 prefetchLocked(*t, piece);
             } else if (t->waitingPiece != piece) {
@@ -719,6 +738,42 @@ private:
         }
     }
 
+    // القطعة من ملفها مباشرة (ملفات الحشو أصفار)، ثم مطابقة SHA-1 مع التورنت. nullptr عند أي شك.
+    std::shared_ptr<std::vector<char>> directRead(lt::torrent_handle const& h, int piece) {
+        try {
+            auto const ti = h.torrent_file();
+            if (!ti || !ti->info_hashes().has_v1()) return nullptr;
+            auto const& layout = ltc::files(*ti);
+            lt::piece_index_t const pi(piece);
+            int const size = ti->piece_size(pi);
+            auto buf = std::make_shared<std::vector<char>>(size_t(size), char(0));
+            int64_t off = 0;
+            for (auto const& sl : ti->map_block(pi, 0, size)) {
+                if (!layout.pad_file_at(sl.file_index)) {
+                    std::ifstream in(fs::u8path(layout.file_path(sl.file_index, dir_)), std::ios::binary);
+                    if (!in) return nullptr;
+                    in.seekg(std::streamoff(sl.offset));
+                    in.read(buf->data() + off, std::streamsize(sl.size));
+                    if (in.gcount() != std::streamsize(sl.size)) return nullptr;
+                }
+                off += sl.size;
+            }
+            if (lt::hasher(buf->data(), size).final() != ti->hash_for_piece(pi)) return nullptr;
+            return buf;
+        } catch (...) { return nullptr; }
+    }
+
+    void recordReadLocked(Torrent& t, int64_t ms) {
+        t.readLastMs = ms; t.readMaxMs = std::max(t.readMaxMs, ms); ++t.readCount;
+        t.readAvgMs += (double(ms) - t.readAvgMs) / t.readCount;
+    }
+
+    void cacheLocked(Torrent& t, int p, std::shared_ptr<std::vector<char>> data) {
+        t.pieceCache[p] = std::move(data);
+        t.cacheOrder.push_back(p);
+        while (t.cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t.pieceCache.erase(t.cacheOrder.front()); t.cacheOrder.pop_front(); }
+    }
+
     void storePiece(lt::read_piece_alert const* a) {
         std::lock_guard<std::mutex> lock(m_);
         for (auto& [id, t] : byId_) {
@@ -726,16 +781,11 @@ private:
             int const p = int(static_cast<std::int32_t>(a->piece));
             t->reading.erase(p);
             if (auto s = t->readStart.find(p); s != t->readStart.end()) {
-                int64_t const ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - s->second).count();
-                t->readLastMs = ms; t->readMaxMs = std::max(t->readMaxMs, ms); ++t->readCount;
-                t->readAvgMs += (double(ms) - t->readAvgMs) / t->readCount;
+                recordReadLocked(*t, std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - s->second).count());
                 t->readStart.erase(s);
             }
             if (a->error) { t->readErrors[p] = a->error.message(); break; }
-            auto data = std::make_shared<std::vector<char>>(a->buffer.get(), a->buffer.get() + a->size);
-            t->pieceCache[p] = data;
-            t->cacheOrder.push_back(p);
-            while (t->cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t->pieceCache.erase(t->cacheOrder.front()); t->cacheOrder.pop_front(); }
+            cacheLocked(*t, p, std::make_shared<std::vector<char>>(a->buffer.get(), a->buffer.get() + a->size));
             break;
         }
     }
@@ -1032,6 +1082,7 @@ int main(int argc, char** argv) {
     if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
     if (const char* r = std::getenv("VANTARA_LT_READAHEAD")) policy::READAHEAD = std::clamp(std::atoi(r), 0, 16);
     if (const char* d = std::getenv("VANTARA_LT_DISK")) policy::DISK_IO = d;
+    if (const char* d = std::getenv("VANTARA_LT_DIRECT")) policy::DIRECT_READ = std::string(d) == "1";
     int apiPort = 0, listenPort = 0, pieceSize = 256 * 1024;
     long parentPid = 0;
     std::string dir, stateDir, seedFile, testPeer;

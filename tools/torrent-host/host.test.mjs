@@ -155,6 +155,12 @@ test('libtorrent host: /diag reports engine rate, peers and the piece the reader
   // محرك القرص المختار فعلًا (القياس يثبت أي واحد قيس)؛ بلا المتغير يبقى اختيار libtorrent الافتراضي
   assert.equal(diag.body.disk_io, process.env.VANTARA_LT_DISK || 'default', 'disk_io reported');
   assert.ok((await read).body.equals(data));
+  // التسليم المباشر (VANTARA_LT_DIRECT=1): البايتات أعلاه مطابقة، والقطع سُلّمت فعلًا من الملف بعد مطابقة SHA-1
+  const after = await request(base, `/torrents/${added.body.id}/diag`);
+  const direct = process.env.VANTARA_LT_DIRECT === '1';
+  assert.equal(after.body.reads.direct, direct ? 1 : 0, 'direct flag reported');
+  if (direct) assert.ok(after.body.reads.direct_hits > 0, `direct path served pieces: ${JSON.stringify(after.body.reads)}`);
+  else assert.equal(after.body.reads.direct_hits, 0, 'direct path off by default');
 });
 
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {

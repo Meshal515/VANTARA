@@ -159,6 +159,7 @@ async function measure(kind, source) {
     const lastReads = [...timeline].reverse().find(s => s.reads)?.reads;
     row.readAvgMs = lastReads?.avg_ms ?? null; row.readMaxMs = lastReads?.max_ms ?? null; row.readCount = lastReads?.count ?? null;
     row.diskIo = timeline.find(s => s.diskIo)?.diskIo ?? null;
+    row.directHits = lastReads?.direct_hits ?? null; row.directMisses = lastReads?.direct_misses ?? null;
     row.headWaitingSamples = headSamples.filter(s => (s.waiting?.piece ?? -1) >= 0).length;
     // صحيح فقط إن كان 206 بالمدى المطلوب بالضبط وبالطول كاملًا
     const exact = (r, from) => r.status === 206 && r.totalMs != null && r.bytes === 4 << 20 && r.contentRange?.startsWith(`bytes ${from}-${from + (4 << 20) - 1}/`);
@@ -201,7 +202,7 @@ for (const kind of Object.keys(engines)) {
     summary[`${kind}/${group}`] = { ok: rows.filter(r => r.head4MB?.status === 206).length, failed: all.length - rows.length,
       medianClickToFirstByteMs: median(rows.map(r => r.clickToFirstByteMs)), medianHeadMBps: median(rows.map(r => r.headMBps)),
       medianSustainedMBps: median(rows.map(r => r.sustainedMBps)), medianSeekMBps: median(rows.map(r => r.seekMBps)),
-      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)), medianReadAvgMs: median(rows.map(r => r.readAvgMs)), medianReadMaxMs: median(rows.map(r => r.readMaxMs)), diskIo: [...new Set(rows.map(r => r.diskIo).filter(Boolean))] };
+      medianHeadEngineMBps: median(rows.map(r => r.headEngineMBps)), medianHeadPeers: median(rows.map(r => r.headPeers)), medianHeadUnchokedUs: median(rows.map(r => r.headUnchokedUs)), medianReadAvgMs: median(rows.map(r => r.readAvgMs)), medianReadMaxMs: median(rows.map(r => r.readMaxMs)), diskIo: [...new Set(rows.map(r => r.diskIo).filter(Boolean))], directHits: rows.reduce((n, r) => n + (r.directHits ?? 0), 0), directMisses: rows.reduce((n, r) => n + (r.directMisses ?? 0), 0) };
   }
 }
 report.summary = summary;

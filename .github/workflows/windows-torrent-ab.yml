@@ -27,7 +27,7 @@ on:
       rounds:
         description: 'Alternating rounds'
         type: string
-        default: '2'
+        default: '3'
 permissions:
   contents: read
 concurrency:
@@ -41,12 +41,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # محرك القرص: القياس السابق أظهر read_piece يتأخر 6–12 ث (وحتى 55 ث) والتنزيل 6–9MB/s، والقراءة المسبقة
-          # زادته سوءًا (طابور القرص). تجربة واحدة لكل محرك قرص، على سرب واحد قوي، ضد الأساسي كما هو.
-          - group: disk-io
+          # التسليم: قياس #6 أظهر read_piece ينتظر 6–7 ث مع mmap وpread معًا (وposix جمّد المحرك)، فالبطء في طابور
+          # القرص كله. التجربة: القطعة من ملفها مباشرة بعد have_piece مع مطابقة SHA-1، ضد الأساسي كما هو.
+          - group: direct-read
             variants: |-
-              posix|||VANTARA_LT_DISK=posix
-              pread|||VANTARA_LT_DISK=pread
+              direct|||VANTARA_LT_DIRECT=1
             rqbit: 'no'
     timeout-minutes: 170
     env:
@@ -106,7 +105,7 @@ jobs:
         shell: pwsh
         env:
           SOURCES: ${{ inputs.sources || 'ubuntu' }}
-          ROUNDS: ${{ inputs.rounds || '2' }}
+          ROUNDS: ${{ inputs.rounds || '3' }}
           QUICK: ${{ inputs.quick }}
           # pread غير موجود في كل نسخ libtorrent: /diag يكشف المحرك الفعلي لكل تشغيل
           WITH_RQBIT: ${{ matrix.rqbit }}
