@@ -883,114 +883,35 @@
   }
 }
 
-/* ═══ «المحور» على الكمبيوتر: شريط الهوية والتشغيل فوق حافة البنر (15 نوفمبر) ═══
- * قبل (لقطات كاملة 1366/1920 مفتوح ومقفل): البنر 508px والغلاف في وسطه والشعار تحته على ~650px، والتشغيل
- * (لقطة الحلقة) على ~840px: خارج أول شاشة 768. وتحت اللقطة فراغ ~170px لأن عمودها أقصر من المعلومات،
- * والحلقات صفوف بصورة 176px ودائرة «شوهدت» في الطرف الآخر من عمود بعرض 500px (فراغ في نص كل صف).
- * الآن: بنر أقصر، وتحته مباشرة شريط واحد يركب حافته: الغلاف | الشعار والمعلومات والموعد | لقطة الحلقة بالتشغيل.
- * ثم القصة بجانب المعلومات، ثم الحلقات بطاقات 16:9 كبيرة بشبكة من العرض (دائرة «شوهدت» على زاوية الصورة).
- * :not([data-unified]) يرفع الخصوصية فوق قاعدة الحاوية في anime.css بلا !important. */
-@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-hero {
-    height: clamp(330px, calc(100svh - 330px), 640px) !important;
-    max-height: none !important;
-    aspect-ratio: auto !important;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main {
-    --core-cover: clamp(170px, 14vw, 236px);
-    /* الهوية لا تقل عن 300px، واللقطة تأخذ الباقي حتى عرضها الكامل (ارتفاع الغلاف × 16:9) */
-    grid-template-columns: var(--core-cover) minmax(300px, 1fr) minmax(0, calc(var(--core-cover) * 1.5 * 16 / 9));
-    grid-template-rows: auto auto auto auto auto auto auto 1fr;
-    column-gap: clamp(28px, 2.6vw, 44px);
-    padding: 0 max(48px, calc((100% - 1360px) / 2)) 24px;
-  }
-  /* الغلاف: العمود الأول، يصعد على البنر بثلثيه */
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-cover {
-    --cover-w: var(--core-cover);
-    grid-column: 1;
-    grid-row: 1 / span 5;
-    justify-self: stretch;
-    align-self: start;
-    width: var(--core-cover);
-    margin-top: calc(var(--core-cover) * -1);
-  }
-  /* الهوية: العمود الثاني، تبدأ من حافة البنر وتنتهي عند أسفل الغلاف */
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main :is(.an-mark, .aw-meta, .aw-genres, .aw-side, .aw-cta) {
-    grid-column: 2;
-    justify-self: start;
-    text-align: start;
-    width: auto;
-    max-width: 100%;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-mark { grid-row: 1; margin-top: calc(var(--core-cover) * -0.42); align-self: end; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-mark .an-mark-logo { max-height: 104px; max-width: min(100%, 380px); object-position: right bottom; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-mark .an-mark-text { font-size: clamp(26px, 2.4vw, 40px); text-align: start; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-meta { grid-row: 2; margin-top: 14px; justify-content: flex-start; font-size: 14.5px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-genres { grid-row: 3; margin-top: 8px; justify-content: flex-start; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-side { grid-row: 4; margin-top: 16px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-cta { grid-row: 5; margin-top: 12px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-cta:empty { display: none; }
-  /* لقطة الحلقة بالتشغيل: العمود الثالث، على حافة البنر بمحاذاة الغلاف */
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still {
-    grid-column: 3;
-    grid-row: 1 / span 5;
-    /* زوج الغلاف: الارتفاع نفسه والحافتان نفسهما، فالشريط خط واحد */
-    align-self: start;
-    width: 100%;
-    max-width: none;
-    height: calc(var(--core-cover) * 1.5);
-    max-height: none;
-    aspect-ratio: auto;
-    justify-self: end;
-    margin-top: calc(var(--core-cover) * -1);
-    z-index: 2;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still-play { width: 56px; height: 56px; }
-  /* تحت الشريط: القصة والرؤى بعرض العمودين الأولين، والمعلومات في الثالث */
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-about { grid-column: 1 / 3; grid-row: 6; margin-top: 40px; max-width: 760px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .work-insights { grid-column: 1 / 3; grid-row: 7; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-info { grid-column: 3; grid-row: 6 / span 2; margin-top: 40px; padding: 0; border-top: 0; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-episodes { margin-top: 56px; }
-  /* الحلقات: بطاقات 16:9 بشبكة من العرض، والعنوان تحت الصورة، ودائرة «شوهدت» على زاوية الصورة */
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-list {
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 26px 18px;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er {
-    position: relative;
-    display: block;
-    margin: 0;
-    padding: 0;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-main {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    width: 100%;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-art { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 12px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-copy { text-align: start; padding-inline: 2px; }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-icon {
-    position: absolute;
-    top: 6px;
-    inset-inline-end: 6px;
-    z-index: 2;
-    width: 34px;
-    height: 34px;
-    background: rgba(0, 0, 0, 0.5);
-    color: #fff;
-  }
-  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-icon .an-er-ring { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
-}
-
 /* ═══ «المنصة» على الكمبيوتر — بعد المراجعة بالعين (15 نوفمبر) ═══
  * الشخصيات خمسة أعمدة ثابتة في عمود 594px وبطاقة الوجه تحتاج ~140px: الصف 695px فخرج يسارًا خارج الصفحة
- * (وجوه مقصوصة على الحافة). «من نفس العالم» بقيت عمودًا واحدًا (300px×2 لا تدخل 594px) ونصف العرض فارغ.
- * والقصة كانت بمحاذاة الوسط في عمود عريض: قراءة صعبة. */
+ * (وجوه مقصوصة على الحافة). «من نفس العالم» بقيت عمودًا واحدًا (300px×2 لا تدخل 594px) ونصف العرض فارغ. */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .v35 .wl-platform .wl-chars { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
   .v35 .wl-platform .wl-chars .ch { min-width: 0; }
   .v35 .wl-platform .wl-chars :is(b, span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .v35 .wl-platform .wl-world { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); column-gap: 28px; }
-  .v35 .wl-platform .wl-desc { text-align: start; }
+}
+
+/* ═══ «المحور» على الكمبيوتر: التصميم نفسه (الغلاف في الوسط والشعار تحته)، أحجام أكبر وفراغات محسوبة ═══
+ * قرار المالك (15 نوفمبر): لا تغيير في تركيب أنماط الأنمي؛ تكبير وضبط فقط.
+ * قيس قبل: الغلاف 220px على كل المقاسات، وصور الحلقات 176px (قاعدة 40% السابقة لم تطبق: قاعدة الحاوية في
+ * anime.css أخص منها)، ولقطة التشغيل 575×323 بجانب عمود معلومات أطول منها بـ~170px فارغة تحتها.
+ * :not([data-unified]) يرفع الخصوصية فوق قاعدة الحاوية بلا !important. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .aw[data-style='core']:not([data-unified]) {
+    --cover-w: clamp(240px, 17.5vw, 300px);
+  }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-cover { width: var(--cover-w); }
+  /* البنر أقصر قليلًا (الحد العام 100svh−260) فيصعد الشعار والمعلومات إلى أول شاشة؛ الصورة من أعلاها والقص من
+   * أسفلها الذي يتلاشى أصلًا */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-hero { max-height: max(380px, calc(100svh - 330px)) !important; }
+  /* اللقطة أعرض فيقترب ارتفاعها من عمود المعلومات بجانبها */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main { grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still-play { width: 56px; height: 56px; }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .aw-still-cap b { font-size: 17px; }
+  /* الحلقات: أعمدة من العرض (عمودان في 1366، ثلاثة في الأعرض) فلا يتمدد الصف 700px وبين العنوان ودائرة
+   * «شوهدت» فراغ يصل 300px */
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-list { grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); column-gap: 36px; }
+  .v35 .aw[data-style='core']:not([data-unified]) .aw-main .an-er-main { grid-template-columns: clamp(200px, 46%, 260px) minmax(0, 1fr); }
 }
