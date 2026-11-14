@@ -2,7 +2,7 @@
 // الاستعمال: node dump-work.cjs anime|cinema|manga <style|unified> [selector]
 const { openDesktop, chromium } = require('./desktop-harness.cjs');
 const [section, style, selector] = process.argv.slice(2);
-const PICK = { anime: { want: /apothecary|frieren|jujutsu/i, card: '.an-card:not(.an-card--ranked)' }, cinema: { card: '.cn-poster' }, manga: { want: /one piece|solo leveling|berserk/i, card: '.page.active .work-card' } };
+const PICK = { anime: { want: /apothecary|frieren|jujutsu/i, card: '.an-card:not(.an-card--ranked)' }, cinema: { card: '.cn-poster', rail: /مسلسلات/ }, manga: { want: /one piece|solo leveling|berserk/i, card: '.page.active .work-card' } };
 (async () => {
   const browser = await chromium.launch();
   const unified = style === 'unified';
@@ -12,7 +12,7 @@ const PICK = { anime: { want: /apothecary|frieren|jujutsu/i, card: '.an-card:not
   await page.waitForTimeout(4500);
   await page.evaluate(s => [...document.querySelectorAll('.drawer button')].find(x => x.textContent.trim().toUpperCase().startsWith(s.toUpperCase()))?.click(), section);
   await page.waitForTimeout(section === 'manga' ? 9000 : 6000);
-  await page.evaluate(([sel, want]) => { const cards = [...document.querySelectorAll(sel)].filter(x => x.checkVisibility?.() && x.querySelector('img')); ((want && cards.find(x => new RegExp(want, 'i').test(x.textContent))) ?? cards[0])?.click(); }, [PICK[section].card, PICK[section].want?.source ?? null]);
+  await page.evaluate(([sel, want, rail]) => { let cards = [...document.querySelectorAll(sel)].filter(x => x.checkVisibility?.() && x.querySelector('img')); if (rail) { const inRail = cards.filter(c => new RegExp(rail).test(c.closest('section')?.querySelector('h2,h3')?.textContent ?? '')); if (inRail.length) cards = inRail; } ((want && cards.find(x => new RegExp(want, 'i').test(x.textContent))) ?? cards[0])?.click(); }, [PICK[section].card, PICK[section].want?.source ?? null, PICK[section].rail?.source ?? null]);
   await page.waitForTimeout(8000);
   console.log(JSON.stringify(await page.evaluate(sel => {
     const root = sel?.startsWith('h2:') ? [...document.querySelectorAll('.page.active h2')].find(h => h.textContent.includes(sel.slice(3)))?.closest('section') : (document.querySelector(sel || '.page.active .aw, .page.active .cn-detail, #detail.page.active') ?? document.querySelector('.page.active'));

@@ -559,6 +559,7 @@
       'poster genre play'
       'sources sources sources'
       'about about about'
+      'episodes episodes episodes'
       'cast cast cast'
       'credits credits credits'
       'similar similar similar';
@@ -576,6 +577,8 @@
   .v35 .cn-detail[data-style='premiere'] .cn-btn--play { grid-area: play; max-width: none; align-self: end; }
   .v35 .cn-detail[data-style='premiere'] .cn-sources { grid-area: sources; }
   .v35 .cn-detail[data-style='premiere'] .cn-about { grid-area: about; margin-top: 36px; }
+  /* الحلقات بلا مساحة في الشبكة كانت تقع تلقائيًا في عمود الملصق (200px: صور 60px وعناوين «A Little …») */
+  .v35 .cn-detail[data-style='premiere'] .cn-episodes { grid-area: episodes; margin-top: 40px; }
   .v35 .cn-detail[data-style='premiere'] .cn-cast { grid-area: cast; }
   .v35 .cn-detail[data-style='premiere'] .cn-credits { grid-area: credits; }
   .v35 .cn-detail[data-style='premiere'] .cn-similar { grid-area: similar; }
@@ -949,4 +952,30 @@
   .v35 .wl-episode .wl-body .wl-s-world { grid-column: 2; grid-row: 1 / span 2; }
   .v35 .wl-episode .wl-body .wl-s-facts { grid-column: 2; grid-row: 3; }
   .v35 .wl-episode .wl-body .wl-s-recs { grid-column: 1 / -1; grid-row: 4; }
+}
+
+/* ═══ السينما — بعد المراجعة بالعين في أربعة مقاسات (15 نوفمبر) ═══ */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* «الشريط العريض»: الجسم يصعد 340px فوق البنر (قاعدة الصفحة العامة) فوقع الشعار والمعلومات وسط الصورة على
+   * الوجه بلا ظل يقرأ عليه، وعنوان «الحلقات» على حافة البنر. الكتلة نفسها (شعار، أنواع، أرقام، تشغيل) في
+   * الثلث الأسفل فوق تدرج إلى var(--bg)، والحلقات تبدأ بعد البنر. */
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-art::after {
+    display: block;
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 72%, transparent) 26%, transparent 52%);
+    pointer-events: none;
+  }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-body { margin-top: -210px; padding-top: 0; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark { height: 84px; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-logo { max-height: 84px; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6)); }
+  .v35 .cn-detail[data-style='marquee'] .cn-genre-line { color: var(--text-2); }
+  .v35 .cn-detail[data-style='marquee'] .cn-look-credits dt { color: var(--text-2); }
+  .v35 .cn-detail[data-style='marquee'] .cn-episodes { margin-top: 56px; }
+
+  /* زر التشغيل العريض: 580–750px شريط بعرض العمود كاملًا؛ بعرض مريح بمحاذاة بداية الهوية (في الأنماط التي هويتها
+   * بالجانب) أو وسطها (الملصق والشريط والمسلسل) */
+  .v35 .cn-detail[data-style='current'] .cn-detail-body > .cn-btn--play { max-width: 420px; justify-self: start; }
+  .v35 .cn-detail:is([data-style='poster'], [data-style='marquee'], [data-style='series']) .cn-detail-body > .cn-btn--play { max-width: 420px; }
 }
