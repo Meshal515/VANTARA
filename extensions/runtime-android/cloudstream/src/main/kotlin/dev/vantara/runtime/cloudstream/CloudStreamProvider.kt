@@ -52,7 +52,6 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             val answer=http.exchange(RuntimeHttpAccess.Request(request.url.toString(),request.method,request.headers.toMultimap(),bytes,follow))
             BrokerResponses.convert(request,answer)
         }
-        LibraryWorld.attach(http)
         try {
             val result=Registration.collect {
                 val type=Class.forName(entry,false,loader)
@@ -64,6 +63,8 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             check(result.sources.isNotEmpty()){"NO_REGISTERED_SOURCES"}
             result.extractors.forEach{ExtractorRegistry.add(it)}
             sources=result.sources
+            // After WorkerState.install: the world reads this generation's context and broker
+            LibraryWorld.attach(http)
         }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();WorkerState.reset();LibraryWorld.reset();plugin=null;throw failure}
     }
     override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String {

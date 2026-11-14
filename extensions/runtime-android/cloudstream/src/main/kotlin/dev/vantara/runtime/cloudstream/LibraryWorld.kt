@@ -47,6 +47,8 @@ internal object LibraryWorld {
         synchronized(lock) {
             bridge?.let { return it }
             if (unavailable) return null
+            // No worker context yet (the provider is still initializing): not a failure, the next call loads it
+            if (WorkerState.context == null) return null
             return try {
                 open()?.also { bridge = it } ?: run { unavailable = true; null }
             } catch (failure: Throwable) {
@@ -100,7 +102,7 @@ internal object LibraryWorld {
      * true when the library gave at least one playable link.
      */
     suspend fun extract(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        val type = load() ?: return false
+        val type = load() ?: run { note("WORLD_OFF host=${host(url)} unavailable=$unavailable"); return false }
         val method = type.getMethod("extract", String::class.java, String::class.java, Long::class.javaPrimitiveType,
             Consumer::class.java, Consumer::class.java)
         var delivered = 0
@@ -114,10 +116,20 @@ internal object LibraryWorld {
             kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
                 method.invoke(null, url, referer, SERVER_BUDGET_MS, onLink, onSubtitle)
             }
-            synchronized(this) { delivered > 0 }
+            val got = synchronized(this) { delivered }
+            note("EXTRACT host=${host(url)} links=$got")
+            got > 0
         } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-        catch (_: Throwable) { synchronized(this) { delivered > 0 } }
+        catch (failure: Throwable) {
+            val cause = (failure as? java.lang.reflect.InvocationTargetException)?.targetException ?: failure
+            // Type and the first line only: never a URL, page body or credential
+            note("EXTRACT_FAILED host=${host(url)} ${cause.javaClass.name}: ${cause.message?.lineSequence()?.firstOrNull()?.take(160)?.replace(Regex("https?://\\S+"), "<url>")}")
+            synchronized(this) { delivered > 0 }
+        }
     }
+
+    private fun host(url: String) = runCatching { java.net.URI(url).host }.getOrNull() ?: "?"
+    private fun note(line: String) { runCatching { android.util.Log.i("VantaraCs3World", line) } }
 
     /** The library's link as this worker's: http(s) only, no credentials; torrents and magnets are not extractor media here. */
     private fun link(raw: Map<String, Any?>): ExtractorLink? {
