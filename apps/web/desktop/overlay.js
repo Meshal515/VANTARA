@@ -105,7 +105,13 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const track = el('div', 'pp-track'), buffered = el('i', 'pp-buffered'), played = el('i', 'pp-played'), thumb = el('b', 'pp-thumb');
   track.append(buffered, played);
   const hoverTip = el('span', 'pp-hover'); hoverTip.hidden = true;
-  bar.append(track, el('span', 'pp-marks'), thumb, hoverTip);
+  // صورة مصغرة فوق المؤشر عند المرور أو السحب (كـCloudStream بطريقتنا): مربع يظهر بتلاشٍ وتكبير ناعم، والصورة من
+  // المحرك لكل 10 ث (player.js ← services.previewFrame)، والوقت تحتها. بلا صورة بعد: الوقت وحده في المربع.
+  const preview = el('div', 'pp-preview'); preview.setAttribute('aria-hidden', 'true');
+  const previewImg = el('img', 'pp-preview__img'); previewImg.alt = ''; previewImg.decoding = 'async';
+  const previewTime = el('span', 'pp-preview__time');
+  preview.append(previewImg, previewTime);
+  bar.append(track, el('span', 'pp-marks'), thumb, hoverTip, preview);
 
   const row = el('div', 'pp-row');
   const left = el('div', 'pp-group');
@@ -183,15 +189,34 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   let dragging = false, dragMs = null;
   const msAt = (x) => { const r = track.getBoundingClientRect(); const p = Math.max(0, Math.min(1, (x - r.left) / (r.width || 1))); return Math.round(p * (state.duration || 0)); };
   bar.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (!state.duration) return; dragging = true; bar.classList.add('pp-bar--drag'); bar.setPointerCapture?.(e.pointerId); dragMs = msAt(e.clientX); paintTime(); showControls(true); });
+  let previewWant = null, previewTimer = 0;
+  function showPreview(ms) {
+    const r = track.getBoundingClientRect(), w = 220;
+    const x = Math.max(w / 2, Math.min((r.width || 1) - w / 2, (ms / state.duration) * (r.width || 1)));
+    preview.style.left = `${x}px`;
+    previewTime.textContent = clock(ms);
+    const bucket = Math.round(ms / 10000) * 10000;
+    const ready = state.thumb?.ms === bucket && state.thumb?.src;
+    if (ready && previewImg.src !== state.thumb.src) previewImg.src = state.thumb.src;
+    preview.classList.toggle('has-img', !!ready);
+    preview.classList.add('is-on');
+    hoverTip.hidden = true;
+    if (bucket !== previewWant) {
+      previewWant = bucket;
+      timers.clearTimeout(previewTimer);
+      previewTimer = timers.setTimeout(() => cmd('thumb', bucket), 120);
+    }
+  }
+  const hidePreview = () => { preview.classList.remove('is-on'); timers.clearTimeout(previewTimer); };
   bar.addEventListener('pointermove', (e) => {
     if (dragging) { dragMs = msAt(e.clientX); paintTime(); }
     if (!state.duration) return;
-    const ms = msAt(e.clientX); hoverTip.textContent = clock(ms); hoverTip.style.left = `${(ms / state.duration) * 100}%`; hoverTip.hidden = false;
+    showPreview(dragging && dragMs != null ? dragMs : msAt(e.clientX));
   });
-  const endDrag = () => { if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag'); if (dragMs != null) cmd('seek', dragMs); showControls(); };
+  const endDrag = () => { if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag'); if (dragMs != null) cmd('seek', dragMs); hidePreview(); showControls(); };
   bar.addEventListener('pointerup', endDrag);
   bar.addEventListener('pointercancel', endDrag);
-  bar.addEventListener('pointerleave', () => { hoverTip.hidden = true; });
+  bar.addEventListener('pointerleave', () => { hoverTip.hidden = true; if (!dragging) hidePreview(); });
 
   function paintTime() {
     const d = Number(state.duration) || 0, t = dragging && dragMs != null ? dragMs : Number(state.position) || 0;
@@ -723,6 +748,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
     paintChip();
+    if (preview.classList.contains('is-on') && state.thumb !== previous.thumb && state.thumb?.ms === previewWant && state.thumb?.src) { previewImg.src = state.thumb.src; preview.classList.add('has-img'); }
     if (state.ended && !previous.ended) startNext();
     else if (!state.ended && previous.ended) stopNext();
     if (openKind === 'network' && networkBody && JSON.stringify([previous.net, previous.serverCode]) !== JSON.stringify([state.net, state.serverCode])) paintNetwork(networkBody);

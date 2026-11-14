@@ -2438,7 +2438,7 @@ export function createAnime(deps) {
    * فالتورنت بأسماء بشرية وجودة ولغة وصحة سرب. الأفضل يرجّح سيرفرك السابق
    * لهذا الأنمي دون أن يقفل عليه.
    */
-  function playEpisode(m, n, { position = null, clip = null } = {}) {
+  function playEpisode(m, n, { position = null, clip = null, hostPick = false } = {}) {
     if (isMovie(m)) n = 1;
     if (!engine.available()) {
       deps.openSheet((body) => {
@@ -2462,7 +2462,7 @@ export function createAnime(deps) {
     // Together: دخلت من بطاقة «مشاهدة معًا» (أو دعوت الحين) ← بلا اختيار: أول سيرفر جاهز عندك يشتغل على طول
     const hub = deps.together?.() ?? null;
     const togetherRef = `anime:${m.id}`;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
+    sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, n)) && !globalThis.VantaraDesktop; // Keep existing PWA/APK behavior; Windows invitees choose source.
     let paintQueued = false;
     let paintFrame = null;
     let off = [];
@@ -2524,9 +2524,9 @@ export function createAnime(deps) {
             episodeTitle: epTitle ?? null,
             episode: n,
           }, {
-            // ورقة الدعوة أغلقت ورقة السيرفرات وأوقفت تجهيزها: نعيد فتحها والغرفة نشطة،
-            // فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
-            onStarted: () => playEpisode(m, n),
+            // ورقة الدعوة أغلقت ورقة السيرفرات: نعيد فتحها والغرفة نشطة، والمضيف يختار سيرفره منها بنفسه
+            // (بالسيدرز والسرب كالعادة). التشغيل التلقائي لأول سيرفر جاهز للمدعوين فقط (قرار المالك 14 نوفمبر).
+            onStarted: () => playEpisode(m, n, { hostPick: true }),
           });
         }, 'شاهد مع أصدقائك');
         extraFoot.push(withFriends);

@@ -8,10 +8,16 @@ const source = (name) => readFileSync(new URL(`./${name}`, import.meta.url), 'ut
 
 describe('الدعوة من ورقة السيرفرات تدخل الغرفة', () => {
   it('الأفلام والمسلسلات: onStarted يعيد فتح ورقة السيرفرات', () => {
-    expect(source('cinema.js')).toMatch(/onStarted: \(\) => play\(m, season, n\)/);
+    expect(source('cinema.js')).toMatch(/onStarted: \(\) => play\(m, season, n, 0, \{ hostPick: true \}\)/);
   });
   it('الأنمي: onStarted يعيد فتح ورقة السيرفرات', () => {
-    expect(source('anime.js')).toMatch(/onStarted: \(\) => playEpisode\(m, n\)/);
+    expect(source('anime.js')).toMatch(/onStarted: \(\) => playEpisode\(m, n, \{ hostPick: true \}\)/);
+  });
+  // قرار المالك (14 نوفمبر): بعد إنشاء الغرفة تبقى ورقة السيرفرات العادية (سيدرز وسرب) والمضيف يختار؛
+  // التشغيل التلقائي لأول سيرفر جاهز للمدعو الداخل من البطاقة أو الإشعار فقط.
+  it('المضيف يختار السيرفر بنفسه، والمدعو يدخل تلقائيًا', () => {
+    expect(source('anime.js')).toContain('sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, n))');
+    expect(source('cinema.js')).toContain('sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, togetherEp))');
   });
   it('ورقة جديدة تغلق السابقة (سبب إعادة الفتح)', () => {
     // Lifecycle lives in sheet-lifecycle.js: new sheet calls close() first.

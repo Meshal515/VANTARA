@@ -2205,7 +2205,7 @@ export function createCinema(deps) {
   // ورقة السيرفرات نفسها في الأنمي (`an-pick`) بلون السينما، والمشغّل الأصلي
   // نفسه بتصميمه يأخذ `section: 'cinema'` فيلبس الأحمر.
 
-  function play(m, season, n, position = 0) {
+  function play(m, season, n, position = 0, { hostPick = false } = {}) {
     const heading = m.type === 'series' ? `الموسم ${season} · الحلقة ${n}` : 'فيلم';
     if (!engine.available()) {
       deps.openSheet((body) => {
@@ -2222,7 +2222,7 @@ export function createCinema(deps) {
     const hub = deps.together?.() ?? null;
     const togetherRef = `cinema:${playKey(m, season)}`;
     const togetherEp = m.type === 'movie' ? 1 : n;
-    sheet.autoTogether = Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
+    sheet.autoTogether = !hostPick && Boolean(hub?.matches(togetherRef, togetherEp)) && !globalThis.VantaraDesktop; // Android/PWA preserve established auto-join.
     let off = [];
     let queued = false;
     let paintFrame = null;
@@ -2267,9 +2267,9 @@ export function createCinema(deps) {
             episodeTitle: m.type === 'series' ? epMeta?.title ?? null : null,
             episode: togetherEp,
             season: m.type === 'series' ? season : null,
-          // ورقة الدعوة أغلقت ورقة السيرفرات (طبقة أوراق واحدة) وأوقفت تجهيزها: نعيد فتحها،
-          // والغرفة الآن نشطة فتشغّل أول سيرفر جاهز وحدها ويفتح المشغّل على شاشة الغرفة.
-          }, { onStarted: () => play(m, season, n) });
+          // ورقة الدعوة أغلقت ورقة السيرفرات (طبقة أوراق واحدة): نعيد فتحها والغرفة نشطة، والمضيف يختار
+          // سيرفره منها بنفسه. التشغيل التلقائي لأول سيرفر جاهز للمدعوين فقط.
+          }, { onStarted: () => play(m, season, n, 0, { hostPick: true }) });
         }, 'شاهد مع أصدقائك');
         extraFoot.push(withFriends);
       }

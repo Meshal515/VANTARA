@@ -422,3 +422,12 @@ html.desktop-overlay .pwa-player .pp-hover { font-size: 12.5px; font-weight: 700
   html.desktop-overlay .pwa-player .pp-titles small { font-size: 14px; }
   html.desktop-overlay .pwa-player .pp-quality { font-size: 14px !important; }
 }
+/* الصورة المصغرة فوق شريط التقدم: تظهر بتلاشٍ وتكبير من 92% (ناعم لا فجأة)، 16:9 بعرض 220px، والوقت تحتها */
+html.desktop-overlay .pp-preview { position: absolute; bottom: calc(100% + 8px); left: 0; width: 220px; transform: translateX(-50%) translateY(6px) scale(.92); transform-origin: 50% 100%; opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .2s cubic-bezier(.2,.8,.2,1); display: grid; justify-items: center; gap: 6px; z-index: 3; }
+html.desktop-overlay .pp-preview.is-on { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+html.desktop-overlay .pp-preview__img { width: 220px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; border: 2px solid rgba(255,255,255,.9); background: #0d111b; box-shadow: 0 10px 28px rgba(0,0,0,.55); display: none; }
+html.desktop-overlay .pp-preview.has-img .pp-preview__img { display: block; }
+html.desktop-overlay .pp-preview__time { padding: 4px 10px; border-radius: 8px; background: rgba(13,17,27,.92); color: #fff; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { html.desktop-overlay .pp-preview { transition: none; } }
+/* المقبض يكبر أثناء السحب كـCloudStream */
+html.desktop-overlay .pwa-player .pp-bar--drag .pp-thumb { width: 20px; height: 20px; margin: -10px 0 0 -10px; box-shadow: 0 0 0 7px var(--accent-soft); }
