@@ -1274,7 +1274,8 @@ class PlayerActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(netChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.LEFT).apply { topMargin = dp(18); leftMargin = dp(22) })
-        if (com.vantara.plugins.DiagnosticVisibility.visible(this) && settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
+        // قرار المالك (14 نوفمبر): قياس الشبكة جزء طبيعي من المشغل، لا يتبع «إظهار التشخيص»؛ مفتاحه في لوحة الشبكة
+        if (settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
 
         sheet = VSheet(root)
         sheet.onClose = {
@@ -1881,7 +1882,6 @@ class PlayerActivity : Activity() {
     }
 
     private fun showNetwork() {
-        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) return
         open(SheetKind.NETWORK, "الشبكة", "قياس حي من طلبات هذا الفيديو نفسها") { body ->
             val latency = net.latencyMs()
             val bps = net.bytesPerSecond()
@@ -2017,7 +2017,7 @@ class PlayerActivity : Activity() {
                 settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
                 sheet.refresh()
             })
-            if (com.vantara.plugins.DiagnosticVisibility.visible(this)) body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
+            body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow(if (isMovie()) "رشّح الفيلم لصديق" else "رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
                     pickFriend("رشّح ${episodeLabel()}") { to, name -> queueMoment(to, name, null) }
@@ -2343,10 +2343,6 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
-        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) {
-            netChip?.visibility = View.GONE
-            if (openSheet == SheetKind.NETWORK) sheet.close()
-        }
         startup.active(player.playWhenReady)
         watchStall()
         sampleUsage()

@@ -431,7 +431,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         offsetOut = row.querySelector('output');
         body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
       }
-      if (diagnosticsUi.visible()) {
+      // قرار المالك (14 نوفمبر): قياس الشبكة جزء طبيعي من المشغل كالـAPK، لا يتبع «إظهار التشخيصات»
+      {
       body.append(sectionLabel('الشبكة'));
       const net = el('div', 'pp-net');
       if (state.net?.peers != null) net.append(el('span', null, 'مشاركون متصلون'), el('b', null, String(state.net.peers)));

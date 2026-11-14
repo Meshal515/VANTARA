@@ -145,10 +145,10 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
  expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
 });
 
-it('uses the common visibility gate for technical network metrics without hiding player controls',()=>{
+it('network metrics are a normal part of the player, independent of the diagnostics toggle (owner, 14 Nov)',()=>{
  const gate=vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
  const {view}=fixture();view.open.more();
- expect(view.root.querySelector('.pp-net')).toBeNull();
+ expect(view.root.querySelector('.pp-net')).not.toBeNull();
  expect(view.root.textContent).toContain('الإعدادات المتقدمة');
  gate.mockReturnValue(true);view.open.more();
  expect(view.root.querySelector('.pp-net')).not.toBeNull();
