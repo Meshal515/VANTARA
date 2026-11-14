@@ -196,19 +196,24 @@
 /* V7: جدول البث صار «تشكيلة» أغلفة داخل بطل الرئيسية (11 غلافًا 124px = 1636px في 1118px). على الكمبيوتر
  * صف واحد يتسع لها كلها بلا تمرير: كل غلاف يأخذ نصيبه من العرض حتى 124px، بنسبته كاملة. */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* قيس (بلاغ المالك 14 نوفمبر، 1366): 18 حلقة في صف واحد = ~60px للغلاف، والأوقات و«بعد 47 دقيقة» تتداخل. الآن
+   * شبكة بأعمدة من العرض الفعلي، الغلاف 108px على الأقل، والزائد ينزل صفًا ثانيًا (لا تمرير أفقي: قانون الكمبيوتر). */
   .v35 .ah-lineup {
     display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 124px);
-    justify-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    grid-auto-flow: row;
+    gap: 18px 14px;
     overflow: visible;
     scroll-snap-type: none;
   }
   .v35 .ah-lineup > .ah-cover {
     width: auto;
     min-width: 0;
+    max-width: 150px;
     flex: none;
   }
+  .v35 .ah-lineup > .ah-cover > b { white-space: nowrap; font-size: 14px; }
+  .v35 .ah-lineup .ah-cover-st { overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 }
 
 /* ═══ أبطال الرئيسيات بأسلوب منصات البث (نفس قاعدة صفحات العمل في desktop-work.css) ═══
@@ -316,4 +321,18 @@
     align-items: start;
   }
   .v35 .addon-v7 .v7-list > :not(.v7-row) { grid-column: 1 / -1; }
+}
+
+/* «تابع المشاهدة» في الأنمي على الكمبيوتر (بلاغ المالك 14 نوفمبر: الغلاف طويل ومتداخل والبطاقات صغيرة). قيس (1366):
+ * 6 أعمدة بعرض ~195px والغلاف 52px يصعد −36px فوق الصورة فيغطي الاسم. هنا: بطاقات أعرض (4 أعمدة في 1366، 6 في 1920)،
+ * والغلاف الصغير بجانب الاسم في سطر مرتب تحت الصورة بلا تراكب، وشريط التقدم بعرض البطاقة. الجوال كما هو. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 .ah-cw-rail .an-strip { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 24px 18px; }
+  .v35 .ah-cw-bar { margin-inline-start: 0; margin-top: 10px; height: 3px; }
+  .v35 .ah-cw-row { margin-top: 10px; align-items: center; gap: 12px; }
+  .v35 .ah-cw-poster { flex: 0 0 40px; width: 40px; margin-top: 0; box-shadow: var(--card-ring); }
+  .v35 .ah-cw-info { padding-top: 0; }
+  .v35 .ah-cw-name > b { font-size: 15px; text-align: right; }
+  .v35 .ah-cw-meta { font-size: 12.5px; margin-top: 2px; }
+  .v35 .ah-cw-play { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
 }
