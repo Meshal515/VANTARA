@@ -19,6 +19,10 @@ on:
         description: 'strong | cc-by | all'
         type: string
         default: 'strong'
+      quick:
+        description: 'Quick screening: first 4MB only, 45 s budget'
+        type: boolean
+        default: true
       rounds:
         description: 'Alternating rounds'
         type: string
@@ -54,18 +58,22 @@ jobs:
           node-version: '24'
       - name: Tests for the torrent-file parser
         run: node --test tools/torrent-host/torrent-file.test.mjs
-      - name: Restore vcpkg binary cache
-        uses: actions/cache@v4
+      # المكتبة المبنية نفسها (لا ملفات vcpkg الثنائية فقط): بناؤها من الصفر ~20 دقيقة، ومن الكاش ~دقيقة. يُحفظ
+      # فور البناء (cache/save) حتى لو سقط القياس بعده، فلا يعاد البناء في التجربة التالية.
+      - name: Restore built libtorrent (vcpkg installed tree)
+        id: ltcache
+        uses: actions/cache/restore@v4
         with:
-          path: .vcpkg-cache
-          key: vcpkg-libtorrent-x64-windows-static-${{ hashFiles('tools/torrent-host/CMakeLists.txt') }}-v1
-          restore-keys: vcpkg-libtorrent-x64-windows-static-
+          path: C:\vcpkg\installed
+          key: vcpkg-installed-libtorrent-x64-windows-static-v1
       - name: Build vantara-torrent.exe from this branch (with /diag)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg libtorrent build failed' }
+          if (-not (Test-Path 'C:\vcpkg\installed\x64-windows-static\share\libtorrent')) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static
+            if ($LASTEXITCODE -ne 0) { throw 'vcpkg libtorrent build failed' }
+          } else { Write-Host 'libtorrent restored from cache' }
           cmake -S tools/torrent-host -B build/torrent-host -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
           if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
           cmake --build build/torrent-host --config Release
@@ -73,6 +81,12 @@ jobs:
           $exe = (Resolve-Path build/torrent-host/Release/vantara-torrent.exe).Path
           & $exe --version
           "NATIVE=$exe" | Out-File -Append $env:GITHUB_ENV
+      - name: Save built libtorrent for the next experiment
+        if: steps.ltcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-installed-libtorrent-x64-windows-static-v1
       - name: Engine tests on Windows (bytes, priority order, /diag)
         env:
           VANTARA_TORRENT_HOST_BINARY: ${{ env.NATIVE }}
@@ -95,7 +109,8 @@ jobs:
           ROUNDS: ${{ inputs.rounds || '2' }}
         run: |
           $rq = if ('${{ matrix.rqbit }}' -eq 'yes') { "--rqbit=$env:RQBIT" } else { '--rqbit=' }
-          $cmd = "node tools/torrent-host/swarm-ab.mjs `"--libtorrent=$env:NATIVE`" $rq `"--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')`" `"--rounds=$env:ROUNDS`" `"--sources=$env:SOURCES`" ${{ matrix.variants }}"
+          $quick = if ('${{ inputs.quick }}' -eq 'false') { '' } else { '--quick' }
+          $cmd = "node tools/torrent-host/swarm-ab.mjs $quick `"--libtorrent=$env:NATIVE`" $rq `"--report=$(Join-Path $env:RUNNER_TEMP 'swarm-ab.json')`" `"--rounds=$env:ROUNDS`" `"--sources=$env:SOURCES`" ${{ matrix.variants }}"
           Write-Host $cmd
           Invoke-Expression $cmd
           if ($LASTEXITCODE -ne 0) { throw "swarm-ab exited $LASTEXITCODE" }

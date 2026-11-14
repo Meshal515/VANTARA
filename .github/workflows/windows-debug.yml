@@ -8,7 +8,10 @@ on:
     paths:
       - 'apps/desktop/**'
       - 'apps/web/**'
-      - 'tools/torrent-host/**'
+      # المحرك نفسه فقط: أدوات القياس (swarm-ab وtorrent-file) لا تبني ولا تنشر نسخة جديدة
+      - 'tools/torrent-host/vantara-torrent.cpp'
+      - 'tools/torrent-host/CMakeLists.txt'
+      - 'tools/torrent-host/host.test.mjs'
       - 'tools/build-windows.mjs'
       - 'tools/verify-windows-*.ps1'
       - '.github/workflows/windows-debug.yml'

@@ -42,7 +42,9 @@ const STRONG = [
   { label: 'Debian netinst (latest)', listing: 'https://cdimage.debian.org/debian-cd/current/amd64/bt-cd/', pattern: /debian-[\d.]+-amd64-netinst\.iso\.torrent/g },
 ];
 const WEBTORRENT_TRACKERS = ['udp://tracker.leechers-paradise.org:6969', 'udp://tracker.coppersurfer.tk:6969', 'udp://explodie.org:6969', 'udp://tracker.opentrackr.org:1337/announce'];
-const BUDGET_MS = 90_000;
+// --quick: فرز سريع — أول 4MB فقط بحد 45 ث (بداية التشغيل هي المشكلة)؛ القياس الكامل للإعداد الفائز فقط
+const quick = process.argv.includes('--quick');
+const BUDGET_MS = quick ? 45_000 : 90_000;
 const auth = `ab:${Math.random().toString(36).slice(2)}`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const port = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
@@ -142,10 +144,10 @@ async function measure(kind, source) {
     row.clickToFirstByteMs = row.head4MB.firstByteMs == null ? null : Math.round(row.metadataMs + row.head4MB.firstByteMs);
     // سرعة مستمرة تقارن بمتوسط قياس الـAPK: 32MB بعد أول 4MB مباشرة (قراءة تسلسلية كالمشغل)
     meter.phase = 'sustained';
-    row.sustained32MB = await readRange(url, 4 << 20, 32 << 20, 120_000, meter);
+    row.sustained32MB = quick ? { skipped: true } : await readRange(url, 4 << 20, 32 << 20, 120_000, meter);
     row.sustainedMBps = row.sustained32MB.status === 206 && row.sustained32MB.bytes === 32 << 20 && row.sustained32MB.totalMs ? +(32 / (row.sustained32MB.totalMs / 1000)).toFixed(2) : null;
     meter.phase = 'seek';
-    row.seek50pct4MB = await readRange(url, Math.floor(files[index].length / 2), 4 << 20, BUDGET_MS, meter);
+    row.seek50pct4MB = quick ? { skipped: true } : await readRange(url, Math.floor(files[index].length / 2), 4 << 20, BUDGET_MS, meter);
     clearInterval(sampler);
     // خلاصة مرحلة البداية: متوسط سرعة تنزيل المحرك مقابل ما وصل للقارئ في الثواني نفسها
     const headSamples = timeline.filter(s => s.phase === 'head' && Number.isFinite(s.rate));
