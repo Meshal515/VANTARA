@@ -43,7 +43,7 @@ bdi{unicode-bidi:isolate}
 .bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:10px;padding:16px 40px 24px}
 .btn{height:48px;border-radius:14px;padding:0 18px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);backdrop-filter:blur(8px);white-space:nowrap;color:var(--t1)}
 .btn svg{width:19px;height:19px}
-.btn.icononly{width:48px;padding:0;justify-content:center}
+.btn.icononly{width:48px;padding:0;justify-content:center}.btn.icononly svg{width:24px;height:24px}
 .btn.primary{background:var(--accent);border-color:var(--accent)}
 .btn .val{font-family:'VL';font-weight:700;color:var(--t2);font-size:13px}
 .who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
@@ -163,6 +163,23 @@ bdi{unicode-bidi:isolate}
 .pc .ss{width:520px}.pc .ss-tabs{font-size:16px}.pc .sr-t b{font-size:16px}.pc .sr-t small{font-size:13.5px}.pc .ss-best{height:62px}
 .pc .side{width:500px}.pc .epr img{width:132px}.pc .epr b{font-size:15px}
 .pc .pv img{width:280px}
+
+.ss-head{display:flex;align-items:center;gap:10px}.ss-head strong{font-size:17px}.ss-head small{font-size:13px;color:var(--t3);font-weight:700}
+.ss-back{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.06);color:#fff;flex:none}.ss-back svg{width:20px;height:20px}
+.ss-pickers{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.ss-pickers.sp{grid-template-columns:1fr;padding:4px 18px 12px}
+.pk{height:52px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-content:center;column-gap:8px;padding:0 14px}
+.pk small{grid-column:1;font-size:11.5px;color:var(--t3);font-weight:700}.pk b{grid-column:1;font-size:15px;font-family:'VL','VS'}.pk svg{grid-column:2;grid-row:1/3;align-self:center;width:18px;height:18px;color:var(--t2)}
+.pk.open{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.08)}.pk.open svg{transform:rotate(180deg)}
+.ss-top,.side{position:relative}
+.menu{position:absolute;z-index:5;top:122px;inset-inline-start:20px;width:calc(50% - 24px);background:#151a26;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:6px;display:grid;gap:2px;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.menu.tall{top:126px;inset-inline:18px;width:auto;max-height:62%;overflow:hidden}
+.mi{height:42px;border-radius:10px;display:flex;align-items:center;gap:10px;padding:0 12px;font-weight:700;font-size:14.5px;font-family:'VL','VS'}
+.mi em{font-style:normal;margin-inline-start:auto;color:var(--t3);font-size:12.5px}.mi i{display:grid;width:18px;color:var(--accent)}.mi i svg{width:18px;height:18px}
+.mi.on{background:rgba(255,255,255,.07)}.mi.on em{margin-inline-start:auto}
+.phone .pk{height:44px}.phone .pk b{font-size:13.5px}.phone .ss-head strong{font-size:15px}.phone .ss-back{width:30px;height:30px}
+.phone .menu{top:96px}.phone .menu.tall{top:112px;max-height:66%}.pc .menu.tall{top:142px}.phone .mi{height:36px;font-size:13px}
+.pc .pk{height:58px}.pc .pk b{font-size:16px}
 </style>
 </head>
 <body>
@@ -178,21 +195,25 @@ const EP=n=>SHOTS[(n-1)%4];
 const ic={server:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
  eps:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M8 10h8M8 14h5"/></svg>',
  x:'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
- more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+ more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="4.5" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="19.5" cy="12" r="2.6"/></svg>',
+ back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+ chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
  play:'<svg viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg>'};
 const STAGES=['اتصال','بيانات الحلقة','أول قطعة','تخزين','أول إطار'];
-const conf={pick:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
+const conf0={pick:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
  servers:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
  preparing:{n:3,line:'نجهّز فيديوك',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="busy">أول قطعة وصلت</span>'},
  ready:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
  countdown:{n:5,line:'الكل جاهز',sub:''},episodes:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
- version:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'}}[S];
-const NAMES={pick:'1 · الغرفة أولًا',servers:'2 · السيرفرات',preparing:'3 · التجهيز',ready:'4 · جاهز',countdown:'5 · العدّ',episodes:'6 · الحلقات',version:'7 · نسخة مختلفة',player:'8 · الصورة المصغرة'};
+ version:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'}};
+const conf=conf0[S]??conf0[S.split('-')[0]];
+const NAMES={pick:'1 · الغرفة أولًا',servers:'2 · السيرفرات','servers-menu':'2ب · قائمة الجودة','episodes-menu':'6ب · قائمة المواسم',preparing:'3 · التجهيز',ready:'4 · جاهز',countdown:'5 · العدّ',episodes:'6 · الحلقات',version:'7 · نسخة مختلفة',player:'8 · الصورة المصغرة'};
 let h='';
 if(S==='player'){
  h=`<div class="vid"></div><div class="ctl"><div class="track"><i class="buf"></i><i class="pl"></i><i class="th"></i><div class="pv"><img src="${EP(3)}"><span>11:17</span></div></div><div class="times"><span>11:17</span><span>24:00</span></div></div>`;
 }else{
- const n=conf.n,ready=n===5,picking=S==='pick'||S==='servers';
+ const n=conf.n,ready=n===5,picking=S==='pick'||S.startsWith('servers');
  const bars=STAGES.map((_,i)=>`<i class="${i<n?'done':i===n&&!picking?'now':''}"></i>`).join('');
  const stepText=picking?'بانتظار سيرفرك':ready?'جاهز للبدء':`${STAGES[n]}…`;
  h=`<div class="bg"><img src="${BANNER}"></div>
@@ -208,11 +229,13 @@ if(S==='player'){
   <span class="btn">${ic.eps}الحلقات</span>
   <span class="btn ${picking?'primary':''}">${ic.server}${picking?'اختر سيرفر':'<bdi class="val">Torrentio · 1080p</bdi>'}</span>
   <span class="start ${ready?'primary':''}"><img src="${EP(1)}"><span class="play">${ic.play}</span><span class="l">البدء</span></span></div>`;
- if(S==='servers'){
+ if(S==='servers'||S==='servers-menu'){
   // نفس ورقة سيرفرات الكمبيوتر الحالية (المعتمدة من المالك) كلوحة جانبية: تبويبات الجودة، مجموعات، صف لكل نسخة، «شغّل الأفضل»
   const sig=n=>`<span class="sg">${[5,8,11,14].map((hh,i)=>`<i style="height:${hh}px" class="${i<n?'':'off'}"></i>`).join('')}</span>`;
   const row=(q,src,d,p,n,cls='',tag='')=>`<div class="sr ${cls}"><div class="sr-t"><b><bdi>${q}</bdi> <bdi>${src}</bdi>${tag}</b><small><bdi>${d}</bdi></small></div><span class="sr-p"><bdi>${p}</bdi>${sig(n)}</span><span class="sr-x">⌄</span></div>`;
-  h+=`<div class="scrim"></div><div class="ss"><div class="ss-top"><span class="ss-back">›</span><div class="ss-tabs"><b>الكل</b><span>1080p</span><span>720p</span><span>SD</span></div></div>
+  h+=`<div class="scrim"></div><div class="ss"><div class="ss-top"><div class="ss-head"><span class="ss-back">${ic.back}</span><strong>اختر سيرفرك</strong><small>الحلقة 1</small></div>
+  <div class="ss-pickers"><span class="pk ${S==='servers-menu'?'open':''}"><small>الجودة</small><b>الكل</b>${ic.chev}</span><span class="pk"><small>المصدر</small><b>كل المصادر</b>${ic.chev}</span></div>
+  ${S==='servers-menu'?`<div class="menu"><span class="mi on">الكل<i>${ic.check}</i></span><span class="mi">1080p<em>64</em></span><span class="mi">720p<em>21</em></span><span class="mi">SD<em>3</em></span></div>`:''}</div>
   <div class="ss-list"><div class="ss-grp"><b>تورنت <i>76</i></b><span>يبدأ أبطأ · جودة وحجم أعلى</span></div>
   ${row('1080p','Torrentio','853 MB · ترجمات متعددة','156',4,'on',' <em>مقترح</em>')}
   ${row('1080p','Torrentio','180 MB · صوت متعدد','113',4)}
@@ -224,10 +247,11 @@ if(S==='player'){
   <div class="ss-more dim">غير متاح الآن (41) ⌄</div></div>
   <div class="ss-foot"><div class="ss-best"><span class="pl">${ic.play}</span><div><b>شغّل الأفضل</b><small><bdi>1080p · Torrentio</bdi> · 156 مشارك · سرب قوي · <bdi>853 MB</bdi></small></div></div></div></div>`;
  }
- if(S==='episodes'){
+ if(S==='episodes'||S==='episodes-menu'){
   const rows=[1,2,3,4,5].map(k=>`<div class="epr ${k===1?'on':''}"><img src="${EP(k)}"><div>${k===1?'<span class="now">الآن</span>':''}<b>الحلقة ${k}</b><small><bdi>${TITLES[(k-1)%4]}</bdi></small></div></div>`).join('');
   h+=`<div class="scrim"></div><div class="side"><div class="side-head"><div class="t"><strong>الحلقات</strong><small>اختيارك ينقل الغرفة كلها</small></div><span class="icon">${ic.x}</span></div>
-  <div class="filters"><span class="chip on">الموسم 1</span><span class="chip">الموسم 2</span><span class="chip">الموسم 3</span><span class="chip">الموسم 4</span></div><div class="eps">${rows}</div></div>`;
+  <div class="ss-pickers sp"><span class="pk ${S==='episodes-menu'?'open':''}"><small>الموسم</small><b>الموسم 1</b>${ic.chev}</span></div>
+  ${S==='episodes-menu'?`<div class="menu tall">${Array.from({length:24},(_,i)=>`<span class="mi ${i===0?'on':''}">الموسم ${i+1}<em>${[20,22,21,20,24,19,22,21,20,22,21,20,24,19,22,21,20,22,21,20,24,19,22,21][i]} حلقة</em>${i===0?`<i>${ic.check}</i>`:''}</span>`).join('')}</div>`:''}<div class="eps">${rows}</div></div>`;
  }
  if(S==='countdown') h+=`<div class="count"><b>3</b><small>نبدأ كلنا مع بعض</small></div>`;
  if(S==='version'){document.documentElement.classList.add('version');h+=`<div class="note"><i></i><p>نسخة <b>دحمي</b> أقصر من نسختك بـ<b>20 ثانية</b>، غالبًا بدون المقدمة.</p><span class="btn">اضبط الديلاي عنده</span></div>`;}
