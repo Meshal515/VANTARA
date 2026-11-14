@@ -67,6 +67,26 @@ describe('Together room client', () => {
     expect(sockets).toHaveLength(3);
   });
 
+  it('old server (no proto): the fixed 300ms lead is removed on receipt so commands run at once; countdowns stay', () => {
+    const { room, sockets, run, tick } = harness();
+    sockets[0].open(); run(0);
+    // ساعة: عيّنة ping بلا تأخير تقريبًا (الخادم = الجهاز + 5000)
+    sockets[0].receive({ t: 'pong', t0: 0, ts: 5_000 });
+    const { proto, ...old } = { ...welcome, proto: undefined };
+    sockets[0].receive(old);
+    sockets[0].receive({ t: 'state', state: { ...welcome.state, seq: 5, playing: false, pos: 9_000, at: 5_000 + 300 } });
+    expect(room.timeline.at).toBe(5_000);
+    // عدّ البداية (3 ث) لا يُمس
+    sockets[0].receive({ t: 'state', state: { ...welcome.state, seq: 6, playing: true, started: true, at: 5_000 + 3_000 } });
+    expect(room.timeline.at).toBe(8_000);
+    // خادم جديد (proto 2): لا تعديل
+    const b = harness(); b.sockets[0].open(); b.run(0); b.sockets[0].receive({ t: 'pong', t0: 0, ts: 5_000 });
+    b.sockets[0].receive({ ...welcome, proto: 2 });
+    b.sockets[0].receive({ t: 'state', state: { ...welcome.state, seq: 5, at: 5_200 } });
+    expect(b.room.timeline.at).toBe(5_200);
+    expect(room.instant).toBe(true);
+  });
+
   it('commands carry the press time on the room clock when given', () => {
     const { room, sockets } = harness();
     sockets[0].open();

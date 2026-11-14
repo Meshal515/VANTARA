@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   startPlayback: call('start-playback'),
   stopPlayback: call('stop-playback'),
   playbackCommand: call('playback-command'),
+  previewFrame: call('preview-frame'),
   openExternal: call('open-external'),
   openUpdatePage: call('open-update-page'),
   downloadUpdate: call('download-update'),

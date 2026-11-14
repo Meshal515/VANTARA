@@ -861,6 +861,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function player(state,url,title,position,pause) {
     state.trace.record('player-start');
+    state.playUrl=url;state.thumbs=new Map();
     if(videoHost){state.videoSurface=await videoHost.acquire(state.session,state.controller.signal);assertSession(state);}
     if(state.videoSurface&&!/^\d{1,20}$/.test(state.videoSurface.windowId))throw new Error('مقبض نافذة الفيديو غير صالح');
     state.ipc=platform==='win32'?`\\\\.\\pipe\\vantara-${secret()}`:join(tmpdir(),`vantara-${secret()}.sock`);
@@ -1235,9 +1236,52 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return ipcCommand(state,['script-message',eventName]);
   }
   // Internal verification only: not registered on the renderer IPC bridge.
+  /**
+   * صورة مصغرة لشريط التقدم (طلب المالك، كـCloudStream): إطار واحد مصغّر (320px) من نفس رابط الحلقة عبر mpv ثانٍ خفيف
+   * بلا صوت ولا نافذة، مرة لكل 10 ث ومحفوظ للجلسة. التورنت: فقط حيث القطع نازلة أصلًا، فلا يطلب المحرك قطعًا جديدة
+   * تزاحم المشاهدة. طلب واحد في كل لحظة والأحدث يفوز.
+   */
+  async function previewFrame({session,positionMs}={}){
+    const s=current;
+    if(!s||s.session!==session||s.stopped||!s.ready||!s.playUrl)return {available:false};
+    const duration=Number(s.progress.duration)||0;
+    const ms=Math.max(0,Math.round(Number(positionMs)/10000)*10000);
+    if(!Number.isFinite(ms)||(duration&&ms>duration))return {available:false};
+    if(s.thumbs.has(ms))return {available:true,positionMs:ms,src:s.thumbs.get(ms)};
+    if(s.torrentId&&s.win&&duration>0){
+      try{
+        const {bits}=await localBitfield(s.api,`/torrents/${s.torrentId}/haves`,{auth:s.auth,signal:s.controller.signal,timeout:2000});
+        const start=s.win.fileOffset+Math.floor(ms/duration*s.win.fileLength),len=s.win.pieceLength||1;
+        for(let p=Math.floor(start/len);p<=Math.floor((start+2*1024*1024)/len);p++)if(!hasPiece(bits,p))return {available:false,positionMs:ms,reason:'not-downloaded'};
+      }catch{return {available:false};}
+    }
+    const seq=s.thumbSeq=(s.thumbSeq??0)+1;
+    try{await s.thumbBusy;}catch{}
+    if(seq!==s.thumbSeq||s.stopped||current!==s)return {available:false,stale:true};
+    const job=(async()=>{
+      const dir=await fs.mkdtemp(join(tmpdir(),'vantara-thumb-'));
+      try{
+        const args=['--no-config','--terminal=no','--really-quiet','--no-audio','--no-sub','--vo=image','--vo-image-format=jpg','--vo-image-jpg-quality=72',`--vo-image-outdir=${dir}`,'--frames=1',`--start=${(ms/1000).toFixed(1)}`,'--hr-seek=no','--vf=scale=320:-2','--untimed',s.playUrl];
+        await new Promise(resolveDone=>{
+          const p=spawn(binaries.mpv,args,{env:cleanEnv(),stdio:'ignore',windowsHide:true,shell:false});
+          const kill=setTimeout(()=>{try{p.kill();}catch{}},6000);
+          p.once('exit',()=>{clearTimeout(kill);resolveDone();});p.once('error',()=>{clearTimeout(kill);resolveDone();});
+        });
+        const file=(await fs.readdir(dir)).find(n=>/\.jpe?g$/i.test(n));
+        if(!file)return null;
+        const src=`data:image/jpeg;base64,${(await fs.readFile(join(dir,file))).toString('base64')}`;
+        if(s.thumbs.size>240)s.thumbs.delete(s.thumbs.keys().next().value);
+        s.thumbs.set(ms,src);
+        return src;
+      }finally{await rm(dir,{recursive:true,force:true}).catch(()=>{});}
+    })();
+    s.thumbBusy=job;
+    const src=await job.catch(()=>null);
+    return src?{available:true,positionMs:ms,src}:{available:false,positionMs:ms};
+  }
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
   async function close(){closed=true;await dropPrewarm();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
-  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,smokeMpvBinding,close};
+  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,previewFrame,smokeMpvBinding,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {

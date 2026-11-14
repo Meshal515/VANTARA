@@ -18,8 +18,16 @@ const t = () => performance.now();
 const core = RoomCore.create(createSettings({ mode: 'sync' }, 'host', 'ABCDEF', Date.now(), '*'), { key: 'anime:1#1', kind: 'anime', label: 'الحلقة 1' }, Date.now());
 const conns = new Map();
 const trace = [];
+// OLD=1: يحاكي الخادم المنشور مع Stable (proto 1): كل أمر مختوم بـ«وصوله + 300ms» وبلا proto في الترحيب
+const OLD = process.env.OLD === '1';
+function legacy(msg) {
+  if (!OLD) return msg;
+  if (msg.t === 'welcome') { const { proto, ...rest } = msg; return rest; }
+  if (msg.t === 'state' && msg.state && !(msg.state.at - Date.now() > 1000)) return { ...msg, state: { ...msg.state, at: Date.now() + 300 } };
+  return msg;
+}
 function apply(out) {
-  for (const o of out) {
+  for (const o0 of out) { const o = 'msg' in o0 ? { ...o0, msg: legacy(o0.msg) } : o0;
     if ('close' in o) { conns.get(o.close)?.serverClose(o.code, o.reason); continue; }
     const targets = o.to === 'all' ? [...conns.keys()] : o.to;
     for (const c of targets) if (c !== o.except) conns.get(c)?.deliver(JSON.stringify(o.msg));
@@ -110,7 +118,7 @@ for (let run = 0; run < RUNS; run++) {
   }
 }
 const med = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? Math.round(s[Math.floor(s.length / 2)]) : '—'; };
-console.log(`شبكة: ذهاب ${ONE_WAY}ms ±${JITTER} لكل اتجاه · mpv ${MPV_APPLY_MS}ms · ${RUNS} مرات لكل أمر (الوسيط بالمللي ثانية من الضغطة)`);
+console.log(`${OLD ? 'خادم قديم (Stable، تأجيل 300ms) · ' : 'خادم جديد · '}شبكة: ذهاب ${ONE_WAY}ms ±${JITTER} لكل اتجاه · mpv ${MPV_APPLY_MS}ms · ${RUNS} مرات لكل أمر (الوسيط بالمللي ثانية من الضغطة)`);
 console.log('الأمر'.padEnd(12), 'المضيف ينفّذ', 'أُرسل', 'وصل الخادم', 'وصل الصديق', 'الصديق يأمر mpv', 'الصديق ينفّذ');
 for (const [name] of ops) {
   const r = rows.filter((x) => x.name === name);

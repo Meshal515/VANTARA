@@ -223,9 +223,19 @@ export function joinRoom({
     }
   }
 
+  // الخادم القديم (proto 1، المنشور مع Stable) يختم كل أمر بـ«وصوله + 300ms» ليؤجّله عمدًا. تأجيل ثابت معروف:
+  // نعيده للحظة وصوله فينفّذ الجميع الأمر فور استلامه — نفس سلوك proto 2 بلا نشر خادم ولا Stable (قرار المالك).
+  // العدّ التنازلي للبداية (ثوانٍ) لا يُمس: يُعرف بأن موعده أبعد من التأجيل الثابت.
+  const OLD_LEAD_MS = 300;
+  function normalize(state) {
+    if (proto >= 2 || !clock.ready || !Number.isFinite(state.at)) return state;
+    const lead = state.at - clock.serverNow();
+    return lead > 0 && lead <= OLD_LEAD_MS + 150 ? { ...state, at: state.at - OLD_LEAD_MS } : state;
+  }
   function acceptState(state, by = null) {
     if (!state || !Number.isFinite(state.seq) || !Number.isFinite(state.pos)) return;
     if (timeline && state.seq <= timeline.seq) return;
+    state = normalize(state);
     timeline = state;
     emit('state', { state, by });
   }
@@ -265,8 +275,8 @@ export function joinRoom({
     get info() { return info; },
     get me() { return me; },
     get status() { return status; },
-    /** الخادم يختم الأوامر بلحظة ضغطها وينفّذها الأصدقاء عند وصولها (بروتوكول 2): المتحكّم يطبّق أمره فورًا. */
-    get instant() { return proto >= 2; },
+    /** المتحكّم يطبّق أمره فورًا: الخادم الجديد يختمه بلحظة ضغطه، والقديم يُعاد تأجيله الثابت عند الاستلام (normalize). */
+    get instant() { return true; },
     get isHost() { return Boolean(me) && info?.hostUserId === me; },
     get canControl() { return Boolean(me) && (info?.hostUserId === me || info?.control === 'all'); },
   };

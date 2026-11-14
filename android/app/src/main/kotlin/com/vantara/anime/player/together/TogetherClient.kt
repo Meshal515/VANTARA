@@ -57,6 +57,16 @@ class TogetherClient(
 
     private val main = Handler(Looper.getMainLooper())
     val clock = SharedClock({ SystemClock.elapsedRealtime().toDouble() })
+    private var proto = 1
+    /**
+     * الخادم القديم (proto 1) يختم كل أمر بـ«وصوله + 300ms» تأجيلًا ثابتًا معروفًا: نعيده للحظة وصوله فينفّذ الجميع
+     * الأمر فور استلامه، بلا نشر خادم ولا Stable (قرار المالك). العدّ التنازلي للبداية أبعد من ذلك فلا يُمس.
+     */
+    private fun normalize(t: Timeline): Timeline {
+        if (proto >= 2 || !clock.ready) return t
+        val lead = t.at - clock.serverNow()
+        return if (lead > 0 && lead <= OLD_LEAD_MS + 150) t.copy(at = t.at - OLD_LEAD_MS) else t
+    }
     private var ws: WebSocket? = null
     private var closed = false
     private var attempt = 0
@@ -139,6 +149,7 @@ class TogetherClient(
             "pong" -> if (m.has("t0")) clock.sample(m.getDouble("t0"), m.getDouble("ts"), SystemClock.elapsedRealtime().toDouble())
             "welcome" -> {
                 me = m.optString("you")
+                proto = m.optInt("proto", 1)
                 room(m.optJSONObject("room"))
                 if (!clock.ready && m.has("now")) { val t = SystemClock.elapsedRealtime().toDouble(); clock.sample(t, m.getDouble("now"), t) }
                 parseTimeline(m.optJSONObject("state"))?.let { timeline = it }
@@ -148,8 +159,9 @@ class TogetherClient(
                 listener.onRoster(roster)
                 timeline?.let { listener.onState(it, null) }
             }
-            "state" -> parseTimeline(m.optJSONObject("state"))?.let { t ->
-                if ((timeline?.seq ?: -1) > t.seq) return
+            "state" -> parseTimeline(m.optJSONObject("state"))?.let { raw ->
+                if ((timeline?.seq ?: -1) > raw.seq) return
+                val t = normalize(raw)
                 timeline = t
                 listener.onState(t, m.optString("by").takeIf { it.isNotEmpty() && it != "null" })
             }
@@ -200,6 +212,7 @@ class TogetherClient(
     companion object {
         private const val RESYNC_MS = 30_000L
         // أول إعادة فورية بعد انقطاع لحظي، ثم تتباعد (كانت تنتظر ثانية كاملة قبل أول محاولة)
+        private const val OLD_LEAD_MS = 300.0
         private val BACKOFF = longArrayOf(0, 1_000, 2_000, 4_000, 8_000, 15_000)
 
         fun parseTimeline(o: JSONObject?): Timeline? {
