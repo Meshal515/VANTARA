@@ -532,7 +532,9 @@ class RuntimeHost(
         }
         val payload=JsonObject(input+mapOf("source" to source.getValue("name")))
         try {
-            val result=worker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await()) }
+            // روابط لم تكتمل (complete=false): خيوط الإضافة قد تبقى عالقة في العامل، فلا يُعاد استعماله
+            val result=warmWorker(o,generation,scope,installed.dexFile(),installed.dexHash(),installed.entry(),transport,
+                { r -> operation!="videoLinks" || (r as? JsonObject)?.get("complete")?.jsonPrimitive?.booleanOrNull!=false }) { client -> RuntimeJson.parse(client.invokeJson(operation,payload.toString(),OPERATION_BUDGET_MS).await()) }
             synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
             val latest=o.store.current(installed.packageId()) ?: error("PACKAGE_NOT_INSTALLED")
             check(latest.packageHash()==installed.packageHash() && RuntimeJson.parse(latest.metadata()).jsonObject["enabled"]?.jsonPrimitive?.booleanOrNull!=false) { "PACKAGE_CHANGED" }
@@ -550,6 +552,31 @@ class RuntimeHost(
         android.util.Log.w("VantaraRuntime","WORKER_START_RETRY:"+failure.code)
         block()
     }
+    /**
+     * عامل دافئ لكل مصدر (كما يبقي CloudStream إضافاته محمّلة): العامل المعزول يُحمَّل مرة ويُعاد استعماله
+     * للبحث والصفحة والحلقات والروابط، بدل عملية معزولة جديدة وتحميل الإضافة من الصفر لكل طلب.
+     * يبقى في [workers] فيُغلق مع تحديث الحزمة أو حذفها أو تغيّر الحساب كما كان. المفتاح يشمل الحساب والحزمة
+     * وبصمتها وجيلها والمصدر والأصول المسموحة: أي تغيّر فيها = عامل جديد. عامل انتهت مهلته أو أُلغي أو سقط
+     * لا يعود ([AndroidRuntimeClient.isOpen])، ولا عامل روابط لم تكتمل (قد يحمل خيوط إضافة عالقة).
+     */
+    private class Switch: AndroidRuntimeClient.HostHttpTransport {
+        @Volatile var current: AndroidRuntimeClient.HostHttpTransport?=null
+        override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response =
+            (current ?: throw IOException("WORKER_IDLE")).exchange(caller,request)
+        override fun close() {}
+    }
+    private class Warm(val key: String,val client: AndroidRuntimeClient,val switch: Switch)
+    private val warm=ConcurrentHashMap<String,Warm>()
+    private val reaper=java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r,"vantara-runtime-reaper").apply { isDaemon=true } }
+    private fun retireWarm(w: Warm) { warm.remove(w.key,w);workers.remove(w.client);w.client.close() }
+    private fun park(w: Warm) {
+        if(closed || !w.client.isOpen()) return retireWarm(w)
+        warm.put(w.key,w)?.takeIf { it!==w }?.let(::retireWarm)
+        // أقدم العمال الخاملين يُغلق أولًا: حد الذاكرة باقٍ
+        while(warm.size>WARM_MAX) warm.values.firstOrNull { it!==w }?.let(::retireWarm) ?: break
+        runCatching { reaper.schedule({ if(warm.remove(w.key,w)) { workers.remove(w.client);w.client.close() } },WARM_IDLE_MS,java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+    /** التسجيل وفحص المرشّح: عامل لمرة واحدة كما كان (لا يُعاد استعماله). */
     private suspend fun <T> worker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostTransport,run: suspend (AndroidRuntimeClient)->T): T {
         val client=synchronized(lock) {
             checkPackage(o,scope.packageId(),generation)
@@ -557,6 +584,26 @@ class RuntimeHost(
         }
         try { client.loadCloudStream(dex,hash,entry).await();return run(client) }
         finally { workers.remove(client);client.close() }
+    }
+    private suspend fun <T> warmWorker(o: Owner,generation: Long,scope: AndroidRuntimeClient.Scope,dex: File,hash: String,entry: String,transport: AndroidRuntimeClient.HostHttpTransport,reusable: (T)->Boolean,run: suspend (AndroidRuntimeClient)->T): T {
+        val key=listOf(o.id,o.epoch,scope.packageId(),scope.sourceId(),generation,hash,entry,scope.allowedOrigins().sorted()).joinToString("\u0000")
+        val reused=warm.remove(key)?.takeIf { it.client.isOpen() && workers.containsKey(it.client) }
+        val w=reused ?: synchronized(lock) {
+            checkPackage(o,scope.packageId(),generation)
+            val switch=Switch()
+            Warm(key,AndroidRuntimeClient(app,scope,switch).also { workers[it]=scope },switch)
+        }
+        w.switch.current=transport
+        var keep=false
+        try {
+            if(reused==null) w.client.loadCloudStream(dex,hash,entry).await()
+            val result=run(w.client)
+            keep=reusable(result)
+            return result
+        } finally {
+            w.switch.current=null
+            if(keep) park(w) else retireWarm(w)
+        }
     }
     private val silentGate=SilentClearanceGate()
     /**
@@ -612,7 +659,7 @@ class RuntimeHost(
         pending.remove(retry.id,retry)
         return buildJsonObject { put("ok",true);put("host",item.host);put("state","verified");put("replayedOperation",retry.operation);put("result",response) }
     }
-    fun close() = synchronized(lock) { closed=true;workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
+    fun close() = synchronized(lock) { closed=true;warm.clear();reaper.shutdownNow();workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
     companion object {
         private val WORKER_START_FAILURES=setOf("BINDING_TIMEOUT","BINDING_FAILED")
         /**
@@ -623,6 +670,9 @@ class RuntimeHost(
         private const val OPERATION_BUDGET_MS=30_000L
         /** عمال معزولون معًا لعمليات المصادر (كانت 2 للكل). زيادة محدودة؛ العدالة والأولوية في RuntimeGate هي الإصلاح. */
         private const val OPERATION_SLOTS=3
+        /** عمال دافئون خاملون كحد أقصى، ومدة بقاء الخامل. */
+        private const val WARM_MAX=3
+        private const val WARM_IDLE_MS=90_000L
         /** One provider load (AndroidRuntimeClient.loadProfile: 30 s) plus one operation. */
         private const val REPLAY_BUDGET_MS=30_000L+OPERATION_BUDGET_MS
         fun digest(value: String)=digest(value.toByteArray())
