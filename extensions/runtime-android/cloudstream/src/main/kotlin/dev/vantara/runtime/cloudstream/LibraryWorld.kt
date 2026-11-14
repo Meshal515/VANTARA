@@ -68,16 +68,24 @@ internal object LibraryWorld {
         val actual = MessageDigest.getInstance("SHA-256").digest(zip).joinToString("") { "%02x".format(it) }
         check(actual == expected) { "CS3WORLD_INTEGRITY" }
         val dex = mutableListOf<ByteBuffer>()
+        val resources = HashMap<String, ByteArray>()
         ZipInputStream(zip.inputStream()).use { z ->
             while (true) {
                 val entry = z.nextEntry ?: break
-                if (Regex("classes\\d*\\.dex").matches(entry.name)) dex += ByteBuffer.wrap(z.readBytes())
+                when {
+                    Regex("classes\\d*\\.dex").matches(entry.name) -> dex += ByteBuffer.wrap(z.readBytes())
+                    entry.name.startsWith("res/") && !entry.isDirectory -> resources[entry.name.removePrefix("res/")] = z.readBytes()
+                }
             }
         }
         check(dex.isNotEmpty()) { "CS3WORLD_EMPTY" }
-        // The boot class loader: java.* and the framework only, nothing of this worker's own libraries
-        val loader = dalvik.system.InMemoryDexClassLoader(dex.toTypedArray(), String::class.java.classLoader)
-        val type = Class.forName(BRIDGE, true, loader)
+        // The boot class loader (java.* and the framework only, nothing of this worker's own libraries), under a loader
+        // that serves the world's jar resources: an in-memory DEX has none, and ServiceLoader (cryptography providers,
+        // Jackson modules) and kotlin-reflect's built-ins read them. Without them the extractor list failed to initialise.
+        val loader = dalvik.system.InMemoryDexClassLoader(dex.toTypedArray(), WorldResources(String::class.java.classLoader, resources))
+        val previous = Thread.currentThread().contextClassLoader
+        Thread.currentThread().contextClassLoader = loader
+        val type = try { Class.forName(BRIDGE, true, loader) } finally { Thread.currentThread().contextClassLoader = previous }
         type.getMethod("install", java.util.function.Function::class.java).invoke(null, transport)
         android.util.Log.i("VantaraCs3World", "WORLD_READY dex=${dex.size}")
         return type
@@ -151,4 +159,20 @@ internal object LibraryWorld {
             headers = (raw["headers"] as? Map<String, String>).orEmpty().entries.take(32).associate { it.key to it.value }
         }
     }
+}
+
+/** Read-only jar resources of the library world, at the paths the libraries ask for. No file is written anywhere. */
+private class WorldResources(parent: ClassLoader?, private val files: Map<String, ByteArray>) : ClassLoader(parent) {
+    private val handler = object : java.net.URLStreamHandler() {
+        override fun openConnection(u: java.net.URL): java.net.URLConnection = object : java.net.URLConnection(u) {
+            override fun connect() {}
+            override fun getInputStream(): java.io.InputStream =
+                java.io.ByteArrayInputStream(files[u.path.removePrefix("/")] ?: throw java.io.FileNotFoundException(u.path))
+        }
+    }
+    private fun url(name: String): java.net.URL? =
+        files[name]?.let { java.net.URL("cs3world", "", -1, "/$name", handler) }
+    override fun findResource(name: String): java.net.URL? = url(name)
+    override fun findResources(name: String): java.util.Enumeration<java.net.URL> =
+        java.util.Collections.enumeration(listOfNotNull(url(name)))
 }

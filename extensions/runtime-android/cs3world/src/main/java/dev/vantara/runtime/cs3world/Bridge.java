@@ -128,9 +128,17 @@ public final class Bridge {
             link.accept(m);
             return Unit.INSTANCE;
         };
-        Object claimed = BuildersKt.runBlocking(EmptyCoroutineContext.INSTANCE, (scope, outer) ->
-                TimeoutKt.withTimeoutOrNull(timeoutMs, (inner, cont) ->
-                        ExtractorApiKt.loadExtractor(url, referer, onSubtitle, onLink, cont), outer));
-        return Boolean.TRUE.equals(claimed);
+        // ServiceLoader and kotlin-reflect inside the library resolve through the context class loader: this world's
+        Thread thread = Thread.currentThread();
+        ClassLoader previous = thread.getContextClassLoader();
+        thread.setContextClassLoader(Bridge.class.getClassLoader());
+        try {
+            Object claimed = BuildersKt.runBlocking(EmptyCoroutineContext.INSTANCE, (scope, outer) ->
+                    TimeoutKt.withTimeoutOrNull(timeoutMs, (inner, cont) ->
+                            ExtractorApiKt.loadExtractor(url, referer, onSubtitle, onLink, cont), outer));
+            return Boolean.TRUE.equals(claimed);
+        } finally {
+            thread.setContextClassLoader(previous);
+        }
     }
 }

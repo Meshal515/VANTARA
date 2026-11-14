@@ -58,5 +58,36 @@ tasks.register('worldDex', JavaExec) {
         args(['--release', '--min-api', '27', '--output', out.absolutePath, tasks.named('jar').get().archiveFile.get().asFile.absolutePath] +
             configurations.world.files.collect { it.absolutePath }.sort())
     }
-    doLast { new File(out.parentFile, 'world.sha256').text = sha256(out) }
+    doLast {
+        // D8 keeps code only. The library world also needs its jars' resources: META-INF/services (cryptography
+        // providers, Jackson modules, kotlin-reflect built-ins loaders), *.kotlin_builtins, OkHttp's public suffix list.
+        // They are appended to the same verified asset and served by LibraryWorld's resource loader.
+        def resources = new TreeMap<String, ByteArrayOutputStream>()
+        ([tasks.named('jar').get().archiveFile.get().asFile] + configurations.world.files.sort()).each { jar ->
+            new java.util.zip.ZipFile(jar).withCloseable { zip ->
+                zip.entries().each { e ->
+                    def n = e.name
+                    if (e.isDirectory() || n.endsWith('.class') || n.startsWith('META-INF/versions/') || n == 'META-INF/MANIFEST.MF' ||
+                        n ==~ /META-INF\/.*\.(SF|RSA|DSA|EC)/ || n.endsWith('module-info.class')) return
+                    def bytes = zip.getInputStream(e).bytes
+                    if (n.startsWith('META-INF/services/')) {
+                        def merged = resources.computeIfAbsent(n) { new ByteArrayOutputStream() }
+                        merged.write(bytes); merged.write('\n'.bytes)
+                    } else if (!resources.containsKey(n)) {
+                        resources[n] = new ByteArrayOutputStream().with { it.write(bytes); it }
+                    }
+                }
+            }
+        }
+        def dexed = new File(out.parentFile, 'dex-only.zip')
+        out.renameTo(dexed)
+        new java.util.zip.ZipOutputStream(new FileOutputStream(out)).withCloseable { z ->
+            new java.util.zip.ZipFile(dexed).withCloseable { dex ->
+                dex.entries().each { e -> z.putNextEntry(new java.util.zip.ZipEntry(e.name)); z << dex.getInputStream(e); z.closeEntry() }
+            }
+            resources.each { name, bytes -> z.putNextEntry(new java.util.zip.ZipEntry('res/' + name)); z.write(bytes.toByteArray()); z.closeEntry() }
+        }
+        dexed.delete()
+        new File(out.parentFile, 'world.sha256').text = sha256(out)
+    }
 }
