@@ -159,6 +159,30 @@ class RuntimeSourceAdapterTest {
             assertEquals(1,server.requestCount)
         }
     }
+    /**
+     * Anime4up (live sweep, 14 Nov): ten dead servers queued for the resolver kept the sheet spinning past 90 s while
+     * the working ones were already on it. The episode's servers share one ceiling, queue included, and each one still
+     * open at the end is reported unavailable at once, with why.
+     */
+    @Test fun deadServersShareOneCeilingAndAreReportedWhenItEnds()=runBlocking {
+        okhttp3.mockwebserver.MockWebServer().use { server ->
+            repeat(6) { server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("<html></html>").setHeadersDelay(10,java.util.concurrent.TimeUnit.SECONDS)) }
+            server.start()
+            val pages=(1..6).map { objectOf("""{"url":"${server.url("/e/$it")}","host":"dead$it.example"}""") }
+            val adapter=RuntimeSourceAdapter(id,"Source",null,com.vantara.anime.hosts.EmbedResolver(okhttp3.OkHttpClient()),embedBudgetMs=1_500) { _,_->
+                buildJsonObject { put("items",JsonArray(emptyList()));put("missingEmbeds",JsonArray(pages));put("complete",true) }
+            }
+            val reports=java.util.Collections.synchronizedList(mutableListOf<com.vantara.anime.stream.RouteReport>())
+            val started=System.nanoTime()
+            val found=adapter.candidates(SourceEpisode(id,"episode","Episode",1f),trace=ResolveTrace { reports+=it })
+            val ms=(System.nanoTime()-started)/1_000_000
+            assertTrue(found.isEmpty())
+            assertTrue("the episode ended at its ceiling, not after six dead servers ($ms ms)",ms<5_000)
+            val final=reports.filter { it.state==com.vantara.anime.stream.RouteState.UNAVAILABLE }
+            assertEquals("every dead server is reported, none left resolving",6,final.map { it.key }.distinct().size)
+            assertTrue(final.all { it.reason!!.startsWith("انتهت مهلة") })
+        }
+    }
     @Test fun aServerVantaraCannotResolveEitherIsReportedWithItsReason()=runBlocking {
         okhttp3.mockwebserver.MockWebServer().use { server ->
             server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("<html>nothing playable</html>"))
