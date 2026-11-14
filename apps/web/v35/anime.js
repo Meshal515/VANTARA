@@ -29,7 +29,7 @@ import * as engine from '../lib/anime-engine.js';
 import { createAnimeAccount } from './anime-account.js';
 import { report as reportUpdate } from '../lib/update-engine.js';
 import { paintWorkInsights } from './work-insights.js';
-import { createServerSheet, learnStart, sourceLabel } from './server-sheet.js';
+import { createServerSheet, describe as describeRoute, learnStart, sourceLabel } from './server-sheet.js';
 import { isChecking, isValid, validity } from '../lib/route-validity.js';
 import { duration as insightDuration } from './insights.js';
 import { episodeStill, episodeTitleOf, loadAnimeArt, loadHdStills } from '../lib/anime-art.js';
@@ -2622,8 +2622,18 @@ export function createAnime(deps) {
       }, () => {});
 
       const statusLine = () => {
-        const ready = sheet.routes.filter(isValid).length;
-        const total = sheet.routes.length;
+        // العدّ كما تعرضه الورقة: التورنت الواحد من عدة مزوّدين (Torrentio مرتين أو ثلاثًا) يُعدّ مرة
+        const seen = new Set();
+        const shown = sheet.routes.filter((r) => {
+          const info = (r.type === 'torrent' || String(r.sourceId).startsWith('addon|')) ? describeRoute(r).info : null;
+          const key = info?.filename ? `${info.filename}|${info.size ?? ''}` : null;
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        const ready = shown.filter(isValid).length;
+        const total = shown.length;
         if (sheet.prepareError) return { text: 'تعذّر تجهيز بعض السيرفرات — أعد المحاولة' };
         if (!sheet.session) {
           if (sheet.searchError) return { text: 'تعذّر البحث في المصادر — أعد المحاولة' };
