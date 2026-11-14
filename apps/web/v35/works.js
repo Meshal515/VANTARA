@@ -965,14 +965,19 @@ const loading = new Map();
  * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
  * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
  */
-export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false } = {}) {
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null } = {}) {
   const id = String(v35work.id);
-  const cached = await readWork(id);
+  // مصدر محدد: نسخته وحدها، ولا اكتشاف في بقية المصادر (المعرّف قد يكون مشتركًا بهوية AniList/MangaDex)
+  if (pinnedSource) discover = false;
+  const scoped = (list) => (pinnedSource ? (list ?? []).filter((e) => e?.sourceId === pinnedSource) : list);
+  const stored = await readWork(id);
+  const cached = stored && pinnedSource ? { ...stored, editions: scoped(stored.editions) } : stored;
   let editions = unionEditions(
     (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => c.sourceId === e.sourceId)?.chapters ?? null })),
     cached?.editions,
-    (v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
+    scoped(v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
   );
+  if (pinnedSource) editions = scoped(editions);
   let detail = cached?.detail ?? null;
   const failed = new Map();
   let last = null;
@@ -1023,7 +1028,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
   // (36 من العاشق وعند غيره 600). نسأل الباقين معها، ولا نعرض شيئًا حتى يردّوا
   // أو تمضي لحظة — الهيكل يبقى بلا رسالة «نبحث».
-  const lonely = !cached && editions.length <= 1;
+  const lonely = !cached && editions.length <= 1 && !pinnedSource;
   if (lonely) {
     held = true;
     setTimeout(() => {
@@ -1062,7 +1067,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const full = emit(true);
   const discoveredNow = await discovery;
   await writeWork(id, {
-    editions,
+    // المصدر المحدد يحدّث نسخته فقط، ولا يمحو نسخ المصادر الأخرى المحفوظة لنفس العمل
+    editions: pinnedSource ? unionEditions(stored?.editions, editions) : editions,
     detail,
     discoveredAt: discoveredNow ? Date.now() : cached?.discoveredAt ?? 0,
     discoveredSources: discoveredNow ? sourceIds : cached?.discoveredSources ?? (cached ? [] : sourceIds),

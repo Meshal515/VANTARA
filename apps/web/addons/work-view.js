@@ -31,14 +31,18 @@ export function sourceWorkModel(item, { addon, episodes = [] }) {
     type,
     externalIds: work.externalIds,
   };
+  // _pinnedSource: فُتح من داخل هذا المصدر، فصفحة العمل وفصولها منه وحده (لا اكتشاف نسخ من مصادر أخرى)
   if (type === "manga")
-    return toV35Work({
-      key: work.canonicalId,
-      title,
-      thumbnailUrl: item.thumbnailUrl ?? item.thumbnail ?? item.poster,
-      editions: [{ sourceId, manga: copy }],
-      aliases: [],
-    });
+    return {
+      ...toV35Work({
+        key: work.canonicalId,
+        title,
+        thumbnailUrl: item.thumbnailUrl ?? item.thumbnail ?? item.poster,
+        editions: [{ sourceId, manga: copy }],
+        aliases: [],
+      }),
+      _pinnedSource: sourceId,
+    };
   const base = {
     id:
       type !== "anime" && work.externalIds.imdb

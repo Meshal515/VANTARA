@@ -398,7 +398,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   function rememberWork(w) {
     const all = readJson(WORKS_KEY, {});
-    const editions = w._work.editions ?? [];
+    // عمل فُتح من مصدر محدد: تُضاف نسخته إلى المحفوظ ولا تستبدل نسخ بقية المصادر
+    const editions = w._pinnedSource ? [...(all[w.id]?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
     all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
     writeJson(WORKS_KEY, all);
     const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
@@ -1722,7 +1723,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar' });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);

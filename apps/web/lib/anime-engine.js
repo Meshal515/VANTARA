@@ -221,8 +221,10 @@ export function searchStream(query, content = 'anime', onHit = () => {}, { timeo
 /** نسخ وصلت بعد بدء التجهيز تُضاف للجلسة نفسها. يرجع عدد الجديد فعلًا. */
 export async function extend(session, copies) {
   const plugin = bridge();
-  if (!plugin?.extend || !session || !copies?.length) return 0;
   const discovery = addonDiscoverySessions.get(session);
+  // جلسة مصدر محدد لا تقبل نسخ مصادر أخرى مهما كان من يطلبها (بحث متأخر، اكتشاف إضافات)
+  if (discovery?.scope) copies = (copies ?? []).filter(c => discovery.scope.has(c.sourceId));
+  if (!plugin?.extend || !session || !copies?.length) return 0;
   const mapped = copies.find(c => c.identity?.externalIds?.kitsu && c.identity.kind === discovery?.identity?.kind && c.identity.canonicalId === discovery?.identity?.canonicalId);
   if (mapped && discovery) discovery.identity = mapped.identity;
   if (isNative() && plugin.appendAddonStreams && plugin.extendAddonSources) {
@@ -503,7 +505,7 @@ export async function episodes(anime) {
  */
 /** أقصى انتظار لاكتشاف الإضافات قبل بدء المصادر الأصلية (#323 U-09). */
 const ADDON_QUICK_MS = 1200;
-export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null, signal = undefined }) {
+export async function prepare({ copies, episode, quality = 1080, variant = 'SUB', preferredSourceId = null, preferredServer = null, probe = false, session = undefined, identity = null, signal = undefined, pinned = false }) {
   signal?.throwIfAborted();
   const plugin = bridge();
   const native = isNative() && plugin?.appendAddonStreams;
@@ -516,17 +518,20 @@ export async function prepare({ copies, episode, quality = 1080, variant = 'SUB'
     nativeAddonSessions.set(id, state);
     observeNativeAddonLifecycle(plugin);
   }
-  const context = { identity: identity ? { ...identity, episode: Number(episode) } : null };
+  // pinned: المستخدم دخل من مصدر محدد، فنسخه هي نطاق الجلسة كلها. الهوية تبقى للترجمات والمشغّل فقط،
+  // ولا تُستعمل لجلب نسخ إضافات أخرى (Torrentio وغيره) ولا لانتظار اكتشافها.
+  const context = { identity: identity ? { ...identity, episode: Number(episode) } : null, scope: pinned ? new Set(copies.map(c => c.sourceId)) : null };
   addonDiscoverySessions.set(id, context);
+  const fanOut = Boolean(identity) && !pinned;
   const hasNative = copies.some(isNativeRuntimeCopy);
-  const deferMapping = identity?.kind === 'anime' && !identity.externalIds?.kitsu && hasNative;
+  const deferMapping = fanOut && identity?.kind === 'anime' && !identity.externalIds?.kitsu && hasNative;
   let discovery = deferMapping ? withAddonCopies([], context.identity).catch(() => []) : null;
   const attachDiscovery = () => {
     if (!discovery) return;
     void discovery.then(extra => addonDiscoverySessions.get(id) === context && extra.length ? extend(id, extra) : null).catch(() => {});
   };
   try {
-  if (identity && !deferMapping) {
+  if (fanOut && !deferMapping) {
     const full = withAddonCopies(copies, context.identity);
     if (!hasNative) copies = await phase(full, 45_000, 'ADDON_DISCOVERY_TIMEOUT');
     else {
