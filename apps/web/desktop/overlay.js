@@ -198,9 +198,12 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
   }
 
-  // ── الأوراق ──
-  let openKind = null, anchorButton = null;
-  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${kind}"]`);
+  // ── اللوحات المنبثقة (Popover) بتصميم أوراق الـAPK ومقاس الكمبيوتر ──
+  let openKind = null, anchorButton = null, keyboardNav = false;
+  doc.addEventListener('keydown', () => { keyboardNav = true; }, true);
+  doc.addEventListener('pointerdown', () => { keyboardNav = false; }, true);
+  // لوحات «المزيد» الفرعية (التخطي والشبكة) تنبثق من زرّه نفسه كما تُفتح من ورقته في الـAPK
+  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${['skips', 'network'].includes(kind) ? 'more' : kind}"]`);
   function positionSheet() {
     if (sheet.hidden || !anchorButton) return;
     const bounds = root.getBoundingClientRect?.() ?? {left:0,top:0}, anchor = anchorButton.getBoundingClientRect?.() ?? {top:690,right:1000};
@@ -212,7 +215,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     sheet.style.right = `${Math.max(12, Math.min(width - measured - 12, width - (anchor.right - bounds.left)))}px`;
     sheet.style.bottom = `${Math.min(height - 100, bottom)}px`;
     sheet.style.maxHeight = `${Math.max(80, height - bottom - 12)}px`;
-    if (openKind === 'more') {
+    if (['more', 'skips', 'network'].includes(openKind)) {
       const top = Math.max(12, (anchor.bottom ?? anchor.top) - bounds.top + 10);
       sheet.style.top = `${top}px`; sheet.style.bottom = 'auto';
       sheet.style.maxHeight = `${Math.max(80, height - top - 12)}px`;
@@ -244,22 +247,25 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     showControls(true);
     root.classList.add('pp--sheet');
     positionSheet();
-    sheet.querySelector('button')?.focus();
+    // التركيز داخل اللوحة للوحة المفاتيح فقط: مع الفأرة كان إطار التركيز يظهر على أول صف بلا سبب
+    if (keyboardNav) sheet.querySelector('button')?.focus();
     return body;
   }
   function closeSheet() {
     if (openKind === 'servers') cmd('servers-close');
     anchorButton?.setAttribute('aria-expanded', 'false');
     const restoreFocus = anchorButton; anchorButton = null;
-    openKind = null; serverUi = null; offsetOut = null;
+    openKind = null; serverUi = null; offsetOut = null; networkBody = null;
     root.classList.remove('pp--sheet');
     sheet.hidden = true; sheetScrim.hidden = true;
-    restoreFocus?.focus();
+    if (keyboardNav) restoreFocus?.focus(); else doc.activeElement?.blur?.();
     showControls();
   }
-  const sheetRow = (label, sub, { on = false, onClick = null } = {}) => {
+  const sheetRow = (label, sub, { on = false, onClick = null, lead = null } = {}) => {
     const b = el(onClick ? 'button' : 'div', `pp-row-item${on ? ' is-on' : ''}`);
     if (onClick) { b.type = 'button'; b.onclick = () => onClick(); }
+    // أيقونة البداية كـglyphView في PlayerActivity.kt (22dp بلون TEXT_2)
+    if (lead && ICON[lead]) { const i = el('span', 'pp-row-item__lead'); i.innerHTML = ICON[lead]; b.append(i); }
     const t = el('span', 'pp-row-item__text');
     t.append(el('strong', null, label));
     if (sub) t.append(el('small', null, sub));
@@ -356,7 +362,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     });
   }
   // الترجمة كما في الـAPK: تبويبان «المسارات» و«الضبط»؛ الضبط أزرار لا أرقام صغيرة
-  let subtitleTab = 'tracks';
+  let subtitleTab = 'tracks', subtitleDraft = '';
   const chips = (items, onPick) => {
     const row = el('div', 'pp-chips');
     for (const [label, on, value] of items) {
@@ -378,6 +384,16 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         if (tracks.length) body.append(sectionLabel('الترجمة من الفيديو'));
         for (const t of tracks) body.append(sheetRow(t.label, t.lang && t.lang !== 'und' ? t.lang : null, { on: !!t.selected, onClick: () => cmd('subtitle-select', t.id) }));
         if (!tracks.length) body.append(el('p', 'pp-note', 'نبحث عن ترجمات لهذه الحلقة… تظهر هنا فور وصولها.'));
+        // «ترجمات إضافية» كالـAPK: ملف ترجمة برابط HTTPS (كان في «الإعدادات المتقدمة» المحذوفة)
+        body.append(sectionLabel('ترجمات إضافية'));
+        const form = el('form', 'pp-url'); form.dir = 'rtl';
+        const input = el('input'); Object.assign(input, { type: 'url', placeholder: 'رابط ملف ترجمة https://…', value: subtitleDraft, spellcheck: false });
+        input.dir = 'ltr'; input.setAttribute('aria-label', 'رابط ترجمة إضافية');
+        input.oninput = () => { subtitleDraft = input.value; };
+        const go = el('button', 'pp-url__go', 'تحميل'); go.type = 'submit';
+        form.onsubmit = (e) => { e.preventDefault(); const url = input.value.trim(); if (!/^https:\/\/\S+$/i.test(url)) { input.setCustomValidity?.('الرابط يبدأ بـ https://'); input.reportValidity?.(); return; } input.setCustomValidity?.(''); cmd('subtitle-load', url); subtitleDraft = ''; input.value = ''; };
+        form.append(input, go);
+        body.append(form);
         restore();
         return;
       }
@@ -419,11 +435,12 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       for (const sp of SPEEDS) body.append(sheetRow(sp === 1 ? 'عادية' : `${sp}×`, null, { on: (state.speed ?? 1) === sp, onClick: state.synced ? null : () => { closeSheet(); cmd('speed', sp); } }));
     });
   }
+  // «المزيد» بترتيب الـAPK (PlayerActivity.showMore): التخطي ثم الشبكة. ملء الصورة وغرفة الأصدقاء لهما زرّان
+  // في الشريط العلوي فلا يتكرران، و«الإعدادات المتقدمة» حُذفت: الترجمة الإضافية صارت في لوحة الترجمة.
   function showMore() {
     openSheet('more', 'المزيد', null, (body) => {
-      body.append(sheetRow('ملء الصورة', state.fit === 'fill' ? 'مفعّل: تُقصّ الحواف' : 'الصورة كاملة بلا قص', { on: state.fit === 'fill', onClick: () => { closeSheet(); cmd('fit', state.fit === 'fill' ? 'fit' : 'fill'); } }));
-      body.append(sheetRow('شاهد مع أصدقائك', 'ادعُ أصدقاءك لنفس الحلقة', { onClick: () => { closeSheet(); cmd('room'); } }));
-      body.append(sheetRow('الإعدادات المتقدمة', 'ترجمة خارجية، ضبط الصوت والصورة والاختصارات', { onClick: () => { closeSheet(); cmd('settings'); } }));
+      if (state.skipStatus) body.append(sheetRow('تخطي المقدمة والنهاية', state.skipStatus, { lead: 'next', onClick: () => showSkips() }));
+      body.append(sheetRow('الشبكة', netSummary(), { lead: 'servers', onClick: () => showNetwork() }));
       if (state.together) {
         body.append(sectionLabel('مع أصدقائك'));
         const paintOffset = () => `${(state.videoOffsetMs ?? 0) > 0 ? '+' : (state.videoOffsetMs ?? 0) < 0 ? '−' : ''}${Math.abs((state.videoOffsetMs ?? 0) / 1000).toFixed(1)} ث`;
@@ -431,16 +448,77 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         offsetOut = row.querySelector('output');
         body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
       }
-      // قرار المالك (14 نوفمبر): قياس الشبكة جزء طبيعي من المشغل كالـAPK، لا يتبع «إظهار التشخيصات»
-      {
-      body.append(sectionLabel('الشبكة'));
-      const net = el('div', 'pp-net');
-      if (state.net?.peers != null) net.append(el('span', null, 'مشاركون متصلون'), el('b', null, String(state.net.peers)));
-      net.append(el('span', null, 'السرعة الآن'), el('b', null, state.net?.kbps != null ? `${(state.net.kbps * 8 / 1024).toFixed(1)} Mbps` : '—'));
-      net.append(el('span', null, 'السيرفر'), el('b', null, state.serverCode ?? '—'));
-      body.append(net);
-      }
     });
+  }
+  // PlayerActivity.showSkips
+  function showSkips() {
+    openSheet('skips', 'تخطي المقدمة والنهاية', null, (body) => {
+      body.append(sheetRow('توقيت هذه الحلقة', state.skipStatus ?? '—', { on: true }));
+      body.append(el('p', 'pp-note', 'يظهر زر التخطي أثناء المقدمة أو النهاية. تخطي النهاية يُبقي المشاهد التي تأتي بعدها.'));
+      body.append(sheetRow('إعادة جلب التوقيت', state.skipPending ? 'جارٍ الجلب…' : 'جرّب مجددًا بعد عودة الاتصال', { onClick: state.skipPending ? null : () => { cmd('skip-refetch'); } }));
+    });
+  }
+
+  // ── قياس الشبكة كالـAPK (showNetwork + netSummary + metricRow) من أحداث المشغل والمحرك الحقيقية ──
+  const NET_CHIP_KEY = 'vantara.player.netChip';
+  // التفضيل محفوظ في التخزين المحلي، ومعه نسخة في الذاكرة إن كان التخزين محجوبًا
+  let chipMemory = null;
+  const chipOn = () => { try { const v = globalThis.localStorage?.getItem(NET_CHIP_KEY); if (v != null) return v === '1'; } catch {} return chipMemory === true; };
+  const setChip = (on) => { chipMemory = on; try { globalThis.localStorage?.setItem(NET_CHIP_KEY, on ? '1' : '0'); } catch {} };
+  const mbps = (bps) => (Number.isFinite(bps) ? `${(bps * 8 / 1e6).toFixed(1)} Mbps` : '— Mbps');
+  const secs = (ms) => (Number.isFinite(ms) ? (ms / 1000).toFixed(1) : '—');
+  function netFacts() {
+    const n = state.net ?? {}, st = n.stages ?? {};
+    const torrent = Number.isFinite(n.peers) || st['engine-start'] != null;
+    // التورنت: من بدء المحرك إلى بدء تنزيل الملف. غيره: من فتح الجلسة إلى أول إطار
+    const prep = torrent ? (st.downloading != null && st['engine-start'] != null ? st.downloading - st['engine-start'] : null) : st.ready ?? null;
+    const aheadS = Number.isFinite(n.aheadMs) ? Math.floor(n.aheadMs / 1000) : null;
+    return { n, st, torrent, prep, aheadS };
+  }
+  function netSummary() {
+    const { n, torrent, prep, aheadS } = netFacts();
+    const iso = (t) => `\u2066${t}\u2069`; // عزل LTR: «1800 ms» و«13.5 Mbps» لا تتبعثر داخل سطر عربي
+    return `${iso(prep != null ? `${prep} ms` : '— ms')} · ${iso(mbps(n.inputBps))} · ${aheadS ?? 0} ث${torrent && Number.isFinite(n.peers) ? ` · ${n.peers} مشارك` : ''}`;
+  }
+  const metricRow = (name, value, tone = 'text', wide = false) => {
+    const r = el('div', `pp-metric pp-metric--${tone}${wide ? ' pp-metric--wide' : ''}`);
+    const v = el('b', null, value); v.dir = wide ? 'rtl' : 'ltr';
+    r.append(el('span', null, name), v);
+    return r;
+  };
+  function paintNetwork(body) {
+    const { n, st, torrent, prep, aheadS } = netFacts();
+    body.replaceChildren();
+    body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : 'لم يُقس بعد', prep == null ? 'mute' : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
+    body.append(metricRow('السرعة الآن', mbps(n.inputBps)));
+    body.append(metricRow('جاهز أمامك', aheadS != null ? `${aheadS} ثانية` : '—', aheadS == null ? 'mute' : aheadS >= 15 ? 'ok' : aheadS >= 5 ? 'warn' : 'bad'));
+    if (Number.isFinite(n.videoHeight)) body.append(metricRow('الفيديو', `${n.videoHeight}p${Number.isFinite(n.videoBps) && n.videoBps > 0 ? ` · ${(n.videoBps / 1e6).toFixed(1)} Mbps` : ''}`, 'soft'));
+    if (torrent) {
+      body.append(metricRow('مشاركون متصلون', Number.isFinite(n.peers) ? `${n.peers}${Number.isFinite(n.seeds) ? ` (زارعون ${n.seeds})` : ''}` : '—', n.peers > 0 ? 'ok' : 'bad'));
+      const need = Number.isFinite(n.videoBps) && n.videoBps > 0 ? n.videoBps / 8 : null;
+      const tone = !Number.isFinite(n.torrentBps) ? 'mute' : need == null ? 'text' : n.torrentBps >= need * 1.5 ? 'ok' : n.torrentBps >= need ? 'warn' : 'bad';
+      body.append(metricRow('تحميل التورنت', mbps(n.torrentBps), tone));
+      if (need != null) body.append(metricRow('يحتاج الفيديو', mbps(need), 'soft'));
+    }
+    const at = (k) => (st[k] != null ? `+${secs(st[k])}` : '—');
+    const line = [`تجهيز ${secs(st['player-start'])}`, torrent ? `المحرك ${at('engine-ready')}` : null, torrent ? `تحميل ${at('downloading')}` : null, `المشغّل ${at('player-start')}`, `إطار ${at('ready')}`].filter(Boolean).join(' · ') + ' ث';
+    body.append(metricRow('تسلسل البدء', line, 'soft', true));
+    if (state.serverCode) body.append(metricRow('السيرفر', state.serverCode, 'mute'));
+    body.append(sheetRow('إظهار القياس فوق الفيديو', 'زمن الاستجابة · السرعة · الجاهز', { on: chipOn(), onClick: () => {
+      setChip(!chipOn());
+      paintChip(); paintNetwork(body);
+    } }));
+  }
+  let networkBody = null;
+  function showNetwork() {
+    networkBody = openSheet('network', 'الشبكة', 'قياس حي من طلبات هذا الفيديو نفسها', (body) => paintNetwork(body), 'pp-sheet--network');
+  }
+  // شريحة القياس فوق الفيديو (netChip في الـAPK): تبقى ظاهرة أثناء المشاهدة متى فُعّلت
+  const netChip = el('div', 'pp-netchip'); netChip.dir = 'rtl'; netChip.hidden = true; netChip.setAttribute('aria-hidden', 'true');
+  root.append(netChip);
+  function paintChip() {
+    netChip.hidden = !chipOn() || !!state.status?.error;
+    if (!netChip.hidden) netChip.textContent = netSummary();
   }
 
   // ── لوحة المفاتيح: كلها تعود لـplayer.js (نفس اختصارات النافذة الرئيسية) ──
@@ -583,13 +661,16 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     paintStage();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
+    paintChip();
+    if (openKind === 'network' && networkBody && JSON.stringify([previous.net, previous.serverCode]) !== JSON.stringify([state.net, state.serverCode])) paintNetwork(networkBody);
+    if (openKind === 'skips' && (previous.skipStatus !== state.skipStatus || previous.skipPending !== state.skipPending)) showSkips();
     if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
     // بدأ التشغيل أو استؤنف: يبدأ عدّاد الإخفاء (كان لا يبدأ إلا بعد إيقاف ثم تشغيل)
     if (!state.ready || state.paused) { if (!root.classList.contains('pp--shown') || previous.ready !== state.ready || previous.paused !== state.paused) showControls(true); }
     else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);
-  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore } };
+  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore, skips: showSkips, network: showNetwork } };
 }
 
 // تشغيل حقيقي داخل نافذة الطبقة (overlay-preload.cjs يعرّف VantaraOverlay)

@@ -6,7 +6,8 @@ afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 function fixture(){
   vi.useFakeTimers();
   const {document}=parseHTML('<html><body></body></html>');
-  return {document,view:createOverlayView(document,()=>{}, {timers:globalThis})};
+  const send=vi.fn();
+  return {document,send,view:createOverlayView(document,send, {timers:globalThis})};
 }
 it('يخفي أزرار البداية بعد وصول أول إطار دون انتظار حركة الماوس',()=>{
   const {view}=fixture();
@@ -126,8 +127,8 @@ it('desktop provides audio track menu and advanced settings instead of hiding ex
   expect(audio.hidden).toBe(false);
   view.open.more();
   expect([...view.root.querySelector('.pp-sheet').querySelectorAll('button')].some(b=>b.textContent.includes('jpn'))).toBe(false);
-  [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإعدادات المتقدمة')).click();
-  expect(send).toHaveBeenCalledWith({name:'settings'});
+  // «الإعدادات المتقدمة» حُذفت (قرار المالك): لا شاشة منفصلة؛ الترجمة الإضافية في لوحة الترجمة
+  expect(view.root.querySelector('.pp-sheet').textContent).not.toContain('الإعدادات المتقدمة');
 });
 
 it('keeps server buttons mounted during cloned progress snapshots so scrolling and clicks survive',()=>{
@@ -146,12 +147,40 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
 });
 
 it('network metrics are a normal part of the player, independent of the diagnostics toggle (owner, 14 Nov)',()=>{
- const gate=vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
- const {view}=fixture();view.open.more();
- expect(view.root.querySelector('.pp-net')).not.toBeNull();
- expect(view.root.textContent).toContain('الإعدادات المتقدمة');
- gate.mockReturnValue(true);view.open.more();
- expect(view.root.querySelector('.pp-net')).not.toBeNull();
+ vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
+ const {view,send}=fixture();
+ const net={openAt:0,stages:{'engine-start':300,downloading:2100,'player-start':2600,ready:3900},torrentBps:1750000,peers:58,seeds:45,aheadMs:41000,inputBps:1690000,videoBps:4200000,videoHeight:1080};
+ view.update({ready:true,paused:true,net,serverCode:'TR',skipStatus:'المقدمة 1:30–3:00'});
+ view.open.more();
+ const more=view.root.querySelector('.pp-sheet');
+ // ترتيب الـAPK: التخطي ثم الشبكة، بلا تكرار لأزرار الشريط العلوي
+ expect([...more.querySelectorAll('.pp-row-item strong')].map(n=>n.textContent)).toEqual(['تخطي المقدمة والنهاية','الشبكة']);
+ [...more.querySelectorAll('button')].find(b=>b.textContent.includes('الشبكة')).click();
+ const sheet=view.root.querySelector('.pp-sheet');
+ expect(sheet.dataset.kind).toBe('network');
+ const rows=Object.fromEntries([...sheet.querySelectorAll('.pp-metric')].map(r=>[r.querySelector('span').textContent,r.querySelector('b').textContent]));
+ expect(rows['تجهيز التورنت']).toBe('1800 ms');
+ expect(rows['جاهز أمامك']).toBe('41 ثانية');
+ expect(rows['مشاركون متصلون']).toBe('58 (زارعون 45)');
+ expect(rows['تحميل التورنت']).toBe('14.0 Mbps');
+ expect(rows['الفيديو']).toBe('1080p · 4.2 Mbps');
+ expect(rows['السيرفر']).toBe('TR');
+ expect(sheet.querySelector('.pp-metric--bad span').textContent).toBe('تجهيز التورنت');
+ // شريحة القياس فوق الفيديو تُفعّل من اللوحة وتبقى بعد الإغلاق
+ expect(view.root.querySelector('.pp-netchip').hidden).toBe(true);
+ [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('إظهار القياس فوق الفيديو')).click();
+ expect(view.root.querySelector('.pp-netchip').hidden).toBe(false);
+ view.closeSheet();view.update({position:1000});
+ expect(view.root.querySelector('.pp-netchip').textContent).toContain('58 مشارك');
+ expect(send).not.toHaveBeenCalledWith({name:'settings'});
+ try{localStorage.removeItem('vantara.player.netChip');}catch{}
+});
+
+it('extra subtitles load from an https link inside the subtitles popover, like the APK',()=>{
+ const {view,send}=fixture();view.update({subtitles:[]});view.open.subtitles();
+ const form=view.root.querySelector('.pp-url'),input=form.querySelector('input');
+ input.value='https://example.com/a.srt';form.onsubmit({preventDefault(){}});
+ expect(send).toHaveBeenCalledWith({name:'subtitle-load',value:'https://example.com/a.srt'});
 });
 
 it('شاشة التحميل كالـAPK: الشعار يمتلئ من اليسار بقدر التقدم ثم تتلاشى عند أول إطار',()=>{

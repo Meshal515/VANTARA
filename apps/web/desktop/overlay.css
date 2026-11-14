@@ -321,3 +321,50 @@ html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,25
 
 /* أسماء المصادر اللاتينية (Torrentio) لها dir=auto فتلتصق يسارًا وتفاصيلها يمينًا في صف عربي: كلاهما من البداية */
 .desktop-overlay .pp-route__text > :is(strong, small) { text-align: right; }
+
+/* ── اللوحات المنبثقة (Popover) بتصميم أوراق الـAPK ومقاس الكمبيوتر ──
+ * المرجع: Ui.kt (VSheet وsheetRow وsectionLabel) وPlayerActivity.kt (metricRow وnetChip وglyphView).
+ * الجوال 56dp للصف و15sp للعنوان؛ الكمبيوتر بالفأرة 48px و14px بنفس الألوان والترتيب والزوايا المتناسبة. */
+html.desktop-overlay .pwa-player .pp-sheet { padding: 16px 16px 14px; border-radius: 18px; background: color-mix(in srgb, var(--surface) 95%, transparent); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="more"] { width: min(320px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="skips"] { width: min(340px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="network"] { width: min(380px, calc(100vw - 24px)); }
+html.desktop-overlay .pwa-player .pp-sheet__head { display: grid; gap: 4px; margin-bottom: 12px; }
+html.desktop-overlay .pwa-player .pp-sheet__head strong { font-size: 17px; font-weight: 800; color: var(--text); }
+html.desktop-overlay .pwa-player .pp-sheet__head small { font-size: 12.5px; color: var(--text-3); }
+html.desktop-overlay .pwa-player .pp-row-item { min-height: 48px; padding: 10px 12px; border-radius: 12px; gap: 12px; margin-bottom: 6px; }
+html.desktop-overlay .pwa-player button.pp-row-item:hover:not(.is-on) { background: var(--surface-3) !important; }
+html.desktop-overlay .pwa-player .pp-row-item__text { min-width: 0; }
+html.desktop-overlay .pwa-player .pp-row-item__text strong { font-size: 14px; font-weight: 700; }
+html.desktop-overlay .pwa-player .pp-row-item.is-on .pp-row-item__text strong { color: var(--accent-text); }
+html.desktop-overlay .pwa-player .pp-row-item__text small { font-size: 12px; color: var(--text-3); line-height: 1.45; }
+html.desktop-overlay .pwa-player .pp-row-item__lead { flex: none; display: grid; place-items: center; width: 22px; height: 22px; color: var(--text-2); }
+html.desktop-overlay .pwa-player .pp-row-item__lead svg { width: 20px; height: 20px; }
+html.desktop-overlay .pwa-player .pp-section { font-size: 12px; font-weight: 700; color: var(--text-3); margin: 10px 4px 6px; }
+html.desktop-overlay .pwa-player .pp-note { font-size: 12.5px; line-height: 1.6; color: var(--text-3); margin: 4px 2px 10px; }
+/* metricRow: الاسم 13.5 بلون TEXT_2 والقيمة 14.5 عريضة بلون حالتها، من اليسار */
+html.desktop-overlay .pwa-player .pp-metric { display: flex; align-items: center; justify-content: flex-start; gap: 16px; min-height: 0; margin: 0; padding: 8px 2px; border-radius: 0; background: none; }
+/* سطر طويل (تسلسل البدء): الاسم فوق والقيمة تحته بعرض اللوحة، لا تتراكب */
+html.desktop-overlay .pwa-player .pp-metric--wide { flex-direction: column; align-items: stretch; gap: 4px; }
+html.desktop-overlay .pwa-player .pp-metric--wide b { white-space: normal; line-height: 1.5; text-align: start; }
+html.desktop-overlay .pp-metric span { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text-2); }
+html.desktop-overlay .pp-metric b { font-size: 14.5px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); }
+html.desktop-overlay .pp-metric--ok b { color: var(--ok); }
+html.desktop-overlay .pp-metric--warn b { color: var(--warn); }
+html.desktop-overlay .pp-metric--bad b { color: var(--bad); }
+html.desktop-overlay .pp-metric--soft b { color: var(--text-2); font-size: 13.5px; }
+html.desktop-overlay .pp-metric--mute b { color: var(--text-3); }
+html.desktop-overlay .pwa-player .pp-sheet[data-kind="network"] .pp-row-item { margin-top: 10px; }
+/* شريحة القياس فوق الفيديو: تحت الشريط العلوي حين يظهر، وفي الزاوية حين يختفي */
+html.desktop-overlay .pp-netchip { position: absolute; z-index: 12; top: 68px; left: 20px; padding: 5px 10px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 75%, transparent); color: #fff; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none; transition: top .2s ease; }
+html.desktop-overlay .pwa-player:not(.pp--shown) .pp-netchip { top: 18px; }
+html.desktop-overlay .pp-netchip[hidden] { display: none; }
+/* الجودة نص أبيض كالـAPK (qualityLabel: 12.5sp عريض بلا خلفية، تموّج دائري عند الضغط) لا كبسولة بيضاء */
+html.desktop-overlay .pwa-player .pp-quality { background: transparent !important; color: #fff !important; min-width: 44px; height: 36px; margin: 0 2px; padding: 0 8px; border-radius: 18px; font-size: 13px !important; font-weight: 800 !important; }
+html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,255,.12) !important; }
+/* ترجمات إضافية برابط */
+html.desktop-overlay .pp-url { display: flex; gap: 8px; margin: 2px 0 6px; }
+html.desktop-overlay .pp-url input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; }
+html.desktop-overlay .pp-url input:focus { outline: none; border-color: var(--accent-line); }
+html.desktop-overlay .pp-url__go { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; }
+html.desktop-overlay .pp-url__go:hover { filter: brightness(1.1); }

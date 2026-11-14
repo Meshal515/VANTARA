@@ -658,11 +658,11 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     emit(state,{type:'playback/stage',stage:'downloading'});
     state.statsTimer=setInterval(async()=>{
       if(state.statsPending||state.stopped||state.rebuilding)return;state.statsPending=true;
-      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live;
+      try{const stats=await localJSON(state.api,`/torrents/${state.torrentId}/stats/v1`,{...options,timeout:2000});const speed=stats.live?.download_speed?.mbps,peers=stats.live?.snapshot?.peer_stats?.live,seeds=stats.live?.snapshot?.peer_stats?.seeds;
         const snapshot=stats.live?.snapshot,range=state.latestDemand;
         state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
         if(peers>0)state.trace.once('peer-connected');
-        emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{} )});
+        emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{}),...(Number.isFinite(seeds)?{seeds}:{})});
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
@@ -898,7 +898,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           state.restarted=true;
           ipcCommand(state,['get_property','video-out-params']).then(params=>{
             if(state.stopped)return;
-            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0)ready();
+            if(Number.isFinite(params?.w)&&params.w>0&&Number.isFinite(params?.h)&&params.h>0){state.progress.videoHeight=params.h;ready();}
             else fail(state,'المصدر لا يوفر إطار فيديو قابلًا للتشغيل؛ قد يكون صوتًا فقط');
           }).catch(()=>{if(!state.stopped)fail(state,'تعذر التحقق من إطار الفيديو في المشغل');});
         }
@@ -923,6 +923,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             if(untagged){state.embeddedArabicChosen=true;state.subtitleExpectedSelection={lang:untagged.lang,label:untagged.label};ipcCommand(state,['set_property','sid',untagged.id]).catch(()=>{});}
             emitSubtitleTracks(state);autoArabic(state);
           }
+          // قياس المشغل للوحة «الشبكة» (كالـAPK): الجاهز أمامك، وسرعة ما يصل للمشغل، ومعدل الفيديو. تُرفق بتقدم الوقت التالي.
+          const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
+          if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
           if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);}
@@ -930,7 +933,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         }
       }
     });
-    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
+    await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
     emit(state,{type:'playback/stage',stage:'first-frame'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
