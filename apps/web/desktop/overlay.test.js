@@ -271,3 +271,28 @@ it('recommend popover: «الجميع» then friends, sends and confirms (Player
  view.update({canRecommend:false});view.open.more();
  expect(view.root.querySelector('.pp-sheet').textContent).not.toContain('رشّح');
 });
+it('لوحة الغرفة داخل المشغّل كالـAPK: الأعضاء ومن لم يدخل والديلاي والأوضاع، والموضع يتحدث دون إعادة بناء الأزرار',()=>{
+  const {view,send}=fixture();
+  const room={mode:'sync',host:true,status:'live',label:'ONE PIECE — الحلقة 1',pending:[{userId:'u3',name:'صديق ثالث',avatarKey:null}],
+    members:[{userId:'u1',name:'مضيف',state:'playing',host:true,me:true,source:'Torrentio',posMs:3000,driftMs:null,sameVersion:null},
+      {userId:'u2',name:'صديق',state:'preparing',host:false,me:false,source:null,posMs:null,driftMs:40,sameVersion:false}]};
+  view.update({ready:true,together:true,videoOffsetMs:0,room});
+  view.root.querySelector('[data-action="users"]').click();
+  const sheet=view.root.querySelector('.pp-sheet--room');
+  expect(sheet).toBeTruthy();expect(send).not.toHaveBeenCalledWith({name:'room'});
+  expect(sheet.querySelector('.pp-sheet__head strong').textContent).toBe('مشاهدة معًا · متزامنة');
+  const text=sheet.textContent;
+  for(const s of ['أنت','Torrentio','0:03','المضيف','نسخة مختلفة','فرق 40ms','صديق ثالث · لم يدخل بعد','ديلاي فيديوي','حوّلها منفصلة','اطلع من الغرفة'])expect(text).toContain(s);
+  const leave=[...sheet.querySelectorAll('.pp-room__btn')].find(b=>b.textContent==='اطلع من الغرفة');
+  view.update({room:{...room,members:room.members.map(m=>m.userId==='u1'?{...m,posMs:4000}:m)}});
+  expect(sheet.textContent).toContain('0:04');
+  expect([...sheet.querySelectorAll('.pp-room__btn')].includes(leave)).toBe(true); // نفس الزر، لم يُستبدل
+  [...sheet.querySelectorAll('.pp-room__btn')].find(b=>b.textContent==='حوّلها منفصلة').click();
+  expect(send).toHaveBeenCalledWith({name:'room-mode',value:'free'});
+  leave.click();expect(send).toHaveBeenCalledWith({name:'room-leave'});
+});
+it('بلا غرفة: زر الأصدقاء يفتح الدعوة كما هو',()=>{
+  const {view,send}=fixture();view.update({ready:true});
+  view.root.querySelector('[data-action="users"]').click();
+  expect(send).toHaveBeenCalledWith({name:'room'});
+});

@@ -431,3 +431,35 @@ html.desktop-overlay .pp-preview__time { padding: 4px 10px; border-radius: 8px; 
 @media (prefers-reduced-motion: reduce) { html.desktop-overlay .pp-preview { transition: none; } }
 /* المقبض يكبر أثناء السحب كـCloudStream */
 html.desktop-overlay .pwa-player .pp-bar--drag .pp-thumb { width: 20px; height: 20px; margin: -10px 0 0 -10px; box-shadow: 0 0 0 7px var(--accent-soft); }
+/* لوحة الغرفة كـTogetherPlayer.openPanel في الـAPK: صف لكل عضو بحدود ناعمة، نقطة حالة على الصورة، والوقت والوسوم في الطرف */
+html.desktop-overlay .pp-sheet--room { width: min(440px, calc(100vw - 32px)); }
+html.desktop-overlay .pp-room__live { margin: 0 0 10px; font-size: 12.5px; font-weight: 700; color: var(--text-3, #9aa3b2); }
+html.desktop-overlay .pp-room__live[data-on="true"] { color: #34d399; }
+html.desktop-overlay .pp-room__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; margin-bottom: 6px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); }
+html.desktop-overlay .pp-room__row.is-pending { background: transparent; border-color: transparent; }
+html.desktop-overlay .pp-room__who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+html.desktop-overlay .pp-room__face { position: relative; flex: none; width: 36px; height: 36px; border-radius: 50%; overflow: visible; background: #1d2433; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 14px; }
+html.desktop-overlay .pp-room__face.is-pending { opacity: .55; }
+html.desktop-overlay .pp-room__img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+html.desktop-overlay .pp-room__dot { position: absolute; inset-block-end: -1px; inset-inline-start: -1px; width: 11px; height: 11px; border-radius: 50%; background: #34d399; border: 2px solid #0f0d16; z-index: 1; }
+html.desktop-overlay .pp-room__face.is-preparing .pp-room__dot, html.desktop-overlay .pp-room__face.is-buffering .pp-room__dot { background: #f5b942; }
+html.desktop-overlay .pp-room__face.is-failed .pp-room__dot { background: #f05252; }
+html.desktop-overlay .pp-room__face.is-paused .pp-room__dot { background: #9aa3b2; }
+html.desktop-overlay .pp-room__names { display: grid; gap: 2px; min-width: 0; }
+html.desktop-overlay .pp-room__names strong { font-size: 14px; color: #fff; }
+html.desktop-overlay .pp-room__names small { font-size: 12px; color: #34d399; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.desktop-overlay .pp-room__state.is-preparing, html.desktop-overlay .pp-room__state.is-buffering { color: #f5b942; }
+html.desktop-overlay .pp-room__state.is-failed { color: #f05252; }
+html.desktop-overlay .pp-room__state.is-paused { color: #9aa3b2; }
+html.desktop-overlay .pp-room__where { display: grid; justify-items: end; gap: 3px; flex: none; }
+html.desktop-overlay .pp-room__where b { font-size: 14px; color: #fff; font-variant-numeric: tabular-nums; }
+html.desktop-overlay .pp-room__tags { display: flex; gap: 4px; }
+html.desktop-overlay .pp-room__tags em { font-style: normal; font-size: 11px; color: #9aa3b2; }
+html.desktop-overlay .pp-room__tags em.is-host { color: #93c5fd; }
+html.desktop-overlay .pp-room__tags em.is-warn { color: #f5b942; }
+html.desktop-overlay .pp-room__wait { font-size: 13px; color: #9aa3b2; }
+html.desktop-overlay .pp-room__offset { margin-top: 8px; }
+html.desktop-overlay .pp-room__actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 12px; }
+html.desktop-overlay .pp-room__btn { min-height: 44px; border-radius: 22px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #fff; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; transition: background .15s ease; }
+html.desktop-overlay .pp-room__btn:hover { background: rgba(255,255,255,.11); }
+html.desktop-overlay .pp-room__btn.is-leave { color: #fca5a5; border-color: rgba(240,82,82,.35); }

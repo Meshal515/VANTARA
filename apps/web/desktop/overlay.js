@@ -92,10 +92,10 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const peopleButton = el('button', 'pp-people pp-desk');
   peopleButton.type = 'button'; peopleButton.hidden = true;
   peopleButton.setAttribute('aria-label', 'أعضاء غرفة المشاهدة');
-  peopleButton.onclick = () => cmd('room');
+  peopleButton.onclick = () => openRoom();
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
   const hideBtn = iconButton('hide', 'إخفاء الأدوات (H)', () => hideControls()); hideBtn.hidden = true;
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => cmd('room')), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -232,7 +232,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   doc.addEventListener('keydown', () => { keyboardNav = true; }, true);
   doc.addEventListener('pointerdown', () => { keyboardNav = false; }, true);
   // لوحات «المزيد» الفرعية (التخطي والشبكة) تنبثق من زرّه نفسه كما تُفتح من ورقته في الـAPK
-  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${['skips', 'network', 'recommend'].includes(kind) ? 'more' : kind}"]`);
+  const anchorFor = (kind) => kind === 'quality' ? qualityBtn : root.querySelector(`[data-action="${['skips', 'network', 'recommend'].includes(kind) ? 'more' : kind === 'room' ? 'users' : kind}"]`);
   function positionSheet() {
     if (sheet.hidden || !anchorButton) return;
     const bounds = root.getBoundingClientRect?.() ?? {left:0,top:0}, anchor = anchorButton.getBoundingClientRect?.() ?? {top:690,right:1000};
@@ -244,7 +244,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     sheet.style.right = `${Math.max(12, Math.min(width - measured - 12, width - (anchor.right - bounds.left)))}px`;
     sheet.style.bottom = `${Math.min(height - 100, bottom)}px`;
     sheet.style.maxHeight = `${Math.max(80, height - bottom - 12)}px`;
-    if (['more', 'skips', 'network', 'recommend'].includes(openKind)) {
+    if (['more', 'skips', 'network', 'recommend', 'room'].includes(openKind)) {
       const top = Math.max(12, (anchor.bottom ?? anchor.top) - bounds.top + 10);
       sheet.style.top = `${top}px`; sheet.style.bottom = 'auto';
       sheet.style.maxHeight = `${Math.max(80, height - top - 12)}px`;
@@ -284,7 +284,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (openKind === 'servers') cmd('servers-close');
     anchorButton?.setAttribute('aria-expanded', 'false');
     const restoreFocus = anchorButton; anchorButton = null;
-    openKind = null; serverUi = null; offsetOut = null; networkBody = null;
+    openKind = null; serverUi = null; offsetOut = null; networkBody = null; roomBody = null;
     root.classList.remove('pp--sheet');
     sheet.hidden = true; sheetScrim.hidden = true;
     if (keyboardNav) restoreFocus?.focus(); else doc.activeElement?.blur?.();
@@ -486,6 +486,70 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
         body.append(row, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
       }
     });
+  }
+  // لوحة الغرفة كـTogetherPlayer.openPanel في الـAPK: صف لكل عضو (صورته ونقطة حالته، اسمه، حالته ومصدره، وموضعه
+  // ووسومه: المضيف/نسخة مختلفة/فرق)، ثم من لم يدخل بعد، ثم ديلاي فيديوي، ثم تحويل الوضع للمضيف، ثم الخروج.
+  // في غرفة: الزر يفتح اللوحة هنا والفيديو ظاهر خلفها؛ بلا غرفة: دعوة الأصدقاء كما هي.
+  let roomBody = null;
+  const STATE_TEXT = { ready: 'جاهز', preparing: 'يجهّز', buffering: 'ينتظر البيانات', failed: 'تعذّر', playing: 'يشاهد', paused: 'متوقف' };
+  function openRoom() { if (state.room) showRoom(); else cmd('room'); }
+  function roomFace(p, cls) {
+    const face = el('span', `pp-room__face ${cls}`);
+    face.append(el('span', 'pp-room__letter', Array.from(String(p.name || '؟'))[0] || '؟'));
+    if (typeof p.avatarKey === 'string' && /^(?:https?:\/\/|data:image\/)/i.test(p.avatarKey)) {
+      const img = el('img', 'pp-room__img'); img.alt = ''; img.loading = 'lazy'; img.onerror = () => img.remove(); img.src = p.avatarKey; face.append(img);
+    }
+    return face;
+  }
+  function paintRoom(body) {
+    const r = state.room; if (!r) { closeSheet(); return; }
+    const synced = r.mode === 'sync';
+    const head = sheet.querySelector('.pp-sheet__head');
+    if (head) { head.querySelector('strong').textContent = synced ? 'مشاهدة معًا · متزامنة' : 'مشاهدة معًا · منفصلة'; }
+    body.replaceChildren();
+    const live = el('p', 'pp-room__live', `${r.members.length} في الغرفة · ${r.status === 'live' ? 'متصل' : r.status === 'reconnecting' ? 'يعيد الاتصال…' : 'يتصل…'}`);
+    live.dataset.on = String(r.status === 'live');
+    body.append(live);
+    for (const m of r.members) {
+      const row = el('div', 'pp-room__row');
+      const who = el('div', 'pp-room__who');
+      const face = roomFace(m, `is-${m.state}`); face.append(el('i', 'pp-room__dot'));
+      const names = el('div', 'pp-room__names');
+      names.append(el('strong', null, m.me ? 'أنت' : m.name), el('small', `pp-room__state is-${m.state}`, [STATE_TEXT[m.state] ?? 'في الغرفة', m.source].filter(Boolean).join(' · ')));
+      who.append(face, names);
+      const where = el('div', 'pp-room__where');
+      const pos = el('b', null, m.posMs == null ? '—' : clock(m.posMs)); pos.dataset.pos = m.userId; where.append(pos);
+      const tags = el('span', 'pp-room__tags');
+      if (m.host) tags.append(el('em', 'is-host', 'المضيف'));
+      if (m.sameVersion === false) tags.append(el('em', 'is-warn', 'نسخة مختلفة'));
+      if (synced && !m.host && m.driftMs != null) { const d = el('em', null, `فرق ${Math.abs(m.driftMs)}ms`); d.dataset.drift = m.userId; tags.append(d); }
+      if (tags.childElementCount) where.append(tags);
+      row.append(who, where);
+      body.append(row);
+    }
+    for (const p of r.pending) {
+      const row = el('div', 'pp-room__row is-pending');
+      const who = el('div', 'pp-room__who');
+      who.append(roomFace(p, 'is-pending'), el('span', 'pp-room__wait', `${p.name} · لم يدخل بعد`));
+      row.append(who); body.append(row);
+    }
+    if (synced) {
+      const v = state.videoOffsetMs ?? 0;
+      const step = stepper('ديلاي فيديوي', `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`, (d) => cmd('video-offset', (state.videoOffsetMs ?? 0) + d * 500));
+      step.classList.add('pp-room__offset');
+      body.append(step, el('small', 'pp-sub-hint', 'مصدرك متقدم عن أصحابك؟ زِد (+). متأخر؟ نقّص (−).'));
+    }
+    const actions = el('div', 'pp-room__actions');
+    if (r.host) {
+      const mode = el('button', 'pp-room__btn'); mode.type = 'button'; mode.textContent = synced ? 'حوّلها منفصلة' : 'حوّلها متزامنة';
+      mode.onclick = () => cmd('room-mode', synced ? 'free' : 'sync'); actions.append(mode);
+    }
+    const leave = el('button', 'pp-room__btn is-leave'); leave.type = 'button'; leave.textContent = 'اطلع من الغرفة';
+    leave.onclick = () => { closeSheet(); cmd('room-leave'); };
+    actions.append(leave); body.append(actions);
+  }
+  function showRoom() {
+    roomBody = openSheet('room', 'مشاهدة معًا', state.room?.label || null, (body) => paintRoom(body), 'pp-sheet--room');
   }
   // PlayerActivity.pickFriend: «الجميع» (المجلس) أولًا ثم الأصدقاء؛ الاختيار يرسل فورًا ويؤكد برسالة قصيرة
   function showRecommend() {
@@ -751,6 +815,16 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (preview.classList.contains('is-on') && state.thumb !== previous.thumb && state.thumb?.ms === previewWant && state.thumb?.src) { previewImg.src = state.thumb.src; preview.classList.add('has-img'); }
     if (state.ended && !previous.ended) startNext();
     else if (!state.ended && previous.ended) stopNext();
+    if (openKind === 'room' && roomBody) {
+      // الموضع والفرق يتغيران مع كل تقرير: يُحدَّثان في مكانهما، ولا يُعاد بناء اللوحة (والزر تحت الفأرة) إلا إن تغيّر ما فيها
+      const shape = (s) => JSON.stringify([s.room && { ...s.room, members: s.room.members.map(({ posMs, driftMs, ...m }) => ({ ...m, drift: driftMs != null })) }, s.videoOffsetMs]);
+      if (shape(previous) !== shape(state)) paintRoom(roomBody);
+      else {
+        const byId = new Map((state.room?.members ?? []).map((m) => [m.userId, m]));
+        for (const n of roomBody.querySelectorAll('[data-pos]')) { const m = byId.get(n.dataset.pos); if (m) n.textContent = m.posMs == null ? '—' : clock(m.posMs); }
+        for (const n of roomBody.querySelectorAll('[data-drift]')) { const m = byId.get(n.dataset.drift); if (m?.driftMs != null) n.textContent = `فرق ${Math.abs(m.driftMs)}ms`; }
+      }
+    }
     if (openKind === 'network' && networkBody && JSON.stringify([previous.net, previous.serverCode]) !== JSON.stringify([state.net, state.serverCode])) paintNetwork(networkBody);
     if (openKind === 'skips' && (previous.skipStatus !== state.skipStatus || previous.skipPending !== state.skipPending)) showSkips();
     if (openKind === 'subtitles' && subtitlesBody && (JSON.stringify(previous.subtitles) !== JSON.stringify(state.subtitles) || previous.subtitleDelay !== state.subtitleDelay || previous.subtitleSize !== state.subtitleSize || previous.subtitlePosition !== state.subtitlePosition || previous.subtitleBackground !== state.subtitleBackground)) subtitlesPaint(subtitlesBody);
@@ -761,7 +835,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     else if (previous.paused || !previous.ready) showControls();
   }
   showControls(true);
-  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore, skips: showSkips, network: showNetwork, recommend: () => showRecommend() } };
+  return { root, update, closeSheet, open: { servers: showServers, episodes: showEpisodes, quality: showQuality, subtitles: showSubtitles, audio: showAudio, speed: showSpeed, more: showMore, skips: showSkips, network: showNetwork, recommend: () => showRecommend(), room: () => showRoom() } };
 }
 
 // تشغيل حقيقي داخل نافذة الطبقة (overlay-preload.cjs يعرّف VantaraOverlay)
