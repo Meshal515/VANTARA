@@ -110,3 +110,21 @@ it('changing the episode keeps the pinned source scope', async () => {
   }
   expect(engine.prepare.mock.calls.map(([a]) => a.episode)).toEqual([3, 4]);
 });
+
+it('one copy per source: a later search page of the same source is never prepared twice', async () => {
+  const general = { id: 77, title: 'Black Clover Season 2', episodes: 12 };
+  engine.detail.mockResolvedValue(general);
+  let late;
+  engine.find.mockImplementation(async (_titles, onWork) => {
+    late = onWork;
+    return { title: 'Black Clover', copies: [{ sourceId: 'cs3|witcher', url: '/series' }, { sourceId: 'cs3|witcher', url: '/ep-6' }, { sourceId: 'anime4up', url: '/a' }] };
+  });
+  engine.addons.mockResolvedValue([]);
+  const { anime } = screen(); anime.play(general, 3); await vi.advanceTimersByTimeAsync(6000);
+  expect(lastPrepare().copies.map(c => c.sourceId)).toEqual(['cs3|witcher', 'anime4up']);
+  // البحث المتدفق يعيد المصدر نفسه بصفحة حلقة أخرى، ومعه مصدر جديد: يُضاف الجديد وحده
+  late({ title: 'Black Clover', copies: [{ sourceId: 'cs3|witcher', url: '/ep-5' }, { sourceId: 'okanime', url: '/o' }] });
+  await vi.advanceTimersByTimeAsync(1);
+  const extended = engine.extend.mock.calls.flatMap(([, copies]) => copies.map(c => c.sourceId));
+  expect(extended).toEqual(['okanime']);
+});

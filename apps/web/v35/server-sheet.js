@@ -745,13 +745,15 @@ export function createServerSheet(body, o) {
       if (open === d.open) return;
       if (open) {
         closeDrops(d);
+        // القائمة في قسم المصادر الذي يُمرَّر، لا في إطار الورقة الثابت: تبقى تحت زرها إذا مرّرت
+        // (كانت تثبت على الشاشة وزرها يتحرك تحتها فتبدو «تنزل معك»). خارج صف المرشّحات لأنه يقصّ ما ينزل منه.
         const a = toggle.getBoundingClientRect?.();
-        const b = body.getBoundingClientRect?.();
+        const b = src.getBoundingClientRect?.();
         if (a && b) {
-          menu.style.top = `${a.bottom - b.top + 4}px`;
+          menu.style.top = `${a.bottom - b.top + (src.scrollTop || 0) + 4}px`;
           menu.style.left = `${Math.max(8, Math.min(a.left - b.left, b.width - 198))}px`;
         }
-        if (!menu.isConnected) body.append(menu);
+        if (menu.parentNode !== src) src.append(menu);
       }
       d.open = open;
       menu.hidden = !open;
