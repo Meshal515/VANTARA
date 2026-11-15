@@ -72,6 +72,26 @@ describe('madara engine', () => {
     expect(asked.some((a) => a.url.endsWith('/ajax/chapters/'))).toBe(true);
   });
 
+  it('follows the chapter pages the site lists (?t=N) instead of stopping at the first 50 (مانجا العاشق: Berserk 386 فصلًا)', async () => {
+    // كالموقع: 386 فصلًا مقسومة صفحات من 50 (الأحدث أولًا)، وكل صفحة تذكر أرقام الصفحات
+    const all = Array.from({ length: 386 }, (_, i) => 386 - i);
+    const pages = Array.from({ length: Math.ceil(all.length / 50) }, (_, i) => all.slice(i * 50, i * 50 + 50));
+    const page = (n) => `<ul>${pages[n - 1].map((c) => `<li class="wp-manga-chapter"><a href="https://site.test/manga/berserk/${c}/">${c} - عنوان</a></li>`).join('')}</ul>` +
+      `<div class="pagination">${[2, 3, pages.length].filter((x) => x !== n).map((x) => `<a href="/?t=${x}" data-page="${x}">${x}</a>`).join('')}</div>`;
+    const { fetch, asked } = fakeFetch({
+      'GET https://site.test/manga/berserk/': DETAILS.replace('Solo Swordmaster', 'Berserk'),
+      'POST https://site.test/manga/berserk/ajax/chapters/': page(1),
+      ...Object.fromEntries(pages.map((_, i) => [`POST https://site.test/manga/berserk/ajax/chapters/?t=${i + 1}`, page(i + 1)])),
+    });
+    const src = madara.create({ domain: 'site.test', config: { chapterMode: 'mangaAjax' } }, { fetch });
+    const { chapters } = await src.series({ url: '1', memo: '{"path":"/manga/berserk/"}', title: 'Berserk' });
+    expect(chapters).toHaveLength(386);
+    expect(chapters[0].url).toBe('386');
+    expect(chapters.at(-1).url).toBe('1');
+    expect(new Set(chapters.map((c) => c.url)).size).toBe(386);
+    expect(asked.filter((a) => a.url.includes('?t=')).map((a) => a.url.split('?t=')[1])).toEqual(['2', '3', '4', '5', '6', '7', '8']);
+  });
+
   it('opens a work saved by the old format (a full url instead of an id)', async () => {
     const { fetch } = fakeFetch({ 'GET https://site.test/manga/solo-swordmaster/': DETAILS + CHAPTERS });
     const src = madara.create({ domain: 'site.test', config: {} }, { fetch });

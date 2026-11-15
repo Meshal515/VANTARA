@@ -14,6 +14,8 @@ final class RuntimeProtocol {
     static final int HELLO=IBinder.FIRST_CALL_TRANSACTION, LOAD=HELLO+1, INVOKE=HELLO+2, CLOSE=HELLO+3,LOAD_CLOUDSTREAM=HELLO+4,INVOKE_JSON=HELLO+5;
     static final int MAX_TEXT=65536, MAX_DEX=8*1024*1024;
     static final int HTTP_EXCHANGE=HELLO+1, MAX_REQUEST=1024*1024, MAX_RESPONSE=4*1024*1024;
+    /** Broker: CloudStream's hidden browser (WebViewResolver). JSON text in and out, each within [MAX_TEXT]. */
+    static final int BROWSE=HELLO+2;
     static final Set<String> OPERATIONS=Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
         "catalogue","search","details","episodes","chapters","pages","videoLinks","videoLinksMore","capabilities")));
     static String text(String value) {

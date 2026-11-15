@@ -35,7 +35,9 @@ class RuntimePlugin : Plugin() {
                     // الحل الصامت نفسه الذي يستخدمه محرك المانجا؛ يُنشأ عميله عند أول حاجة إن لم يكن موجودًا
                     val solver=CloudflareInterceptor.current ?: run { Injekt.get<NetworkHelper>().client;CloudflareInterceptor.current }
                     solver?.silentClearance(url,agent)
-                })
+                },
+                // أداة CloudStream ‏WebViewResolver (StreamWish وFilemoon وغيرها): متصفح فانتارا المخفي
+                browser=HiddenPageBrowser(context.applicationContext))
         }catch(error:Exception){android.util.Log.w("VantaraRuntime","RUNTIME_INITIALIZATION_FAILED:"+error.javaClass.simpleName)}
     }
     private fun run(call: PluginCall,action: suspend ()->JsonElement) { jobs.launch {

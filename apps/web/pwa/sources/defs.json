@@ -30,7 +30,7 @@
       "content": "manga",
       "engine": "madara",
       "version": 1,
-      "domain": "starzmanga.com",
+      "domain": "starzmanga.net",
       "config": {},
       "probe": {
         "query": "solo"

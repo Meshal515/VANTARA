@@ -24,4 +24,10 @@ public interface RuntimeHttpAccess extends RuntimeAccess {
         return Collections.unmodifiableMap(result);
     }
     Response exchange(Request request) throws Exception;
+    /**
+     * CloudStream's hidden browser (WebViewResolver): the host opens [request]'s page in a hidden WebView and answers
+     * with the requests it saw. JSON text both ways, bounded by the protocol's text limit; no WebView, cookie or
+     * page content crosses. Off unless the host offers it.
+     */
+    default String browse(String request) throws Exception { throw new UnsupportedOperationException("BROWSER_UNSUPPORTED"); }
 }

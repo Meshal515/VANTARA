@@ -38,6 +38,20 @@ public final class Bridge {
     private Bridge() {}
     private static volatile Function<Map<String, Object>, Map<String, Object>> transport;
     private static volatile boolean installed;
+    private static volatile Function<String, String> browser;
+
+    /**
+     * CloudStream's hidden browser for the library's extractors (StreamWish, Filemoon, Filesim, ...): VANTARA's hidden
+     * browser in the host, reached through the worker. JSON job in, requests seen out (RuntimeBrowser's contract).
+     */
+    public static void installBrowser(Function<String, String> next) { browser = next; }
+
+    /** The host browser's answer, or null when there is none (the library then sees "nothing intercepted"). */
+    public static String browse(String job) {
+        Function<String, String> current = browser;
+        if (current == null) return null;
+        try { return current.apply(job); } catch (RuntimeException failure) { return null; }
+    }
 
     /** Sets (or replaces) the transport; the library's clients are wired to it once. */
     public static synchronized void install(Function<Map<String, Object>, Map<String, Object>> next) {

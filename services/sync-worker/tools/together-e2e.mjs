@@ -58,8 +58,10 @@ const seqBefore = dahmi.timeline.seq;
 host.command('play', { pos: 10_000 });
 check('«ابدأ» من المضيف يصل للجميع ويبدأ الحلقة', await until(() => dahmi.timeline?.seq === seqBefore + 1 && host.timeline?.seq === seqBefore + 1 && dahmi.timeline.started === true));
 const tl = dahmi.timeline;
-const leadAtArrival = tl.at - dahmi.clock.serverNow();
-check('الأمر مجدول للمستقبل (يصل قبل موعده)', leadAtArrival > 0 && leadAtArrival <= 300, `باقي ${leadAtArrival.toFixed(0)}ms عند الوصول`);
+// البروتوكول 2 (9f46c18a): الأمر يُختم بلحظة ضغطه ويُنفّذ عند وصوله، بلا تأجيل 300ms مصطنع. فختمه في الماضي
+// القريب (زمن الشبكة)، لا في المستقبل ولا أبعد من نافذة الضغط.
+const ageAtArrival = dahmi.clock.serverNow() - tl.at;
+check('الأمر يُنفّذ عند وصوله بختم لحظة الضغط (بلا تأجيل مصطنع)', ageAtArrival >= -5 && ageAtArrival < 2_000, `عمره ${ageAtArrival.toFixed(0)}ms عند الوصول`);
 const a = targetAt(host.timeline, host.clock.serverNow()); const b = targetAt(dahmi.timeline, dahmi.clock.serverNow());
 check('الجهازان يحسبان نفس الموقع المطلوب', Math.abs(a - b) < 20, `فرق ${Math.abs(a - b).toFixed(1)}ms`);
 
@@ -137,6 +139,14 @@ check('خروج المضيف يصل كـ left', await until(() => dahmi2.roster.
 console.log('… انتظار مهلة غياب المضيف (60 ث)');
 check('بعد 60 ث تنتقل الاستضافة لدحمي', await until(() => newHost === U.dahmi, 70_000), String(newHost));
 check('دحمي صار يتحكم', dahmi2.isHost);
+// المضيف الأصلي يعود لغرفته بعد انتقال الاستضافة (كان يُرفض «غير مدعو»)
+const back = joinRoom({ baseUrl: base, code, getToken: () => T.host });
+check('المضيف الأصلي يعود لغرفته بعد انتقال الاستضافة', await until(() => back.status === 'live'), back.status);
+check('وصار ضيفًا: لا يتحكم والمضيف دحمي', !back.isHost && dahmi2.isHost);
+back.close();
+// معلومات الغرفة للمدعوين وحدهم
+const outsider = await fetch(`${base}/v1/together/rooms/${code}`, { headers: { authorization: `Bearer ${await tok('5a1f0c2e-0000-4000-8000-00000000abcd')}` } });
+check('معلومات الغرفة لا تصل غير المدعو', outsider.status === 403 || outsider.status === 410, String(outsider.status));
 dahmi2.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} نجح`);

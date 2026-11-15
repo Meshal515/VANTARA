@@ -31,6 +31,27 @@ data class Member(
     val avatarKey: String? = null,
 )
 
+/**
+ * كشف الاتصال «نصف الميت» بقواعد الويب نفسها (apps/web/lib/together/room.js): نبضة كل [HEARTBEAT_MS]، وصمت أطول من
+ * [SILENCE_MS]، أو أمر/نبضة بلا أي رد خلال [ECHO_MS] = اتصال ميت فنعيد الاتصال فورًا. بدونه كان الجوال الذي ينتقل من
+ * Wi‑Fi إلى البيانات يبقى على مقبس ميت دقائق: لا يصله أمر المضيف، والمضيف يظنه معه.
+ */
+internal class ConnectionWatch {
+    private var lastRx = 0L
+    private var awaitingSince: Long? = null
+    fun opened(now: Long) { lastRx = now; awaitingSince = null }
+    fun received(now: Long) { lastRx = now; awaitingSince = null }
+    /** أرسلنا ما يستحق ردًا (أمرًا يعود صداه، أو نبضة). */
+    fun expectReply(now: Long) { if (awaitingSince == null) awaitingSince = now }
+    fun dead(now: Long): Boolean = awaitingSince?.let { now - it > ECHO_MS } == true || now - lastRx > SILENCE_MS
+    companion object {
+        const val HEARTBEAT_MS = 5_000L
+        const val SILENCE_MS = 12_000L
+        const val ECHO_MS = 2_500L
+        const val WATCH_MS = 1_000L
+    }
+}
+
 class TogetherClient(
     private val http: OkHttpClient,
     private val baseUrl: String,
@@ -92,34 +113,53 @@ class TogetherClient(
             token?.let { header("Authorization", "Bearer $it") }
         }.build()
         ws = http.newWebSocket(req, object : WebSocketListener() {
+            // أحداث مقبس قديم (أُغلق أو استُبدل) لا تمس الاتصال الحالي: كان إغلاقه المتأخر يمحو المقبس الجديد
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 main.post {
+                    if (webSocket !== ws) return@post
                     attempt = 0
+                    watch.opened(SystemClock.elapsedRealtime())
                     for (i in 0 until 8) main.postDelayed({ ping() }, i * 150L)
-                    main.postDelayed(resync, RESYNC_MS)
+                    main.postDelayed(heartbeat, ConnectionWatch.HEARTBEAT_MS)
+                    main.postDelayed(watchdog, ConnectionWatch.WATCH_MS)
                 }
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
-                val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
-                main.post { handle(msg) }
+                val msg = runCatching { JSONObject(text) }.getOrNull()
+                main.post {
+                    if (webSocket !== ws) return@post
+                    watch.received(SystemClock.elapsedRealtime())
+                    msg?.let(::handle)
+                }
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Complete the server's close handshake so onClosed can schedule reconnect.
                 webSocket.close(code, reason)
             }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { dropped(code) }.let {}
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { dropped(response?.code ?: 1006) }.let {}
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { if (webSocket === ws) dropped(code) }.let {}
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { if (webSocket === ws) dropped(response?.code ?: 1006) }.let {}
         })
     }
 
-    private val resync = object : Runnable {
-        override fun run() { ping(); main.postDelayed(this, RESYNC_MS) }
+    private val watch = ConnectionWatch()
+    /** نبضة كل 5 ث (تغذي الساعة المشتركة أيضًا) تنتظر ردًا. */
+    private val heartbeat = object : Runnable {
+        override fun run() { if (ping()) watch.expectReply(SystemClock.elapsedRealtime()); main.postDelayed(this, ConnectionWatch.HEARTBEAT_MS) }
     }
+    /** المقبس الميت يُلغى فيعيد onFailure الاتصال فورًا (أول محاولة بلا انتظار). */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val socket = ws ?: return
+            if (watch.dead(SystemClock.elapsedRealtime())) { socket.cancel(); return }
+            main.postDelayed(this, ConnectionWatch.WATCH_MS)
+        }
+    }
+    private fun stopTimers() { main.removeCallbacks(heartbeat); main.removeCallbacks(watchdog) }
 
     private fun ping() = send(JSONObject().put("t", "ping").put("t0", SystemClock.elapsedRealtime().toDouble()))
 
     private fun dropped(code: Int) {
-        main.removeCallbacks(resync)
+        stopTimers()
         ws = null
         setLive(false)
         if (closed) return
@@ -139,7 +179,7 @@ class TogetherClient(
     private fun finish(reason: String) {
         if (closed) return
         closed = true
-        main.removeCallbacks(resync)
+        stopTimers()
         runCatching { ws?.close(1000, reason) }
         listener.onClosed(reason)
     }
@@ -193,8 +233,9 @@ class TogetherClient(
         pos?.let { put("pos", it) }
         countdownMs?.let { put("countdownMs", it) }
         at?.let { put("at", Math.round(it)) }
-        if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", "anime").put("label", mediaLabel ?: mediaKey))
-    })
+        // نوع العمل من مفتاحه (`cinema:tt…:2#4`): كان «anime» دائمًا، فينقلب مسلسل الغرفة أنميًا عند الويب وويندوز
+        if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", mediaKind(mediaKey)).put("label", mediaLabel ?: mediaKey))
+    }).also { sent -> if (sent) watch.expectReply(SystemClock.elapsedRealtime()) }
 
     fun report(pos: Double, state: String, source: String?, mediaKey: String?, durationMs: Long?, driftMs: Long?, driftP95: Long?) = send(
         JSONObject().put("t", "report").put("pos", pos).put("at", clock.serverNow()).put("state", state)
@@ -207,13 +248,15 @@ class TogetherClient(
 
     fun close() {
         closed = true
+        stopTimers()
         main.removeCallbacksAndMessages(null)
         runCatching { ws?.close(1000, "left") }
         ws = null
     }
 
     companion object {
-        private const val RESYNC_MS = 30_000L
+        /** نوع العمل كما يفهمه الخادم والويب، من بادئة المفتاح. */
+        internal fun mediaKind(key: String): String = key.substringBefore(':').takeIf { it == "anime" || it == "cinema" || it == "manga" } ?: "anime"
         // أول إعادة فورية بعد انقطاع لحظي، ثم تتباعد (كانت تنتظر ثانية كاملة قبل أول محاولة)
         private const val OLD_LEAD_MS = 300.0
         private val BACKOFF = longArrayOf(0, 1_000, 2_000, 4_000, 8_000, 15_000)

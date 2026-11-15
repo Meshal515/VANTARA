@@ -87,6 +87,9 @@ internal object LibraryWorld {
         Thread.currentThread().contextClassLoader = loader
         val type = try { Class.forName(BRIDGE, true, loader) } finally { Thread.currentThread().contextClassLoader = previous }
         type.getMethod("install", java.util.function.Function::class.java).invoke(null, transport)
+        // CloudStream's hidden browser for the library's extractors (StreamWish, Filemoon, ...): the host's, as the
+        // provider's own WebViewResolver uses. No browser = the library's "nothing intercepted".
+        type.getMethod("installBrowser", java.util.function.Function::class.java).invoke(null, browser)
         android.util.Log.i("VantaraCs3World", "WORLD_READY dex=${dex.size}")
         return type
     }
@@ -103,6 +106,10 @@ internal object LibraryWorld {
             throw IllegalStateException(failure.message?.takeIf { it.matches(Regex("[A-Z_]{3,64}")) } ?: "TRANSPORT_FAILED")
         }
         mapOf("url" to answer.url(), "status" to answer.status(), "headers" to answer.headers(), "body" to answer.body())
+    }
+
+    private val browser = java.util.function.Function<String, String?> { job ->
+        try { WorkerState.browse(job) } catch (_: Exception) { null }
     }
 
     /**

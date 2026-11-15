@@ -55,8 +55,25 @@ tasks.register('worldDex', JavaExec) {
     mainClass = 'com.android.tools.r8.D8'
     doFirst {
         out.parentFile.mkdirs()
+        // The library's WebViewResolver is its JVM build (no WebView: it intercepts nothing). This module ships the same
+        // class asking VANTARA's hidden browser (src/main/java/com/lagradost/cloudstream3/network), so the library's own
+        // copy is left out of the world, and its extractors (StreamWish, Filemoon, ...) link to ours.
+        def library = configurations.world.files.find { it.name ==~ /library-jvm-.*\.jar/ }
+        if (library == null) throw new GradleException('cs3world: library-jvm missing from the world')
+        def replaced = ~/com\/lagradost\/cloudstream3\/network\/WebViewResolver(\$.*)?\.class/
+        def filtered = new File(temporaryDir, library.name)
+        int dropped = 0
+        new java.util.zip.ZipOutputStream(new FileOutputStream(filtered)).withCloseable { z ->
+            new java.util.zip.ZipFile(library).withCloseable { zip ->
+                zip.entries().each { e ->
+                    if (e.name ==~ replaced) { dropped++; return }
+                    z.putNextEntry(new java.util.zip.ZipEntry(e.name)); if (!e.isDirectory()) z << zip.getInputStream(e); z.closeEntry()
+                }
+            }
+        }
+        if (dropped == 0) throw new GradleException('cs3world: the library no longer ships WebViewResolver; review the replacement')
         args(['--release', '--min-api', '27', '--output', out.absolutePath, tasks.named('jar').get().archiveFile.get().asFile.absolutePath] +
-            configurations.world.files.collect { it.absolutePath }.sort())
+            (configurations.world.files - library).collect { it.absolutePath }.sort() + [filtered.absolutePath])
     }
     doLast {
         // D8 keeps code only. The library world also needs its jars' resources: META-INF/services (cryptography

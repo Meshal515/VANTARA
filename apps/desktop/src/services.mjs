@@ -234,6 +234,23 @@ function bounded(value, fallback, low, high) {
   if (!Number.isSafeInteger(value) || value < low || value > high) throw new Error('حد الطلب غير صالح');
   return value;
 }
+/**
+ * صفحة تحقق بدل المحتوى: Cloudflare («Just a moment»، cf-mitigated، challenge-platform) وحمايات الاستضافة
+ * («One moment, please» من SiteGround/Imunify، sgcaptcha). «One moment» كانت تمر كصفحة عادية فيرى القارئ قائمة فارغة
+ * بلا سبب. متصفح المصادر المخفي (source-browser.cjs) يحلّها كما يحلها WebView الـAPK.
+ */
+export function challengePage({status,headers={},text=''}={}) {
+  const mitigated=String(headers['cf-mitigated']??headers['Cf-Mitigated']??'').toLowerCase()==='challenge';
+  if(mitigated)return true;
+  const head=String(text).slice(0,16*1024);
+  if(/<title>\s*(?:just a moment|one moment,? please|attention required|checking your browser|please wait|ddos-guard)/i.test(head))return true;
+  if(/cf-chl-|\/cdn-cgi\/challenge-platform\/|sgcaptcha|__cf_chl_|_imunify/i.test(head)&&(status===403||status===503||status===429||/<title>/i.test(head)&&head.length<16000))return true;
+  return false;
+}
+/** هوية متصفح حقيقي لطلبات المصادر (كالـAPK والويب): «Mozilla/5.0 VANTARA/Windows» تُقرأ هوية آلي فتزيد صفحات التحقق. */
+const BROWSER_HOST_MS=30*60*1000;
+export const SOURCE_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 function readResponse(response, limit, decode=data=>data.toString('utf8')) {
   return new Promise((resolve,reject) => {
     const chunks=[];let size=0;
@@ -373,9 +390,11 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null}) {
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null,browserFetch=null,sourceUserAgent=SOURCE_USER_AGENT}) {
   if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
+  /** مضيفات طلبت تحققًا: تُطلب من جلسة المتصفح المخفي حتى هذا الوقت. */
+  const browserHosts=new Map();
   // انهيار libtorrent بعد جاهزيته يحجبه 10 دقائق؛ التشغيل التالي يبدأ بـrqbit مباشرة بدل تكرار الفشل.
   let libtorrentBlockedUntil=0;
   // DoH أولًا كالـAPK؛ الاختبارات التي تحاكي DNS النظام تطفئه صراحة.
@@ -439,7 +458,14 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     try {
       let request=validateResourceRequest({url,...options});
       // JSON:API (Kitsu لربط الأنمي بـTorrentio) يرفض application/json وحده بـ406؛ نقبل +json وأي نوع احتياطًا
-      request.headers={accept:json?'application/json, application/*+json;q=0.9, */*;q=0.8':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
+      // MangaDex (واجهتها وخوادم صورها) ترفض هوية تشبه المتصفح وتقبل هوية التطبيق الصريحة؛ غيرها هوية متصفح حقيقي
+      const host=new URL(request.url).hostname;
+      const appAgent=/^(?:api|uploads)\.mangadex\.org$/i.test(host)||/\.mangadex\.network$/i.test(host);
+      request.headers={accept:json?'application/json, application/*+json;q=0.9, */*;q=0.8':'*/*','user-agent':appAgent?'VANTARA/1.0 (+https://github.com/Meshal515/VANTARA)':sourceUserAgent,...request.headers};
+      // مضيف طلب تحققًا قبل قليل: الطلب من جلسة المتصفح المخفي مباشرة (كوكي التحقق فيها، وطلب Node سيُرد مجددًا)
+      const original={url:request.url,method:request.method,headers:{...request.headers},body:request.body,binary:request.binary,limit,timeout};
+      const viaBrowser=()=>{browserHosts.set(host,Date.now()+BROWSER_HOST_MS);return browserFetch(original);};
+      if(browserFetch&&!appAgent&&(browserHosts.get(host)??0)>Date.now())return await viaBrowser();
       for(let redirects=0;redirects<6;redirects++) {
         const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout,lookup});
         const status=response.statusCode;
@@ -458,10 +484,19 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           const chunks=[];let size=0;
           for await(const chunk of response){size+=chunk.length;if(size>limit){response.destroy();throw new Error('حجم الصورة أكبر من الحد');}chunks.push(chunk);}
           const type=String(headers['content-type']??'').split(';')[0];
-          if(!/^image\/(png|jpeg|webp|gif|avif)$/.test(type))throw new Error('المورد ليس صورة مدعومة');
+          if(!/^image\/(png|jpeg|webp|gif|avif)$/.test(type)) {
+            // صورة الفصل نفسها خلف صفحة تحقق: من المتصفح المخفي كالصفحات
+            if(browserFetch&&!appAgent&&challengePage({status,headers:response.headers,text:Buffer.concat(chunks).subarray(0,16*1024).toString('utf8')}))return await viaBrowser();
+            throw new Error('المورد ليس صورة مدعومة');
+          }
           return {base64:Buffer.concat(chunks).toString('base64'),contentType:type,status,url:request.url,headers};
         }
-        return {text:await readResponse(response,limit),status,url:request.url,headers,location:response.headers.location??null};
+        const text=await readResponse(response,limit);
+        if(browserFetch&&!appAgent&&challengePage({status,headers:response.headers,text})) {
+          // صفحة تحقق: المتصفح المخفي يحلها ويكمل الطلب (كـWebView الـAPK). إن تعذّر بقيت الصفحة نفسها فيقول القارئ سببها
+          try { return await viaBrowser(); } catch { browserHosts.delete(host); }
+        }
+        return {text,status,url:request.url,headers,location:response.headers.location??null};
       }
       throw new Error('عدد إعادة التوجيه أكبر من الحد');
     } catch(e) {
