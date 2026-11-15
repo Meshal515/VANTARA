@@ -23,7 +23,7 @@ import { isTorrentRoute } from '../lib/route-family.js';
 import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
-import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, detail as fetchDetail, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
+import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, detail as fetchDetail, detailAnyType, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
@@ -251,7 +251,8 @@ export function createCinema(deps) {
   const descriptor = (m) => ({ seriesRef: refOf(m.id), seriesTitle: m.title ?? null, coverUrl: m.poster ?? null });
   // v1 حفظ «فيلم» لمسلسلات: Cinemeta يردّ على /meta/movie/<معرّف مسلسل> بنسخة فيلم ناقصة
   // (بلا ملصق ولا سنة ولا حلقات) فكانت تُقبل. تُرمى ويُتعلَّم النوع من جديد.
-  const TYPES_KEY = 'vantara.cinema.types.v2';
+  // v3: ذاكرة v2 قد تحمل «فيلم» لمسلسل من فشل عابر قديم (series ثم movie)، فتُترك كلها مرة واحدة
+  const TYPES_KEY = 'vantara.cinema.types.v3';
   try { globalThis.localStorage?.removeItem('vantara.cinema.types.v1'); } catch {}
   const types = readJson(TYPES_KEY, {});
   const rememberType = (m) => {
@@ -539,9 +540,20 @@ export function createCinema(deps) {
     // نوع مجهول (عمل من الحساب): مسلسل أولًا. /meta/series لمعرّف فيلم يردّ بلا شيء،
     // أما /meta/movie لمعرّف مسلسل فيردّ بفيلم ناقص فلا يصلح أن يكون الأول
     const tryType = (type) => fetchDetail(type, m.id).catch(() => null);
-    const p = (async () => (known ? await tryType(known) : (await tryType('series')) ?? (await tryType('movie'))))().then((full) => {
-      if (full) rememberType(full);
-      else state.details.delete(key);
+    const p = (async () => {
+      if (!known) {
+        // النوعان معًا ويُحسم بـslug: الفشل العابر لطلب «مسلسل» كان ينزل لـ«فيلم» ويُحفظ للأبد (Cyberpunk فيلمًا)
+        const { work, certain } = await detailAnyType(m.id).catch(() => ({ work: null, certain: false }));
+        if (work && certain) rememberType(work);
+        return work;
+      }
+      const full = await tryType(known);
+      // نوع محفوظ أو ممرَّر خاطئ: Cinemeta نفسه يقول غيره (slug) ⇒ تفاصيل النوع الصحيح، ويُصحَّح المحفوظ
+      if (full && full.type !== known) return (await tryType(full.type)) ?? full;
+      return full;
+    })().then((full) => {
+      if (full && known) rememberType(full);
+      if (!full) state.details.delete(key);
       return full;
     });
     state.details.set(key, p);

@@ -49,9 +49,10 @@ object CandidateMediaSources {
                 Container.DASH -> setMimeType(MimeTypes.APPLICATION_MPD)
                 else -> Unit // Preserve extractor sniffing for MP4, MKV and extensionless URLs.
             }
-            setSubtitleConfigurations(candidate.subtitles.map { track ->
+            val labels = SubtitleLabels.of(candidate.subtitles, candidate.sourceName)
+            setSubtitleConfigurations(candidate.subtitles.mapIndexed { i, track ->
                 MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
-                    .setMimeType(subtitleMime(track.url)).setLanguage(track.lang).setLabel(track.lang)
+                    .setMimeType(subtitleMime(track.url)).setLanguage(track.lang).setLabel(labels[i])
                     .setSelectionFlags(if (track.lang.contains("ar", true) || track.lang.contains("عرب")) C.SELECTION_FLAG_DEFAULT else 0)
                     .build()
             })

@@ -11,6 +11,8 @@
  * ولا يُستبدل بغيره دون إذنه. ولا تُخلط روابط مصدرين داخل عملية واحدة.
  */
 
+import { parseRelease } from '../../addons/release-info.js';
+
 /** الحاويات التي يحفظها محرك التنزيل الأصلي ويشغّلها Media3/mpv من القرص. */
 export const SAVABLE = new Set(['MP4', 'MKV', 'WEBM', 'HLS', 'TORRENT']);
 
@@ -29,8 +31,34 @@ export function isDownloadReady(route) {
   return route?.state === 'READY' && route.probed !== false;
 }
 
+/** تورنت فعلًا (تذاكر التورنت أو بصمة infoHash)، لا كل ما جاء من إضافة: روابط Stremio المباشرة ليست تورنت. */
 export function isTorrent(route) {
-  return route?.type === 'torrent';
+  return route?.type === 'torrent' || String(route?.fingerprint ?? '').startsWith('btih:') || Boolean(route?.infoHash);
+}
+
+const GB = 1024 ** 3;
+
+/**
+ * ما يعلنه التورنت عن نفسه (المشاركون، الحجم، CAM) من وصفه بمحلّل ورقة التشغيل نفسه.
+ * كان الذكي يرتّب التورنت بالجودة وحدها: 249 إصدارًا 1080p متعادلة، فيأخذ أولها في رد الإضافة ولو بمشاركَين.
+ */
+export function torrentFacts(route) {
+  if (!isTorrent(route) || !route?.label) return { seeders: null, size: null, cam: false };
+  const r = parseRelease(route.sourceName ?? route.server ?? '', route.label);
+  return { seeders: Number.isFinite(r.seeders) ? r.seeders : null, size: Number.isFinite(r.size) ? r.size : null, cam: r.source === 'CAM' };
+}
+
+/** درجة السرب وحجم الملف للتورنت (0 لغيره). سرب ميت = لا يُنزَّل منه. */
+function swarmScore(route) {
+  if (!isTorrent(route)) return 0;
+  const { seeders, size, cam } = torrentFacts(route);
+  if (seeders === 0) return -Infinity;
+  // لوغاريتمي: 5 ← 0.17، 50 ← 0.38، 300 ← 0.55؛ غير المعلن يُعامل كمتوسط لا كميت
+  let score = seeders == null ? 0.2 : Math.min(0.6, Math.log10(seeders + 1) * 0.22);
+  if (cam) score -= 1;
+  // التخزين: نسخة 60GB لحلقة أو فيلم ليست «أذكى» من 3GB بنفس الجودة
+  if (size != null) score -= size > 30 * GB ? 0.45 : size > 12 * GB ? 0.25 : size > 6 * GB ? 0.1 : 0;
+  return score;
 }
 
 /**
@@ -48,7 +76,9 @@ export function scoreRoute(route, { platform = {}, prefer = {} } = {}) {
   // التورنت يكمل ويستأنف بالقطع، لكنه يعتمد على المشاركين: يأتي بعد المباشر الجيد لا قبله
   const transport = isTorrent(route) ? 0.25 : 0.4;
   const variant = prefer.variant && route.variant === prefer.variant ? 0.3 : route.variant === 'UNKNOWN' ? 0.1 : 0;
-  return quality * 1.5 + probed + latency + transport + variant;
+  const swarm = swarmScore(route);
+  if (!Number.isFinite(swarm)) return -Infinity;
+  return quality * 1.5 + probed + latency + transport + variant + swarm;
 }
 
 /** ترتيب الجاهز للتنزيل: الأعلى درجة أولًا، والتعادل لأقل زمن رد. */
@@ -67,6 +97,8 @@ export function rankRoutes(routes, opts = {}) {
 export function unsupportedReason(info) {
   if (!info) return 'NO_ROUTE';
   if (info.drm) return 'DRM';
+  // الفحص نفسه فشل (403/404، انقطاع): كان يُتجاهل فيبدأ تنزيل سيرفر رفض للتو
+  if (info.error) return ['SOURCE', 'EXPIRED', 'NETWORK', 'UNSUPPORTED', 'DRM'].includes(info.error) ? (info.error === 'EXPIRED' || info.error === 'NETWORK' ? 'SOURCE' : info.error) : 'SOURCE';
   const c = String(info.container ?? '').toUpperCase();
   if (c === 'DASH') return 'UNSUPPORTED';
   if (c === 'HTML' || c === 'PAGE') return 'UNSUPPORTED';

@@ -136,9 +136,36 @@ describe('smart selection', () => {
     expect(unsupportedReason({ container: 'DASH' })).toBe('UNSUPPORTED');
   });
 
-  it('matches the same server by source and code, never another source', () => {
-    expect(sameRoute({ sourceId: 'a', code: 'SWH' }, { sourceId: 'a', routeCode: 'SWH' })).toBe(true);
-    expect(sameRoute({ sourceId: 'torrentio', code: 'SWH' }, { sourceId: 'a', routeCode: 'SWH' })).toBe(false);
+  it('matches the same server by identity, never another source', () => {
+    expect(sameRoute({ sourceId: 'a', server: 'swh', code: 'SWH' }, { sourceId: 'a', server: 'swh' })).toBe(true);
+    expect(sameRoute({ sourceId: 'torrentio', server: 'swh' }, { sourceId: 'a', server: 'swh' })).toBe(false);
+  });
+
+  it('a chosen torrent is that release, not another of the same addon with the same code or quality', () => {
+    const chosen = { sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: 'btih:bbbb:0', quality: 1080 };
+    // الرمز يُعطى بترتيب الوصول في كل جلسة: TRR في الجلسة الثانية قد يكون إصدارًا آخر
+    expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', code: 'TRR', quality: 1080, fingerprint: 'btih:aaaa:0' }, chosen)).toBe(false);
+    expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', code: 'TRR7', quality: 1080, fingerprint: 'btih:bbbb:0' }, chosen)).toBe(true);
+  });
+
+  it('smart ranks a torrent swarm by its seeders and size, not by the order the addon listed it', () => {
+    const t = (id, label) => ({ id, sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', state: 'READY', quality: 1080, label });
+    const ranked = rankRoutes([
+      t('weak', 'Fight.Club.1999.1080p.BluRay\n👤 2 💾 1.1 GB ⚙️ TPB'),
+      t('cam', 'Fight.Club.1999.1080p.HDCAM\n👤 900 💾 1.0 GB ⚙️ TPB'),
+      t('dead', 'Fight.Club.1999.1080p.WEB\n👤 0 💾 900 MB ⚙️ TPB'),
+      t('huge', 'Fight.Club.1999.1080p.REMUX\n👤 300 💾 38 GB ⚙️ TPB'),
+      t('good', 'Fight.Club.1999.1080p.BluRay.x265\n👤 289 💾 2.1 GB ⚙️ TPB'),
+    ], { platform: { torrent: true } });
+    expect(ranked[0].id).toBe('good');
+    expect(ranked.map((r) => r.id)).not.toContain('dead');
+    expect(ranked.findIndex((r) => r.id === 'cam')).toBeGreaterThan(ranked.findIndex((r) => r.id === 'weak'));
+    expect(ranked.findIndex((r) => r.id === 'huge')).toBeGreaterThan(ranked.findIndex((r) => r.id === 'good'));
+  });
+
+  it('a failed inspection is a refusal, not a green light', () => {
+    expect(unsupportedReason({ container: 'UNKNOWN', error: 'SOURCE', reason: 'HTTP 404' })).toBe('SOURCE');
+    expect(unsupportedReason({ container: 'UNKNOWN', error: 'EXPIRED' })).toBe('SOURCE');
   });
 });
 
@@ -443,5 +470,141 @@ describe('video driver and the device queue (Android)', () => {
     await expect(run).resolves.toMatchObject({ bytes: 5 });
     expect(native.start).not.toHaveBeenCalled();
     expect(engine.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('video driver: the server the user chose is the one downloaded', () => {
+  const torrent = (id, fp, label) => ({ id, sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', code: 'TRR', type: 'torrent', state: 'READY', quality: 1080, fingerprint: fp, label });
+  const engineWith = (routes) => ({
+    prepare: vi.fn(async ({ session }) => ({ session, routes, done: true })),
+    routes: vi.fn(async () => ({ routes, done: true })),
+    upsertRoute: (list, r) => [...list.filter((x) => x.id !== r.id), r],
+    on: () => () => {},
+    pick: vi.fn(async (_s, routeId) => `cand-${routeId}`),
+    closeSession: vi.fn(async () => {}),
+  });
+  const ctlOf = () => ({ signal: new AbortController().signal, update: vi.fn(), progress: vi.fn(), handoff: vi.fn(), settings: () => ({ parallel: 2, wifiOnly: false }) });
+  /** جهاز وهمي: حالة كل عمل محفوظة كما في JobStore، فما يسبق الاشتراك يُقرأ بـstatus كالجهاز الحقيقي. */
+  const fakeDevice = (outcomeOf, inspectInfo = { container: 'TORRENT', transport: 'torrent', resumable: true }) => {
+    const jobs = new Map();
+    let emit;
+    return {
+      status: vi.fn(async ({ id }) => jobs.get(id) ?? { exists: false }),
+      inspect: vi.fn(async () => inspectInfo),
+      start: vi.fn(async (args) => {
+        const end = { id: args.id, ...outcomeOf(args) };
+        jobs.set(args.id, { exists: true, ...end });
+        queueMicrotask(() => emit?.(end));
+      }),
+      addListener: vi.fn(async (_n, fn) => { emit = fn; return { remove() {} }; }),
+    };
+  };
+  const nativeReady = () => fakeDevice(() => ({ state: 'ready', bytes: 7, path: '/v.mkv' }));
+
+  it('manual: the 200 MB release the user picked, not the 1.1 GB best of the same addon', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const routes = [
+      torrent('s|a', 'btih:aaaa:0', 'Big.1080p\n👤 289 💾 1.1 GB'),
+      torrent('s|b', 'btih:bbbb:0', 'Small.1080p\n👤 68 💾 200 MB'),
+    ];
+    const engine = engineWith(routes);
+    const native = nativeReady();
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'android', torrent: true }) });
+    const item = { id: 'dl_fc', kind: 'movie', section: 'cinema', work: { title: 'Fight Club' }, unit: { number: null }, request: { copies: [], episode: -1 },
+      source: { mode: 'manual', sourceId: 'addon|torrentio', server: 'Torrentio', routeCode: 'TRR2', fingerprint: 'btih:bbbb:0', quality: 1080 } };
+    await driver.run(item, ctlOf());
+    expect(native.start).toHaveBeenCalledTimes(1);
+    expect(native.start.mock.calls[0][0]).toMatchObject({ candidate: 'cand-s|b', sourceKey: 'addon|torrentio|btih:bbbb:0' });
+    // جلسة التنزيل معروفة البادئة (لا تسخين تورنتات أخرى)، وتُغلق بعده
+    expect(engine.prepare.mock.calls[0][0].session).toMatch(/^dl-/);
+    expect(engine.closeSession).toHaveBeenCalled();
+  });
+
+  it('manual: a picked release that did not come back fails honestly instead of downloading another', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const engine = engineWith([torrent('s|a', 'btih:aaaa:0', 'Big\n👤 289')]);
+    const native = nativeReady();
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'android', torrent: true }) });
+    const item = { id: 'dl_fc', kind: 'movie', section: 'cinema', work: { title: 'Fight Club' }, unit: { number: null }, request: { copies: [], episode: -1 },
+      source: { mode: 'manual', sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: 'btih:bbbb:0' } };
+    await expect(driver.run(item, ctlOf())).rejects.toMatchObject({ code: 'NO_ROUTE' });
+    expect(native.start).not.toHaveBeenCalled();
+  });
+
+  it('a job that fails before the listener is attached is not lost (no endless «preparing»)', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const engine = engineWith([{ id: 'r1', sourceId: 'src', server: 'mp4', state: 'READY', probed: true, quality: 720 }]);
+    let jobState = { exists: false };
+    const native = {
+      status: vi.fn(async () => jobState),
+      inspect: vi.fn(async () => ({ container: 'MP4', transport: 'http', resumable: true })),
+      // يفشل فورًا داخل الجهاز قبل أي اشتراك، والحدث يضيع
+      start: vi.fn(async () => { jobState = { exists: true, state: 'failed', code: 'SOURCE', message: 'الملف غير موجود عند المصدر (HTTP 404)' }; }),
+      addListener: vi.fn(async () => ({ remove() {} })),
+    };
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'windows', torrent: false }) });
+    const item = { id: 'dl_ar', kind: 'episode', section: 'cinema', work: { title: 'Arcane' }, unit: { number: 1 }, request: { copies: [], episode: 1 }, source: { mode: 'manual', sourceId: 'src', server: 'mp4' } };
+    await expect(driver.run(item, ctlOf())).rejects.toMatchObject({ code: 'SOURCE', message: expect.stringContaining('404') });
+  });
+
+  it('smart: a server that refuses mid-download is swapped for the next one, on a fresh file', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const routes = [
+      { id: 'r1', sourceId: 'src', server: 'one', state: 'READY', probed: true, probeMs: 100, quality: 1080 },
+      { id: 'r2', sourceId: 'src', server: 'two', state: 'READY', probed: true, probeMs: 300, quality: 1080 },
+    ];
+    const engine = engineWith(routes);
+    const native = fakeDevice(({ candidate }) => (candidate === 'cand-r1'
+      ? { state: 'failed', code: 'SOURCE', message: 'HTTP 404' }
+      : { state: 'ready', bytes: 9, path: '/ok.mp4' }), { container: 'MP4', transport: 'http', resumable: true });
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'windows', torrent: false }) });
+    const item = { id: 'dl_s', kind: 'episode', section: 'anime', work: { title: 'W' }, unit: { number: 3 }, request: { copies: [], episode: 3 }, source: { mode: 'smart' } };
+    const out = await driver.run(item, ctlOf());
+    expect(out).toMatchObject({ bytes: 9 });
+    expect(native.start.mock.calls.map((c) => c[0].candidate)).toEqual(['cand-r1', 'cand-r2']);
+    expect(native.start.mock.calls[0][0].sourceKey).not.toBe(native.start.mock.calls[1][0].sourceKey);
+  });
+
+  it('smart stops waiting for slow sources once enough is ready', async () => {
+    const engine = {
+      prepare: vi.fn(async ({ session }) => ({ session, routes: [{ id: 'fast', state: 'READY', probed: true }, { id: 'slow', state: 'RESOLVING' }], done: false })),
+      routes: vi.fn(async () => ({ routes: [], done: false })),
+      upsertRoute: (list, r) => [...list.filter((x) => x.id !== r.id), r],
+      on: () => () => {},
+    };
+    const t0 = Date.now();
+    const out = await resolveRoutes(engine, { copies: [], episode: 1 }, { settleMs: 30_000, enough: (rs) => rs.some((r) => r.state === 'READY') });
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(out.routes.some((r) => r.id === 'fast')).toBe(true);
+  });
+
+  it('an aborted wait returns its session to the caller instead of leaking it', async () => {
+    const ac = new AbortController();
+    const engine = {
+      prepare: vi.fn(async ({ session }) => ({ session, routes: [{ id: 'slow', state: 'RESOLVING' }], done: false })),
+      routes: vi.fn(async () => ({ routes: [], done: false })),
+      upsertRoute: (list, r) => [...list.filter((x) => x.id !== r.id), r],
+      on: () => () => {},
+    };
+    setTimeout(() => ac.abort('closed'), 50);
+    const out = await resolveRoutes(engine, { copies: [], episode: 1 }, { settleMs: 30_000, signal: ac.signal });
+    expect(out.session).toMatch(/^dl-/);
+  });
+});
+
+describe('work art on the device', () => {
+  it('a manga cover the WebView cannot fetch (no CORS, needs Referer) is saved through the source engine', async () => {
+    const { saveWorkArt, artUrl } = await import('./art.js');
+    const store = memoryStore();
+    const fetchImpl = vi.fn(async (src) => {
+      if (src.startsWith('https://')) throw new TypeError('Failed to fetch'); // CORS/Referer من الواجهة
+      return { ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) };
+    });
+    const local = vi.fn(async () => 'http://localhost/_capacitor_file_/files/covers/a.jpg');
+    const saved = await saveWorkArt(store, { ref: 'ext:solo', cover: 'https://site.example/wp/cover.jpg', coverSource: 'src1' }, { fetchImpl, local });
+    expect(saved).toBe(1);
+    expect(local).toHaveBeenCalledWith('https://site.example/wp/cover.jpg', 'cover');
+    globalThis.URL.createObjectURL ??= () => 'blob:x';
+    expect(await artUrl(store, 'ext:solo', 'cover')).toBeTruthy();
   });
 });

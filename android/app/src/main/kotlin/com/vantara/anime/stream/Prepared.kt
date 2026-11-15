@@ -118,6 +118,7 @@ class PreparedEpisode(
                 sourceName = r.candidates.firstOrNull()?.sourceName ?: old?.sourceName,
                 label = r.candidates.firstOrNull()?.label?.takeIf { it.isNotBlank() } ?: old?.label,
                 type = if (r.candidates.isNotEmpty() && r.candidates.all { it.url.startsWith(MagnetLinks.TICKET_SCHEME) }) "torrent" else old?.type,
+                fingerprint = r.candidates.firstNotNullOfOrNull { it.torrent }?.let { "btih:$it" } ?: old?.fingerprint ?: stableRouteId(rid),
             )
             byId[rid] = route
         }
@@ -270,6 +271,9 @@ class PreparedEpisode(
     }
 
     /** نفس السيرفر مرتين في نفس الجودة (من مصدرين): «MPU» ثم «MPU2». */
+    /** معرّف الطريق بلا معرّف هذه الجلسة (مرشّحات الإضافات تبدأ به)، فيتطابق الطريق نفسه بين جلستين. */
+    private fun stableRouteId(rid: String): String = rid.replace("$id|", "")
+
     private fun uniqueCode(base: String, quality: Int?, rid: String): String {
         val taken = byId.values.filter { it.id != rid && it.quality == quality }.map { it.code }.toSet()
         if (base !in taken) return base

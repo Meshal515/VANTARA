@@ -17,8 +17,16 @@ import { DownloadError } from './model.js';
 import { isDownloadReady, rankRoutes, unsupportedReason } from './smart.js';
 
 const SETTLE_MS = 60_000;
+/** الذكي لا ينتظر أبطأ مصدر: بعد أول سيرفر صالح بهذه المهلة يختار من الجاهز (كان ينتظر استقرار الكل حتى 60 ث). */
+const SMART_GRACE_MS = 8_000;
 const SMART_TRIES = 4;
 const MAX_RENEWALS = 3;
+/** فحص المرشّح (أول بايتات/قائمة HLS) لا يحبس «يجهّز المصدر» دقائق على مضيف ميت. */
+const INSPECT_MS = 20_000;
+/** إخفاقات من السيرفر نفسه لا من الشبكة: الذكي ينتقل لغيره (ملف جديد، لا خلط بايتات). */
+const SERVER_FAULTS = new Set(['SOURCE', 'UNSUPPORTED', 'VERIFY', 'NO_ROUTE', 'DRM']);
+/** بادئة جلسات تجهيز التنزيل: المحرك الأصلي لا يسخّن فيها تورنتات لم يخترها المستخدم. */
+export const DOWNLOAD_SESSION_PREFIX = 'dl-';
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -30,20 +38,48 @@ function sleep(ms, signal) {
   });
 }
 
-/** نفس السيرفر: المصدر نفسه، واسم السيرفر أو رمزه. */
+function withTimeout(promise, ms, code, message) {
+  let t;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { t = setTimeout(() => reject(new DownloadError(code, message)), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
+/**
+ * هوية سيرفر ثابتة بين جلستين: بصمة المحرك (التورنت بـinfoHash:fileIdx)، أو معرّف الطريق حيث لا بصمة.
+ * الرمز (`code`) ليس هوية: يُعطى بترتيب وصول السيرفرات في كل جلسة (TRR ثم TRR2…).
+ */
+export function routeIdentity(route) {
+  return route?.fingerprint ?? route?.id ?? null;
+}
+
+/**
+ * السيرفر نفسه الذي اختاره المستخدم أو قُفل عليه التنزيل.
+ *   - بصمة محفوظة: تطابق البصمة وحدها (تورنت آخر من الإضافة نفسها ليس هو، مهما تشابهت الجودة).
+ *   - بلا بصمة (تنزيل قديم): اسم السيرفر والجودة داخل المصدر نفسه.
+ */
 export function sameRoute(route, source) {
   if (!route || !source?.sourceId || route.sourceId !== source.sourceId) return false;
-  if (source.routeCode && route.code) return route.code === source.routeCode;
-  if (source.server) return route.server === source.server;
+  if (source.fingerprint) {
+    if (route.fingerprint) return route.fingerprint === source.fingerprint;
+    return route.id === source.fingerprint;
+  }
+  if (source.server && route.server !== source.server) return false;
+  if (source.quality != null && route.quality != null && Number(route.quality) !== Number(source.quality)) return false;
   return true;
 }
+
+/** هل حدّد المستخدم سيرفرًا بعينه (لا مصدرًا فقط)؟ */
+const pinsRoute = (source) => Boolean(source?.fingerprint || source?.server);
 
 /**
  * يجهّز الحلقة وينتظر السيرفرات: يرجع حين ينتهي التجهيز، أو حين يجهز ما يكفي للاختيار
  * (اليدوي: سيرفره وحده؛ الذكي: كل ما يُجهَّز انتهى أو مرّت المهلة).
  */
-export async function resolveRoutes(engine, request, { signal, wanted = null, settleMs = SETTLE_MS, onRoutes = null } = {}) {
-  const out = await engine.prepare({ copies: request.copies ?? [], identity: request.identity ?? null, episode: request.episode, pinned: Boolean(request.pinned), probe: true, signal });
+export async function resolveRoutes(engine, request, { signal, wanted = null, enough = null, settleMs = SETTLE_MS, onRoutes = null, session: sessionId } = {}) {
+  const session0 = sessionId ?? `${DOWNLOAD_SESSION_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const out = await engine.prepare({ copies: request.copies ?? [], identity: request.identity ?? null, episode: request.episode, pinned: Boolean(request.pinned), probe: true, signal, session: session0 });
   if (!out?.session) throw new DownloadError('NO_ROUTE', 'لم تبدأ جلسة تجهيز السيرفرات', { retryable: true });
   const session = out.session;
   let routes = out.routes ?? [];
@@ -66,8 +102,12 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, se
       if (wanted && mine.length && !mine.some(pending)) break;
       const checking = routes.some(pending);
       if (done && !checking) break;
+      // الذكي: ما يكفي جاهز (سيرفر صالح ومهلة سماح بعده)، فلا ينتظر أبطأ مصدر
+      if (!wanted && enough?.(routes)) break;
       if (Date.now() >= until) break;
-      await sleep(700, signal);
+      // الإلغاء يُنهي الانتظار بلا استثناء: الجلسة تعود للمتصل فيغلقها (كانت تتسرب مفتوحة مع الاستثناء)
+      await sleep(700, signal).catch(() => {});
+      if (signal?.aborted) break;
       try {
         const snap = await engine.routes(session, { signal });
         for (const r of snap?.routes ?? []) routes = engine.upsertRoute ? engine.upsertRoute(routes, r) : routes;
@@ -88,27 +128,34 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, se
  * @param {{ engine: () => object, native: () => object|null, platform: () => ({ torrent: boolean }) }} deps
  */
 export function createVideoDriver(deps) {
+  /** فحص المرشّح بمهلة: مضيف لا يرد لا يحبس التنزيل في «يجهّز المصدر». */
+  async function inspect(native, session, candidate) {
+    const info = await withTimeout(native.inspect({ session, candidate }), INSPECT_MS, 'SOURCE', 'السيرفر لم يرد على الفحص خلال 20 ثانية');
+    const why = unsupportedReason(info);
+    if (why) throw new DownloadError(why, info?.reason ?? null);
+    return info;
+  }
+
   /** يختار السيرفر والمرشّح: يرجع { route, candidate, info } أو يرمي بسبب واضح. */
-  async function choose(engine, native, item, session, routes, signal) {
-    const locked = item.source?.locked;
-    const manual = item.source?.mode === 'manual';
-    if (locked) {
-      const route = routes.find((r) => sameRoute(r, item.source));
+  async function choose(engine, native, item, session, routes, signal, skip = new Set()) {
+    const source = item.source ?? {};
+    const exact = source.locked || (source.mode === 'manual' && pinsRoute(source));
+    if (exact) {
+      // اليدوي والمقفول: السيرفر نفسه بهويته، لا «الأفضل» من مصدره (كان اليدوي يختار أعلى تورنت في Torrentio
+      // بدل الذي ضغطه المستخدم)
+      const route = rankRoutes(routes.filter((r) => sameRoute(r, source)), { platform: deps.platform() })[0];
       if (!route || !isDownloadReady(route)) {
-        throw new DownloadError('NO_ROUTE', 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله الآن', { retryable: true });
+        throw new DownloadError('NO_ROUTE', source.locked ? 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله الآن' : 'السيرفر الذي اخترته لم يعد متاحًا لهذه الحلقة الآن', { retryable: true });
       }
       const candidate = await engine.pick(session, route.id);
       if (!candidate) throw new DownloadError('NO_ROUTE', 'السيرفر لم يرجع رابطًا');
-      const info = await native.inspect({ session, candidate });
-      const why = unsupportedReason(info);
-      if (why) throw new DownloadError(why, info?.reason ?? null);
-      return { route, candidate, info };
+      return { route, candidate, info: await inspect(native, session, candidate) };
     }
-    // يدوي: سيرفرات المصدر الذي اختاره المستخدم وحدها، ولا انتقال لغيره مهما كان أفضل
-    const pool = manual ? routes.filter((r) => r.sourceId === item.source.sourceId) : routes;
-    const ranked = rankRoutes(pool, { platform: deps.platform(), prefer: { quality: item.source?.quality ?? null } });
+    // يدوي بمصدر فقط: سيرفرات ذلك المصدر وحدها؛ الذكي: الكل
+    const pool = (source.mode === 'manual' ? routes.filter((r) => r.sourceId === source.sourceId) : routes).filter((r) => !skip.has(routeIdentity(r)));
+    const ranked = rankRoutes(pool, { platform: deps.platform(), prefer: { quality: source.quality ?? null } });
     if (!ranked.length) {
-      throw new DownloadError('NO_ROUTE', manual ? 'المصدر الذي اخترته لم يجهز سيرفرًا قابلًا للتنزيل لهذه الحلقة الآن' : 'لا سيرفر جاهز يدعم التنزيل لهذه الحلقة الآن', { retryable: true });
+      throw new DownloadError('NO_ROUTE', source.mode === 'manual' ? 'المصدر الذي اخترته لم يجهز سيرفرًا قابلًا للتنزيل لهذه الحلقة الآن' : noRouteReason(routes, skip), { retryable: true });
     }
     let last = null;
     for (const route of ranked.slice(0, SMART_TRIES)) {
@@ -116,18 +163,22 @@ export function createVideoDriver(deps) {
       try {
         const candidate = await engine.pick(session, route.id);
         if (!candidate) continue;
-        const info = await native.inspect({ session, candidate });
-        const why = unsupportedReason(info);
-        if (why) {
-          last = new DownloadError(why, info?.reason ?? null);
-          continue;
-        }
-        return { route, candidate, info };
+        return { route, candidate, info: await inspect(native, session, candidate) };
       } catch (error) {
         last = error;
       }
     }
     throw last instanceof DownloadError ? last : new DownloadError('NO_ROUTE', String(last?.message ?? 'لا سيرفر قابل للتنزيل'), { retryable: true });
+  }
+
+  /** لماذا لا سيرفر: بالأرقام، لا «تعذّر» صامت. */
+  function noRouteReason(routes, skip) {
+    const torrentOnly = routes.length > 0 && routes.every((r) => r.type === 'torrent');
+    if (!routes.length) return 'لم يرجع أي مصدر سيرفرًا لهذه الحلقة';
+    if (torrentOnly && !deps.platform()?.torrent) return 'كل السيرفرات تورنت، وهذا الجهاز لا يحفظ التورنت';
+    const failed = routes.filter((r) => r.state === 'UNAVAILABLE' || r.state === 'FAILED' || r.probed === false).length;
+    const tried = skip.size ? ` (جُرّب ${skip.size} ورفض)` : '';
+    return `لا سيرفر صالح للتنزيل من ${routes.length}${failed ? `، ${failed} منها لا يعمل الآن` : ''}${tried}`;
   }
 
   /** ينتظر نهاية العمل الأصلي، ويمرّر تقدّمه. يرجع { status: 'ready'|'expired', ... }. */
@@ -161,9 +212,13 @@ export function createVideoDriver(deps) {
           else reject(new DownloadError(e.code ?? 'UNKNOWN', e.message ?? null, { retryable: e.code === 'NETWORK' }));
         }
       };
-      Promise.resolve(native.addListener('progress', listener)).then((h) => {
+      Promise.resolve(native.addListener('progress', listener)).then(async (h) => {
         handle = h;
-        if (ctl.signal.aborted) h?.remove?.();
+        if (ctl.signal.aborted) return void h?.remove?.();
+        // حدث سبق الاشتراك (فشل فوري برمز 404، أو اكتمال سريع) لا يُفقد: الحالة الحالية من الجهاز.
+        // بدونها يبقى الصف «يجهّز المصدر» للأبد لأن نهايته وصلت قبل أن يستمع أحد
+        const st = await native.status?.({ id: item.id }).catch(() => null);
+        if (st?.exists && ['ready', 'failed', 'expired'].includes(st.state)) listener({ ...st, id: item.id });
       });
     });
   }
@@ -202,14 +257,31 @@ export function createVideoDriver(deps) {
           // انتهت صلاحية الرابط وهو في طابور الجهاز: يُجهَّز من جديد أدناه
         }
       }
-      for (let renewal = 0; renewal <= MAX_RENEWALS; renewal++) {
-        ctl.update({ state: 'resolving' });
-        const wanted = current.source?.locked ? (r) => sameRoute(r, current.source)
+      // أخطاء السيرفر نفسه في الذكي: يُستبعد ويُجرَّب التالي (ملف جديد من الصفر، لا خلط بايتات)
+      const skip = new Set();
+      for (let renewal = 0; renewal <= MAX_RENEWALS + SMART_TRIES; renewal++) {
+        ctl.update({ state: 'resolving', stage: 'نجهّز سيرفرات الحلقة…' });
+        const exact = current.source?.locked || (current.source?.mode === 'manual' && pinsRoute(current.source));
+        const wanted = exact ? (r) => sameRoute(r, current.source)
           : current.source?.mode === 'manual' ? (r) => r.sourceId === current.source.sourceId : null;
-        const { session, routes } = await resolveRoutes(engine, current.request, { signal: ctl.signal, wanted });
+        let firstGood = 0;
+        const enough = (routes) => {
+          if (!rankRoutes(routes.filter((r) => !skip.has(routeIdentity(r))), { platform: deps.platform() }).length) return false;
+          firstGood ||= Date.now();
+          return Date.now() - firstGood >= SMART_GRACE_MS;
+        };
+        const onRoutes = (routes) => {
+          const ready = routes.filter((r) => isDownloadReady(r)).length;
+          const pending = routes.filter((r) => r.state === 'RESOLVING' || r.state === 'CHECKING').length;
+          const stage = ready ? `${ready} ${ready === 1 ? 'سيرفر جاهز' : 'سيرفرات جاهزة'}${pending ? ` · يُفحص ${pending}` : ''}` : pending ? `نبحث في المصادر · ${pending}` : 'نجهّز سيرفرات الحلقة…';
+          if (stage !== current.stage) { current = { ...current, stage }; ctl.update({ stage }); }
+        };
+        const { session, routes } = await resolveRoutes(engine, current.request, { signal: ctl.signal, wanted, enough, onRoutes });
+        let started = null;
         try {
           if (ctl.signal.aborted) return null;
-          const picked = await choose(engine, native, current, session, routes, ctl.signal);
+          ctl.update({ stage: 'نفحص الملف قبل الحفظ…' });
+          const picked = await choose(engine, native, current, session, routes, ctl.signal, skip);
           if (!picked || ctl.signal.aborted) return null;
           const { route, candidate, info } = picked;
           const source = {
@@ -218,12 +290,19 @@ export function createVideoDriver(deps) {
             sourceName: route.sourceName ?? current.source?.sourceName ?? null,
             server: route.server,
             routeCode: route.code ?? null,
+            fingerprint: routeIdentity(route),
+            torrent: route.type === 'torrent' || undefined,
+            label: route.label ?? current.source?.label ?? null,
             quality: route.quality ?? info.quality ?? null,
             locked: true,
+            // قفلُ الذكي (لا المستخدم): خطأ دائم من السيرفر ينقل لغيره
+            auto: current.source?.mode !== 'manual',
           };
           current = { ...current, source };
+          started = routeIdentity(route);
           ctl.update({
             source,
+            stage: null,
             transport: info.transport ?? (route.type === 'torrent' ? 'torrent' : info.container === 'HLS' ? 'hls' : 'http'),
             resumable: info.resumable ?? null,
             total: info.size > 0 ? info.size : current.total ?? null,
@@ -239,7 +318,8 @@ export function createVideoDriver(deps) {
             id: current.id,
             session,
             candidate,
-            sourceKey: `${source.sourceId}|${source.routeCode ?? source.server ?? ''}`,
+            // هوية السيرفر الثابتة: نفسها ⇒ يكمل الجزئي، غيرها ⇒ ملف جديد (الرمز يتغير بين الجلسات فلا يصلح)
+            sourceKey: `${source.sourceId}|${source.fingerprint ?? source.server ?? ''}`,
             title: current.work.title,
             label: current.unit.number != null ? (current.kind === 'manga' ? `الفصل ${current.unit.number}` : `الحلقة ${current.unit.number}`) : current.work.title,
             section: current.section,
@@ -250,6 +330,17 @@ export function createVideoDriver(deps) {
           if (end.status === 'aborted') return null;
           if (end.status === 'ready') return outcome(end, current, source);
           // انتهت صلاحية الرابط: نفس السيرفر برابط جديد، ويكمل المحرك من آخر بايت صحيح
+        } catch (error) {
+          // الذكي وحده ينتقل: سيرفر رفض (404، صفحة بدل ملف، فحص فاشل) يُستبعد ويُجرَّب الذي بعده
+          const code = error instanceof DownloadError ? error.code : null;
+          const smart = current.source?.mode !== 'manual' && (!current.source?.locked || current.source?.auto);
+          if (!smart || !SERVER_FAULTS.has(code) || ctl.signal.aborted) throw error;
+          // فشل قبل البدء: choose جرّب أفضل ما عنده بالفعل، فلا جولة تجهيز ثانية بلا جديد
+          if (!started) throw error;
+          skip.add(started);
+          if (skip.size >= SMART_TRIES) throw error;
+          current = { ...current, source: { ...current.source, locked: false, fingerprint: null, server: null, routeCode: null } };
+          ctl.update({ source: current.source, stage: 'السيرفر رفض — نجرّب غيره…' });
         } finally {
           void engine.closeSession?.(session)?.catch?.(() => {});
         }

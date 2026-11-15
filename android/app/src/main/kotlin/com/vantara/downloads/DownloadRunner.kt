@@ -14,7 +14,7 @@ class DownloadRunner(
     /** محرك التورنت الدائم (TorrentEngine.downloadPermanent)؛ null حيث لا يتوفر (الاختبارات). */
     private val torrent: ((DownloadJob, File, (DownloadJob) -> Unit) -> File)? = null,
     /** ترجمات الإضافات المثبتة لهذه الحلقة: (اللغة، النص UTF-8، الامتداد). null حيث لا تتوفر. */
-    private val addonSubtitles: ((DownloadJob) -> List<Triple<String, String, String>>)? = null,
+    private val addonSubtitles: ((DownloadJob) -> List<SavedSubtitle>)? = null,
 ) {
     fun interface Listener { fun on(job: DownloadJob) }
 
@@ -210,9 +210,9 @@ class DownloadRunner(
         val fetchSubtitles = addonSubtitles
         if (!job.addonSubtitlesDone && fetchSubtitles != null && job.subtitleProviders != null) {
             val fetched = runCatching { fetchSubtitles(job) }.getOrDefault(emptyList())
-            val saved = fetched.mapIndexedNotNull { i, (lang, text, ext) ->
-                val name = "addon-$i-$lang.$ext"
-                runCatching { File(dir, name).writeText(text, Charsets.UTF_8) }.getOrNull()?.let { Sidecar(url = "addon:$i", lang = lang, file = name) }
+            val saved = fetched.mapIndexedNotNull { i, sub ->
+                val name = "addon-$i-${sub.lang}.${sub.ext}"
+                runCatching { File(dir, name).writeText(sub.text, Charsets.UTF_8) }.getOrNull()?.let { Sidecar(url = "addon:$i", lang = sub.lang, file = name, label = sub.provider) }
             }
             job = job.copy(subtitles = job.subtitles + saved, addonSubtitlesDone = true)
         }

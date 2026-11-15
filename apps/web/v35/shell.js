@@ -3619,9 +3619,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     units.sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity));
     const next = state.nextRow ? chapterKeyOf(ref, state.nextRow) : null;
+    const cover = w.coverImage?.extraLarge ?? w.coverImage?.large ?? null;
     const work = {
-      ref, title: titleOf(w), cover: w.coverImage?.extraLarge ?? w.coverImage?.large ?? null,
+      ref, title: titleOf(w), cover,
       banner: w.wideBanner ?? (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null), color: w.coverImage?.color ?? null,
+      // المصدر الذي جاء منه الغلاف: به يُحفظ على الجهاز (Referer/كوكي الموقع)
+      coverSource: (w._editions ?? []).find((e) => e.manga?.thumbnailUrl && e.manga.thumbnailUrl === cover)?.sourceId ?? w._editions?.[0]?.sourceId ?? null,
     };
     downloadsDeps.open({
       section: 'manga',

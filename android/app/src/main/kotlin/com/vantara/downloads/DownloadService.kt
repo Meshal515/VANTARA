@@ -186,7 +186,7 @@ class DownloadService : Service() {
     /**
      * ترجمات الإضافات المثبتة بنفس مسار المشغّل (SubtitleProviders.discover + RemoteAddonClient): العربية وحدها، حتى 20. النص يُقرأ بفك ترميز العربية القديم (windows-1256) ويُحفظ UTF-8، والتوقيت كما هو.
      */
-    private fun addonSubtitles(job: DownloadJob): List<Triple<String, String, String>> {
+    private fun addonSubtitles(job: DownloadJob): List<SavedSubtitle> {
         val providers = com.vantara.addons.SubtitleProviders.providers(job.subtitleProviders)
         if (providers.isEmpty() || com.vantara.addons.SubtitleProviders.videoId(job.subtitleIdentity, job.episode) == null) return emptyList()
         val client = com.vantara.addons.nativeAddonClient(this)
@@ -208,7 +208,7 @@ class DownloadService : Service() {
                 head.startsWith("[Script Info]", true) -> "ass"
                 else -> "srt"
             }
-            Triple(t.lang, text, ext)
+            SavedSubtitle(t.lang, text, ext, t.provider)
         }
     }
 

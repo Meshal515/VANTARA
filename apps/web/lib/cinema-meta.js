@@ -66,19 +66,35 @@ export function sharpArt(url, width = 780) {
   return url.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/');
 }
 
+/**
+ * نوع العمل. Cinemeta يردّ على `/meta/movie/<مسلسل>` بنوع «movie» (Cyberpunk: Edgerunners ظهر فيلمًا)، لكن
+ * `slug` يبقى «series/…»: هذا الاتجاه وحده مُثبت. أما «movie/…» فليس حكمًا (Game of Thrones له بذرة فيلم
+ * بـslug «movie/…» بلا حلقات).
+ */
+export function kindOf(m) {
+  if (String(m?.slug ?? '').startsWith('series/')) return 'series';
+  return m?.type === 'series' ? 'series' : 'movie';
+}
+
+/** حلقات العمل نفسه في رد «مسلسل» (videos بمعرّف tt…:موسم:حلقة). */
+const episodesOf = (m, id) => (m?.videos ?? []).filter((v) => String(v?.id ?? '').startsWith(`${id}:`)).length;
+
 /** شكل واحد للعمل في كل الواجهة. */
 export function normalize(m) {
   if (!m?.id || !/^tt\d+$/.test(String(m.imdb_id ?? m.id))) return null;
   const rating = Number.parseFloat(m.imdbRating);
+  const type = kindOf(m);
   return {
     id: String(m.imdb_id ?? m.id),
-    type: m.type === 'series' ? 'series' : 'movie',
+    type,
+    // مسلسل بشهادة slug أو حلقاته: يُصحّح بطاقة محفوظة أو ممرَّرة «فيلمًا» (الاتجاه الوحيد المثبت)
+    typeCertain: type === 'series' && (String(m.slug ?? '').startsWith('series/') || episodesOf(m, String(m.imdb_id ?? m.id)) >= 2),
     title: m.name,
     poster: sharpArt(m.poster) || null,
     background: m.background ? m.background.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, '._V1_.$1') : null,
     logo: m.logo || null,
     year: year(m),
-    endYear: m.type === 'series' ? endYear(m) : null,
+    endYear: type === 'series' ? endYear(m) : null,
     rating: Number.isFinite(rating) && rating > 0 ? rating : null,
     genres: m.genres ?? m.genre ?? [],
     description: m.description || null,
@@ -113,6 +129,26 @@ export async function search(query, { fetchImpl } = {}) {
 export async function detail(type, id, { fetchImpl } = {}) {
   const data = await getJson(`${CINEMETA}/meta/${type}/${id}.json`, fetchImpl);
   return normalize(data.meta);
+}
+
+/**
+ * نوع مجهول (عمل من الحساب أو مرجع بلا موسم): الطلبان معًا ثم الحكم. ردود Cinemeta للنوع الخاطئ «صالحة» الشكل:
+ *   - `/meta/movie/<مسلسل>`: المسلسل نفسه موسومًا فيلمًا (slug series/…)، أو بذرة بلا حلقات (Game of Thrones)،
+ *     أو عمل آخر بنفس الرقم (Arcane ← «De nacht van Aalbers»).
+ *   - `/meta/series/<فيلم>`: عمل آخر بحلقة واحدة (Fight Club ← «NICK …»).
+ * الحكم: slug مسلسل، أو رد «مسلسل» بحلقتين فأكثر للمعرّف نفسه ⇒ مسلسل؛ وإلا فيلم.
+ * `{ work, certain }`: certain=false إن فشل أحد الطلبين، فلا يُحفظ النوع من نصف جواب.
+ */
+export async function detailAnyType(id, { fetchImpl } = {}) {
+  const ask = (type) => getJson(`${CINEMETA}/meta/${type}/${id}.json`, fetchImpl).then((d) => ({ meta: d?.meta ?? null }), () => ({ failed: true }));
+  const [movie, series] = await Promise.all([ask('movie'), ask('series')]);
+  const ours = (m) => (m && String(m.imdb_id ?? m.id) === String(id) ? m : null);
+  const movieMeta = ours(movie.meta);
+  const seriesMeta = ours(series.meta);
+  const isSeries = String(movieMeta?.slug ?? '').startsWith('series/') || episodesOf(seriesMeta, id) >= 2;
+  const chosen = isSeries ? (episodesOf(seriesMeta, id) ? seriesMeta : movieMeta) : movieMeta ?? seriesMeta;
+  const work = normalize(chosen ? { ...chosen, type: isSeries ? 'series' : chosen.type } : null);
+  return { work, certain: !movie.failed && !series.failed && Boolean(work) };
 }
 
 /** أسماء الأعمال تبقى كما هي (الإنجليزية)؛ القصة وحدها تُعرَّب. */

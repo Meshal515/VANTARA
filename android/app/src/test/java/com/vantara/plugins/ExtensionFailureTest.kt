@@ -21,6 +21,13 @@ class ExtensionFailureTest {
         assertEquals(Owner.SITE, v.owner); assertEquals("SITE_HTTP_403", v.code); arabicOnly(v.message)
     }
 
+    @Test fun pageThatIsNotAnImageIsTheSiteNotACrashedExtension() {
+        // انحدار: قارئ المانجا عرض «تعطّلت الإضافة أثناء الطلب» لصفحة حجب HTML ردّها الموقع بـ200
+        val v = ExtensionFailure.classify(PageImageException("not an image: text/html"))
+        assertEquals(Owner.SITE, v.owner); assertEquals("SITE_NOT_IMAGE", v.code); arabicOnly(v.message)
+        assertEquals(Owner.EXTENSION, ExtensionFailure.classify(PageImageException("page carries no imageUrl", noImageUrl = true)).owner)
+    }
+
     @Test fun httpTextWithoutTypeIsStillSite() {
         assertEquals("SITE_HTTP_503", ExtensionFailure.classify(IOException("HTTP error 503")).code)
     }

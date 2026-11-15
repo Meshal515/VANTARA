@@ -29,7 +29,7 @@ data class ServerRoute(
 )
 
 @Serializable
-data class TrackRef(val url: String, val lang: String)
+data class TrackRef(val url: String, val lang: String, /** اسم الإضافة/المصدر: يميّز ترجمات «ar» المتعددة في القائمة. */ val label: String? = null)
 
 @Serializable
 data class Candidate(
@@ -60,6 +60,11 @@ data class Candidate(
      * Null means no preparation session has measured this candidate (including legacy payloads).
      */
     val preparationMs: Long? = null,
+    /**
+     * هوية التورنت الثابتة «hash:fileIdx» (أو «hash:» بلا ملف محدد). تذكرة التشغيل (`vantara-torrent://uuid`)
+     * عشوائية لكل جلسة، فلا يُعرف منها أن تورنتين في جلستين هما نفس الإصدار. التنزيلات تثبّت اختيار المستخدم بها.
+     */
+    val torrent: String? = null,
 )
 
 object StreamClassifier {

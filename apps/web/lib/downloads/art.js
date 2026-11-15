@@ -30,24 +30,42 @@ async function shrink(blob, maxWidth) {
   }
 }
 
-/** يحفظ ما لم يُحفظ بعد من فن العمل. الفشل لا يوقف التنزيل: البطاقة تعرض لون العمل بدل الغلاف. */
-export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch } = {}) {
-  if (!store?.putArt || !work?.ref) return;
+async function imageBlob(src, fetchImpl) {
+  const res = await fetchImpl(src);
+  if (!res.ok) return null;
+  const blob = await res.blob();
+  return blob?.size && /^image\//.test(blob.type) ? blob : null;
+}
+
+/**
+ * يحفظ ما لم يُحفظ بعد من فن العمل. الفشل لا يوقف التنزيل: البطاقة تعرض لون العمل بدل الغلاف.
+ * `local(src)`: نسخة محلية بمحرّك المصدر (غلاف المانجا: الموقع يحتاج Referer/كوكي ولا يرسل CORS، فطلب
+ * الواجهة المباشر يفشل دائمًا — لذلك غابت أغلفة المانجا وحدها عن «على الجهاز»). يرجع عدد الصور المحفوظة.
+ */
+export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, local = null } = {}) {
+  if (!store?.putArt || !work?.ref) return 0;
+  let saved = 0;
   for (const kind of ['cover', 'banner', 'logo']) {
     const src = work[kind];
     if (!src || typeof src !== 'string') continue;
     const key = `${work.ref}|${kind}`;
     try {
       if (await store.getArt(key)) continue;
-      const res = await fetchImpl(src);
-      if (!res.ok) continue;
-      const blob = await shrink(await res.blob(), SIZES[kind]);
+      let blob = await imageBlob(src, fetchImpl).catch(() => null);
+      if (!blob && local) {
+        const copy = await Promise.resolve(local(src, kind)).catch(() => null);
+        if (copy) blob = await imageBlob(copy, fetchImpl).catch(() => null);
+      }
+      if (!blob) continue;
+      blob = await shrink(blob, SIZES[kind]);
       if (!blob?.size || !/^image\//.test(blob.type)) continue;
       await store.putArt(key, { type: blob.type, data: await blob.arrayBuffer(), at: Date.now() });
+      saved++;
     } catch {
       /* صورة واحدة فشلت لا تمنع البقية */
     }
   }
+  return saved;
 }
 
 /** رابط محلي لصورة محفوظة (يُعاد استعماله)، أو null. */

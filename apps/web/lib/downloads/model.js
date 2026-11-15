@@ -127,6 +127,8 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
       banner: spec.work.banner ?? null,
       logo: spec.work.logo ?? null,
       color: spec.work.color ?? null,
+      // مصدر غلاف المانجا: يُجلب بعميله وترويساته (الطلب المباشر من الواجهة يرفضه الموقع)
+      coverSource: spec.work.coverSource ?? null,
       year: spec.work.year ?? null,
       format: spec.work.format ?? null,
     },
@@ -142,6 +144,9 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
       sourceName: spec.source?.sourceName ?? null,
       server: spec.source?.server ?? null,
       routeCode: spec.source?.routeCode ?? null,
+      // هوية السيرفر الثابتة (التورنت: btih:hash:idx) — بها يُنزَّل ما اختاره المستخدم نفسه لا «أفضل» غيره
+      fingerprint: spec.source?.fingerprint ?? null,
+      label: spec.source?.label ?? null,
       quality: spec.source?.quality ?? null,
     },
     request: spec.request ?? {},

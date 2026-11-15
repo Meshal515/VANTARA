@@ -582,7 +582,8 @@ class AnimeEngine(context: Context) {
                 // تجهيز مسبق محدود لأفضل خيارَي تورنت بترتيب المشغّل: بيانات التورنت (وطرفا الملف
                 // للأول) قبل الضغط، فالتشغيل لا ينتظر إلا القطع. تجهيز الحلقة التالية: بيانات فقط.
                 val torrents = list.filter { it.url.startsWith("vantara-torrent:") }
-                if (torrents.isNotEmpty() && prepared[id] === prep && prep.job?.isActive == true) runCatching {
+                // جلسة تنزيل («dl-»): لا تسخين؛ كان يسخّن أعلى إصدارين (غير الذي اختاره المستخدم) فينافسانه على المشاركين
+                if (torrents.isNotEmpty() && !id.startsWith(DOWNLOAD_SESSION_PREFIX) && prepared[id] === prep && prep.job?.isActive == true) runCatching {
                     val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
                     engine.warmUp()
                     val picks = com.vantara.addons.torrent.TorrentPrefetch.pick(prep.rank(torrents).map { it.url to it.label }, background = id.startsWith("warm-"))
@@ -741,7 +742,7 @@ class AnimeEngine(context: Context) {
             val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
             val uri = runCatching { engine.register(request) }.getOrNull() ?: return null
             if (!prep.ownTorrentTicket(uri.toString())) { engine.release(uri); return null }
-            return c.copy(url = uri.toString(), host = "torrent", headers = emptyMap())
+            return c.copy(url = uri.toString(), host = "torrent", headers = emptyMap(), torrent = "${request.infoHash}:${request.fileIdx ?: ""}")
         }
         fun report(r: com.vantara.anime.stream.RouteReport): com.vantara.anime.stream.RouteReport {
             if (r.candidates.none { com.vantara.anime.stream.MagnetLinks.isMagnet(it.url) }) return r
@@ -1015,6 +1016,8 @@ class AnimeEngine(context: Context) {
          */
         const val SLOW_SOURCE_SEARCH_MS = 45_000L
         const val RUNTIME_SOURCE_PREFIX = "addon|cs3|"
+        /** جلسات تجهيز التنزيلات: تُرى من معرّفها فلا تسخّن تورنتات لم يخترها المستخدم. */
+        const val DOWNLOAD_SESSION_PREFIX = "dl-"
 
         /**
          * ترتيب البحث العام: (المتخطّى، المسؤول). السليمة أولًا ثم المبرَّدة بعد فشل متتالٍ؛ المتخطّى فقط ما حجبه
