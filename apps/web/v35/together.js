@@ -361,7 +361,9 @@ export function createTogether(deps) {
     text.append(title, who);
     body.append(cover, text);
     wrap.append(top, body, enter);
-    void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).then((r) => {
+    // من لم يُدعَ للغرفة يرد الخادم عليه 403: البطاقة تبقى كما هي بلا خطأ صامت في الخلفية
+    void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).catch(() => undefined).then((r) => {
+      if (r === undefined) return;
       alive = r != null;
       if (!r) {
         wrap.classList.add('is-over');

@@ -398,8 +398,12 @@ export class RoomCore {
   }
 
   private transferHost(userId: string, now: number): Out[] {
-    if (userId === this.settings.hostUserId) return [];
-    this.settings = { ...this.settings, hostUserId: userId };
+    const previous = this.settings.hostUserId;
+    if (userId === previous) return [];
+    // المضيف السابق يبقى مدعوًا: قائمة المدعوين لا تحمل المضيف (الاستضافة تُدخله)، فكان يُطرد من غرفته
+    // «غير مدعو» حين تنتقل الاستضافة (غاب دقيقة فانتقلت لأقدم حاضر، ثم عاد).
+    const allowed = this.settings.allowed === '*' ? '*' : [...new Set([...this.settings.allowed, previous])].filter((id) => id !== userId);
+    this.settings = { ...this.settings, hostUserId: userId, allowed };
     this.hostAwaySince = null;
     this.dirty = true;
     return [{ to: 'all', msg: { t: 'host', userId } }, { to: 'all', msg: { t: 'room', room: this.roomView() } }, this.rosterOut(now)];

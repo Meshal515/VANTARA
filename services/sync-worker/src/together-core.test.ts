@@ -137,6 +137,24 @@ describe('Together room core', () => {
     expect(back.tick(10_000 + HOST_GRACE_MS).out).toHaveLength(0);
   });
 
+  it('the host who lost hosting while away is still invited and gets back into the room', () => {
+    // غرفة لأصدقاء محددين (الافتراضي في الواجهة)، لا مفتوحة للكل
+    const core = room({}, 1_000, ['u-b', 'u-c']);
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.leave('c-host', 10_000);
+    expect(of(core.tick(10_000 + HOST_GRACE_MS).out, 'host')[0]!.msg['userId']).toBe('u-b');
+    const back = core.join({ conn: 'c-host2', userId: HOST, name: 'المضيف', avatarKey: null }, 10_000 + HOST_GRACE_MS + 5_000);
+    expect(of(back, 'uninvited')).toHaveLength(0);
+    expect(of(back, 'welcome')).toHaveLength(1);
+    // ونقل الاستضافة يدويًا كذلك: من سلّمها يبقى مدعوًا، والمضيف الجديد لا يتكرر في القائمة
+    const manual = room({}, 1_000, ['u-b']);
+    manual.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    manual.handle('c-host', { t: 'host', userId: 'u-b' }, 3_000);
+    expect(manual.roomView().invited).toEqual([HOST]);
+    manual.leave('c-host', 4_000);
+    expect(of(manual.join({ conn: 'c-host3', userId: HOST, name: 'المضيف', avatarKey: null }, 5_000), 'welcome')).toHaveLength(1);
+  });
+
   it('an empty room expires after its TTL', () => {
     const core = room();
     core.leave('c-host', 5_000);

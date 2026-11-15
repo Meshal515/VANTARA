@@ -87,6 +87,8 @@ export class TogetherRoom {
     }
     if (url.pathname === '/info') {
       if (!this.core) return json({ error: 'gone' }, 404);
+      // من في الغرفة وماذا يشاهدون لمن دُعي إليها فقط، لا لأي حساب يعرف الرمز
+      if (!this.core.invited(request.headers.get('x-vantara-user') ?? '')) return json({ error: 'uninvited' }, 403);
       // لبطاقة الدعوة في الشات: من داخل الآن، وهل بدأت (فيدخلك على طول في نفس الثانية)
       return json({
         room: this.core.roomView(),
@@ -246,9 +248,12 @@ export async function togetherRoute(path: string, request: Request, env: Env, no
   const code = normalizeCode(m?.[1]);
   if (!m || !code) return json({ error: 'not_found' }, 404);
   const stub = ns.get(ns.idFromName(code));
-  if (!m[2]) return stub.fetch(new Request('https://room/info'));
+  if (!m[2]) return stub.fetch(new Request('https://room/info', { headers: { 'x-vantara-user': claims.userId } }));
   const headers = new Headers(request.headers);
   headers.delete('authorization');
+  // هوية العضو من الحساب وحده: ترويسة x-vantara-* يرسلها الجهاز لا تصل الغرفة (كانت صورة حساب آخر تمر
+  // حين لا صورة لصاحب الحساب)
+  for (const name of [...headers.keys()]) if (name.toLowerCase().startsWith('x-vantara-')) headers.delete(name);
   headers.set('x-vantara-user', claims.userId);
   headers.set('x-vantara-name', encodeURIComponent(profile.display_name || profile.username));
   if (profile.avatar_key) headers.set('x-vantara-avatar', profile.avatar_key);
