@@ -298,7 +298,7 @@ export function createDownloadsUI(deps) {
     if (ratio != null) refs.bar.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
     else refs.bar.removeAttribute('aria-valuenow');
     // سطر الحالة: الحجم والنسبة، ثم السرعة والوقت المتبقي (مستقر فقط)
-    const key = `${item.state}|${item.bytes}|${item.total}|${item.pages}|${Math.round(item.speed / 1024)}|${item.error?.code ?? ''}`;
+    const key = `${item.state}|${item.bytes}|${item.total}|${item.pages}|${Math.round(item.speed / 1024)}|${item.error?.code ?? ''}|${item.error?.message ?? ''}|${item.stage ?? ''}`;
     if (refs.last !== key) {
       refs.last = key;
       refs.meta.replaceChildren(...metaLine(item, ratio));
@@ -313,13 +313,66 @@ export function createDownloadsUI(deps) {
     }
   }
 
+  /**
+   * المسارات بأسمائها: «العربية · OpenSubtitles» لا «ar، ar، ar». المتكرر يُجمع بعدده («العربية · Subsource ×3»).
+   */
+  function trackList(list, unsaved) {
+    if (!list?.length) return null;
+    let names;
+    try { names = new Intl.DisplayNames(['ar'], { type: 'language' }); } catch { names = null; }
+    const lang = (code) => {
+      const c = String(code ?? '').trim();
+      const tag = { ara: 'ar', arabic: 'ar', eng: 'en', english: 'en' }[c.toLowerCase()] ?? c;
+      try { return (tag && /^[a-z]{2,3}(-[a-z0-9]+)?$/i.test(tag) && names?.of(tag)) || c || 'غير محددة'; } catch { return c || 'غير محددة'; }
+    };
+    const counts = new Map();
+    for (const t of list) {
+      const x = typeof t === 'string' ? { lang: t } : t;
+      const text = `${lang(x.lang)}${x.label ? ` · ${x.label}` : ''}${x.saved === false ? ` (${unsaved})` : ''}`;
+      counts.set(text, (counts.get(text) ?? 0) + 1);
+    }
+    return [...counts].map(([text, n]) => (n > 1 ? `${text} ×${n}` : text)).join('، ');
+  }
+
+  /** السبب التقني مقروءًا: رموز HTTP بمعناها، ولا تكرار لما قاله العنوان. */
+  function failureDetail(error, label) {
+    const raw = String(error?.message ?? '').trim();
+    if (!raw || raw === label) return null;
+    // رسائل المتصفح العامة («Failed to fetch») لا تضيف لـ«انقطع الاتصال» شيئًا
+    if (/^(?:TypeError:\s*)?(?:Failed to fetch|NetworkError\b|Load failed|network error|aborted)/i.test(raw)) return null;
+    const http = /HTTP (\d{3})/.exec(raw)?.[1];
+    const meaning = { 400: 'طلب مرفوض من الخادم', 401: 'الخادم يطلب تسجيل دخول', 403: 'الخادم منع الوصول (حماية أو رابط منتهي)', 404: 'الملف غير موجود عند المصدر', 405: 'الخادم لا يقبل هذا النوع من الطلبات', 410: 'الرابط حُذف أو انتهى', 429: 'كثرة طلبات — الخادم يطلب التمهّل', 451: 'المحتوى محجوب قانونيًا في هذه المنطقة' }[http];
+    // الرمز وحدة واحدة باتجاهها (LRI…PDI) ومسافة لا تنكسر: لا «(HTTP» في سطر و«404)» في آخر
+    const text = meaning && !raw.includes(meaning) ? `${meaning} · \u2066HTTP\u00a0${http}\u2069` : raw;
+    return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+  }
+
   function metaLine(item, ratio) {
     const out = [];
     if (item.state === STATES.failed || item.state === STATES.noSpace) {
-      out.push(el('span', 'dl-state is-bad', item.state === STATES.noSpace ? STATE_LABEL.no_space : ERROR_LABEL[item.error?.code] ?? ERROR_LABEL.UNKNOWN));
+      const label = item.state === STATES.noSpace ? STATE_LABEL.no_space : ERROR_LABEL[item.error?.code] ?? ERROR_LABEL.UNKNOWN;
+      out.push(el('span', 'dl-state is-bad', label));
+      // السبب الفعلي تحت العنوان («الملف غير موجود عند المصدر (HTTP 404)»)، لا «المصدر رفض الطلب» وحده
+      const why = failureDetail(item.error, label);
+      if (why) {
+        const d = el('span', 'dl-why', why);
+        // سبب عربي فيه «HTTP 404»: اتجاه ثابت من اليمين، فلا تنقلب الأقواس والرقم
+        d.dir = /^[\u0600-\u06FF]/.test(why) ? 'rtl' : 'auto';
+        out.push(el('span', 'dl-break'), d);
+      }
       return out;
     }
     if (item.state !== STATES.downloading) out.push(el('span', `dl-state${item.state === STATES.reconnecting ? ' is-warn' : ''}`, STATE_LABEL[item.state] ?? item.state));
+    // «يجهّز المصدر» لا يبقى صامتًا: كم سيرفرًا جاهزًا وكم يُفحص، أو أنه يفحص الملف
+    if (item.state === STATES.resolving && item.stage) {
+      const st = el('span', 'dl-stage', item.stage);
+      st.dir = 'auto';
+      out.push(st);
+    }
+    if (item.state === STATES.reconnecting && item.error?.message) {
+      const why = failureDetail(item.error, null);
+      if (why) out.push(el('span', 'dl-break'), Object.assign(el('span', 'dl-why', why), { dir: /^[\u0600-\u06FF]/.test(why) ? 'rtl' : 'auto' }));
+    }
     if (item.kind === 'manga') {
       if (item.pagesTotal) out.push(ltr(el, `${item.pages ?? 0}/${item.pagesTotal}`), el('span', null, 'صفحة'));
     } else if (item.bytes > 0 || item.total > 0) out.push(ltr(el, formatProgressBytes(item.bytes, item.total)));
@@ -363,6 +416,13 @@ export function createDownloadsUI(deps) {
     return wrap;
   }
 
+  /** نسخة محلية من فن العمل بمحرّك مصدره (المانجا)؛ الأنمي والسينما يُجلبان مباشرة. */
+  const healedArt = new Set();
+  function localArt(work) {
+    if (!String(work?.ref ?? '').length || /^(anime|cinema):/.test(work.ref)) return null;
+    return async (src, kind) => (kind === 'logo' ? null : (await import('./covers.js')).nativeCover(src, work.coverSource ?? null));
+  }
+
   function workCard(w) {
     const a = el('article', 'work-card dl-card');
     a.tabIndex = 0;
@@ -375,7 +435,12 @@ export function createDownloadsUI(deps) {
     const img = el('img');
     img.alt = '';
     img.decoding = 'async';
-    void artUrl(ctx.store, w.ref, 'cover').then((u) => {
+    void artUrl(ctx.store, w.ref, 'cover').then(async (u) => {
+      // تنزيل حُفظ بلا غلاف (أغلفة المانجا قبل الإصلاح): يُستكمل مرة بمحرّك المصدر ثم يُعرض من الجهاز
+      if (!u && navigator.onLine !== false && w.work.cover && !healedArt.has(w.ref)) {
+        healedArt.add(w.ref);
+        if (await saveWorkArt(ctx.store, w.work, { local: localArt(w.work) })) u = await artUrl(ctx.store, w.ref, 'cover');
+      }
       const src = u ?? (navigator.onLine !== false ? w.work.cover : null);
       if (!src) return;
       img.src = src;
@@ -607,8 +672,8 @@ export function createDownloadsUI(deps) {
         ]],
         ['الوسائط', item.kind === 'manga' ? [] : [
           ['الترميز', media.codec ?? null, true],
-          ['مسارات الصوت', media.audio?.length ? media.audio.map((a) => (typeof a === 'string' ? a : `${a.lang}${a.saved === false ? ' (لم يُحفظ)' : ''}`)).join('، ') : null],
-          ['الترجمات', media.subtitles?.length ? media.subtitles.map((s) => (typeof s === 'string' ? s : `${s.lang}${s.saved === false ? ' (لم تُحفظ)' : ''}`)).join('، ') : null],
+          ['مسارات الصوت', trackList(media.audio, 'لم يُحفظ')],
+          ['الترجمات', trackList(media.subtitles, 'لم تُحفظ')],
         ]],
         ['التورنت', item.transport !== 'torrent' ? [] : [
           ['المشاركون المتصلون', item.torrent ? String(item.torrent.peers) : null, true],
@@ -929,8 +994,10 @@ export function createDownloadsUI(deps) {
             const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
             const shown = new Map();
             const list = el('div', 'dl-source-list');
+            // جلسة الورقة تُغلق حين تُغلق الورقة: كانت تبقى مفتوحة بتذاكر تورنتاتها ومسح سيرفراتها حتى 25 ث
+            const stop = new AbortController();
             const onRoutes = (routes) => {
-              if (!body.isConnected) return;
+              if (!body.isConnected) return void stop.abort('closed');
               // الجودة أولًا، ثم السرب: المشاركون يصنعون سرعة التورنت (إصدار بمشاركَين بطيء مهما كانت جودته)
               const fresh = routes.filter((r) => r.state === 'READY' && !shown.has(r.id)).map((r) => ({ r, row: routeRow(r) }))
                 .sort((x, y) => (y.r.quality ?? 0) - (x.r.quality ?? 0) || (y.row.seeds ?? 0) - (x.row.seeds ?? 0));
@@ -943,7 +1010,8 @@ export function createDownloadsUI(deps) {
               waiting.textContent = shown.size ? `نبحث عن المزيد…${pending ? ` (${pending})` : ''}` : (video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
               if (shown.size && !list.isConnected) sourceBox.replaceChildren(list, waiting);
             };
-            await resolveRoutes(eng, first.request, { settleMs: 25_000, onRoutes });
+            const out = await resolveRoutes(eng, first.request, { settleMs: 25_000, onRoutes, signal: stop.signal }).catch(() => null);
+            if (out?.session) void Promise.resolve(eng.closeSession?.(out.session)).catch(() => {});
             if (!body.isConnected) return;
             if (shown.size) { waiting.remove(); return; }
           } else {
@@ -979,9 +1047,13 @@ export function createDownloadsUI(deps) {
         try {
           const specs = await spec.build(list, { mode: pick.mode, sourceId: pick.sourceId, sourceName: pick.sourceName, quality: pick.route?.quality ?? null });
           // سيرفر اختاره المستخدم: يُلتزم به (المصدر والرمز)، لا بديل صامت
-          if (pick.route) for (const sp of specs) sp.source = { ...sp.source, mode: 'manual', sourceId: pick.route.sourceId, sourceName: pick.sourceName, server: pick.route.server, routeCode: pick.route.code ?? null, quality: pick.route.quality ?? null };
+          // البصمة هوية الإصدار نفسه (التورنت بـinfoHash): الرمز يتغيّر بين الجلسات فلا يثبّت الاختيار
+          if (pick.route) {
+            const { routeIdentity } = await import('../lib/downloads/video-driver.js');
+            for (const sp of specs) sp.source = { ...sp.source, mode: 'manual', sourceId: pick.route.sourceId, sourceName: pick.sourceName, server: pick.route.server, routeCode: pick.route.code ?? null, fingerprint: routeIdentity(pick.route), label: pick.route.label ?? null, quality: pick.route.quality ?? null };
+          }
           const { added } = await c.manager.enqueue(specs);
-          void saveWorkArt(c.store, spec.work);
+          void saveWorkArt(c.store, spec.work, { local: localArt(spec.work) });
           if (spec.snapshot) {
             try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }

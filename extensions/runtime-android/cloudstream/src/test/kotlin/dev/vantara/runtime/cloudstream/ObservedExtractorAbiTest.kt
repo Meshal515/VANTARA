@@ -14,6 +14,18 @@ import org.junit.Test
 
 /** Exact additional descriptors observed in the published Mehdi Anime4Up v4 DEX. */
 class ObservedExtractorAbiTest {
+    @Test fun scoreFrom5ExistsWithTheDescriptorCarateenCalls() {
+        // الفحص الحي (Carateen): NoSuchMethodError from5(Ljava/lang/Double;)Lcom/lagradost/cloudstream3/Score;
+        val score = com.lagradost.cloudstream3.Score::class.java
+        val companion = Class.forName("com.lagradost.cloudstream3.Score\$Companion")
+        for (owner in listOf(score, companion)) for (name in listOf("from5", "from10", "from100"))
+            for (arg in listOf(java.lang.Double::class.java, java.lang.Float::class.java, java.lang.Integer::class.java, String::class.java))
+                assertEquals("$name($arg) on ${owner.simpleName}", score, owner.getMethod(name, arg).returnType)
+        assertEquals(8, com.lagradost.cloudstream3.Score.from5(4.0)!!.toInt(10))
+        assertEquals(7, com.lagradost.cloudstream3.Score.from100("70")!!.toInt(10))
+        assertNull(com.lagradost.cloudstream3.Score.from5(Double.NaN))
+    }
+
     @Test fun opaqueExtractorDataSurvivesTheExactStringGetterAndSetter() {
         val link = ExtractorLink("server", "server", "https://media.example/video.mp4")
         val get = ExtractorLink::class.java.getMethod("getExtractorData")

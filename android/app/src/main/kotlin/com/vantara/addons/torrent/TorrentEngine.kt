@@ -207,7 +207,17 @@ class TorrentEngine internal constructor(
     fun downloadPermanent(request: TorrentRequest, dest: File, cancelled: () -> Boolean, progress: (PermanentProgress) -> Unit): File {
         check(!shutdown.get()) { "Torrent engine is closed" }
         val hash = request.infoHash
-        if (states.containsKey(hash)) throw IOException("TORRENT_BUSY")
+        // حالة بث بلا قارئ (تسخين ورقة السيرفرات، أو مشاهدة انتهت وبقيت للعودة السريعة) لا تمنع التنزيل: تُخلى
+        // ويُنزَّل إلى مجلد التحميلات. كانت أي حالة باقية ترفض بـTORRENT_BUSY ⇒ «المصدر رفض الطلب» بعد مجرد فتح
+        // ورقة السيرفرات. المشغّل المفتوح فعلًا وحده يمنع (لا يُنزَع ملف من تحت فيديو يُشاهَد)
+        val cleared = synchronized(states) {
+            val existing = states[hash] ?: return@synchronized false
+            if (!existing.unused()) throw IOException("TORRENT_BUSY")
+            synchronized(warming) { warming.remove(hash) }
+            states.remove(hash, existing) && run { existing.remove(); true }
+        }
+        // libtorrent يزيل المقبض بلا انتظار: لا يُعاد استعمال مقبض البث وهو يُحذف (حفظه في مجلد الكاش)
+        if (cleared) runCatching { waitFor(cancelled, 5_000, "Torrent handle still closing") { if (manager.find(Sha1Hash(hash))?.isValid == true) null else Unit } }
         dest.mkdirs()
         var handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid }
         if (handle == null) {

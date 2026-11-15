@@ -13,6 +13,12 @@ import javax.net.ssl.SSLException
  * عطل في VANTARA، عطل في الإضافة نفسها، عطل من الموقع أو الشبكة، أو وظيفة غير مدعومة.
  * لا رسالة خام بالإنجليزية تصل للمستخدم ("HttpException: HTTP error 403").
  */
+/**
+ * صورة صفحة لم تصل صورة: الموقع ردّ بصفحة HTML أو ملف صغير (حماية، حدّ طلبات، رابط منتهي).
+ * كانت تُرمى `IllegalArgumentException` فتُصنَّف «تعطّلت الإضافة أثناء الطلب» والإضافة سليمة (قارئ المانجا).
+ */
+class PageImageException(val reason: String, val noImageUrl: Boolean = false) : java.io.IOException(reason)
+
 object ExtensionFailure {
     enum class Owner { VANTARA, EXTENSION, SITE, UNSUPPORTED }
 
@@ -22,6 +28,10 @@ object ExtensionFailure {
         val chain = generateSequence(t) { it.cause }.take(6).toList()
         chain.firstNotNullOfOrNull { it as? HostCoolingException }?.let {
             return Verdict(Owner.SITE, "HOST_COOLING", it.message ?: "الموقع يطلب التمهّل؛ أعد المحاولة بعد قليل")
+        }
+        chain.firstNotNullOfOrNull { it as? PageImageException }?.let {
+            return if (it.noImageUrl) Verdict(Owner.EXTENSION, "PAGE_NO_IMAGE", "الإضافة لم تُرجع رابط صورة لهذه الصفحة")
+            else Verdict(Owner.SITE, "SITE_NOT_IMAGE", "الموقع ردّ بصفحة بدل الصورة (حماية أو كثرة طلبات)؛ أعد المحاولة بعد لحظة")
         }
         chain.firstNotNullOfOrNull { it as? HttpException }?.let { return http(it.code) }
         chain.firstNotNullOfOrNull { it.message?.let(HTTP_TEXT::find)?.groupValues?.get(1)?.toIntOrNull() }?.let { return http(it) }

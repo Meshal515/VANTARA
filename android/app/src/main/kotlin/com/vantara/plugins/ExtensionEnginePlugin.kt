@@ -721,7 +721,7 @@ class ExtensionEnginePlugin : Plugin() {
                 val page = pageFrom(call.getObject("page"))
                 val url = page.imageUrl
                     ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
-                    ?: error("page carries no imageUrl")
+                    ?: throw PageImageException("page carries no imageUrl", noImageUrl = true)
 
                 val hit = withContext(Dispatchers.IO) { cacheHit(url) }
                 val file: java.io.File
@@ -740,6 +740,8 @@ class ExtensionEnginePlugin : Plugin() {
                             // (Referer/Origin/custom headers) and keep the
                             // streaming response alive until its body is read.
                             asHttp.getImage(page).use { res ->
+                                // رمز الخطأ نفسه (403/429…) لا «ليست صورة» بعد قراءة صفحة الخطأ
+                                if (!res.isSuccessful) throw eu.kanade.tachiyomi.network.HttpException(res.code)
                                 res.body.bytes() to res.header("content-type")
                             }
                         } else {
@@ -752,9 +754,9 @@ class ExtensionEnginePlugin : Plugin() {
                     bytes = fetched.first
                     // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: الحجم وحده لا
                     // يكفي، فصفحة HTML كبيرة تمرّ منه. التوقيع يُفحص قبل الكاش
-                    require(bytes.size > 1024) { "image too small: ${bytes.size} bytes" }
+                    if (bytes.size <= 1024) throw PageImageException("image too small: ${bytes.size} bytes")
                     val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
-                    require(verdict.accepted) { "not an image: ${verdict.reason}" }
+                    if (!verdict.accepted) throw PageImageException("not an image: ${verdict.reason}")
                     // النوع من الاستجابة أولًا، فإن سكتت فمن امتداد الرابط
                     type = fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")

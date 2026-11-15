@@ -60,6 +60,8 @@ object NativeAddonCandidates {
                 com.vantara.anime.stream.TrackRef(RemoteAddonClient.publicUrl(track.text("url") ?: error("url")).toString(), track.text("lang")?.take(32) ?: "und")
             }.getOrNull() }.orEmpty()
             val url = if (isTorrent) torrent?.invoke(s) ?: return@runCatching null else requireNotNull(httpUrl)
+            // هوية الإصدار الثابتة (التذكرة عشوائية لكل جلسة): بها يُثبَّت تورنت اختاره المستخدم للتنزيل
+            val torrentKey = if (isTorrent) runCatching { torrentRequest(s) }.getOrNull()?.let { "${it.infoHash}:${it.fileIdx ?: ""}" } else null
             val id = "$session|addon|${digest(sourceId)}|${digest(s.text("id") ?: "$index|$url") }"
             Candidate(
                 id = id, sourceId = sourceId, sourceName = sourceName,
@@ -72,6 +74,7 @@ object NativeAddonCandidates {
                 filename = (s.text("filename") ?: hints?.text("filename"))?.take(1000), videoHash = (s.text("videoHash") ?: hints?.text("videoHash"))?.takeIf { Regex("[a-fA-F0-9]{16}").matches(it) },
                 videoSize = (s.number("videoSize") ?: hints?.number("videoSize"))?.takeIf { it > 0 }, duration = s.number("duration")?.takeIf { it > 0 },
                 fps = (s["fps"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it.isFinite() && it > 0 },
+                torrent = torrentKey,
             )
         }.getOrNull() }.distinctBy { it.id }
     }

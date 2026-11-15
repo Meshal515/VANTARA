@@ -55,9 +55,12 @@ data class DownloadJob(
 )
 
 @Serializable
-data class Sidecar(val url: String, val lang: String, val file: String? = null, val kind: String = "subtitle")
+data class Sidecar(val url: String, val lang: String, val file: String? = null, val kind: String = "subtitle", /** الإضافة/المصدر الذي جاءت منه. */ val label: String? = null)
 
 class DownloadFailure(val code: String, message: String) : Exception(message)
+
+/** ترجمة إضافة جُلبت للحفظ بجانب الملف: لغتها ونصها (UTF-8) وامتدادها واسم الإضافة. */
+data class SavedSubtitle(val lang: String, val text: String, val ext: String, val provider: String? = null)
 
 /** مجلد التنزيلات الدائم وبيانات كل عمل. */
 class JobStore(val root: File) {

@@ -785,6 +785,14 @@ export function openSmartReader(deps, ctx) {
         if (token !== state.token) return;
         return loadSlot(seg, index, PRIORITY.VISIBLE);
       }
+      // الموقع يحدّ الطلبات أو ردّ بصفحة حجب بدل الصورة (القارئ يطلب عدة صفحات معًا، والتنزيل واحدة واحدة فينجح):
+      // مهلة أطول مرة واحدة قبل الحكم بالفشل
+      if (!slot.retriedSlow && ['SITE_NOT_IMAGE', 'SITE_HTTP_429', 'HOST_COOLING', 'SITE_TIMEOUT', 'SITE_NETWORK'].includes(error?.code)) {
+        slot.retriedSlow = true;
+        await new Promise((r) => setTimeout(r, 2500 + Math.random() * 1500));
+        if (token !== state.token) return;
+        return loadSlot(seg, index, PRIORITY.VISIBLE);
+      }
       // المصدر نفسه لا يعطي الصفحة (تحدّي Cloudflare على خادم صوره مثلًا): نفس الصفحة من مصدر ثانٍ
       // في مكانها. كان يُعاد فتح الفصل كله من المصدر الثاني: تُحذف الفصول السابقة ويرجع التمرير للأعلى،
       // فيبدو القارئ وكأنه «طرد» القارئ وهو ينزل للفصل التالي (بلاغ المالك).

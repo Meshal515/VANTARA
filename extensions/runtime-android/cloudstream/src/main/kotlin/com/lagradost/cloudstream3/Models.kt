@@ -11,11 +11,25 @@ class Score private constructor(private val fraction:Double) {
     fun toInt(maxScore:Int=10)=kotlin.math.round(fraction*maxScore).toInt()
     fun toDouble(maxScore:Int=10)=fraction*maxScore
     fun toFloat(maxScore:Int=10)=toDouble(maxScore).toFloat()
+    // عائلة from كاملة كما في CloudStream: Carateen يستدعي from5 فكان يسقط بـNoSuchMethodError (ABI_MISMATCH).
+    // @JvmStatic يُبقي استدعاء Companion ويضيف الثابت، فتصل الإضافة بأي صيغة تُرجمت بها
     companion object {
-        fun from10(value:Float?):Score?=value?.takeIf{it.isFinite()}?.let{Score((it/10.0).coerceIn(0.0,1.0))}
-        fun from10(value:Double?):Score?=value?.takeIf{it.isFinite()}?.let{Score((it/10.0).coerceIn(0.0,1.0))}
-        fun from10(value:Int?):Score?=value?.let{from10(it.toDouble())}
-        fun from10(value:String?):Score?=value?.toDoubleOrNull()?.let{from10(it)}
+        @JvmStatic fun from(value:Double?,maxScore:Int):Score?=value?.takeIf{it.isFinite()&&maxScore>0}?.let{Score((it/maxScore).coerceIn(0.0,1.0))}
+        @JvmStatic fun from(value:Float?,maxScore:Int):Score?=from(value?.toDouble(),maxScore)
+        @JvmStatic fun from(value:Int?,maxScore:Int):Score?=from(value?.toDouble(),maxScore)
+        @JvmStatic fun from(value:String?,maxScore:Int):Score?=from(value?.trim()?.replace(',','.')?.toDoubleOrNull(),maxScore)
+        @JvmStatic fun from5(value:Double?):Score?=from(value,5)
+        @JvmStatic fun from5(value:Float?):Score?=from(value,5)
+        @JvmStatic fun from5(value:Int?):Score?=from(value,5)
+        @JvmStatic fun from5(value:String?):Score?=from(value,5)
+        @JvmStatic fun from10(value:Float?):Score?=from(value,10)
+        @JvmStatic fun from10(value:Double?):Score?=from(value,10)
+        @JvmStatic fun from10(value:Int?):Score?=from(value,10)
+        @JvmStatic fun from10(value:String?):Score?=from(value,10)
+        @JvmStatic fun from100(value:Double?):Score?=from(value,100)
+        @JvmStatic fun from100(value:Float?):Score?=from(value,100)
+        @JvmStatic fun from100(value:Int?):Score?=from(value,100)
+        @JvmStatic fun from100(value:String?):Score?=from(value,100)
     }
 }
 data class MainPageRequest(val name:String,val data:String,val horizontalImages:Boolean)

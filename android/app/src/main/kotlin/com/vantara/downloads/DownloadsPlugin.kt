@@ -70,8 +70,8 @@ class DownloadsPlugin : Plugin() {
                 put("location", "Android/data/${context.packageName}/files/VANTARA/Downloads")
                 put("media", JSObject()
                     .put("container", job.container)
-                    .put("subtitles", JSArray(job.subtitles.map { JSObject().put("lang", it.lang).put("saved", it.file != null) }))
-                    .put("audio", JSArray(job.audio.map { JSObject().put("lang", it.lang).put("saved", it.file != null) })))
+                    .put("subtitles", JSArray(job.subtitles.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) }))
+                    .put("audio", JSArray(job.audio.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) })))
             }
         }
 
@@ -169,8 +169,8 @@ class DownloadsPlugin : Plugin() {
         id = id, sourceKey = sourceKey, url = c.url, headers = c.headers,
         kind = if (c.container == Container.HLS) "HLS" else "FILE", sourceId = c.sourceId, quality = c.quality,
         title = title, label = label, section = section,
-        subtitles = c.subtitles.map { Sidecar(it.url, it.lang) },
-        audio = c.audio.map { Sidecar(it.url, it.lang, kind = "audio") },
+        subtitles = c.subtitles.map { Sidecar(it.url, it.lang, label = it.label ?: c.sourceName) },
+        audio = c.audio.map { Sidecar(it.url, it.lang, kind = "audio", label = it.label ?: c.sourceName) },
     )
 
     /**
@@ -200,6 +200,9 @@ class DownloadsPlugin : Plugin() {
         val next = when {
             previous == null -> fresh
             previous.sourceKey != sourceKey || previous.kind != fresh.kind -> { store.delete(id); fresh }
+            // تورنت آخر بالمفتاح نفسه (رمز السيرفر يتكرر بين الجلسات): ملف جديد كامل. كان يُكمل بهوية التورنت السابق
+            // فيُنزَّل إصدار غير الذي اختاره المستخدم (200MB المختار ← 1.1GB السابق)
+            fresh.kind == "TORRENT" && (previous.torrentHash != fresh.torrentHash || previous.torrentFile != fresh.torrentFile) -> { store.delete(id); fresh }
             // نفس السيرفر: الرابط والترويسات الجديدة، والتقدّم ومعرّفات الملف من السابق
             else -> previous.copy(url = fresh.url, headers = fresh.headers, subtitles = previous.subtitles.ifEmpty { fresh.subtitles },
                 subtitleIdentity = previous.subtitleIdentity ?: fresh.subtitleIdentity, subtitleProviders = previous.subtitleProviders ?: fresh.subtitleProviders,
@@ -268,8 +271,8 @@ class DownloadsPlugin : Plugin() {
             id = "local-$id", sourceId = "local", sourceName = "على الجهاز", server = "local", host = "local",
             url = android.net.Uri.fromFile(main).toString(), quality = job.quality, label = "على الجهاز",
             container = if (job.kind == "HLS") Container.HLS else Container.MP4,
-            subtitles = job.subtitles.mapNotNull { s -> s.file?.let { File(dir, it) }?.takeIf { it.isFile }?.let { TrackRef(android.net.Uri.fromFile(it).toString(), s.lang) } },
-            audio = job.audio.mapNotNull { a -> a.file?.let { File(dir, it) }?.takeIf { it.isFile }?.let { TrackRef(android.net.Uri.fromFile(it).toString(), a.lang) } },
+            subtitles = job.subtitles.mapNotNull { s -> s.file?.let { File(dir, it) }?.takeIf { it.isFile }?.let { TrackRef(android.net.Uri.fromFile(it).toString(), s.lang, s.label) } },
+            audio = job.audio.mapNotNull { a -> a.file?.let { File(dir, it) }?.takeIf { it.isFile }?.let { TrackRef(android.net.Uri.fromFile(it).toString(), a.lang, a.label) } },
             resolvedAt = now, expiresAt = Long.MAX_VALUE,
         )
         val session = "local-$id-$now"
