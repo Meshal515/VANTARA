@@ -10,7 +10,7 @@
    زر غير مربّع). opacity وtransform فقط على الأيقونة: لا يمسّ تخطيط الترويسة */
 .v35 .dl-entry-ring { display: none; }
 .v35 .dl-entry .icon { transition: color var(--dur) var(--ease); }
-.v35 .dl-entry.is-busy .icon { color: var(--accent); animation: dl-entry-pulse 1.6s var(--ease) infinite; }
+.v35 .dl-entry.is-busy .icon { color: var(--danger, #e5484d); animation: dl-entry-pulse 1.6s var(--ease) infinite; }
 @keyframes dl-entry-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.88); }

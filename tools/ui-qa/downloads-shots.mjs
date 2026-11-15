@@ -13,6 +13,18 @@ const report = [];
 let n = 0;
 
 const QA_INIT = () => {
+  // إدارة المساحة: تقرير المحرك الأصلي بأحجام واقعية (حالة «VANTARA ماخذ 20 جيجا»)
+  const G = 1024 ** 3, M = 1024 ** 2;
+  window.Capacitor = Object.assign(window.Capacitor ?? {}, { Plugins: Object.assign(window.Capacitor?.Plugins ?? {}, { VantaraStorage: {
+    report: async () => ({ deviceTotal: 128 * G, deviceFree: 43.8 * G, appTotal: 21.6 * G, other: 410 * M, kinds: [
+      { id: 'torrentStreams', label: 'بقايا بث التورنت', effect: 'أجزاء حلقات شاهدتها بالتورنت. لا تحتاجها؛ الحلقة تُبث من جديد إن فتحتها.', bytes: 16.2 * G, cache: true, deletable: true, busy: false },
+      { id: 'mangaPages', label: 'صفحات المانجا المؤقتة', effect: 'صور الفصول التي قرأتها من الإنترنت. تُجلب من جديد عند القراءة؛ الفصول المحمّلة لا تتأثر.', bytes: 2.1 * G, cache: true, deletable: true, busy: false },
+      { id: 'webCache', label: 'كاش الواجهة والصور', effect: 'أغلفة وصور الواجهة المؤقتة. حسابك ومكتبتك وتحميلاتك لا تتأثر.', bytes: 520 * M, cache: true, deletable: true, busy: false },
+      { id: 'translationModels', label: 'نماذج الترجمة المحلية', effect: 'تشغّل الترجمة المرئية على الجهاز. بحذفها تتوقف حتى تُنزّلها من جديد (حجمها كبير).', bytes: 860 * M, cache: false, deletable: true, busy: false },
+      { id: 'videoDownloads', label: 'الحلقات والأفلام المحمّلة', effect: 'ما نزّلته لتشاهده بلا إنترنت. يُدار من «التحميلات».', bytes: 1.3 * G, cache: false, deletable: false, busy: false },
+    ] }),
+    clear: async () => ({ freed: 0, skipped: [] }),
+  } }) });
   const listeners = new Set();
   const jobs = new Map();
   let started = 0;
@@ -314,10 +326,64 @@ await step('desktop', async () => {
     await tab('جاري التحميل');
     await sleep(700);
     await shot(`desktop-${w}-queue`, `ويندوز ${w}×${h}: «جاري التحميل»`);
+    // القوائم على الكمبيوتر: ⋯ الطابور، ⋯ الجهاز، إدارة المساحة، والتحديد
+    if (await page.locator('.dl-summary-more').count()) {
+      await tap('.dl-summary-more');
+      await page.waitForSelector('.dl-manage');
+      await shot(`desktop-${w}-queue-manage`, `ويندوز ${w}×${h}: ⋯ إدارة التحميلات`);
+      await closeSheet();
+    }
+    await tab('على الجهاز');
+    await sleep(500);
+    await tap('.dl-device-more');
+    await page.waitForSelector('.dl-manage');
+    await shot(`desktop-${w}-device-manage`, `ويندوز ${w}×${h}: ⋯ ما على الجهاز`);
+    await page.locator('.sheet-item', { hasText: 'إدارة المساحة' }).first().click();
+    await page.waitForSelector('.st-sheet');
+    await sleep(600);
+    await shot(`desktop-${w}-storage`, `ويندوز ${w}×${h}: إدارة المساحة`);
+    await closeSheet();
+    const card = await page.locator('.dl-card').first().boundingBox();
+    await page.mouse.move(card.x + card.width / 2, card.y + card.height / 3);
+    await page.mouse.down();
+    await sleep(700);
+    await page.mouse.up();
+    await page.waitForSelector('.dl-selectbar');
+    await shot(`desktop-${w}-device-select`, `ويندوز ${w}×${h}: تحديد أعمال على الجهاز`);
+    await tap('.dl-selectbar .icon-btn');
     await openDeviceCard('Frieren');
     await page.waitForSelector('#anime.active .an-er', { timeout: 20000 });
     await sleep(2000);
     await shot(`desktop-${w}-anime-local`, `ويندوز ${w}×${h}: صفحة العمل الأصلية من الجهاز`);
+    // ورقة تحميل حلقة بفلاتر «اختر السيرفر»
+    await js(() => window.__shell.openAnimeRef('anime:154587', { title: "Frieren: Beyond Journey's End" }));
+    await page.waitForSelector('#anime.active #animeTools [aria-haspopup]', { timeout: 30000 }).catch(() => {});
+    await sleep(1500);
+    if (await page.locator('#anime.active #animeTools [aria-haspopup]').count()) {
+      await menuOpen('#anime.active', '#animeTools');
+      await shot(`desktop-${w}-anime-menu`, `ويندوز ${w}×${h}: ⋮ في صفحة الأنمي`);
+      await page.locator('.aw-menu-item', { hasText: 'تحميل' }).first().click().catch(() => {});
+      await page.waitForSelector('.dl-start', { timeout: 15000 });
+      await page.locator('.dl-start-tabs .library-tab', { hasText: 'اختر السيرفر' }).first().click();
+      await page.waitForSelector('.dl-server-filters', { timeout: 20000 }).catch(() => {});
+      await sleep(900);
+      await shot(`desktop-${w}-download-filters`, `ويندوز ${w}×${h}: ورقة التحميل بفلاتر السيرفرات`);
+      await closeSheet();
+    }
+    // الإضافات وقوائمها
+    await js(() => document.querySelector('[data-act="openDrawer"]')?.click());
+    await sleep(600);
+    await shot(`desktop-${w}-drawer`, `ويندوز ${w}×${h}: القائمة الجانبية`);
+    await js(() => [...document.querySelectorAll('.drawer-item')].find((b) => b.textContent.trim() === 'الإضافات')?.click());
+    await sleep(2500);
+    await shot(`desktop-${w}-addons`, `ويندوز ${w}×${h}: الإضافات`);
+    const more = page.locator('.utility-page.active [aria-haspopup], .active [data-act="addonsMenu"], .active .icon-btn[aria-label*="خيارات"]').first();
+    if (await more.count()) {
+      await more.click().catch(() => {});
+      await sleep(700);
+      await shot(`desktop-${w}-addons-menu`, `ويندوز ${w}×${h}: قائمة الإضافات`);
+      await page.keyboard.press('Escape');
+    }
     await goDownloads();
   }
 });

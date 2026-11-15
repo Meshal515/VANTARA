@@ -22,6 +22,8 @@ import { isTorrentRoute } from '../lib/route-family.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 const SORTS = ['recent', 'size', 'name'];
+/** ما يُنزَّل فعلًا الآن (لا المتوقف ولا المنتظر). */
+const TRANSFERRING = new Set(['resolving', 'downloading', 'verifying']);
 const SORT_LABEL = { recent: 'الأحدث', size: 'الأكبر حجمًا', name: 'الاسم' };
 
 /** نص LTR معزول داخل سطر عربي: الأرقام والوحدات لا تنقلب. */
@@ -61,9 +63,13 @@ export function createDownloadsUI(deps) {
 
   // ───────────── المدخل: زر «التحميلات» في مكتبتي ─────────────
 
-  /** الدائرة حول أيقونة المدخل تقول إن هناك تنزيلًا يعمل، بلا رقم مزعج. */
-  function paintEntry(summary) {
-    for (const b of deps.root.querySelectorAll('[data-act="openDownloads"]')) b.classList.toggle('is-busy', summary.active + summary.waiting > 0);
+  /**
+   * أيقونة المدخل تنبض بالأحمر حين يُنزَّل شيء فعلًا الآن، وحده. المتوقف والمنتظر (Wi‑Fi، الاتصال، خانة) والفاشل
+   * لا يُحسب: كانت تنبض و«كله متوقف مؤقتًا» (بلاغ المالك). يُقرأ من العناصر لا من ملخص يجمع المنتظر مع النشط.
+   */
+  function paintEntry() {
+    const busy = Boolean(ctx?.manager.list().some((i) => TRANSFERRING.has(i.state)));
+    for (const b of deps.root.querySelectorAll('[data-act="openDownloads"]')) b.classList.toggle('is-busy', busy);
   }
 
   // ───────────── الصفحة ─────────────
@@ -100,7 +106,7 @@ export function createDownloadsUI(deps) {
     if (view.frame) return;
     view.frame = requestAnimationFrame(() => {
       view.frame = 0;
-      paintEntry(ctx.manager.summary());
+      paintEntry();
       if (deps.currentPage?.() !== 'downloads') return;
       if (view.listDirty) {
         view.listDirty = false;
@@ -1348,7 +1354,7 @@ export function createDownloadsUI(deps) {
             try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }
           closeSheet();
-          paintEntry(c.manager.summary());
+          paintEntry();
           toast(added.length ? (added.length === 1 ? 'بدأ التنزيل — تابعه في «التحميلات»' : `${added.length} في طابور التحميل`) : 'موجود مسبقًا');
         } catch (e) {
           go.disabled = false;
@@ -1373,9 +1379,9 @@ export function createDownloadsUI(deps) {
 
   // حالة المدخل عند الإقلاع (بلا فتح الصفحة)
   void ready().then((c) => {
-    paintEntry(c.manager.summary());
+    paintEntry();
     c.manager.subscribe((e) => {
-      if (e.type === 'change' || e.type === 'list' || e.type === 'removed') paintEntry(c.manager.summary());
+      if (e.type === 'change' || e.type === 'list' || e.type === 'removed') paintEntry();
       if (e.type === 'completed' && deps.currentPage?.() !== 'downloads') toast(`على الجهاز: ${e.item.work.title} — ${unitLabel(e.item)}`);
     });
   }).catch(() => {});
