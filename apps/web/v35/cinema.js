@@ -1745,8 +1745,9 @@ export function createCinema(deps) {
         const specs = [];
         for (const [season, group] of bySeason) {
           const { copies, pinned } = await copiesFor(movie ? undefined : season);
-          const scoped = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : copies;
-          if (!scoped.length) throw new Error(choice.mode === 'manual' ? `المصدر المختار لا يحمل ${movie ? 'الفيلم' : `الموسم ${season}`}` : 'لم نجد هذا العمل في مصادرك بعد');
+          // سيرفر من إضافة (تورنت، Stremio) يأتي بهوية العمل كما في التشغيل: لا حصر في نسخ المصادر ولا رفض
+          const own = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : [];
+          const scoped = own.length ? own : copies;
           const prepared = movie ? scoped : scoped.map((c) => ({ ...c, requestedSeason: season }));
           for (const u of group) {
             specs.push({
@@ -1755,7 +1756,7 @@ export function createCinema(deps) {
               work,
               unit: { key: u.key, number: movie ? null : u.number, season: movie ? null : season, title: u.title ?? null },
               source: { mode: choice.mode, sourceId: choice.mode === 'manual' ? choice.sourceId : null, sourceName: choice.sourceName ?? null, quality: choice.quality },
-              request: { copies: prepared, identity: identityFor(movie ? undefined : season, movie ? undefined : u.number), pinned: choice.mode === 'manual' || pinned, episode: movie ? -1 : u.number },
+              request: { copies: prepared, identity: identityFor(movie ? undefined : season, movie ? undefined : u.number), pinned: own.length > 0 || pinned, episode: movie ? -1 : u.number },
             });
           }
         }

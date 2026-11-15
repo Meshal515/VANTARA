@@ -1499,15 +1499,17 @@ export function createAnime(deps) {
       sources: async () => (await copiesOf()).map((c) => ({ id: c.sourceId, name: sourceLabel(c.sourceId, { names: SOURCE_NAMES, title: c.title }) })),
       build: async (list, choice) => {
         const copies = await copiesOf();
-        const scoped = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : copies;
-        if (!scoped.length) throw new Error(choice.mode === 'manual' ? 'المصدر المختار لم يعد متاحًا لهذا العمل' : 'لم نجد هذا العمل في مصادرك بعد');
+        // سيرفر من إضافة (تورنت، Stremio) لا نسخة له في المصادر: هوية العمل تجلبه كما في التشغيل، فلا يُحصر
+        // الطلب في نسخ المصادر ولا يُرفض عمل لم تجده المصادر العربية (كان «لم نجد هذا العمل» قبل سؤال الإضافات)
+        const own = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : [];
+        const scoped = own.length ? own : copies;
         return list.map((u) => ({
           section: 'anime',
           kind: movie ? 'movie' : 'episode',
           work,
           unit: { key: u.key, number: u.number },
           source: { mode: choice.mode, sourceId: choice.mode === 'manual' ? choice.sourceId : null, sourceName: choice.sourceName ?? null, quality: choice.quality },
-          request: { copies: withSeasonHint(m, scoped), identity: animeAddonIdentity(m, u.number), pinned: choice.mode === 'manual' || Boolean(m._sourceCopy), episode: movie ? -1 : u.number },
+          request: { copies: withSeasonHint(m, scoped), identity: animeAddonIdentity(m, u.number), pinned: own.length > 0 || Boolean(m._sourceCopy), episode: movie ? -1 : u.number },
         }));
       },
     });
