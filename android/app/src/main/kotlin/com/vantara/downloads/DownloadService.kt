@@ -176,7 +176,8 @@ class DownloadService : Service() {
             throw Transfers.Cancelled()
         } catch (e: java.io.IOException) {
             throw when (e.message) {
-                "TORRENT_BUSY" -> DownloadFailure("SOURCE", "هذا التورنت يُشغَّل الآن؛ أغلق المشغّل ثم أعد المحاولة")
+                // المشغّل مفتوح عليه الآن: مؤقت لا رفض من المصدر، فيُعاد تلقائيًا بعد إغلاقه
+                "TORRENT_BUSY" -> DownloadFailure("NETWORK", "هذا الإصدار مفتوح في المشغّل الآن؛ يبدأ تنزيله بعد إغلاقه")
                 "NO_PEERS" -> DownloadFailure("NETWORK", "لا مشاركين في التورنت الآن")
                 else -> DownloadFailure("NETWORK", e.message ?: "انقطع التورنت")
             }
