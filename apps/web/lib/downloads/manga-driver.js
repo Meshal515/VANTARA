@@ -226,7 +226,9 @@ export function createMangaDriver(deps) {
       await deps.store.deletePages(item.id);
     }
     // المصدر الذي تُنزَّل منه الصفحات الآن: به يُستأنف، والطلب الأصلي (وبدائله) يبقى كما اختير
-    ctl.update({ pagesTotal: total, pagesSignature: signature, transport: 'pages', resumable: true, source: { ...item.source, sourceId }, request: { ...item.request, active: { sourceId, chapter } } });
+    // مراجع صفحات المصدر تُحفظ مع الفصل: الفريم المشارك والترجمة يعرفان الصفحة الأصلية ولو قُرئت من الجهاز
+    const pageRefs = list.map((p, index) => ({ index: p?.index ?? index, url: p?.url ?? '', imageUrl: p?.imageUrl ?? null }));
+    ctl.update({ pagesTotal: total, pagesSignature: signature, pageRefs, transport: 'pages', resumable: true, source: { ...item.source, sourceId }, request: { ...item.request, active: { sourceId, chapter } } });
 
     let saved = 0;
     let bytes = 0;

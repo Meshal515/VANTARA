@@ -62,7 +62,13 @@ export function withDownloads(engine, downloads) {
       if (!hit) return engine.pages(sourceId, chapter);
       const total = Number(hit.item.pagesTotal ?? hit.item.pages ?? 0);
       if (!(total > 0)) return engine.pages(sourceId, chapter);
-      return Array.from({ length: total }, (_, index) => ({ index, [LOCAL_MARK]: { itemId: hit.item.id, sourceId, chapter } }));
+      const refs = Array.isArray(hit.item.pageRefs) && hit.item.pageRefs.length === total ? hit.item.pageRefs : null;
+      return Array.from({ length: total }, (_, index) => ({
+        index,
+        url: refs?.[index]?.url ?? '',
+        imageUrl: refs?.[index]?.imageUrl ?? null,
+        [LOCAL_MARK]: { itemId: hit.item.id, sourceId, chapter },
+      }));
     },
     async pageImage(sourceId, page) {
       const local = page?.[LOCAL_MARK];

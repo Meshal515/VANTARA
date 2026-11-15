@@ -5,19 +5,28 @@ object ImagePayloadPolicy {
 
     data class Verdict(val accepted: Boolean, val reason: String? = null)
 
+    /**
+     * البايتات هي الحكم لا الترويسة: مضيفات صور حقيقية ترسل `binary/octet-stream` أو `text/plain` أو
+     * `application/x-octet-stream` لصورة سليمة، وكان رفضها يظهر «الموقع ردّ بصفحة بدل الصورة» على صفحة صحيحة
+     * فيفشل تنزيل الفصل وقراءته. صفحة HTML (حجب، تحدٍّ) تُرفض لأن توقيعها ليس صورة أيًّا كانت ترويستها.
+     */
     fun validate(contentType: String?, bytes: ByteArray): Verdict {
+        if (hasSupportedSignature(bytes)) return Verdict(true)
         val normalizedType = contentType?.substringBefore(';')?.trim()?.lowercase()
-        if (
-            normalizedType != null &&
-            normalizedType != "application/octet-stream" &&
-            !normalizedType.startsWith("image/")
-        ) {
+        if (normalizedType != null && normalizedType != "application/octet-stream" && !normalizedType.startsWith("image/")) {
             return Verdict(false, "content-type $contentType is not an image")
         }
-        if (!hasSupportedSignature(bytes)) {
-            return Verdict(false, "payload signature is not a supported image")
-        }
-        return Verdict(true)
+        return Verdict(false, "payload signature is not a supported image")
+    }
+
+    /** نوع الصورة من توقيعها، أو null. يسبق الترويسة والامتداد: ملف webp باسم .jpg يُخدَم بنوعه الحقيقي. */
+    fun sniffType(bytes: ByteArray): String? = when {
+        bytes.startsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) -> "image/png"
+        bytes.startsWith(0xFF, 0xD8, 0xFF) -> "image/jpeg"
+        bytes.startsWithAscii("GIF87a") || bytes.startsWithAscii("GIF89a") -> "image/gif"
+        bytes.startsWithAscii("RIFF") && bytes.asciiAt(8, 4) == "WEBP" -> "image/webp"
+        bytes.asciiAt(4, 4) == "ftyp" && bytes.asciiAt(8, 4) in setOf("avif", "avis") -> "image/avif"
+        else -> null
     }
 
     /** Power-of-two sampling that keeps even very tall comic pages inside a small preview budget. */
