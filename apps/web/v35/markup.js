@@ -141,10 +141,6 @@ export const SHELL_HTML = `<div class="app">
     <div class="page-body" id="downloadsBody"></div>
   </section>
 
-  <section class="page dl-work-page" id="downloadWork">
-    <div id="downloadWorkBody"></div>
-  </section>
-
   <section class="page" id="discover">
     ${mainTop('اكتشف')}
     <div class="page-body anime-only" id="animeDiscover"></div>

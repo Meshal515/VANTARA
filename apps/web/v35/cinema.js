@@ -1558,8 +1558,10 @@ export function createCinema(deps) {
 
   // ───────────── صفحة العمل ─────────────
 
-  async function openWork(m, { autoplay = false, playAt = null } = {}) {
+  async function openWork(m, { autoplay = false, playAt = null, local = null } = {}) {
     const token = ++state.token;
+    // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة ومواسم/حلقات المحمّل وحده، والتشغيل من الملف
+    state.local = local;
     // عمل آخر: جلسة العمل السابق الدافئة تُغلق (روابطها لا تخصّ هذا)
     if (state.warm && String(state.warm.key).split(':')[0] !== String(m.id)) dropWarm();
     state.detail = m;
@@ -1568,7 +1570,7 @@ export function createCinema(deps) {
     window.scrollTo?.(0, 0);
     renderDetail(m, { partial: true });
     let fetched;
-    try { fetched = m._sourceCopy ? m : String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`cinema:${m.id}`, m) : await prefetch(m); }
+    try { fetched = local || m._sourceCopy ? m : String(m.id).startsWith("addon-") ? await deps.restoreSourceWork(`cinema:${m.id}`, m) : await prefetch(m); }
     catch (error) { if (token === state.token) toast(error.message); return; }
     if (token !== state.token) return;
     // التفاصيل تُقبل لنفس المعرّف والنوع فقط، والاسم الذي ضغطه الشخص يبقى اسم الصفحة
@@ -1605,7 +1607,7 @@ export function createCinema(deps) {
       const r = resumePoint(full);
       play(full, r.season, r.episode, r.position);
     }
-    void similar(full, token);
+    if (!local) void similar(full, token);
   }
 
   // ───────────── أدوات الترويسة (نفس نظام aw-tools/aw-menu في الأنمي) ─────────────
@@ -1679,7 +1681,7 @@ export function createCinema(deps) {
       },
       top: () => { toggleCinemaMenu(false); deps.openWorkMenu?.({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }); },
       options: () => { toggleCinemaMenu(false); deps.openWorkOptions?.(target()); },
-      download: () => { toggleCinemaMenu(false); void openDownload(work()); },
+      download: () => { toggleCinemaMenu(false); if (state.local?.ref === ref) deps.downloads?.manage(ref); else void openDownload(work()); },
     };
     const dl = deps.downloads;
     const list = workMenuEntries(kind, {
@@ -1727,6 +1729,7 @@ export function createCinema(deps) {
       section: 'cinema',
       kind: movie ? 'movie' : 'episode',
       work,
+      snapshot: m,
       units,
       seasons: movie ? undefined : seasons.map((s) => ({ n: s.n, label: `الموسم ${s.n}` })),
       season: firstSeason,
@@ -2275,6 +2278,10 @@ export function createCinema(deps) {
   // نفسه بتصميمه يأخذ `section: 'cinema'` فيلبس الأحمر.
 
   function play(m, season, n, position = 0, { hostPick = false } = {}) {
+    if (state.local?.ref === refOf(m.id)) {
+      const key = m.type === 'movie' ? 'movie' : `s${season}e${n}`;
+      if (state.local.keys.has(key)) return void state.local.play(key, { position });
+    }
     const heading = m.type === 'series' ? `الموسم ${season} · الحلقة ${n}` : 'فيلم';
     if (!engine.available()) {
       deps.openSheet((body) => {

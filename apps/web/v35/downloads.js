@@ -86,11 +86,6 @@ export function createDownloadsUI(deps) {
     view.frame = requestAnimationFrame(() => {
       view.frame = 0;
       paintEntry(ctx.manager.summary());
-      if (deps.currentPage?.() === 'downloadWork' && view.listDirty && view.work) {
-        view.listDirty = false;
-        view.dirty.clear();
-        return renderWork(view.work);
-      }
       if (deps.currentPage?.() !== 'downloads') return;
       if (view.listDirty) {
         view.listDirty = false;
@@ -369,10 +364,7 @@ export function createDownloadsUI(deps) {
     const frame = el('div', 'work-card-frame');
     const p = el('div', 'poster');
     if (w.work.color) p.style.background = `color-mix(in srgb, ${w.work.color} 40%, var(--surface-2))`;
-    const badge = el('span', 'poster-badge dl-local-badge');
-    badge.innerHTML = glyph('downloaded', { size: 12 });
-    badge.setAttribute('aria-hidden', 'true');
-    frame.append(p, badge);
+    frame.append(p);
     const img = el('img');
     img.alt = '';
     img.decoding = 'async';
@@ -398,179 +390,91 @@ export function createDownloadsUI(deps) {
     return box;
   }
 
-  // ───────────── صفحة العمل المحلي ─────────────
+  // ───────────── «على الجهاز» ← صفحة العمل الأصلية ─────────────
 
+  /**
+   * العمل المحمّل يُفتح في صفحته الأصلية نفسها (الأنمي/السينما/المانجا) بنمطها وشعارها وغلافها وبنرها،
+   * ببياناته المحفوظة عند التنزيل وصوره المحفوظة على الجهاز. الفرق الوحيد: الحلقات/الفصول المعروضة
+   * هي المحمّلة وحدها بأرقامها الأصلية، والتشغيل/القراءة من الملف بلا شبكة.
+   */
   async function openWork(ref) {
-    await ready();
-    view.work = ref;
-    showPage('downloadWork');
-    subscribe();
-    renderWork(ref);
-  }
-
-  async function renderWork(ref) {
-    const box = q('downloadWorkBody');
-    if (!box) return;
-    const data = localWork(ctx.manager.list(), ref);
-    if (!data.ready.length && !data.pending.length) {
-      // حُذف آخر عنصر: العمل لم يعد على الجهاز
-      view.work = null;
-      deps.goBack?.();
-      return;
-    }
+    const c = await ready();
+    const data = localWork(c.manager.list(), ref);
+    if (!data.ready.length) return toast('لا شيء من هذا العمل على الجهاز');
+    const [saved, cover, banner, logo] = await Promise.all([
+      c.store.getArt(`${ref}|detail`).catch(() => null),
+      artUrl(c.store, ref, 'cover'), artUrl(c.store, ref, 'banner'), artUrl(c.store, ref, 'logo'),
+    ]);
+    let base = null;
+    try { base = saved?.json ? JSON.parse(saved.json) : null; } catch { base = null; }
     const w = data.work;
-    const page = el('div', 'dl-work');
-    page.dataset.section = data.section ?? '';
-    if (w.color) page.style.setProperty('--work-color', w.color);
-    const hero = el('div', 'dl-hero');
-    const banner = el('div', 'dl-hero-art');
-    const shade = el('span', 'dl-hero-shade');
-    const back = el('button', 'icon-btn dl-hero-back');
-    back.type = 'button';
-    back.setAttribute('aria-label', 'رجوع');
-    back.innerHTML = glyph('back');
-    back.onclick = () => deps.goBack?.();
-    hero.append(banner, shade, back);
-    const head = el('div', 'dl-work-head');
-    const cover = el('span', 'dl-work-cover');
-    const info = el('div', 'dl-work-info');
-    const logo = el('div', 'dl-work-logo');
-    const title = el('h1', 'dl-work-title', w.title);
-    title.dir = 'auto';
-    const facts = el('p', 'dl-work-facts');
-    facts.append(el('span', null, `${countText(data.kind, data.ready.length)} على الجهاز`));
-    if (data.bytes > 0) facts.append(el('span', 'dl-dot', '·'), ltr(el, formatBytes(data.bytes)));
-    info.append(logo, title, facts);
-    head.append(cover, info);
-    void Promise.all([artUrl(ctx.store, ref, 'banner'), artUrl(ctx.store, ref, 'cover'), artUrl(ctx.store, ref, 'logo')]).then(([b, c, l]) => {
-      const online = navigator.onLine !== false;
-      const bannerSrc = b ?? c ?? (online ? w.banner ?? w.cover : null);
-      if (bannerSrc) banner.style.backgroundImage = `url("${bannerSrc}")`;
-      const coverSrc = c ?? (online ? w.cover : null);
-      if (coverSrc) {
-        const img = el('img');
-        img.alt = '';
-        img.src = coverSrc;
-        cover.append(img);
-      }
-      const logoSrc = l ?? null;
-      if (logoSrc) {
-        const img = el('img');
-        img.alt = w.title;
-        img.src = logoSrc;
-        logo.append(img);
-        title.classList.add('has-logo');
-      }
-    });
-
-    const actions = el('div', 'dl-work-actions');
-    const first = data.ready[0];
-    if (first) {
-      const verb = data.kind === 'manga' ? 'اقرأ' : 'شغّل';
-      const primary = el('button', 'btn btn-primary dl-play');
-      primary.type = 'button';
-      primary.innerHTML = `${glyph(data.kind === 'manga' ? 'book' : 'play', { size: 18, filled: data.kind !== 'manga' })}<span>${data.kind === 'movie' ? 'شغّل الفيلم' : `${verb} ${unitLabel(first)}`}</span>`;
-      primary.onclick = () => playItem(first, data);
-      actions.append(primary);
-    }
-    if (deps.openOnline && navigator.onLine !== false) {
-      const online = el('button', 'btn dl-online');
-      online.type = 'button';
-      online.innerHTML = `${glyph('compass', { size: 18 })}<span>صفحة العمل</span>`;
-      online.onclick = () => deps.openOnline({ ref, section: data.section, title: w.title, cover: w.cover });
-      actions.append(online);
-    }
-    const more = el('button', 'icon-btn dl-work-more');
-    more.type = 'button';
-    more.setAttribute('aria-label', 'حذف كل تنزيلات العمل');
-    more.innerHTML = glyph('trash', { size: 20 });
-    more.onclick = () => confirmDelete(data.ready, { title: `حذف ${w.title} من الجهاز`, all: true, ref });
-    actions.append(more);
-
-    page.append(hero, head, actions);
-    if (data.pending.length) {
-      const p = el('button', 'dl-pending-link');
-      p.type = 'button';
-      p.innerHTML = `<span class="dl-pulse" aria-hidden="true"></span><span>${data.pending.length === 1 ? 'عنصر واحد' : `${data.pending.length} عناصر`} في «جاري التحميل»</span>${glyph('chevron', { size: 16 })}`;
-      p.onclick = () => open('queue');
-      page.append(p);
-    }
-    if (data.kind !== 'movie') {
-      const listBox = el('section', 'dl-units');
-      if (data.seasons.length > 1) {
-        const seasonTabs = el('div', 'segmented library-tabs dl-season-tabs');
-        const current = view.season?.[ref] ?? data.seasons[0].season;
-        for (const s of data.seasons) {
-          const b = el('button', `library-tab${s.season === current ? ' active' : ''}`, s.season ? `الموسم ${s.season}` : 'إضافات');
-          b.type = 'button';
-          b.append(el('b', null, String(s.items.length)));
-          b.onclick = () => {
-            view.season = { ...(view.season ?? {}), [ref]: s.season };
-            renderWork(ref);
-          };
-          seasonTabs.append(b);
-        }
-        listBox.append(seasonTabs);
-        const s = data.seasons.find((x) => x.season === current) ?? data.seasons[0];
-        listBox.append(unitList(s.items, data));
-      } else {
-        listBox.append(el('h2', 'dl-units-title', data.kind === 'manga' ? 'الفصول المحفوظة' : 'الحلقات المحفوظة'), unitList(data.ready, data));
-      }
-      page.append(listBox);
-    }
-    const scroller = q('downloadWork');
-    const keep = scroller?.scrollTop ?? 0;
-    box.replaceChildren(page);
-    if (scroller) scroller.scrollTop = keep;
-  }
-
-  function unitList(items, data) {
-    const list = el('div', 'dl-unit-list');
-    for (const item of items) {
-      const b = el('div', 'dl-unit-row');
-      b.tabIndex = 0;
-      b.setAttribute('role', 'button');
-      const num = el('span', 'dl-unit-num', numberLabel(item.unit.number) ?? '•');
-      num.dir = 'ltr';
-      const text = el('div', 'dl-unit-text');
-      const name = el('b', null, item.unit.title && item.kind !== 'manga' ? item.unit.title : unitLabel(item));
-      name.dir = 'auto';
-      const sub = el('span');
-      const bits = [item.kind === 'manga' && item.unit.title ? item.unit.title : null, item.source?.quality ? `${item.source.quality}p` : null].filter(Boolean);
-      if (bits.length) sub.append(el('span', null, bits.join(' · ')));
-      const size = formatBytes(item.storage?.bytes ?? item.bytes);
-      if (size) {
-        if (bits.length) sub.append(el('span', 'dl-dot', '·'));
-        sub.append(ltr(el, size));
-      }
-      text.append(name, sub);
-      const go = el('span', 'dl-unit-go');
-      go.innerHTML = glyph(item.kind === 'manga' ? 'book' : 'play', { size: 18, filled: item.kind !== 'manga' });
-      const opts = el('button', 'icon-btn dl-unit-more');
-      opts.type = 'button';
-      opts.setAttribute('aria-label', `خيارات ${unitLabel(item)}`);
-      opts.innerHTML = glyph('more', { size: 20 });
-      opts.onclick = (e) => {
-        e.stopPropagation();
-        openUnitMenu(item);
+    const art = { cover: cover ?? w.cover ?? null, banner: banner ?? w.banner ?? null, logo: logo ?? w.logo ?? null };
+    const id = String(ref).slice(String(ref).indexOf(':') + 1);
+    const itemOf = new Map(data.ready.map((i) => [String(i.unit.key), i]));
+    let snapshot;
+    let local;
+    if (data.section === 'anime') {
+      const numbers = new Set(data.ready.map((i) => i.unit.number ?? 1));
+      const max = Math.max(...numbers);
+      snapshot = { ...(base ?? { id: /^\d+$/.test(id) ? Number(id) : id, title: w.title, format: w.format, color: w.color }),
+        poster: art.cover, posterSmall: art.cover, banner: art.banner ?? (base?.banner ?? null) };
+      if (!(snapshot.aired >= max)) snapshot.aired = Math.max(Number(snapshot.aired) || 0, max);
+      local = {
+        ref, numbers,
+        art: { ...(art.logo ? { logo: art.logo } : {}), ...(art.banner ? { fanart: art.banner } : {}) },
+        play: (n) => playItem(data.ready.find((i) => (i.unit.number ?? 1) === n)),
       };
-      b.append(num, text, go, opts);
-      b.onclick = () => playItem(item, data);
-      b.onkeydown = (e) => { if (e.key === 'Enter') playItem(item, data); };
-      list.append(b);
+    } else if (data.section === 'cinema') {
+      const keys = new Set(itemOf.keys());
+      const movie = data.kind === 'movie';
+      const seasons = movie ? [] : (base?.seasons ?? [])
+        .map((s) => ({ ...s, episodes: (s.episodes ?? []).filter((e) => keys.has(`s${s.n}e${e.n}`)) }))
+        .filter((s) => s.episodes.length);
+      // بيانات محفوظة ناقصة (تنزيل قديم): المواسم تُبنى من المحمّل نفسه
+      if (!movie && !seasons.length) {
+        const bySeason = new Map();
+        for (const i of data.ready) {
+          const sn = i.unit.season ?? 1;
+          if (!bySeason.has(sn)) bySeason.set(sn, []);
+          bySeason.get(sn).push({ n: i.unit.number, name: i.unit.title ?? null });
+        }
+        for (const [n, episodes] of [...bySeason].sort((a, b) => a[0] - b[0])) seasons.push({ n, episodes: episodes.sort((a, b) => a.n - b.n) });
+      }
+      snapshot = { ...(base ?? { id, type: movie ? 'movie' : 'series', title: w.title, name: w.title, year: w.year }),
+        poster: art.cover, background: art.banner ?? art.cover, logo: art.logo, ...(movie ? {} : { seasons }) };
+      local = { ref, keys, play: (key) => playItem(itemOf.get(String(key))) };
+    } else {
+      const items = data.ready.filter((i) => i.kind === 'manga');
+      snapshot = { ...(base ?? { id: ref, title: { english: w.title }, genres: [], staff: { edges: [] } }), id: ref,
+        coverImage: { ...(base?.coverImage ?? {}), large: art.cover, extraLarge: art.cover, medium: art.cover },
+        bannerImage: art.banner ?? art.cover, wideBanner: art.banner ?? null };
+      snapshot._work = { ...(snapshot._work ?? {}), key: snapshot._work?.key ?? ref.replace(/^ext:/, ''), title: w.title, thumbnailUrl: art.cover, editions: [] };
+      local = { ref, rows: localRows(items), engine: createLocalMangaEngine(ctx.store, items) };
     }
-    return list;
+    view.localRef = ref;
+    deps.openLocalWork?.({ ref, section: data.section, snapshot, local });
   }
 
-  function openUnitMenu(item) {
+  /** ⋮ ← «تحميل» على صفحة عمل مفتوحة من الجهاز: ما عليه، وحذف ما تريد منه بتأكيد. */
+  async function manage(ref) {
+    const c = await ready();
+    const data = localWork(c.manager.list(), ref);
     openSheet((body) => {
-      const h = el('h3', null, `${item.work.title} — ${unitLabel(item)}`);
+      body.classList.add('dl-manage');
+      const h = el('h3', null, data.work.title ?? '');
       h.dir = 'auto';
-      body.append(h);
-      const info = sheetButton('info', 'التفاصيل', () => { closeSheet(); openInfo(item.id); });
-      const del = sheetButton('trash', 'حذف من الجهاز', () => { closeSheet(); confirmDelete([item], { title: `حذف ${unitLabel(item)}` }); }, true);
-      body.append(info, del);
-    }, { tone: item.section });
+      const facts = el('p', 'dl-hint');
+      facts.append(el('span', null, `${countText(data.kind, data.ready.length)} على الجهاز`));
+      if (data.bytes > 0) facts.append(el('span', 'dl-dot', '·'), ltr(el, formatBytes(data.bytes)));
+      body.append(h, facts);
+      for (const item of data.ready) {
+        const row = sheetButton('trash', `حذف ${unitLabel(item)}`, () => { closeSheet(); confirmDelete([item], { title: `حذف ${unitLabel(item)}` }); }, true);
+        const size = formatBytes(item.storage?.bytes ?? item.bytes);
+        if (size) row.append(ltr(el, size, 'trail dl-size'));
+        body.append(row);
+      }
+      if (data.ready.length > 1) body.append(sheetButton('trash', 'حذف كل ما على الجهاز من هذا العمل', () => { closeSheet(); confirmDelete(data.ready, { title: `حذف ${data.work.title} من الجهاز`, all: true, ref }); }, true));
+    }, { tone: data.section });
   }
 
   function sheetButton(icon, label, run, danger = false) {
@@ -582,18 +486,11 @@ export function createDownloadsUI(deps) {
     return b;
   }
 
-  /** تشغيل/قراءة المحفوظ: الملف المحلي وحده، بلا طلب سيرفر. */
-  async function playItem(item, data) {
-    if (item.kind === 'manga') {
-      const items = data.ready.filter((i) => i.kind === 'manga');
-      const engine = createLocalMangaEngine(ctx.store, items);
-      const rows = localRows(items);
-      const row = rows[items.indexOf(item)];
-      deps.openReader?.({ seriesRef: item.work.ref, title: item.work.title, work: { id: item.work.ref, title: item.work.title, coverImage: { large: item.work.cover } }, rows, row, engine, sourceLocked: true, offline: true });
-      return;
-    }
+  /** تشغيل الحلقة/الفيلم المحفوظ: الملف المحلي وحده، بلا طلب سيرفر. */
+  async function playItem(item) {
+    if (!item) return toast('هذه الحلقة لم تعد على الجهاز');
     const native = ctx.caps.video ? (await import('../lib/downloads/index.js')).nativeDownloads() : null;
-    if (!native?.play) return toast('التشغيل المحلي يعمل في تطبيق Android وويندوز');
+    if (!native?.play) return toast('التشغيل من الجهاز يعمل في تطبيق Android وويندوز');
     try {
       await native.play({
         id: item.id,
@@ -634,6 +531,12 @@ export function createDownloadsUI(deps) {
         if (all && ref) await dropWorkArt(ctx.store, ref);
         else if (ref == null && items[0] && !ctx.manager.list().some((i) => i.work.ref === items[0].work.ref)) await dropWorkArt(ctx.store, items[0].work.ref);
         closeSheet();
+        // الصفحة الأصلية مفتوحة من الجهاز: تُعاد بما بقي، أو يُرجع منها إن لم يبق شيء
+        const ref0 = items[0]?.work.ref;
+        if (ref0 && view.localRef === ref0 && ['anime', 'cinema', 'detail'].includes(deps.currentPage?.())) {
+          if (ctx.manager.list().some((i) => i.work.ref === ref0 && i.state === STATES.ready)) void openWork(ref0);
+          else deps.goBack?.();
+        }
         const f = formatBytes(freed);
         toast(f ? `حُذف وتحرّر ${f}` : 'حُذف من الجهاز');
       };
@@ -1066,6 +969,10 @@ export function createDownloadsUI(deps) {
           const specs = await spec.build(list, { mode: pick.mode, sourceId: pick.sourceId, sourceName: pick.sourceName, quality: pick.quality });
           const { added } = await c.manager.enqueue(specs);
           void saveWorkArt(c.store, spec.work);
+          // بيانات صفحة العمل (الوصف والتصنيفات والمواسم…): تُفتح صفحته الأصلية منها بلا إنترنت
+          if (spec.snapshot) {
+            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' || k === 'chapters' && Array.isArray(v) ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
+          }
           closeSheet();
           paintEntry(c.manager.summary());
           toast(added.length ? (added.length === 1 ? 'بدأ التنزيل — تابعه في «التحميلات»' : `${added.length} في طابور التحميل`) : 'موجود مسبقًا');
@@ -1103,6 +1010,7 @@ export function createDownloadsUI(deps) {
     open,
     leave,
     openWork,
+    manage,
     openDownloadSheet,
     openSettings,
     isActive: (id) => ACTIVE_STATES.has(ctx?.manager.get(id)?.state),

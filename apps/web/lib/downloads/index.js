@@ -20,6 +20,8 @@ const SETTINGS_KEY = 'vantara.downloads.settings';
 
 /** الجسر الأصلي لتنزيل الفيديو، أو null حيث لا يوجد. */
 export function nativeDownloads(g = globalThis) {
+  // جسر بديل لاختبارات الواجهة في المتصفح (Playwright) يحل محل محرك Android؛ لا يوجد في التطبيق
+  if (g?.__VANTARA_QA_DOWNLOADS__?.native) return g.__VANTARA_QA_DOWNLOADS__.native;
   if (isNative(g)) return g?.Capacitor?.Plugins?.VantaraDownloads ?? null;
   if (isDesktop(g)) return desktopPlugin('Downloads', g);
   return null;
@@ -106,7 +108,7 @@ export function downloads() {
       network: networkWatch(),
       drivers: {
         manga: createMangaDriver({ store, engine: () => (mangaEngine.isAvailable() ? mangaEngine : null) }),
-        video: caps.video ? createVideoDriver({ engine: () => animeEngine, native: () => nativeDownloads(), platform: () => capabilities() }) : null,
+        video: caps.video ? createVideoDriver({ engine: () => globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? animeEngine, native: () => nativeDownloads(), platform: () => capabilities() }) : null,
       },
     });
     // التطبيق عاد للواجهة: ما انتظر الشبكة أو خانة يُفحص من جديد

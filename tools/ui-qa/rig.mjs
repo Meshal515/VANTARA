@@ -84,7 +84,7 @@ function cinemetaFixture(url, o) {
  * @param {number} [o.imageDelay] تأخر الصور المولّدة (ms)
  */
 // QA_IMAGE_DELAY / QA_MANGA_DELAY: شبكة بطيئة (الصور والفصول تتأخر) لاختبار مسار المهلة والمحتوى المتأخر
-export async function launch({ unified = false, section = 'manga', viewport = { width: 390, height: 844 }, appearance = null, rows = {}, net = 'fixture', mangaDelay = Number(process.env.QA_MANGA_DELAY ?? 400), imageDelay = Number(process.env.QA_IMAGE_DELAY ?? 0), mobile = true, record = null, motion = null } = {}) {
+export async function launch({ unified = false, section = 'manga', viewport = { width: 390, height: 844 }, appearance = null, rows = {}, net = 'fixture', mangaDelay = Number(process.env.QA_MANGA_DELAY ?? 400), imageDelay = Number(process.env.QA_IMAGE_DELAY ?? 0), mobile = true, record = null, motion = null, scale = 1, rewrites = {}, init = null } = {}) {
   const index = await readFile(path.join(WEB, 'index.html'), 'utf8');
   const css = [...index.matchAll(/href="(\/[^"]*\.css)"/g)].map((m) => m[1]);
   const fontCss = /<style>[\s\S]*?<\/style>/.exec(index)?.[0] ?? '';
@@ -103,6 +103,8 @@ export async function launch({ unified = false, section = 'manga', viewport = { 
       }
       let body = await readFile(path.join(WEB, p));
       if (p === '/v35/works.js') body = String(body).replace('export const available = () => engine.isAvailable();', 'export const available = () => true;').replace('export async function loadWork(', fakeLoadWork(mangaDelay));
+      // بدائل اختبار لملفات بعينها (لا تمس الملف على القرص): [[نص، بديل]]
+      for (const [from, to] of rewrites[p] ?? []) { const text = String(body); if (!text.includes(from)) throw new Error(`rewrite missing in ${p}`); body = text.replace(from, to); }
       res.setHeader('Content-Type', TYPES[path.extname(p)] ?? 'application/octet-stream');
       res.end(body);
     } catch { res.statusCode = 404; res.end(); }
@@ -111,10 +113,11 @@ export async function launch({ unified = false, section = 'manga', viewport = { 
   const origin = `http://127.0.0.1:${server.address().port}`;
   const live = net === 'live';
   const browser = await chromium.launch({ args: ['--no-sandbox'], proxy: live && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } : undefined });
-  const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true, hasTouch: mobile, isMobile: mobile, deviceScaleFactor: 1, locale: 'ar-SA', ...(record ? { recordVideo: { dir: record, size: viewport } } : {}) });
+  const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true, hasTouch: mobile, isMobile: mobile, deviceScaleFactor: scale, locale: 'ar-SA', ...(record ? { recordVideo: { dir: record, size: viewport } } : {}) });
   // NO_WEBGL=1: متصفح القياس يرسم WebGL برمجيًا (SwiftShader) فتثقل خلفية silk كل إطار ثقلًا لا يوجد على جهاز
   // حقيقي. يُعطَّل لقياس انتقالات التطبيق نفسه، ويُذكر ذلك في التقرير.
   if (process.env.NO_WEBGL) await context.addInitScript(() => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return /webgl/.test(t) ? null : g.call(this, t, ...a); }; });
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   const log = { errors: [], console: [], requests: [] };
   page.on('pageerror', (e) => { if (!/محرّك الإضافات غير متاح/.test(e.message)) log.errors.push(String(e.stack || e).slice(0, 700)); });

@@ -47,6 +47,8 @@ export function episodePage({
   total = 0, pageSize = 25, pageIndex = null, currentEpisode = 1,
   query = '', newestFirst = false, hideSeen = false,
   titleOf = () => '', isSeen = () => false,
+  /** «على الجهاز»: أرقام الحلقات المحمّلة وحدها (Set)، بأرقامها الأصلية. */
+  only = null,
 } = {}) {
   total = integer(total);
   pageSize = Math.max(1, integer(pageSize, 25) || 25);
@@ -54,6 +56,7 @@ export function episodePage({
   const numericQuery = /^\d+$/.test(query) ? Number(query) : null;
   const matching = [];
   for (let n = 1; n <= total; n++) {
+    if (only && !only.has(n)) continue;
     if (hideSeen && isSeen(n)) continue;
     if (query && (numericQuery != null ? n !== numericQuery : !digits(titleOf(n)).toLocaleLowerCase().includes(query))) continue;
     matching.push(n);
