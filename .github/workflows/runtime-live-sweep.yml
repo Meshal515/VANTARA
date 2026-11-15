@@ -24,7 +24,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: runtime-live-sweep-${{ github.ref }}
+  group: runtime-live-sweep-${{ github.ref }}-${{ inputs.only }}
   cancel-in-progress: true
 jobs:
   sweep:
