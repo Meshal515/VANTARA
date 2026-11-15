@@ -632,6 +632,12 @@ export async function pick(session, route) {
   return (await call('pick', { session, route }))?.candidate ?? null;
 }
 
+/** مثل pick مع سبب الغياب (`NO_CANDIDATES`، `EXPIRED`، `FAILED`، `PROBE_FAILED`) للتنزيل. */
+export async function pickWithReason(session, route) {
+  const r = await call('pick', { session, route });
+  return { candidate: r?.candidate ?? null, reason: r?.reason ?? null };
+}
+
 /** يفتح المشغّل الأصلي على جلسة مجهّزة (والسيرفر المختار إن وُجد). */
 /**
  * سياق ترجمات الإضافات كما يمرّره open() للمشغّل: هوية الحلقة (مع IMDb والموسم) وقائمة إضافات الترجمة المثبتة.

@@ -124,6 +124,14 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, en
   return { session, routes };
 }
 
+/** لماذا لم يعطِ السيرفر المختار رابطًا (من المحرك الأصلي)، بكلام مفهوم. */
+const PICK_REASON = {
+  NO_CANDIDATES: 'السيرفر لم يرجع رابطًا لهذه الحلقة',
+  EXPIRED: 'انتهت صلاحية روابط هذا السيرفر؛ نعيد التجهيز',
+  FAILED: 'روابط هذا السيرفر فشلت في التشغيل',
+  PROBE_FAILED: 'روابط هذا السيرفر لم تجتز الفحص (المضيف رفض أو الرابط ميت)',
+};
+
 /**
  * @param {{ engine: () => object, native: () => object|null, platform: () => ({ torrent: boolean }) }} deps
  */
@@ -150,8 +158,8 @@ export function createVideoDriver(deps) {
       if (!route || !isDownloadReady(route)) {
         throw new DownloadError('NO_ROUTE', source.locked ? 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله الآن' : 'السيرفر الذي اخترته لم يعد متاحًا لهذه الحلقة الآن', { retryable: true });
       }
-      const candidate = await engine.pick(session, route.id);
-      if (!candidate) throw new DownloadError('NO_ROUTE', 'السيرفر لم يرجع رابطًا');
+      const { candidate, reason } = engine.pickWithReason ? await engine.pickWithReason(session, route.id) : { candidate: await engine.pick(session, route.id), reason: null };
+      if (!candidate) throw new DownloadError('NO_ROUTE', PICK_REASON[reason] ?? 'السيرفر لم يرجع رابطًا', { retryable: reason === 'EXPIRED' || reason === 'NO_CANDIDATES' });
       return { route, candidate, info: await inspect(native, session, candidate) };
     }
     // يدوي بمصدر فقط: سيرفرات ذلك المصدر وحدها؛ الذكي: الكل
@@ -164,7 +172,7 @@ export function createVideoDriver(deps) {
     for (const route of ranked.slice(0, SMART_TRIES)) {
       if (signal.aborted) return null;
       try {
-        const candidate = await engine.pick(session, route.id);
+        const { candidate } = engine.pickWithReason ? await engine.pickWithReason(session, route.id) : { candidate: await engine.pick(session, route.id) };
         if (!candidate) continue;
         return { route, candidate, info: await inspect(native, session, candidate) };
       } catch (error) {
