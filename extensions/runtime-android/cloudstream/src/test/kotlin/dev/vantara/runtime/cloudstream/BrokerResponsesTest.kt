@@ -23,9 +23,11 @@ class BrokerResponsesTest {
     @Test fun aPostCarriesItsBodysMediaTypeToTheBroker() {
         val json=okhttp3.Request.Builder().url("https://witanime.example/watch/x/sources")
             .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType())).build()
-        assertEquals(listOf("application/json; charset=utf-8"),BrokerResponses.headers(json)["Content-Type"])
+        // The broker reads header names case-insensitively (RuntimeHttpAccess.copyHeaders); OkHttp lowercases them here
+        fun sent(request:Request)=RuntimeHttpAccess.copyHeaders(BrokerResponses.headers(request))["Content-Type"]
+        assertEquals(listOf("application/json; charset=utf-8"),sent(json))
         val explicit=json.newBuilder().header("Content-Type","application/x-www-form-urlencoded").build()
-        assertEquals(listOf("application/x-www-form-urlencoded"),BrokerResponses.headers(explicit)["Content-Type"])
-        assertNull(BrokerResponses.headers(okhttp3.Request.Builder().url("https://witanime.example/").build())["Content-Type"])
+        assertEquals("the provider's own header is kept, not doubled",listOf("application/x-www-form-urlencoded"),sent(explicit))
+        assertNull(sent(okhttp3.Request.Builder().url("https://witanime.example/").build()))
     }
 }
