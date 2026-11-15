@@ -8,7 +8,8 @@ import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
 import { resolveRoutes, sameRoute } from './video-driver.js';
 
-const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7, 8]).buffer;
+/** JPEG كامل البنية (SOI … EOI): فحص السلامة يرفض المبتور، فالعيّنة تنتهي بـFFD9 كالملف الحقيقي. */
+const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 76 }, (_, i) => (i * 7) & 0x7f), 0xff, 0xd9]).buffer;
 
 const mangaSpec = (n, over = {}) => ({
   section: 'manga',
@@ -341,7 +342,7 @@ describe('manga driver', () => {
   const fetchBytes = (eng, calls) => async (src) => {
     calls.push(src);
     const n = Number(src.split('-')[1]);
-    if (eng.fail.has(n)) throw new Error('reset');
+    if (eng.fail.has(n)) throw new TypeError('Failed to fetch');
     return { bytes: JPEG(), type: 'image/jpeg' };
   };
 
@@ -349,7 +350,7 @@ describe('manga driver', () => {
     const store = memoryStore();
     const eng = engine([0, 1, 2, 3, 4]);
     const calls = [];
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls) });
+    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls), wait: async () => {} });
     const item = createItem(mangaSpec(1));
     const ctl = { signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() };
     const out = await driver.run(item, ctl);
@@ -362,7 +363,7 @@ describe('manga driver', () => {
     const store = memoryStore();
     const eng = engine([0, 1, 2, 3], { fail: new Set([2]) });
     const calls = [];
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls) });
+    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls), wait: async () => {} });
     const item = createItem(mangaSpec(1));
     const ctl = { signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() };
     await expect(driver.run(item, ctl)).rejects.toMatchObject({ code: 'NETWORK' });
@@ -378,7 +379,7 @@ describe('manga driver', () => {
   it('rejects a page that is not an image (an HTML error page is not a chapter)', async () => {
     const store = memoryStore();
     const eng = engine([0]);
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: async () => ({ bytes: new TextEncoder().encode('<html>').buffer, type: 'text/html' }) });
+    const driver = createMangaDriver({ store, engine: () => eng, wait: async () => {}, fetchBytes: async () => ({ bytes: new TextEncoder().encode('<html>').buffer, type: 'text/html' }) });
     await expect(driver.run(createItem(mangaSpec(1)), { signal: new AbortController().signal, progress() {}, update() {} })).rejects.toMatchObject({ code: 'VERIFY' });
     expect(sniffImageType(JPEG())).toBe('image/jpeg');
   });

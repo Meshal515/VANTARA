@@ -647,6 +647,35 @@ class TogetherPlayer(
 
     fun panelClosed() { panelOpen = false }
 
+    /**
+     * الغرفة انتقلت لحلقة أخرى: لا سيرفر يُختار تلقائيًا ولا تشغيل (قرار المالك، 15 نوفمبر). الكل يرجع لشاشة الغرفة
+     * و«اختر سيرفر» كما عند دخولها، والسيرفرات تتجهّز في الخلفية للورقة.
+     */
+    fun awaitPick() {
+        awaitingPick = true
+        ready = false
+        failedSource = null
+        progressShown = 0f
+        mute(false)
+        showLobby()
+        report("preparing", force = true)
+        paintLobby()
+    }
+
+    /**
+     * المضيف نقل الغرفة لموسم آخر: الواجهة تجهّز مشغّل الموسم الجديد تحت هذا المشغّل، وهذا يبقى ظاهرًا بشاشة الغرفة
+     * حتى يأخذ الجديد مكانه. يُغلق اتصاله الآن (الجديد يدخل الغرفة بالحساب نفسه).
+     */
+    fun handOff(label: String?) {
+        main.removeCallbacksAndMessages(null)
+        client.close()
+        awaitingPick = true
+        ready = false
+        showLobby()
+        paintLobby()
+        hooks.message(listOfNotNull("ننقل الغرفة", label?.takeIf { it.isNotBlank() }).joinToString(" · ") + "…")
+    }
+
     /** اختيار حلقة من ورقة المشغّل داخل غرفة متزامنة: المضيف ينقل الغرفة كلها، والصديق يُبلَّغ. منفصلة: تبديل محلي. */
     /** الموسم من ورقة الحلقات: المضيف ينقل الغرفة كلها لأول حلقة في الموسم (`anime:<id>#1`)؛ الصديق يُبلَّغ. */
     fun requestWork(prefix: String, label: String): Boolean {

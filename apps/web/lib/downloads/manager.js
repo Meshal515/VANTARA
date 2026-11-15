@@ -98,12 +98,16 @@ export function createDownloadManager(deps) {
     pumping = true;
     try {
       const queue = [...items.values()]
-        .filter((i) => i.state === STATES.queued || i.state === STATES.waitingWifi)
+        .filter((i) => i.state === STATES.queued || i.state === STATES.waitingWifi || i.state === STATES.waitingNetwork)
         .sort((a, b) => a.order - b.order);
       if (!canRunNow()) {
         // بلا Wi-Fi والإعداد يطلبه: يُقال ذلك صراحة بدل «في الانتظار» بلا سبب
         if (settings.wifiOnly && network.online() && network.metered()) {
           for (const i of queue) if (i.state !== STATES.waitingWifi) patch(i.id, { state: STATES.waitingWifi });
+        }
+        // بلا اتصال أصلًا: «بانتظار الاتصال» لا «في الانتظار» بلا سبب
+        if (!network.online()) {
+          for (const i of queue) if (i.state === STATES.queued) patch(i.id, { state: STATES.waitingNetwork });
         }
         return;
       }
@@ -112,7 +116,7 @@ export function createDownloadManager(deps) {
       for (const i of queue) {
         if (running.has(i.id)) continue;
         if (free <= 0) {
-          if (i.state === STATES.waitingWifi) patch(i.id, { state: STATES.queued });
+          if (i.state === STATES.waitingWifi || i.state === STATES.waitingNetwork) patch(i.id, { state: STATES.queued });
           continue;
         }
         free--;
@@ -216,6 +220,13 @@ export function createDownloadManager(deps) {
     }
     const retryable = error?.retryable || code === 'NETWORK';
     const attempt = cur.attempts ?? 1;
+    // الشبكة نفسها غابت (وضع الطيران، نفق): ليس عطل مصدر ولا يستحق محاولة. ينتظر عودة الاتصال بلا عدّاد،
+    // ومستمع الشبكة يعيده للطابور. كانت ثلاث محاولات خلال 30 ثانية تُستهلك بلا شبكة فيفشل الفصل نهائيًا
+    if (retryable && !network.online()) {
+      patch(id, { state: STATES.waitingNetwork, speed: 0, error: { code, message }, attempts: Math.max(0, attempt - 1), retryFrom: Number(cur.bytes) || 0 });
+      pump();
+      return;
+    }
     if (retryable && attempt <= RETRY_DELAYS_MS.length) {
       // نفس المصدر بعد مهلة متزايدة؛ الخانة تفرغ لغيره أثناء الانتظار
       patch(id, { state: STATES.reconnecting, speed: 0, error: { code, message }, retryFrom: Number(cur.bytes) || 0 });
@@ -226,7 +237,7 @@ export function createDownloadManager(deps) {
           patch(id, { state: STATES.queued });
           pump();
         }
-      }, RETRY_DELAYS_MS[attempt - 1]);
+      }, Math.max(RETRY_DELAYS_MS[attempt - 1], Number(error?.retryAfterMs) || 0));
       retryTimers.set(id, t);
       pump();
       return;
@@ -301,7 +312,7 @@ export function createDownloadManager(deps) {
 
     resume(id) {
       const item = items.get(id);
-      if (!item || ![STATES.paused, STATES.failed, STATES.noSpace, STATES.reconnecting].includes(item.state)) return;
+      if (!item || ![STATES.paused, STATES.failed, STATES.noSpace, STATES.reconnecting, STATES.waitingNetwork].includes(item.state)) return;
       stopRunning(id, 'requeue');
       patch(id, { state: STATES.queued, error: null, attempts: 0, retryFrom: null });
       pump();
@@ -309,6 +320,38 @@ export function createDownloadManager(deps) {
 
     retry(id) {
       api.resume(id);
+    },
+
+    /** «أعد كل الفاشل»: الفاشل ونقص المساحة يعودان للطابور بمحاولات كاملة. يرجع عددها. */
+    retryFailed() {
+      let n = 0;
+      for (const item of [...items.values()].sort((a, b) => a.order - b.order)) {
+        if (item.state !== STATES.failed && item.state !== STATES.noSpace) continue;
+        patch(item.id, { state: STATES.queued, error: null, attempts: 0, retryFrom: null });
+        n++;
+      }
+      if (n) pump();
+      return n;
+    },
+
+    /**
+     * «قدّمه»: العناصر المختارة إلى رأس الطابور بترتيبها. ما يعمل الآن لا يُقطع؛ المقدَّم يأخذ أول خانة تفرغ.
+     */
+    prioritize(ids) {
+      const list = [].concat(ids).map((id) => items.get(id)).filter((i) => i && i.state !== STATES.ready);
+      if (!list.length) return 0;
+      let min = Math.min(...[...items.values()].map((i) => Number(i.order) || 0));
+      for (const item of [...list].reverse()) patch(item.id, { order: --min });
+      emit({ type: 'list' });
+      pump();
+      return list.length;
+    },
+
+    /** إلغاء عدة تنزيلات لم تكتمل معًا (ما نُزّل منها يُحذف). يرجع عددها. */
+    async cancelMany(ids) {
+      let n = 0;
+      for (const id of [].concat(ids)) if (await api.cancel(id)) n++;
+      return n;
     },
 
     pauseAll() {

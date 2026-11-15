@@ -238,8 +238,11 @@ class AnimeEnginePlugin : Plugin() {
     @PluginMethod
     fun pick(call: PluginCall) {
         val prep = engine.prepared(call.getString("session") ?: "") ?: return call.reject("الجلسة انتهت")
-        val list = prep.rank(prep.playable(prep.candidatesOf(call.getString("route") ?: "")))
-        call.resolve(JSObject().put("candidate", list.firstOrNull()?.id))
+        val route = call.getString("route") ?: ""
+        val all = prep.candidatesOf(route)
+        // المفحوص الصالح أولًا، ثم ما لم يُرفض فحصه بعد (الفحص ما زال يجري)
+        val chosen = prep.rank(prep.playable(all)).firstOrNull() ?: prep.rank(prep.notRejected(all)).firstOrNull()
+        call.resolve(JSObject().put("candidate", chosen?.id).put("reason", if (chosen == null) prep.pickFailure(route) else null))
     }
 
     override fun handleOnPause() {

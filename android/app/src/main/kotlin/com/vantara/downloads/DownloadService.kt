@@ -111,7 +111,8 @@ class DownloadService : Service() {
             launch(job)
         }
         for (job in pending) if (progress[job.id]?.state != "queued") emit(job.copy(state = "queued"))
-        if (running.isEmpty() && pending.isEmpty()) idle()
+        if (running.isEmpty() && pending.isEmpty() && holds.isEmpty()) idle()
+        else if (holds.isNotEmpty()) runCatching { promote() }
     }
 
     private fun idle() {
@@ -249,6 +250,20 @@ class DownloadService : Service() {
         private val running = ConcurrentHashMap<String, Running>()
         private val pending = java.util.concurrent.ConcurrentLinkedQueue<DownloadJob>()
         private val progress = ConcurrentHashMap<String, DownloadJob>()
+        /** مسكات الواجهة (تنزيل المانجا): المفتاح ← سطر الإشعار. الخدمة لا تتوقف ما بقيت مسكة. */
+        private val holds = ConcurrentHashMap<String, String>()
+
+        fun hold(context: Context, key: String, label: String) {
+            holds[key] = label
+            val service = instance
+            if (service != null) service.drainPending()
+            // من الواجهة والتطبيق ظاهر؛ رفض النظام (خلفية) لا يُسقط التنزيل نفسه
+            else runCatching { ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)) }
+        }
+
+        fun release(key: String) {
+            if (holds.remove(key) != null) instance?.drainPending()
+        }
         /** التوازي و«Wi-Fi فقط» من إعدادات الواجهة (manager.js)، يصلان مع كل تسليم. */
         @Volatile var maxParallel = 2
         @Volatile var wifiOnly = false
@@ -312,7 +327,7 @@ class DownloadService : Service() {
         private fun notification(context: Context): Notification {
             val active = running.keys.mapNotNull { progress[it] }
             val title = when (active.size) {
-                0 -> if (pending.isEmpty()) "يجهّز التنزيل" else if (wifiOnly) "${pending.size} في الانتظار حتى Wi‑Fi" else "${pending.size} في الانتظار"
+                0 -> if (pending.isEmpty()) holds.values.firstOrNull() ?: "يجهّز التنزيل" else if (wifiOnly) "${pending.size} في الانتظار حتى Wi‑Fi" else "${pending.size} في الانتظار"
                 1 -> active[0].let { listOf(it.title, it.label).filter(String::isNotBlank).joinToString(" — ") }
                 else -> "${active.size} تنزيلات جارية"
             }

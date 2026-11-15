@@ -254,6 +254,18 @@ class DownloadsPlugin : Plugin() {
     }
 
     /**
+     * تنزيل المانجا يجري في الواجهة (صفحات بمحرك الإضافات نفسه)، فتجميد النظام للعملية بعد الخروج من التطبيق
+     * كان يوقفه بلا كلمة. مسكة على الخدمة الأمامية نفسها تبقي العملية حية بإشعار تقدّم ما دام فصل يُنزَّل.
+     */
+    @PluginMethod
+    fun keepAlive(call: PluginCall) {
+        val key = call.getString("key") ?: "manga"
+        if (call.getBoolean("on", true) == true) DownloadService.hold(context, key, call.getString("label") ?: "تنزيل فصول المانجا")
+        else DownloadService.release(key)
+        call.resolve()
+    }
+
+    /**
      * تشغيل ملف محفوظ بالمشغّل نفسه: جلسة محلية بمرشّح file:// وترجماته وصوته المحفوظين.
      * لا مصدر ولا شبكة ولا «مشاهدة معًا» (ميزة مستقبلية منفصلة).
      */

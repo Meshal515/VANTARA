@@ -19,6 +19,8 @@ export const STATES = Object.freeze({
   failed: 'failed',
   noSpace: 'no_space',
   waitingWifi: 'waiting_wifi',
+  /** الاتصال انقطع: العنصر يكمل وحده حين يعود، ولا تُستهلك محاولاته وهو بلا شبكة. */
+  waitingNetwork: 'waiting_network',
   /** سُلِّم لطابور الجهاز (Android) وينتظر خانته هناك: يكمل ولو أُغلق التطبيق، ولا يشغل خانة في الواجهة. */
   scheduled: 'scheduled',
 });
@@ -26,7 +28,7 @@ export const STATES = Object.freeze({
 /** الحالات التي تشغل خانة من خانات التوازي. */
 export const ACTIVE_STATES = new Set([STATES.resolving, STATES.downloading, STATES.reconnecting, STATES.verifying]);
 /** حالات «جاري التحميل» (كل ما لم يصبح على الجهاز بعد). */
-export const PENDING_STATES = new Set([...ACTIVE_STATES, STATES.queued, STATES.scheduled, STATES.paused, STATES.failed, STATES.noSpace, STATES.waitingWifi]);
+export const PENDING_STATES = new Set([...ACTIVE_STATES, STATES.queued, STATES.scheduled, STATES.paused, STATES.failed, STATES.noSpace, STATES.waitingWifi, STATES.waitingNetwork]);
 
 export const STATE_LABEL = Object.freeze({
   queued: 'في الانتظار',
@@ -39,6 +41,7 @@ export const STATE_LABEL = Object.freeze({
   failed: 'فشل التنزيل',
   no_space: 'مساحة غير كافية',
   waiting_wifi: 'بانتظار Wi-Fi',
+  waiting_network: 'بانتظار الاتصال',
   scheduled: 'في طابور الجهاز',
 });
 
@@ -48,6 +51,14 @@ export const ERROR_LABEL = Object.freeze({
   EXPIRED: 'انتهت صلاحية رابط المصدر',
   SOURCE: 'المصدر رفض الطلب',
   UNSUPPORTED: 'هذا المصدر لا يدعم التنزيل',
+  /** المصدر ردّ لكن الفصل بلا صفحات (مقفل، مدفوع، أو أزيل) — ليس «رفضًا». */
+  EMPTY: 'الفصل بلا صفحات عند المصدر',
+  /** 429 أو صفحة حجب بدل الصورة: الموقع يطلب التمهّل، والتنزيل يبطئ ويعيد. */
+  RATE_LIMIT: 'الموقع يحدّ الطلبات',
+  /** تحدّي Cloudflare أو ما يشبهه: يُحل من «تحتاج تحقق» في الإضافات. */
+  VERIFICATION: 'الموقع يطلب تحققًا',
+  /** كود الإضافة تعطّل أو لم يقرأ صفحة الموقع (تغيّر الموقع). */
+  EXTENSION: 'الإضافة تعطّلت عند هذا الفصل',
   NO_SPACE: 'المساحة على الجهاز لا تكفي',
   VERIFY: 'الملف لم يجتز التحقق',
   NO_ROUTE: 'لم يجهز مصدر صالح للتنزيل',
@@ -253,7 +264,7 @@ export function queueSummary(items) {
     if (ACTIVE_STATES.has(i.state)) {
       active++;
       speed += i.state === STATES.downloading ? Number(i.speed) || 0 : 0;
-    } else if (i.state === STATES.queued || i.state === STATES.waitingWifi || i.state === STATES.scheduled) waiting++;
+    } else if (i.state === STATES.queued || i.state === STATES.waitingWifi || i.state === STATES.waitingNetwork || i.state === STATES.scheduled) waiting++;
     else if (i.state === STATES.paused) paused++;
     else if (i.state === STATES.failed || i.state === STATES.noSpace) failed++;
   }

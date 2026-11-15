@@ -14,12 +14,17 @@ import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localWork, 
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
 import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
+import { createStorageView } from './storage-view.js';
 import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, progressRatio } from '../lib/downloads/units.js';
 import { glyph } from './icons.js';
 import { parseRelease } from '../addons/release-info.js';
 import { isTorrentRoute } from '../lib/route-family.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
+const SORTS = ['recent', 'size', 'name'];
+/** ما يُنزَّل فعلًا الآن (لا المتوقف ولا المنتظر). */
+const TRANSFERRING = new Set(['resolving', 'downloading', 'verifying']);
+const SORT_LABEL = { recent: 'الأحدث', size: 'الأكبر حجمًا', name: 'الاسم' };
 
 /** نص LTR معزول داخل سطر عربي: الأرقام والوحدات لا تنقلب. */
 const ltr = (el, text, cls) => {
@@ -40,16 +45,31 @@ export function createDownloadsUI(deps) {
     dirty: new Set(),
     listDirty: false,
     work: null,
+    /** وضع التحديد: { scope: 'queue'|'device', ids: Set } (الجهاز: مراجع أعمال) أو null. */
+    select: null,
+    /** ترتيب «على الجهاز»: recent | size | name. */
+    sort: 'recent',
   };
   let ctx = null; // { manager, store, caps }
 
   const ready = () => (ctx ? Promise.resolve(ctx) : downloads().then((c) => (ctx = c)));
 
+  // إدارة المساحة: كل ما يأخذه VANTARA بفئاته، وحذف انتقائي بعد أن ترى الاسم والحجم والأثر
+  const storage = createStorageView({
+    el, openSheet, closeSheet, toast,
+    mangaBytes: async () => (await ready()).manager.list().filter((i) => i.kind === 'manga' && i.state === STATES.ready).reduce((n, i) => n + (Number(i.storage?.bytes ?? i.bytes) || 0), 0),
+    openDownloads: () => { view.tab = 'device'; void open('device'); },
+  });
+
   // ───────────── المدخل: زر «التحميلات» في مكتبتي ─────────────
 
-  /** الدائرة حول أيقونة المدخل تقول إن هناك تنزيلًا يعمل، بلا رقم مزعج. */
-  function paintEntry(summary) {
-    for (const b of deps.root.querySelectorAll('[data-act="openDownloads"]')) b.classList.toggle('is-busy', summary.active + summary.waiting > 0);
+  /**
+   * أيقونة المدخل تنبض بالأحمر حين يُنزَّل شيء فعلًا الآن، وحده. المتوقف والمنتظر (Wi‑Fi، الاتصال، خانة) والفاشل
+   * لا يُحسب: كانت تنبض و«كله متوقف مؤقتًا» (بلاغ المالك). يُقرأ من العناصر لا من ملخص يجمع المنتظر مع النشط.
+   */
+  function paintEntry() {
+    const busy = Boolean(ctx?.manager.list().some((i) => TRANSFERRING.has(i.state)));
+    for (const b of deps.root.querySelectorAll('[data-act="openDownloads"]')) b.classList.toggle('is-busy', busy);
   }
 
   // ───────────── الصفحة ─────────────
@@ -86,7 +106,7 @@ export function createDownloadsUI(deps) {
     if (view.frame) return;
     view.frame = requestAnimationFrame(() => {
       view.frame = 0;
-      paintEntry(ctx.manager.summary());
+      paintEntry();
       if (deps.currentPage?.() !== 'downloads') return;
       if (view.listDirty) {
         view.listDirty = false;
@@ -112,6 +132,8 @@ export function createDownloadsUI(deps) {
     const pending = items.filter((i) => i.state !== STATES.ready);
     const nodes = [tabs(pending.length), filters(items)];
     if (!ctx.caps.video) nodes.push(note('على هذا الجهاز تُنزَّل فصول المانجا فقط. تنزيل الحلقات والأفلام في تطبيق Android وويندوز.'));
+    if (view.select && view.select.scope !== view.tab) view.select = null;
+    if (view.select) nodes.push(selectBar(items));
     if (view.tab === 'queue') nodes.push(queueView(pending));
     else nodes.push(deviceView(items));
     box.replaceChildren(...nodes);
@@ -139,6 +161,7 @@ export function createDownloadsUI(deps) {
         const page = q('downloads');
         if (page) view.scroll[view.tab] = page.scrollTop;
         view.tab = k;
+        view.select = null;
         render({ keepScroll: true });
         if (page) page.scrollTop = view.scroll[k] ?? 0;
       };
@@ -203,7 +226,12 @@ export function createDownloadsUI(deps) {
     settings.setAttribute('aria-label', 'إعدادات التحميل');
     settings.innerHTML = glyph('sliders', { size: 20 });
     settings.onclick = () => openSettings();
-    bar.append(text, btn, settings);
+    const more = el('button', 'icon-btn dl-summary-more');
+    more.type = 'button';
+    more.setAttribute('aria-label', 'إدارة التحميلات');
+    more.innerHTML = glyph('more', { size: 20 });
+    more.onclick = () => openQueueManage();
+    bar.append(text, btn, more, settings);
     return bar;
   }
 
@@ -275,6 +303,7 @@ export function createDownloadsUI(deps) {
       openInfo(item.id);
     };
     r.append(thumb(item), main, ctl, info);
+    selectable(r, 'queue', item.id, () => openInfo(item.id));
     view.rows.set(item.id, { r, unit, bar, fill, meta, ctl, last: '' });
     updateRow(item.id);
     return r;
@@ -407,11 +436,25 @@ export function createDownloadsUI(deps) {
       return wrap;
     }
     const total = works.reduce((s, w) => s + w.bytes, 0);
-    const head = el('p', 'dl-device-head');
-    head.append(el('span', null, `${works.length} ${works.length === 1 ? 'عمل' : works.length === 2 ? 'عملان' : works.length <= 10 ? 'أعمال' : 'عملًا'}`));
-    if (total > 0) head.append(el('span', 'dl-dot', '·'), ltr(el, formatBytes(total)));
+    const head = el('div', 'dl-device-head');
+    const facts = el('p', 'dl-device-facts');
+    facts.append(el('span', null, `${works.length} ${works.length === 1 ? 'عمل' : works.length === 2 ? 'عملان' : works.length <= 10 ? 'أعمال' : 'عملًا'}`));
+    if (total > 0) facts.append(el('span', 'dl-dot', '·'), ltr(el, formatBytes(total)));
+    const sortBtn = el('button', 'dl-chip dl-sort', SORT_LABEL[view.sort]);
+    sortBtn.type = 'button';
+    sortBtn.setAttribute('aria-label', `الترتيب: ${SORT_LABEL[view.sort]}`);
+    sortBtn.onclick = () => {
+      view.sort = SORTS[(SORTS.indexOf(view.sort) + 1) % SORTS.length];
+      render({ keepScroll: true });
+    };
+    const more = el('button', 'icon-btn dl-device-more');
+    more.type = 'button';
+    more.setAttribute('aria-label', 'إدارة ما على الجهاز');
+    more.innerHTML = glyph('more', { size: 20 });
+    more.onclick = () => openDeviceManage();
+    head.append(facts, sortBtn, more);
     const grid = el('div', 'grid dl-grid');
-    for (const w of works) grid.append(workCard(w));
+    for (const w of sortWorks(works)) grid.append(workCard(w));
     wrap.append(head, grid);
     return wrap;
   }
@@ -450,8 +493,8 @@ export function createDownloadsUI(deps) {
     t.dir = 'auto';
     const m = el('div', 'work-meta', countText(w.kind, w.count));
     a.append(frame, t, m);
-    a.onclick = () => openWork(w.ref);
-    a.onkeydown = (e) => { if (e.key === 'Enter') openWork(w.ref); };
+    selectable(a, 'device', w.ref, () => openWork(w.ref));
+    a.onkeydown = (e) => { if (e.key === 'Enter') a.click(); };
     return a;
   }
 
@@ -459,6 +502,13 @@ export function createDownloadsUI(deps) {
     const box = el('div', 'dl-empty');
     box.innerHTML = `<span class="dl-empty-icon">${glyph(icon, { size: 30 })}</span>`;
     box.append(el('b', null, title), el('p', null, hint));
+    // المساحة لا تتعلق بوجود تنزيلات: الكاش وبقايا البث قد تكون جيجابايتات والقائمة فارغة
+    const space = el('button', 'btn dl-empty-space');
+    space.type = 'button';
+    space.innerHTML = glyph('chart', { size: 16 });
+    space.append(el('span', null, 'إدارة المساحة'));
+    space.onclick = () => void storage.open();
+    box.append(space);
     return box;
   }
 
@@ -545,6 +595,8 @@ export function createDownloadsUI(deps) {
         if (size) row.append(ltr(el, size, 'trail dl-size'));
         body.append(row);
       }
+      const done = data.ready.filter(consumed);
+      if (done.length) body.append(sheetButton('check', `حذف ${data.kind === 'manga' ? 'المقروء' : 'المشاهَد'} (${countText(data.kind, done.length)})`, () => { closeSheet(); confirmDelete(done, { title: `حذف ${data.kind === 'manga' ? 'المقروء' : 'المشاهَد'} من ${data.work.title}` }); }, true));
       if (data.ready.length > 1) body.append(sheetButton('trash', 'حذف كل ما على الجهاز من هذا العمل', () => { closeSheet(); confirmDelete(data.ready, { title: `حذف ${data.work.title} من الجهاز`, all: true, ref }); }, true));
     }, { tone: data.section });
   }
@@ -579,7 +631,7 @@ export function createDownloadsUI(deps) {
 
   // ───────────── الحذف (بتأكيد) والإلغاء ─────────────
 
-  function confirmDelete(items, { title, all = false, ref = null }) {
+  function confirmDelete(items, { title, all = false, ref = null, after = null }) {
     const bytes = items.reduce((s, i) => s + (Number(i.storage?.bytes ?? i.bytes) || 0), 0);
     const kind = items[0]?.kind;
     openSheet((body) => {
@@ -601,8 +653,12 @@ export function createDownloadsUI(deps) {
         del.disabled = true;
         const freed = await ctx.manager.remove(items.map((i) => i.id));
         if (all && ref) await dropWorkArt(ctx.store, ref);
-        else if (ref == null && items[0] && !ctx.manager.list().some((i) => i.work.ref === items[0].work.ref)) await dropWorkArt(ctx.store, items[0].work.ref);
+        else if (ref == null) {
+          // كل عمل لم يبقَ منه شيء على الجهاز: يُحذف فنه المحفوظ أيضًا
+          for (const r of new Set(items.map((i) => i.work.ref))) if (!ctx.manager.list().some((i) => i.work.ref === r)) await dropWorkArt(ctx.store, r);
+        }
         closeSheet();
+        after?.();
         // الصفحة الأصلية مفتوحة من الجهاز: تُعاد بما بقي، أو يُرجع منها إن لم يبق شيء
         const ref0 = items[0]?.work.ref;
         if (ref0 && view.localRef === ref0 && ['anime', 'cinema', 'detail'].includes(deps.currentPage?.())) {
@@ -738,6 +794,193 @@ export function createDownloadsUI(deps) {
 
   // ───────────── الإعدادات ─────────────
 
+  // ───────────── الإدارة: تحديد متعدد، أوامر جماعية، ترتيب، مساحة ─────────────
+
+  /** مقروء/مشاهَد في حسابك؟ (المانجا بعلامات الفصول، الأنمي بالحلقات المشاهدة؛ ما لا يُعرف = لا) */
+  const consumed = (item) => {
+    try {
+      return Boolean(deps.consumed?.(item));
+    } catch {
+      return false;
+    }
+  };
+
+  /** عقدة تُحدَّد: لمسة في وضع التحديد تبدّلها، ولمسة مطوّلة تبدأ التحديد بها. خارجه تنفّذ فعلها العادي. */
+  function selectable(node, scope, id, open) {
+    const on = () => view.select?.scope === scope && view.select.ids.has(id);
+    node.classList.toggle('is-selected', on());
+    node.setAttribute('aria-selected', String(on()));
+    let timer = 0;
+    let long = false;
+    const clear = () => { clearTimeout(timer); timer = 0; };
+    node.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || view.select) return;
+      long = false;
+      timer = setTimeout(() => {
+        long = true;
+        view.select = { scope, ids: new Set([id]) };
+        try { navigator.vibrate?.(12); } catch { /* اهتزاز اختياري */ }
+        render({ keepScroll: true });
+      }, 480);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave', 'pointermove']) node.addEventListener(ev, (e) => { if (ev !== 'pointermove' || Math.abs(e.movementY) > 4) clear(); });
+    node.addEventListener('contextmenu', (e) => { if (view.select || long) e.preventDefault(); });
+    node.addEventListener('click', (e) => {
+      if (long) { long = false; e.preventDefault(); return; }
+      if (view.select?.scope === scope) {
+        e.preventDefault();
+        const ids = view.select.ids;
+        if (ids.has(id)) ids.delete(id); else ids.add(id);
+        if (!ids.size) view.select = null;
+        render({ keepScroll: true });
+        return;
+      }
+      if (e.target.closest('button') && e.target.closest('button') !== node) return;
+      open();
+    });
+  }
+
+  /** العناصر المقصودة بالتحديد: الطابور عناصر، و«على الجهاز» كل الجاهز من الأعمال المحددة. */
+  function selectedItems() {
+    if (!view.select || !ctx) return [];
+    const list = ctx.manager.list();
+    if (view.select.scope === 'queue') return list.filter((i) => view.select.ids.has(i.id) && i.state !== STATES.ready);
+    return list.filter((i) => i.state === STATES.ready && view.select.ids.has(i.work.ref));
+  }
+
+  /** شريط التحديد: العدد، الكل/لا شيء، والأوامر على المحدد. */
+  function selectBar(items) {
+    const bar = el('div', 'dl-selectbar');
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'أوامر المحدد');
+    const scope = view.select.scope;
+    const pool = scope === 'queue'
+      ? items.filter((i) => i.state !== STATES.ready && visible(i)).map((i) => i.id)
+      : onDeviceWorks(items, { section: view.filter }).map((w) => w.ref);
+    const chosen = selectedItems();
+    const head = el('div', 'dl-selectbar-head');
+    const close = el('button', 'icon-btn');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'إنهاء التحديد');
+    close.innerHTML = glyph('close', { size: 20 });
+    close.onclick = () => { view.select = null; render({ keepScroll: true }); };
+    const count = el('b', null, scope === 'queue' ? `${view.select.ids.size} محدد` : `${view.select.ids.size} ${view.select.ids.size === 1 ? 'عمل' : 'أعمال'} · ${countText(chosen[0]?.kind ?? 'manga', chosen.length)}`);
+    const all = el('button', 'dl-chip', view.select.ids.size >= pool.length ? 'لا شيء' : 'تحديد الكل');
+    all.type = 'button';
+    all.onclick = () => {
+      view.select.ids = view.select.ids.size >= pool.length ? new Set() : new Set(pool);
+      if (!view.select.ids.size) view.select = null;
+      render({ keepScroll: true });
+    };
+    head.append(close, count, all);
+    const actions = el('div', 'dl-selectbar-actions');
+    const act = (icon, label, run, danger = false) => {
+      const b = el('button', `btn${danger ? ' btn-danger' : ''} dl-select-act`);
+      b.type = 'button';
+      b.innerHTML = glyph(icon, { size: 16 });
+      b.append(el('span', null, label));
+      b.disabled = !chosen.length;
+      b.onclick = run;
+      actions.append(b);
+    };
+    const done = () => { view.select = null; render({ keepScroll: true }); };
+    if (scope === 'queue') {
+      act('pause', 'إيقاف', () => { for (const i of chosen) ctx.manager.pause(i.id); done(); });
+      act('play', 'استئناف', () => { for (const i of chosen) ctx.manager.resume(i.id); done(); });
+      act('upload', 'قدّمه', () => { ctx.manager.prioritize(chosen.map((i) => i.id)); toast('صار في أول الطابور'); done(); });
+      act('trash', 'إلغاء', () => confirmCancelMany(chosen, done), true);
+    } else {
+      act('trash', 'حذف', () => confirmDelete(chosen, { title: `حذف ${countText(chosen[0]?.kind ?? 'manga', chosen.length)} من الجهاز`, after: done }), true);
+    }
+    bar.append(head, actions);
+    return bar;
+  }
+
+  function confirmCancelMany(items, after) {
+    openSheet((body) => {
+      body.classList.add('dl-confirm');
+      body.append(el('h3', null, `إلغاء ${items.length === 1 ? 'تنزيل واحد' : `${items.length} تنزيلات`}`));
+      const p = el('p', 'dl-confirm-text', 'يُحذف ما نُزّل منها حتى الآن وتخرج من الطابور. للإبقاء عليها استعمل «إيقاف».');
+      const row = el('div', 'dl-confirm-actions');
+      const keep = el('button', 'btn', 'تراجع');
+      keep.type = 'button';
+      keep.onclick = () => closeSheet();
+      const go = el('button', 'btn btn-danger', 'إلغاء التنزيلات');
+      go.type = 'button';
+      go.onclick = async () => {
+        go.disabled = true;
+        const n = await ctx.manager.cancelMany(items.map((i) => i.id));
+        closeSheet();
+        after?.();
+        toast(n === 1 ? 'أُلغي التنزيل' : `أُلغيت ${n} تنزيلات`);
+      };
+      row.append(keep, go);
+      body.append(p, row);
+    });
+  }
+
+  /** ⋯ في «جاري التحميل»: أوامر الطابور كله. */
+  async function openQueueManage() {
+    const c = await ready();
+    const items = c.manager.list();
+    const pending = items.filter((i) => i.state !== STATES.ready && visible(i));
+    const failed = pending.filter((i) => i.state === STATES.failed || i.state === STATES.noSpace);
+    const s = queueSummary(pending);
+    openSheet((body) => {
+      body.classList.add('dl-manage');
+      body.append(el('h3', null, 'إدارة التحميلات'));
+      body.append(sheetButton('check', 'تحديد…', () => { closeSheet(); view.select = { scope: 'queue', ids: new Set() }; render({ keepScroll: true }); }));
+      if (failed.length) body.append(sheetButton('refresh', `أعد كل الفاشل (${failed.length})`, () => { closeSheet(); const n = c.manager.retryFailed(); toast(n ? `عاد ${n} للطابور` : 'لا فاشل'); }));
+      if (s.active + s.waiting > 0) body.append(sheetButton('pause', 'إيقاف الكل', () => { closeSheet(); c.manager.pauseAll(); }));
+      if (s.paused) body.append(sheetButton('play', 'استئناف الكل', () => { closeSheet(); c.manager.resumeAll(); }));
+      if (pending.length) body.append(sheetButton('trash', `إلغاء كل ما في الطابور (${pending.length})`, () => { closeSheet(); confirmCancelMany(pending); }, true));
+      body.append(sheetButton('chart', 'إدارة المساحة', () => { closeSheet(); void storage.open(); }));
+      body.append(sheetButton('sliders', 'إعدادات التحميل', () => { closeSheet(); void openSettings(); }));
+    });
+  }
+
+  /** ⋯ في «على الجهاز»: المساحة حسب القسم، والتحديد، وحذف المقروء/المشاهد كله. */
+  async function openDeviceManage() {
+    const c = await ready();
+    const ready_ = c.manager.list().filter((i) => i.state === STATES.ready && visible(i));
+    const done = ready_.filter(consumed);
+    const doneBytes = done.reduce((n, i) => n + (Number(i.storage?.bytes ?? i.bytes) || 0), 0);
+    const bySection = new Map();
+    for (const i of ready_) bySection.set(i.section, (bySection.get(i.section) ?? 0) + (Number(i.storage?.bytes ?? i.bytes) || 0));
+    openSheet((body) => {
+      body.classList.add('dl-manage');
+      body.append(el('h3', null, 'ما على الجهاز'));
+      const usage = el('div', 'dl-usage');
+      for (const [sec, bytes] of [...bySection].sort((a, b) => b[1] - a[1])) {
+        const line = el('p', 'dl-usage-row');
+        line.append(el('span', null, SECTION_LABEL[sec] ?? sec), ltr(el, formatBytes(bytes) ?? '0 B'));
+        usage.append(line);
+      }
+      const free = el('p', 'dl-usage-row dl-usage-free');
+      usage.append(free);
+      void storageFree(c).then((f) => { if (f != null && f >= 0) free.append(el('span', null, 'متاح على الجهاز'), ltr(el, formatBytes(f))); });
+      body.append(usage);
+      body.append(sheetButton('chart', 'إدارة المساحة (الكاش والبقايا وكل ما يأخذه التطبيق)', () => { closeSheet(); void storage.open(); }));
+      body.append(sheetButton('check', 'تحديد…', () => { closeSheet(); view.select = { scope: 'device', ids: new Set() }; render({ keepScroll: true }); }));
+      if (done.length) {
+        const b = sheetButton('trash', `حذف كل المقروء والمشاهَد (${done.length})`, () => { closeSheet(); confirmDelete(done, { title: 'حذف المقروء والمشاهَد من الجهاز' }); }, true);
+        const size = formatBytes(doneBytes);
+        if (size) b.append(ltr(el, size, 'trail dl-size'));
+        body.append(b);
+      }
+      body.append(sheetButton('sliders', 'إعدادات التحميل', () => { closeSheet(); void openSettings(); }));
+    });
+  }
+
+  function sortWorks(works) {
+    const list = [...works];
+    if (view.sort === 'size') return list.sort((a, b) => b.bytes - a.bytes);
+    if (view.sort === 'name') return list.sort((a, b) => String(a.work.title ?? '').localeCompare(String(b.work.title ?? ''), 'ar'));
+    return list;
+  }
+
+  const storageView = () => storage;
+
   async function openSettings() {
     const c = await ready();
     const s = c.manager.settings();
@@ -770,7 +1013,8 @@ export function createDownloadsUI(deps) {
       const wifi = toggleRow('Wi-Fi فقط', 'لا يُنزَّل شيء على بيانات الجوال. ما في الطابور ينتظر الشبكة.', s.wifiOnly, (on) => c.manager.setWifiOnly(on));
       const storage = el('div', 'dl-setting dl-storage');
       storage.append(el('div', 'dl-setting-head'));
-      body.append(par, wifi, storage);
+      const manageSpace = sheetButton('chart', 'إدارة المساحة', () => { closeSheet(); void storageView().open(); });
+      body.append(par, wifi, storage, manageSpace);
       void storageLine(c, native).then((nodes) => storage.firstChild.append(...nodes));
     });
   }
@@ -994,6 +1238,55 @@ export function createDownloadsUI(deps) {
             const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
             const shown = new Map();
             const list = el('div', 'dl-source-list');
+            // فلاتر كورقة السيرفرات: الجودة، والنوع (تورنت/مباشر)، والمصدر، والترتيب. تُبنى مما وصل فعلًا
+            const filt = { q: 'all', kind: 'all', src: 'all', sort: 'quality' };
+            const meta = new Map();
+            const bar = el('div', 'dl-server-filters');
+            const SORTS_SRV = { quality: 'الأعلى جودة', seeds: 'الأكثر مشاركين', small: 'الأصغر حجمًا' };
+            const sizeOf = (label) => {
+              const m = /([\d.]+)\s*(KB|MB|GB|TB)/i.exec(String(label ?? ''));
+              return m ? Number(m[1]) * 1024 ** ({ KB: 1, MB: 2, GB: 3, TB: 4 })[m[2].toUpperCase()] : Infinity;
+            };
+            const applyFilters = () => {
+              const entries = [...meta.entries()];
+              for (const [b, m] of entries) b.hidden = !((filt.q === 'all' || m.q === filt.q) && (filt.kind === 'all' || m.kind === filt.kind) && (filt.src === 'all' || m.src === filt.src));
+              const order = [...entries].sort(([, x], [, y]) => filt.sort === 'seeds' ? (y.seeds - x.seeds) || (y.qn - x.qn)
+                : filt.sort === 'small' ? (x.bytes - y.bytes) || (y.seeds - x.seeds)
+                : (y.qn - x.qn) || (y.seeds - x.seeds));
+              for (const [b] of order) list.append(b);
+              paintChips();
+            };
+            const chip = (label, on, run) => {
+              const c0 = el('button', `dl-chip dl-chip--small${on ? ' is-on' : ''}`, label);
+              c0.type = 'button';
+              c0.setAttribute('aria-pressed', String(on));
+              c0.onclick = run;
+              return c0;
+            };
+            const paintChips = () => {
+              const all = [...meta.values()];
+              const qs = [...new Set(all.map((m) => m.q).filter(Boolean))].sort((a, b) => (parseInt(b, 10) || 9999) - (parseInt(a, 10) || 9999));
+              const kinds = [...new Set(all.map((m) => m.kind))];
+              const srcs = [...new Set(all.map((m) => m.src).filter(Boolean))];
+              const row1 = el('div', 'dl-filters');
+              const row2 = el('div', 'dl-filters');
+              if (qs.length > 1) {
+                row1.append(chip('كل الجودات', filt.q === 'all', () => { filt.q = 'all'; applyFilters(); }));
+                for (const q of qs) row1.append(chip(q, filt.q === q, () => { filt.q = filt.q === q ? 'all' : q; applyFilters(); }));
+              }
+              const sortChip = chip(`↕ ${SORTS_SRV[filt.sort]}`, false, () => {
+                const keys = Object.keys(SORTS_SRV);
+                filt.sort = keys[(keys.indexOf(filt.sort) + 1) % keys.length];
+                applyFilters();
+              });
+              sortChip.setAttribute('aria-label', `الترتيب: ${SORTS_SRV[filt.sort]}`);
+              row1.append(sortChip);
+              if (kinds.length > 1) for (const [k, label] of [['torrent', 'تورنت'], ['direct', 'مباشر']]) row2.append(chip(label, filt.kind === k, () => { filt.kind = filt.kind === k ? 'all' : k; applyFilters(); }));
+              if (srcs.length > 1) for (const n of srcs) row2.append(chip(n, filt.src === n, () => { filt.src = filt.src === n ? 'all' : n; applyFilters(); }));
+              const visibleCount = [...meta.keys()].filter((b) => !b.hidden).length;
+              const count = el('p', 'dl-hint dl-server-count', filt.q === 'all' && filt.kind === 'all' && filt.src === 'all' ? `${meta.size} سيرفر` : `${visibleCount} من ${meta.size}`);
+              bar.replaceChildren(row1, ...(row2.childElementCount ? [row2] : []), count);
+            };
             // جلسة الورقة تُغلق حين تُغلق الورقة: كانت تبقى مفتوحة بتذاكر تورنتاتها ومسح سيرفراتها حتى 25 ث
             const stop = new AbortController();
             const onRoutes = (routes) => {
@@ -1004,11 +1297,13 @@ export function createDownloadsUI(deps) {
               for (const { r, row } of fresh) {
                 const b = sourceRow(row);
                 shown.set(r.id, b);
+                meta.set(b, { q: row.quality, qn: Number(r.quality) || 0, kind: isTorrentRoute(r) ? 'torrent' : 'direct', src: row.name, seeds: row.seeds ?? 0, bytes: sizeOf(row.size) });
                 list.append(b);
               }
+              if (fresh.length) applyFilters();
               const pending = routes.filter((r) => r.state === 'RESOLVING' || r.state === 'CHECKING').length;
               waiting.textContent = shown.size ? `نبحث عن المزيد…${pending ? ` (${pending})` : ''}` : (video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
-              if (shown.size && !list.isConnected) sourceBox.replaceChildren(list, waiting);
+              if (shown.size && !list.isConnected) sourceBox.replaceChildren(bar, list, waiting);
             };
             const out = await resolveRoutes(eng, first.request, { settleMs: 25_000, onRoutes, signal: stop.signal }).catch(() => null);
             if (out?.session) void Promise.resolve(eng.closeSession?.(out.session)).catch(() => {});
@@ -1037,7 +1332,8 @@ export function createDownloadsUI(deps) {
         go.innerHTML = `${glyph('downloads', { size: 18 })}<span>${list.length ? `نزّل ${noun}` : 'كله على الجهاز'}</span>`;
         go.disabled = !list.length || (pick.mode === 'manual' && !pick.sourceId);
         const need = pick.mode === 'manual' && !pick.sourceId ? (video ? 'اختر سيرفرًا' : 'اختر مصدرًا') : null;
-        status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز ${status.dataset.free}` : '');
+        // الحجم معزول الاتجاه: كان يظهر «GB 43.8 المتاح على الجهاز» داخل سطر عربي
+        status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز \u2066${status.dataset.free}\u2069` : '');
       }
       go.onclick = async () => {
         const list = chosen().filter((u) => !taken(u));
@@ -1058,7 +1354,7 @@ export function createDownloadsUI(deps) {
             try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }
           closeSheet();
-          paintEntry(c.manager.summary());
+          paintEntry();
           toast(added.length ? (added.length === 1 ? 'بدأ التنزيل — تابعه في «التحميلات»' : `${added.length} في طابور التحميل`) : 'موجود مسبقًا');
         } catch (e) {
           go.disabled = false;
@@ -1083,9 +1379,9 @@ export function createDownloadsUI(deps) {
 
   // حالة المدخل عند الإقلاع (بلا فتح الصفحة)
   void ready().then((c) => {
-    paintEntry(c.manager.summary());
+    paintEntry();
     c.manager.subscribe((e) => {
-      if (e.type === 'change' || e.type === 'list' || e.type === 'removed') paintEntry(c.manager.summary());
+      if (e.type === 'change' || e.type === 'list' || e.type === 'removed') paintEntry();
       if (e.type === 'completed' && deps.currentPage?.() !== 'downloads') toast(`على الجهاز: ${e.item.work.title} — ${unitLabel(e.item)}`);
     });
   }).catch(() => {});
@@ -1105,6 +1401,7 @@ export function createDownloadsUI(deps) {
     manage,
     openDownloadSheet,
     openSettings,
+    openStorage: () => storage.open(),
     isActive: (id) => ACTIVE_STATES.has(ctx?.manager.get(id)?.state),
     /** كم عنصرًا من هذا العمل على الجهاز (0 قبل أن يُقرأ البيان). */
     count: (ref) => (ctx ? ctx.manager.list().filter((i) => i.work.ref === ref && i.state === STATES.ready).length : 0),
