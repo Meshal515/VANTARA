@@ -878,8 +878,11 @@ export function createServerSheet(body, o) {
     const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
     if (filterKey !== lastFilterKey) { lastFilterKey = filterKey; folded.clear(); }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
-    // صف ظاهر يبقى بمكانه وإن تعذّر؛ صف مطويّ في «نسخ إضافية» يتعذّر يذهب إلى «غير متاح» (لا يُرى فلا قفزة)
-    const live = shown.filter((r) => isSelectable(r) || isPending(r) || (placed.has(r.id) && folded.get(r.id) !== false));
+    // المكان الظاهر للسيرفر الصالح وحده (طلب المالك 15 نوفمبر): السيرفرات قيد الفحص تصل أولًا مع التسليم التدريجي
+    // وأغلبها يتعذّر، فكانت تحجز الأماكن الظاهرة وتدفع الصالح إلى «نسخ إضافية». ما لم يصلح بعد ينتظر في «قيد الفحص»،
+    // والصالح يُضاف تحت الموجود (لا قفزة). صف ظهر يبقى بمكانه وإن تعذّر بعدها.
+    const live = shown.filter((r) => isSelectable(r) || (placed.has(r.id) && folded.get(r.id) !== false))
+    const waiting = shown.filter((r) => isPending(r) && !placed.has(r.id))
     const fresh = live.filter((r) => !placed.has(r.id))
       .map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : -1e9 }))
       .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
@@ -919,8 +922,8 @@ export function createServerSheet(body, o) {
     const groups = [direct, torrent].filter((g) => sectionAt.has(g) && !g.s.hidden).sort((a, b) => sectionAt.get(a) - sectionAt.get(b));
     // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
     const neverShown = gone.filter((r) => !live.includes(r));
-    const waiting = [];
-    reconcile(wait.grid, waiting);
+    reconcile(wait.grid, waiting.map(row));
+    wait.summary.textContent = `قيد الفحص (${waiting.length})`;
     reconcile(dead.grid, neverShown.map(row));
     dead.summary.textContent = `غير متاح الآن (${neverShown.length})`;
     const loading = !routes.length && !model.settled && !model.missing && !model.error && !model.noSources;
@@ -929,6 +932,7 @@ export function createServerSheet(body, o) {
       empty ? note : null,
       loading ? skeleton : null,
       ...groups.map((g) => g.s),
+      waiting.length ? wait.d : null,
       neverShown.length ? dead.d : null,
     ].filter(Boolean);
     reconcile(list, order);

@@ -82,6 +82,10 @@ class VerificationPlugin : Plugin() {
             startActivityForResult(call, Intent(context, VerificationActivity::class.java)
                 .putExtra("host", item.host).putExtra("origin", item.origin).putExtra("url", item.url)
                 .putExtra("userAgent", item.userAgent).putExtra("sourceName", item.sourceName)
+                // An anime source or video host reaches its site through the engine's network (encrypted DNS first,
+                // split ClientHello). The check page took the system network instead and failed in seconds on a
+                // blocked site; it now goes through the same path (VerificationTunnel), as CloudStream checks do.
+                .putExtra("engineNetwork", com.vantara.anime.net.AnimeHostRouter.prefersDoh(item.host))
                 .putExtra("token", item.token), "verified")
         } catch (_: Exception) {
             active = null

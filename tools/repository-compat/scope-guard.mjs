@@ -117,6 +117,8 @@ for (const path of animeDetailSeams) seams.add(path);
 
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/AndroidRuntimeClient.java');
 seams.add('extensions/runtime-android/executor/src/main/java/dev/vantara/runtime/android/BrokerHostTransport.java');
+seams.add('android/app/src/main/kotlin/com/vantara/verification/VerificationPlugin.kt');
+seams.add('android/app/src/main/kotlin/com/vantara/verification/VerificationCoordinator.kt');
 seams.add('android/app/src/test/java/com/vantara/anime/AniyomiGenreTabsTest.kt');
 seams.add('extensions/runtime-android/cloudstream/build.gradle');
 seams.add('extensions/runtime-android/DEPENDENCIES.md');

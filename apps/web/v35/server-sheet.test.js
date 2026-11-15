@@ -59,14 +59,16 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   expect(top[0].textContent).toContain('مترجم عربي');
   expect(body.querySelector('.an-pick-best').textContent).toContain('شغّل الأفضل');
   expect(body.querySelector('.an-pick-best small').textContent).toBe('1080p · WitAnime · عربي · يبدأ فورًا');
-  // المباشر قبل التورنت، والأسرع بدءًا أولًا؛ ما يُفحص يبقى بمكانه تحت الجاهز (لا يُطوى فتقفز القائمة)
+  // المباشر قبل التورنت، والأسرع بدءًا أولًا. الأماكن الظاهرة للصالح وحده (المالك، 15 نوفمبر): ما يُفحص ينتظر
+  // في «قيد الفحص» ولا يحجز مكانًا يدفع صالحًا يصل بعده إلى «نسخ إضافية»
   const direct = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
-  expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload', 'HG Cloud']);
-  expect(direct[2].textContent).toContain('قيد الفحص');
+  expect(direct.map((b) => b.querySelector('.ss-host').textContent)).toEqual(['StreamWish', 'Mp4Upload']);
+  const waiting = body.querySelector('.cn-srv-wait');
+  expect(waiting.querySelector('summary').textContent).toBe('قيد الفحص (1)');
+  expect(waiting.textContent).toContain('HG Cloud');
   expect(body.textContent).not.toMatch(/\b(?:SWH|MPU|TRR|HGC)\b/);
   expect(body.querySelector('.ss-group--torrent .ss-row .ss-name').textContent).toBe('Torrentio');
   // ما تعذّر قبل أن يظهر مطويّ في الأسفل
-  expect(body.querySelector('.cn-srv-wait')).toBeNull();
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
   expect(onPick).toHaveBeenCalledWith(routes[2]);
@@ -343,15 +345,18 @@ it('a better server arriving later never moves the rows already shown (no jump u
   const onPick = vi.fn();
   const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
   const a = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
+  const a2 = { id: 'a2', sourceId: 'witanime', server: 'uqload', quality: 480, state: 'READY', probed: true, probeMs: 4000 };
   const b = { id: 'b', sourceId: 'witanime', server: 'videa', quality: 480, state: 'RESOLVING' };
-  ui.update({ routes: [a, b], settled: false, status: { text: '…' } });
+  ui.update({ routes: [a, a2, b], settled: false, status: { text: '…' } });
   const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
-  const [rowA, rowB] = rows();
+  const [rowA, rowA2] = rows();
   const filtersHeight = body.querySelector('.an-pick-filters');
-  // سيرفر أفضل (1080p وأسرع) يصل، والثاني يتعذّر: الصفّان بمكانهما والجديد تحتهما
+  // سيرفر أفضل (1080p وأسرع) يصل، وما كان يُفحص يتعذّر: الصفّان الظاهران بمكانهما والجديد تحتهما،
+  // والمتعذّر لم يحجز مكانًا ظاهرًا أصلًا
   const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
-  ui.update({ routes: [a, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
-  expect(rows().slice(0, 2)).toEqual([rowA, rowB]);
+  ui.update({ routes: [a, a2, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
+  expect(rows().slice(0, 2)).toEqual([rowA, rowA2]);
+  expect(rows()).toHaveLength(3);
   expect(rows()[2].querySelector('.ss-name').textContent).toBe('okanime');
   // الأفضل يُعرف بكلمة «مقترح» وبالزر، لا بنقل الصفوف
   expect(rows()[2].className).toContain('ss-row--top');
