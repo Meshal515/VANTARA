@@ -771,7 +771,8 @@ class PlayerActivity : Activity() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) together?.onUserPlayPause(playWhenReady)
+            // ExoPlayer يبلّغ كل setPlayWhenReady بسبب USER_REQUEST، حتى ما يضبطه الكود: الغرفة تسمع ضغطات المستخدم وحدها
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST && !programmaticPlay) together?.onUserPlayPause(playWhenReady)
             startup.active(usageForeground && playWhenReady)
             watchStall()
             playButton.setImageDrawable(Glyph(if (playWhenReady) Glyph.Kind.PAUSE else Glyph.Kind.PLAY, Color.WHITE))
@@ -888,7 +889,8 @@ class PlayerActivity : Activity() {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
         player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
         player.prepare()
-        player.playWhenReady = clip == null
+        // في غرفة لم تبدأ: لا تشغيل تلقائي (كان يُحسب ضغطة «تشغيل» من المضيف فيبدأ الغرفة قبل «ابدأ»)
+        setPlayingQuietly(clip == null && together?.mayAutoplay() != false)
         main.removeCallbacks(startupWatchdog)
         startup.active(usageForeground && player.playWhenReady)
         main.post(startupWatchdog)
@@ -911,6 +913,13 @@ class PlayerActivity : Activity() {
     }
 
     private fun position(): Long = player.currentPosition.coerceAtLeast(0)
+
+    /** تشغيل/إيقاف يقرّره الكود لا المستخدم: لا يصل الغرفة أمرًا (onPlayWhenReadyChanged يُستدعى متزامنًا). */
+    private var programmaticPlay = false
+    private fun setPlayingQuietly(on: Boolean) {
+        programmaticPlay = true
+        try { player.playWhenReady = on } finally { programmaticPlay = false }
+    }
 
     // ───────────── قياس «تعذّر» الحقيقي ─────────────
     // محاولة = فتح حلقة للمشاهدة. نجاحها = أول إطار جاهز (بعد أي تبديل سيرفر تلقائي).
@@ -2438,7 +2447,7 @@ class PlayerActivity : Activity() {
             // اللحظة الأصلية لا تضيع: نعود إليها كما كنا (من الذاكرة، بلا إعادة تحميل)
             player.setSeekParameters(SeekParameters.EXACT)
             player.seekTo(moment)
-            player.playWhenReady = wasPlaying
+            setPlayingQuietly(wasPlaying)
             setControls(true)
         }
     }
@@ -2651,7 +2660,8 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         main.removeCallbacks(presenceTick)
-        player.playWhenReady = false
+        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها
+        setPlayingQuietly(false)
         if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
         main.removeCallbacks(stallWatchdog)
