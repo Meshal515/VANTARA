@@ -111,7 +111,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     room.command(op, { pos: roomPos, at });
     intent = { seq: room.timeline?.seq, until: at + 2000 };
   }
-  const offs = [room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
+  // رفض الخادم (ليس المضيف عنده أو لا يملك التحكم) كان يمر بلا أثر: الزر «لا يستجيب» (15 نوفمبر)
+  const offs = [room.on('denied', () => message('الغرفة رفضت الأمر: التحكم بالتشغيل للمضيف')), room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
     room.on('roster', paintLobby), room.on('connection', () => { paintLobby(); if (live()) { align(true); report(true); } }),
     room.on('room', () => { if (!synced()) video.playbackRate = 1; else align(true); paintLobby(); })];
   const timer = setInterval(() => {
@@ -151,7 +152,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       // أول بدء من غرفة الانتظار: عدّ 3-2-1 مشترك عند الجميع
       if (room.canControl && prepared) {
-        if (!room.timeline?.started && playing) room.command('play', { pos: 0, countdownMs: 3000 });
+        if (!room.timeline?.started && playing) { if (!room.command('play', { pos: 0, countdownMs: 3000 })) message('ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة'); }
         else if (room.instant) { hostCommand(playing ? 'play' : 'pause', position()); if (playing) play(); else if (!video.paused) video.pause(); }
         else room.command(playing ? 'play' : 'pause', { pos: position() }); // خادم قديم: ننتظر بثّه
       } else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');

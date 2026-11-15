@@ -339,6 +339,29 @@ class TogetherPlayer(
     override fun onConnection(live: Boolean) { connected = live; paintLobby() }
     override fun onJoined(name: String) = hooks.message("$name دخل")
     override fun onLeft(name: String) = hooks.message("$name طلع")
+    /**
+     * «البدء»: الحالة تُقرأ لحظة اللمس لا لحظة رسم الزر، وكل نتيجة لها أثر: عدّ 3-2-1 عند الجميع، أو رسالة بالسبب.
+     */
+    private var startSentAt = 0L
+    private val startWatch = Runnable {
+        if (startSentAt != 0L && client.timeline?.started != true && lobbyCount == null) hooks.message(TogetherStart.NO_REPLY)
+        startSentAt = 0L
+    }
+    private fun pressStart() {
+        val gate = TogetherStart.gate(ready, connected, awaitingPick)
+        if (gate != TogetherStart.Gate.SEND) { hooks.message(TogetherStart.message(gate)!!); paintLobby(); return }
+        if (!client.command("play", 0.0, countdownMs = TogetherStart.COUNTDOWN_MS)) { hooks.message(TogetherStart.SEND_FAILED); return }
+        startSentAt = android.os.SystemClock.uptimeMillis()
+        main.removeCallbacks(startWatch)
+        main.postDelayed(startWatch, TogetherStart.REPLY_TIMEOUT_MS)
+    }
+
+    override fun onDenied() {
+        startSentAt = 0L
+        main.removeCallbacks(startWatch)
+        hooks.message(TogetherStart.DENIED)
+    }
+
     override fun onHost(userId: String) { if (userId == client.me) hooks.message("صرت المضيف"); paintLobby() }
     override fun onClosed(reason: String) {
         hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; else -> "انقطعت الغرفة" })
@@ -1002,7 +1025,7 @@ class TogetherPlayer(
         }
         actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
         // البدء: صورة الحلقة ← دائرة بمثلث (مزاح نحو رأسه: متمركز بصريًا) ← «البدء». أزرق فقط حين يجهز فيديوك.
-        val canStart = ready && connected && !awaitingPick
+        val canStart = TogetherStart.gate(ready, connected, awaitingPick) == TogetherStart.Gate.SEND
         val action: View = if (client.isHost) LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1028,7 +1051,7 @@ class TogetherPlayer(
             addView(dot, LinearLayout.LayoutParams(context.dp(28), context.dp(28)).apply { marginEnd = context.dp(10) })
             addView(context.label("البدء", 15f, if (canStart) Color.WHITE else 0x8CFFFFFF.toInt(), bold = true))
             // أول بدء: عدّ 3-2-1 مشترك عند الجميع
-            setOnClickListener { if (canStart) client.command("play", 0.0, countdownMs = 3000L) else hooks.message(if (awaitingPick) "اختر سيرفرك أول" else "نجهّز فيديوك…") }
+            setOnClickListener { pressStart() }
         } else context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) }
         actions.addView(action, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f))
         if ((lobbyMore as? FrameLayout)?.visibility == View.VISIBLE) { (lobbyMore as FrameLayout).removeAllViews(); (lobbyMore as FrameLayout).addView(offsetRow()) }
