@@ -397,3 +397,18 @@ it('each direct row shows its source picture beside the name, in a slot reserved
   expect(icon('Torrentio').hidden).toBe(true);
 });
 
+
+it('كل سيرفر مباشر صالح ظاهر مهما كثر، والتورنت ستة إصدارات ظاهرة (المالك، 15 نوفمبر)', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId });
+  const direct = Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, sourceId: 'witanime', server: `host${i}`, quality: 1080, state: 'READY', probed: true, probeMs: 500 + i }));
+  const torrents = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: 1080, state: 'READY', runtimeReady: true, label: `Show.S01E01.1080p.WEB-DL-G${i}.mkv\n👤 ${100 + i} 💾 1.${i} GB ⚙️ Nyaa` }));
+  const cam = { id: 'cam', sourceId: TORR, sourceName: 'Torrentio', quality: 720, state: 'READY', runtimeReady: true, label: 'Show.S01E01.HDCAM.mkv\n👤 3 💾 700 MB ⚙️ Nyaa' };
+  ui.update({ routes: [...direct, ...torrents, cam], settled: true, status: { text: '' } });
+  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(20);
+  expect(body.querySelector('.ss-group--direct .ss-more-copies, .ss-group--direct details:not([hidden])')).toBeNull();
+  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')).toHaveLength(6);
+  // وما يصل بعدها صالحًا يظهر كذلك، تحت الموجود
+  ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
+  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(21);
+});
