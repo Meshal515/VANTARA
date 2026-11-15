@@ -67,6 +67,8 @@ class TogetherRoomScreensDeviceTest {
         }))
         server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
 
+        // كما يفعل التطبيق عند الإقلاع (ومثل PlayerStartupDeviceTest): مكوّنات المحرك قبل استدعائه
+        com.vantara.plugins.ensureEngineInjekt(context.applicationContext as android.app.Application)
         val engine = AnimeEngine.get(context)
         val now = System.currentTimeMillis()
         fun candidate(id: String, source: String, server: String, quality: Int, label: String) = Candidate(
