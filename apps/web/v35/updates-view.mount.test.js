@@ -124,3 +124,15 @@ it('#323 O-2: include يقصر الخط الزمني على نوع واحد (ا�
   expect(host.textContent).toContain('tt-series');
   expect(host.textContent).not.toContain('tt-movie');
 });
+
+it('every press gets a visible answer: nothing new, or the end of the feed', async () => {
+  timeline.mockResolvedValueOnce(page([event('1')])).mockResolvedValueOnce(page([event('1')])).mockResolvedValueOnce(page([event('2'), event('1')]));
+  mount();
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  await api.refresh();
+  expect(host.querySelector('.up-status').textContent).toContain('لا جديد');
+  await api.refresh();
+  expect(host.querySelector('.up-status').textContent).toContain('وصل 1 جديد');
+  await api.loadMore();
+  expect(host.querySelector('.up-status').textContent).toBe('وصلت لآخر التحديثات');
+});
