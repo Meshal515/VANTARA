@@ -17,6 +17,8 @@ import { createNativeCatalog, diagnoseManagedAddon } from '../addons/native-cata
 import { createSourceVerification } from '../lib/source-verification.js';
 import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
+import { createDownloadsUI } from './downloads.js';
+import { capabilities as downloadCapabilities } from '../lib/downloads/index.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
@@ -1638,7 +1640,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
-  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false } = {}) {
+  async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false, local = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
@@ -1647,6 +1649,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
+    // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة، والفصول المحمّلة وحدها تُقرأ من الجهاز
+    state.localManga = local;
+    if (local) return openLocalManga(work, local);
     if (!work._work?.editions?.length && String(work.id).startsWith('ext:')) {
       work = workFromRef(String(work.id), titleOf(work), work.coverImage?.large);
     }
@@ -1759,6 +1764,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
       });
       setReadCta(null);
     }
+  }
+  /** صفحة عمل المانجا من الجهاز: لا بحث ولا مصادر؛ الفصول المحمّلة بأرقامها الأصلية. */
+  function openLocalManga(work, local) {
+    if (state.current && String(state.current.id) !== String(work.id)) endWorkSession(String(state.current.id));
+    const full = { ...work, _chapters: local.rows, _editions: [], _sources: [], _failedSources: [] };
+    state.current = full;
+    state.nextRow = null;
+    state.chapterSource = null;
+    state.chapterNewestFirst = false;
+    state.chapterShown = CHAPTER_BATCH;
+    state.chapterRange = null;
+    showPage('detail');
+    mountDetail();
+    renderDetail(full);
+    const fill = () => {
+      if (state.current !== full || currentPage() !== 'detail') return;
+      renderSources(full);
+      renderChapters(full);
+    };
+    const page = q('detail');
+    if (motionActive(page)) afterMotion(page, fill);
+    else fill();
   }
   /**
    * هيكل صفحة العمل بالنمط المختار في الإعدادات (manga-work.js). يُبنى عند كل فتح عمل؛ التحديثات بعده
@@ -3087,7 +3114,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const rows = state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters;
     // آخر نسخة من العمل نفسه: المصادر تصل والقارئ مفتوح (#323 U-27)
     const getWork = () => (state.current && String(state.current.id) === String(w.id) ? state.current : w);
-    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, getWork, rows, row, sourceLocked: Boolean(state.chapterSource), inviteTogether });
+    const local = state.localManga && String(state.localManga.ref) === String(w.id) ? state.localManga : null;
+    deps.openReader({ seriesRef: String(w.id), title: titleOf(w), work: w, getWork, rows, row, sourceLocked: Boolean(state.chapterSource) || Boolean(local), inviteTogether, ...(local ? { engine: local.engine, offline: true } : {}) });
   }
 
   /**
@@ -3557,8 +3585,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       top: () => toggleTopCurrent(),
       translate: openTranslateMenu,
       options: openWorkMenu,
+      download: () => (state.localManga?.ref === String(w.id) ? downloadsDeps.manage(String(w.id)) : openMangaDownload(w)),
     };
     const spec = workMenuEntries('manga', {
+      download: downloadCapabilities().manga ? { onDevice: downloadsUI.count(ref) } : null,
       library: Boolean(e?.row),
       later: Boolean(e?.later),
       top: inCollection('top', ref),
@@ -3568,6 +3598,57 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
     rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
     menu.replaceChildren(...rows);
+  }
+  /**
+   * «تحميل» فصول المانجا: ورقة التنزيل المشتركة بفصول العمل كما تعرضها صفحته.
+   * الذكي: الفصل من النسخة التي يختارها العمل نفسه لكل رقم (الأوثق بالعربي أولًا)؛
+   * اليدوي: فصول النسخة المختارة وحدها، وما ليس فيها لا يُستبدل من غيرها.
+   */
+  function openMangaDownload(w) {
+    const ref = String(w.id);
+    const rows = (state.chapterSource ? editionRows(w, state.chapterSource) : w._chapters) ?? [];
+    if (!rows.length) return toast('الفصول ما وصلت بعد، لحظة');
+    const seen = new Set();
+    const units = [];
+    for (const r of rows) {
+      const key = chapterKeyOf(ref, r);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const n = Number(r.number);
+      units.push({ key, number: Number.isFinite(n) ? n : null, title: r.chapter?.name ?? null, row: r });
+    }
+    units.sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity));
+    const next = state.nextRow ? chapterKeyOf(ref, state.nextRow) : null;
+    const work = {
+      ref, title: titleOf(w), cover: w.coverImage?.extraLarge ?? w.coverImage?.large ?? null,
+      banner: w.wideBanner ?? (w.bannerImage && w.bannerImage !== w.coverImage?.large ? w.bannerImage : null), color: w.coverImage?.color ?? null,
+    };
+    downloadsDeps.open({
+      section: 'manga',
+      kind: 'manga',
+      work,
+      snapshot: w,
+      units,
+      current: next ?? units[0]?.key,
+      sources: async () => (w._editions ?? []).filter((e) => e.chapters?.length).map((e) => ({ id: e.sourceId, name: displayName(e.label, e.sourceId) + (isFiller(e.sourceId) ? ' · إنجليزي' : ''), note: `${e.chapters.length}` })),
+      build: async (list, choice) => {
+        const manual = choice.mode === 'manual' ? new Map(editionRows(w, choice.sourceId).map((r) => [chapterKeyOf(ref, r), r])) : null;
+        const specs = [];
+        for (const u of list) {
+          const row = manual ? manual.get(u.key) : u.row;
+          if (!row?.chapter) continue;
+          specs.push({
+            section: 'manga',
+            work,
+            unit: { key: u.key, number: u.number, title: u.title },
+            source: { mode: choice.mode, sourceId: row.sourceId, sourceName: choice.sourceName ?? displayName(null, row.sourceId) },
+            request: { sourceId: row.sourceId, chapter: row.chapter },
+          });
+        }
+        if (!specs.length) throw new Error(manual ? 'المصدر المختار لا يحمل هذه الفصول' : 'لا فصول قابلة للتنزيل');
+        return specs;
+      },
+    });
   }
   function toggleDetailMenu(force) {
     const menu = q('detailMenu');
@@ -5447,6 +5528,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       exitMarkMode();
     }
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
+    if (from === 'downloads' && id !== 'downloads') downloadsUI.leave();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
     // خلل «إعادة رسم الشريط السفلي» (8 نوفمبر): رسم الصفحة الثقيلة (40–110ms على جوال متوسط) كان يجري في
@@ -6925,6 +7007,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const insights = createInsights({ sync, host: q('insightsBody'), mountImage, openWork, previewWork: (w) => previewWork(w), workFromRef, toast });
 
   const actions = {
+    openDownloads: () => void downloadsUI.open(),
     toggleSections: () => dock().consumeDrag() || dock().toggle(),
     toggleRail,
     railLogo,
@@ -7258,8 +7341,45 @@ export function mountV35(deps, { page = 'home' } = {}) {
     await addons.ready;
     return restoreSourceWork(ref, { addons, title: fallback.title, cover: fallback.poster ?? fallback.cover });
   }
+  // «التحميلات»: الصفحة وورقة البدء ومدخلها في ترويسة مكتبتي (downloads.js)
+  const downloadsUI = createDownloadsUI({
+    root, q, el, toast, openSheet, closeSheet, currentPage,
+    showPage: (id) => showPage(id),
+    goBack: () => goBack(),
+    openReader: (target) => deps.openReader(target),
+    // «على الجهاز»: صفحة العمل الأصلية نفسها في قسمها، بالمحمّل وحده
+    openLocalWork: ({ ref, section, snapshot, local }) => {
+      if (root.dataset.section !== section && root.dataset.content !== 'unified') {
+        writeSection(section);
+        applySection(section);
+        showHome(section);
+      }
+      if (section === 'anime') return void anime.openAnime(snapshot, { local });
+      if (section === 'cinema') return void cinema.openWork(snapshot, { local });
+      return void openWork(snapshot, { local });
+    },
+    openOnline: ({ ref, title, cover }) => {
+      if (ref.startsWith('anime:')) return openAnimeRef(ref, { title, cover });
+      if (ref.startsWith('cinema:')) return openCinemaRef(ref, { title, cover });
+      if (root.dataset.section !== 'manga') {
+        writeSection('manga');
+        applySection('manga');
+        showHome('manga');
+      }
+      void openWork(workFromRef(ref, title, cover));
+    },
+  });
+  /** ما تحتاجه قوائم ⋮ في الأقسام: هل يُنزَّل هذا النوع هنا، وكم منه على الجهاز، وفتح ورقة البدء. */
+  const downloadsDeps = {
+    can: (kind) => (kind === 'manga' ? downloadCapabilities().manga : downloadCapabilities().video),
+    count: (ref) => downloadsUI.count(ref),
+    open: (spec) => void downloadsUI.openDownloadSheet(spec),
+    /** على صفحة عمل فُتحت من «على الجهاز»: «تحميل» يعرض ما عليه ويحذف منه. */
+    manage: (ref) => void downloadsUI.manage(ref),
+  };
   const animeAccount = createAnimeAccount(sync);
   const anime = createAnime({
+    downloads: downloadsDeps,
     root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), goBack: () => goBack(), currentPage, genreAr, readKv, writeKv,
     playableSources, addSource,
     // بنر «اليوم» يُجهَّز في وقت الخمول بعد فتح التطبيق، فيكون جاهزًا من أول دخول لقسم الأنمي
@@ -7298,6 +7418,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   });
   // السينما: نفس هيكل الأنمي، ببياناتها ومصادرها
   const cinema = createCinema({
+    downloads: downloadsDeps,
     root, q, el, toast, openSheet, closeSheet, showPage, workReady, workShown, settleIn, motionActive, afterMotion, unifiedLook: () => unifiedLookOn(), currentPage, readKv, writeKv, sync,
     playableSources, addSource,
     openWorkMenu: openMediaWorkMenu,

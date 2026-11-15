@@ -1603,6 +1603,8 @@ class PlayerActivity : Activity() {
     /** رسالة عابرة أعلى الشاشة؛ لا نص تقني دائم. */
     fun message(text: String, long: Boolean = false) {
         pill.text = text
+        // فوق كل الطبقات: غرفة المشاهدة معًا طبقة معتمة تُضاف بعد الرسالة، فكانت رسائلها تُرسم تحتها ولا تُرى
+        pill.bringToFront()
         pill.visibility = View.VISIBLE
         pill.animate().cancel()
         pill.animate().alpha(1f).setDuration(150).start()

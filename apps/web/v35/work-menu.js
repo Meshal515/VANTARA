@@ -3,7 +3,7 @@
  * هذا الملف يقرّر «ماذا يظهر وبأي اسم وحالة»، وكل قسم يربط الأفعال بمنطقه هو (المكتبة والجداول واحدة:
  * `library`، `collections` [read_later/favorite/top]، `completions`، `ratings`، `chapter_marks`).
  *
- * الترتيب: أتابعها/في مكتبتي، لاحقًا، علّم الفصول/الحلقات، قرأته/شاهدته سابقًا، أفضل 5، (الترجمة للمانجا)،
+ * الترتيب: تحميل (حيث يدعمه الجهاز)، أتابعها/في مكتبتي، لاحقًا، علّم الفصول/الحلقات، قرأته/شاهدته سابقًا، أفضل 5، (الترجمة للمانجا)،
  * خيارات أخرى (التقييم، أكملته، الإبلاغ، الحذف).
  * لا «مشاركة» في صفحة العمل؛ «رشّح» للأصدقاء في الشريط العلوي وحده.
  */
@@ -24,12 +24,16 @@ export const markLabel = (kind) => (kind === 'manga' ? 'علّم الفصول' :
 /**
  * @param {WorkKind} kind
  * @param {{ library?: boolean, later?: boolean, top?: boolean, previous?: boolean, canMark?: boolean,
- *   translate?: { available: boolean, on: boolean } | null, signedIn?: boolean }} s
+ *   translate?: { available: boolean, on: boolean } | null, signedIn?: boolean,
+ *   download?: { onDevice: number } | null }} s
  * @returns {{ id: string, icon: string, label: string, pressed: boolean }[]}
  */
 export function workMenuEntries(kind, s = {}) {
   const out = [];
   const add = (id, icon, label, pressed = false) => out.push({ id, icon, label, pressed: Boolean(pressed) });
+  // «تحميل» أولًا، أقرب دائرة لزر ⋮: يظهر حيث يستطيع هذا الجهاز تنزيل هذا النوع فعلًا (لا زر لا يعمل)
+  // له تنزيلات على الجهاز: الرمز يقول ذلك (الرف بعلامة)، والاسم يبقى «تحميل» لإضافة المزيد
+  if (s.download) add('download', s.download.onDevice ? 'downloaded' : 'downloads', 'تحميل', Boolean(s.download.onDevice));
   add('library', s.library ? 'check' : 'plus', libraryLabel(s.library), s.library);
   if (s.signedIn !== false) add('later', s.later ? 'check' : 'clock', 'لاحقًا', s.later);
   // الأفلام لا حلقات لها: لا «علّم الحلقات»، و«شاهدته سابقًا» يعلّم الفيلم نفسه

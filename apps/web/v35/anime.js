@@ -505,8 +505,10 @@ export function createAnime(deps) {
   const artOf = (m) => (state.art?.id === m?.id ? state.art : null);
   const SOURCE_AR = { ORIGINAL: 'عمل أصلي', MANGA: 'مانجا', LIGHT_NOVEL: 'رواية خفيفة', WEB_NOVEL: 'رواية ويب', NOVEL: 'رواية', VIDEO_GAME: 'لعبة فيديو', VISUAL_NOVEL: 'رواية مرئية', MANHWA: 'مانهوا', ONE_SHOT: 'قصة قصيرة', OTHER: 'أخرى' };
 
-  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false } = {}) {
+  async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false, local = null } = {}) {
     const token = ++state.detailToken;
+    // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة، والحلقات المحمّلة وحدها تُعرض وتُشغَّل من الملف
+    state.local = local;
     state.detailLoad = null;
     state.episodeRange = null;
     if (!preserveEpisodeControls) state.epQuery = '';
@@ -514,10 +516,12 @@ export function createAnime(deps) {
     state.malTitles = {};
     if (state.art?.id !== m.id) state.art = null;
     // Start independent network work before synchronous DOM construction.
-    const artworkLoading = loadAnimeArt(m.id);
+    const artworkLoading = local
+      ? Promise.resolve(loadAnimeArt(m.id)).catch(() => null).then((art) => (art ? { ...art, ...local.art } : local.art))
+      : loadAnimeArt(m.id);
     let detailLoading;
     try {
-      detailLoading = Promise.resolve(m._sourceCopy ? (m._officialIdentity ? fetchAnimeDetail(m.id).then((d) => (d ? { ...d, _sourceCopy: m._sourceCopy, _officialIdentity: true } : m), () => m) : m) : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
+      detailLoading = local ? Promise.resolve(m) : Promise.resolve(m._sourceCopy ? (m._officialIdentity ? fetchAnimeDetail(m.id).then((d) => (d ? { ...d, _sourceCopy: m._sourceCopy, _officialIdentity: true } : m), () => m) : m) : String(m.id).startsWith('addon-') ? deps.restoreSourceWork(`anime:${m.id}`, m) : fetchAnimeDetail(m.id));
     } catch (error) { detailLoading = Promise.reject(error); }
     // The original promise remains rejected for the guarded UI handler below.
     void detailLoading.catch(() => {});
@@ -585,7 +589,7 @@ export function createAnime(deps) {
       const page = q('anime');
       if (deps.motionActive?.(page)) deps.afterMotion(page, fill);
       else fill();
-      void locateWork(full, token);
+      if (!local) void locateWork(full, token);
       // لحظة أرسلها صديق: ورقة سيرفرات الحلقة جاهزة من ثانيتها
       if (episode && (position != null || play)) playEpisode(full, episode, { position, clip });
       // الحلقة المقصودة تُعلَّم في القائمة؛ لا ننزلق إليها إلا لمن طلب قائمة الحلقات صراحة
@@ -599,7 +603,7 @@ export function createAnime(deps) {
         else if (window.scrollY > 0 && !userScrolled) window.scrollTo?.({ top: 0, behavior: 'instant' });
       }
       // عناوين الحلقات من MAL: تُكتب في صفوفها، لا تُعاد القائمة
-      void fetchMalEpisodes(full.idMal)
+      if (!local) void fetchMalEpisodes(full.idMal)
         .then(({ titles }) => {
           if (token !== state.detailToken || !Object.keys(titles).length) return;
           state.malTitles = titles;
@@ -618,6 +622,13 @@ export function createAnime(deps) {
   /** من أين يكمل زر المشاهدة: الحلقة غير المكتملة الأخيرة، أو التالية لآخر مكتملة. */
   function resumePoint(m) {
     const watch = localWatch()[m.id];
+    if (state.local?.ref === `anime:${m.id}`) {
+      // زر المشاهدة على الجهاز: أول حلقة محمّلة لم تكتمل، وإلا الأولى
+      const isSeen = signedIn() ? (n) => account.isSeen(m.id, n) : (n) => Boolean(watch?.episodes?.[n]?.done);
+      const nums = [...state.local.numbers].sort((a, b) => a - b);
+      const n = nums.find((x) => !isSeen(x)) ?? nums[0] ?? 1;
+      return { episode: n, resume: Number(watch?.episodes?.[n]?.position) > 0 && !isSeen(n), completed: false, replay: false };
+    }
     return resumeEpisode({ m, watch, isSeen: signedIn() ? n => account.isSeen(m.id,n) : n => Boolean(watch?.episodes?.[n]?.done) });
   }
 
@@ -1441,8 +1452,11 @@ export function createAnime(deps) {
       previous: () => { closeMenu(); movie ? toggleSeen(work(), 1) : openPreviousSheet(work(), total); paintMenu(m); },
       top: () => { closeMenu(); deps.openWorkMenu?.({ ref, title: work().title, cover: m.posterSmall ?? m.poster ?? null }); },
       options: () => { closeMenu(); deps.openWorkOptions?.(target()); },
+      download: () => { closeMenu(); if (state.local?.ref === ref) deps.downloads?.manage(ref); else void openDownload(work()); },
     };
+    const dl = deps.downloads;
     const spec = workMenuEntries(kind, {
+      download: dl?.can(movie ? 'movie' : 'episode') ? { onDevice: dl.count(ref) } : null,
       library: inList(m.id),
       later: Boolean(account?.inCollection('read_later', m.id)),
       top: Boolean(media?.top),
@@ -1453,6 +1467,50 @@ export function createAnime(deps) {
     const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
     rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
     v.menu.replaceChildren(...rows);
+  }
+
+  /**
+   * «تحميل» من قائمة ⋮: ورقة التنزيل المشتركة (downloads.js) بحلقات هذا العمل.
+   * الطلب نفسه الذي يجهّز به التشغيل (نسخ العمل وهويته)، والاختيار اليدوي يثبّت الجلسة
+   * على المصدر المختار وحده: لا Torrentio ولا غيره داخل مصدر مباشر لم يختره المستخدم.
+   */
+  async function openDownload(m) {
+    const dl = deps.downloads;
+    if (!dl) return;
+    const movie = isMovie(m);
+    const total = m.aired || m.episodes || 0;
+    if (!movie && !total) return toast('الحلقات ما وصلت بعد، لحظة');
+    const units = movie ? [{ key: 'movie', number: 1 }] : Array.from({ length: total }, (_, i) => ({ key: `e${i + 1}`, number: i + 1 }));
+    let current = 1;
+    if (!movie) while (current < total && epRecord(m, current).done) current++;
+    const work = {
+      ref: `anime:${m.id}`, title: m.title, cover: m.poster ?? m.posterSmall ?? null,
+      banner: (state.view?.id === m.id ? state.view.heroSrc : null) ?? artOf(m)?.fanart ?? m.banner ?? null,
+      logo: artOf(m)?.logo ?? null, color: m.color ?? null, format: m.format ?? null,
+    };
+    const copiesOf = async () => (await locateWork(m))?.copies ?? [];
+    dl.open({
+      section: 'anime',
+      kind: movie ? 'movie' : 'episode',
+      work,
+      snapshot: state.detail?.id === m.id ? state.detail : m,
+      units,
+      current: movie ? 'movie' : `e${current}`,
+      sources: async () => (await copiesOf()).map((c) => ({ id: c.sourceId, name: sourceLabel(c.sourceId, { names: SOURCE_NAMES, title: c.title }) })),
+      build: async (list, choice) => {
+        const copies = await copiesOf();
+        const scoped = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : copies;
+        if (!scoped.length) throw new Error(choice.mode === 'manual' ? 'المصدر المختار لم يعد متاحًا لهذا العمل' : 'لم نجد هذا العمل في مصادرك بعد');
+        return list.map((u) => ({
+          section: 'anime',
+          kind: movie ? 'movie' : 'episode',
+          work,
+          unit: { key: u.key, number: u.number },
+          source: { mode: choice.mode, sourceId: choice.mode === 'manual' ? choice.sourceId : null, sourceName: choice.sourceName ?? null, quality: choice.quality },
+          request: { copies: withSeasonHint(m, scoped), identity: animeAddonIdentity(m, u.number), pinned: choice.mode === 'manual' || Boolean(m._sourceCopy), episode: movie ? -1 : u.number },
+        }));
+      },
+    });
   }
 
   function toggleMenu(force) {
@@ -1823,7 +1881,7 @@ export function createAnime(deps) {
 
   function pageFor(m, pageSize = EP_PAGE) {
     const watch = localWatch()[m.id];
-    return episodePage({ total: episodeCount(m), pageSize, pageIndex: state.episodeRange,
+    return episodePage({ total: episodeCount(m), pageSize, pageIndex: state.episodeRange, only: state.local?.ref === `anime:${m.id}` ? state.local.numbers : null,
       currentEpisode: resumePoint(m).episode, query: state.epQuery,
       newestFirst: state.newestFirst, hideSeen: state.hideSeen,
       titleOf: n => episodeTitleOf(m,n,{mal:state.malTitles,art:artOf(m)}) ?? '',
@@ -2455,6 +2513,8 @@ export function createAnime(deps) {
    * لهذا الأنمي دون أن يقفل عليه.
    */
   function playEpisode(m, n, { position = null, clip = null, hostPick = false } = {}) {
+    // على الجهاز: الملف المحفوظ بالمشغّل نفسه، بلا ورقة سيرفرات ولا شبكة
+    if (state.local?.ref === `anime:${m.id}` && state.local.numbers.has(Number(n))) return void state.local.play(Number(n), { position });
     if (isMovie(m)) n = 1;
     if (!engine.available()) {
       deps.openSheet((body) => {

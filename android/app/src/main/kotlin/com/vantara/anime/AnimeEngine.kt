@@ -756,6 +756,16 @@ class AnimeEngine(context: Context) {
 
     fun session(id: String): PlaybackSession? = sessions[id]
 
+    /**
+     * جلسة ملف محفوظ على الجهاز (التنزيلات): مرشّح محلي واحد، بلا تجهيز ولا مصادر ولا شبكة.
+     * المشغّل نفسه يشغّلها؛ لا إعادة استخراج للسيرفر ولا اتصال بالمصدر.
+     */
+    fun openLocal(sessionId: String, candidate: Candidate) {
+        prepared.remove(sessionId)?.let(::releasePrepared)
+        sessionRequests.remove(sessionId)
+        sessions[sessionId] = PlaybackSession(listOf(candidate), health)
+    }
+
     fun sessionCandidate(session: PlaybackSession, id: String): Candidate? = session.find(id)
 
     private fun releasePrepared(prep: com.vantara.anime.stream.PreparedEpisode) {

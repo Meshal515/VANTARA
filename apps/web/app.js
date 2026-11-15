@@ -1560,7 +1560,8 @@ function screenSmartReader(target) {
   const reader = openSmartReader(
     {
       sync,
-      engine,
+      // فصل من «التحميلات» يُقرأ من الجهاز بمحرك محلي بنفس الواجهة؛ غيره من المصادر
+      engine: target.engine ?? engine,
       // الترجمة المرئية تمرّ من خادم المحتوى (وكيل إلى عامل جهاز البيت)
       api,
       mount,

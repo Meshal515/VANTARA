@@ -74,6 +74,8 @@ class TogetherClient(
         /** نهائي: full | gone | uninvited | replaced. لا إعادة محاولة بعده. */
         fun onClosed(reason: String) {}
         fun onConnection(live: Boolean) {}
+        /** الخادم رفض أمرًا من هذا الاتصال (ليس المضيف عنده أو لا يملك التحكم). */
+        fun onDenied() {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -211,6 +213,7 @@ class TogetherClient(
             "status" -> listener.onStatus(m.optString("userId"), m.optString("name"), m.optString("state"), m.optString("source").takeIf { it.isNotEmpty() && it != "null" })
             "joined" -> listener.onJoined(m.optString("name"))
             "left" -> listener.onLeft(m.optString("name"))
+            "denied" -> listener.onDenied()
             "full", "gone", "uninvited" -> finish(m.optString("t"))
         }
     }
