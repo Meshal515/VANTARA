@@ -221,7 +221,7 @@ class TorrentEngine internal constructor(
             val files = info.files()
             val index = request.fileIdx?.takeIf { it in 0 until files.numFiles() }
                 ?: (0 until files.numFiles()).maxByOrNull { files.fileSize(it) } ?: throw IOException("Torrent has no files")
-            h.prioritizeFiles(Array(files.numFiles()) { if (it == index) Priority.DEFAULT else Priority.IGNORE })
+            h.prioritizeFiles(Array(files.numFiles()) { if (it == index) Priority.FOUR else Priority.IGNORE })
             val name = files.filePath(index)
             var lastDone = -1L
             var stalledSince = System.currentTimeMillis()

@@ -206,8 +206,9 @@ class DownloadRunner(
         }
         job = job.copy(subtitles = subs, audio = audio)
         // ترجمات الإضافات (OpenSubtitles وغيرها): نص UTF-8 بجانب الفيديو، فلا ينكسر ترميز العربية بلا إنترنت
-        if (!job.addonSubtitlesDone && addonSubtitles != null && job.subtitleProviders != null) {
-            val fetched = runCatching { addonSubtitles.invoke(job) }.getOrDefault(emptyList())
+        val fetchSubtitles = addonSubtitles
+        if (!job.addonSubtitlesDone && fetchSubtitles != null && job.subtitleProviders != null) {
+            val fetched = runCatching { fetchSubtitles(job) }.getOrDefault(emptyList())
             val saved = fetched.mapIndexedNotNull { i, (lang, text, ext) ->
                 val name = "addon-$i-$lang.$ext"
                 runCatching { File(dir, name).writeText(text, Charsets.UTF_8) }.getOrNull()?.let { Sidecar(url = "addon:$i", lang = lang, file = name) }
