@@ -261,7 +261,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const preparedListener=engine.addListener?.('prepared',event=>{if(event?.session===session){void sources();void refreshServers();}});
   const togetherListener=engine.addListener?.('desktopTogether',event=>{
     if(event.closed){if(event.session===session){roomState=null;void lobbyUi?.update({visible:false});viewport();}return;}
-    if(!panel&&event.visible)open({session:event.session,title:event.media?.title??'VANTARA'});
+    if(!panel&&event.visible){entryView?.destroy();entryView=null;doc.documentElement.classList.remove('room-servers');open({session:event.session,title:event.media?.title??'VANTARA'});}
     if(event.session!==session)return;
     roomState=event;void lobbyUi?.update({...event,progress:loadProgress});void sources();
   });

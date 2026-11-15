@@ -1472,3 +1472,10 @@
 .v35 .an-pick-filters .ss-tabs[hidden] {
   display: none;
 }
+
+/* غرفة «مشاهدة معًا» على الكمبيوتر (قرار المالك 15 نوفمبر): «اختر السيرفر» لا تنقلك من الغرفة. الورقة نفسها لوحة
+   جانبية في جهة البداية فوق الغرفة (عمود المصادر ومرشّحاها وزرّها)، والغرفة ظاهرة بجانبها تحت تعتيم خفيف. */
+html.room-servers .v35 .sheet-backdrop.sheet-backdrop--full { z-index: 10020; background: rgba(0, 0, 0, 0.45); justify-items: start; }
+html.room-servers .v35 .sheet-backdrop.sheet-backdrop--full > .sheet { width: clamp(420px, 36vw, 560px); border-inline-end: 1px solid var(--line, rgba(255, 255, 255, 0.08)); }
+html.room-servers .v35 .an-pick { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'src' 'foot'; }
+html.room-servers .v35 .ss-info { display: none; }
