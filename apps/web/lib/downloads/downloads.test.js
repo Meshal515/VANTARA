@@ -334,4 +334,18 @@ describe('video route resolution', () => {
     const out = await resolveRoutes(engine, { copies: [], episode: 1 }, { wanted: (r) => sameRoute(r, { sourceId: 'a', server: 'x' }), settleMs: 5000 });
     expect(out.routes.find((r) => r.id === 'r1').state).toBe('READY');
   });
+
+  it('reports each ready server as it arrives, before the slowest source settles', async () => {
+    let calls = 0;
+    const engine = {
+      prepare: vi.fn(async () => ({ session: 's1', routes: [{ id: 'fast', state: 'READY' }, { id: 'slow', state: 'RESOLVING' }], done: false })),
+      routes: vi.fn(async () => ({ routes: ++calls < 2 ? [] : [{ id: 'slow', state: 'READY' }], done: calls >= 2 })),
+      upsertRoute: (list, r) => [...list.filter((x) => x.id !== r.id), r],
+      on: () => () => {},
+    };
+    const seen = [];
+    await resolveRoutes(engine, { copies: [], episode: 1 }, { settleMs: 10_000, onRoutes: (routes) => seen.push(routes.filter((r) => r.state === 'READY').map((r) => r.id).sort().join(',')) });
+    expect(seen[0]).toBe('fast');
+    expect(seen.at(-1)).toBe('fast,slow');
+  });
 });

@@ -7594,6 +7594,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openCinemaRef,
     openMajlis,
     openProfile,
+    /** «على جهازي»: صفحة التحميلات مباشرة (الدخول بلا إنترنت من البوابة). */
+    openDownloads: (tab) => downloadsUI.open(tab),
     handleBack,
     pause() {
       scrollRestore++; scrollRestoreCleanup?.();

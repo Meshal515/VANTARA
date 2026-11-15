@@ -75,8 +75,15 @@ await step('ورقة البدء: فصول 1–6 بالتحميل الذكي', as
   await page.waitForSelector('.dl-start');
   await sleep(350);
   await shot('02-sheet');
-  await page.getByRole('button', { name: 'فصول محددة' }).click();
-  await page.fill('.dl-range input', '1-6');
+  await page.getByRole('button', { name: 'فصول', exact: true }).click();
+  // شبكة الأرقام: لمسة تختار أو تلغي؛ نضبطها على 1–6 بالضبط
+  await page.waitForSelector('.dl-grid-nums button');
+  await page.evaluate(() => {
+    for (const b of document.querySelectorAll('.dl-grid-nums button')) {
+      const want = /^[1-6]$/.test(b.textContent.trim());
+      if ((b.getAttribute('aria-pressed') === 'true') !== want) b.click();
+    }
+  });
   await page.waitForFunction(() => /6 فصول/.test(document.querySelector('.dl-start-go')?.textContent ?? ''));
   await shot('03-sheet-range');
   await page.click('.dl-start-go');

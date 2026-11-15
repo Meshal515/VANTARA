@@ -895,31 +895,51 @@ export function createDownloadsUI(deps) {
         b.onclick = () => selectRow(b, data);
         return b;
       };
+      /** صف سيرفر من مسار محرك التشغيل: التورنت باسم إصداره وحجمه وسربه. */
+      const routeRow = (r) => ({
+        route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
+        // التورنت: اسم الإصدار والحجم من وصف الإضافة (Torrentio وغيرها) بجانب الجودة والسرب
+        sub: r.type === 'torrent'
+          ? [String(r.label ?? '').split('\n').map((l) => l.trim()).find((l) => /\.(mkv|mp4|avi)$|\b(1080p|720p|2160p|x26[45]|HEVC)\b/i.test(l)) ?? 'تورنت', /💾\s*([\d.,]+\s*[GMK]B)/i.exec(r.label ?? '')?.[1]].filter(Boolean).join(' · ')
+          : (r.server && r.server !== r.sourceName ? r.server : null),
+        quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
+        seeds: r.type === 'torrent' ? Number(/👤\s*(\d+)/.exec(r.label ?? '')?.[1] ?? NaN) || 0 : null,
+      });
       async function loadSources() {
-        sourceBox.replaceChildren(el('p', 'dl-hint', video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…'));
+        const waiting = el('p', 'dl-hint', video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
+        sourceBox.replaceChildren(waiting);
         let rows = [];
         try {
           if (video && spec.build) {
-            // سيرفرات الحلقة الحقيقية من محرك التشغيل نفسه
+            // سيرفرات الحلقة الحقيقية من محرك التشغيل نفسه. كل سيرفر يظهر لحظة جاهزيته في آخر القائمة
+            // (ما ظهر لا يتحرك)، وسطر «نبحث عن المزيد» تحتها حتى تستقر المصادر.
             const unit = chosen()[0] ?? currentUnit;
             const [first] = await spec.build([unit], { mode: 'smart', sourceId: null, quality: null });
             const { resolveRoutes } = await import('../lib/downloads/video-driver.js');
             const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
-            const { routes } = await resolveRoutes(eng, first.request, { settleMs: 25_000 });
-            rows = routes.filter((r) => r.state === 'READY').sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0)).map((r) => ({
-              route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
-              // التورنت: اسم الإصدار والحجم من وصف الإضافة (Torrentio وغيرها) بجانب الجودة والسرب
-              sub: r.type === 'torrent'
-                ? [String(r.label ?? '').split('\n').map((l) => l.trim()).find((l) => /\.(mkv|mp4|avi)$|\b(1080p|720p|2160p|x26[45]|HEVC)\b/i.test(l)) ?? 'تورنت', /💾\s*([\d.,]+\s*[GMK]B)/i.exec(r.label ?? '')?.[1]].filter(Boolean).join(' · ')
-                : (r.server && r.server !== r.sourceName ? r.server : null),
-              quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
-              seeds: r.type === 'torrent' ? Number(/👤\s*(\d+)/.exec(r.label ?? '')?.[1] ?? NaN) || 0 : null,
-            }));
+            const shown = new Map();
+            const list = el('div', 'dl-source-list');
+            const onRoutes = (routes) => {
+              if (!body.isConnected) return;
+              const fresh = routes.filter((r) => r.state === 'READY' && !shown.has(r.id)).sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0));
+              for (const r of fresh) {
+                const b = sourceRow(routeRow(r));
+                shown.set(r.id, b);
+                list.append(b);
+              }
+              const pending = routes.filter((r) => r.state === 'RESOLVING' || r.state === 'CHECKING').length;
+              waiting.textContent = shown.size ? `نبحث عن المزيد…${pending ? ` (${pending})` : ''}` : (video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
+              if (shown.size && !list.isConnected) sourceBox.replaceChildren(list, waiting);
+            };
+            await resolveRoutes(eng, first.request, { settleMs: 25_000, onRoutes });
+            if (!body.isConnected) return;
+            if (shown.size) { waiting.remove(); return; }
           } else {
             rows = ((await spec.sources?.()) ?? []).map((x) => ({ sourceId: x.id, name: x.name, sub: x.note ? `${x.note} فصلًا` : null }));
           }
         } catch { rows = []; }
         if (!body.isConnected) return;
+        if (sourceBox.querySelector('.dl-source')) { waiting.remove(); return; }
         sourceBox.replaceChildren(...(rows.length ? rows.map(sourceRow) : [el('p', 'dl-hint', 'ما جهز سيرفر الآن. التحميل الذكي يحاول وقت التنزيل.')]));
       }
 
