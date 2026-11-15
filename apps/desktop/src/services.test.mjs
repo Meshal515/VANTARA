@@ -339,6 +339,10 @@ test('نقل الإضافات يحد حجم الاستجابة ويرفض الت
   await assert.rejects(services.requestResource({url:'https://example.com/large',limit:20}),/حجم/);
   await assert.rejects(services.requestResource({url:'https://example.com/redirect'}),/توجيه|داخلي/);
   assert.match(requests[0].accept,/^application\/json, application\/\*\+json/);assert.equal(requests[0].authorization,undefined);
+  assert.match(requests[0]['user-agent'],/^Mozilla\/5\.0 VANTARA\/Windows/);
+  // MangaDex (الواجهة وخوادم الصور) ترفض هوية المتصفح بتحويل لفحص الآليين: هوية التطبيق الصريحة هنا وحدها
+  for(const url of ['https://api.mangadex.org/manga','https://uploads.mangadex.org/covers/a/b.jpg','https://x1.mangadex.network/data/h/1.png'])await services.requestResource({url,json:true,limit:100});
+  for(const r of requests.slice(-3))assert.match(r['user-agent'],/^VANTARA\/1\.0 /);
 });
 
 test('حجب SNI: مصافحة تنقطع تُعاد مرة بتقسيم ClientHello، ويُذكر السبب الحقيقي إن فشلت',async t=>{

@@ -439,7 +439,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     try {
       let request=validateResourceRequest({url,...options});
       // JSON:API (Kitsu لربط الأنمي بـTorrentio) يرفض application/json وحده بـ406؛ نقبل +json وأي نوع احتياطًا
-      request.headers={accept:json?'application/json, application/*+json;q=0.9, */*;q=0.8':'*/*','user-agent':'Mozilla/5.0 VANTARA/Windows',...request.headers};
+      // MangaDex (واجهتها وخوادم صورها) ترفض هوية تشبه المتصفح وتقبل هوية التطبيق الصريحة؛ غيرها كما كان
+      const appAgent=/^(?:api|uploads)\.mangadex\.org$/i.test(new URL(request.url).hostname)||/\.mangadex\.network$/i.test(new URL(request.url).hostname);
+      request.headers={accept:json?'application/json, application/*+json;q=0.9, */*;q=0.8':'*/*','user-agent':appAgent?'VANTARA/1.0 (+https://github.com/Meshal515/VANTARA)':'Mozilla/5.0 VANTARA/Windows',...request.headers};
       for(let redirects=0;redirects<6;redirects++) {
         const response=await secureResponse(request.url,{headers:request.headers,method:request.method,body:request.body,signal:controller.signal,timeout,lookup});
         const status=response.statusCode;

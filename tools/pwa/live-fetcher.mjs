@@ -8,6 +8,11 @@ import { DOMParser } from 'linkedom';
 import { setParser } from '../../apps/web/pwa/sources/dom.js';
 
 const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+// كما يفعل جالب الويب وويندوز: MangaDex يرفض هوية المتصفح من غير متصفح
+const agentFor = (url) => {
+  const host = (() => { try { return new URL(String(url)).hostname; } catch { return ''; } })();
+  return /^(?:api|uploads)\.mangadex\.org$/i.test(host) || /\.mangadex\.network$/i.test(host) ? 'VANTARA/1.0 (+https://github.com/Meshal515/VANTARA)' : UA;
+};
 
 /** ترويسات المصدر التي يحتاجها محرك (Videa: مفتاح فك XML). نفس قائمة الجالب. */
 const PASSED_HEADERS = ['x-videa-xs'];
@@ -27,7 +32,7 @@ export class LiveError extends Error {
 export function liveFetcher({ log = () => {} } = {}) {
   const jar = new Map();
   function text(url, opts = {}) {
-    const args = ['-s', ...(opts.follow === false ? [] : ['-L', '--max-redirs', '6']), '-m', '30', '-A', UA, '-H', 'Accept-Language: ar,en;q=0.8', '-D', '-', '-o', '-', '-w', '\n__VF__%{http_code} %{url_effective}'];
+    const args = ['-s', ...(opts.follow === false ? [] : ['-L', '--max-redirs', '6']), '-m', '30', '-A', agentFor(url), '-H', 'Accept-Language: ar,en;q=0.8', '-D', '-', '-o', '-', '-w', '\n__VF__%{http_code} %{url_effective}'];
     const headers = { ...(opts.headers ?? {}) };
     if (opts.referer) headers.referer = opts.referer;
     if (opts.xhr) headers['x-requested-with'] = 'XMLHttpRequest';

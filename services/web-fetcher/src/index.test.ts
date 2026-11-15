@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { hostAllowed, parseTarget } from './allow.ts';
 import { mintGrant, verifyGrant } from './grant.ts';
 import { rewritePlaylist } from './hls.ts';
-import { challengeOf, createHandler, overLimit, type Env } from './index.ts';
+import { challengeOf, createHandler, overLimit, wantsAppAgent, type Env } from './index.ts';
 
 const SECRET = 'fetcher-test-identity-secret-32-chars!!';
 const env: Env = { VANTARA_IDENTITY_SECRET: SECRET, ALLOWED_ORIGINS: 'https://vantara-bcf.pages.dev' };
@@ -143,6 +143,25 @@ describe('/v1/fetch', () => {
     expect(sent.headers.get('authorization')).toBeNull();
     expect(sent.headers.get('host')).toBeNull();
     expect(sent.headers.get('user-agent')).toMatch(/Mozilla/);
+  });
+
+  it('MangaDex gets the app identity it asks for; every other site still sees a mobile browser', async () => {
+    const api = 'https://api.mangadex.org/manga?limit=1';
+    const page = 'https://cmdxd98sb0x3yprd.mangadex.network/data/abc/1.png';
+    const { impl, seen } = fakeUpstream({
+      [api]: () => new Response('{"result":"ok"}', { status: 200, headers: { 'content-type': 'application/json' } }),
+      [page]: () => new Response('png', { status: 200, headers: { 'content-type': 'image/png' } }),
+      'https://m.myseed.pics/': () => new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    });
+    for (const url of [api, page, 'https://m.myseed.pics/']) {
+      expect((await createHandler(impl)(fetchReq({ url }, await bearer()), env)).status).toBe(200);
+    }
+    // MangaDex ترد على هوية متصفح بتحويل لصفحة فحص الآليين: هويتنا الصريحة هنا وحدها
+    expect(seen[0]!.headers.get('user-agent')).toMatch(/^VANTARA\//);
+    expect(seen[1]!.headers.get('user-agent')).toMatch(/^VANTARA\//);
+    expect(seen[2]!.headers.get('user-agent')).toMatch(/Mozilla/);
+    expect(wantsAppAgent('mangadex.org.evil.example')).toBe(false);
+    expect(wantsAppAgent('uploads.mangadex.org')).toBe(true);
   });
 
   it('follows redirects inside the allowlist and stops at a foreign one', async () => {
