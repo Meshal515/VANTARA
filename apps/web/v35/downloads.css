@@ -375,3 +375,8 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 .v35 .dl-empty-space { margin-top: 14px; min-height: 42px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; }
 .v35 button.st-row--info { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; cursor: pointer; padding-inline: 0; }
 .v35 button.st-row--info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* فلاتر «اختر السيرفر» في ورقة التحميل */
+.v35 .dl-server-filters { display: grid; gap: 8px; margin: 4px 0 10px; }
+.v35 .dl-server-filters .dl-filters { margin: 0; }
+.v35 .dl-server-count { margin: 0; }
+.v35 .dl-source[hidden] { display: none; }

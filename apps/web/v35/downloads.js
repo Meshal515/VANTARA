@@ -1232,6 +1232,55 @@ export function createDownloadsUI(deps) {
             const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
             const shown = new Map();
             const list = el('div', 'dl-source-list');
+            // فلاتر كورقة السيرفرات: الجودة، والنوع (تورنت/مباشر)، والمصدر، والترتيب. تُبنى مما وصل فعلًا
+            const filt = { q: 'all', kind: 'all', src: 'all', sort: 'quality' };
+            const meta = new Map();
+            const bar = el('div', 'dl-server-filters');
+            const SORTS_SRV = { quality: 'الأعلى جودة', seeds: 'الأكثر مشاركين', small: 'الأصغر حجمًا' };
+            const sizeOf = (label) => {
+              const m = /([\d.]+)\s*(KB|MB|GB|TB)/i.exec(String(label ?? ''));
+              return m ? Number(m[1]) * 1024 ** ({ KB: 1, MB: 2, GB: 3, TB: 4 })[m[2].toUpperCase()] : Infinity;
+            };
+            const applyFilters = () => {
+              const entries = [...meta.entries()];
+              for (const [b, m] of entries) b.hidden = !((filt.q === 'all' || m.q === filt.q) && (filt.kind === 'all' || m.kind === filt.kind) && (filt.src === 'all' || m.src === filt.src));
+              const order = [...entries].sort(([, x], [, y]) => filt.sort === 'seeds' ? (y.seeds - x.seeds) || (y.qn - x.qn)
+                : filt.sort === 'small' ? (x.bytes - y.bytes) || (y.seeds - x.seeds)
+                : (y.qn - x.qn) || (y.seeds - x.seeds));
+              for (const [b] of order) list.append(b);
+              paintChips();
+            };
+            const chip = (label, on, run) => {
+              const c0 = el('button', `dl-chip dl-chip--small${on ? ' is-on' : ''}`, label);
+              c0.type = 'button';
+              c0.setAttribute('aria-pressed', String(on));
+              c0.onclick = run;
+              return c0;
+            };
+            const paintChips = () => {
+              const all = [...meta.values()];
+              const qs = [...new Set(all.map((m) => m.q).filter(Boolean))].sort((a, b) => (parseInt(b, 10) || 9999) - (parseInt(a, 10) || 9999));
+              const kinds = [...new Set(all.map((m) => m.kind))];
+              const srcs = [...new Set(all.map((m) => m.src).filter(Boolean))];
+              const row1 = el('div', 'dl-filters');
+              const row2 = el('div', 'dl-filters');
+              if (qs.length > 1) {
+                row1.append(chip('كل الجودات', filt.q === 'all', () => { filt.q = 'all'; applyFilters(); }));
+                for (const q of qs) row1.append(chip(q, filt.q === q, () => { filt.q = filt.q === q ? 'all' : q; applyFilters(); }));
+              }
+              const sortChip = chip(`↕ ${SORTS_SRV[filt.sort]}`, false, () => {
+                const keys = Object.keys(SORTS_SRV);
+                filt.sort = keys[(keys.indexOf(filt.sort) + 1) % keys.length];
+                applyFilters();
+              });
+              sortChip.setAttribute('aria-label', `الترتيب: ${SORTS_SRV[filt.sort]}`);
+              row1.append(sortChip);
+              if (kinds.length > 1) for (const [k, label] of [['torrent', 'تورنت'], ['direct', 'مباشر']]) row2.append(chip(label, filt.kind === k, () => { filt.kind = filt.kind === k ? 'all' : k; applyFilters(); }));
+              if (srcs.length > 1) for (const n of srcs) row2.append(chip(n, filt.src === n, () => { filt.src = filt.src === n ? 'all' : n; applyFilters(); }));
+              const visibleCount = [...meta.keys()].filter((b) => !b.hidden).length;
+              const count = el('p', 'dl-hint dl-server-count', filt.q === 'all' && filt.kind === 'all' && filt.src === 'all' ? `${meta.size} سيرفر` : `${visibleCount} من ${meta.size}`);
+              bar.replaceChildren(row1, ...(row2.childElementCount ? [row2] : []), count);
+            };
             // جلسة الورقة تُغلق حين تُغلق الورقة: كانت تبقى مفتوحة بتذاكر تورنتاتها ومسح سيرفراتها حتى 25 ث
             const stop = new AbortController();
             const onRoutes = (routes) => {
@@ -1242,11 +1291,13 @@ export function createDownloadsUI(deps) {
               for (const { r, row } of fresh) {
                 const b = sourceRow(row);
                 shown.set(r.id, b);
+                meta.set(b, { q: row.quality, qn: Number(r.quality) || 0, kind: isTorrentRoute(r) ? 'torrent' : 'direct', src: row.name, seeds: row.seeds ?? 0, bytes: sizeOf(row.size) });
                 list.append(b);
               }
+              if (fresh.length) applyFilters();
               const pending = routes.filter((r) => r.state === 'RESOLVING' || r.state === 'CHECKING').length;
               waiting.textContent = shown.size ? `نبحث عن المزيد…${pending ? ` (${pending})` : ''}` : (video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
-              if (shown.size && !list.isConnected) sourceBox.replaceChildren(list, waiting);
+              if (shown.size && !list.isConnected) sourceBox.replaceChildren(bar, list, waiting);
             };
             const out = await resolveRoutes(eng, first.request, { settleMs: 25_000, onRoutes, signal: stop.signal }).catch(() => null);
             if (out?.session) void Promise.resolve(eng.closeSession?.(out.session)).catch(() => {});
@@ -1275,7 +1326,8 @@ export function createDownloadsUI(deps) {
         go.innerHTML = `${glyph('downloads', { size: 18 })}<span>${list.length ? `نزّل ${noun}` : 'كله على الجهاز'}</span>`;
         go.disabled = !list.length || (pick.mode === 'manual' && !pick.sourceId);
         const need = pick.mode === 'manual' && !pick.sourceId ? (video ? 'اختر سيرفرًا' : 'اختر مصدرًا') : null;
-        status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز ${status.dataset.free}` : '');
+        // الحجم معزول الاتجاه: كان يظهر «GB 43.8 المتاح على الجهاز» داخل سطر عربي
+        status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز \u2066${status.dataset.free}\u2069` : '');
       }
       go.onclick = async () => {
         const list = chosen().filter((u) => !taken(u));

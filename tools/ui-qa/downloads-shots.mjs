@@ -45,7 +45,11 @@ const QA_INIT = () => {
     addListener: async (name, fn) => { if (name === 'progress') listeners.add(fn); return { remove: () => listeners.delete(fn) }; },
   };
   const engine = {
-    prepare: async () => ({ session: 'qa', routes: [{ id: 'r1', sourceId: 'qa-source', sourceName: 'AnimeRift', server: 'AnimeRift', code: 'NMR', quality: 1080, state: 'READY', probed: true, probeMs: 420 }], done: true }),
+    prepare: async () => ({ session: 'qa', routes: [{ id: 'r1', sourceId: 'qa-source', sourceName: 'AnimeRift', server: 'AnimeRift', code: 'NMR', quality: 1080, state: 'READY', probed: true, probeMs: 420 },
+      { id: 't1', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a1', quality: 1080, state: 'READY', label: '[SubsPlease] Frieren - 01 (1080p).mkv\n👤 145 💾 257 MB ⚙️ Nyaa' },
+      { id: 't2', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a2', quality: 1080, state: 'READY', label: '[Erai-raws] Frieren - 01 [1080p HEVC].mkv\n👤 137 💾 68 MB ⚙️ Nyaa' },
+      { id: 't3', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a3', quality: 720, state: 'READY', label: '[SubsPlease] Frieren - 01 (720p).mkv\n👤 57 💾 108 MB ⚙️ Nyaa' },
+      { id: 'r2', sourceId: 'qa-source-2', sourceName: 'Anime4up', server: 'Anime4up', code: 'MP4', quality: 720, state: 'READY', probed: true, probeMs: 380 }], done: true }),
     routes: async () => ({ routes: [], done: true }),
     pick: async () => 'c1',
     on: () => () => {},
