@@ -105,7 +105,11 @@ export function downloads() {
     const manager = createDownloadManager({
       store,
       settings: readSettings(),
-      saveSettings: writeSettings,
+      // التوازي و«Wi-Fi فقط» يصلان طابور الجهاز أيضًا (Android)، فيطبّقهما وهو يعمل بلا واجهة
+      saveSettings: (next) => {
+        writeSettings(next);
+        void Promise.resolve(nativeDownloads()?.configure?.({ parallel: next.parallel, wifiOnly: next.wifiOnly })).catch(() => {});
+      },
       network: networkWatch(),
       drivers: {
         manga: createMangaDriver({ store, engine: () => (mangaEngine.isAvailable() ? mangaEngine : null) }),

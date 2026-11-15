@@ -144,7 +144,9 @@ export function createVideoDriver(deps) {
       ctl.signal.addEventListener('abort', onAbort, { once: true });
       const listener = (e) => {
         if (e?.id !== item.id) return;
-        if (e.state === 'downloading') ctl.progress({
+        // في طابور الجهاز (Android) ينتظر خانته هناك
+        if (e.state === 'queued') ctl.update({ state: 'scheduled' });
+        else if (e.state === 'downloading') ctl.progress({
           bytes: e.bytes ?? 0,
           total: e.total > 0 ? e.total : null,
           // التورنت: المشاركون والقطع المتحقق من بصمتها (segmentsDone للقطع في محرك التورنت)
@@ -166,12 +168,40 @@ export function createVideoDriver(deps) {
     });
   }
 
+  /** نهاية العمل الأصلي إلى نتيجة المدير. */
+  function outcome(end, current, source) {
+    const e = end.event;
+    return {
+      bytes: e.bytes,
+      total: e.bytes,
+      storage: { kind: 'file', path: e.path ?? null, bytes: e.bytes, verified: Boolean(e.verified), location: e.location ?? null },
+      media: { ...(current.media ?? {}), ...(e.media ?? {}) },
+      source,
+    };
+  }
+
+  // Android وحده يملك طابورًا أصليًا يكمل بلا واجهة (DownloadService)؛ ويندوز ينفّذ ما يُسلَّم فورًا
+  const deviceQueue = () => deps.platform?.()?.platform === 'android';
+
   return {
     async run(item, ctl) {
       const native = deps.native();
       if (!native) throw new DownloadError('UNSUPPORTED', 'تنزيل الفيديو يعمل في تطبيق Android وويندوز');
       const engine = deps.engine();
       let current = item;
+      // سُلِّم من قبل (أُغلق التطبيق والجهاز أكمل أو ما زال يعمل): نتابعه، بلا تجهيز سيرفر ولا تنزيل ثانٍ
+      if (deviceQueue()) {
+        const st = await native.status?.({ id: item.id }).catch(() => null);
+        if (st?.exists && st.state === 'ready') return outcome({ event: st }, current, current.source);
+        if (st?.exists && (st.running || st.queued)) {
+          ctl.handoff?.();
+          if (st.queued) ctl.update({ state: 'scheduled' });
+          const end = await follow(native, current, ctl);
+          if (end.status === 'aborted') return null;
+          if (end.status === 'ready') return outcome(end, current, current.source);
+          // انتهت صلاحية الرابط وهو في طابور الجهاز: يُجهَّز من جديد أدناه
+        }
+      }
       for (let renewal = 0; renewal <= MAX_RENEWALS; renewal++) {
         ctl.update({ state: 'resolving' });
         const wanted = current.source?.locked ? (r) => sameRoute(r, current.source)
@@ -201,7 +231,10 @@ export function createVideoDriver(deps) {
           });
           // ترجمات الإضافات المثبتة (العربية أولًا) تُحفظ بجانب الملف: نفس ما يجلبه المشغّل أونلاين
           const subs = await engine.subtitleContext?.(current.request.identity).catch?.(() => null) ?? null;
+          const conf = ctl.settings?.() ?? {};
           await native.start({
+            parallel: conf.parallel,
+            wifiOnly: conf.wifiOnly,
             ...(subs?.subtitleIdentity ? { subtitleIdentity: subs.subtitleIdentity, addonSubtitleProviders: subs.addonSubtitleProviders ?? [], episode: current.request.episode ?? 1 } : {}),
             id: current.id,
             session,
@@ -211,18 +244,11 @@ export function createVideoDriver(deps) {
             label: current.unit.number != null ? (current.kind === 'manga' ? `الفصل ${current.unit.number}` : `الحلقة ${current.unit.number}`) : current.work.title,
             section: current.section,
           });
+          // في طابور الجهاز الآن: الخانة هنا تفرغ لتجهيز التالي، والجهاز يكمل ولو أُغلق التطبيق
+          if (deviceQueue()) ctl.handoff?.();
           const end = await follow(native, current, ctl);
           if (end.status === 'aborted') return null;
-          if (end.status === 'ready') {
-            const e = end.event;
-            return {
-              bytes: e.bytes,
-              total: e.bytes,
-              storage: { kind: 'file', path: e.path ?? null, bytes: e.bytes, verified: Boolean(e.verified), location: e.location ?? null },
-              media: { ...(current.media ?? {}), ...(e.media ?? {}) },
-              source,
-            };
-          }
+          if (end.status === 'ready') return outcome(end, current, source);
           // انتهت صلاحية الرابط: نفس السيرفر برابط جديد، ويكمل المحرك من آخر بايت صحيح
         } finally {
           void engine.closeSession?.(session)?.catch?.(() => {});

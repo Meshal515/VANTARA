@@ -230,6 +230,35 @@ describe('download manager', () => {
     expect(m.get(item.id).state).toBe('ready');
   });
 
+  it('an item handed to the device queue frees its slot for the next one, and keeps being followed', async () => {
+    const gates = [];
+    const handing = { run: vi.fn((item, ctl) => new Promise((resolve) => { ctl.handoff(); ctl.update({ state: 'scheduled' }); gates.push(() => resolve({ bytes: 1, storage: { bytes: 1 } })); })), remove: vi.fn() };
+    const { m } = make({ manga: handing, parallel: 1 });
+    await m.enqueue([1, 2, 3].map((n) => mangaSpec(n)));
+    await flush(10);
+    // التوازي 1 في الواجهة، والثلاثة سُلِّمت للجهاز (هو يطبّق التوازي)
+    expect(handing.run).toHaveBeenCalledTimes(3);
+    expect(m.list().map((i) => i.state)).toEqual(['scheduled', 'scheduled', 'scheduled']);
+    expect(m.summary()).toMatchObject({ active: 0, waiting: 3 });
+    gates.forEach((open) => open());
+    await flush(10);
+    expect(m.list().map((i) => i.state)).toEqual(['ready', 'ready', 'ready']);
+  });
+
+  it('an item that was with the device when the app closed returns to the engine on restart', async () => {
+    const store = memoryStore();
+    const first = make({ store, manga: { run: vi.fn((item, ctl) => new Promise(() => { ctl.handoff(); ctl.update({ state: 'scheduled' }); })), remove: vi.fn() } });
+    const { added: [item] } = await first.m.enqueue([mangaSpec(1)]);
+    await flush(10);
+    expect(first.m.get(item.id).state).toBe('scheduled');
+    const again = { run: vi.fn(async () => ({ bytes: 1, storage: { bytes: 1 } })), remove: vi.fn() };
+    const second = make({ store, manga: again });
+    await second.m.ready;
+    await flush(10);
+    expect(again.run).toHaveBeenCalledTimes(1);
+    expect(second.m.get(item.id).state).toBe('ready');
+  });
+
   it('waits for Wi-Fi when asked, and says so', async () => {
     let metered = true;
     let onChange = () => {};
@@ -380,5 +409,39 @@ describe('on-device chapters', () => {
     const rows = localRows([1, 2, 3, 5, 6, 4, 7].map(item));
     expect(rows.map((r) => r.number)).toEqual([7, 6, 5, 4, 3, 2, 1]);
     expect(startChapter(rows, () => false).number).toBe(1);
+  });
+});
+
+describe('video driver and the device queue (Android)', () => {
+  const itemOf = () => ({ id: 'dl_x1', kind: 'episode', section: 'anime', work: { title: 'W' }, unit: { number: 1 }, source: { sourceId: 'a', locked: true }, request: { copies: [], episode: 1 } });
+  const ctlOf = () => ({ signal: new AbortController().signal, update: vi.fn(), progress: vi.fn(), handoff: vi.fn(), settings: () => ({ parallel: 2, wifiOnly: false }) });
+  it('a job the device finished while the app was closed is taken as ready, with no server resolved again', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const engine = { prepare: vi.fn() };
+    const native = { status: vi.fn(async () => ({ exists: true, state: 'ready', bytes: 9, path: '/x/video.mkv', verified: true })) };
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'android', torrent: true }) });
+    const out = await driver.run(itemOf(), ctlOf());
+    expect(out).toMatchObject({ bytes: 9, storage: { path: '/x/video.mkv', verified: true } });
+    expect(engine.prepare).not.toHaveBeenCalled();
+  });
+  it('a job still waiting in the device queue is followed, not started twice', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    let emit;
+    const engine = { prepare: vi.fn() };
+    const native = {
+      status: vi.fn(async () => ({ exists: true, state: 'queued', queued: true })),
+      start: vi.fn(),
+      addListener: vi.fn(async (_n, fn) => { emit = fn; return { remove() {} }; }),
+    };
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'android', torrent: true }) });
+    const ctl = ctlOf();
+    const run = driver.run(itemOf(), ctl);
+    await vi.waitFor(() => expect(emit).toBeTypeOf('function'));
+    expect(ctl.handoff).toHaveBeenCalled();
+    expect(ctl.update).toHaveBeenCalledWith({ state: 'scheduled' });
+    emit({ id: 'dl_x1', state: 'ready', bytes: 5, path: '/y' });
+    await expect(run).resolves.toMatchObject({ bytes: 5 });
+    expect(native.start).not.toHaveBeenCalled();
+    expect(engine.prepare).not.toHaveBeenCalled();
   });
 });
