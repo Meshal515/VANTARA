@@ -29,7 +29,7 @@ const QA_INIT = () => {
       const job = { bytes: jobs.get(id)?.bytes ?? 0, total, timer: null };
       jobs.set(id, job);
       job.timer = setInterval(() => {
-        job.bytes = Math.min(total, job.bytes + (rate / 4) * (0.92 + Math.random() * 0.16));
+        job.bytes = Math.min(total, job.bytes + ((window.__qaAllFast ? 400 * 1024 ** 2 : rate) / 4) * (0.92 + Math.random() * 0.16));
         if (job.bytes >= total) {
           clearInterval(job.timer);
           emit({ id, state: 'verifying', bytes: total });
@@ -192,7 +192,7 @@ await step('device', async () => {
     const { downloads } = await import('/lib/downloads/index.js');
     const { manager } = await downloads();
     const l = manager.list();
-    return l.filter((i) => i.state === 'ready').length >= 10;
+    return l.filter((i) => i.state === 'ready').length >= 12;
   }, null, { timeout: 90000, polling: 1000 }).catch(() => {});
   await tab('على الجهاز');
   await page.waitForSelector('.dl-card');

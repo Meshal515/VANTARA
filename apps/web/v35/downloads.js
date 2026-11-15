@@ -229,9 +229,8 @@ export function createDownloadsUI(deps) {
     const img = el('img');
     img.alt = '';
     img.decoding = 'async';
-    img.loading = 'lazy';
-    img.hidden = true;
-    img.onload = () => { img.hidden = false; };
+    // لا loading=lazy مع إخفاء: المتصفح لا يحمّل صورة كسولة مخفية أبدًا (كان الغلاف لا يظهر في الصف)
+    img.onload = () => img.classList.add('is-loaded');
     t.append(img);
     void artUrl(ctx.store, item.work.ref, 'cover').then((u) => {
       const src = u ?? (navigator.onLine !== false ? item.work.cover : null);
@@ -323,6 +322,8 @@ export function createDownloadsUI(deps) {
     } else if (item.bytes > 0 || item.total > 0) out.push(ltr(el, formatProgressBytes(item.bytes, item.total)));
     if (ratio != null && item.state === STATES.downloading) out.push(ltr(el, `${Math.floor(ratio * 100)}%`, 'dl-pct'));
     if (item.state === STATES.downloading) {
+      // سطر ثانٍ للسرعة والوقت: لا نقطة فاصلة معلّقة في أول السطر حين يلتف
+      out.push(el('span', 'dl-break'));
       const speed = formatSpeed(item.speed);
       if (speed) out.push(ltr(el, speed, 'dl-speed'));
       const eta = item.kind === 'manga' ? null : formatEta(etaSeconds({ done: item.bytes, total: item.total, rate: item.speed, stable: item.stable }));
@@ -331,9 +332,11 @@ export function createDownloadsUI(deps) {
     // فاصل هادئ بين الأجزاء
     const joined = [];
     out.forEach((n, i) => {
-      if (i && !(n.textContent === 'صفحة')) joined.push(el('span', 'dl-dot', '·'));
+      const prev = out[i - 1];
+      if (i && n.textContent !== 'صفحة' && !n.classList.contains('dl-break') && !prev?.classList.contains('dl-break')) joined.push(el('span', 'dl-dot', '·'));
       joined.push(n);
     });
+    if (joined.at(-1)?.classList.contains('dl-break')) joined.pop();
     return joined;
   }
 
