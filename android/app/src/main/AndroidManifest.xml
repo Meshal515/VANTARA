@@ -78,6 +78,12 @@
             android:name="com.vantara.plugins.translation.TranslationJobService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- التنزيلات: نقل الملفات في الخلفية والشاشة مطفأة، بإشعار تقدّم واحد (DownloadService) -->
+        <service
+            android:name="com.vantara.downloads.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
     <!-- Permissions -->
