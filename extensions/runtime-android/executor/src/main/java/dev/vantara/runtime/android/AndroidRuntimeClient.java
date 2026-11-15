@@ -13,6 +13,8 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     private static final Semaphore httpIngress=new Semaphore(8);
     /** In-flight HTTP exchanges one worker generation may hold; providers fan out across an episode's servers. */
     private final Semaphore workerExchanges=new Semaphore(6);
+    /** Hidden browsers one worker may hold open at once (each is a WebView on the phone). */
+    private final Semaphore workerBrowsers=new Semaphore(2);
     public interface HostTransport { String request(Scope scope,String url) throws Exception; }
     public interface HostHttpTransport extends HostTransport,AutoCloseable {
         RuntimeHttpAccess.Response exchange(Scope scope,RuntimeHttpAccess.Request request) throws Exception;
@@ -25,6 +27,11 @@ public final class AndroidRuntimeClient implements AutoCloseable {
             return new RuntimeHttpAccess.Response(response.url(),response.status(),response.headers(),
                 body.length<=limit?body:Arrays.copyOf(body,limit));
         }
+        /**
+         * CloudStream's hidden browser for this worker's source: a JSON job in ([RuntimeProtocol.BROWSE]), the requests
+         * the page made out. Hosts without a browser refuse it, as before this capability existed.
+         */
+        default String browse(Scope scope,String job) throws Exception { throw new RuntimeFailure("BROWSER_UNSUPPORTED"); }
         @Override default String request(Scope scope,String url) throws Exception {
             return new String(exchange(scope,new RuntimeHttpAccess.Request(url,"GET",Collections.emptyMap(),null,true)).body(),java.nio.charset.StandardCharsets.UTF_8);
         }
@@ -199,11 +206,12 @@ public final class AndroidRuntimeClient implements AutoCloseable {
     }
     private final Binder broker=new Binder() {
         @Override protected boolean onTransact(int code,Parcel data,Parcel reply,int flags) throws RemoteException {
-            if(code!=RuntimeProtocol.HELLO&&code!=RuntimeProtocol.HTTP_EXCHANGE) return super.onTransact(code,data,reply,flags);
+            if(code!=RuntimeProtocol.HELLO&&code!=RuntimeProtocol.HTTP_EXCHANGE&&code!=RuntimeProtocol.BROWSE) return super.onTransact(code,data,reply,flags);
             Identity worker=identity;
             if(worker==null || closed.get() || Binder.getCallingUid()!=worker.uid() || Binder.getCallingPid()!=worker.pid()) throw new SecurityException("Not the owning worker generation");
             data.enforceInterface(RuntimeProtocol.BROKER);
             if(code==RuntimeProtocol.HTTP_EXCHANGE){exchange(data,reply);return true;}
+            if(code==RuntimeProtocol.BROWSE){browse(data,reply);return true;}
             try {
                 String url=RuntimeProtocol.text(data.readString()), origin=RuntimeProtocol.origin(url);
                 if(!scope.allowedOrigins().contains(origin)) throw new RuntimeFailure("ORIGIN_NOT_ALLOWED");
@@ -220,6 +228,27 @@ public final class AndroidRuntimeClient implements AutoCloseable {
             return true;
         }
     };
+    private void browse(Parcel data,Parcel reply) {
+        boolean owned=false;
+        try {
+            String job=RuntimeProtocol.text(data.readString());
+            if(!(transport instanceof HostHttpTransport))throw new RuntimeFailure("BROWSER_UNSUPPORTED");
+            if(!workerBrowsers.tryAcquire(30,TimeUnit.SECONDS))throw new RuntimeFailure("WORKER_BUSY");owned=true;
+            if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
+            final String result;long identity=Binder.clearCallingIdentity();
+            try {result=RuntimeProtocol.text(((HostHttpTransport)transport).browse(scope,job));}
+            finally {Binder.restoreCallingIdentity(identity);}
+            if(closed.get())throw new RuntimeFailure("WORKER_CLOSED");
+            RuntimeProtocol.result(reply,"OK",result);
+        }catch(RuntimeFailure failure){RuntimeProtocol.result(reply,failure.code,null);}
+        catch(InterruptedException interrupted){Thread.currentThread().interrupt();RuntimeProtocol.result(reply,"WORKER_CLOSED",null);}
+        catch(Exception failure){
+            // The host's refusal code (ORIGIN_NOT_ALLOWED, BROWSER_TIMEOUT, ...), never a URL or page
+            String code=failure.getMessage();
+            RuntimeProtocol.result(reply,code!=null&&code.matches("[A-Z][A-Z0-9_]{2,63}")?code:"BROWSER_FAILED",null);
+        }
+        finally{if(owned)workerBrowsers.release();}
+    }
     private void exchange(Parcel data,Parcel reply) {
         boolean admitted=false,owned=false;
         try {

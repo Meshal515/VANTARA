@@ -68,6 +68,8 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
             sources=result.sources
             // After WorkerState.install: the world reads this generation's context and broker
             LibraryWorld.attach(http)
+            // CloudStream's hidden browser (WebViewResolver), for the provider and the library world
+            WorkerState.browser={job->http.browse(job)}
         }catch(failure:Throwable){NetworkBridge.reset();ExtractorRegistry.clear();WorkerState.reset();LibraryWorld.reset();plugin=null;throw failure}
     }
     override fun invoke(operation:String,inputJson:String,access:RuntimeAccess):String {

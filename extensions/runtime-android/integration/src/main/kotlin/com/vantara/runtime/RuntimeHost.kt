@@ -46,6 +46,8 @@ class RuntimeHost(
     private val sourceTransport: (AndroidRuntimeClient.Scope,HttpBroker)->AndroidRuntimeClient.HostHttpTransport = { scope,http -> BrokerHostTransport(scope,http) },
     /** حل صامت لتحدي Cloudflare غير التفاعلي (url، User-Agent) ← cf_clearance أو null. null = لا حل صامت. */
     private val silentClearance: ((String,String)->String?)? = null,
+    /** متصفح فانتارا المخفي لأداة CloudStream ‏WebViewResolver. null = لا متصفح (تبقى الأداة بلا نتيجة كما في نسخة JVM). */
+    private val browser: RuntimeBrowser.Engine? = null,
 ) {
     private val app = context.applicationContext
     private val directory = File(app.filesDir,"runtime-cloudstream-v1")
@@ -485,6 +487,17 @@ class RuntimeHost(
         val scope=AndroidRuntimeClient.Scope("cloudstream",installed.packageId(),id,o.id,origins)
         val bound=sourceTransport(scope,broker)
         val transport=object: AndroidRuntimeClient.HostHttpTransport {
+            override fun browse(caller: AndroidRuntimeClient.Scope,job: String): String {
+                synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
+                val engine=browser ?: throw IOException("BROWSER_UNSUPPORTED")
+                val parsed=try { RuntimeBrowser.parse(job,caller.allowedOrigins(),userAgent) }
+                    catch(invalid: IllegalArgumentException) { throw IOException(invalid.message ?: "INVALID_BROWSER_JOB") }
+                val started=System.nanoTime()
+                val result=engine.open(parsed)
+                android.util.Log.i("VantaraRuntimeBrowser","${source.text("name")} "+RuntimeBrowser.describe(parsed,result,(System.nanoTime()-started)/1_000_000))
+                synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
+                return RuntimeBrowser.encode(result ?: RuntimeBrowser.Result(null,emptyList(),emptyList(),emptyList()))
+            }
             override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
                 synchronized(lock) { checkPackage(o,installed.packageId(),generation) }
                 val headers=java.util.TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER);headers.putAll(request.headers())
@@ -602,6 +615,8 @@ class RuntimeHost(
         @Volatile var current: AndroidRuntimeClient.HostHttpTransport?=null
         override fun exchange(caller: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response =
             (current ?: throw IOException("WORKER_IDLE")).exchange(caller,request)
+        override fun browse(caller: AndroidRuntimeClient.Scope,job: String): String =
+            (current ?: throw IOException("WORKER_IDLE")).browse(caller,job)
         override fun close() {}
     }
     private class Warm(val key: String,val client: AndroidRuntimeClient,val switch: Switch)

@@ -96,6 +96,16 @@ public final class RuntimeWorkerService extends Service {
                 return RuntimeProtocol.readHttpResponse(answer);
             }finally{request.recycle();answer.recycle();}
         }
+        @Override public String browse(String job) throws Exception {
+            RuntimeProtocol.text(job);
+            Parcel request=Parcel.obtain(),answer=Parcel.obtain();
+            try {
+                request.writeInterfaceToken(RuntimeProtocol.BROKER);request.writeString(job);
+                if(!broker.transact(RuntimeProtocol.BROWSE,request,answer,0))throw new BrokerRejected("BROKER_UNAVAILABLE");
+                try { return RuntimeProtocol.response(answer); }
+                catch(RuntimeFailure e) { throw new BrokerRejected(e.code); }
+            }finally{request.recycle();answer.recycle();}
+        }
         @Override public String request(String url) throws Exception {
             RuntimeProtocol.text(url);
             Parcel request=Parcel.obtain(), answer=Parcel.obtain();

@@ -48,7 +48,10 @@ object WorkerState {
     }
     /** What the host may persist for this provider after the generation ends. */
     fun snapshot():Map<String,String> =HashMap(values)
-    fun reset(){context=null;values.clear();clearance=emptyMap()}
+    fun reset(){context=null;values.clear();clearance=emptyMap();browser=null}
+    /** This generation's hidden browser in the host (JSON job in, requests seen out); null when the host has none. */
+    @Volatile var browser:((String)->String)?=null
+    fun browse(job:String):String=(browser?:throw java.io.IOException("BROWSER_UNSUPPORTED"))(job)
 }
 
 /** SharedPreferences over the worker map. Values keep their Java type inside one generation. */
