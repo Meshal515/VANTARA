@@ -1,0 +1,111 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/v35/core.css"><link rel="stylesheet" href="/v35/unified-view.css"><link rel="stylesheet" href="/mock/mock.css">
+<style>
+/* «الصفحة» بعد الدمج: غلاف وعمود معلومات، وتبويبات تحتهما */
+.pg-top{padding:96px 20px 0;display:flex;gap:16px;position:relative;z-index:2}
+.pg-amb{position:absolute;inset:0 0 auto 0;height:360px;overflow:hidden}
+.pg-amb img{width:100%;height:100%;object-fit:cover;filter:blur(28px) saturate(1.2);opacity:.45;transform:scale(1.2)}
+.pg-amb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,7,12,.2),var(--bg) 92%)}
+.pg-cover{width:132px;height:198px;border-radius:14px;overflow:hidden;flex:none;position:relative;box-shadow:0 18px 40px rgba(0,0,0,.55)}
+.pg-cover img{width:100%;height:100%;object-fit:cover}
+.pg-info{position:relative;flex:1;min-width:0;padding-top:6px}
+.pg-info h1{font-size:24px;line-height:1.2;margin:0 0 6px;font-weight:800}
+.pg-info .alt{font-size:12.5px;color:var(--text-3);margin-bottom:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12.5px}
+.kv span{color:var(--text-3)}.kv b{font-weight:650;color:var(--text-1)}
+.pg-act{display:flex;gap:10px;padding:18px 20px 0;position:relative;z-index:2}
+.pg-act .go{flex:1;height:50px;border-radius:14px;background:var(--accent);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:750;font-size:15px}
+.pg-act .sq{width:50px;height:50px;border-radius:14px;background:var(--surface-2);display:grid;place-items:center}
+.pg-act svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9}
+/* «ويبتوني»: غلاف طويل كامل العرض، والفصول خط زمني */
+.wt-hero{position:relative;height:520px;overflow:hidden}
+.wt-hero img{width:100%;height:100%;object-fit:cover;object-position:50% 15%}
+.wt-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 45%,rgba(8,7,12,.7) 75%,var(--bg) 99%)}
+.wt-id{position:absolute;bottom:16px;inset-inline:20px;z-index:2}
+.wt-id h1{margin:0;font-size:32px;font-weight:850;line-height:1.1}
+.wt-id .sub{font-size:13px;color:var(--text-2);margin-top:8px}
+.tl{position:relative;padding:4px 20px 120px}
+.tl::before{content:'';position:absolute;top:16px;bottom:120px;inset-inline-start:33px;width:2px;background:linear-gradient(var(--accent),var(--surface-3) 40%)}
+.tli{display:flex;align-items:center;gap:16px;padding:12px 0;position:relative}
+.tli .k{width:28px;display:grid;place-items:center;flex:none}
+.tli .k i{width:12px;height:12px;border-radius:50%;background:var(--surface-3);box-shadow:0 0 0 4px var(--bg)}
+.tli.new .k i{background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--accent-soft)}
+.tli .th{width:62px;height:62px;border-radius:12px;overflow:hidden;flex:none;background:var(--surface-2)}
+.tli .th img{width:100%;height:100%;object-fit:cover}
+.tli .m{flex:1}.tli .m b{display:block;font-size:15px;font-weight:700}.tli .m span{font-size:12px;color:var(--text-3)}
+.tli .badge{font-size:11px;font-weight:800;color:var(--accent-text);background:var(--accent-soft);padding:3px 8px;border-radius:999px}
+.tli.read .m b{color:var(--text-4)}
+/* «كلاسيكي»: الفصول مجلدات على رفوف */
+.cl-top{padding:90px 20px 0;text-align:center;position:relative}
+.cl-top h1{margin:14px 0 4px;font-size:24px;font-weight:800}
+.cl-top .sub{font-size:12.5px;color:var(--text-3)}
+.cl-cv{width:120px;height:180px;margin:0 auto;border-radius:6px;overflow:hidden;box-shadow:-10px 14px 30px rgba(0,0,0,.6),inset 4px 0 0 rgba(255,255,255,.12)}
+.cl-cv img{width:100%;height:100%;object-fit:cover}
+.vols{padding:18px 20px 120px}
+.vol{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.vol .spine{width:44px;height:64px;border-radius:4px;overflow:hidden;flex:none;position:relative;box-shadow:inset 3px 0 0 rgba(255,255,255,.14)}
+.vol .spine img{width:100%;height:100%;object-fit:cover;filter:saturate(.9)}
+.vol .spine b{position:absolute;inset:auto 0 3px 0;text-align:center;font-size:12px;font-weight:850;text-shadow:0 1px 6px #000}
+.vol .m{flex:1}.vol .m b{display:block;font-size:14.5px;font-weight:700}.vol .m span{font-size:12px;color:var(--text-3)}
+.vol .pr{width:52px;text-align:center;font-size:11.5px;color:var(--text-3)}
+.vol .pr i{display:block;height:4px;border-radius:4px;background:var(--surface-3);margin-top:5px;overflow:hidden}
+.vol .pr i::after{content:'';display:block;height:100%;width:var(--p);background:var(--accent)}
+.vol.open{border-bottom:none}
+.vchs{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:2px 0 14px 0}
+.vchs span{height:40px;border-radius:10px;background:var(--surface-1);display:grid;place-items:center;font-size:14px;font-weight:700;direction:ltr}
+.vchs span.r{color:var(--text-4)}.vchs span.h{background:var(--accent-soft);color:var(--accent-text);box-shadow:inset 0 0 0 1.5px var(--accent-line)}
+</style></head>
+<body class="v35">
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="back" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="share" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></symbol>
+<symbol id="heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+<symbol id="dots" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></symbol>
+<symbol id="mark" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM20 17v4H6.5"/></symbol>
+<symbol id="users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+</defs></svg>
+
+<!-- «الصفحة» (دمج الصفحة والمعرض) -->
+<section class="phone" id="m-page">
+  <div class="pg-amb"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30002-Cul4OeN7bYtn.jpg"></div>
+  <div class="tb"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Berserk</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="pg-top"><span class="pg-cover"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30002-Cul4OeN7bYtn.jpg"></span>
+    <div class="pg-info"><h1>Berserk</h1><div class="alt">ベルセルク · بيرسيرك</div>
+      <div class="kv"><span>الحالة</span><b>مستمر</b><span>التقييم</span><b>★ 9.2</b><span>الفصول</span><b>386</b><span>المؤلف</span><b>كنتارو ميورا</b><span>المصدر</span><b>القارئ الذكي</b></div></div></div>
+  <div class="pg-act"><span class="go"><svg><use href="#book"/></svg>تابع · الفصل 50</span><span class="sq"><svg><use href="#mark"/></svg></span><span class="sq"><svg><use href="#users"/></svg></span></div>
+  <div class="mo-body" style="padding-top:8px">
+    <div class="seg"><span class="on">الفصول</span><span>القصة</span><span>مشابه</span></div>
+    <div class="row read"><span class="n">49</span><span class="m"><b>الفصل 49</b><span>قبل 3 أيام · Mangalek</span></span><span class="dot"></span></div>
+    <div class="row next"><span class="n">50</span><span class="m"><b>الفصل 50</b><span>وصلت هنا</span></span><span class="dot"></span></div>
+    <div class="row"><span class="n">51</span><span class="m"><b>الفصل 51</b><span>قبل 3 أيام</span></span><span class="dot"></span></div>
+    <div class="row"><span class="n">52</span><span class="m"><b>الفصل 52</b><span>قبل 4 أيام</span></span><span class="dot"></span></div>
+  </div>
+</section>
+
+<!-- «ويبتوني» -->
+<section class="phone" id="m-webtoon">
+  <div class="tb"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">Solo Leveling</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="wt-hero"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx105398-b673Vt5ZSuz3.jpg">
+    <div class="wt-id"><h1>Solo Leveling</h1><div class="sub">مانهوا · ★ 8.7 · مكتمل · 200 فصل</div></div></div>
+  <div class="tl">
+    <div class="tli new"><span class="k"><i></i></span><span class="th"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/banner/105398-4UrEhdqZukrg.jpg"></span><span class="m"><b>الفصل 200</b><span>قبل ساعتين</span></span><span class="badge">جديد</span></div>
+    <div class="tli new"><span class="k"><i></i></span><span class="th"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/banner/105398-4UrEhdqZukrg.jpg" style="object-position:20% 50%"></span><span class="m"><b>الفصل 199</b><span>أمس</span></span></div>
+    <div class="tli read"><span class="k"><i></i></span><span class="th"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/banner/105398-4UrEhdqZukrg.jpg" style="object-position:80% 50%"></span><span class="m"><b>الفصل 198</b><span>قبل 3 أيام · قرأته</span></span></div>
+  </div>
+  <div class="dockact"><span class="go"><svg style="width:22px;height:22px"><use href="#book"/></svg><span class="t">اقرأ الجديد<small>الفصل 199</small></span></span><span class="sq"><svg><use href="#mark"/></svg></span></div>
+</section>
+
+<!-- «كلاسيكي» -->
+<section class="phone" id="m-classic">
+  <div class="tb"><span class="ic"><svg><use href="#back"/></svg></span><span class="ttl">One Piece</span><span class="ic"><svg><use href="#share"/></svg></span><span class="ic"><svg><use href="#heart"/></svg></span><span class="ic"><svg><use href="#dots"/></svg></span></div>
+  <div class="cl-top"><span class="cl-cv" style="display:block"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg"></span><h1>One Piece</h1><div class="sub">مانجا · ★ 9.0 · 1130 فصلًا · 110 مجلدات</div></div>
+  <div class="vols">
+    <div class="vol"><span class="spine"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg"><b>1</b></span><span class="m"><b>المجلد 1 · رومانس داون</b><span>الفصول 1–8</span></span><span class="pr">8/8<i style="--p:100%"></i></span></div>
+    <div class="vol open"><span class="spine"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg" style="filter:hue-rotate(40deg)"><b>2</b></span><span class="m"><b>المجلد 2 · ضد قراصنة باغي</b><span>الفصول 9–17</span></span><span class="pr">3/9<i style="--p:33%"></i></span></div>
+    <div class="vchs"><span class="r">9</span><span class="r">10</span><span class="r">11</span><span class="h">12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span></div>
+    <div class="vol"><span class="spine"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg" style="filter:hue-rotate(160deg)"><b>3</b></span><span class="m"><b>المجلد 3 · ما لا يُخفى</b><span>الفصول 18–26</span></span><span class="pr">0/9<i style="--p:0%"></i></span></div>
+  </div>
+  <div class="dockact"><span class="go"><svg style="width:22px;height:22px"><use href="#book"/></svg><span class="t">تابع القراءة<small>المجلد 2 · الفصل 12</small></span></span><span class="sq"><svg><use href="#mark"/></svg></span></div>
+</section>
+</body></html>

@@ -104,6 +104,96 @@ describe('revoking a friend’s recent views', () => {
 });
 
 describe('queue durability', () => {
+  it('rejects a strict source choice trimmed by a full event queue without reporting success or changing saved work', async () => {
+    const saved = Array.from({ length: 500 }, (_, i) => ({
+      opId: `saved-work-${i}`, kind: 'usage.work',
+      payload: { section: 'manga', seriesRef: `manga:${i}`, activeMs: 1000 }, at: i + 1,
+    }));
+    storage.setItem('vantara.queue', JSON.stringify(saved));
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ error: 'offline' }, 503)) });
+    const queueBefore = storage.getItem('vantara.queue');
+    const choices = await import('./source-entitlement.js');
+    const pkg = 'eu.kanade.tachiyomi.extension.ar.dilar';
+    choices.setChoiceOwner('account:u1');
+    choices.setEntitlement({ state: 'clean' });
+    choices.setChoiceWriter(async fields => {
+      await sync.enqueue('settings.patch', { fields }, { opId: 'capacity-source-choice', requireDurable: true });
+    });
+    try {
+      await expect(choices.choosePackage(pkg, true)).rejects.toMatchObject({ code: 'QUEUE_CAPACITY_EXCEEDED' });
+      expect(choices.entitlement().added.has(pkg)).toBe(false);
+      expect(sync.rows('settings')).toEqual([]);
+      expect(sync.pendingWrites).toBe(500);
+      expect(storage.getItem('vantara.queue')).toBe(queueBefore);
+      expect(JSON.parse(queueBefore).map(op => op.opId)).toEqual(saved.map(op => op.opId));
+    } finally {
+      choices.setChoiceWriter(null);
+      choices.setChoiceOwner(null);
+      choices.setEntitlement({ state: 'unknown' });
+    }
+  });
+
+  it('rejects a quota-blocked durable source choice without publishing its selection or overwriting saved writes', async () => {
+    const saved = [{ opId: 'already-saved', kind: 'view.add', payload: { seriesRef: 'saved' }, at: 1 }];
+    storage.setItem('vantara.queue', JSON.stringify(saved));
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ error: 'offline' }, 503)) });
+    const queueBefore = storage.getItem('vantara.queue');
+    const setItem = storage.setItem;
+    storage.setItem = (key, value) => {
+      if (key === 'vantara.queue') throw Object.assign(new Error('QuotaExceededError'), { name: 'QuotaExceededError' });
+      setItem(key, value);
+    };
+    const choices = await import('./source-entitlement.js');
+    const pkg = 'eu.kanade.tachiyomi.extension.ar.dilar';
+    choices.setChoiceOwner('account:u1');
+    choices.setEntitlement({ state: 'clean' });
+    choices.setChoiceWriter(async fields => {
+      await sync.enqueue('settings.patch', { fields }, { requireDurable: true });
+    });
+    try {
+      await expect(choices.choosePackage(pkg, true)).rejects.toThrow('تعذّر حفظ');
+      expect(choices.entitlement().added.has(pkg)).toBe(false);
+      expect(choices.visible({ id: pkg })).toBe(false);
+      expect(storage.getItem('vantara.queue')).toBe(queueBefore);
+      expect(sync.rows('settings')).toEqual([]);
+    } finally {
+      choices.setChoiceWriter(null);
+      choices.setChoiceOwner(null);
+      choices.setEntitlement({ state: 'unknown' });
+    }
+  });
+
+  it('retains a following write and its account backup after a strict candidate was rejected', async () => {
+    const { IDBFactory } = await import('fake-indexeddb');
+    const previousDatabase = globalThis.indexedDB;
+    globalThis.indexedDB = new IDBFactory();
+    try {
+      const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ error: 'offline' }, 503)) });
+      const setItem = storage.setItem;
+      storage.setItem = (key, value) => {
+        if (key === 'vantara.queue' && value.includes('rejected-source-choice')) {
+          throw Object.assign(new Error('QuotaExceededError'), { name: 'QuotaExceededError' });
+        }
+        setItem(key, value);
+      };
+      expect(() => sync.enqueue('settings.patch', { fields: { sourceChoice: true } }, {
+        opId: 'rejected-source-choice', requireDurable: true,
+      })).toThrow('تعذّر حفظ');
+      sync.enqueue('view.add', { seriesRef: 'kept-after-rejection' }, { opId: 'following-write' });
+      const { createAccountStore } = await import('./account-store.js');
+      const backup = createAccountStore();
+      await vi.waitFor(async () => {
+        const saved = await backup.read('queue', SIGNED_IN.userId);
+        expect(saved?.ops.map(op => op.opId)).toEqual(['following-write']);
+      });
+      expect(JSON.parse(storage.getItem('vantara.queue')).map(op => op.opId)).toEqual(['following-write']);
+      expect(sync.rows('settings')).toEqual([]);
+      expect(sync.pendingWrites).toBe(1);
+    } finally {
+      globalThis.indexedDB = previousDatabase;
+    }
+  });
+
   it('restores queued profile colors after an offline reload and preserves a later reset', async () => {
     storage.setItem('vantara.mirror', JSON.stringify({ profiles: { u1: { user_id: 'u1', background_color: '#111111', bio: 'نبذة' } } }));
     const fetchImpl = vi.fn(async () => jsonResponse({ error: 'offline' }, 503));

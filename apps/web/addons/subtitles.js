@@ -1,4 +1,4 @@
-import { kitsuVideoRequest } from "./anime-mapping.js";
+import { kitsuVideoRequest, singleMovieIdentity } from "./anime-mapping.js";
 import { publicUrl } from "./manifest.js";
 import { boundedItems } from "./contracts.js";
 import { runProgressive } from "./scheduler.js";
@@ -40,7 +40,7 @@ function requestsFor(identity, stream = {}) {
   for (const key of ["filename", "videoHash", "videoSize"])
     if (stream?.[key] != null) extra[key] = stream[key];
   if (providerId || kitsu) {
-    const type = kitsu?.type ?? ((identity.kind === "movie" || identity.kind === "anime" && identity.format === "MOVIE") ? "movie" : ["series", "anime"].includes(identity.kind) ? "series" : null);
+    const type = kitsu?.type ?? ((identity.kind === "movie" || identity.kind === "anime" && singleMovieIdentity(identity)) ? "movie" : ["series", "anime"].includes(identity.kind) ? "series" : null);
     if (!type) return [];
     const first = { type, videoId: providerId ?? kitsu.videoId, extra };
     // Kitsu لإضافات تعرفه، وIMDb بعده لإضافات لا تعرف إلا tt (OpenSubtitles)
@@ -50,7 +50,7 @@ function requestsFor(identity, stream = {}) {
   }
   if (!/^tt\d+$/.test(imdb ?? "")) return [];
   const type =
-    (identity.kind === "movie" || identity.kind === "anime" && identity.format === "MOVIE")
+    (identity.kind === "movie" || identity.kind === "anime" && singleMovieIdentity(identity))
       ? "movie"
       : ["series", "anime"].includes(identity.kind)
         ? "series"

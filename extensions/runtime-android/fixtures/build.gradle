@@ -1,0 +1,13 @@
+plugins { id 'java-library' }
+java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
+def sdkRoot = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+if (!sdkRoot) throw new GradleException('ANDROID_HOME is required for external DEX fixtures')
+dependencies { compileOnly project(':api'); compileOnly files("${sdkRoot}/platforms/android-35/android.jar") }
+tasks.register('dex', Exec) {
+    dependsOn tasks.jar
+    def output = layout.buildDirectory.dir('dexAssets')
+    inputs.file(tasks.jar.archiveFile)
+    outputs.dir(output)
+    doFirst { output.get().asFile.mkdirs() }
+    commandLine "${sdkRoot}/build-tools/35.0.0/d8", '--min-api', '29', '--output', output.get().asFile.absolutePath, tasks.jar.archiveFile.get().asFile.absolutePath
+}

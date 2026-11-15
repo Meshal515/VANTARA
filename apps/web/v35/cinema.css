@@ -42,7 +42,7 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 0.6s ease;
+  transition: opacity var(--reveal-ms) var(--reveal-ease);
 }
 .v35 .cn-img.loaded {
   opacity: 1;
@@ -560,6 +560,12 @@
   .v35 .cn-hero-alt {
     margin-top: 0;
   }
+  /* تبديل الأقسام: الطبقات تُحشى بارتفاع الترويسة لأنها تشغل مكانًا في الأنمي والمانجا. صفحة السينما تبدأ من
+     أعلى الشاشة تحت ترويستها الثابتة، فطبقتها بلا حشوة، وإلا نزل البانر بارتفاع الترويسة ثم قفز عند الاستقرار */
+  .v35 #home.layering > #cinemaHome:has(> .cn-hero-alt),
+  .v35 #home > #cinemaHome.layer-standby:has(> .cn-hero-alt) {
+    padding-top: 0;
+  }
   /* زر الرجوع ثابت مستقل عن طبقة الصورة المتحركة. لا نترك حاويته
      pointer-events:none ثم نطلب من الأبناء إصلاح اللمس داخل WebView. */
   .v35 #cinema.active .cn-detail-bar {
@@ -583,14 +589,27 @@
     backdrop-filter: blur(14px) saturate(140%);
     border-radius: 999px;
   }
+  /* الترويسة صلبة بعد التمرير: حاويات الأزرار كانت لقراءتها فوق البانر، وتحتها حاوية داخل حاوية */
+  .v35[data-section='cinema'].cn-scrolled #home > .header .header-end,
+  .v35[data-section='cinema'].cn-scrolled #home > .header .header-start .icon-btn {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  /* الأيقونات في مكانها نفسه في الأقسام الثلاثة (فرق 0px مقيس): الكبسولة خلفها فقط، لا تحشوها ولا تزيحها،
+     وتلاصق حافة الشاشة بهامش 6px من الجهتين بدل حشوة الترويسة */
   .v35[data-section='cinema'] #home > .header .header-end {
-    gap: 2px;
-    padding-inline: 6px;
+    gap: 0;
+    padding-inline: 0;
+    margin-inline-end: -6px;
+  }
+  .v35[data-section='cinema'] #home > .header .header-start {
+    margin-inline-start: -6px;
   }
   .v35[data-section='cinema'] #home > .header .header-end .icon-btn,
   .v35[data-section='cinema'] #home > .header .header-start .icon-btn {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
   }
   .v35[data-section='cinema'] #home > .header .icon-btn .icon {
     width: 22px;
@@ -1009,20 +1028,7 @@
   background: var(--surface-1);
   overflow: hidden;
 }
-/* نفس عمق الأنمي مربوطًا بالتمرير على خيط الرسم (انظر anime.css) */
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .v35 .cn-detail-art > .cn-img {
-      animation: cn-art-depth linear both;
-      animation-timeline: scroll(root block);
-      animation-range: 0 var(--hero-span, 62vw);
-    }
-  }
-}
-@keyframes cn-art-depth {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to { transform: translate3d(0, calc(var(--hero-span, 62vw) * 0.5), 0) scale(1.12); }
-}
+/* العمق مع التمرير لكل الأنماط: depth.js (DEPTH_SPECS.cinema). */
 .v35 .cn-detail-art::after {
   content: '';
   position: absolute;
@@ -1103,6 +1109,44 @@
 }
 .v35 .cn-sources:empty {
   display: none;
+}
+/* سطر المصادر يحجز مقاسه من أول إطار: البحث هيكل بمقاس السطر نفسه لا نص يظهر ويختفي */
+.v35 .cn-sources {
+  min-height: 46px;
+  box-sizing: border-box;
+}
+.v35 .cn-sources-skel {
+  display: block;
+  width: min(62%, 260px);
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%) 0 0 / 200% 100%;
+  animation: cn-skel-sweep 1.4s linear infinite;
+}
+@keyframes cn-skel-sweep {
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-sources-skel { animation: none; }
+}
+
+/* أدوات الترويسة: نفس كبسولة صفحة عمل الأنمي (aw-tools/aw-menu في anime.css) */
+.v35 .cn-detail-bar .cn-tools {
+  flex: none;
+  margin-inline-start: auto;
+}
+.v35 .cn-detail-bar > .aw-menu {
+  inset-inline-end: 10px;
+}
+.v35 .cn-detail-bar > .aw-menu:not(.open) {
+  pointer-events: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tools {
+  background: transparent;
+  backdrop-filter: none;
+}
+.v35 .cn-detail-bar.collapsed .aw-tool {
+  color: var(--text-1);
 }
 .v35 .cn-dot {
   width: 7px;
@@ -1443,7 +1487,7 @@
   padding: 0 4px;
   border-radius: 99px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 10px;
   line-height: 16px;
   text-align: center;
@@ -1631,25 +1675,17 @@
   animation: cn-blink 1.4s ease-in-out infinite;
 }
 .v35 .cn-synopsis.cn-pending {
-  height: 5.1em;
+  height: 5.25em;
 }
 .v35 .cn-ep-over.cn-pending {
-  height: 2.7em;
+  height: 3.1em;
   width: 92%;
 }
 
-/* لم يُعثر عليه: سبب واضح، نتائج قريبة يختارها الشخص، وفحص المصادر */
-.v35 .cn-sources[data-state='none'] {
+/* لم يُعثر عليه: بلا سطر حالة (قرار المالك)؛ تظهر النتائج القريبة وفحص المطوّر فقط، وإلا يختفي السطر وخطّاه */
+.v35 .cn-sources[data-state='none']:not(:empty) {
   display: grid;
   gap: 10px;
-}
-.v35 .cn-sources-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.v35 .cn-sources-row .cn-link {
-  margin-inline-start: auto;
 }
 .v35 .cn-near {
   display: grid;
@@ -1795,3 +1831,374 @@
   font-size: 11px;
   color: var(--text-3);
 }
+
+/* تبديل الأقسام: كبسولات أزرار السينما ومقاساتها تتشكّل مع انزلاق الصفحة لا دفعة واحدة في أول إطار */
+.v35 #home > .header .header-end,
+.v35 #home > .header .header-start .icon-btn,
+.v35 #home > .header .header-end .icon-btn,
+.v35 #home > .header .icon-btn .icon {
+  transition: background-color 0.4s ease, width 0.4s ease, height 0.4s ease, padding 0.4s ease, gap 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 #home > .header .header-end,
+  .v35 #home > .header .icon-btn,
+  .v35 #home > .header .icon-btn .icon { transition: none; }
+}
+html[data-motion='off'] .v35 #home > .header .header-end,
+html[data-motion='off'] .v35 #home > .header .icon-btn,
+html[data-motion='off'] .v35 #home > .header .icon-btn .icon { transition: none; }
+
+/* «شوهدت» على كل حلقة: زر على زاوية اللقطة (نفس شكل زر الأنمي)، والعدّاد بمكان محجوز */
+.v35 .cn-ep {
+  position: relative;
+}
+.v35 .cn-ep-seen {
+  position: absolute;
+  top: 14px;
+  inset-inline-start: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(10, 7, 7, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.2s ease;
+}
+.v35 .cn-ep-seen::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.v35 .cn-ep-seen:active {
+  transform: scale(0.9);
+}
+.v35 .cn-ep-seen[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.v35 .cn-ep-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+.v35 .cn-ep.seen .cn-ep-art img {
+  opacity: 0.6;
+}
+.v35 .cn-eps-count {
+  margin: -4px 0 10px;
+  min-height: 1.5em;
+  font-size: 12.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ثبات التحميل: القصة تحجز أسطرها الثلاثة، والخلفية لا تظهر قبل أن تُحسم وتُفك (تلاشٍ واحد) */
+.v35 .cn-synopsis.clamped {
+  min-height: 5.25em;
+}
+.v35 .cn-detail-art > .cn-img {
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.v35 .cn-detail-art > .cn-img.loaded,
+.v35 .cn-detail-art > .cn-img.kept {
+  opacity: 1;
+}
+.v35 .cn-detail-art > .cn-img.kept {
+  transition: none;
+}
+.v35 .cn-detail-art.cn-wait::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 80% at 50% 35%, rgba(255, 255, 255, 0.06), transparent 70%);
+  animation: cn-blink 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .cn-detail-art.cn-wait::before { animation: none; }
+}
+/* رأس صفحة العمل بصناديق محجوزة: الشعار أو الاسم (72)، وسطر الحقائق، وسطر الأنواع */
+.v35 .cn-detail-mark {
+  height: 72px;
+  display: flex;
+  align-items: flex-end;
+}
+.v35 .cn-detail-mark .cn-mark-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.2;
+}
+.v35 .cn-detail-mark:not(.has-logo) .cn-mark-text { font-size: 28px; }
+.v35 .cn-detail-body > .cn-facts { min-height: 22px; }
+.v35 .cn-genre-line { min-height: 1.5em; line-height: 1.5; }
+@media (min-width: 900px) {
+  .v35 .cn-detail-mark { height: 96px; }
+  .v35 .cn-detail-mark .cn-mark-logo { max-height: 96px; }
+}
+/* المكتبة: هامش الصفحة وحده (كان هامش الصفحة + هامش الشبكة = 32px، فراغ يمين ويسار — ملاحظة المالك) */
+.v35 #cinemaLibrary :is(.cn-grid, .cn-wide-grid) { padding-inline: 0; }
+
+/* ═════════════ أنماط صفحة عمل السينما (قرار المالك، 9 نوفمبر — المراجعة الثانية) ═════════════
+ * DOM واحد ووظائف واحدة؛ النمط يرتّب ويلبس فقط. قواعد المالك:
+ *   - المواسم: زر واحد باسم الموسم يفتح قائمتها (لا شريط مواسم)
+ *   - الخلفية بطولها الطبيعي (لا بنر طويل يقص الصورة)
+ *   - الحلقات بلقطاتها دائمًا (لا أرقام بدل الصور)
+ *   - حدّة السينما: زوايا حادة (4px)، خطوط شعرية، تباين واضح؛ لا نعومة الأنمي
+ *   العرض الأول   ← نسخة «المحور» في الأنمي: الملصق على حافة الخلفية، الشعار، ولقطة التشغيل
+ *   الملصق       ← روح «البطاقة الطائرة»: الملصق المائل في أجواء خلفيته
+ *   الشريط العريض ← إطار 2.39 بين شريطين أسودين، كريدت، والحلقات خط زمني بلقطاتها */
+.v35 .cn-detail:not([data-style='current']) { --look-r: 4px; }
+.v35 .cn-detail:not([data-style='current']) .cn-episodes { margin-top: 30px; }
+.v35 .cn-detail:not([data-style='current']) .cn-about { margin-top: 26px; }
+.v35 .cn-detail:not([data-style='current']) :is(.cn-ep-art, .cn-season-btn) { border-radius: var(--look-r); }
+.v35 .cn-detail:not([data-style='current']) :is(.cn-about, .cn-cast, .cn-credits, .cn-episodes, .cn-similar) { text-align: start; }
+.v35 .cn-detail:not([data-style='current']) :is(.cn-resume, .cn-sources) { justify-content: center; }
+
+/* الملصق المشترك (العرض الأول والملصق): حاد الزوايا بإطار شعري وظل عميق */
+.v35 .cn-look-poster {
+  position: relative;
+  width: min(46vw, 200px);
+  aspect-ratio: 2 / 3;
+  margin: 0 auto;
+  border-radius: var(--look-r, 4px);
+  overflow: hidden;
+  background: var(--surface-1);
+  box-shadow: 0 30px 50px -22px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.v35 .cn-look-poster > .cn-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ════ العرض الأول = المحور ════ */
+.v35 .cn-detail[data-style='premiere'] .cn-detail-art::after {
+  height: 70%;
+  background: linear-gradient(to top, var(--bg) 8%, rgba(10, 7, 7, 0));
+}
+.v35 .cn-detail[data-style='premiere'] .cn-detail-body {
+  position: relative;
+  z-index: 1;
+  margin-top: calc(-0.62 * min(46vw, 200px) * 1.5);
+  text-align: center;
+}
+.v35 .cn-detail[data-style='premiere'] .cn-detail-mark { justify-content: center; height: 76px; margin-top: 22px; }
+.v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-logo { max-height: 76px; max-width: 76%; object-position: center bottom; margin-inline: auto; }
+.v35 .cn-detail[data-style='premiere'] .cn-detail-mark .cn-mark-text { text-align: center; font-size: 28px; }
+.v35 .cn-detail[data-style='premiere'] .cn-detail-body > .cn-facts { justify-content: center; margin-top: 14px; }
+.v35 .cn-detail[data-style='premiere'] .cn-genre-line { text-align: center; }
+/* لقطة التشغيل: 16:9 حادة، النص والزر الدائري في أسفلها */
+.v35 .cn-look-still.cn-btn--play {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: 1fr auto auto;
+  align-items: end;
+  column-gap: 12px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: var(--look-r);
+  overflow: hidden;
+  background: var(--surface-1);
+  color: #fff;
+  text-align: start;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.v35 .cn-look-still .cn-still-art { position: absolute; inset: 0; z-index: 0; }
+.v35 .cn-look-still .cn-still-art .cn-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v35 .cn-look-still::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(to top, rgba(6, 4, 4, 0.88), rgba(6, 4, 4, 0) 62%);
+}
+.v35 .cn-look-still > span { grid-column: 1; grid-row: 2; z-index: 1; font-size: 17px; font-weight: 800; }
+.v35 .cn-look-still > small {
+  grid-column: 1; grid-row: 3; z-index: 1;
+  font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.v35 .cn-look-still .cn-still-go {
+  grid-column: 2; grid-row: 2 / 4; z-index: 1;
+  display: grid; place-items: center;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent, #fff);
+}
+.v35 .cn-look-still:active { transform: scale(0.985); }
+
+/* ════ الملصق ════ */
+.v35 .cn-detail[data-style='poster'] .cn-detail-art {
+  aspect-ratio: auto;
+  height: min(64svh, 540px);
+}
+/* الأجواء: الخلفية مغبّشة. الحجم الزائد بـ inset لا بـ transform، وحركة العمق تبقى CSS مربوطة بالتمرير:
+ * «animation: none» كان يجعل collapse-hero يحرّكها من JavaScript بعد كل تمرير، وهو سبب الاهتزاز القديم
+ * على WebView أندرويد (d823bd0) — لا يُعطَّل الخط الزمني هنا أبدًا */
+.v35 .cn-detail[data-style='poster'] .cn-detail-art > .cn-img {
+  position: absolute;
+  inset: -36px;
+  width: calc(100% + 72px);
+  height: calc(100% + 72px);
+  object-fit: cover;
+  filter: blur(22px) saturate(1.2) brightness(0.55);
+}
+.v35 .cn-detail[data-style='poster'] .cn-detail-art::after {
+  height: 60%;
+  background: linear-gradient(to top, var(--bg) 4%, rgba(10, 7, 7, 0));
+}
+.v35 .cn-detail[data-style='poster'] .cn-detail-body {
+  position: relative;
+  z-index: 1;
+  margin-top: calc(-1 * min(64svh, 540px) + var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 30px);
+  text-align: center;
+}
+.v35 .cn-detail[data-style='poster'] .cn-look-poster {
+  width: min(54vw, 230px);
+  transform: perspective(900px) rotateX(4deg);
+  transform-origin: 50% 100%;
+}
+.v35 .cn-detail[data-style='poster'] .cn-detail-mark { justify-content: center; align-items: center; height: 64px; margin-top: 20px; }
+/* الشعار على الملصق نفسه: تحته الاسم بخطه لا الشعار مرة ثانية */
+.v35 .cn-detail[data-style='poster'] .cn-detail-mark .cn-mark-logo { display: none; }
+.v35 .cn-detail[data-style='poster'] .cn-detail-mark .cn-mark-text { position: static; width: auto; height: auto; clip: auto; display: -webkit-box; text-align: center; font-size: 24px; font-weight: 800; }
+.v35 .cn-detail[data-style='poster'] .cn-detail-body > .cn-facts { justify-content: center; }
+.v35 .cn-detail[data-style='poster'] .cn-genre-line { text-align: center; }
+.v35 .cn-detail[data-style='poster'] #cinemaPlay { margin-top: 18px; border-radius: var(--look-r); }
+
+/* ════ الشريط العريض ════ */
+.v35 .cn-detail[data-style='marquee'] .cn-detail-art {
+  /* بنسبة البنر نفسه (خلفيات العمل 1920×1080): كان 2.39 يقص 25.7% من ارتفاعه (#323، قرار المالك) */
+  aspect-ratio: 16 / 9;
+  /* Keep artwork below the fixed controls without black letterbox shadows. */
+  margin-top: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + var(--tap) + 16px);
+  background: var(--bg);
+  box-shadow: none;
+}
+.v35 .cn-detail[data-style='marquee'] .cn-detail-art > .cn-img { width: 100%; height: 100%; object-fit: cover; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-art::after { display: none; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-body { padding-top: 30px; text-align: center; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-mark { justify-content: center; height: 60px; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-logo { max-height: 60px; max-width: 66%; object-position: center bottom; margin-inline: auto; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-mark .cn-mark-text { text-align: center; font-size: 22px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+.v35 .cn-detail[data-style='marquee'] .cn-detail-body > .cn-facts { display: none; }
+.v35 .cn-detail[data-style='marquee'] .cn-genre-line { text-align: center; font-size: 11.5px; font-weight: 700; letter-spacing: 0.12em; color: var(--text-3); margin-top: 12px; }
+.v35 .cn-look-credits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  margin: 18px 0 0;
+  padding: 14px 0;
+  box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line);
+}
+.v35 .cn-look-credits > div { display: grid; gap: 4px; justify-items: center; min-width: 0; padding: 0 6px; }
+.v35 .cn-look-credits > div + div { box-shadow: inset -1px 0 0 var(--line); }
+.v35 .cn-look-credits dt { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-3); }
+.v35 .cn-look-credits dd { margin: 0; max-width: 100%; font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v35 .cn-detail[data-style='marquee'] #cinemaPlay { margin-top: 20px; border-radius: var(--look-r); height: 52px; }
+/* الحلقات خط زمني: خط شعري على جهة البداية، ونقطة لكل حلقة عند منتصف لقطتها (المشاهَدة ممتلئة) */
+.v35 .cn-detail[data-style='marquee'] .cn-eps { gap: 0; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep { padding-inline-start: 22px; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 5px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.v35 .cn-detail[data-style='marquee'] .cn-ep:first-child::before { top: 46px; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep:last-child::before { bottom: auto; height: 46px; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep::after {
+  content: '';
+  position: absolute;
+  top: 41px;
+  inset-inline-start: 0;
+  width: 11px;
+  height: 11px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+.v35 .cn-detail[data-style='marquee'] .cn-ep.seen::after { background: var(--accent); box-shadow: none; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep-row { grid-template-columns: 136px 1fr; }
+.v35 .cn-detail[data-style='marquee'] .cn-ep-seen { inset-inline-start: 28px; }
+
+@media (min-width: 700px) {
+  .v35 .cn-detail:not([data-style='current']) .cn-detail-body { max-width: 760px; margin-inline: auto; }
+  .v35 .cn-detail[data-style='marquee'] .cn-detail-art { aspect-ratio: 2.39 / 1; }
+  .v35 .cn-detail[data-style='poster'] .cn-detail-art { aspect-ratio: auto; }
+}
+
+/* ── فخامة السينما (المراجعة الثانية): إيحاء من أنماط الأنمي لا نسخها ──
+ * هدوء وتباين بدل الزخرفة: خلفية بإطار مظلم (vignette)، زر الموسم نص بلا صندوق، زر التشغيل أبيض كالشاشة،
+ * وسطر الحقائق بفواصل شعرية. لا تباعد حروف على العربي (يفكّ الاتصال البصري). */
+.v35 .cn-detail:not([data-style='current']) .cn-detail-art::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+.v35 .cn-detail:not([data-style='current']) .cn-season-btn {
+  min-height: 36px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 14px;
+  color: var(--text);
+}
+.v35 .cn-detail:not([data-style='current']) .cn-eps-head h2 { font-size: 17px; }
+.v35 .cn-detail:not([data-style='current']) .cn-detail-body > .cn-facts { font-size: 12.5px; color: var(--text-2); }
+.v35 .cn-detail:not([data-style='current']) .cn-genre-line { letter-spacing: 0; font-size: 12.5px; }
+.v35 .cn-look-credits dt { letter-spacing: 0; }
+/* زر التشغيل في الملصق والشريط العريض: بلون القسم الذي اختاره المستخدم (لا أبيض ثابت)، حاد الزوايا */
+.v35 .cn-detail:is([data-style='poster'], [data-style='marquee']) #cinemaPlay {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  border-radius: var(--look-r);
+  height: 52px;
+  font-weight: 800;
+}
+
+/* العرض الأول: الخلفية ظاهرة والملصق على حافتها السفلى فقط */
+.v35 .cn-detail[data-style='premiere'] .cn-detail-body { margin-top: calc(-0.42 * min(46vw, 200px) * 1.5); }
+.v35 .cn-look-still .cn-still-go { width: 48px; height: 48px; } /* بلون القسم (var(--accent)) كبقية أزرار التشغيل */
+.v35 .cn-look-still.cn-btn--play { aspect-ratio: 2.1 / 1; }
+/* حلقات العرض الأول: لقطة عريضة كاملة العرض والعنوان تحتها (كبطاقات الأفلام القصيرة) */
+.v35 .cn-detail[data-style='premiere'] .cn-eps { gap: 18px; }
+.v35 .cn-detail[data-style='premiere'] .cn-ep-row { grid-template-columns: 1fr; gap: 10px; padding: 0; }
+.v35 .cn-detail[data-style='premiere'] .cn-ep-over { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v35 .cn-detail[data-style='premiere'] .cn-ep-seen { top: 10px; inset-inline-start: 10px; }
+
+/* ════ المسلسل أولًا (#323): المواسم شريط لقطات حادة بتقدّم كل موسم، والبحث والترتيب في رأس الحلقات ════ */
+.v35 .cn-detail[data-style='series'] .cn-sf-seasons { margin: 26px 0 8px; }
+.v35 .cn-sf-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 12px; }
+.v35 .cn-sf-head h2 { margin: 0; font-size: 20px; font-weight: 800; }
+.v35 .cn-sf-head span { font-size: 12.5px; color: var(--text-3); }
+.v35 .cn-sf-rail { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; margin-inline: calc(-1 * var(--cn-gutter, 16px)); padding: 2px var(--cn-gutter, 16px) 4px; scroll-snap-type: x proximity; }
+.v35 .cn-sf-rail::-webkit-scrollbar { display: none; }
+.v35 .cn-sf-season { flex: none; width: 150px; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; text-align: start; cursor: pointer; scroll-snap-align: start; }
+.v35 .cn-sf-art { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: var(--look-r, 4px); overflow: hidden; background: var(--surface-1); }
+.v35 .cn-sf-art .cn-img { width: 100%; height: 100%; object-fit: cover; }
+.v35 .cn-sf-bar { position: absolute; inset: auto 0 0 0; height: 3px; background: rgba(255, 255, 255, 0.18); }
+.v35 .cn-sf-bar i { display: block; height: 100%; background: var(--accent); }
+.v35 .cn-sf-season b { display: block; margin-top: 9px; font-size: 14px; font-weight: 800; }
+.v35 .cn-sf-season > span:last-child { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.v35 .cn-sf-season.active .cn-sf-art { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v35 .cn-detail[data-style='series'] .cn-eps-head { display: flex; align-items: center; gap: 10px; }
+.v35 .cn-sf-tools { display: flex; align-items: center; gap: 2px; margin-inline-start: auto; }
+.v35 .cn-sf-tools .icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border: 0; background: none; color: var(--text-2); }
+.v35 .cn-sf-find { width: min(220px, 52vw); height: 38px; padding: 0 12px; border: 0; border-radius: var(--look-r, 4px); background: var(--surface-1); color: var(--text-1); font: inherit; font-size: 14px; }
+.v35 .cn-detail[data-style='series'] .cn-detail-art { aspect-ratio: 16 / 9; }

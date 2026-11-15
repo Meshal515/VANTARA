@@ -44,6 +44,8 @@ export function seasonsOf(videos = []) {
       title: v.name || v.title || null,
       overview: v.overview || v.description || null,
       thumb: v.thumbnail || null,
+      // لقطة metahub الأصلية 1920×1080 (المصدر نفسه بلا تصغير)، و`thumb` 780 بديلها
+      thumbHd: typeof v.thumbnail === 'string' && /^https:\/\/episodes\.metahub\.space\/.+\/w\d+\.jpg$/.test(v.thumbnail) ? v.thumbnail.replace(/\/w\d+\.jpg$/, '/original.jpg') : null,
       rating: Number.parseFloat(v.rating) > 0 ? Number.parseFloat(v.rating) : null,
       // بعض أعمال Cinemeta (Besstydniki) تعطي firstAired بدل released
       released: v.released || v.firstAired ? Date.parse(v.released || v.firstAired) || null : null,
@@ -54,6 +56,16 @@ export function seasonsOf(videos = []) {
     .map(([n, eps]) => ({ n, episodes: eps.sort((a, b) => a.n - b.n) }));
 }
 
+/**
+ * ملصقات IMDb (m.media-amazon.com) تصل من بحث Cinemeta بمقاس 250px (`._V1_SX250.jpg`) فتغبش على الشاشة.
+ * المقاس جزء من الرابط نفسه: نطلب 780px، أوضح بثلاث مرات بنفس الصورة. وmetahub الصغير (240px) إلى المتوسط.
+ */
+export function sharpArt(url, width = 780) {
+  if (typeof url !== 'string' || !url) return url ?? null;
+  if (/m\.media-amazon\.com\/images\//.test(url)) return url.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, `._V1_SX${width}.$1`);
+  return url.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/');
+}
+
 /** شكل واحد للعمل في كل الواجهة. */
 export function normalize(m) {
   if (!m?.id || !/^tt\d+$/.test(String(m.imdb_id ?? m.id))) return null;
@@ -62,8 +74,8 @@ export function normalize(m) {
     id: String(m.imdb_id ?? m.id),
     type: m.type === 'series' ? 'series' : 'movie',
     title: m.name,
-    poster: m.poster || null,
-    background: m.background || null,
+    poster: sharpArt(m.poster) || null,
+    background: m.background ? m.background.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, '._V1_.$1') : null,
     logo: m.logo || null,
     year: year(m),
     endYear: m.type === 'series' ? endYear(m) : null,
@@ -120,8 +132,10 @@ export function castPhotos(imdb, { fetchImpl = globalThis.fetch } = {}) {
   if (!castCache.has(imdb)) {
     const query = `SELECT ?name ?img WHERE { ?w wdt:P345 "${imdb}" . ?w wdt:P161 ?p . ?p wdt:P18 ?img . ?p rdfs:label ?name FILTER(lang(?name)="en") }`;
     castCache.set(imdb, fetchImpl(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, { headers: { Accept: 'application/sparql-results+json' } })
-      .then((r) => (r.ok ? r.json() : null))
+      // 429/503 فشل عابر لا «لا صور» (#311 D-012): كان null يُحفظ قائمة فارغة لا تُطلب ثانية طوال الجلسة
+      .then((r) => { if (!r.ok) throw new Error(`wikidata_${r.status}`); return r.json(); })
       .then((d) => {
+        if (!d || typeof d !== 'object') throw new Error('wikidata_body');
         const out = new Map();
         for (const b of d?.results?.bindings ?? []) {
           const key = normName(b.name?.value);

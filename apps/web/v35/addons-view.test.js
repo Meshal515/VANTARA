@@ -1,3 +1,5 @@
+import { beforeEach, afterEach } from 'vitest';
+import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { renderAddons, renderAddonDetails, configureInApp } from "./addons-view.js";
@@ -400,4 +402,16 @@ it("V7 imports inspected JSON with explicit preview selection only", async () =>
   await tick();await tick();
   expect(install).toHaveBeenCalledTimes(1);
   expect(saved[0].name).toBe("Good");
+});
+
+beforeEach(() => { vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(true); });
+
+afterEach(() => vi.restoreAllMocks());
+it('omits diagnostic actions entirely when the shared gate is off', () => {
+  setup(); vi.spyOn(diagnosticsUi, 'visible').mockReturnValue(false);
+  const onCheck = vi.fn();
+  const view = renderAddonDetails({ addon: row('Addon'), registry: {}, onCheck });
+  expect([...view.querySelectorAll('button')].some(b => b.textContent === 'فحص الإضافة')).toBe(false);
+  expect(view.querySelector('.addon-check-results')).toBeNull();
+  expect(onCheck).not.toHaveBeenCalled(); view.close();
 });

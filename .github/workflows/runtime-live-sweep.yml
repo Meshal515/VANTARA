@@ -1,0 +1,140 @@
+name: VANTARA Runtime live repository sweep (opt-in)
+# Installs every plugin of a real CloudStream repository through the actual Debug app host and runs
+# catalogue → details → episodes → video links against the sources' live sites. The report records each
+# step's PASS/FAIL and reason; it is evidence about the sources from this runner's network, not a gate.
+on:
+  push:
+    branches: [fix/engine-core-predebug-20261031]
+    paths:
+      - '.github/workflows/runtime-live-sweep.yml'
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: CloudStream repository URL (repo.json)
+        required: false
+        default: https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json
+      only:
+        description: Optional comma-separated plugin names
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: runtime-live-sweep-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Pinned provider fixtures used by the androidTest assets directory
+        run: python3 tools/repository-compat/prepare_execution_fixtures.py --output extensions/runtime-android/harness/build/pinnedPackages
+      - name: Package this branch's actual web assets
+        run: npx cap sync android
+      - name: Build the actual Debug app with the runtime and its instrumentation
+        run: bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Live sweep through the actual app host
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          SWEEP_REPOSITORY: ${{ inputs.repository }}
+          SWEEP_ONLY: ${{ inputs.only }}
+          SWEEP_LIMIT: '6'
+          ANIYOMI_REPOSITORY: https://raw.githubusercontent.com/yuzono/anime-repo/repo
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: bash tools/repository-compat/run_live_sweep.sh
+      - name: Summarize the sweep
+        if: always()
+        run: node tools/repository-compat/summarize_live_sweep.mjs live-sweep.jsonl >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Summarize the manga sweep
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY" || true
+          import json
+          print('### المانجا: من تحميل الحزمة حتى صورة صفحة فعلية')
+          print('| الإضافة | الأصل | المصدر | النتيجة |'); print('|---|---|---|---|')
+          for line in open('manga-sweep.jsonl'):
+              if not line.startswith('{'): continue
+              r=json.loads(line)
+              head=next((f"{k}: {r[k].get('code')}" for k in ('download','load') if r.get(k,{}).get('result')=='FAIL'),None)
+              for s in (r.get('sources') or [{}]) if not head else [{}]:
+                  verdict=head or ('PASS' if s.get('image',{}).get('result')=='PASS' else next((f"{k}: {s[k].get('code')}" for k in ('popular','latest','series','pages','image') if s.get(k,{}).get('result')=='FAIL' and not (k=='popular' and s.get('latest',{}).get('result')=='PASS')),'EMPTY'))
+                  print(f"| {r['extension']} | {r['origin']} | {s.get('name','')} | {verdict} |")
+          PY
+      - name: Real signed multi-source Aniyomi APK source routing evidence
+        if: always()
+        run: |
+          {
+            echo '### Aniyomi: actual signed Yuzono APK, nine factory sources'
+            if test -s aniyomi-sweep.log; then
+              cat aniyomi-sweep.log
+            else
+              echo 'NO_ANIYOMI_PASS_EVIDENCE — inspect emulator instrumentation report'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      # من شبكة هذا الجهاز نفسه (الصفحة والفيديو من عنوان واحد كما في هاتف المستخدم): كل رابط سيرفر حقيقي
+      # جمعه الفحص أو حُفظ سابقًا يمر بمستخرجات VANTARA، ولا يُحتسب رابطًا إلا إن أعاد السيرفر فيديو أو HLS فعلًا
+      - name: Live extractor probe (real server samples)
+        if: always()
+        run: |
+          python3 - <<'PY' > extractor-samples.txt
+          import json
+          seen=set()
+          for line in open('tools/repository-compat/extractor-samples.txt'):
+              u=line.strip()
+              if u.startswith('http') and u not in seen: seen.add(u);print(u)
+          try:
+              for line in open('live-sweep.jsonl'):
+                  if not line.startswith('{'): continue
+                  for s in json.loads(line).get('sources',[]):
+                      for u in (s.get('missingSamples') or {}).values():
+                          if u not in seen: seen.add(u);print(u)
+          except FileNotFoundError: pass
+          PY
+          VANTARA_LIVE_EXTRACTORS="$PWD/extractor-samples.txt" VANTARA_LIVE_OUT="$PWD/extractor-probe.txt" \
+            bash android/gradlew -p extensions/runtime-android :cloudstream:testDebugUnitTest --tests '*LiveExtractorProbeTest*' --no-daemon || true
+          # التمريرة الثانية: قارئ صفحات المشغّل العام على كل رابط، لمعرفة المضيفات التي يقرأ منها فيديو فعليًا
+          # قبل تسجيلها (لا يُسجَّل مضيف دون دليل MEDIA هنا)
+          VANTARA_LIVE_GENERIC=1 VANTARA_LIVE_EXTRACTORS="$PWD/extractor-samples.txt" VANTARA_LIVE_OUT="$PWD/extractor-generic.txt" \
+            bash android/gradlew -p extensions/runtime-android :cloudstream:testDebugUnitTest --tests '*LiveExtractorProbeTest*' --rerun --no-daemon -q || true
+          { echo '### Live extractor probe'; echo '```'; cat extractor-probe.txt 2>/dev/null; echo '```'
+            echo '### Generic player-page probe'; echo '```'; grep MEDIA extractor-generic.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-repository-sweep
+          path: |
+            extractor-probe.txt
+            extractor-generic.txt
+            manga-sweep.jsonl
+            aniyomi-sweep.log
+            live-sweep.jsonl
+            live-sweep-logcat.txt
+            android/app/build/outputs/androidTest-results/

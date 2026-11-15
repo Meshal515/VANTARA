@@ -4,7 +4,7 @@ import { createDesktopTogetherPlayer } from './together-player.js';
 function fixture(host = false, timeline = {}) {
   const listeners = new Map();
   let now = 1000, episode = 1;
-  const room = { status: 'live', me: host ? 'host' : 'guest', isHost: host, canControl: host, info: { mode: 'sync' },
+  const room = { status: 'live', me: host ? 'host' : 'guest', isHost: host, canControl: host, instant: true, info: { mode: 'sync' },
     timeline: { media: { key: 'cinema:tt123#1', kind: 'cinema' }, started: false, playing: false, pos: 0, at: 1000, seq: 0, ...timeline },
     roster: [{ userId: 'host', name: 'Meshal', avatarKey: '/avatars/meshal.webp', state: 'ready', host: true }], clock: { serverNow: () => now }, report: vi.fn(), command: vi.fn(), close: vi.fn(),
     on(name, fn) { const set = listeners.get(name) ?? new Set(); set.add(fn); listeners.set(name, set); return () => set.delete(fn); },
@@ -58,8 +58,8 @@ describe('مشاهدة ويندوز المشتركة تستخدم الغرفة �
     f.hooks.onLobby.mock.lastCall[0].start(); expect(f.room.command).toHaveBeenLastCalledWith('play', { pos: 0, countdownMs: 3000 });
     f.state({ started: true, playing: true, pos: 0, seq: 1 });
     f.event('pause', { paused: false }); expect(f.room.command).toHaveBeenCalledTimes(1);
-    f.event('pause', { paused: true }); expect(f.room.command).toHaveBeenLastCalledWith('pause', { pos: 0 });
-    f.event('seek', { position: 55000 }); expect(f.room.command).toHaveBeenLastCalledWith('seek', { pos: 55000 }); f.player.close();
+    f.event('pause', { paused: true }); expect(f.room.command).toHaveBeenLastCalledWith('pause', expect.objectContaining({ pos: 0 }));
+    f.event('seek', { position: 55000 }); expect(f.room.command).toHaveBeenLastCalledWith('seek', expect.objectContaining({ pos: 55000 })); f.player.close();
   });
   it('إزاحة الفيديو تصحح اختلاف المقدمة للمشاهد محليًا دون تغيير ساعة الغرفة', () => {
     vi.useFakeTimers();
@@ -71,9 +71,10 @@ describe('مشاهدة ويندوز المشتركة تستخدم الغرفة �
     f.event('progress',{position:50000});
     expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({pos:40000,driftMs:0}));
     f.player.seek(70000);
-    expect(f.room.command).toHaveBeenLastCalledWith('seek',{pos:60000});
+    expect(f.room.command).toHaveBeenLastCalledWith('seek',expect.objectContaining({pos:60000}));
+    // التقديم نُفّذ عند المضيف فورًا: الإيقاف بعده من الموضع الجديد (70000 بوقته = 60000 بوقت الغرفة)
     f.player.playPause(false);
-    expect(f.room.command).toHaveBeenLastCalledWith('pause',{pos:40000});
+    expect(f.room.command).toHaveBeenLastCalledWith('pause',expect.objectContaining({pos:60000}));
     expect(f.hooks.onLobby.mock.lastCall[0]).toMatchObject({videoOffsetMs:10000});
     expect(f.player.setVideoOffset(200000)).toBe(false);
     f.player.close();
@@ -162,4 +163,43 @@ it('Windows lobby carries the shared artwork identity and three-second start clo
   f.now(4000);vi.advanceTimersByTime(500);
   expect(f.hooks.onLobby.mock.lastCall[0].visible).toBe(false);
   f.player.close();
+});
+
+describe('تحكّم المضيف بلا تأخير', () => {
+  it('المضيف: الإيقاف والتشغيل والتقديم تُطبّق عنده فورًا وتُرسل بلحظة الضغط، ولا يرجعها المؤقت قبل وصول البث', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: true, pos: 0, at: 1000, seq: 4 });
+    f.event('ready'); f.event('progress', { position: 60000, paused: false });
+    f.bridge.playbackCommand.mockClear();
+    f.player.playPause(false);
+    // لحظة الضغط بساعة الغرفة تُرسل مع الأمر (الخادم يختم بها بدل لحظة الوصول)
+    expect(f.room.command).toHaveBeenCalledWith('pause', { pos: 60000, at: 1000 });
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({ session: 'mpv-session', command: 'pause', value: true });
+    f.bridge.playbackCommand.mockClear();
+    vi.advanceTimersByTime(1000); // مؤقت align كل 500ms والغرفة ما زالت «تعمل» بلا بث جديد
+    expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: false }));
+    f.state({ playing: false, pos: 60000, at: 1000, seq: 5 });
+    f.bridge.playbackCommand.mockClear();
+    // التشغيل فوري أيضًا (لا 300ms)
+    f.player.playPause(true);
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({ session: 'mpv-session', command: 'pause', value: false });
+    f.player.seek(90000);
+    expect(f.room.command).toHaveBeenLastCalledWith('seek', expect.objectContaining({ pos: 90000 }));
+    expect(f.bridge.playbackCommand).toHaveBeenCalledWith({ session: 'mpv-session', command: 'seek', value: 90000 });
+    f.player.close();
+  });
+});
+
+describe('توافق مع خادم قديم (بروتوكول 1)', () => {
+  it('بلا instant: أمر المضيف يُرسل وينتظر بثّ الخادم كما كان، فلا يقفز موضعه للخلف مع تأجيل 300ms', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: true, pos: 0, at: 1000, seq: 4 });
+    f.room.instant = false;
+    f.event('ready'); f.event('progress', { position: 60000, paused: false });
+    f.bridge.playbackCommand.mockClear();
+    f.player.playPause(false);
+    expect(f.room.command).toHaveBeenLastCalledWith('pause', { pos: 60000 });
+    expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: true }));
+    f.player.close();
+  });
 });

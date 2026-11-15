@@ -287,3 +287,38 @@ describe('countMainChapters', () => {
     expect(countMain([{ number: -1 }, { number: -1 }])).toBe(2);
   });
 });
+
+// #323 U-28: رقم مرّ بـFloat في المحرك الأصلي يظهر 356.1000061035156 بجانب 356.1 من مصدر آخر
+import { fromFloat32 } from './catalog.js';
+describe('chapter numbers widened from Float32', () => {
+	it('returns the number the source wrote', () => {
+		expect(fromFloat32(Math.fround(356.1))).toBe(356.1);
+		expect(fromFloat32(Math.fround(22.1))).toBe(22.1);
+		expect(chapterNumberOf(chapter('الفصل 356.1', { chapterNumber: Math.fround(356.1) }))).toBe(356.1);
+	});
+	it('leaves exact and text-sourced numbers alone', () => {
+		for (const n of [356.1, 22.1, 232, 0, 0.5, 1047.5, -1]) expect(fromFloat32(n)).toBe(n);
+	});
+	it('one chapter, not two, when sources disagree only by Float noise', () => {
+		const merged = mergeChapters([
+			{ source: { id: 'a' }, chapters: [chapter('Chapter 356.1', { chapterNumber: Math.fround(356.1) })] },
+			{ source: { id: 'b' }, chapters: [chapter('Chapter 356.1', { chapterNumber: 356.1 })] },
+		]);
+		const numbers = [...new Set(merged.map((c) => c.number ?? chapterNumberOf(c)))];
+		expect(numbers).toEqual([356.1]);
+	});
+});
+
+// #323 U-30: صف Mangalek {url:'n-a', name:'0', chapterNumber:-1} صار «الفصل 0» من اسمه، فاختاره «ابدأ»
+describe('placeholder chapter rows', () => {
+	it('a row without a real chapter path is not a chapter (not «chapter 0»)', () => {
+		const merged = mergeChapters([
+			{ sourceId: 'mangalek', chapters: [chapter('2', { chapterNumber: 2 }), chapter('1', { chapterNumber: 1 }), { url: 'n-a', name: '0', chapterNumber: -1 }] },
+		]);
+		expect(merged.map((c) => c.number)).toEqual([2, 1]);
+	});
+	it('a real prologue numbered 0 stays', () => {
+		const merged = mergeChapters([{ sourceId: 'a', chapters: [chapter('Chapter 1', { chapterNumber: 1 }), chapter('Prologue', { chapterNumber: 0 })] }]);
+		expect(merged.map((c) => c.number)).toEqual([1, 0]);
+	});
+});

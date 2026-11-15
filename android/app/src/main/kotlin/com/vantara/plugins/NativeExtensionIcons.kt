@@ -23,11 +23,18 @@ object NativeExtensionIcons {
     /** Missing/invalid resources stay absent, allowing the caller to use its repo's declared logo. */
     fun iconUrl(context: Context, directory: String, pkg: String, sha256: String): String? {
         if (directory !in setOf("extensions", "anime-extensions") || !packageName.matches(pkg) || !digest.matches(sha256)) return null
-        val local = File(context.filesDir, "$directory/$pkg.apk")
+        // مخزن الإضافات المستمر (vault/<pkg>/<sha256>.apk) أولًا، ثم ملف ما قبل المخزن
+        val local = File(context.filesDir, "$directory/vault/$pkg/${sha256.lowercase()}.apk").takeIf { it.isFile }
+            ?: File(context.filesDir, "$directory/$pkg.apk")
         if (local.isFile && local.length() !in 1..MAX_APK_BYTES) return null
         val key = if (local.isFile) "${local.absolutePath}:${local.length()}:${local.lastModified()}:$sha256"
             else "bundled:${context.packageName}:$directory/$pkg:$sha256"
         return cache.getOrPut(key) {
+            // Only PNGs produced after archive digest/package verification enter this cache.
+            // Its stable identity also keeps an installed icon available across process restarts.
+            val pngCache = NativeIconPngStore(File(context.cacheDir, "extension-icons/png"))
+            val imageKey = "$directory:$pkg:${sha256.lowercase()}"
+            pngCache.read(imageKey)?.let { return@getOrPut pngDataUrl(it) }
             // Assets need a path for PackageManager. Stage only our own verified temporary
             // copy; source APKs/user files stay untouched and no source is prepared.
             val staged = if (!local.isFile) NativeIconArchive.stage(
@@ -97,12 +104,16 @@ object NativeExtensionIcons {
                         }
                         val out = ByteArrayOutputStream()
                         if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) || out.size() > MAX_PNG_BYTES) return@runCatching null
-                        "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                        val png = out.toByteArray()
+                        pngCache.write(imageKey, png)
+                        pngDataUrl(png)
                     } finally { bitmap.recycle() }
                 }.getOrNull()
             } finally { staged?.delete() }
         }
     }
+
+    private fun pngDataUrl(png: ByteArray) = "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP)
 
     private fun boundsFor(width: Int, height: Int): Rect = NativeIconBounds.fit(width, height, SIZE)
         .let { Rect(it[0], it[1], it[2], it[3]) }
@@ -154,5 +165,73 @@ internal object NativeIconArchive {
         } finally {
             if (!verified) staged?.delete()
         }
+    }
+}
+
+/** Private, bounded cache of already verified archive icons; never accepts a network image. */
+internal class NativeIconPngStore(
+    private val directory: File,
+    private val maxEntries: Int = 64,
+    private val maxBytes: Long = 4L * 1024 * 1024,
+) {
+    companion object {
+        private const val MAX_PNG_BYTES = 64 * 1024
+        private val names = Regex("^[a-f0-9]{64}\\.png$")
+        private val signature = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 13, 10, 26, 10)
+        private val lock = Any()
+    }
+
+    private fun file(key: String): File = File(directory,
+        MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) } + ".png")
+
+    fun read(key: String): ByteArray? = synchronized(lock) {
+        val file = file(key)
+        runCatching {
+            if (!file.isFile || file.length() !in 33..MAX_PNG_BYTES.toLong()) return@synchronized null
+            // Length checks alone are racy; cap the read itself as well.
+            val bytes = file.inputStream().use { input ->
+                val out = ByteArrayOutputStream()
+                val buffer = ByteArray(4096)
+                while (true) {
+                    val count = input.read(buffer, 0, minOf(buffer.size, MAX_PNG_BYTES + 1 - out.size()))
+                    if (count < 0) break
+                    out.write(buffer, 0, count)
+                    require(out.size() <= MAX_PNG_BYTES)
+                }
+                out.toByteArray()
+            }
+            if (!valid(bytes)) { file.delete(); return@synchronized null }
+            file.setLastModified(System.currentTimeMillis())
+            bytes
+        }.getOrNull()
+    }
+
+    fun write(key: String, png: ByteArray) = synchronized(lock) {
+        if (!valid(png) || maxEntries < 1 || maxBytes < png.size) return@synchronized
+        var temporary: File? = null
+        try {
+            if (!directory.isDirectory && !directory.mkdirs()) return@synchronized
+            val target = file(key)
+            temporary = File.createTempFile("icon-", ".tmp", directory)
+            temporary.writeBytes(png)
+            if (!temporary.renameTo(target)) return@synchronized
+            val entries = directory.listFiles().orEmpty().filter { it.isFile && names.matches(it.name) }.sortedBy { it.lastModified() }
+            var bytes = entries.sumOf { it.length() }
+            var count = entries.size
+            for (entry in entries) {
+                if (count <= maxEntries && bytes <= maxBytes) break
+                val length = entry.length()
+                if (entry.delete()) { count--; bytes -= length }
+            }
+        } catch (_: Exception) {
+            // Icon caching must not change an install/list operation's outcome.
+        } finally { temporary?.delete() }
+    }
+
+    private fun valid(png: ByteArray): Boolean {
+        if (png.size !in 33..MAX_PNG_BYTES || !png.copyOfRange(0, 8).contentEquals(signature)) return false
+        if (!png.copyOfRange(8, 16).contentEquals(byteArrayOf(0, 0, 0, 13, 73, 72, 68, 82))) return false
+        val dimensions = java.nio.ByteBuffer.wrap(png, 16, 8)
+        return dimensions.int in 1..96 && dimensions.int in 1..96
     }
 }

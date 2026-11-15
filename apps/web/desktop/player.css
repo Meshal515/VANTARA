@@ -47,3 +47,8 @@
    فالفيديو يملأ المشغل كله كما في الهاتف، والصفوف أعلاه احتياط فقط حين تتعذر الطبقة. */
 .desktop-player.desktop-player--overlay>header,.desktop-player.desktop-player--overlay .desktop-player-controls{display:none}
 .desktop-player.desktop-player--overlay .desktop-player-video{position:absolute;inset:0;min-height:0}
+/* «اختر السيرفر» من الغرفة داخل المشغّل: نفس الورقة لوحة جانبية فوق الغرفة لا شاشة كاملة (قرار المالك 15 نوفمبر) */
+.desktop-room-layer--servers{padding:0;background:rgba(0,0,0,.45);display:flex;justify-content:flex-start;place-items:initial}
+.desktop-room-layer--servers>.desktop-room-body{width:clamp(420px,36vw,560px);height:100%;max-height:none;border:0;border-inline-end:1px solid var(--line);border-radius:0;padding:0;overflow:hidden}
+.desktop-room-layer--servers .an-pick{grid-template-columns:minmax(0,1fr);grid-template-areas:'src' 'foot'}
+.desktop-room-layer--servers .ss-info{display:none}

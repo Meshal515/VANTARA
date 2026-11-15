@@ -11,6 +11,13 @@ describe('stable feeds', () => {
     expect(feed.pending).toBe(1);
     expect(feed.refresh().map((x) => x.id)).toEqual(['x', 'c', 'lookism', 'b']);
   });
+  it('a card whose reference changed after new evidence is replaced in place, not kept beside the merged card', () => {
+    const cls = (id) => (id === 'ext:demonic emperor' ? 'ext:magic emperor' : id);
+    const feed = createFeedSnapshot({ key: (item) => cls(item.id) });
+    feed.accept([{ id: 'ext:demonic emperor' }, { id: 'ext:other' }]);
+    expect(feed.accept([{ id: 'ext:other' }, { id: 'ext:magic emperor', sources: 2 }]).map((x) => x.id)).toEqual(['ext:magic emperor', 'ext:other']);
+    expect(feed.pending).toBe(0);
+  });
   it('explicit pagination appends without moving existing cards or duplicating a canonical work', () => {
     const feed = createFeedSnapshot();
     feed.accept([{ id: 'a' }, { id: 'b' }]);

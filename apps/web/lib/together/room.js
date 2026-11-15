@@ -22,7 +22,8 @@ const HEARTBEAT_MS = 5_000;
 const SILENCE_MS = 12_000;
 const ECHO_MS = 2_500;
 const WATCH_MS = 500;
-const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+// أول إعادة فورية (انقطاع لحظي: تبدّل شبكة)، ثم تتباعد إن فشلت. كانت تنتظر ثانية كاملة قبل أول محاولة
+const BACKOFF_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 
 /**
  * ينشئ غرفة لمن اخترتهم (invite: معرّفات أو '*') ويُرجع رمزها الداخلي. الرمز لا يراه
@@ -81,6 +82,7 @@ export function joinRoom({
   let status = 'connecting';
   let lastRx = 0;
   let awaitingSince = null;
+  let proto = 1;
 
   const emit = (event, payload) => {
     for (const fn of listeners.get(event) ?? []) try { fn(payload); } catch { /* مستمع معطوب لا يوقف الغرفة */ }
@@ -173,6 +175,7 @@ export function joinRoom({
         return;
       case 'welcome':
         me = msg.you;
+        proto = Number.isFinite(msg.proto) ? msg.proto : 1;
         info = msg.room;
         roster = msg.roster ?? [];
         // تقدير أولي للساعة من رسالة الترحيب حتى تصل عينات ping
@@ -220,9 +223,19 @@ export function joinRoom({
     }
   }
 
+  // الخادم القديم (proto 1، المنشور مع Stable) يختم كل أمر بـ«وصوله + 300ms» ليؤجّله عمدًا. تأجيل ثابت معروف:
+  // نعيده للحظة وصوله فينفّذ الجميع الأمر فور استلامه — نفس سلوك proto 2 بلا نشر خادم ولا Stable (قرار المالك).
+  // العدّ التنازلي للبداية (ثوانٍ) لا يُمس: يُعرف بأن موعده أبعد من التأجيل الثابت.
+  const OLD_LEAD_MS = 300;
+  function normalize(state) {
+    if (proto >= 2 || !clock.ready || !Number.isFinite(state.at)) return state;
+    const lead = state.at - clock.serverNow();
+    return lead > 0 && lead <= OLD_LEAD_MS + 150 ? { ...state, at: state.at - OLD_LEAD_MS } : state;
+  }
   function acceptState(state, by = null) {
     if (!state || !Number.isFinite(state.seq) || !Number.isFinite(state.pos)) return;
     if (timeline && state.seq <= timeline.seq) return;
+    state = normalize(state);
     timeline = state;
     emit('state', { state, by });
   }
@@ -235,8 +248,9 @@ export function joinRoom({
       listeners.get(event).add(fn);
       return () => listeners.get(event)?.delete(fn);
     },
-    command(op, { pos, media, countdownMs } = {}) {
-      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
+    /** at: لحظة الضغط بساعة الغرفة (clock.serverNow) — الخادم يختم الأمر بها بدل لحظة وصوله. */
+    command(op, { pos, media, countdownMs, at } = {}) {
+      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}), ...(Number.isFinite(at) ? { at: Math.round(at) } : {}) });
       if (sent) expectReply();
       return sent;
     },
@@ -261,6 +275,8 @@ export function joinRoom({
     get info() { return info; },
     get me() { return me; },
     get status() { return status; },
+    /** المتحكّم يطبّق أمره فورًا: الخادم الجديد يختمه بلحظة ضغطه، والقديم يُعاد تأجيله الثابت عند الاستلام (normalize). */
+    get instant() { return true; },
     get isHost() { return Boolean(me) && info?.hostUserId === me; },
     get canControl() { return Boolean(me) && (info?.hostUserId === me || info?.control === 'all'); },
   };

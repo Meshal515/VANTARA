@@ -22,11 +22,12 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const WEB_COPY = 'android/app/src/main/assets/public/';
 
-export function nativeInputs(root = ROOT) {
-  const tracked = execFileSync('git', ['ls-files', '-z', '--', 'android', 'capacitor.config.ts'], { cwd: root })
+export function nativeInputs(root = ROOT, {runtimeDebug = false} = {}) {
+  const tracked = execFileSync('git', ['ls-files', '-z', '--', 'android', 'capacitor.config.ts', ...(runtimeDebug ? ['extensions/runtime-android'] : [])], { cwd: root })
     .toString()
     .split('\0')
-    .filter((path) => path && !path.startsWith(WEB_COPY));
+    .filter((path) => path && !path.startsWith(WEB_COPY))
+    .filter((path) => !path.startsWith('extensions/runtime-android/') || (!/\/src\/(?:test|androidTest)\//.test(path) && !/\/(?:harness|fixtures)\//.test(path)));
   return tracked.sort();
 }
 
@@ -38,9 +39,9 @@ export function capacitorVersions(lockfile) {
     .sort();
 }
 
-export function nativeFingerprint(root = ROOT) {
+export function nativeFingerprint(root = ROOT, options = {}) {
   const hash = createHash('sha256');
-  for (const path of nativeInputs(root)) {
+  for (const path of nativeInputs(root, options)) {
     hash.update(`${path}\0`);
     hash.update(readFileSync(resolve(root, path)));
     hash.update('\0');
@@ -50,5 +51,5 @@ export function nativeFingerprint(root = ROOT) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.stdout.write(`${nativeFingerprint()}\n`);
+  process.stdout.write(`${nativeFingerprint(ROOT, {runtimeDebug: process.env.VANTARA_RUNTIME_DEBUG === 'true'})}\n`);
 }

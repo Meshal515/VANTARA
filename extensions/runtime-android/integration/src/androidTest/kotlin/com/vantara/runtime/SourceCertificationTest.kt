@@ -1,0 +1,505 @@
+package com.vantara.runtime
+
+import android.app.Application
+import android.os.SystemClock
+import android.util.Log
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.test.platform.app.InstrumentationRegistry
+import com.getcapacitor.JSObject
+import com.vantara.anime.AnimeEngine
+import com.vantara.anime.adapters.AnimeAdapter
+import com.vantara.anime.adapters.Listing
+import com.vantara.anime.adapters.SourceAnime
+import com.vantara.anime.bridge.AnimeEnginePlugin
+import com.vantara.anime.player.PlayerActivity
+import com.vantara.anime.stream.Candidate
+import com.vantara.anime.stream.Preferences
+import com.vantara.anime.stream.RouteState
+import com.vantara.plugins.ensureEngineInjekt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import uy.kohesive.injekt.api.get
+import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * اعتماد مصدر واحد من الألف إلى الياء، بمسار التطبيق نفسه (تثبيت ← كتالوج ← تفاصيل ← حلقات ←
+ * تجهيز السيرفرات بالفحص ← المشغّل الأصلي):
+ *
+ * - التغطية: 30 عملًا موجودة فعلًا في كتالوج المصدر، 10 مشهورة و10 متوسطة و10 نادرة. الشهرة من
+ *   AniList للأنمي (عدد المتابعين)، وللسينما من موضع العمل في قوائم المصدر نفسه (أول الرائج ← أعمق الصفحات).
+ * - الاحتياط: كم سيرفرًا للحلقة، وكم منها جاهز.
+ * - الصدق: كل سيرفر «جاهز» يُفتح في المشغّل الأصلي؛ لا يُعدّ ناجحًا إلا بأول إطار مفكوك وتقدّم
+ *   الوقت دون خطأ ودون انتقال المشغّل لسيرفر آخر. «جاهز» فشل = FALSE_READY (أخطر حكم).
+ * - الإطارات: المفكوكة والساقطة لكل سيرفر كما يعدّها Media3. على المحاكي (فك برمجي) تُسجَّل ولا تُعتمد
+ *   شهادةَ سلاسة؛ السلاسة تُعتمد على جهاز فعلي.
+ *
+ * تقرير فقط (`-e vantaraCertify true`): سطر JSON لكل عمل ولكل مصدر بوسم VANTARA_CERT.
+ */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+class SourceCertificationTest {
+    private val arb = "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/repo.json"
+    private val yuzono = "https://raw.githubusercontent.com/yuzono/anime-repo/repo"
+    private val tiers = listOf("popular", "mid", "obscure")
+    private companion object {
+        const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+    }
+
+    private val libraryFrames = Regex("^(java|javax|kotlin|kotlinx|android|androidx|dalvik|libcore|sun|com\\.android|okhttp3|okio|org\\.jsoup|org\\.json|com\\.fasterxml|uy\\.kohesive)\\.")
+
+    /**
+     * Who threw it: the first frame outside platform/library code, as a package prefix. An extension's own frame
+     * (eu.kanade.tachiyomi.animeextension…) proves the fault is the extension's; com.vantara/dev.vantara is ours.
+     */
+    private fun thrower(error: Throwable): String? {
+        val frame = error.stackTrace.firstOrNull { !libraryFrames.containsMatchIn(it.className) } ?: return null
+        // Decisive, not by name: extension classes (often R8-renamed, package-less) exist only in the extension's
+        // own class loader. A class the app's loader cannot resolve was thrown by the extension.
+        val app = InstrumentationRegistry.getInstrumentation().targetContext.classLoader
+        val inApp = runCatching { Class.forName(frame.className, false, app) }.isSuccess
+        val owner = if (inApp && frame.className.matches(Regex("^(com|dev)\\.vantara\\..*"))) "vantara" else if (inApp) "library" else "extension"
+        return "$owner:${frame.className.take(80)}"
+    }
+
+    private fun reason(error: Throwable): String {
+        val chain = generateSequence(error) { it.cause }.take(6).toList()
+        val code = chain.mapNotNull { it.message }.firstOrNull { it.matches(Regex("[A-Z][A-Z0-9_]{2,80}(:.*)?")) }
+        // A typed code already names its owner; an untyped exception carries where it was thrown.
+        val raw = chain.last()
+        return (code ?: (raw.javaClass.simpleName + ": " + (raw.message ?: "") + (thrower(raw)?.let { " @$it" } ?: "")))
+            .replace(Regex("https?://\\S+"), "<url>").take(240)
+    }
+
+    private fun emit(obj: JsonObject) = Log.i("VANTARA_CERT", obj.toString())
+
+    private suspend fun <T> environmentRetry(block: suspend () -> T): T {
+        repeat(2) { attempt ->
+            try { return block() } catch (e: Throwable) {
+                if (reason(e).let { r -> listOf("DNS_FAILED", "TRANSPORT_FAILED", "UnknownHostException").none { it in r } }) throw e
+                delay(5_000L * (attempt + 1))
+            }
+        }
+        return block()
+    }
+
+    private val http by lazy {
+        uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client.newBuilder()
+            .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS).build()
+    }
+
+    /** شهرة العناوين من AniList (popularity = عدد من أضافه لقائمته). null = لم يُعرف. */
+    private fun aniListPopularity(titles: List<String>): Map<String, Int?> {
+        val out = mutableMapOf<String, Int?>()
+        for (chunk in titles.chunked(20)) {
+            val query = chunk.mapIndexed { i, t ->
+                val safe = t.replace("\\", " ").replace("\"", " ").take(100)
+                "q$i: Media(search: \"$safe\", type: ANIME) { popularity }"
+            }.joinToString(" ", "{ ", " }")
+            val body = buildJsonObject { put("query", query) }.toString()
+                .toRequestBody("application/json".toMediaType())
+            val parsed = runCatching {
+                http.newCall(okhttp3.Request.Builder().url("https://graphql.anilist.co").post(body)
+                    .header("Accept", "application/json").build()).execute().use { r ->
+                    Json.parseToJsonElement(r.body?.string().orEmpty()).jsonObject["data"]?.jsonObject
+                }
+            }.getOrNull()
+            chunk.forEachIndexed { i, t ->
+                out[t] = (parsed?.get("q$i") as? JsonObject)?.get("popularity")?.jsonPrimitive?.intOrNull
+            }
+            Thread.sleep(700) // حد AniList: 90 طلبًا في الدقيقة
+        }
+        return out
+    }
+
+    /**
+     * حال موقع المصدر خارج الإضافة: هل يرد، وهل انتقل لمضيف آخر، وهل يطلب تحقق Cloudflare.
+     * يفرّق «الإضافة متقادمة/الموقع انتقل» عن «عطل في محرك VANTARA» دون أي معرفة بموقع بعينه.
+     */
+    private fun siteProbe(base: String?): JsonObject = buildJsonObject {
+        if (base.isNullOrBlank()) { put("site", "UNKNOWN_BASE"); return@buildJsonObject }
+        val from = base.toHttpUrlOrNull() ?: run { put("site", "INVALID_BASE"); return@buildJsonObject }
+        put("siteHost", from.host)
+        runCatching {
+            http.newCall(okhttp3.Request.Builder().url(from).header("User-Agent", BROWSER_UA).build()).execute().use { r ->
+                val head = r.peekBody(65_536).string()
+                put("siteStatus", r.code)
+                if (r.request.url.host != from.host) put("siteMovedTo", r.request.url.host)
+                if (r.code in setOf(403, 503) && Regex("cf[-_]chl|just a moment|challenge-platform", RegexOption.IGNORE_CASE).containsMatchIn(head)) put("siteChallenge", "cloudflare")
+            }
+        }.onFailure { put("site", reason(it)) }
+    }
+
+    /** كتالوج المصدر نفسه: الرائج ثم الأحدث، صفحات حتى تتوفر عينة كافية. الموضع يُحفظ للسينما. */
+    private suspend fun crawl(adapter: AnimeAdapter, out: JsonObjectBuilder): List<SourceAnime> {
+        val seen = LinkedHashMap<String, SourceAnime>()
+        var pages = 0
+        val errors = mutableListOf<String>()
+        val pageMs = mutableListOf<Long>()
+        for (listing in listOf(Listing.POPULAR, Listing.LATEST)) {
+            for (page in 1..12) {
+                val t = SystemClock.elapsedRealtime()
+                val got = runCatching { withTimeout(40_000) { adapter.page(listing, page) } }
+                    .onFailure { errors += "${listing.name.lowercase()}#$page:${reason(it)}" }.getOrNull() ?: break
+                pageMs += SystemClock.elapsedRealtime() - t
+                pages++
+                if (got.items.isEmpty() && page == 1) errors += "${listing.name.lowercase()}#1:EMPTY_PAGE"
+                got.items.forEach { seen.putIfAbsent(it.url.trimEnd('/'), it) }
+                if (!got.hasNext || got.items.isEmpty() || seen.size >= 400) break
+            }
+            if (seen.size >= 400) break
+        }
+        out.put("cataloguePages", pages)
+        out.put("catalogueWorks", seen.size)
+        if (pageMs.isNotEmpty()) out.put("pageMsMedian", pageMs.sorted()[pageMs.size / 2])
+        if (errors.isNotEmpty()) out.put("catalogueErrors", JsonArray(errors.distinct().take(6).map(::JsonPrimitive)))
+        return seen.values.toList()
+    }
+
+    /** يقسّم ما في الكتالوج فعلًا إلى ثلاث طبقات شهرة، عشرة لكل طبقة إن وُجدت. */
+    private fun sample(works: List<SourceAnime>, content: String, perTier: Int, out: JsonObjectBuilder): Map<String, List<SourceAnime>> {
+        if (works.isEmpty()) return tiers.associateWith { emptyList() }
+        if (content == "anime") {
+            val pop = aniListPopularity(works.map { it.title }.distinct().take(240))
+            val known = works.mapNotNull { w -> pop[w.title]?.let { w to it } }
+            val unknown = works.filter { pop[it.title] == null }
+            out.put("popularitySource", "anilist")
+            out.put("popularityKnown", known.size)
+            val popular = known.filter { it.second >= 100_000 }.sortedByDescending { it.second }.map { it.first }
+            val mid = known.filter { it.second in 15_000 until 100_000 }.sortedByDescending { it.second }.map { it.first }
+            // النادر: أقل متابعة على AniList، ثم ما لا يعرفه AniList أصلًا
+            val obscure = known.filter { it.second < 15_000 }.sortedBy { it.second }.map { it.first } + unknown.reversed()
+            return mapOf("popular" to popular.take(perTier), "mid" to mid.take(perTier), "obscure" to obscure.take(perTier))
+        }
+        out.put("popularitySource", "source-position")
+        val n = works.size
+        val third = maxOf(1, n / 3)
+        return mapOf(
+            "popular" to works.take(minOf(perTier, third)),
+            "mid" to works.drop(third).take(perTier),
+            "obscure" to works.takeLast(minOf(perTier, maxOf(0, n - 2 * third))).reversed(),
+        )
+    }
+
+    private fun <T> onMain(read: () -> T): T {
+        val v = AtomicReference<T>()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { v.set(read()) }
+        return v.get()
+    }
+
+    /** يفتح السيرفر في المشغّل الأصلي ويقيس: أول إطار، تقدّم الوقت، المفكوك والساقط، الخطأ، والانتقال. */
+    private fun play(engineSession: String, first: Candidate, seconds: Int): JsonObject {
+        var chosen = first
+        val ins = InstrumentationRegistry.getInstrumentation()
+        var activity: PlayerActivity? = null
+        val started = SystemClock.elapsedRealtime()
+        return try {
+            activity = ins.startActivitySync(PlayerActivity.intent(ins.targetContext,
+                PlayerActivity.Launch(session = engineSession, title = "VANTARA certification", candidate = chosen.id))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as PlayerActivity
+            val act = activity
+            val playerField = PlayerActivity::class.java.getDeclaredField("player").apply { isAccessible = true }
+            val currentField = PlayerActivity::class.java.getDeclaredField("current").apply { isAccessible = true }
+            fun player() = playerField.get(act) as ExoPlayer
+            // The player's own failure reason (engine watchdog: FIRST_VIDEO_FRAME_TIMEOUT, STARTUP_TIMEOUT…) lives in its
+            // diagnostics log, which a new server attempt resets; read it every tick so the switch keeps its cause.
+            val diagField = runCatching { PlayerActivity::class.java.getDeclaredField("diag").apply { isAccessible = true } }.getOrNull()
+            fun playerReasons(): List<String> = runCatching {
+                val d = diagField?.get(act) ?: return emptyList()
+                val events = d.javaClass.getDeclaredField("events").apply { isAccessible = true }.get(d) as Iterable<*>
+                synchronized(d) { events.map { it.toString() } }.filter { "خطأ" in it }.map { it.substringAfter("خطأ: ").take(120) }
+            }.getOrDefault(emptyList())
+            var lastReasons = emptyList<String>()
+            onMain { player().volume = 0f }
+            // The player clears its error when it moves to the next server; keep the first one it raised here.
+            val firstError = AtomicReference<String?>(null)
+            // The HTTP answer behind a bad-status error: which request (playlist the probe already opened, or a later
+            // segment) and which code. It separates a link consumed/expired after the probe from a broken route.
+            val httpFailure = AtomicReference<String?>(null)
+            onMain { player().addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    firstError.compareAndSet(null, error.errorCodeName)
+                    val bad = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                    if (bad != null) {
+                        val uri = bad.dataSpec.uri
+                        val same = uri.toString().substringBefore('?') == chosen.url.substringBefore('?')
+                        httpFailure.compareAndSet(null, "${bad.responseCode} ${if (same) "manifest" else "media"} ${uri.host?.take(40)} ${uri.lastPathSegment?.substringAfterLast('.')?.take(6) ?: ""}")
+                    }
+                }
+            }) }
+            var ttff = -1L
+            var error: String? = null
+            var switchedAt = -1L
+            var switchedTo: String? = null
+            // Up to 45s: the player's own budgets decide (slow emulator first frames reached 22s), not this loop.
+            while (SystemClock.elapsedRealtime() - started < 45_000) {
+                error = onMain { player().playerError?.errorCodeName } ?: firstError.get()
+                if (error != null) break
+                // The player left this server on its own: when, and with which error, says who failed.
+                playerReasons().takeIf { it.isNotEmpty() }?.let { lastReasons = it }
+                val now = onMain { currentField.get(act) as? Candidate }
+                if (now != null && now.id != chosen.id) {
+                    switchedAt = SystemClock.elapsedRealtime() - started
+                    // Another rendition of the same server is the player adapting, not the route failing.
+                    switchedTo = if (now.server == chosen.server && now.host == chosen.host) "same-server:${now.quality ?: -1}" else "other:${now.host.take(40)}"
+                    if (now.server == chosen.server && now.host == chosen.host) { chosen = now; switchedAt = -1; switchedTo = null; continue }
+                    break
+                }
+                if (onMain { (player().videoDecoderCounters?.renderedOutputBufferCount ?: 0) > 0 }) { ttff = SystemClock.elapsedRealtime() - started; break }
+                Thread.sleep(100)
+            }
+            val switched = switchedAt >= 0 || onMain { (currentField.get(act) as? Candidate)?.id }?.let { it != chosen.id } == true
+            if (ttff < 0) return buildJsonObject {
+                put("verdict", "FALSE_READY"); put("code", error ?: if (switched) "SWITCHED_BEFORE_FRAME" else "NO_FIRST_FRAME")
+                put("waitedMs", SystemClock.elapsedRealtime() - started)
+                if (switchedAt >= 0) put("switchedAtMs", switchedAt)
+                switchedTo?.let { put("switchedTo", it) }
+                firstError.get()?.let { put("playerError", it) }
+                httpFailure.get()?.let { put("httpFailure", it) }
+                if (lastReasons.isNotEmpty()) put("playerReason", lastReasons.last())
+                // No player error and a switch at the startup budget: a slow first segment, not a broken route.
+                put("startupBudgetMs", com.vantara.anime.player.PlaybackBudgets.startupMs(chosen.url))
+            }
+            val pos0 = onMain { player().currentPosition }
+            val r0 = onMain { player().videoDecoderCounters?.renderedOutputBufferCount ?: 0 }
+            val d0 = onMain { player().videoDecoderCounters?.droppedBufferCount ?: 0 }
+            var stalls = 0
+            val t0 = SystemClock.elapsedRealtime()
+            while (SystemClock.elapsedRealtime() - t0 < seconds * 1000L) {
+                error = onMain { player().playerError?.errorCodeName }
+                if (error != null) break
+                if (onMain { player().playbackState == androidx.media3.common.Player.STATE_BUFFERING }) stalls++
+                Thread.sleep(250)
+            }
+            val advanced = onMain { player().currentPosition } - pos0
+            val rendered = onMain { player().videoDecoderCounters?.renderedOutputBufferCount ?: 0 } - r0
+            val dropped = onMain { player().videoDecoderCounters?.droppedBufferCount ?: 0 } - d0
+            val size = onMain { player().videoFormat?.let { "${it.width}x${it.height}" } ?: "?" }
+            val switchedLate = onMain { (currentField.get(act) as? Candidate)?.id }?.let { it != chosen.id } == true
+            val ok = error == null && !switchedLate && advanced >= (seconds * 1000L * 0.6).toLong() && rendered > 0
+            buildJsonObject {
+                put("verdict", if (ok) "PLAYS" else "FALSE_READY")
+                if (!ok) put("code", error ?: if (switchedLate) "SWITCHED_SERVER" else if (rendered <= 0) "NO_FRAMES" else "CLOCK_STALLED")
+                put("ttffMs", ttff); put("advancedMs", advanced); put("decoded", rendered); put("dropped", dropped)
+                put("stallSamples", stalls); put("size", size)
+            }
+        } catch (e: Throwable) {
+            buildJsonObject { put("verdict", "FALSE_READY"); put("code", "PLAYER_" + reason(e)) }
+        } finally {
+            activity?.let { a -> onMain { a.finish() } }
+            Thread.sleep(800)
+        }
+    }
+
+    private suspend fun certifyWork(engine: AnimeEngine, adapter: AnimeAdapter, work: SourceAnime, servers: Int, seconds: Int): JsonObject = buildJsonObject {
+        put("title", work.title.take(90))
+        val t0 = SystemClock.elapsedRealtime()
+        var detail = runCatching { withTimeout(40_000) { adapter.details(work) } }.getOrElse { put("details", reason(it)); work }
+        put("detailsMs", SystemClock.elapsedRealtime() - t0)
+        if (detail.hasSeasons) {
+            val season = runCatching { withTimeout(40_000) { adapter.seasons(detail) } }.getOrNull()?.firstOrNull()
+            if (season != null) detail = runCatching { withTimeout(40_000) { adapter.details(season) } }.getOrDefault(season)
+        }
+        val t1 = SystemClock.elapsedRealtime()
+        var episodes = runCatching { withTimeout(45_000) { adapter.episodes(detail) } }.getOrElse { failure ->
+            // As the episode list does in the app: a multi-season work is opened through its first season.
+            if (failure.message != "SEASON_SELECTION_REQUIRED") { put("stage", "episodes"); put("code", reason(failure)); return@buildJsonObject }
+            val season = runCatching { withTimeout(40_000) { adapter.seasons(detail.copy(hasSeasons = true)) } }.getOrNull()?.firstOrNull()
+                ?: run { put("stage", "seasons"); put("code", "NO_SEASONS"); return@buildJsonObject }
+            detail = season
+            runCatching { withTimeout(45_000) { adapter.episodes(season) } }.getOrElse { put("stage", "episodes"); put("code", reason(it)); return@buildJsonObject }
+        }
+        put("episodesMs", SystemClock.elapsedRealtime() - t1)
+        put("episodes", episodes.size)
+        val episode = episodes.filter { it.number >= 1f }.minByOrNull { it.number } ?: episodes.firstOrNull()
+            ?: run { put("stage", "episodes"); put("code", "EMPTY_EPISODES"); return@buildJsonObject }
+        put("episode", episode.number.toDouble())
+        val session = "cert-" + UUID.randomUUID()
+        val started = SystemClock.elapsedRealtime()
+        val prep = engine.prepare(session, listOf(detail), episode.number, Preferences(quality = 720), probe = true)
+        try {
+            // التجهيز كما في ورقة السيرفرات: ننتظر انتهاءه (حتى 90 ثانية) ثم فحوص الروابط الجارية (حتى 20 ثانية)
+            while (!prep.done && SystemClock.elapsedRealtime() - started < 90_000) delay(500)
+            val probeEnd = SystemClock.elapsedRealtime() + 20_000
+            while (SystemClock.elapsedRealtime() < probeEnd && prep.routes().any { it.state == RouteState.READY && it.probed == null }) delay(500)
+            val routes = prep.routes()
+            val ready = routes.filter { it.state == RouteState.READY && it.probed == true }
+            put("prepareMs", SystemClock.elapsedRealtime() - started)
+            put("servers", routes.map { it.server.lowercase() }.distinct().size)
+            put("routes", routes.size)
+            put("ready", ready.size)
+            put("probeFailed", routes.count { it.state == RouteState.READY && it.probed == false })
+            put("unavailable", routes.count { it.state != RouteState.READY })
+            put("unavailableReasons", JsonArray(routes.filter { it.state != RouteState.READY }.mapNotNull { it.reason?.take(60) }.distinct().take(6).map(::JsonPrimitive)))
+            // No route at all: the preparation only logged why. Ask the source once, here, to record its answer.
+            if (routes.isEmpty()) put("noRoute", runCatching { withTimeout(40_000) { adapter.candidates(episode) }; "EMPTY_CANDIDATES" }.getOrElse { reason(it) })
+            // كل سيرفر جاهز (حتى [servers] سيرفرات مختلفة) يُفتح في المشغّل الأصلي
+            val toPlay = ready.distinctBy { it.server.lowercase() }.take(servers)
+            val plays = toPlay.mapNotNull { route ->
+                val cand = route.candidates.firstNotNullOfOrNull { prep.candidate(it) } ?: return@mapNotNull null
+                buildJsonObject {
+                    put("server", route.server.take(40)); put("host", cand.host.take(60)); put("quality", route.quality ?: -1)
+                    val result = play(session, cand, seconds)
+                    result.forEach { (k, v) -> put(k, v) }
+                    // The player was refused the very manifest the probe had opened: resolve fresh links and fetch one
+                    // twice with the playback client. 200 then 403 = a single-use link that the probe itself consumed.
+                    if (result["httpFailure"]?.jsonPrimitive?.contentOrNull?.startsWith("403 manifest") == true) {
+                        put("singleUse", runCatching {
+                            val fresh = withTimeout(40_000) { adapter.candidates(episode) }.firstOrNull { it.server == cand.server } ?: return@runCatching "NO_FRESH_LINK"
+                            val client = com.vantara.addons.nativeAddonMediaClient(http, fresh.url, fresh.headers)
+                            val first = com.vantara.anime.stream.StreamProbe.check(client, fresh)
+                            val second = com.vantara.anime.stream.StreamProbe.check(client, fresh)
+                            // Then exactly as the player's data source asks (MediaCache.factory: OkHttpDataSource with the
+                            // candidate headers), as is and with a browser User-Agent as CloudStream's player sends.
+                            fun asPlayer(ua: String?): String = runCatching {
+                                val factory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client).setDefaultRequestProperties(fresh.headers)
+                                if (ua != null) factory.setUserAgent(ua)
+                                val source = factory.createDataSource()
+                                try { source.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(fresh.url))); "ok" } finally { source.close() }
+                            }.getOrElse { e -> (e as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode?.toString() ?: e.javaClass.simpleName }
+                            "fresh:${if (first) "ok" else "refused"} again:${if (second) "ok" else "refused"} player:${asPlayer(null)} playerBrowserUA:${asPlayer(BROWSER_UA)} headers:${fresh.headers.keys.sorted().joinToString("+")}"
+                        }.getOrElse { "CHECK_FAILED:" + reason(it) })
+                    }
+                }
+            }
+            put("played", JsonArray(plays))
+            put("plays", plays.count { it["verdict"]?.jsonPrimitive?.content == "PLAYS" })
+            put("falseReady", plays.count { it["verdict"]?.jsonPrimitive?.content == "FALSE_READY" })
+        } finally {
+            engine.closeSession(session)
+        }
+    }
+
+    @Test fun certifySource() = runBlocking {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue("Source certification is opt-in", args.getString("vantaraCertify") == "true")
+        val kind = args.getString("vantaraCertKind") ?: error("CERT_KIND_REQUIRED")
+        val name = args.getString("vantaraCertName") ?: error("CERT_NAME_REQUIRED")
+        val content = args.getString("vantaraCertContent")?.takeIf { it in setOf("anime", "cinema") } ?: "anime"
+        val perTier = args.getString("vantaraCertPerTier")?.toIntOrNull()?.coerceIn(1, 20) ?: 10
+        val servers = args.getString("vantaraCertServers")?.toIntOrNull()?.coerceIn(1, 6) ?: 3
+        val seconds = args.getString("vantaraCertSeconds")?.toIntOrNull()?.coerceIn(4, 60) ?: 10
+        val ins = InstrumentationRegistry.getInstrumentation()
+        val context = ins.targetContext
+        ensureEngineInjekt(context.applicationContext as Application)
+        val engine = AnimeEngine.get(context)
+        val window = androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
+        var host: RuntimeHost? = null
+        // المرحلة الجارية تُكتب في سطر الفشل: «OPERATION_TIMEOUT» وحده لا يفرّق تثبيتًا عن كتالوج
+        var stage = "setup"
+        val began = SystemClock.elapsedRealtime()
+        val bases = mutableMapOf<String, String>()
+        try {
+            val ids: List<String> = when (kind) {
+                "cs3" -> {
+                    val h = RuntimeHost(context, engine, BROWSER_UA,
+                        silentClearance = { url, agent ->
+                            val solver = eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current
+                                ?: run { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client; eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current }
+                            solver?.silentClearance(url, agent)
+                        }).also { host = it }
+                    h.setProfile("cert-" + UUID.randomUUID())
+                    val repo = args.getString("vantaraCertRepo") ?: arb
+                    stage = "repository"
+                    // The emulator's DNS can miss GitHub right after boot (DNS_FAILED, round 13): the repository is
+                    // test setup, not the source under certification, so it is retried before judging anything.
+                    environmentRetry { h.addRepository(repo) }
+                    stage = "index"
+                    val row = environmentRetry { h.extensions(repo) }.map { it.jsonObject }.firstOrNull {
+                        (it["name"]?.jsonPrimitive?.contentOrNull ?: "").equals(name, ignoreCase = true)
+                    } ?: error("PLUGIN_NOT_IN_REPOSITORY")
+                    stage = "install"
+                    val installed = withTimeout(120_000) { h.install(repo, row.getValue("pkg").jsonPrimitive.content, content) }
+                    val sourceIds = installed["sourceIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+                    val registered = installed["registration"]?.jsonObject?.get("sources")?.jsonArray.orEmpty().map { it.jsonObject }
+                    sourceIds.zip(registered).forEach { (id, src) -> src["mainUrl"]?.jsonPrimitive?.contentOrNull?.let { bases[id] = it } }
+                    sourceIds
+                }
+                "aniyomi" -> {
+                    val plugin = AtomicReference<AnimeEnginePlugin>()
+                    window.onActivity { plugin.set(it.bridge.getPlugin("AnimeEngine").instance as AnimeEnginePlugin) }
+                    val repo = args.getString("vantaraCertRepo") ?: yuzono
+                    stage = "repository"
+                    com.vantara.anime.invokeVideoEngine(plugin.get(), "addRepo", JSObject().put("url", repo))
+                    stage = "index"
+                    val index = com.vantara.anime.invokeVideoEngine(plugin.get(), "repoIndex", JSObject().put("url", repo)).getJSONArray("extensions")
+                    val entry = (0 until index.length()).map { index.getJSONObject(it) }
+                        .firstOrNull { it.getString("pkg").endsWith(".$name") } ?: error("PACKAGE_NOT_IN_REPOSITORY")
+                    stage = "install"
+                    val installed = com.vantara.anime.invokeVideoEngine(plugin.get(), "installExtension",
+                        JSObject().put("repo", repo).put("pkg", entry.getString("pkg")).put("content", content))
+                    listOf(installed.getString("id")!!)
+                }
+                else -> error("CERT_KIND_UNKNOWN")
+            }
+            val installMs = SystemClock.elapsedRealtime() - began
+            for (id in ids) {
+                stage = "route"
+                val adapter = engine.adapter(id) ?: run {
+                    emit(buildJsonObject { put("type", "source"); put("kind", kind); put("name", name); put("id", id); put("code", "SOURCE_NOT_ROUTED") }); continue
+                }
+                val head = buildJsonObject {
+                    put("type", "source"); put("kind", kind); put("name", name); put("id", id); put("content", content)
+                    put("installMs", installMs)
+                    siteProbe(bases[id] ?: (adapter as? com.vantara.anime.adapters.ExtensionAdapter)?.extensionBaseUrl).forEach { (k, v) -> put(k, v) }
+                    stage = "catalogue"
+                    val catalogue = crawl(adapter, this)
+                    stage = "works"
+                    val picked = sample(catalogue, content, perTier, this)
+                    val results = mutableMapOf<String, MutableList<JsonObject>>()
+                    for (tier in tiers) for (work in picked[tier].orEmpty()) {
+                        val r = runCatching { certifyWork(engine, adapter, work, servers, seconds) }
+                            .getOrElse { buildJsonObject { put("title", work.title.take(90)); put("code", reason(it)) } }
+                        val line = buildJsonObject { put("type", "work"); put("name", name); put("tier", tier); r.forEach { (k, v) -> put(k, v) } }
+                        emit(line)
+                        results.getOrPut(tier) { mutableListOf() } += line
+                    }
+                    // الملخص: لكل طبقة كم وُجد وكم اشتغل، والاحتياط (سيرفران جاهزان فأكثر)، وصدق «جاهز»
+                    val all = results.values.flatten()
+                    put("tiers", buildJsonObject {
+                        for (tier in tiers) {
+                            val rs = results[tier].orEmpty()
+                            put(tier, buildJsonObject {
+                                put("found", picked[tier].orEmpty().size)
+                                put("playable", rs.count { (it["plays"]?.jsonPrimitive?.intOrNull ?: 0) > 0 })
+                                put("backup", rs.count { (it["ready"]?.jsonPrimitive?.intOrNull ?: 0) >= 2 })
+                            })
+                        }
+                    })
+                    val played = all.flatMap { (it["played"] as? JsonArray).orEmpty().map { p -> p.jsonObject } }
+                    put("worksTested", all.size)
+                    put("worksPlayable", all.count { (it["plays"]?.jsonPrimitive?.intOrNull ?: 0) > 0 })
+                    put("worksWithBackup", all.count { (it["ready"]?.jsonPrimitive?.intOrNull ?: 0) >= 2 })
+                    put("serversOpened", played.size)
+                    put("falseReady", played.count { it["verdict"]?.jsonPrimitive?.content == "FALSE_READY" })
+                    put("falseReadyCodes", JsonArray(played.mapNotNull { it["code"]?.jsonPrimitive?.contentOrNull }.groupingBy { it }.eachCount().map { (k, v) -> JsonPrimitive("$k×$v") }))
+                    val ok = played.filter { it["verdict"]?.jsonPrimitive?.content == "PLAYS" }
+                    put("ttffMedianMs", ok.mapNotNull { it["ttffMs"]?.jsonPrimitive?.longOrNull }.sorted().let { if (it.isEmpty()) -1 else it[it.size / 2] })
+                    put("decodedFrames", ok.sumOf { it["decoded"]?.jsonPrimitive?.intOrNull ?: 0 })
+                    put("droppedFrames", ok.sumOf { it["dropped"]?.jsonPrimitive?.intOrNull ?: 0 })
+                    put("decoder", "emulator-software")
+                }
+                emit(head)
+            }
+        } catch (e: Throwable) {
+            emit(buildJsonObject {
+                put("type", "source"); put("kind", kind); put("name", name); put("code", reason(e))
+                put("stage", stage); put("elapsedMs", SystemClock.elapsedRealtime() - began)
+                // سلسلة الأسباب كاملة (بلا روابط) حين لا يكفي الرمز وحده
+                put("chain", JsonArray(generateSequence(e) { it.cause }.take(5).map { JsonPrimitive((it.javaClass.simpleName + ":" + (it.message ?: "")).replace(Regex("https?://\\S+"), "<url>").take(160)) }.toList()))
+            })
+        } finally {
+            runCatching { host?.close() }
+            runCatching { engine.setRuntimeSources(emptyList()) }
+            window.close()
+        }
+        Unit // JUnit يشترط دالة اختبار void؛ آخر تعبير في runBlocking هنا يرجع Int من Log.i
+    }
+}

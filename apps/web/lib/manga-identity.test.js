@@ -281,3 +281,28 @@ describe('العنوان الأصلي المشترك لا يدمج الجزء ا
     expect(index.rejected.join(' ')).toContain('اسم جزء آخر');
   });
 });
+
+// من مقياس الهوية (fixtures/manga-identity-bench.json، عناوين AniList وMangaDex حقيقية): دمج خاطئ بأدلة
+describe('مقياس الهوية: أجزاء ومجموعات لا تُدمج', () => {
+  it('«… S» تتمة لا ملكية: Kurosaki-kun no Iinari ni Nante Naranai ≠ … S', () => {
+    expect(titleTwins('Kurosaki-kun no Iinari ni Nante Naranai', 'Kurosaki-kun no Iinari ni Nante Naranai S')).toBe(false);
+    // والملكية داخل العنوان تبقى حشوًا
+    expect(titleTwins('Wistoria’s Wand and Sword', 'WISTORIA: WAND AND SWORD')).toBe(true);
+  });
+
+  it('رقم بعد الاسم يكمله: «جوجوتسو كايسن» ليس داخل «جوجوتسو كايسن 0»', () => {
+    expect(aliasEvidence('جوجوتسو كايسن', ['جوجوتسو كايسن 0'])).toBeNull();
+    // تغيّر الأبجدية بين اسمين ما زال حدًّا
+    expect(aliasEvidence('امبراطور السحر', ['امبراطور السحر Demonic Emperor'])).not.toBeNull();
+  });
+
+  it('نسخة تشير إلى عدة أعمال (مجموعة قصص) لا يدمجها عنوانها الأصلي بأحدها', () => {
+    const index = canonicalIndex();
+    index.add({ sourceId: 'a', manga: { title: 'Sasaki Stopped a Bullet', url: '/1' } });
+    index.add({ sourceId: 'a', manga: { title: 'Love is Blind', url: '/2' } });
+    index.add({ sourceId: 'dex', manga: { title: 'Tatsuki Fujimoto Short Story Collection', url: '/3', altNames: ['Sasaki Stopped a Bullet', 'Love is Blind', '佐々木くんが銃弾止めた'] } });
+    index.add({ sourceId: 'b', manga: { title: 'Sasaki-kun ga Juudan Tometa', url: '/4', altNames: ['佐々木くんが銃弾止めた'] } });
+    const card = index.list().find((w) => w.editions.some((e) => e.manga.url === '/3'));
+    expect(card.editions).toHaveLength(1);
+  });
+});

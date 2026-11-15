@@ -4,14 +4,20 @@
  * الغرفة لا تنقل فيديو ولا صورًا: كل جهاز يشغّل من سيرفره هو. ما هنا فقط:
  *  - الخط الزمني المرجعي: {playing, pos, at, rate, seq}. الموقع المطلوب عند أي
  *    لحظة خادم t هو pos + (t − at) × rate إن كان يعمل.
- *  - أوامر مجدولة: أمر المضيف يُختم بلحظة بعد LEAD_MS، فيصل لكل الأجهزة قبل موعده.
+ *  - أوامر بلا انتظار مصطنع: الأمر يُختم بلحظة ضغطه عند المرسل (بساعة الغرفة المشتركة، إن جاءت ضمن
+ *    PRESS_WINDOW_MS) وإلا بلحظة وصوله. كل جهاز ينفّذه فور وصوله ويحسب موضعه من الخط الزمني، فيصل كل واحد
+ *    بزمن شبكته الفعلي فقط. (كان يُختم بعد LEAD_MS = 300ms فينتظر الأصدقاء ~270ms مصطنعة بعد وصوله.)
  *  - من في الغرفة، ومن المضيف، وأين كل واحد (للوحة الغرفة والوضع الحر).
  * المتعثّر في التحميل لا يغيّر الخط الزمني: الغرفة لا تتوقف إلا بأمر صريح.
  *
  * كل دالة تُرجع رسائل للإرسال بدل أن ترسل بنفسها، فتُختبر بلا WebSocket.
  */
 
-export const LEAD_MS = 300;
+/** إصدار البروتوكول في الترحيب: 2 = الأوامر تُختم بلحظة ضغطها وتُنفّذ عند وصولها (لا LEAD). العملاء الجدد
+ * لا يطبّقون أمر المتحكّم عنده فورًا إلا مع 2، فلا يقفز موضعه للخلف مع خادم قديم يؤجّل الأوامر 300ms. */
+export const PROTOCOL_VERSION = 2;
+/** أقصى قِدم مقبول للحظة الضغط التي يرسلها صاحب الأمر (تأخر الشبكة + خطأ الساعة). */
+export const PRESS_WINDOW_MS = 2_000;
 export const MAX_CAP = 10;
 export const HOST_GRACE_MS = 60_000;
 export const EMPTY_TTL_MS = 30 * 60_000;
@@ -225,7 +231,7 @@ export class RoomCore {
     this.emptySince = null;
     if (member.userId === this.settings.hostUserId) this.hostAwaySince = null;
     this.dirty = true;
-    out.push({ to: [member.conn], msg: { t: 'welcome', you: member.userId, now, room: this.roomView(), state: this.timeline, roster: this.roster(now) } });
+    out.push({ to: [member.conn], msg: { t: 'welcome', you: member.userId, now, proto: PROTOCOL_VERSION, room: this.roomView(), state: this.timeline, roster: this.roster(now) } });
     if (!previous) out.push({ to: 'all', except: member.conn, msg: { t: 'joined', userId: member.userId, name: member.name, avatarKey: member.avatarKey } });
     out.push(this.rosterOut(now));
     return out;
@@ -306,7 +312,10 @@ export class RoomCore {
     const op = msg['op'];
     // أول «ابدأ» في غرفة الانتظار: عدّ تنازلي مشترك (حتى 5 ث) فيبدأ الكل في اللحظة نفسها
     const countdown = op === 'play' && !this.timeline.started ? Math.min(5000, Math.max(0, finite(msg['countdownMs']) ?? 0)) : 0;
-    const at = now + Math.max(LEAD_MS, countdown);
+    // لحظة الضغط عند المرسل بساعة الغرفة؛ لا مستقبل (خطأ ساعة) ولا ماضٍ أبعد من النافذة
+    const pressed = finite(msg['at']);
+    const stamp = pressed != null && pressed >= now - PRESS_WINDOW_MS ? Math.min(now, pressed) : now;
+    const at = countdown > 0 ? now + countdown : stamp;
     const given = finite(msg['pos']);
     const t = this.timeline;
     let next: Timeline;
@@ -382,7 +391,7 @@ export class RoomCore {
     const present = [...this.members.values()];
     const settled = (m: Member) => m.report != null && m.report.state !== 'preparing';
     if (!present.every(settled) && now - this.hostReadyAt < AUTOSTART_MS) return [];
-    const at = now + LEAD_MS;
+    const at = now;
     this.timeline = { ...t, started: true, autoStart: false, playing: true, at, seq: t.seq + 1 };
     this.dirty = true;
     return [{ to: 'all', msg: { t: 'state', state: this.timeline, by: null } }];

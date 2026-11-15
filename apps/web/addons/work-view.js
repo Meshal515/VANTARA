@@ -31,21 +31,25 @@ export function sourceWorkModel(item, { addon, episodes = [] }) {
     type,
     externalIds: work.externalIds,
   };
+  // _pinnedSource: فُتح من داخل هذا المصدر، فصفحة العمل وفصولها منه وحده (لا اكتشاف نسخ من مصادر أخرى)
   if (type === "manga")
-    return toV35Work({
-      key: work.canonicalId,
-      title,
-      thumbnailUrl: item.thumbnailUrl ?? item.thumbnail ?? item.poster,
-      editions: [{ sourceId, manga: copy }],
-      aliases: [],
-    });
+    return {
+      ...toV35Work({
+        key: work.canonicalId,
+        title,
+        thumbnailUrl: item.thumbnailUrl ?? item.thumbnail ?? item.poster,
+        editions: [{ sourceId, manga: copy }],
+        aliases: [],
+      }),
+      _pinnedSource: sourceId,
+    };
   const base = {
     id:
       type !== "anime" && work.externalIds.imdb
         ? work.externalIds.imdb
         : type === "anime" && /^\d+$/.test(work.externalIds.anilist ?? "")
           ? Number(work.externalIds.anilist)
-          : `addon-${encodeURIComponent(normalizeWork({ id: String(id), title }, { addonKey: addon.key, type }).canonicalId)}`,
+          : `addon-${encodeURIComponent(sourceId.startsWith('addon|cs3|') ? work.canonicalId : normalizeWork({ id: String(id), title }, { addonKey: addon.key, type }).canonicalId)}`,
     title,
     externalIds: work.externalIds,
     canonicalId: work.canonicalId,
@@ -96,13 +100,18 @@ export async function restoreSourceWork(ref, { addons, title = null, cover = nul
   try { identity = decodeURIComponent(local.slice(6)); } catch { throw new Error("مرجع الإضافة غير صالح"); }
   const match = /^(movie|series|anime)\|provider:([^:|]+):([^|]+)\|s(\d*)\|p(\d*)$/.exec(identity);
   if (!match) throw new Error("مرجع الإضافة غير صالح");
-  const [, type, encodedKey, encodedId] = match;
+  const [, type, encodedKey, encodedId, encodedSeason] = match;
   const key = decodeURIComponent(encodedKey), id = decodeURIComponent(encodedId);
   const addon = addons.registry.list().find(a => a.key === key && a.enabled && a.contentTypes.includes(type));
   if (!addon) throw new Error("ثبّت أو فعّل إضافة هذا العمل لفتحه");
   const source = addons.sources.source(addon.sourceId ?? `addon|${key}`);
   if (!source) throw new Error("مصدر العمل غير متاح");
   let item = { id, url: id, type, title: title ?? "عمل", poster: cover };
+  if(addon.sourceId?.startsWith('addon|cs3|') && encodedSeason!=='') {
+    const season=Number(encodedSeason);
+    if(!Number.isSafeInteger(season)||season<0)throw new Error('رقم موسم الإضافة غير صالح');
+    item={...item,season,requestedSeason:season,seasonNumber:season};
+  }
   const adapter = addons.adapter(key);
   if (addon.protocol === "stremio" && addon.capabilities?.includes("meta") !== false && adapter.meta)
     item = { ...item, ...await adapter.meta({ type, id, signal }) };

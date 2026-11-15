@@ -55,6 +55,11 @@ data class Candidate(
     val videoSize: Long? = null,
     val duration: Long? = null,
     val fps: Double? = null,
+    /** Monotonic milliseconds from PreparedEpisode creation to this candidate's first availability.
+     * Includes episode lookup and source resolution; excludes subsequent probes/player preparation.
+     * Null means no preparation session has measured this candidate (including legacy payloads).
+     */
+    val preparationMs: Long? = null,
 )
 
 object StreamClassifier {

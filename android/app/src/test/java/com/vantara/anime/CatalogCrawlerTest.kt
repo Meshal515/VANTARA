@@ -19,6 +19,14 @@ class CatalogCrawlerTest {
     private val crawler get() = CatalogCrawler(storeRef, pause = {})
     private lateinit var storeRef: CatalogStore
 
+    @Test fun `refresh crosses an unchanged first page to find a new later page item`() = runBlocking {
+        storeRef = store()
+        crawler.run("s", { p -> SourcePage(listOf(item(p)), hasNext = p < 2) })
+        val refresh = crawler.run("s", { p -> SourcePage(if (p == 1) listOf(item(1)) else listOf(item(2), item(3)), hasNext = p < 2) })
+        assertTrue(refresh.done)
+        assertEquals(listOf(1, 2, 3).map { "/a/$it" }, storeRef.items("s").map { it.url })
+    }
+
     @Test fun `crawls every page until the source says no more`() = runBlocking {
         storeRef = store()
         val c = crawler.run("s", { p -> SourcePage((1..10).map { item((p - 1) * 10 + it) }, hasNext = p < 7) })
@@ -52,6 +60,7 @@ class CatalogCrawlerTest {
         val first = crawler.run("s", fetch)
         assertFalse(first.done)
         assertEquals(3, first.nextPage)
+        assertTrue(first.lastError.orEmpty().contains("parse"))
         broken = false
         val second = crawler.run("s", fetch)
         assertTrue(second.done)

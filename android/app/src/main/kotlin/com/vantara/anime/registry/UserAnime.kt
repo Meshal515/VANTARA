@@ -1,5 +1,6 @@
 package com.vantara.anime.registry
 
+import com.vantara.plugins.ExtensionStateFile
 import com.vantara.plugins.UserRepo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -10,6 +11,15 @@ import java.io.File
  * (SourceEntry بإضافة وبصمة مثبّتة)، فتعمل في البحث والحلقات والسيرفرات والصحة بلا
  * مسار خاص. القسم (أنمي/أفلام) يختاره المستخدم لأن المستودع لا يفرّق بينهما.
  */
+@Serializable
+data class InstalledAnimeSource(
+    val sourceId: String,
+    val id: String,
+    val name: String,
+    val lang: String,
+    val baseUrl: String,
+)
+
 @Serializable
 data class UserAnimeExtension(
     val repoUrl: String,
@@ -22,36 +32,148 @@ data class UserAnimeExtension(
     val content: String,
     val sourceName: String? = null,
     val baseUrl: String,
+    /** Null on old persisted records, so historical library IDs remain unchanged. */
+    val stableId: String? = null,
+    val sourceLang: String = "ar",
+    val primarySourceId: String? = null,
+    val additionalSources: List<InstalledAnimeSource> = emptyList(),
+    /** Zero means an old saved record/repository did not declare an Android version code. */
+    val versionCode: Long = 0,
+    /** Publisher package icon; absent on older saved installations. */
+    val iconUrl: String? = null,
 ) {
-    val id: String get() = "user-" + pkg.substringAfterLast('.').ifEmpty { pkg }
+    val id: String get() = stableId ?: ("user-" + pkg.substringAfterLast('.').ifEmpty { pkg })
 
     fun entry(): SourceEntry = SourceEntry(
         id = id,
-        name = name,
-        lang = "ar",
+        name = sourceName ?: name,
+        lang = sourceLang,
         priority = 40,
         content = content,
-        extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName),
+        extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName, sourceId = primarySourceId),
         domains = Domains(current = baseUrl),
     )
+
+    /** All sources from a signed APK are addressable, including non-Arabic ones. */
+    fun entries(): List<SourceEntry> = listOf(entry()) + additionalSources.map { source ->
+        SourceEntry(
+            id = source.id,
+            name = source.name,
+            lang = source.lang,
+            priority = 40,
+            content = content,
+            extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256,
+                version = version, sourceName = source.name, sourceId = source.sourceId),
+            domains = Domains(current = source.baseUrl),
+        )
+    }
 }
 
 @Serializable
 data class UserAnimeState(val repos: List<UserRepo> = emptyList(), val extensions: List<UserAnimeExtension> = emptyList())
 
 class UserAnimeStore(private val file: File) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
-    @Volatile var state: UserAnimeState = runCatching { json.decodeFromString<UserAnimeState>(file.readText()) }.getOrDefault(UserAnimeState())
-        private set
+    private val shared = open(file)
+    private val json get() = shared.json
+    private val storage get() = shared.storage
+    private val packageRevisions get() = shared.packageRevisions
+    private val repositoryRevisions get() = shared.repositoryRevisions
 
-    @Synchronized fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState {
+    class InstallToken internal constructor(
+        internal val owner: UserAnimeStore,
+        val pkg: String,
+        val repository: UserRepo,
+        val previous: UserAnimeExtension?,
+        internal val packageRevision: Long,
+        internal val repositoryRevision: Long,
+    )
+
+    val state: UserAnimeState get() = shared.state
+
+    fun update(change: (UserAnimeState) -> UserAnimeState): UserAnimeState = synchronized(shared) {
+        shared.refresh()
         val next = change(state)
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(UserAnimeState.serializer(), next))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
-        state = next
-        return next
+        storage.write(json.encodeToString(UserAnimeState.serializer(), next))
+        shared.accept(next)
+        next
+    }
+
+    /** Re-adding/refreshing a bookmark is not authorization to replace a pinned publisher identity. */
+    fun registerRepository(repo: UserRepo): UserAnimeState = synchronized(shared) {
+        shared.refresh()
+        val pinned = state.repos.singleOrNull { it.url == repo.url }
+        check(pinned == null || pinned.fingerprint.equals(repo.fingerprint, ignoreCase = true)) {
+            "ANIYOMI_REPOSITORY_KEY_CHANGED"
+        }
+        update { it.copy(repos = it.repos.filter { old -> old.url != repo.url } + repo) }
+    }
+
+    fun beginInstall(pkg: String, repoUrl: String): InstallToken = synchronized(shared) {
+        shared.refresh()
+        val repo = state.repos.singleOrNull { it.url == repoUrl }
+            ?: error("ANIYOMI_REPOSITORY_CHANGED")
+        InstallToken(this, pkg, repo, state.extensions.singleOrNull { it.pkg == pkg },
+            packageRevisions[pkg] ?: 0, repositoryRevisions[repoUrl] ?: 0)
+    }
+
+    /** No network under the monitor. Lock order: store -> engine; engine never reads this store. */
+    fun commitInstall(token: InstallToken, user: UserAnimeExtension,
+        publish: (UserAnimeState) -> Unit): UserAnimeState = synchronized(shared) {
+        shared.refresh()
+        check(token.owner === this && user.pkg == token.pkg && user.repoUrl == token.repository.url) { "ANIYOMI_PACKAGE_CHANGED" }
+        check((packageRevisions[token.pkg] ?: 0) == token.packageRevision &&
+            state.extensions.singleOrNull { it.pkg == token.pkg } == token.previous) { "ANIYOMI_PACKAGE_CHANGED" }
+        check((repositoryRevisions[token.repository.url] ?: 0) == token.repositoryRevision &&
+            state.repos.singleOrNull { it.url == token.repository.url } == token.repository) { "ANIYOMI_REPOSITORY_CHANGED" }
+        val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != user.pkg } + user) }
+        publish(next)
+        next
+    }
+
+    fun uninstall(pkg: String, publish: (UserAnimeState) -> Unit, erase: () -> Unit): UserAnimeState = synchronized(shared) {
+        val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != pkg }) }
+        // Also revoke a first install that started while this package had no active record.
+        packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+        publish(next)
+        erase()
+        next
+    }
+
+    /** All bridge generations for one file share state, revisions and the publication lock. */
+    private class Shared(file: File) {
+        val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+        val storage = ExtensionStateFile(file)
+        val packageRevisions = mutableMapOf<String, Long>()
+        val repositoryRevisions = mutableMapOf<String, Long>()
+        @Volatile var state = storage.read(UserAnimeState()) { json.decodeFromString<UserAnimeState>(it) }
+
+        fun refresh() = accept(storage.read(state) { json.decodeFromString<UserAnimeState>(it) })
+        fun accept(next: UserAnimeState) {
+            val beforePackages = state.extensions.associateBy { it.pkg }
+            val afterPackages = next.extensions.associateBy { it.pkg }
+            for (pkg in beforePackages.keys + afterPackages.keys)
+                if (beforePackages[pkg] != afterPackages[pkg]) packageRevisions[pkg] = (packageRevisions[pkg] ?: 0) + 1
+            val beforeRepos = state.repos.associateBy { it.url }
+            val afterRepos = next.repos.associateBy { it.url }
+            for (url in beforeRepos.keys + afterRepos.keys)
+                if (beforeRepos[url] != afterRepos[url]) repositoryRevisions[url] = (repositoryRevisions[url] ?: 0) + 1
+            state = next
+        }
+    }
+    companion object {
+        private val files = mutableMapOf<String, java.lang.ref.WeakReference<Shared>>()
+        private fun open(file: File): Shared {
+            val canonical = file.canonicalFile
+            val shared = synchronized(files) {
+                files.entries.removeAll { it.value.get() == null }
+                files[canonical.path]?.get() ?: Shared(canonical).also {
+                    files[canonical.path] = java.lang.ref.WeakReference(it)
+                }
+            }
+            // Do not hold the registry lock while acquiring a file's publication lock.
+            synchronized(shared) { shared.refresh() }
+            return shared
+        }
     }
 }
 
@@ -60,5 +182,6 @@ fun mergeUserSources(base: Manifest, user: List<SourceEntry>): Manifest {
     val ids = base.sources.map { it.id }.toSet()
     val pkgs = base.sources.mapNotNull { it.extension?.pkg }.toSet()
     val extra = user.filter { it.id !in ids && it.extension?.pkg !in pkgs }
+        .distinctBy { it.id }
     return if (extra.isEmpty()) base else base.copy(sources = base.sources + extra)
 }

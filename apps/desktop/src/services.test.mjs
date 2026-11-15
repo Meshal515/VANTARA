@@ -116,7 +116,7 @@ fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,p
 const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>clearInterval(gate));return;}res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
   await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
-  const events=[];services=createDesktopServices({userData:dir,binaries:{rqbit,mpv},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,torrentMetadataStrategy:'list-only',replayCache:false,...serviceOptions});
+  const events=[];services=createDesktopServices({userData:dir,binaries:{rqbit,mpv,...(serviceOptions.extraBinaries??{})},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,torrentMetadataStrategy:'list-only',replayCache:false,...serviceOptions});
   return {dir,services,events,binaries:{rqbit,mpv}};
 }
 test('an explicit file index resolves the magnet once and never performs list_only discovery',async t=>{
@@ -671,4 +671,87 @@ test('subtitles off before an Arabic result arrives stays off',async t=>{
   await services.playbackCommand({session:'auto-off',command:'subtitle-register',value:{url:'https://subs.example.com/ar.srt',lang:'ar',label:'ar'}});
   await new Promise(r=>setTimeout(r,80));
   assert.equal((await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.command[0]==='sub-add').length,0);
+});
+
+// ───────────── محرك libtorrent الأساسي والرجوع التلقائي إلى rqbit ─────────────
+import { engineOrder, libtorrentArgs } from './services.mjs';
+async function fakeLibtorrent(t, body) {
+  const dir=await mkdtemp(join(tmpdir(),'vantara-fake-libtorrent-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const file=join(dir,'vantara-torrent');
+  await writeFile(file,`#!${process.execPath}\nimport fs from 'node:fs';import http from 'node:http';fs.appendFileSync(${JSON.stringify(join(dir,'launches'))},'1\\n');\n${body}`);
+  const {chmod}=await import('node:fs/promises');await chmod(file,0o755);
+  return {file,launches:async()=>(await readFile(join(dir,'launches'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).length};
+}
+const stages=events=>events.filter(e=>e.type==='playback/stage').map(e=>e.stage+(e.engine?`:${e.engine}`:'')+(e.from?`:${e.from}->${e.to}`:''));
+
+test('engineOrder: libtorrent first, rqbit always as fallback, explicit preference and crash block respected',()=>{
+  const binaries={libtorrent:'lt.exe',rqbit:'rq.exe'};
+  assert.deepEqual(engineOrder({binaries,preference:undefined}),['libtorrent','rqbit']);
+  assert.deepEqual(engineOrder({binaries,preference:'rqbit'}),['rqbit']);
+  assert.deepEqual(engineOrder({binaries:{rqbit:'rq.exe'},preference:undefined}),['rqbit']);
+  assert.deepEqual(engineOrder({binaries,preference:undefined,libtorrentBlockedUntil:2000,now:1000}),['rqbit']);
+  assert.deepEqual(engineOrder({binaries,preference:undefined,libtorrentBlockedUntil:2000,now:3000}),['libtorrent','rqbit']);
+  const args=libtorrentArgs({apiPort:3030,listenPort:51413,dir:'C:\\cache',stateDir:'C:\\state',parentPid:42});
+  assert.deepEqual(args,['--api-port=3030','--listen-port=51413','--dir=C:\\cache','--state-dir=C:\\state','--parent-pid=42']);
+  assert.ok(!args.includes('--allow-private-peers'),'production never allows private peers');
+  assert.throws(()=>libtorrentArgs({apiPort:1,listenPort:2,dir:'x',testPeer:'10.0.0.5:6881'}),/محليًا/);
+});
+
+test('libtorrent that exits before ready falls back to rqbit and playback still starts',async t=>{
+  const lt=await fakeLibtorrent(t,'process.exit(3);');
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',extraBinaries:{libtorrent:lt.file}});
+  await services.startPlayback({session:'fallback-exit',candidate:{infoHash:hash,fileIdx:0}});
+  assert.ok(await hasReadyEvent(events));
+  assert.equal(await lt.launches(),1);
+  assert.deepEqual(stages(events).filter(s=>s.startsWith('engine-')),['engine-start','engine-fallback:libtorrent->rqbit','engine-ready:rqbit']);
+  assert.ok((await readFile(join(dir,'requests'),'utf8')).includes('only_files=0'),'rqbit served the torrent');
+});
+
+test('a missing libtorrent executable falls back to rqbit',async t=>{
+  const {services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',extraBinaries:{libtorrent:join(tmpdir(),'does-not-exist','vantara-torrent.exe')}});
+  await services.startPlayback({session:'fallback-missing',candidate:{infoHash:hash,fileIdx:0}});
+  assert.ok(await hasReadyEvent(events));
+  assert.ok(stages(events).includes('engine-ready:rqbit'));
+});
+
+test('libtorrent crashing after ready fails that playback once, then the next playback goes straight to rqbit',async t=>{
+  // يجيب على / بأنه libtorrent ثم ينهار عند أول طلب إضافة
+  const lt=await fakeLibtorrent(t,`const a=process.argv.find(x=>x.startsWith('--api-port=')).split('=')[1];http.createServer((req,res)=>{if(req.url==='/'){res.setHeader('content-type','application/json');return res.end('{"engine":"libtorrent"}');}process.exit(9);}).listen(Number(a),'127.0.0.1');`);
+  const {services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',extraBinaries:{libtorrent:lt.file}});
+  await services.startPlayback({session:'crash-1',candidate:{infoHash:hash,fileIdx:0}}).catch(()=>{});
+  assert.ok(stages(events).includes('engine-ready:libtorrent'));
+  const deadline=Date.now()+3000;
+  while(!events.some(e=>e.type==='playback/error'&&e.session==='crash-1')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+  assert.ok(events.some(e=>e.type==='playback/error'&&e.session==='crash-1'),'the crash is reported, not hidden');
+  await services.stopPlayback({session:'crash-1'}).catch(()=>{});
+  events.length=0;
+  await services.startPlayback({session:'crash-2',candidate:{infoHash:hash,fileIdx:0}});
+  assert.ok(await hasReadyEvent(events));
+  assert.equal(await lt.launches(),1,'libtorrent is not relaunched right after it crashed');
+  assert.ok(stages(events).includes('engine-ready:rqbit'));
+});
+
+test('real libtorrent engine: services plays through its own proxy with exact bytes (VANTARA_TORRENT_HOST_BINARY)',{skip:process.env.VANTARA_TORRENT_HOST_BINARY?false:'VANTARA_TORRENT_HOST_BINARY غير محدد',timeout:90000},async t=>{
+  const {spawn}=await import('node:child_process');const {randomBytes}=await import('node:crypto');const net=await import('node:net');
+  const binary=process.env.VANTARA_TORRENT_HOST_BINARY;
+  const seedDir=await mkdtemp(join(tmpdir(),'vantara-seed-'));
+  const data=randomBytes(6*1024*1024);await writeFile(join(seedDir,'clip.mp4'),data);
+  const seedPort=await new Promise(r=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>r(p));});});
+  const seeder=spawn(binary,[`--seed=${join(seedDir,'clip.mp4')}`,`--listen-port=${seedPort}`,'--piece-size=262144'],{stdio:['ignore','pipe','inherit']});
+  t.after(async()=>{seeder.kill();await rm(seedDir,{recursive:true,force:true});});
+  const magnet=await new Promise((resolve,reject)=>{let o='';seeder.stdout.on('data',c=>{o+=c;if(o.includes('\n'))resolve(o.split('\n')[0].trim());});seeder.once('exit',c=>reject(new Error(`seeder ${c}`)));});
+  const infoHash=/btih:([a-f0-9]{40})/.exec(magnet)[1];
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',torrentWarmup:'none',extraBinaries:{libtorrent:binary},torrentTestPeer:`127.0.0.1:${seedPort}`});
+  await services.startPlayback({session:'real-libtorrent',candidate:{infoHash,fileIdx:0}});
+  assert.ok(await hasReadyEvent(events,{timeoutMs:20000}));
+  assert.ok(stages(events).includes('engine-ready:libtorrent'),stages(events).join(','));
+  assert.ok(!stages(events).some(s=>s.startsWith('engine-fallback')),'no fallback when libtorrent works');
+  // المشغل يقرأ من وكيل services نفسه (نفس الرابط الذي يعطى لـmpv)، لا من المحرك مباشرة
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const url=commands.find(m=>m.command[0]==='loadfile').command[1];
+  const at=3*1024*1024+777;
+  const part=Buffer.from(await (await fetch(url,{headers:{Range:`bytes=${at}-${at+65535}`}})).arrayBuffer());
+  assert.ok(part.equals(data.subarray(at,at+65536)),'seek through services proxy returns exact bytes');
+  const whole=Buffer.from(await (await fetch(url)).arrayBuffer());
+  assert.ok(whole.equals(data),'full file through services proxy is exact');
 });

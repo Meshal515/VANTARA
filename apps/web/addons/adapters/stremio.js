@@ -37,6 +37,8 @@ export function createStremioAdapter({ manifest, manifestUrl, transport, runtime
       out = await transport.json(url, { signal, timeout: name === "stream" ? 45000 : name === "catalog" || name === "meta" ? 30000 : 15000 });
     } catch (error) {
       if (error?.name === "AbortError") throw new StremioError("ABORTED", name, { name: "AbortError" });
+      // الموقع طلب التوقف (قاطع الدائرة): السبب العربي الصريح يصل كما هو، لا «فشل الطلب»
+      if (error?.code === "HOST_COOLING") throw error;
       if (error?.name === "TimeoutError") throw new StremioError("TIMEOUT", name, { name: "TimeoutError" });
       const status = typeof error?.status === "number" && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599 ? error.status : undefined;
       throw new StremioError(status ? `HTTP_${status}` : "REQUEST_FAILED", name, { status });

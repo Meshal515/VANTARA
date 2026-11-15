@@ -33,6 +33,8 @@ data class Route(
     val runtimeReady: Boolean = false,
     val sourceName: String? = null,
     val label: String? = null,
+    /** "torrent" حين كل روابطه تذاكر تورنت (من أي محوّل): الورقة تعرضه تورنت لا رابطًا مباشرًا. */
+    val type: String? = null,
 )
 
 /** ما يرسله المحوّل عن سيرفر: مفتاحه عنده، واسمه، وحالته. */

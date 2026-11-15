@@ -109,6 +109,12 @@ describe('anime in the account', () => {
     expect(views[0].payload).toMatchObject({ seriesRef: 'anime:20', chapterLabel: 'الحلقة 12', chapterNumber: 12 });
   });
 
+  it('records a film view without calling it episode one', () => {
+    const sync = fakeSync();
+    createAnimeAccount(sync).recordView({ ...naruto, format: 'MOVIE', episodes: 1 }, 1);
+    expect(sync.ops.find(o => o.kind === 'view.add').payload).toMatchObject({ chapterLabel: 'الفيلم', chapterNumber: 1 });
+  });
+
   it('builds a shelf from anime rows only, titles from works or views', () => {
     const sync = fakeSync({
       library: [

@@ -176,9 +176,33 @@ export function createTogether(deps) {
     s.offs.push(room.on('room', (r) => { s.mode = r.mode; paintStrips(); }));
     s.offs.push(room.on('roster', paintStrips));
     // Timeline media contains only key/kind/label; retain the invitation's launch routing.
-    s.offs.push(room.on('state', ({ state }) => { if (state?.media) s.media = { ...s.media, ...state.media }; }));
+    s.offs.push(room.on('state', ({ state }) => {
+      if (!state?.media) return;
+      // المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): مرجع العمل وفنّه يتبعانه، وغرفة الكمبيوتر تُعرض للموسم الجديد
+      const next = s.media?.seriesRef && s.media.kind !== 'manga' ? mediaFromRoom({ media: state.media }) : null;
+      if (next && next.seriesRef !== s.media.seriesRef) {
+        s.media = next;
+        s.art = null;
+        if (artOf) void artOf(next).then((a) => { if (s.media === next) s.art = a; }).catch(() => {});
+        if (session === s) presentDesktopRoom(s, next);
+        return;
+      }
+      s.media = { ...s.media, ...state.media };
+    }));
     emit();
     return s;
+  }
+
+  /**
+   * الغرفة أولًا على ويندوز (قرار المالك 14 نوفمبر): الدخول من أي مكان (إنشاء الغرفة، بطاقة المجلس، الإشعار) يفتح
+   * شاشة الغرفة قبل السيرفر، و«اختر السيرفر» منها يفتح الورقة. false = ليس ويندوز أو مانجا (الطريق القديم).
+   */
+  function presentDesktopRoom(joined, media) {
+    const desktop = desktopPlugin('AnimeEngine');
+    if (!desktop?.presentRoom || !media || media.kind === 'manga') return false;
+    desktop.presentRoom({ together: { hub: api, session: joined, mediaPrefix: media.seriesRef }, media,
+      chooseServer: () => { if (session === joined) deps.openMedia(media, joined); } });
+    return true;
   }
 
   function leave() {
@@ -193,7 +217,8 @@ export function createTogether(deps) {
 
   // ───────────── الدعوة: اضغط على الأفاتارات ثم «أرسل» ─────────────
 
-  function openInvite(media, { onStarted = null } = {}) {
+  // roomFirst=false: الدعوة من داخل مشغّل يعمل أصلًا (ويندوز)، فالغرفة تُربط به كما هو بلا شاشة غرفة قبل السيرفر
+  function openInvite(media, { onStarted = null, roomFirst = true } = {}) {
     const picked = new Set();
     let everyone = false;
     let mode = 'sync';
@@ -260,8 +285,9 @@ export function createTogether(deps) {
           const n = everyone ? 'الكل' : picked.size === 1 ? deps.friends().find((f) => picked.has(f.userId))?.displayName : `${picked.size} أشخاص`;
           ui().toast(`انرسلت الدعوة لـ${n}`);
           start(code, media, mode, everyone ? deps.friends().map(f => f.userId) : invitees);
-          if (onStarted) onStarted(session);
-          else deps.openMedia(media, session);
+          // ويندوز: من صفحة العمل → شاشة الغرفة قبل السيرفر. من داخل المشغّل (سيرفر شغّال أصلًا) → يكمل كما هو.
+          if (onStarted && !roomFirst) onStarted(session);
+          else if (!presentDesktopRoom(session, media)) { if (onStarted) onStarted(session); else deps.openMedia(media, session); }
         } catch (error) {
           send.disabled = false;
           ui().toast(error?.status === 401 ? 'سجّل دخولك من جديد' : 'ما قدرنا ننشئ الغرفة، جرّب بعد لحظة');
@@ -329,7 +355,7 @@ export function createTogether(deps) {
         return;
       }
       const s = start(row.code, media, row.mode);
-      deps.openMedia(media, s);
+      if (!presentDesktopRoom(s, media)) deps.openMedia(media, s);
     };
     const text = el('div', 'tg-card-text');
     text.append(title, who);
@@ -471,7 +497,7 @@ export function createTogether(deps) {
     });
   }
 
-  return {
+  const api = {
     get session() { return session; },
     /** شاشة فوق الواجهة (القارئ) تستلم الأوراق والتنبيهات حتى تُغلق. */
     useSurface(surface) {
@@ -514,6 +540,8 @@ export function createTogether(deps) {
         banner: art.banner ?? media.banner ?? media.cover ?? null,
         logo: art.logo ?? media.logo ?? null,
         episodeTitle: art.episodeTitle ?? media.episodeTitle ?? null,
+        // صورة الحلقة لزر «البدء» (الخلفية banner فن العمل)
+        episodeImage: art.episodeImage ?? null,
         season: media.season ?? null,
         // المدعوون بأسمائهم وصورهم: من لم يدخل يظهر «بانتظاره…»
         invitees: Array.isArray(invited) ? invited.map(personById) : [],
@@ -524,6 +552,18 @@ export function createTogether(deps) {
       s.room.close();
       emit();
       return cfg;
+    },
+    /**
+     * المضيف نقل الغرفة لموسم آخر من مشغّل الجوال (حدث `togetherWork`): المشغّل أُغلق، فتُفتح غرفة الموسم الجديد
+     * بنفس الرمز، والكل يختار سيرفره من جديد (الغرفة أولًا).
+     */
+    switchWork(code, key, label = '', mode = 'sync') {
+      const kind = String(key ?? '').split(':')[0];
+      const media = mediaFromRoom({ media: { key, kind, label } });
+      if (!code || !media) return false;
+      const joined = start(code, media, mode || 'sync');
+      if (!presentDesktopRoom(joined, media)) deps.openMedia(media, joined);
+      return true;
     },
     /** يُستدعى من رابط/إشعار «#together=CODE». */
     async joinByCode(code, row) {
@@ -539,13 +579,10 @@ export function createTogether(deps) {
       }
       if (!media) return ui().toast('ما لقينا الدعوة، افتحها من المجلس');
       const joined = start(code, media, mode ?? 'sync');
-      const desktop = desktopPlugin('AnimeEngine');
-      if (desktop?.presentRoom && media.kind !== 'manga') {
-        desktop.presentRoom({ together: { hub: this, session: joined, mediaPrefix: media.seriesRef }, media,
-          chooseServer: () => { if (session === joined) deps.openMedia(media, joined); } });
-      } else deps.openMedia(media, joined);
+      if (!presentDesktopRoom(joined, media)) deps.openMedia(media, joined);
     },
   };
+  return api;
 }
 
 /**

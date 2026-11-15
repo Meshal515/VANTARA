@@ -159,3 +159,41 @@ it('Windows invitation opens the room first and waits for choosing a source befo
  presentRoom.mock.calls[0][0].chooseServer();
  expect(openMedia).toHaveBeenCalledWith(media,hub.session);expect(room.close).not.toHaveBeenCalled();hub.leave();
 });
+
+it('Windows: إنشاء الغرفة من صفحة العمل يفتح شاشة الغرفة قبل السيرفر، والدعوة من داخل المشغّل تُربط به كما هو',async()=>{
+ const {document}=parseHTML('<html><body><div id="sheet"></div></body></html>');
+ vi.stubGlobal('document',document);
+ const presentRoom=vi.fn(),openMedia=vi.fn();
+ vi.stubGlobal('VantaraDesktop',{platform:'windows',requestResource(){},startPlayback(){},onEvent(){}});
+ vi.stubGlobal('VantaraDesktopBridges',{AnimeEngine:{presentRoom}});
+ const make=()=>createTogether({sync:{enqueue:vi.fn()},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>roomOf(),createRoomImpl:async()=> 'ABCDEF',friends:()=>[{userId:'u2',displayName:'دحمي'}],avatarNode:()=>document.createElement('span'),toast:vi.fn(),openSheet:build=>build(document.getElementById('sheet')),closeSheet:vi.fn(),openMedia});
+ const media={seriesRef:'anime:42',kind:'anime',episode:1,key:'anime:42#1'};
+ // من صفحة العمل: onStarted (ورقة السيرفرات) لا يُنادى، والغرفة تظهر أولًا
+ const work=make(),pageStarted=vi.fn();
+ work.openInvite(media,{onStarted:pageStarted});
+ document.querySelector('[data-user]').click();await document.querySelector('.tg-send').onclick();
+ expect(presentRoom).toHaveBeenCalledOnce();expect(pageStarted).not.toHaveBeenCalled();expect(openMedia).not.toHaveBeenCalled();
+ work.leave();
+ // من داخل مشغّل يعمل: يُربط به (roomFirst:false) بلا شاشة غرفة قبل السيرفر
+ document.getElementById('sheet').replaceChildren();presentRoom.mockClear();
+ const player=make(),bind=vi.fn();
+ player.openInvite(media,{roomFirst:false,onStarted:bind});
+ document.querySelector('[data-user]').click();await document.querySelector('.tg-send').onclick();
+ expect(bind).toHaveBeenCalledOnce();expect(presentRoom).not.toHaveBeenCalled();
+ player.leave();
+});
+it('المضيف ينقل الغرفة لموسم آخر: مرجع العمل يتبعه، وحدث الجوال يفتح غرفة الموسم الجديد بنفس الرمز', () => {
+  vi.stubGlobal('Capacitor', undefined); const room = roomOf(); const openMedia = vi.fn();
+  const hub = createTogether({ sync:{}, baseUrl:()=> 'https://sync.test', joinRoomImpl:()=>room, openMedia, toast:vi.fn() });
+  hub.joinByCode('ABCDEF', {media_json:JSON.stringify({seriesRef:'anime:16498',kind:'anime',key:'anime:16498#3'}),mode:'sync'});
+  room.emit('state', {state:{media:{key:'anime:20958#1',kind:'anime',label:'Attack on Titan Season 2 — الحلقة 1'}}});
+  expect(hub.session.media.seriesRef).toBe('anime:20958');
+  expect(hub.session.media.title).toBe('Attack on Titan Season 2');
+  expect(hub.handOff('anime:20958')).not.toBeNull();
+  openMedia.mockClear();
+  expect(hub.switchWork('ABCDEF', 'anime:99147#1', 'Attack on Titan Season 3 — الحلقة 1', 'sync')).toBe(true);
+  expect(openMedia).toHaveBeenCalledOnce();
+  expect(openMedia.mock.calls[0][0]).toMatchObject({ kind:'anime', seriesRef:'anime:99147', episode:1, title:'Attack on Titan Season 3' });
+  expect(hub.session.code).toBe('ABCDEF');
+  hub.leave();
+});
