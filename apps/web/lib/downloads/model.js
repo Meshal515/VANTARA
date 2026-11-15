@@ -51,6 +51,8 @@ export const ERROR_LABEL = Object.freeze({
   NO_SPACE: 'المساحة على الجهاز لا تكفي',
   VERIFY: 'الملف لم يجتز التحقق',
   NO_ROUTE: 'لم يجهز مصدر صالح للتنزيل',
+  // المصدر ردّ بقائمة صفحات فاضية (فصل ترويجي أو معطّل عنده): ليس رفضًا للطلب
+  NO_PAGES: 'المصدر ما أعطى صفحات لهذا الفصل',
   DRM: 'المحتوى محمي ولا يُنزَّل',
   STORAGE: 'تعذّرت الكتابة على الجهاز',
   UNKNOWN: 'تعذّر التنزيل',
@@ -65,6 +67,26 @@ export class DownloadError extends Error {
     this.code = ERROR_LABEL[code] ? code : 'UNKNOWN';
     this.retryable = retryable;
   }
+}
+
+/**
+ * رقم فصل المانجا للتنزيل: السالب (-1) يعني «بلا رقم» (إعلان، مقدمة، «انضم لسيرفرنا»)، فيصير مجهولًا يُرتَّب آخرًا ولا يُسمّى
+ * «الفصل -1». كان يُرتَّب أولًا فيصير هو «الفصل الحالي» الافتراضي في ورقة التحميل.
+ */
+export function mangaUnitNumber(n) {
+  if (n === null || n === undefined || n === '') return null; // Number(null) = 0: يصير «الفصل 0»
+  const v = Number(n);
+  return Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/**
+ * الفصل الافتراضي في ورقة التحميل: ما تقرؤه تاليًا، وإلا أول فصل حقيقي (من 1 قبل 0: الفصل 0 مقدمة ترويجية بلا صور في
+ * مصادر كثيرة)، وإلا أول مرقَّم، وإلا الأول.
+ */
+export function defaultUnitKey(units, nextKey = null) {
+  const list = Array.isArray(units) ? units : [];
+  if (nextKey != null && list.some((u) => u.key === nextKey)) return nextKey;
+  return (list.find((u) => u.number != null && u.number >= 1) ?? list.find((u) => u.number != null) ?? list[0])?.key;
 }
 
 /** مفتاح العنصر: العمل + الوحدة. نفس الفصل لا يدخل الطابور مرتين ولا يتكرر على القرص. */

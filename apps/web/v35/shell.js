@@ -19,6 +19,7 @@ import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { createDownloadsUI } from './downloads.js';
 import { capabilities as downloadCapabilities } from '../lib/downloads/index.js';
+import { defaultUnitKey, mangaUnitNumber } from '../lib/downloads/model.js';
 import { renderAddons } from './addons-view.js';
 import { renderSourceMode } from './source-mode.js';
 import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
@@ -3614,8 +3615,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const key = chapterKeyOf(ref, r);
       if (seen.has(key)) continue;
       seen.add(key);
-      const n = Number(r.number);
-      units.push({ key, number: Number.isFinite(n) ? n : null, title: r.chapter?.name ?? null, row: r });
+      // -1 = بلا رقم (إعلان/مقدمة): مجهول يُرتَّب آخرًا، لا «الفصل -1» ولا الفصل الأول
+      units.push({ key, number: mangaUnitNumber(r.number), title: r.chapter?.name ?? null, row: r });
     }
     units.sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity));
     const next = state.nextRow ? chapterKeyOf(ref, state.nextRow) : null;
@@ -3632,20 +3633,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
       work,
       snapshot: w,
       units,
-      current: next ?? units[0]?.key,
+      current: defaultUnitKey(units, next),
       sources: async () => (w._editions ?? []).filter((e) => e.chapters?.length).map((e) => ({ id: e.sourceId, name: displayName(e.label, e.sourceId) + (isFiller(e.sourceId) ? ' · إنجليزي' : ''), note: `${e.chapters.length}` })),
       build: async (list, choice) => {
         const manual = choice.mode === 'manual' ? new Map(editionRows(w, choice.sourceId).map((r) => [chapterKeyOf(ref, r), r])) : null;
+        // الذكي: نفس الفصل عند المصادر الأخرى (بمفتاحه) احتياطًا إن ردّ مصدره بلا صفحات
+        const others = manual ? [] : (w._editions ?? []).filter((e) => e.chapters?.length)
+          .map((e) => ({ id: e.sourceId, rows: new Map(editionRows(w, e.sourceId).map((r) => [chapterKeyOf(ref, r), r])) }));
         const specs = [];
         for (const u of list) {
           const row = manual ? manual.get(u.key) : u.row;
           if (!row?.chapter) continue;
+          const alternates = others.filter((o) => o.id !== row.sourceId).map((o) => o.rows.get(u.key)).filter((r) => r?.chapter).slice(0, 3)
+            .map((r) => ({ sourceId: r.sourceId, sourceName: displayName(null, r.sourceId), chapter: r.chapter }));
           specs.push({
             section: 'manga',
             work,
             unit: { key: u.key, number: u.number, title: u.title },
             source: { mode: choice.mode, sourceId: row.sourceId, sourceName: choice.sourceName ?? displayName(null, row.sourceId) },
-            request: { sourceId: row.sourceId, chapter: row.chapter },
+            request: { sourceId: row.sourceId, chapter: row.chapter, ...(alternates.length ? { alternates } : {}) },
           });
         }
         if (!specs.length) throw new Error(manual ? 'المصدر المختار لا يحمل هذه الفصول' : 'لا فصول قابلة للتنزيل');

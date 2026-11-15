@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadManager } from './manager.js';
 import { createMangaDriver, sniffImageType } from './manga-driver.js';
-import { countText, createItem, localWork, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel } from './model.js';
+import { countText, createItem, defaultUnitKey, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
 import { rankRoutes, unsupportedReason } from './smart.js';
 import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
@@ -617,5 +617,61 @@ describe('work art on the device', () => {
     expect(local).toHaveBeenCalledWith('https://site.example/wp/cover.jpg', 'cover');
     globalThis.URL.createObjectURL ??= () => 'blob:x';
     expect(await artUrl(store, 'ext:solo', 'cover')).toBeTruthy();
+  });
+});
+
+describe('manga: the chapter the sheet starts on, and a source that returns no pages', () => {
+  it('an unnumbered row (-1: announcement/prologue) is unknown and never the default chapter', () => {
+    expect(mangaUnitNumber(-1)).toBeNull();
+    expect(mangaUnitNumber(0)).toBe(0);
+    expect(mangaUnitNumber('12.5')).toBe(12.5);
+    expect(mangaUnitNumber(null)).toBeNull();
+    const units = [{ key: 'u:ad', number: null }, { key: 'n:0', number: 0 }, { key: 'n:1', number: 1 }, { key: 'n:2', number: 2 }];
+    // بلا سجل قراءة: أول فصل حقيقي (1) لا الإعلان ولا الفصل 0 الترويجي
+    expect(defaultUnitKey(units)).toBe('n:1');
+    // ما تقرؤه تاليًا يغلب
+    expect(defaultUnitKey(units, 'n:2')).toBe('n:2');
+    // عمل أوله 0 فقط: يبقى 0، وبلا أرقام: الأول
+    expect(defaultUnitKey([{ key: 'n:0', number: 0 }])).toBe('n:0');
+    expect(defaultUnitKey([{ key: 'a', number: null }])).toBe('a');
+  });
+
+  const eng = (byRoute) => ({
+    pages: vi.fn(async (sid) => { const v = byRoute[sid]; if (v instanceof Error) throw v; return v; }),
+    pageImage: vi.fn(async (_s, page) => ({ src: `page-${page.index}` })),
+  });
+  const ok = async () => ({ bytes: JPEG(), type: 'image/jpeg' });
+  const ctlOf = () => ({ signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() });
+  const spec = (mode, alternates) => createItem(mangaSpec(1, { source: { mode, sourceId: 'a' }, request: { sourceId: 'a', chapter: { url: '/a/1' }, ...(alternates ? { alternates } : {}) } }));
+
+  it('smart: a source that answers with no pages is skipped for the same chapter elsewhere, and the request locks to it', async () => {
+    const store = memoryStore();
+    const e = eng({ a: [], b: [{ index: 0 }, { index: 1 }] });
+    const driver = createMangaDriver({ store, engine: () => e, fetchBytes: ok });
+    const ctl = ctlOf();
+    const out = await driver.run(spec('smart', [{ sourceId: 'b', sourceName: 'B', chapter: { url: '/b/1' } }]), ctl);
+    expect(out).toMatchObject({ pages: 2 });
+    expect(e.pages.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
+    // الاستئناف لا يخلط مصدرين: الطلب يُقفل على البديل
+    expect(ctl.update).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ sourceId: 'b', alternates: [] }) }));
+  });
+
+  it('nobody has pages: the reason is «no pages», not «the source refused»', async () => {
+    const driver = createMangaDriver({ store: memoryStore(), engine: () => eng({ a: [], b: [] }), fetchBytes: ok });
+    const err = await driver.run(spec('smart', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
+    expect(err.code).toBe('NO_PAGES');
+    expect(err.message).toContain('2');
+    expect(ERROR_LABEL.NO_PAGES).not.toBe(ERROR_LABEL.SOURCE);
+    const single = await createMangaDriver({ store: memoryStore(), engine: () => eng({ a: [] }), fetchBytes: ok }).run(spec('smart'), ctlOf()).catch((x) => x);
+    expect(single).toMatchObject({ code: 'NO_PAGES', message: ERROR_LABEL.NO_PAGES });
+  });
+
+  it('manual never switches source, and a transport failure on every try stays retryable', async () => {
+    const e = eng({ a: [], b: [{ index: 0 }] });
+    const manual = await createMangaDriver({ store: memoryStore(), engine: () => e, fetchBytes: ok }).run(spec('manual', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
+    expect(manual.code).toBe('NO_PAGES');
+    expect(e.pages).toHaveBeenCalledTimes(1);
+    const down = await createMangaDriver({ store: memoryStore(), engine: () => eng({ a: new Error('timeout'), b: new Error('timeout') }), fetchBytes: ok }).run(spec('smart', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
+    expect(down).toMatchObject({ code: 'SOURCE', retryable: true });
   });
 });

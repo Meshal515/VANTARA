@@ -42,18 +42,36 @@ export function createMangaDriver(deps) {
     async run(item, ctl) {
       const engine = deps.engine();
       if (!engine?.pages || !engine?.pageImage) throw new DownloadError('UNSUPPORTED', 'محرك المانجا غير متاح هنا');
-      const { sourceId, chapter } = item.request ?? {};
-      if (!sourceId || !chapter) throw new DownloadError('NO_ROUTE', 'الفصل بلا مصدر');
-      let list;
-      try {
-        list = await engine.pages(sourceId, chapter);
-      } catch (error) {
-        throw new DownloadError('SOURCE', String(error?.message ?? error), { retryable: true });
+      const { sourceId: firstSource, chapter: firstChapter } = item.request ?? {};
+      if (!firstSource || !firstChapter) throw new DownloadError('NO_ROUTE', 'الفصل بلا مصدر');
+      // الذكي: الفصل نفسه عند مصادر أخرى (يضيفها طلب التنزيل) يُجرَّب إن ردّ الأول بلا صفحات أو سقط. اليدوي لا بديل له.
+      const alternates = item.source?.mode === 'manual' ? [] : (item.request?.alternates ?? []);
+      const candidates = [{ sourceId: firstSource, chapter: firstChapter }, ...alternates.filter((a) => a?.sourceId && a?.chapter)];
+      let list = null;
+      let used = candidates[0];
+      let lastError = null;
+      let empty = 0;
+      for (const cand of candidates) {
+        try {
+          const got = await engine.pages(cand.sourceId, cand.chapter);
+          if (ctl.signal.aborted) return null;
+          if (Array.isArray(got) && got.length) { list = got; used = cand; break; }
+          empty++;
+        } catch (error) {
+          if (ctl.signal.aborted) return null;
+          lastError = error;
+        }
       }
-      if (ctl.signal.aborted) return null;
-      if (!Array.isArray(list) || !list.length) throw new DownloadError('SOURCE', 'الفصل بلا صفحات عند المصدر');
+      if (!list) {
+        // سقطت كل المحاولات بخطأ نقل: يُعاد لاحقًا. وإن ردّ أحدها بقائمة فاضية فالفصل نفسه بلا صفحات (لا «رفض الطلب»)
+        if (lastError && !empty) throw new DownloadError('SOURCE', String(lastError?.message ?? lastError), { retryable: true });
+        throw new DownloadError('NO_PAGES', candidates.length > 1 ? `جُرّب ${candidates.length} مصادر ولم يعطِ أحدها صفحات لهذا الفصل` : null);
+      }
+      const sourceId = used.sourceId;
+      // انتقلنا لمصدر بديل: يُقفل عليه الطلب، فالاستئناف لا يخلط صفحات مصدرين في فصل واحد
+      if (used !== candidates[0]) ctl.update({ request: { ...item.request, sourceId, chapter: used.chapter, alternates: [] }, source: { ...item.source, sourceId, sourceName: used.sourceName ?? item.source?.sourceName ?? null } });
       const total = list.length;
-      ctl.update({ pagesTotal: total, transport: 'pages', resumable: true, source: { ...item.source, sourceId } });
+      ctl.update({ pagesTotal: total, transport: 'pages', resumable: true, source: { ...item.source, sourceId, ...(used !== candidates[0] ? { sourceName: used.sourceName ?? item.source?.sourceName ?? null } : {}) } });
 
       let saved = 0;
       let bytes = 0;
