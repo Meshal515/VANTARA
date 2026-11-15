@@ -18,7 +18,6 @@ import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, p
 import { glyph } from './icons.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
-const QUALITY_CHOICES = [[null, 'الأفضل'], [1080, '1080p'], [720, '720p'], [480, '480p']];
 
 /** نص LTR معزول داخل سطر عربي: الأرقام والوحدات لا تنقلب. */
 const ltr = (el, text, cls) => {
@@ -769,219 +768,187 @@ export function createDownloadsUI(deps) {
     const video = spec.kind !== 'manga';
     if (video && !c.caps.video) return toast('تنزيل الحلقات والأفلام متاح في تطبيق Android وويندوز');
     if (!video && !c.caps.manga) return toast('التنزيل غير متاح في هذا المتصفح');
-    const units = spec.units ?? [];
-    const onDevice = new Set(c.manager.list().filter((i) => i.work.ref === spec.work.ref && i.state === STATES.ready).map((i) => String(i.unit.key)));
-    const queued = new Set(c.manager.list().filter((i) => i.work.ref === spec.work.ref && i.state !== STATES.ready).map((i) => String(i.unit.key)));
-    const pick = {
-      scope: spec.kind === 'movie' ? 'all' : 'one',
-      text: '',
-      season: spec.season ?? spec.seasons?.[0]?.n ?? null,
-      mode: 'smart',
-      sourceId: null,
-      sourceName: null,
-      quality: null,
-      wifiOnly: c.manager.settings().wifiOnly,
-    };
-    const currentUnit = units.find((u) => String(u.key) === String(spec.current)) ?? units[0];
+    // الموسم المفتوح وحده: لا «كل المواسم» (للموسم التالي افتح موسمه ونزّله)
+    const all = spec.units ?? [];
+    const units = spec.season != null && spec.kind !== 'manga' ? all.filter((u) => u.season == null || Number(u.season) === Number(spec.season)) : all;
+    const mine = c.manager.list().filter((i) => i.work.ref === spec.work.ref);
+    const onDevice = new Set(mine.filter((i) => i.state === STATES.ready).map((i) => String(i.unit.key)));
+    const queued = new Set(mine.filter((i) => i.state !== STATES.ready).map((i) => String(i.unit.key)));
+    const taken = (u) => onDevice.has(String(u.key)) || queued.has(String(u.key));
+    const currentUnit = units.find((u) => String(u.key) === String(spec.current)) ?? units.find((u) => !taken(u)) ?? units[0];
+    const pick = { scope: spec.kind === 'movie' ? 'season' : 'one', keys: new Set(currentUnit && !taken(currentUnit) ? [String(currentUnit.key)] : []), mode: 'smart', route: null, sourceId: null, sourceName: null };
+    const unitWord = spec.kind === 'manga' ? 'الفصل' : 'الحلقة';
     const chosen = () => {
       if (spec.kind === 'movie') return units.slice(0, 1);
       if (pick.scope === 'one') return currentUnit ? [currentUnit] : [];
-      if (pick.scope === 'season') return pickUnits(units, { type: 'season', season: pick.season });
-      if (pick.scope === 'all') return units.slice();
-      const ranges = parseNumberList(pick.text);
-      if (!ranges) return [];
-      return units.filter((u) => matchesNumberList(ranges, u.number) && (pick.season == null || !spec.seasons?.length || Number(u.season) === Number(pick.season)));
+      if (pick.scope === 'season') return units.slice();
+      return units.filter((u) => pick.keys.has(String(u.key)));
     };
+
     openSheet((body) => {
       body.classList.add('dl-start');
-      // الرأس: غلاف العمل واسمه
       const head = el('div', 'dl-start-head');
       const cover = el('span', 'dl-start-cover');
-      if (spec.work.cover) {
-        const img = el('img');
-        img.alt = '';
-        img.src = spec.work.cover;
-        cover.append(img);
-      }
+      if (spec.work.cover) { const img = el('img'); img.alt = ''; img.src = spec.work.cover; cover.append(img); }
       const ht = el('div');
       const t = el('h3', null, spec.work.title);
       t.dir = 'auto';
-      ht.append(el('span', 'dl-start-kicker', 'تحميل إلى الجهاز'), t);
+      const seasonName = spec.seasons?.find((x) => Number(x.n) === Number(spec.season))?.label;
+      ht.append(t, el('span', 'dl-start-kicker', seasonName ? `تحميل · ${seasonName}` : 'تحميل إلى الجهاز'));
       head.append(cover, ht);
       body.append(head);
 
-      // النطاق
+      // النطاق: تبويبات بسيطة فوق، والمحتوى تحتها
+      const scopeBox = el('div', 'dl-scope');
       if (spec.kind !== 'movie' && units.length) {
-        const group = el('section', 'dl-start-group');
-        group.append(el('h4', null, 'النطاق'));
-        const chips = el('div', 'dl-chips');
-        const options = [
-          ['one', currentUnit ? (spec.kind === 'manga' ? `الفصل ${numberLabel(currentUnit.number)}` : `الحلقة ${numberLabel(currentUnit.number)}`) : null],
-          ['range', spec.kind === 'manga' ? 'فصول محددة' : 'حلقات محددة'],
-          ...(spec.seasons?.length ? [['season', 'الموسم كاملًا']] : []),
-          ['all', spec.kind === 'manga' ? `كل الفصول (${units.length})` : spec.seasons?.length ? 'كل المواسم' : `كل الحلقات (${units.length})`],
+        const tabsRow = el('div', 'segmented library-tabs dl-start-tabs');
+        const opts = [
+          ['one', currentUnit ? `${unitWord} ${numberLabel(currentUnit.number) ?? ''}`.trim() : null],
+          ['pick', spec.kind === 'manga' ? 'فصول' : 'حلقات'],
+          ['season', spec.kind === 'manga' ? 'كل الفصول' : 'الموسم كامل'],
         ].filter(([, l]) => l);
-        for (const [k, label] of options) {
-          const b = el('button', `dl-chip${pick.scope === k ? ' is-on' : ''}`, label);
+        for (const [k, label] of opts) {
+          const b = el('button', `library-tab${pick.scope === k ? ' active' : ''}`, label);
           b.type = 'button';
-          b.setAttribute('aria-pressed', String(pick.scope === k));
           b.onclick = () => {
             pick.scope = k;
-            for (const x of chips.children) {
-              x.classList.toggle('is-on', x === b);
-              x.setAttribute('aria-pressed', String(x === b));
-            }
-            rangeBox.hidden = k !== 'range';
-            seasonBox.hidden = !(spec.seasons?.length > 1 && (k === 'season' || k === 'range'));
-            if (k === 'range') input.focus();
+            for (const x of tabsRow.children) x.classList.toggle('active', x === b);
+            paintScope();
             refresh();
           };
-          chips.append(b);
+          tabsRow.append(b);
         }
-        const seasonBox = el('div', 'dl-chips dl-season-pick');
-        seasonBox.hidden = true;
-        for (const s of spec.seasons ?? []) {
-          const b = el('button', `dl-chip dl-chip--small${pick.season === s.n ? ' is-on' : ''}`, s.label);
-          b.type = 'button';
-          b.onclick = () => {
-            pick.season = s.n;
-            for (const x of seasonBox.children) x.classList.toggle('is-on', x === b);
-            refresh();
-          };
-          seasonBox.append(b);
-        }
-        const rangeBox = el('div', 'dl-range');
-        rangeBox.hidden = true;
-        const input = el('input', 'search-input');
-        input.inputMode = 'numeric';
-        input.placeholder = spec.kind === 'manga' ? 'مثال: 1-12 أو 1، 4، 7' : 'مثال: 1-12 أو 3، 5';
-        input.setAttribute('aria-label', 'الأرقام المطلوبة');
-        input.oninput = () => {
-          pick.text = input.value;
-          refresh();
-        };
-        rangeBox.append(input);
-        group.append(chips, seasonBox, rangeBox);
-        body.append(group);
+        body.append(tabsRow, scopeBox);
       }
+      function paintScope() {
+        if (pick.scope !== 'pick') {
+          const n = chosen().filter((u) => !taken(u)).length;
+          const done = chosen().length - n;
+          scopeBox.replaceChildren(el('p', 'dl-hint', pick.scope === 'one'
+            ? (currentUnit?.title ? `${currentUnit.title}` : 'التي تتابعها الآن')
+            : `${countText(spec.kind === 'manga' ? 'manga' : 'episode', chosen().length)}${done ? ` · ${done} على الجهاز` : ''}`));
+          return;
+        }
+        // شبكة الأرقام: لمسة تختار أو تلغي (الحلقة 10 بلمسة واحدة)، والمحمّل معلّم ولا يُختار
+        const grid = el('div', 'dl-grid-nums');
+        for (const u of units) {
+          const on = pick.keys.has(String(u.key));
+          const b = el('button', `dl-num${on ? ' is-on' : ''}${taken(u) ? ' is-saved' : ''}`, numberLabel(u.number) ?? '•');
+          b.type = 'button';
+          b.dir = 'ltr';
+          b.disabled = taken(u);
+          b.setAttribute('aria-pressed', String(on));
+          b.setAttribute('aria-label', `${unitWord} ${numberLabel(u.number)}${taken(u) ? ' — على الجهاز' : ''}`);
+          b.onclick = () => {
+            const k = String(u.key);
+            if (pick.keys.has(k)) pick.keys.delete(k); else pick.keys.add(k);
+            b.classList.toggle('is-on', pick.keys.has(k));
+            b.setAttribute('aria-pressed', String(pick.keys.has(k)));
+            refresh();
+          };
+          grid.append(b);
+        }
+        scopeBox.replaceChildren(grid);
+      }
+      paintScope();
 
-      // المصدر
-      const srcGroup = el('section', 'dl-start-group');
-      srcGroup.append(el('h4', null, 'المصدر'));
-      const modeSeg = el('div', 'dl-seg dl-seg--wide');
-      const sourceList = el('div', 'dl-sources');
-      sourceList.hidden = true;
-      const modeHint = el('p', 'dl-hint', 'يفحص المصادر الجاهزة ويختار الأوضح والأكمل والأثبت، مع دعم الاستئناف.');
-      for (const [k, label] of [['smart', 'تحميل ذكي'], ['manual', 'اختيار يدوي']]) {
-        const b = el('button', `dl-seg-btn${pick.mode === k ? ' is-on' : ''}`, label);
+      // المصدر: ذكي، أو سيرفر تختاره بنفسك (الجودة والمصدر والسرب كما في ورقة السيرفرات)
+      body.append(el('h4', 'dl-section', 'المصدر'));
+      const modeRow = el('div', 'segmented library-tabs dl-start-tabs');
+      const sourceBox = el('div', 'dl-sources');
+      const modeHint = el('p', 'dl-hint', 'يختار الأوضح والأكمل والأثبت من الجاهز فعلًا.');
+      for (const [k, label] of [['smart', 'تحميل ذكي'], ['manual', video ? 'اختر السيرفر' : 'اختر المصدر']]) {
+        const b = el('button', `library-tab${pick.mode === k ? ' active' : ''}`, label);
         b.type = 'button';
         b.onclick = () => {
           pick.mode = k;
-          for (const x of modeSeg.children) x.classList.toggle('is-on', x === b);
-          sourceList.hidden = k !== 'manual';
-          modeHint.textContent = k === 'smart' ? 'يفحص المصادر الجاهزة ويختار الأوضح والأكمل والأثبت، مع دعم الاستئناف.' : 'يلتزم بالمصدر الذي تختاره، ولا ينتقل لغيره دون إذنك.';
-          if (k === 'manual' && !sourceList.childElementCount) void loadSources();
+          for (const x of modeRow.children) x.classList.toggle('active', x === b);
+          modeHint.hidden = k !== 'smart';
+          sourceBox.hidden = k !== 'manual';
+          if (k === 'manual' && !sourceBox.childElementCount) void loadSources();
           refresh();
         };
-        modeSeg.append(b);
+        modeRow.append(b);
       }
+      sourceBox.hidden = true;
+      body.append(modeRow, modeHint, sourceBox);
+
+      const selectRow = (b, data) => {
+        pick.route = data.route ?? null;
+        pick.sourceId = data.sourceId;
+        pick.sourceName = data.name;
+        for (const x of sourceBox.querySelectorAll('.dl-source')) x.classList.toggle('is-on', x === b);
+        refresh();
+      };
+      const sourceRow = (data) => {
+        const b = el('button', 'dl-source');
+        b.type = 'button';
+        b.append(el('span', 'dl-radio'));
+        const main = el('span', 'dl-source-main');
+        const name = el('b', null, data.name);
+        name.dir = 'auto';
+        main.append(name);
+        if (data.sub) main.append(el('small', null, data.sub));
+        b.append(main);
+        if (data.quality) b.append(ltr(el, data.quality, 'dl-source-q'));
+        if (data.seeds != null) { const sw = el('span', 'dl-seeds'); sw.innerHTML = glyph('users', { size: 14 }); sw.append(ltr(el, String(data.seeds))); b.append(sw); }
+        b.onclick = () => selectRow(b, data);
+        return b;
+      };
       async function loadSources() {
-        sourceList.replaceChildren(el('p', 'dl-hint', 'نقرأ المصادر المتاحة…'));
-        let list = [];
+        sourceBox.replaceChildren(el('p', 'dl-hint', video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…'));
+        let rows = [];
         try {
-          list = (await spec.sources?.()) ?? [];
-        } catch {
-          list = [];
-        }
+          if (video && spec.build) {
+            // سيرفرات الحلقة الحقيقية من محرك التشغيل نفسه
+            const unit = chosen()[0] ?? currentUnit;
+            const [first] = await spec.build([unit], { mode: 'smart', sourceId: null, quality: null });
+            const { resolveRoutes } = await import('../lib/downloads/video-driver.js');
+            const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
+            const { routes } = await resolveRoutes(eng, first.request, { settleMs: 25_000 });
+            rows = routes.filter((r) => r.state === 'READY').sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0)).map((r) => ({
+              route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
+              sub: r.type === 'torrent' ? 'تورنت' : (r.server && r.server !== r.sourceName ? r.server : null),
+              quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
+              seeds: r.type === 'torrent' ? Number(/👤\s*(\d+)/.exec(r.label ?? '')?.[1] ?? NaN) || 0 : null,
+            }));
+          } else {
+            rows = ((await spec.sources?.()) ?? []).map((x) => ({ sourceId: x.id, name: x.name, sub: x.note ? `${x.note} فصلًا` : null }));
+          }
+        } catch { rows = []; }
         if (!body.isConnected) return;
-        if (!list.length) {
-          sourceList.replaceChildren(el('p', 'dl-hint', 'لم نجد مصادر لهذا العمل الآن. التحميل الذكي يبحث وقت التنزيل.'));
-          return;
-        }
-        sourceList.replaceChildren(...list.map((s) => {
-          const b = el('button', `dl-source${pick.sourceId === s.id ? ' is-on' : ''}`);
-          b.type = 'button';
-          b.setAttribute('role', 'radio');
-          b.setAttribute('aria-checked', String(pick.sourceId === s.id));
-          const name = el('b', null, s.name);
-          name.dir = 'auto';
-          b.append(el('span', 'dl-radio'), name);
-          if (s.note) b.append(el('span', 'dl-source-note', s.note));
-          b.onclick = () => {
-            pick.sourceId = s.id;
-            pick.sourceName = s.name;
-            for (const x of sourceList.children) {
-              const on = x === b;
-              x.classList.toggle('is-on', on);
-              x.setAttribute('aria-checked', String(on));
-            }
-            refresh();
-          };
-          return b;
-        }));
-      }
-      srcGroup.append(modeSeg, modeHint, sourceList);
-      body.append(srcGroup);
-
-      // الجودة (فيديو)
-      if (video) {
-        const qGroup = el('section', 'dl-start-group');
-        qGroup.append(el('h4', null, 'الجودة'));
-        const chips = el('div', 'dl-chips');
-        for (const [v, label] of QUALITY_CHOICES) {
-          const b = el('button', `dl-chip${pick.quality === v ? ' is-on' : ''}`, label);
-          b.type = 'button';
-          b.onclick = () => {
-            pick.quality = v;
-            for (const x of chips.children) x.classList.toggle('is-on', x === b);
-          };
-          chips.append(b);
-        }
-        qGroup.append(chips, el('p', 'dl-hint', 'الصوت والترجمات المدمجة تُحفظ كما هي، والترجمات الخارجية بجانب الملف.'));
-        body.append(qGroup);
+        sourceBox.replaceChildren(...(rows.length ? rows.map(sourceRow) : [el('p', 'dl-hint', 'ما جهز سيرفر الآن. التحميل الذكي يحاول وقت التنزيل.')]));
       }
 
-      // التخزين
-      const store = el('section', 'dl-start-group dl-start-storage');
-      const wifi = toggleRow('Wi-Fi فقط', 'على بيانات الجوال ينتظر حتى تتصل بـWi-Fi.', pick.wifiOnly, (on) => { pick.wifiOnly = on; });
-      const space = el('p', 'dl-hint');
-      store.append(wifi, space);
-      body.append(store);
-      void storageFree(c).then((free) => {
-        space.replaceChildren(el('span', null, 'الحجم يُعرف عند بدء التنزيل'));
-        if (free != null) space.append(el('span', 'dl-dot', '·'), el('span', null, 'المتاح '), ltr(el, formatBytes(free)));
-      });
-
-      // زر البدء
       const foot = el('div', 'dl-start-foot');
+      const status = el('p', 'dl-start-status');
       const go = el('button', 'btn btn-primary dl-start-go');
       go.type = 'button';
-      const status = el('p', 'dl-start-status');
       foot.append(status, go);
       body.append(foot);
+      void storageFree(c).then((free) => { if (free != null && body.isConnected) status.dataset.free = formatBytes(free); refresh(); });
 
       function refresh() {
-        const list = chosen();
-        const fresh = list.filter((u) => !onDevice.has(String(u.key)) && !queued.has(String(u.key)));
-        const already = list.length - fresh.length;
-        const noun = spec.kind === 'movie' ? 'الفيلم' : countText(spec.kind === 'manga' ? 'manga' : 'episode', fresh.length);
-        go.innerHTML = `${glyph('downloads', { size: 18 })}<span>${fresh.length ? `نزّل ${noun}` : 'لا جديد للتنزيل'}</span>`;
-        go.disabled = !fresh.length || (pick.mode === 'manual' && !pick.sourceId);
-        status.textContent = already ? `${already === 1 ? 'واحد منها' : `${already} منها`} على الجهاز أو في الطابور` : pick.mode === 'manual' && !pick.sourceId ? 'اختر مصدرًا' : '';
+        const list = chosen().filter((u) => !taken(u));
+        const noun = spec.kind === 'movie' ? 'الفيلم' : countText(spec.kind === 'manga' ? 'manga' : 'episode', list.length);
+        go.innerHTML = `${glyph('downloads', { size: 18 })}<span>${list.length ? `نزّل ${noun}` : 'كله على الجهاز'}</span>`;
+        go.disabled = !list.length || (pick.mode === 'manual' && !pick.sourceId);
+        const need = pick.mode === 'manual' && !pick.sourceId ? (video ? 'اختر سيرفرًا' : 'اختر مصدرًا') : null;
+        status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز ${status.dataset.free}` : '');
       }
       go.onclick = async () => {
-        const list = chosen().filter((u) => !onDevice.has(String(u.key)) && !queued.has(String(u.key)));
+        const list = chosen().filter((u) => !taken(u));
         if (!list.length) return;
         go.disabled = true;
         go.classList.add('is-busy');
         try {
-          if (pick.wifiOnly !== c.manager.settings().wifiOnly) c.manager.setWifiOnly(pick.wifiOnly);
-          const specs = await spec.build(list, { mode: pick.mode, sourceId: pick.sourceId, sourceName: pick.sourceName, quality: pick.quality });
+          const specs = await spec.build(list, { mode: pick.mode, sourceId: pick.sourceId, sourceName: pick.sourceName, quality: pick.route?.quality ?? null });
+          // سيرفر اختاره المستخدم: يُلتزم به (المصدر والرمز)، لا بديل صامت
+          if (pick.route) for (const sp of specs) sp.source = { ...sp.source, mode: 'manual', sourceId: pick.route.sourceId, sourceName: pick.sourceName, server: pick.route.server, routeCode: pick.route.code ?? null, quality: pick.route.quality ?? null };
           const { added } = await c.manager.enqueue(specs);
           void saveWorkArt(c.store, spec.work);
-          // بيانات صفحة العمل (الوصف والتصنيفات والمواسم…): تُفتح صفحته الأصلية منها بلا إنترنت
           if (spec.snapshot) {
-            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' || k === 'chapters' && Array.isArray(v) ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
+            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }
           closeSheet();
           paintEntry(c.manager.summary());

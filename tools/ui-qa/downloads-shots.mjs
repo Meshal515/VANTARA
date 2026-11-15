@@ -118,12 +118,13 @@ await step('anime', async () => {
   await tap('#anime.active .aw-menu.open .aw-menu-item');
   await page.waitForSelector('.dl-start');
   await shot('anime-sheet', 'ورقة بدء التحميل: النطاق، المصدر (ذكي/يدوي)، الجودة، Wi-Fi فقط، المساحة');
-  await page.getByRole('button', { name: 'اختيار يدوي' }).click();
+  await page.getByRole('button', { name: 'اختر السيرفر' }).click();
   await page.waitForSelector('.dl-source');
+  await page.locator('.dl-source').first().click();
   await shot('anime-sheet-manual', 'الاختيار اليدوي: مصادر العمل، والتنزيل يلتزم بالمختار');
   await page.getByRole('button', { name: 'تحميل ذكي' }).click();
-  await page.getByRole('button', { name: 'حلقات محددة' }).click();
-  await page.fill('.dl-range input', '1-4');
+  await page.getByRole('button', { name: 'حلقات', exact: true }).click();
+  for (const n of ['1', '2', '3', '4']) await page.locator('.dl-num', { hasText: new RegExp(`^${n}$`) }).first().click();
   await sleep(300);
   await shot('anime-sheet-range', 'حلقات محددة 1-4: الزر يقول ما سيُنزَّل');
   await tap('.dl-start-go');
@@ -160,8 +161,8 @@ await step('cinema', async () => {
   await shot('cinema-menu', '⋮ في السينما: «تحميل» أولًا');
   await tap('#cinema.active .aw-menu.open .aw-menu-item');
   await page.waitForSelector('.dl-start');
-  await page.getByRole('button', { name: 'حلقات محددة' }).click();
-  await page.fill('.dl-range input', '1-2');
+  await page.getByRole('button', { name: 'حلقات', exact: true }).click();
+  for (const n of ['1', '2']) await page.locator('.dl-num', { hasText: new RegExp(`^${n}$`) }).first().click();
   await sleep(300);
   await shot('cinema-sheet', 'المسلسل: الموسم كاملًا أو حلقات محددة من موسم');
   await tap('.dl-start-go');
@@ -178,8 +179,8 @@ await step('manga', async () => {
   await shot('manga-menu', '⋮ في المانجا: «تحميل» أولًا');
   await tap('#detailMenu.open .aw-menu-item');
   await page.waitForSelector('.dl-start');
-  await page.getByRole('button', { name: 'فصول محددة' }).click();
-  await page.fill('.dl-range input', '1-6');
+  await page.getByRole('button', { name: 'فصول', exact: true }).click();
+  for (const n of ['1', '2', '3', '4', '5', '6']) await page.locator('.dl-num', { hasText: new RegExp(`^${n}$`) }).first().click();
   await sleep(300);
   await shot('manga-sheet', 'فصول 1–6 من عمل فيه 201 فصل');
   await tap('.dl-start-go');
@@ -268,12 +269,21 @@ await step('offline', async () => {
 
 // ───────────── الكمبيوتر ─────────────
 await step('desktop', async () => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await sleep(1200);
-  await shot('desktop-device-grid', 'مقاس الكمبيوتر: «على الجهاز»');
-  await tab('جاري التحميل');
-  await sleep(800);
-  await shot('desktop-queue', 'مقاس الكمبيوتر: «جاري التحميل»');
+  for (const [w, h] of [[1920, 1080], [1366, 768]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await sleep(1200);
+    await tab('على الجهاز');
+    await sleep(700);
+    await shot(`desktop-${w}-device-grid`, `ويندوز ${w}×${h}: «على الجهاز»`);
+    await tab('جاري التحميل');
+    await sleep(700);
+    await shot(`desktop-${w}-queue`, `ويندوز ${w}×${h}: «جاري التحميل»`);
+    await openDeviceCard('Frieren');
+    await page.waitForSelector('#anime.active .an-er', { timeout: 20000 });
+    await sleep(2000);
+    await shot(`desktop-${w}-anime-local`, `ويندوز ${w}×${h}: صفحة العمل الأصلية من الجهاز`);
+    await goDownloads();
+  }
 });
 
 await writeFile(`${out}/report.json`, JSON.stringify({ report, errors: log.errors }, null, 2));

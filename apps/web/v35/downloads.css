@@ -298,3 +298,23 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 }
 
 .v35 .dl-manage .sheet-item .dl-size { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-caption); }
+
+/* ── ورقة البدء بلا حاويات: تبويبات فوق، أرقام، وصفوف مسطحة ── */
+.v35 .dl-start .dl-start-head { padding-bottom: 12px; }
+.v35 .dl-start-tabs { margin: 4px 0 10px; }
+.v35 .dl-section { margin: 18px 0 2px; color: var(--text-3); font-size: var(--fs-caption); font-weight: 700; }
+.v35 .dl-scope { min-height: 24px; }
+.v35 .dl-grid-nums { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; max-height: 236px; overflow-y: auto; padding: 2px 0 4px; }
+.v35 .dl-num { height: 44px; border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font: inherit; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.v35 .dl-num.is-on { background: var(--accent); color: #fff; }
+.v35 .dl-num.is-saved { background: none; color: var(--text-4); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
+.v35 .dl-sources { display: flex; flex-direction: column; margin-top: 4px; max-height: 280px; overflow-y: auto; }
+.v35 .dl-source { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 0 2px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; color: var(--text-1); font: inherit; text-align: start; cursor: pointer; }
+.v35 .dl-source:last-child { border-bottom: 0; }
+.v35 .dl-source.is-on { background: none; box-shadow: none; }
+.v35 .dl-source-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.v35 .dl-source-main b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v35 .dl-source-main small { color: var(--text-3); font-size: var(--fs-caption); }
+.v35 .dl-source-q { color: var(--text-1); font-weight: 700; font-size: var(--fs-meta); }
+.v35 .dl-seeds { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.v35 .dl-start-foot { background: linear-gradient(to bottom, transparent, var(--surface-1) 24%); }

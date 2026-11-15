@@ -137,15 +137,15 @@ class DownloadService : Service() {
     }
 
     /**
-     * ترجمات الإضافات المثبتة بنفس مسار المشغّل (SubtitleProviders.discover + RemoteAddonClient): العربية أولًا (حتى 3)
-     * ثم إنجليزية واحدة. النص يُقرأ بفك ترميز العربية القديم (windows-1256) ويُحفظ UTF-8، والتوقيت كما هو.
+     * ترجمات الإضافات المثبتة بنفس مسار المشغّل (SubtitleProviders.discover + RemoteAddonClient): العربية وحدها، حتى 20. النص يُقرأ بفك ترميز العربية القديم (windows-1256) ويُحفظ UTF-8، والتوقيت كما هو.
      */
     private fun addonSubtitles(job: DownloadJob): List<Triple<String, String, String>> {
         val providers = com.vantara.addons.SubtitleProviders.providers(job.subtitleProviders)
         if (providers.isEmpty() || com.vantara.addons.SubtitleProviders.videoId(job.subtitleIdentity, job.episode) == null) return emptyList()
         val client = com.vantara.addons.nativeAddonClient(this)
         val found = providers.flatMap { p -> runCatching { com.vantara.addons.SubtitleProviders.discover(client, p, job.subtitleIdentity, job.episode, "download-${job.id}-${p.key}") }.getOrDefault(emptyList()) }
-        val chosen = found.filter { it.lang == "ar" }.distinctBy { it.url }.take(3) + found.filter { it.lang == "en" }.take(1)
+        // العربية وحدها (قرار المالك): إضافة واحدة قد ترجع مئات الترجمات بكل اللغات؛ نحفظ حتى 20 عربية فقط
+        val chosen = found.filter { it.lang == "ar" }.distinctBy { it.url }.take(20)
         return chosen.mapIndexedNotNull { i, t ->
             val text = runCatching { client.request(t.url, "download-${job.id}-sub-$i", fallbackCharset = if (t.lang == "ar") "windows-1256" else null) }.getOrNull()
             if (text.isNullOrBlank()) return@mapIndexedNotNull null
