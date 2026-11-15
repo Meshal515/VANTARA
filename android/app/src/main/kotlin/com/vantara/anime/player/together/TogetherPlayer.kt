@@ -93,6 +93,9 @@ class TogetherPlayer(
         fun leaveRoom() {}
         /** «غيّر» في شاشة الغرفة: ورقة السيرفرات. */
         fun openServers() {}
+        /** ورقة الحلقات في المشغّل (زر «الحلقات» في الغرفة للمضيف). */
+        fun openEpisodes() {}
+        fun hasEpisodes(): Boolean = false
         /** «OKRU · 1080p» للسيرفر الحالي. */
         fun serverLabel(): String? = sourceName()
         /** تقدّم تجهيز فيديوك الحقيقي 0..1 (مراحل المصدر والتورنت والمشغّل) لامتلاء الشعار ومراحل الغرفة. */
@@ -603,6 +606,14 @@ class TogetherPlayer(
 
     fun panelClosed() { panelOpen = false }
 
+    /** اختيار حلقة من ورقة المشغّل داخل غرفة متزامنة: المضيف ينقل الغرفة كلها، والصديق يُبلَّغ. منفصلة: تبديل محلي. */
+    fun requestEpisode(n: Int): Boolean {
+        if (!synced) return false
+        if (!client.isHost) { hooks.message("المضيف يختار الحلقة"); return true }
+        client.command("load", 0.0, mediaKey(n), "الحلقة $n")
+        return true
+    }
+
     private fun button(text: String, primary: Boolean, onClick: () -> Unit) = context.label(text, 14f, Color.WHITE, bold = true).apply {
         gravity = Gravity.CENTER
         setPadding(context.dp(18), context.dp(11), context.dp(18), context.dp(11))
@@ -949,6 +960,18 @@ class TogetherPlayer(
             }
         }
         actions.addView(moreBtn, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(10) })
+        // «الحلقات» للمضيف: ورقة الحلقات، واختياره ينقل الغرفة كلها (requestEpisode ← load)
+        if (client.isHost && hooks.hasEpisodes()) {
+            val episodes = context.label("الحلقات", 14f, Color.WHITE, bold = true).apply {
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(context.dp(16), 0, context.dp(16), 0)
+                background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+                contentDescription = "الحلقات"
+                setOnClickListener { hooks.openEpisodes() }
+            }
+            actions.addView(episodes, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)).apply { marginEnd = context.dp(10) })
+        }
         val picking = awaitingPick || failedSource != null
         val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, Color.WHITE, bold = true).apply {
             gravity = Gravity.CENTER

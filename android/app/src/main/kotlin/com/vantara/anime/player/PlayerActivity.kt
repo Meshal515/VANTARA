@@ -650,6 +650,8 @@ class PlayerActivity : Activity() {
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
             override fun leaveRoom() = finish()
             override fun openServers() = showServers()
+            override fun openEpisodes() = showEpisodes()
+            override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
             // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
             override fun loadProgress(): Float {
                 if (current == null) return 0f
@@ -1611,11 +1613,69 @@ class PlayerActivity : Activity() {
     }
 
     /** نفس نموذج ورقة الواجهة: رموز لا أسماء، مجمّعة بالجودة، بحالتها الآن. */
+    // ورقة السيرفرات (طلب المالك 15 نوفمبر): زرّان فقط — «الجودة» و«المصدر» — كلٌّ يفتح خياراته داخل الورقة نفسها
+    // (لا نافذة نظام). الاختيار والقائمة المفتوحة يبقيان مع كل تحديث: السيرفرات تصل تباعًا فتُعاد الورقة، ولا تُغلق وحدها.
+    private var serverQuality: Int? = null
+    private var serverSource: String? = null
+    private var serverMenu: String? = null
+    private fun sourceOf(r: Route) = r.sourceName?.takeIf { it.isNotBlank() } ?: r.server.ifBlank { r.code }
+
+    private fun serverFilters(body: LinearLayout, routes: List<Route>): List<Route> {
+        val live = routes.filter { it.state != RouteState.UNAVAILABLE }
+        val qualities = live.mapNotNull { RouteGroups.bucket(it.quality) }.distinct().sortedDescending()
+        val sources = live.map { sourceOf(it) }.distinct()
+        if (serverQuality != null && serverQuality !in qualities) serverQuality = null
+        if (serverSource != null && serverSource !in sources) serverSource = null
+        val qualityText = serverQuality?.let { "${it}p" } ?: "كل الجودات"
+        val sourceText = serverSource ?: "كل المصادر"
+        fun picker(key: String, caption: String, value: String, enabled: Boolean) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(7), dp(14), dp(8))
+            val open = serverMenu == key
+            background = pressable(if (open) Tone.SURFACE_3 else Tone.SURFACE_2, dp(12).toFloat(), dp(1), if (open) Tone.TEXT_3 else Tone.LINE)
+            alpha = if (enabled) 1f else 0.5f
+            contentDescription = "$caption: $value"
+            addView(label(caption, 11.5f, Tone.TEXT_3, bold = true))
+            addView(label("$value  ${if (open) "▴" else "▾"}", 14f, Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_FIRST_STRONG })
+            setOnClickListener { if (enabled) { serverMenu = if (serverMenu == key) null else key; sheet.refresh() } }
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(picker("q", "الجودة", qualityText, qualities.size > 1), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        row.addView(picker("s", "المصدر", sourceText, sources.size > 1), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        val menuKey = serverMenu
+        if (menuKey != null) {
+            val options: List<Pair<String, () -> Unit>> = if (menuKey == "q")
+                listOf<Pair<String, () -> Unit>>("كل الجودات" to { serverQuality = null }) + qualities.map { q -> "${q}p" to { serverQuality = q } }
+            else listOf<Pair<String, () -> Unit>>("كل المصادر" to { serverSource = null }) + sources.map { name -> name to { serverSource = name } }
+            val selected = if (menuKey == "q") qualityText else sourceText
+            val menu = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                background = rounded(Tone.SURFACE_3, dp(12).toFloat(), dp(1), Tone.LINE)
+            }
+            for ((text, choose) in options) {
+                val on = text == selected
+                menu.addView(label(if (on) "✓  $text" else text, 14f, if (on) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply {
+                    minHeight = dp(42)
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                    textDirection = View.TEXT_DIRECTION_FIRST_STRONG
+                    setPadding(dp(12), 0, dp(12), 0)
+                    background = pressable(Color.TRANSPARENT, dp(10).toFloat())
+                    setOnClickListener { choose(); serverMenu = null; sheet.refresh() }
+                })
+            }
+            body.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        }
+        return routes.filter { r -> (serverQuality == null || RouteGroups.bucket(r.quality) == serverQuality) && (serverSource == null || sourceOf(r) == serverSource) }
+    }
+
     private fun showServers() {
         val p = prep ?: return message("السيرفرات غير متاحة لهذه الجلسة")
         engine.completePreparation(sessionId)
+        serverMenu = null
         open(SheetKind.SERVERS, "السيرفرات", episodeLabel()) { body ->
-            val routes = p.routes()
+            val routes = serverFilters(body, p.routes())
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
             val ready = routes.count { it.state == RouteState.READY }
             body.addView(pillButton("شغّل الأفضل", primary = true) { playBest() }.apply {
@@ -1696,7 +1756,8 @@ class PlayerActivity : Activity() {
                     textAlignment = View.TEXT_ALIGNMENT_CENTER
                     minHeight = dp(48)
                     background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat(), if (watched && !on) dp(1) else 0, Tone.ACCENT_LINE)
-                    setOnClickListener { if (n != cur) switchEpisode(n) else sheet.close() }
+                    // داخل غرفة متزامنة: المضيف ينقل الغرفة كلها (أمر load)، والصديق يُبلَّغ أن المضيف يختار
+                    setOnClickListener { if (n == cur) sheet.close() else if (together?.requestEpisode(n) == true) sheet.close() else switchEpisode(n) }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
             }
             // الصف الأخير يكمل بفراغ فلا تتمدد أرقامه
