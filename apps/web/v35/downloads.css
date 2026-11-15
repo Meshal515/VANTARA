@@ -6,18 +6,15 @@
 
 /* ── المدخل في ترويسة مكتبتي ── */
 .v35 .dl-entry { position: relative; }
-.v35 .dl-entry-ring {
-  position: absolute;
-  inset: 6px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-  opacity: 0;
-  transform: scale(0.8);
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
-  pointer-events: none;
+/* تنزيل يعمل: الأيقونة نفسها بلون التمييز الذي اختاره المستخدم وتنبض بهدوء (كانت حلقة تُرسم بيضاوية حول
+   زر غير مربّع). opacity وtransform فقط على الأيقونة: لا يمسّ تخطيط الترويسة */
+.v35 .dl-entry-ring { display: none; }
+.v35 .dl-entry .icon { transition: color var(--dur) var(--ease); }
+.v35 .dl-entry.is-busy .icon { color: var(--accent); animation: dl-entry-pulse 1.6s var(--ease) infinite; }
+@keyframes dl-entry-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.88); }
 }
-.v35 .dl-entry.is-busy .dl-entry-ring { opacity: 0.9; transform: none; }
-.v35 .dl-entry.is-busy .icon { color: var(--accent-text); }
 
 /* ── الصفحة ── */
 .v35 .dl-page .page-body { padding-bottom: calc(32px + var(--safe-bottom)); }
@@ -295,7 +292,8 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 @media (prefers-reduced-motion: reduce) {
   .v35 .dl-bar > i { transition: none; }
   .v35 .dl-bar.is-indeterminate > i { animation: none; translate: 0 0; width: 100%; opacity: 0.35; }
-  .v35 .dl-entry-ring, .v35 .dl-switch, .v35 .dl-switch::after { transition: none; }
+  .v35 .dl-switch, .v35 .dl-switch::after { transition: none; }
+  .v35 .dl-entry.is-busy .icon { animation: none; }
 }
 
 .v35 .dl-manage .sheet-item .dl-size { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-caption); }
@@ -318,5 +316,6 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 .v35 .dl-source-main b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v35 .dl-source-main small { color: var(--text-3); font-size: var(--fs-caption); }
 .v35 .dl-source-q { color: var(--text-1); font-weight: 700; font-size: var(--fs-meta); }
+.v35 .dl-source-size { color: var(--text-2); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; white-space: nowrap; } /* حجم الملف: تختار الأخف قبل التنزيل */
 .v35 .dl-seeds { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
 .v35 .dl-start-foot { background: linear-gradient(to bottom, transparent, var(--surface-1) 24%); }

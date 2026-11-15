@@ -139,7 +139,7 @@ const GENRES = [
 const CHAPTER_BATCH = 60;
 
 const drawerGroups = [
-  ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass']]],
+  ['', [['الرئيسية', 'home', 'home'], ['مكتبتي', 'library', 'library'], ['اكتشف', 'discover', 'compass'], ['التحميلات', 'downloads', 'downloads']]],
   ['الاجتماع', [['الأصدقاء', 'friends', 'users'], ['المجلس', 'majlisFeed', 'activity'], ['الإشعارات', 'notifications', 'bell'], ['التوصيات', 'recommendations', 'spark']]],
   ['قوائمي', [['المفضلة', 'favorites', 'heart'], ['أقرأ لاحقًا', 'later', 'clock'], ['آخر المشاهدات', 'history', 'history'], ['إحصائيات المتابعة', 'insights', 'chart']]],
   ['', [['الإضافات', 'addons', 'puzzle'], ['الإعدادات', 'settings', 'settings'], ['تبديل الحساب', 'switchAccount', 'switchUser']]],
@@ -4939,8 +4939,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     const unread = unreadNotifications();
     const here = currentPage();
-    // «رفيق» لمن فُتح له وحده: غيره لا يرى له أثرًا
-    const groups = rafiq.enabled && supports('rafiq') ? [[drawerGroups[0][0], [...drawerGroups[0][1], ['رفيق', 'rafiq', 'spark']]], ...drawerGroups.slice(1)] : drawerGroups;
+    // «رفيق» أُخفي من القائمة نهائيًا بقرار المالك (15 نوفمبر)، ومكانه «التحميلات»
+    const groups = drawerGroups;
     // الأقسام الثلاثة في رأس القائمة: التبديل من حيث تتنقّل، لا من الشعار وحده
     const sections = el('div', 'drawer-sections');
     sections.setAttribute('role', 'radiogroup');
@@ -5002,7 +5002,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   function openDrawer() {
     // رفيق ما تأكد بعد: نسأل الآن ونعيد بناء القائمة إن ظهر
-    if (rafiq.enabled !== true && supports('rafiq')) void rafiq.check().then((on) => on && q('drawerBackdrop').classList.contains('open') && buildDrawer());
+
     buildDrawer();
     q('drawerBackdrop').classList.add('open');
   }
@@ -5056,7 +5056,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       state.libraryFilter = key === 'favorites' ? 'favorite' : key;
       return navTo('library');
     }
-    if (key === 'rafiq') return supports('rafiq') ? showPage('rafiq') : undefined;
+    if (key === 'downloads') return void downloadsUI.open();
     if (key === 'insights') return showPage('insights');
     if (key === 'addons') return void openAddons();
     if (key === 'switchAccount') return confirmSwitchAccount();

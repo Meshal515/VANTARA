@@ -216,7 +216,15 @@ class TorrentEngine internal constructor(
         }
         val h = handle!!
         try {
-            runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED); h.resume() }
+            // كمسار التشغيل (21–45 مشاركًا في الاختبار الحي): بلا حد اتصالات للتورنت، ومتتبّعات الإضافة والقائمة العامة
+            // على المقبض نفسه، وإعلان فوري للمتتبّعات وDHT. كان التنزيل الدائم يكتفي بما في magnet ويبدأ بمشاركَين
+            runCatching { h.swig().set_max_connections(-1); h.unsetFlags(TorrentFlags.AUTO_MANAGED); h.resume() }
+            runCatching {
+                val known = h.trackers().map { it.url() }.toSet()
+                request.announce.filterNot { it in known }.forEach { h.addTracker(AnnounceEntry(it)) }
+                h.forceReannounce()
+                h.forceDHTAnnounce()
+            }
             val info = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { h.torrentFile()?.takeIf { it.isValid } }
             val files = info.files()
             val index = request.fileIdx?.takeIf { it in 0 until files.numFiles() }
@@ -234,7 +242,8 @@ class TorrentEngine internal constructor(
                 val done = st.totalWantedDone()
                 val total = st.totalWanted()
                 progress(PermanentProgress(done, total, st.numPeers(), st.downloadPayloadRate().toLong(), st.numPieces(), info.numPieces(), name))
-                if (total > 0 && done >= total && st.isFinished) break
+                // كل القطع المطلوبة متحقق منها (totalWantedDone يعدّ الموثّق وحده): انتهى، بلا انتظار علم isFinished المتأخر
+                if (total > 0 && done >= total) break
                 if (done != lastDone) { lastDone = done; stalledSince = System.currentTimeMillis() }
                 else if (System.currentTimeMillis() - stalledSince > PERMANENT_STALL_MS) throw IOException(if (st.numPeers() == 0) "NO_PEERS" else "TORRENT_STALLED")
                 try { Thread.sleep(1000) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent download interrupted") }
