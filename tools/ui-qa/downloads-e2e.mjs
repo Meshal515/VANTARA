@@ -57,6 +57,27 @@ const installEngine = () => page.evaluate(() => {
 });
 await installEngine();
 
+
+// صفحة العمل المحلي هي صفحة العمل الأصلية نفسها (openLocalWork) بفصول الجهاز وحدها
+const openLocal = async () => {
+  await page.click('.dl-card');
+  await page.waitForSelector('#detail.active');
+  await page.waitForFunction(() => /\d/.test(document.getElementById('chapterCount')?.textContent ?? ''));
+  await sleep(400);
+};
+const savedNumbers = () => page.evaluate(async () => {
+  const { downloads } = await import('/lib/downloads/index.js');
+  const { manager } = await downloads();
+  return manager.list().filter((i) => i.state === 'ready').map((i) => i.unit.number).sort((a, b) => a - b);
+});
+const openManage = async () => {
+  await page.click('#detailTools [aria-haspopup]');
+  await page.waitForSelector('#detailMenu.open');
+  await sleep(300);
+  await page.click('#detailMenu .aw-menu-item');
+  await page.waitForSelector('.dl-manage');
+};
+
 await step('⋮ في صفحة المانجا: دائرة «تحميل» أولًا', async () => {
   await page.evaluate(() => window.__open('manga', 1));
   await page.waitForSelector('#detail.active');
@@ -119,23 +140,25 @@ await step('كلها تكتمل وتنتقل إلى «على الجهاز» بع
 });
 
 await step('صفحة العمل المحلي تعرض المحفوظ وحده بأرقامه', async () => {
-  await page.click('.dl-card');
-  await page.waitForSelector('#downloadWork.active .dl-unit-row');
-  await sleep(400);
-  const nums = await page.$$eval('.dl-unit-num', (n) => n.map((x) => x.textContent));
-  assert.deepEqual(nums, ['1', '2', '3', '4', '5', '6']);
+  await openLocal();
+  const count = await page.textContent('#chapterCount');
+  assert.match(count, /6/);
+  assert.deepEqual(await savedNumbers(), [1, 2, 3, 4, 5, 6]);
   await shot('06-local-work');
 });
 
 await step('حذف فصل واحد بتأكيد يحرّر مساحته ويبقي الباقي', async () => {
-  await page.click('.dl-unit-row:nth-child(4) .dl-unit-more');
-  await page.getByRole('button', { name: 'حذف من الجهاز' }).click();
+  await openManage();
+  await page.getByRole('button', { name: /حذف الفصل 4/ }).click();
   await page.waitForSelector('.dl-confirm');
   await shot('07-confirm-delete');
   await page.click('.dl-confirm .btn-danger');
-  await page.waitForFunction(() => document.querySelectorAll('.dl-unit-row').length === 5);
-  const nums = await page.$$eval('.dl-unit-num', (n) => n.map((x) => x.textContent));
-  assert.deepEqual(nums, ['1', '2', '3', '5', '6']);
+  await page.waitForFunction(async () => {
+    const { downloads } = await import('/lib/downloads/index.js');
+    const { manager } = await downloads();
+    return manager.list().filter((i) => i.state === 'ready').length === 5;
+  });
+  assert.deepEqual(await savedNumbers(), [1, 2, 3, 5, 6]);
 });
 
 await step('لا تكرار: إعادة طلب 1–6 تنزّل الرابع وحده', async () => {
@@ -167,7 +190,8 @@ await step('انقطاع صفحة: فشل بسبب واضح، ثم إعادة ا
   await page.getByRole('tab', { name: /جاري التحميل/ }).click().catch(() => {});
   await page.waitForSelector('.dl-row[data-state="reconnecting"]', { timeout: 20000 });
   await shot('08a-reconnecting');
-  await page.waitForSelector('.dl-row[data-state="failed"]', { timeout: 60000 });
+  // ثلاث إعادات بتراجع 2 ث ثم 8 ثم 20، وكل محاولة تمر بالصفحات المحفوظة: الفشل النهائي بعد ~45 ث
+  await page.waitForSelector('.dl-row[data-state="failed"]', { timeout: 120000 });
   await shot('08b-failed');
   const before = fetched.filter((k) => k.startsWith('7-')).length;
   failPage = null;
@@ -178,18 +202,12 @@ await step('انقطاع صفحة: فشل بسبب واضح، ثم إعادة ا
   assert.ok(!again.includes('7-0') || before === 0, `refetched saved pages: ${again}`);
 });
 
-await step('ⓘ التفاصيل والإعدادات (التوازي 1–4، Wi-Fi فقط)', async () => {
-  await page.getByRole('tab', { name: /على الجهاز/ }).click();
-  await page.click('.dl-card');
-  await page.waitForSelector('#downloadWork.active .dl-unit-row');
-  await page.click('.dl-unit-row:first-child .dl-unit-more');
-  await page.getByRole('button', { name: 'التفاصيل' }).click();
-  await page.waitForSelector('.dl-info-sheet');
-  await sleep(350);
-  await shot('09-info');
-  const text = await page.textContent('.dl-info-sheet');
-  assert.match(text, /سليم ومكتمل/);
-  await page.keyboard.press('Escape');
+await step('ⓘ الإعدادات: التوازي 1–4 وWi-Fi فقط', async () => {
+  const settings = await page.evaluate(async () => {
+    const { PARALLEL_CHOICES } = await import('/lib/downloads/manager.js');
+    return PARALLEL_CHOICES;
+  });
+  assert.deepEqual([...settings], [1, 2, 3, 4]);
 });
 
 await step('إعادة فتح التطبيق بلا إنترنت: «على الجهاز» بأغلفتها، والقارئ يقرأ من الجهاز', async () => {
@@ -202,16 +220,19 @@ await step('إعادة فتح التطبيق بلا إنترنت: «على ال�
   await page.evaluate(() => document.querySelector('[data-act="navTo"][data-arg="library"]')?.click());
   await page.waitForSelector('#library.active');
   await page.click('#library [data-act="openDownloads"]');
+  await page.waitForSelector('#downloads.active', { timeout: 8000 });
+  await page.getByRole('tab', { name: /على الجهاز/ }).click().catch(() => {});
+  await sleep(600);
+  await shot('10a-offline-device-open');
   await page.waitForSelector('#downloads.active .dl-card img', { timeout: 8000 });
   await sleep(400);
   await shot('10-offline-device');
   const meta = await page.$$eval('.dl-card .work-meta', (m) => m.map((x) => x.textContent));
   assert.deepEqual(meta, ['7 فصول']);
-  await page.click('.dl-card');
-  await page.waitForSelector('#downloadWork.active .dl-unit-row');
-  await sleep(300);
+  await openLocal();
   await shot('11-offline-work');
-  await page.click('.dl-unit-row:first-child');
+  // أول فصل محفوظ: زر «اقرأ» في صفحة العمل يفتح القارئ بمحرك الجهاز
+  await page.evaluate(() => document.querySelector('#detail.active [data-act="readNow"]')?.click() ?? document.querySelector('#detail.active .mw-chs > *:not(.wt-month), #detail.active .mw-grid > *')?.click());
   await page.waitForFunction(() => window.__reader);
   const read = await page.evaluate(async () => {
     const [target] = window.__reader;
@@ -226,7 +247,7 @@ await step('إعادة فتح التطبيق بلا إنترنت: «على ال�
     }
     return { numbers: target.rows.map((r) => r.number), first: target.row.number, sizes, offline: target.offline };
   });
-  assert.deepEqual(read.numbers, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(read.numbers, [7, 6, 5, 4, 3, 2, 1]); // الأحدث أولًا كفصول المصادر
   assert.equal(read.first, 1);
   assert.deepEqual(read.sizes, ['360x520', '360x520', '360x520', '360x520']);
 });

@@ -208,6 +208,28 @@ describe('download manager', () => {
     expect(m.get(item.id)).toMatchObject({ state: 'failed', error: { code: 'NETWORK' } });
   });
 
+  it('a page that always fails ends in failure even though saved pages report progress on every retry', async () => {
+    const timers = { setTimeout: (fn) => { queueMicrotask(fn); return 1; }, clearTimeout: () => {} };
+    // كل محاولة تستأنف من الصفحتين المحفوظتين (تقدّم بنفس البايتات) ثم تسقط في الصفحة الثالثة
+    const stuck = { run: vi.fn(async (_item, ctl) => { ctl.progress({ bytes: 200, pagesDone: 2, pagesTotal: 4 }); const e = new Error('reset'); e.code = 'NETWORK'; e.retryable = true; throw e; }), remove: vi.fn() };
+    const { m } = make({ manga: stuck, timers, parallel: 1 });
+    const { added: [item] } = await m.enqueue([mangaSpec(1)]);
+    await flush(60);
+    expect(stuck.run).toHaveBeenCalledTimes(4);
+    expect(m.get(item.id)).toMatchObject({ state: 'failed', error: { code: 'NETWORK' } });
+  });
+
+  it('real progress past the last drop earns the retries back', async () => {
+    const timers = { setTimeout: (fn) => { queueMicrotask(fn); return 1; }, clearTimeout: () => {} };
+    let bytes = 0;
+    const flaky = { run: vi.fn(async (_item, ctl) => { bytes += 100; ctl.progress({ bytes }); if (bytes < 600) { const e = new Error('reset'); e.code = 'NETWORK'; e.retryable = true; throw e; } return { bytes, storage: { bytes } }; }), remove: vi.fn() };
+    const { m } = make({ manga: flaky, timers, parallel: 1 });
+    const { added: [item] } = await m.enqueue([mangaSpec(1)]);
+    await flush(80);
+    expect(flaky.run).toHaveBeenCalledTimes(6);
+    expect(m.get(item.id).state).toBe('ready');
+  });
+
   it('waits for Wi-Fi when asked, and says so', async () => {
     let metered = true;
     let onChange = () => {};
@@ -347,5 +369,16 @@ describe('video route resolution', () => {
     await resolveRoutes(engine, { copies: [], episode: 1 }, { settleMs: 10_000, onRoutes: (routes) => seen.push(routes.filter((r) => r.state === 'READY').map((r) => r.id).sort().join(',')) });
     expect(seen[0]).toBe('fast');
     expect(seen.at(-1)).toBe('fast,slow');
+  });
+});
+
+describe('on-device chapters', () => {
+  it('are listed newest first like source chapters, whatever the download order', async () => {
+    const { localRows } = await import('./local-reader.js');
+    const { startChapter } = await import('../../v35/reading.js');
+    const item = (n) => ({ id: `dl_${n}x`, unit: { key: `n:${n}`, number: n }, request: { chapter: { url: `/c/${n}` } } });
+    const rows = localRows([1, 2, 3, 5, 6, 4, 7].map(item));
+    expect(rows.map((r) => r.number)).toEqual([7, 6, 5, 4, 3, 2, 1]);
+    expect(startChapter(rows, () => false).number).toBe(1);
   });
 });

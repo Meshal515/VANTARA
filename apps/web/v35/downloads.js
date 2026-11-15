@@ -1006,9 +1006,17 @@ export function createDownloadsUI(deps) {
     });
   }).catch(() => {});
 
+  /** رجوع إلى الصفحة بلا open (زر الرجوع): الاشتراك والرسم من الحالة الحالية. */
+  function resume() {
+    if (!ctx) return;
+    subscribe();
+    render({ keepScroll: true });
+  }
+
   return {
     open,
     leave,
+    resume,
     openWork,
     manage,
     openDownloadSheet,

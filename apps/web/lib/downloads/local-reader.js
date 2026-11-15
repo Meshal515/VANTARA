@@ -7,7 +7,10 @@
 export const LOCAL_PREFIX = 'local:';
 
 export function localRows(items) {
-  return items.map((item) => ({
+  // الأحدث أولًا كفصول المصادر: صفحة العمل و«ابدأ القراءة» (startChapter) تفترضان هذا الترتيب، وترتيب
+  // التنزيل (1، 2، 3، 5، 6، 4، 7) كان يبدأ القراءة من آخر فصل
+  const ordered = [...items].sort((a, b) => (Number(b.unit.number) || 0) - (Number(a.unit.number) || 0));
+  return ordered.map((item) => ({
     sourceId: `${LOCAL_PREFIX}${item.id}`,
     chapter: { ...(item.request?.chapter ?? {}), url: item.request?.chapter?.url ?? item.unit.key },
     number: item.unit.number,
