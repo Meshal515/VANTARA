@@ -111,10 +111,12 @@ it('hands Android the room screen art and the invitees with their pictures', asy
   const friends = () => [{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }];
   const resolveArtImpl = async (m) => ({ banner: 'https://img/5.jpg', logo: 'https://logo.png', title: m.title, episodeTitle: 'Ep' });
   const hub=createTogether({sync:{},baseUrl:()=> 'https://sync.test',joinRoomImpl:()=>room,openMedia:vi.fn(),toast:vi.fn(),friends,resolveArtImpl});
-  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',title:'Frieren',episode:5}),mode:'sync'});
+  hub.joinByCode('ABCDEF',{media_json:JSON.stringify({seriesRef:'anime:42',kind:'anime',title:'Frieren',episode:5,rating:8.7,duration:'43 دقيقة'}),mode:'sync'});
   await Promise.resolve(); await Promise.resolve();
   const cfg = hub.handOff('anime:42');
   expect(cfg).toMatchObject({ kindText: 'أنمي', title: 'Frieren', banner: 'https://img/5.jpg', logo: 'https://logo.png', episodeTitle: 'Ep' });
+  // تقييم الحلقة ومدتها نصان للمشغّل الأصلي (String في TogetherLaunch)، والتقييم برقم عشري واحد
+  expect(cfg).toMatchObject({ rating: '8.7', duration: '43 دقيقة' });
   expect(cfg.invitees).toEqual([{ userId: 'u2', displayName: 'دحمي', avatarKey: '/avatars/d7m.webp' }, { userId: 'u3', displayName: 'صديق', avatarKey: null }]);
 });
 

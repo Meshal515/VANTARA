@@ -2353,6 +2353,12 @@ export function createCinema(deps) {
             cover: m.poster ?? null,
             format: m.type === 'series' ? 'series' : 'movie',
             banner: thumb ?? m.background ?? null,
+            // خلفية الغرفة بنر العمل نفسه، وصورة الحلقة لزر «البدء». بدون backdrop كانت الغرفة تأخذ
+            // banner (صورة الحلقة) خلفية لها، لأن banner هو الاحتياط الوحيد عند غياب fanart الأنمي
+            backdrop: m.background ?? null,
+            episodeImage: thumb ?? null,
+            rating: (series ? epMeta?.rating : m.rating) ?? null,
+            duration: runtimeAr(m.runtime),
             logo: m.logo ?? null,
             episodeTitle: m.type === 'series' ? epMeta?.title ?? null : null,
             episode: togetherEp,
