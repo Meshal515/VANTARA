@@ -29,9 +29,10 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
+import { readerEngine } from '../lib/reader-engine.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
@@ -2819,7 +2820,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (warmKey && warmKey !== state.warmKey && available()) {
       state.warmKey = warmKey;
       clearTimeout(state.warmTimer);
-      state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
+      state.warmTimer = setTimeout(() => warmChapter(readerEngine, next), 600);
     }
     paintProgress(w, readCount, counted.length);
     paintStats(w);
@@ -3636,6 +3637,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sources: async () => (w._editions ?? []).filter((e) => e.chapters?.length).map((e) => ({ id: e.sourceId, name: displayName(e.label, e.sourceId) + (isFiller(e.sourceId) ? ' · إنجليزي' : ''), note: `${e.chapters.length}` })),
       build: async (list, choice) => {
         const manual = choice.mode === 'manual' ? new Map(editionRows(w, choice.sourceId).map((r) => [chapterKeyOf(ref, r), r])) : null;
+        // الذكي: نفس الفصل (بالرقم) عند نسخ العمل الأخرى، بترتيب ثقة المصادر. فصل بلا صفحات أو مصدر رفضه
+        // يُكمل من غيره بدل أن يفشل «المصدر رفض الطلب» وعند غيره الفصل كاملًا (كما يفعل القارئ)
+        const alternatesOf = (row) => {
+          if (manual || !Number.isFinite(row?.number) || row.number < 0) return [];
+          return (w._editions ?? [])
+            .filter((e) => e.sourceId !== row.sourceId)
+            .map((e) => editionRows(w, e.sourceId).find((r) => r.number === row.number))
+            .filter((r) => r?.chapter)
+            .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))
+            .slice(0, 4)
+            .map((r) => ({ sourceId: r.sourceId, chapter: r.chapter, sourceName: displayName(r.label, r.sourceId) }));
+        };
         const specs = [];
         for (const u of list) {
           const row = manual ? manual.get(u.key) : u.row;
@@ -3645,7 +3658,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
             work,
             unit: { key: u.key, number: u.number, title: u.title },
             source: { mode: choice.mode, sourceId: row.sourceId, sourceName: choice.sourceName ?? displayName(null, row.sourceId) },
-            request: { sourceId: row.sourceId, chapter: row.chapter },
+            request: { sourceId: row.sourceId, chapter: row.chapter, alternates: alternatesOf(row) },
           });
         }
         if (!specs.length) throw new Error(manual ? 'المصدر المختار لا يحمل هذه الفصول' : 'لا فصول قابلة للتنزيل');

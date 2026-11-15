@@ -164,6 +164,14 @@ export function createScheduler({ run, concurrency = 3, backgroundSlots = 1 }) {
         pump();
       }
     },
+    /**
+     * ينسى نتيجة منتهية: رابط صورة نجح جلبه ثم فشل عرضه (ملف كاش مسحه النظام، Blob حُرِّر، ملف مبتور)
+     * كان يبقى محفوظًا فتعيد كل محاولة الرابط الميت نفسه. ما زال يعمل لا يُلمس.
+     */
+    forget(key) {
+      const job = jobs.get(key);
+      if (job?.done) jobs.delete(key);
+    },
     has: (key) => jobs.has(key),
     isDone: (key) => jobs.get(key)?.done === true,
     cancel(pred) {

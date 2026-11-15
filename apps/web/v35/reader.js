@@ -58,8 +58,24 @@ const el = (tag, cls, text) => {
 // ── كاش الجلسة: يعيش بين فتحات القارئ ──
 // قائمة صفحات الفصل، وصور الصفحات (وعود بروابطها). الفصل الذي جُهّز مسبقًا
 // يُقرأ من هنا بلا طلب جديد، والرجوع لفصلٍ قرأته قبل قليل فوري.
-const pageLists = new Map();
-let scheduler = null;
+// كاش لكل محرك: محرك المصادر، ومحرك «على الجهاز» المحلي، ومحرك هجين يقرأ المحمّل أولًا. كانت جدولةٌ واحدة
+// للوحدة تلتقط **أول** محرك يُفتح به القارئ: فصل من الإنترنت ثم فصل محمّل ⇒ صور المحمّل تُطلب من محرك
+// الإضافات بمعرّف «local:» فتفشل كل صفحة («التحميل ينجح والصفحات لا تظهر»)، والعكس يكسر القراءة من الإنترنت.
+const caches = new WeakMap();
+function cacheOf(engine) {
+  let c = caches.get(engine);
+  if (!c) {
+    c = {
+      pageLists: new Map(),
+      scheduler: createScheduler({
+        concurrency: 5,
+        run: async (_key, { sourceId, page }) => (await engine.pageImage(sourceId, page)).src,
+      }),
+    };
+    caches.set(engine, c);
+  }
+  return c;
+}
 const MAX_CACHED_IMAGES = 420;
 const MAX_CACHED_LISTS = 24;
 
@@ -73,13 +89,10 @@ const chapterId = (row) => `${row.sourceId}|${row.chapter?.url ?? ''}|${row.chap
 const imageKey = (row, index) => `${chapterId(row)}#${index}`;
 
 function ensureScheduler(engine) {
-  scheduler ??= createScheduler({
-    concurrency: 5,
-    run: async (_key, { sourceId, page }) => (await engine.pageImage(sourceId, page)).src,
-  });
-  return scheduler;
+  return cacheOf(engine).scheduler;
 }
 function sharedPages(engine, row) {
+  const { pageLists } = cacheOf(engine);
   const id = chapterId(row);
   let promise = pageLists.get(id);
   if (!promise) {
@@ -126,7 +139,7 @@ export function warmChapter(engine, row, images = 3) {
  */
 export function openSmartReader(deps, ctx) {
   const { sync, engine, api } = deps;
-  ensureScheduler(engine);
+  const scheduler = ensureScheduler(engine);
 
   const settings = loadSettings();
   const sequence = chapterSequence(ctx.rows?.length ? ctx.rows : [ctx.row]);
@@ -778,6 +791,8 @@ export function openSmartReader(deps, ctx) {
       tl.onImage(seg, index);
     } catch (error) {
       if (error?.cancelled || token !== state.token) return;
+      // نتيجة الجلب نجحت والعرض فشل: الإعادة تجلب من جديد لا الرابط الميت نفسه
+      scheduler.forget(imageKey(row, index));
       // مرة ثانية بهدوء: انقطاعٌ لحظي لا يستحق رسالة
       if (!slot.retried) {
         slot.retried = true;
@@ -821,6 +836,7 @@ export function openSmartReader(deps, ctx) {
         return true;
       } catch (error) {
         if (error?.cancelled) return false;
+        scheduler.forget(imageKey(alt, index));
       }
     }
     return false;
