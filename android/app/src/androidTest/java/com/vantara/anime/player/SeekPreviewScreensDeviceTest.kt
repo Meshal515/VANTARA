@@ -19,6 +19,7 @@ import com.vantara.anime.stream.PreparedEpisode
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,7 +73,14 @@ class SeekPreviewScreensDeviceTest {
         // مشاهدة حقيقية ~25 ث حتى تُلتقط إطارات المشاهدة
         val end = SystemClock.elapsedRealtime() + 40_000
         while (SystemClock.elapsedRealtime() < end && !(field<Boolean>("firstFrameShown"))) Thread.sleep(250)
-        Thread.sleep(25_000)
+        // لوحة القصة: 10 إطارات على الأقل للحلقة (كل دقيقتين على الأكثر) تُجهَّز في الخلفية والمشاهدة مستمرة
+        val preview0 = field<SeekPreview>("seekPreview")
+        fun frameCount(): Int { var n = 0; instrumentation.runOnMainSync {
+            n = (SeekPreview::class.java.getDeclaredField("frames").apply { isAccessible = true }.get(preview0) as Map<*, *>).size }; return n }
+        val storyBy = SystemClock.elapsedRealtime() + 90_000
+        while (SystemClock.elapsedRealtime() < storyBy && frameCount() < 12) Thread.sleep(500)
+        File(out, "seek-00-frames.txt").writeText("frames=${frameCount()}")
+        assertTrue("لوحة القصة جاهزة قبل السحب (${frameCount()} إطار)", frameCount() >= 10)
         instrumentation.runOnMainSync {
             PlayerActivity::class.java.getDeclaredMethod("setControls", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(activity, true)
         }
@@ -87,7 +95,14 @@ class SeekPreviewScreensDeviceTest {
         }
         touch(MotionEvent.ACTION_DOWN, 0.42f)
         assertEquals("المربع يظهر مع بداية السحب", View.VISIBLE, preview.view.visibility)
-        shot("seek-01-unwatched-42pct", 3_500)
+        shot("seek-01-unwatched-42pct", 700) // بلا انتظار: إطار لوحة القصة فوري
+        // بلاغ المالك: الإصبع ثابت طويلًا فتختفي الأدوات ويبقى المربع وحده. الآن لا تختفي أثناء السحب
+        Thread.sleep(7_000)
+        val controls = field<View>("controls")
+        assertEquals("الأدوات باقية أثناء السحب", View.VISIBLE, controls.visibility)
+        assertTrue("الأدوات غير شفافة أثناء السحب", controls.alpha > 0.9f)
+        assertEquals("المربع باقٍ مع الأدوات", View.VISIBLE, preview.view.visibility)
+        shot("seek-01b-held-7s", 100)
         for (i in 1..12) { touch(MotionEvent.ACTION_MOVE, 0.42f + i * 0.03f); Thread.sleep(40) }
         shot("seek-02-unwatched-78pct", 3_500)
         for (i in 1..12) { touch(MotionEvent.ACTION_MOVE, 0.78f - i * 0.0625f); Thread.sleep(40) }

@@ -373,7 +373,9 @@ class VSheet(private val host: FrameLayout) {
             scrim = s
             panel = p
             p.translationX = width.toFloat() + dp(12)
-            p.animate().translationX(0f).setDuration(240).setInterpolator(DecelerateInterpolator(2f)).start()
+            settleAt = android.os.SystemClock.uptimeMillis() + 260
+            // طبقة GPU طوال الانزلاق: الورقة تُرسم مرة وتتحرك صورة، لا إعادة رسم لكل الصفوف في كل إطار
+            p.animate().translationX(0f).setDuration(240).setInterpolator(DecelerateInterpolator(2f)).withLayer().start()
             s.animate().alpha(1f).setDuration(200).start()
             return
         }
@@ -389,8 +391,23 @@ class VSheet(private val host: FrameLayout) {
         scrim = s
         panel = p
         p.translationY = h * 0.6f
-        p.animate().translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
+        settleAt = android.os.SystemClock.uptimeMillis() + 280
+        p.animate().translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).withLayer().start()
         s.animate().alpha(1f).setDuration(200).start()
+    }
+
+    /**
+     * تحديث مجمّع للمحتوى الذي يتغيّر وحده (سيرفرات تصل تباعًا): بناء واحد كل 250ms على الأكثر، ولا بناء أثناء انزلاق
+     * الورقة. كان كل سيرفر يصل يعيد بناء القائمة كاملة وسط الحركة فتتجمد أجزاء من الثانية (ملاحظة المالك 15 نوفمبر).
+     */
+    private var settleAt = 0L
+    private var refreshQueued = false
+    private val queuedRefresh = Runnable { refreshQueued = false; refresh() }
+    fun refreshSoon() {
+        if (body == null || refreshQueued) return
+        refreshQueued = true
+        val wait = (settleAt - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0L) + 250L
+        host.postDelayed(queuedRefresh, wait)
     }
 
     /** يعيد بناء المحتوى (سيرفر جهز، حالة تغيّرت) بلا إغلاق ولا قفزة. */
@@ -402,6 +419,7 @@ class VSheet(private val host: FrameLayout) {
     }
 
     fun close(animated: Boolean = true) {
+        host.removeCallbacks(queuedRefresh); refreshQueued = false
         val p = panel ?: return
         val s = scrim
         panel = null
@@ -412,8 +430,8 @@ class VSheet(private val host: FrameLayout) {
         if (!animated) {
             host.removeView(p); s?.let(host::removeView)
         } else {
-            if (side) p.animate().translationX(p.width.toFloat() + dp(12)).setDuration(180).withEndAction { host.removeView(p) }.start()
-            else p.animate().translationY(p.height.toFloat()).setDuration(200).withEndAction { host.removeView(p) }.start()
+            if (side) p.animate().translationX(p.width.toFloat() + dp(12)).setDuration(180).withLayer().withEndAction { host.removeView(p) }.start()
+            else p.animate().translationY(p.height.toFloat()).setDuration(200).withLayer().withEndAction { host.removeView(p) }.start()
             s?.animate()?.alpha(0f)?.setDuration(200)?.withEndAction { host.removeView(s) }?.start()
         }
         onClose?.invoke()
