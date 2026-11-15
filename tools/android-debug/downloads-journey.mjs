@@ -109,7 +109,9 @@ const AE = 'Capacitor.Plugins.AnimeEngine', VR = 'Capacitor.Plugins.VantaraRunti
 try {
   await step('mountShell', () => js(`(async()=>{window.__uiErrors=[];
     addEventListener('error',e=>__uiErrors.push(String(e.error?.stack||e.message)));addEventListener('unhandledrejection',e=>__uiErrors.push(String(e.reason?.stack||e.reason)));
-    const sync={user:null,rows:()=>[],row:()=>null,onChange:()=>()=>{},enqueue:()=>{},translation:async()=>({status:200,body:{rows:[]}}),latestSnapshots:async()=>({sources:[]}),
+    // حساب تجريبي محايد (لا حساب حقيقي): تظهر أزرار الحساب كما عند المالك
+    const tables={work_views:[],library:[],progress:[],collections:[],completions:[],ratings:[],notifications:[],chapter_marks:[],settings:[],accounts:[{user_id:'qa',display_name:'QA',created_at:1}]};
+    const sync={user:{userId:'qa',displayName:'QA'},ready:Promise.resolve(),rows:(t,p)=>(tables[t]??[]).filter(p||(()=>true)),row:(t,id)=>(tables[t]??[]).find(r=>r.id===id||r.user_id===id)??null,onChange:()=>()=>{},enqueue:()=>Promise.resolve(),refreshSession:async()=>{},attachNativeLinkBridge:()=>{},translation:async()=>({status:200,body:{rows:[]}}),latestSnapshots:async()=>({sources:[]}),
       presence:async()=>[],stats:async()=>({}),insights:async()=>({}),topWorks:async()=>[],pendingDevices:async()=>[],privacyCapability:async()=>({}),authorizationHeader:null};
     const engine=await import('/lib/extension-engine.js');
     const {openSmartReader}=await import('/v35/reader.js');
@@ -186,34 +188,51 @@ try {
     for (const t = Date.now(); Date.now() - t < 20 * 60000; await delay(4000)) {
       const list = (await dlState()).filter((i) => i.unit != null && !i.pagesTotal);
       last = list[0];
-      if (last?.state === 'downloading' && shots < 3 && last.bytes > 0) { await shot(`anime-queue-${++shots}`); }
+      if (last?.state === 'downloading' && shots < 2 && last.bytes > 0) {
+        await shot(`anime-queue-${++shots}`);
+        if (shots === 2 && await js(`Boolean(document.querySelector('#downloads .dl-row .dl-info'))`)) {
+          await click('#downloads .dl-row .dl-info');
+          await wait(`document.querySelector('.dl-info-sheet')`, 'info sheet');
+          await shot('anime-queue-info');
+          await js(`document.querySelector('.sheet-backdrop.show')?.click()`);
+          await delay(600);
+        }
+      }
       if (last && (last.state === 'ready' || last.state === 'failed' || last.state === 'no_space')) break;
     }
     if (last?.state !== 'ready') { await shot('anime-queue-end'); throw new Error(JSON.stringify(last)); }
     return last;
   });
 
-  await step('animeOnDeviceAndInfo', async () => {
+  await step('animeOriginalPageFromDevice', async () => {
     await js(`[...document.querySelectorAll('#downloads .library-tab')].find(b=>b.textContent.includes('على الجهاز')).click()`);
-    await wait(`document.querySelector('#downloads .dl-card')`, 'device card');
+    await wait(`document.querySelector('#downloads .dl-card img')`, 'device card');
     await shot('device-grid');
     await click('#downloads .dl-card');
-    await wait(`document.querySelector('#downloadWork.active .dl-unit-row')`, 'local work page');
-    await shot('anime-local-work');
-    await click('#downloadWork.active .dl-unit-more');
-    await js(`[...document.querySelectorAll('.sheet-item')].find(b=>b.textContent.includes('التفاصيل')).click()`);
-    await wait(`document.querySelector('.dl-info-sheet')`, 'info sheet');
-    await shot('anime-info');
-    const text = await js(`document.querySelector('.dl-info-sheet').innerText`);
-    await js(`document.querySelector('[data-act="sheetBackdrop"], #sheet')?.click()`).catch(() => {});
-    return { info: text.slice(0, 600) };
+    // صفحة العمل الأصلية نفسها، بالحلقات المحمّلة وحدها
+    await wait(`document.querySelector('#anime.active .an-er')`, 'original anime page from device', 60000);
+    await delay(2500);
+    await shot('anime-original-from-device');
+    const eps = await js(`[...document.querySelectorAll('#anime.active .an-er')].map(r=>r.dataset.ep)`);
+    await js(`document.querySelector('#anime.active .an-er')?.scrollIntoView({block:'center'})`);
+    await delay(900);
+    await shot('anime-original-episodes');
+    await js(`window.scrollTo(0,0)`);
+    await click('#anime.active .aw-tools [aria-haspopup]');
+    await wait(`document.querySelector('#anime.active .aw-menu.open')`, 'menu');
+    await click('#anime.active .aw-menu.open .aw-menu-item');
+    await wait(`document.querySelector('.dl-manage')`, 'manage sheet');
+    await shot('anime-device-manage');
+    await js(`document.querySelector('.sheet-backdrop.show')?.click()`);
+    await delay(600);
+    return { episodesShown: eps };
   });
 
   await step('animePlaysOfflineFromFile', async () => {
     await airplane(true);
     await delay(1500);
     await shot('airplane-local-work');
-    await js(`(()=>{document.querySelector('.sheet-backdrop.show')?.click();document.querySelector('#downloadWork.active .dl-unit-row').click();return true})()`);
+    await js(`(()=>{document.querySelector('.sheet-backdrop.show')?.click();document.querySelector('#anime.active .an-er-main').click();return true})()`);
     let player = false;
     for (const t = Date.now(); Date.now() - t < 30000 && !player; await delay(1000)) {
       player = /PlayerActivity/.test(adb('shell', 'dumpsys', 'activity', 'activities').split('\n').filter((l) => /topResumedActivity|mResumedActivity/.test(l)).join(' '));
@@ -287,10 +306,14 @@ try {
     await wait(`document.querySelectorAll('#downloads .dl-card').length>=2`, 'two works on device');
     await shot('device-grid-two');
     await airplane(true);
-    await js(`[...document.querySelectorAll('#downloads .dl-card')].find(c=>!/حلقة/.test(c.textContent)).click()`);
-    await wait(`document.querySelector('#downloadWork.active .dl-unit-row')`, 'manga local work');
-    await shot('manga-local-work');
-    await click('#downloadWork.active .dl-unit-row');
+    await js(`[...document.querySelectorAll('#downloads .dl-card')].find(c=>/فصل/.test(c.textContent)).click()`);
+    await wait(`document.querySelector('#detail.active .mw-ch-open')`, 'original manga page from device', 60000);
+    await delay(2000);
+    await shot('manga-original-from-device');
+    await js(`document.querySelector('#detail.active .mw-ch')?.scrollIntoView({block:'center'})`);
+    await delay(800);
+    await shot('manga-original-chapters');
+    await click('#detail.active .mw-ch-open');
     await wait(`document.querySelectorAll('.rd img').length>0 && [...document.querySelectorAll('.rd img')].some(i=>i.complete&&i.naturalWidth>0)`, 'reader pages offline', 60000);
     await delay(1500);
     await shot('manga-reader-offline');
