@@ -49,7 +49,10 @@ class CloudStreamProvider(private val context:Context,private val loader:ClassLo
         val http=access as? RuntimeHttpAccess?:throw IOException("FULL_HTTP_UNSUPPORTED")
         NetworkBridge.install{request,follow->
             val bytes=request.body?.let{body->val buffer=okio.Buffer();body.writeTo(buffer);if(buffer.size>1024*1024)throw IOException("REQUEST_BODY_LIMIT");buffer.readByteArray()}
-            val answer=http.exchange(RuntimeHttpAccess.Request(request.url.toString(),request.method,request.headers.toMultimap(),bytes,follow))
+            // OkHttp keeps a body's media type on the body and adds the header only in its own BridgeInterceptor,
+            // after this application-level bridge: every provider POST reached the site as application/octet-stream
+            // (a CSRF/JSON endpoint such as WitAnime's /sources can refuse it). The body's own type goes as the header.
+            val answer=http.exchange(RuntimeHttpAccess.Request(request.url.toString(),request.method,BrokerResponses.headers(request),bytes,follow))
             BrokerResponses.convert(request,answer)
         }
         try {
