@@ -16,6 +16,8 @@ import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
 import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, progressRatio } from '../lib/downloads/units.js';
 import { glyph } from './icons.js';
+import { parseRelease } from '../addons/release-info.js';
+import { isTorrentRoute } from '../lib/route-family.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 
@@ -113,6 +115,8 @@ export function createDownloadsUI(deps) {
     if (view.tab === 'queue') nodes.push(queueView(pending));
     else nodes.push(deviceView(items));
     box.replaceChildren(...nodes);
+    // الشريط يُبنى فارغًا: يُملأ الآن لا عند أول تقدّم (كان زر «إيقاف الكل» يظهر بيضويًا فارغًا)
+    paintSummary();
     if (page && !keepScroll) page.scrollTop = view.scroll[view.tab] ?? 0;
   }
 
@@ -890,21 +894,27 @@ export function createDownloadsUI(deps) {
         main.append(name);
         if (data.sub) main.append(el('small', null, data.sub));
         b.append(main);
+        if (data.size) b.append(ltr(el, data.size, 'dl-source-size'));
         if (data.quality) b.append(ltr(el, data.quality, 'dl-source-q'));
         if (data.seeds != null) { const sw = el('span', 'dl-seeds'); sw.innerHTML = glyph('users', { size: 14 }); sw.append(ltr(el, String(data.seeds))); b.append(sw); }
         b.onclick = () => selectRow(b, data);
         return b;
       };
       /** صف سيرفر من مسار محرك التشغيل: التورنت باسم إصداره وحجمه وسربه. */
-      const routeRow = (r) => ({
-        route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
-        // التورنت: اسم الإصدار والحجم من وصف الإضافة (Torrentio وغيرها) بجانب الجودة والسرب
-        sub: r.type === 'torrent'
-          ? [String(r.label ?? '').split('\n').map((l) => l.trim()).find((l) => /\.(mkv|mp4|avi)$|\b(1080p|720p|2160p|x26[45]|HEVC)\b/i.test(l)) ?? 'تورنت', /💾\s*([\d.,]+\s*[GMK]B)/i.exec(r.label ?? '')?.[1]].filter(Boolean).join(' · ')
-          : (r.server && r.server !== r.sourceName ? r.server : null),
-        quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
-        seeds: r.type === 'torrent' ? Number(/👤\s*(\d+)/.exec(r.label ?? '')?.[1] ?? NaN) || 0 : null,
-      });
+      const routeRow = (r) => {
+        const torrent = isTorrentRoute(r);
+        // وصف التورنت بمحلّل ورقة التشغيل نفسه (الحجم والسرب واسم الإصدار) بأي صيغة تكتبها الإضافة
+        const info = torrent && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+        return {
+          route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
+          sub: torrent
+            ? (info?.filename ?? 'تورنت')
+            : (r.server && r.server !== r.sourceName ? r.server : null),
+          quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
+          seeds: torrent ? Number(info?.seeders) || 0 : null,
+          size: torrent ? info?.sizeLabel ?? null : null,
+        };
+      };
       async function loadSources() {
         const waiting = el('p', 'dl-hint', video ? 'نجهّز سيرفرات الحلقة…' : 'نقرأ المصادر…');
         sourceBox.replaceChildren(waiting);
@@ -921,9 +931,11 @@ export function createDownloadsUI(deps) {
             const list = el('div', 'dl-source-list');
             const onRoutes = (routes) => {
               if (!body.isConnected) return;
-              const fresh = routes.filter((r) => r.state === 'READY' && !shown.has(r.id)).sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0));
-              for (const r of fresh) {
-                const b = sourceRow(routeRow(r));
+              // الجودة أولًا، ثم السرب: المشاركون يصنعون سرعة التورنت (إصدار بمشاركَين بطيء مهما كانت جودته)
+              const fresh = routes.filter((r) => r.state === 'READY' && !shown.has(r.id)).map((r) => ({ r, row: routeRow(r) }))
+                .sort((x, y) => (y.r.quality ?? 0) - (x.r.quality ?? 0) || (y.row.seeds ?? 0) - (x.row.seeds ?? 0));
+              for (const { r, row } of fresh) {
+                const b = sourceRow(row);
                 shown.set(r.id, b);
                 list.append(b);
               }

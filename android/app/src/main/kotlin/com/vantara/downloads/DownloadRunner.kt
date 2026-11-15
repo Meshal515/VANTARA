@@ -38,8 +38,9 @@ class DownloadRunner(
             "TORRENT" -> torrentFile(job, dir, listener)
             else -> file(job, dir, listener)
         }
-        job = sidecars(job, dir, listener)
+        // الملف كامل: «يتحقق» من الآن، لا «يحمّل 100%» طوال جلب الترجمات والصوت الخارجي
         job = save(job.copy(state = "verifying"), listener)
+        job = sidecars(job, dir, listener)
         val main = job.main?.let { File(dir, it) }
         if (main == null || !main.isFile || main.length() <= 0) throw DownloadFailure("VERIFY", "الملف الرئيسي غير موجود بعد التنزيل")
         if (job.kind == "FILE") {

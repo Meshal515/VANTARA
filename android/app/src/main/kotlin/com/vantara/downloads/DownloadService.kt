@@ -143,10 +143,16 @@ class DownloadService : Service() {
         val providers = com.vantara.addons.SubtitleProviders.providers(job.subtitleProviders)
         if (providers.isEmpty() || com.vantara.addons.SubtitleProviders.videoId(job.subtitleIdentity, job.episode) == null) return emptyList()
         val client = com.vantara.addons.nativeAddonClient(this)
-        val found = providers.flatMap { p -> runCatching { com.vantara.addons.SubtitleProviders.discover(client, p, job.subtitleIdentity, job.episode, "download-${job.id}-${p.key}") }.getOrDefault(emptyList()) }
+        // مهلة كلية: الترجمات إضافة على حلقة اكتملت، فلا تُبقيها «تتحقق» دقائق بسبب إضافة بطيئة
+        val deadline = System.currentTimeMillis() + SUBTITLE_BUDGET_MS
+        val found = providers.flatMap { p ->
+            if (System.currentTimeMillis() > deadline) emptyList()
+            else runCatching { com.vantara.addons.SubtitleProviders.discover(client, p, job.subtitleIdentity, job.episode, "download-${job.id}-${p.key}") }.getOrDefault(emptyList())
+        }
         // العربية وحدها (قرار المالك): إضافة واحدة قد ترجع مئات الترجمات بكل اللغات؛ نحفظ حتى 20 عربية فقط
         val chosen = found.filter { it.lang == "ar" }.distinctBy { it.url }.take(20)
         return chosen.mapIndexedNotNull { i, t ->
+            if (System.currentTimeMillis() > deadline) return@mapIndexedNotNull null
             val text = runCatching { client.request(t.url, "download-${job.id}-sub-$i", fallbackCharset = if (t.lang == "ar") "windows-1256" else null) }.getOrNull()
             if (text.isNullOrBlank()) return@mapIndexedNotNull null
             val head = text.trimStart().take(40)
@@ -189,6 +195,7 @@ class DownloadService : Service() {
     companion object {
         private const val CHANNEL = "vantara.downloads.progress"
         private const val ONGOING_ID = 7401
+        private const val SUBTITLE_BUDGET_MS = 30_000L
         @Volatile private var instance: DownloadService? = null
         private val running = ConcurrentHashMap<String, Running>()
         private val pending = java.util.concurrent.ConcurrentLinkedQueue<DownloadJob>()
