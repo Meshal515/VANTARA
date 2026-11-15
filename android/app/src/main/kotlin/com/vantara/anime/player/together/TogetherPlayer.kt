@@ -100,6 +100,8 @@ class TogetherPlayer(
         fun serverLabel(): String? = sourceName()
         /** تقدّم تجهيز فيديوك الحقيقي 0..1 (مراحل المصدر والتورنت والمشغّل) لامتلاء الشعار ومراحل الغرفة. */
         fun loadProgress(): Float = 0f
+        /** المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): يُغلق المشغّل وتفتح الواجهة غرفة الموسم الجديد للاختيار. */
+        fun switchWork(key: String, label: String?) {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -302,6 +304,12 @@ class TogetherPlayer(
     }
 
     override fun onState(timeline: Timeline, by: String?) {
+        // عمل آخر (موسم ثانٍ مثلًا): لا يُقارن رقم الحلقة وحده، وإلا شغّل «الحلقة 1» من الموسم القديم
+        val prefix = timeline.mediaKey?.substringBeforeLast('#', "")?.takeIf { it.isNotEmpty() }
+        if (prefix != null && prefix != launch.mediaPrefix) {
+            if (synced || by == client.hostUserId) { ready = false; hooks.switchWork(timeline.mediaKey!!, timeline.mediaLabel) }
+            return
+        }
         val ep = episodeOf(timeline.mediaKey)
         // الحلقة التالية (أو أي حلقة اختارها المضيف): كل واحد يجهّزها بسيرفره
         if (ep != null && ep != hooks.episode()) {
@@ -607,6 +615,15 @@ class TogetherPlayer(
     fun panelClosed() { panelOpen = false }
 
     /** اختيار حلقة من ورقة المشغّل داخل غرفة متزامنة: المضيف ينقل الغرفة كلها، والصديق يُبلَّغ. منفصلة: تبديل محلي. */
+    /** الموسم من ورقة الحلقات: المضيف ينقل الغرفة كلها لأول حلقة في الموسم (`anime:<id>#1`)؛ الصديق يُبلَّغ. */
+    fun requestWork(prefix: String, label: String): Boolean {
+        if (!synced) return false
+        if (!client.isHost) { hooks.message("المضيف يختار الموسم"); return true }
+        if (prefix == launch.mediaPrefix) return true
+        client.command("load", 0.0, "$prefix#1", label)
+        return true
+    }
+
     fun requestEpisode(n: Int): Boolean {
         if (!synced) return false
         if (!client.isHost) { hooks.message("المضيف يختار الحلقة"); return true }

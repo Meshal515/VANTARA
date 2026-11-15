@@ -24,6 +24,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,7 +56,7 @@ class TogetherRoomScreensDeviceTest {
                 webSocket.send(JSONObject()
                     .put("t", "welcome").put("you", "host").put("proto", 2).put("now", now)
                     .put("room", JSONObject().put("hostUserId", "host").put("mode", "sync").put("control", "host").put("invited", JSONArray().put("friend")))
-                    .put("state", JSONObject().put("media", JSONObject().put("key", "anime:97940#2").put("kind", "anime").put("label", "Black Clover — الحلقة 2"))
+                    .put("state", JSONObject().put("media", JSONObject().put("key", "anime:20958#1").put("kind", "anime").put("label", "Attack on Titan Season 2 — الحلقة 1"))
                         .put("started", false).put("playing", false).put("pos", 0).put("at", now).put("rate", 1).put("seq", 0))
                     .put("roster", JSONArray().put(JSONObject().put("userId", "host").put("name", "أنت").put("host", true).put("state", "preparing").put("joinedAt", 1)))
                     .toString())
@@ -63,6 +64,10 @@ class TogetherRoomScreensDeviceTest {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val m = JSONObject(text)
                 if (m.optString("t") == "ping") webSocket.send(JSONObject().put("t", "pong").put("t0", m.opt("t0")).put("ts", System.currentTimeMillis()).toString())
+                // مثل RoomCore: أمر load من المضيف يُبثّ حالة جديدة للغرفة كلها (seq أعلى)
+                if (m.optString("t") == "cmd" && m.optString("op") == "load") webSocket.send(JSONObject().put("t", "state").put("by", "host")
+                    .put("state", JSONObject().put("media", m.optJSONObject("media")).put("started", false).put("playing", false).put("pos", 0)
+                        .put("at", System.currentTimeMillis().toDouble()).put("rate", 1).put("seq", 1)).toString())
             }
         }))
         server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
@@ -71,19 +76,20 @@ class TogetherRoomScreensDeviceTest {
         com.vantara.plugins.ensureEngineInjekt(context.applicationContext as android.app.Application)
         val engine = AnimeEngine.get(context)
         val now = System.currentTimeMillis()
-        fun candidate(id: String, source: String, server: String, quality: Int, label: String) = Candidate(
+        fun candidate(id: String, source: String, server: String, quality: Int, label: String, url: String = Uri.fromFile(video).toString()) = Candidate(
             id = id, sourceId = source, sourceName = source, server = server, host = "local.fixture",
-            url = Uri.fromFile(video).toString(), quality = quality, label = label, resolvedAt = now, expiresAt = now + 3_600_000,
+            url = url, quality = quality, label = label, resolvedAt = now, expiresAt = now + 3_600_000,
         )
-        val copies = listOf(SourceAnime(sourceId = "torrentio", url = "fixture://black-clover", title = "Black Clover"))
+        val copies = listOf(SourceAnime(sourceId = "torrentio", url = "fixture://attack-on-titan-s2", title = "Attack on Titan Season 2"))
         val session = PlaybackSession(emptyList(), engine.health)
-        val prep = PreparedEpisode(id = "room-shots", copies = copies, number = 2f, prefs = Preferences(), session = session, health = engine.health)
+        val prep = PreparedEpisode(id = "room-shots", copies = copies, number = 1f, prefs = Preferences(), session = session, health = engine.health)
+        // تورنت حقيقي الشكل (vantara-torrent:) لقسم «تورنت» ومؤشر السرب؛ لا يُشغَّل في الاختبار (لا تذكرة مسجّلة)
         prep.adopt("Torrentio", listOf(
-            candidate("t1", "Torrentio", "Torrentio 1080p", 1080, "Black Clover S01E02 1080p · 853 MB · 👤 156"),
-            candidate("t2", "Torrentio", "Torrentio 1080p HEVC", 1080, "Black Clover S01E02 HEVC · 180 MB · 👤 113"),
-            candidate("t3", "Torrentio", "Torrentio 720p", 720, "Black Clover S01E02 720p · 420 MB · 👤 23"),
+            candidate("t2", "Torrentio", "Torrentio 1080p", 1080, "Attack on Titan S02E01 1080p · 1.1 GB · 👤 212", "vantara-torrent://fixture-a/0"),
+            candidate("t3", "Torrentio", "Torrentio 720p", 720, "Attack on Titan S02E01 720p · 540 MB · 👤 7", "vantara-torrent://fixture-b/0"),
         ))
-        prep.adopt("AnimeKai", listOf(candidate("k1", "AnimeKai", "MegaUp", 1080, "مترجم عربي")))
+        prep.allowRuntimeCandidate("t2"); prep.allowRuntimeCandidate("t3")
+        prep.adopt("AnimeKai", listOf(candidate("t1", "AnimeKai", "MegaUp", 1080, "مترجم عربي"), candidate("k2", "AnimeKai", "MegaUp 720p", 720, "مترجم عربي")))
         prep.adopt("WitAnime", listOf(candidate("w1", "WitAnime", "StreamWish", 720, "مترجم عربي")))
         AnimeEngine::class.java.getDeclaredField("sessions").apply { isAccessible = true }.let {
             @Suppress("UNCHECKED_CAST") (it.get(engine) as MutableMap<String, PlaybackSession>)["room-shots"] = session
@@ -94,14 +100,14 @@ class TogetherRoomScreensDeviceTest {
 
         val together = JSONObject()
             .put("baseUrl", server.url("/").toString().trimEnd('/')).put("code", "SHOTS2").put("token", "fixture").put("mode", "sync")
-            .put("mediaPrefix", "anime:97940").put("kindText", "أنمي").put("title", "Black Clover")
-            .put("banner", "https://artworks.thetvdb.com/banners/series/331753/backgrounds/5f28da5d508c9.jpg")
-            .put("logo", "https://images.metahub.space/logo/medium/tt7441658/img")
-            .put("episodeImage", "https://artworks.thetvdb.com/banners/episodes/331753/6279072.jpg")
-            .put("episodeTitle", "The Boys` Promise").put("pick", true)
+            .put("mediaPrefix", "anime:20958").put("kindText", "أنمي").put("title", "Attack on Titan Season 2")
+            .put("banner", "https://artworks.thetvdb.com/banners/series/267440/backgrounds/5f8611eaa79ff.jpg")
+            .put("logo", "https://images.metahub.space/logo/medium/tt2560140/img")
+            .put("episodeImage", "https://artworks.thetvdb.com/banners/episodes/267440/5978808.jpg")
+            .put("episodeTitle", "Beast Titan").put("pick", true)
             .put("invitees", JSONArray().put(JSONObject().put("userId", "friend").put("displayName", "صديق")))
         val launch = PlayerActivity.Launch(
-            session = "room-shots", title = "Black Clover", animeId = "97940", episode = 2f, total = 170,
+            session = "room-shots", title = "Attack on Titan Season 2", animeId = "20958", episode = 1f, total = 12,
             copies = Json.encodeToString(ListSerializer(SourceAnime.serializer()), copies), together = together.toString(),
         )
         instrumentation.startActivitySync(PlayerActivity.intent(context, launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -128,11 +134,26 @@ class TogetherRoomScreensDeviceTest {
         val end = SystemClock.elapsedRealtime() + 8_000
         while (SystemClock.elapsedRealtime() < end) Thread.sleep(250)
         shot("room-01-pick")
-        call("showServers"); shot("room-02-servers")
+        // تقطيع الورقة: سيرفرات تصل تباعًا أثناء انزلاقها (كما في الواقع). أطول فجوة بين إطارين تُسجَّل
+        val gaps = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        var lastFrame = 0L
+        var measuring = true
+        val tickFrame = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(t: Long) { if (lastFrame > 0) gaps += (t - lastFrame) / 1_000_000; lastFrame = t; if (measuring) android.view.Choreographer.getInstance().postFrameCallback(this) }
+        }
+        instrumentation.runOnMainSync { android.view.Choreographer.getInstance().postFrameCallback(tickFrame) }
+        Thread.sleep(300); gaps.clear()
+        call("showServers")
+        for (i in 1..6) { Thread.sleep(60); prep.adopt("Late$i", listOf(candidate("late$i", "Late$i", "Late $i", 720, "مترجم عربي"))) }
+        Thread.sleep(900)
+        measuring = false
+        File(out, "room-02-sheet-frames.txt").writeText("frames=${gaps.size} maxGapMs=${gaps.maxOrNull()} over50ms=${gaps.count { it > 50 }} gaps=${gaps.joinToString(",")}")
+        shot("room-02-servers")
         field("serverMenu", "q"); refreshSheet(); shot("room-03-servers-quality-menu")
         field("serverMenu", null); field("serverSource", "Torrentio"); refreshSheet(); shot("room-04-servers-filtered")
+        field("serverSource", null); refreshSheet(); instrumentation.runOnMainSync { PlayerActivity::class.java.getDeclaredField("sheet").apply { isAccessible = true }.get(activity).let { it.javaClass.getDeclaredMethod("scrollTo", Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(it, 10_000) } }; shot("room-04b-servers-bottom")
         field("serverSource", null); back()
-        call("showEpisodes"); shot("room-05-episodes"); back()
+        call("showEpisodes"); shot("room-05-episodes", 6000); back() // ani.zip ثم الصور: وقت للشبكة قبل اللقطة
         // اختيار سيرفر: التجهيز ثم الجاهزية (البدء أزرق)
         instrumentation.runOnMainSync {
             val c = session.take("t1") ?: prep.candidate("t1")
@@ -141,7 +162,41 @@ class TogetherRoomScreensDeviceTest {
         }
         shot("room-06-preparing", 1200)
         shot("room-07-ready", 5000)
-        instrumentation.runOnMainSync { activity.finish() }
+
+        // المواسم (طلب المالك): «الحلقات» ← زر «الموسم» المنسدل بسلسلة AniList الحقيقية ← المضيف يختار موسمًا آخر
+        val events = java.util.concurrent.CopyOnWriteArrayList<Pair<String, JSONObject>>()
+        PlaybackEvents.events = { name, data -> events += name to data }
+        call("showEpisodes")
+        val seasonsBy = SystemClock.elapsedRealtime() + 20_000
+        fun seasonCount(): Int { var n = 0; instrumentation.runOnMainSync {
+            n = (PlayerActivity::class.java.getDeclaredField("seasons").apply { isAccessible = true }.get(activity) as? List<*>)?.size ?: -1 }; return n }
+        while (SystemClock.elapsedRealtime() < seasonsBy && seasonCount() < 0) Thread.sleep(250)
+        assertTrue("سلسلة المواسم من AniList (${seasonCount()})", seasonCount() >= 3)
+        shot("room-08-episodes-season-button", 1500)
+        // ضغطة حقيقية على زر «الموسم» (لا تعديل حقل): نفس مسار المستخدم
+        instrumentation.runOnMainSync {
+            val found = ArrayList<android.view.View>()
+            activity.window.decorView.findViewsWithText(found, "الموسم: ", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION)
+            found.firstOrNull { it.isClickable }?.performClick()
+        }
+        shot("room-09-seasons-menu", 1200)
+        var option: android.view.View? = null
+        instrumentation.runOnMainSync {
+            val found = ArrayList<android.view.View>()
+            activity.window.decorView.findViewsWithText(found, "الموسم 3", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION)
+            option = found.firstOrNull { it.isClickable }
+            option?.performClick()
+        }
+        assertTrue("خيار «الموسم 3» موجود في القائمة", option != null)
+        val movedBy = SystemClock.elapsedRealtime() + 8_000
+        while (SystemClock.elapsedRealtime() < movedBy && events.none { it.first == "togetherWork" }) Thread.sleep(150)
+        val moved = events.firstOrNull { it.first == "togetherWork" }?.second
+        PlaybackEvents.events = null
+        assertTrue("الغرفة انتقلت لموسم آخر وأُبلغت الواجهة ($moved)", moved != null && moved.optString("code") == "SHOTS2" &&
+            moved.optString("key").startsWith("anime:") && moved.optString("key").endsWith("#1") && !moved.optString("key").startsWith("anime:20958#"))
+        File(out, "room-10-season-switch.txt").writeText(moved.toString())
+        Thread.sleep(800)
+        assertTrue("المشغّل أُغلق لتفتح الواجهة غرفة الموسم الجديد", activity.isFinishing || activity.isDestroyed)
         server.shutdown()
     }
 

@@ -163,6 +163,7 @@ class PlayerActivity : Activity() {
     private lateinit var timeNow: TextView
     private lateinit var timeTotal: TextView
     private lateinit var bar: TimeBar
+    private lateinit var seekPreview: SeekPreview
     private lateinit var playButton: ImageView
     private lateinit var fitButton: ImageView
     private lateinit var nextButton: ImageView
@@ -652,6 +653,11 @@ class PlayerActivity : Activity() {
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
+            // موسم آخر اختاره المضيف: الواجهة تفتح غرفة الموسم الجديد (الكل يختار سيرفره من جديد)
+            override fun switchWork(key: String, label: String?) {
+                PlaybackEvents.emit("togetherWork", JSONObject().put("code", cfg.code).put("mode", cfg.mode).put("key", key).put("label", label ?: ""))
+                finish()
+            }
             // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
             override fun loadProgress(): Float {
                 if (current == null) return 0f
@@ -682,7 +688,7 @@ class PlayerActivity : Activity() {
         sessionId = id
         session = engine.session(id)
         prep = engine.prepared(id)
-        unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refresh() } }
+        unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refreshSoon() } }
         expanded = false
         titleView.text = launch.title
         episodeView.text = episodeLabel()
@@ -868,6 +874,11 @@ class PlayerActivity : Activity() {
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
         val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
+        // المعاينة: مصدر مستقل بلا قياس شبكة (لا تُحسب حركتها على سرعة المشاهدة)، والتورنت بإطارات المشاهدة وحدها
+        // المعاينة: مصدر مستقل بلا قياس شبكة؛ التورنت بقارئ معاينة لا يحرّك نافذة المشاهدة
+        if (::seekPreview.isInitialized) seekPreview.bind({
+            CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource
+        }, torrent = c.url.startsWith("vantara-torrent:"))
         externalAudioUrls = media.externalAudioUrls
         if (BuildConfig.DEBUG) {
             if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")
@@ -882,17 +893,20 @@ class PlayerActivity : Activity() {
         startup.active(usageForeground && player.playWhenReady)
         main.post(startupWatchdog)
         updateQualityLabel()
-        if (openSheet == SheetKind.SERVERS) sheet.refresh()
+        if (openSheet == SheetKind.SERVERS) sheet.refreshSoon()
         discoverAddonSubtitles(c, subtitleGeneration)
     }
 
     /** Shared by playback and external subtitle selection, including local downloaded subtitle files. */
-    private fun playbackDataSourceFactory(c: Candidate): androidx.media3.datasource.DataSource.Factory {
+    private fun playbackDataSourceFactory(c: Candidate, measured: Boolean = true, preview: Boolean = false): androidx.media3.datasource.DataSource.Factory {
         val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers,
             plainMedia = c.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else network.client
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
-        val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
+        val base = if (!c.url.startsWith("vantara-torrent:")) delegate
+            else if (preview) com.vantara.addons.torrent.TorrentEngine.get(this).previewDataSourceFactory(delegate)
+            else com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate)
         // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)
+        if (!measured) return base
         return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net); if (BuildConfig.DEBUG) it.addTransferListener(diag) } }
     }
 
@@ -934,7 +948,7 @@ class PlayerActivity : Activity() {
         current = null
         val at = position()
         val next = session?.failed(c, reason)
-        if (openSheet == SheetKind.SERVERS) sheet.refresh()
+        if (openSheet == SheetKind.SERVERS) sheet.refreshSoon()
         if (next != null) {
             message("تم التبديل إلى سيرفر آخر")
             start(next, at)
@@ -1266,6 +1280,10 @@ class PlayerActivity : Activity() {
         buildTop()
         buildBottom()
         root.addView(controls, match())
+        seekPreview = SeekPreview(this, main)
+        // سطح مشغّل المعاينة خلف الفيديو (لا يُرى، لكنه يُرسم فتُقرأ صوره)
+        root.addView(seekPreview.probe, 0, seekPreview.probeSize)
+        root.addView(seekPreview.view, FrameLayout.LayoutParams(dp(176), dp(99), Gravity.TOP or Gravity.LEFT))
 
         skipButton = pillButton("تخطي المقدمة  »", primary = true) {
             IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())?.let { player.seekTo(it.interval.endMs) }
@@ -1354,8 +1372,9 @@ class PlayerActivity : Activity() {
         times.addView(timeTotal, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT))
         col.addView(times, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8); rightMargin = dp(8) })
         bar = TimeBar(this).apply {
-            onDragState = { dragging -> if (dragging) main.removeCallbacks(hideControls) else scheduleHide() }
-            onScrub = { ms -> timeNow.text = ClipMath.clock(ms) }
+            // أثناء السحب لا تختفي الأدوات أبدًا (كان مؤقت آخر يخفيها فيبقى مربع المعاينة وحده وسط الشاشة)
+            onDragState = { dragging -> scrubbing = dragging; if (dragging) main.removeCallbacks(hideControls) else { seekPreview.hide(); scheduleHide() } }
+            onScrub = { ms -> timeNow.text = ClipMath.clock(ms); showSeekPreview(ms) }
             onSeek = { ms -> player.seekTo(ms) }
         }
         col.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1432,6 +1451,25 @@ class PlayerActivity : Activity() {
         timeNow.text = ClipMath.clock(position())
         timeTotal.text = if (d > 0) ClipMath.clock(d) else "--:--"
         clip?.tick(position())
+        if (::seekPreview.isInitialized) {
+            val playing = player.isPlaying && firstFrameShown
+            if (playing) seekPreview.aspect(player.videoSize.width, player.videoSize.height)
+            // لوحة القصة فقط والمشاهدة مستقرة: تعمل، وقدّامها 8 ث مخزنة على الأقل، وليست قصاصة
+            val healthy = playing && clip == null && player.bufferedPosition - player.currentPosition >= 8_000L
+            seekPreview.tick(video.videoSurfaceView, position(), d, playing, healthy)
+        }
+    }
+
+    /** مربع المعاينة فوق مقبض الشريط (إحداثيات الجذر). */
+    private fun showSeekPreview(ms: Long) {
+        if (!::seekPreview.isInitialized || bar.durationMs <= 0) return
+        val at = IntArray(2); val base = IntArray(2)
+        bar.getLocationInWindow(at); root.getLocationInWindow(base)
+        val pad = dp(10).toFloat()
+        val x = at[0] - base[0] + pad + (bar.width - pad * 2) * (ms.toFloat() / bar.durationMs).coerceIn(0f, 1f)
+        // فوق صف الوقت لا فوق الشريط مباشرة: المربع لا يغطي «الوقت الحالي» ولا «المدة»
+        val clock = IntArray(2); timeNow.getLocationInWindow(clock)
+        seekPreview.show(ms, x, minOf(at[1], clock[1]).toFloat() - base[1], root.width)
     }
 
     private fun updateQualityLabel() {
@@ -1439,7 +1477,11 @@ class PlayerActivity : Activity() {
         qualityLabel.text = h?.let { "${it}p" } ?: "HD"
     }
 
+    private var scrubbing = false
+
     private fun setControls(show: Boolean) {
+        if (!show && scrubbing) return
+        if (!show && ::seekPreview.isInitialized) seekPreview.hide()
         if (locked || clip != null) {
             controls.visibility = View.GONE
             return
@@ -1459,7 +1501,7 @@ class PlayerActivity : Activity() {
 
     private fun scheduleHide() {
         main.removeCallbacks(hideControls)
-        if (openSheet != null) return
+        if (openSheet != null || scrubbing) return
         if (player.isPlaying) main.postDelayed(hideControls, HIDE_AFTER_MS)
         // إيقاف مقصود (لا تحميل ولا نهاية): الأدوات تختفي بعد 5 ث بلا لمس
         else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) main.postDelayed(hideControls, PAUSED_HIDE_AFTER_MS)
@@ -1688,6 +1730,9 @@ class PlayerActivity : Activity() {
             fun rank(r: Route) = when (r.state) { RouteState.READY -> 0; RouteState.RESOLVING -> 1; RouteState.FAILED -> 2; else -> 3 }
             val usable = routes.filter { it.state != RouteState.UNAVAILABLE }
             val (torrents, direct) = usable.partition { r -> r.candidates.any { id -> p.candidate(id)?.url?.startsWith("vantara-torrent:") == true } }
+            // «مقترح» على صف ما سيشغّله «شغّل الأفضل» (نفس علامة الكمبيوتر)
+            val suggested = p.best(preferCode)?.let { p.routeOf(it.id)?.id }
+            val torrentIds = torrents.map { it.id }.toSet()
             fun section(name: String, hint: String, list: List<Route>) {
                 if (list.isEmpty()) return
                 val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(14), dp(6), dp(6)) }
@@ -1695,7 +1740,7 @@ class PlayerActivity : Activity() {
                 head.addView(label(hint, 12f, Tone.TEXT_3, bold = true))
                 body.addView(head)
                 list.sortedWith(compareBy<Route> { rank(it) }.thenByDescending { it.quality ?: 0 }).forEach { r ->
-                    body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+                    body.addView(routeRow(r, r.id == currentRoute, suggested = r.id == suggested, torrent = r.id in torrentIds), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
                 }
             }
             section("تورنت", "جودة أعلى · يبدأ أبطأ", torrents)
@@ -1724,7 +1769,7 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun routeRow(r: Route, isCurrent: Boolean): View {
+    private fun routeRow(r: Route, isCurrent: Boolean, suggested: Boolean = false, torrent: Boolean = false): View {
         val (text, color, pulse) = when {
             isCurrent -> Triple(if (reportedStart) "يعمل الآن" else "يبدأ…", Tone.ACCENT, !reportedStart)
             r.state == RouteState.RESOLVING -> Triple("يتجهّز…", Tone.WARN, true)
@@ -1736,8 +1781,10 @@ class PlayerActivity : Activity() {
         val dim = r.state == RouteState.UNAVAILABLE || r.state == RouteState.RESOLVING
         val title = r.sourceName?.takeIf { it.isNotBlank() } ?: r.server.ifBlank { r.code }
         // ما يميّز هذا السيرفر عن جاره: وصف المصدر (الحجم والترميز والبذور للتورنت)، وإلا اسم الخادم ورمزه
-        val detail = r.label?.takeIf { it.isNotBlank() && it != title }
-            ?: listOf(r.server.takeIf { it.isNotBlank() && it != title }, r.code.takeIf { it != title }).filterNotNull().joinToString(" · ")
+        // التورنت: عدد المشاركين في مؤشر السرب يسار الصف (مثل الكمبيوتر) لا في سطر الوصف
+        val seeds = if (torrent) SeedMeter.seeders(r.label) else null
+        val detail = (r.label?.takeIf { it.isNotBlank() && it != title }?.let { if (seeds != null) it.replace(Regex("\\s*·?\\s*👤\\s*[0-9][0-9.,]*\\s*[kK]?"), "").trim() else it }
+            ?: listOf(r.server.takeIf { it.isNotBlank() && it != title }, r.code.takeIf { it != title }).filterNotNull().joinToString(" · "))
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1752,12 +1799,18 @@ class PlayerActivity : Activity() {
             top.addView(label("\u2068$heading\u2069", 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             else if (r.code == preferCode && !isCurrent) top.addView(chip("آخر اختيار", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
+            else if (suggested && !isCurrent) top.addView(label("مقترح", 12.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(dp(8), 0, 0, 0) })
             texts.addView(top)
             if (detail.isNotBlank()) texts.addView(label(detail, 12.5f, Tone.TEXT_2).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, dp(3), 0, 0) })
             addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             val state = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
-            state.addView(StatusDot(context, color, pulse))
-            state.addView(label(text, 12f, if (r.state == RouteState.FAILED) Tone.BAD else Tone.TEXT_2, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            if (seeds != null && !isCurrent && r.state == RouteState.READY) {
+                state.addView(SeedMeter(context, SeedMeter.bars(seeds), SeedMeter.color(seeds)))
+                state.addView(label(if (seeds >= 1000) "${"%.1f".format(seeds / 1000.0).removeSuffix(".0")}k" else "$seeds", 13f, Tone.TEXT, bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            } else {
+                state.addView(StatusDot(context, color, pulse))
+                state.addView(label(text, 12f, if (r.state == RouteState.FAILED) Tone.BAD else Tone.TEXT_2, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            }
             addView(state)
             contentDescription = "$title، $detail، $text"
             if (playable) setOnClickListener { switchTo(r) }
@@ -1795,11 +1848,121 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /**
+     * مواسم العمل في الغرفة (طلب المالك 15 نوفمبر): كل موسم في AniList عمل مستقل، فالسلسلة تُبنى بالمشي عبر
+     * PREQUEL ثم SEQUEL (مسلسلات TV/ONA فقط، حتى 30 في كل اتجاه)، مرة للجلسة. نفس قاعدة `fetchSeasonChain` في الويب.
+     */
+    private data class SeasonEntry(val id: Int, val title: String, val episodes: Int?)
+    private var seasons: List<SeasonEntry>? = null
+    private var seasonsLoading = false
+    private var seasonMenu = false
+    private fun fetchSeasons() {
+        if (seasons != null || seasonsLoading) return
+        val id = launch.animeId.toIntOrNull()?.takeIf { launch.section == "anime" && it > 0 } ?: return
+        seasonsLoading = true
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { seasonChain(id) }.getOrNull() }
+            seasonsLoading = false
+            seasons = list ?: emptyList()
+            if (openSheet == SheetKind.EPISODES) sheet.refresh()
+        }
+    }
+
+    private fun aniMedia(id: Int): JSONObject? {
+        val q = "query(\$id:Int){Media(id:\$id,type:ANIME){id format episodes title{romaji english} relations{edges{relationType node{id type format}}}}}"
+        val body = JSONObject().put("query", q).put("variables", JSONObject().put("id", id)).toString().toRequestBody("application/json".toMediaType())
+        return network.client.newCall(Request.Builder().url("https://graphql.anilist.co").header("Accept", "application/json").post(body).build()).execute().use { res ->
+            if (!res.isSuccessful) null else JSONObject(res.body.string()).optJSONObject("data")?.optJSONObject("Media")
+        }
+    }
+
+    private fun seasonChain(id: Int): List<SeasonEntry> {
+        val series = setOf("TV", "TV_SHORT", "ONA")
+        fun entry(m: JSONObject): SeasonEntry {
+            val t = m.optJSONObject("title")
+            val name = listOf(t?.optString("english"), t?.optString("romaji")).firstOrNull { !it.isNullOrBlank() && it != "null" }.orEmpty()
+            return SeasonEntry(m.optInt("id"), name, m.optInt("episodes").takeIf { it > 0 })
+        }
+        val start = aniMedia(id) ?: return emptyList()
+        val seen = mutableSetOf(id)
+        fun walk(relation: String): List<SeasonEntry> {
+            val out = mutableListOf<SeasonEntry>()
+            var cur: JSONObject = start
+            for (step in 0 until 30) {
+                val edges = cur.optJSONObject("relations")?.optJSONArray("edges") ?: break
+                var next = 0
+                for (i in 0 until edges.length()) {
+                    val e = edges.optJSONObject(i) ?: continue
+                    val n = e.optJSONObject("node") ?: continue
+                    if (e.optString("relationType") == relation && n.optString("type") == "ANIME" && n.optString("format") in series && n.optInt("id") !in seen) { next = n.optInt("id"); break }
+                }
+                if (next <= 0) break
+                seen += next
+                cur = aniMedia(next) ?: break
+                out += entry(cur)
+            }
+            return out
+        }
+        return walk("PREQUEL").reversed() + entry(start) + walk("SEQUEL")
+    }
+
+    /** زر «الموسم» المنسدل أعلى ورقة الحلقات (نفس نمط فلاتر السيرفرات)، وقائمته تفتح في مكانها: 24 موسمًا تظهر كلها. */
+    private fun seasonPicker(body: LinearLayout, list: List<SeasonEntry>) {
+        val curId = launch.animeId.toIntOrNull()
+        val index = list.indexOfFirst { it.id == curId }
+        val value = if (index >= 0) "الموسم ${index + 1}" else "الموسم"
+        val open = seasonMenu
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(7), dp(14), dp(8))
+            background = pressable(if (open) Tone.SURFACE_3 else Tone.SURFACE_2, dp(12).toFloat(), dp(1), if (open) Tone.TEXT_3 else Tone.LINE)
+            contentDescription = "الموسم: $value من ${list.size}"
+            addView(label("الموسم · ${list.size} مواسم", 11.5f, Tone.TEXT_3, bold = true))
+            addView(label("$value  ${if (open) "▴" else "▾"}", 14f, Tone.TEXT, bold = true))
+            // فتح القائمة يعيد الورقة لأعلاها: زر «الموسم» والمواسم ظاهرة لا مخفية فوق الحلقة الحالية
+            setOnClickListener { seasonMenu = !seasonMenu; sheet.refresh(); if (seasonMenu) main.post { sheet.scrollTo(0) } }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        if (!open) return
+        val menu = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = rounded(Tone.SURFACE_3, dp(12).toFloat(), dp(1), Tone.LINE)
+        }
+        for ((i, season) in list.withIndex()) {
+            val on = season.id == curId
+            menu.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                background = pressable(Color.TRANSPARENT, dp(10).toFloat())
+                contentDescription = "الموسم ${i + 1}"
+                addView(label(if (on) "✓  الموسم ${i + 1}" else "الموسم ${i + 1}", 14f, if (on) Tone.ACCENT_TEXT else Tone.TEXT, bold = true))
+                val sub = listOfNotNull(season.title.takeIf { it.isNotBlank() }?.let { "\u2068$it\u2069" }, season.episodes?.let { "$it حلقة" }).joinToString(" · ")
+                if (sub.isNotEmpty()) addView(label(sub, 12f, Tone.TEXT_3).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                setOnClickListener {
+                    seasonMenu = false
+                    when {
+                        on -> sheet.refresh()
+                        // المضيف ينقل الغرفة كلها لأول حلقة في الموسم؛ الصديق يُبلَّغ أن المضيف يختار
+                        together?.requestWork("anime:${season.id}", "${season.title.ifBlank { "الموسم ${i + 1}" }} — الحلقة 1") == true -> sheet.close()
+                        else -> { message("الغرفة تتصل… جرّب بعد لحظة"); sheet.refresh() }
+                    }
+                }
+            })
+        }
+        body.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+    }
+
     private fun showEpisodes() {
         val total = launch.total
         if (total <= 0 || copies.isEmpty()) return message("قائمة الحلقات من صفحة الأنمي")
         fetchEpisodeArt()
+        // المواسم داخل الغرفة فقط: هناك تنقل الغرفة كلها (وحدك تُختار من صفحة الأنمي)
+        if (together != null) fetchSeasons()
+        seasonMenu = false
         open(SheetKind.EPISODES, "الحلقات", "$total حلقة") { body ->
+            seasons?.takeIf { together != null && it.size > 1 }?.let { seasonPicker(body, it) }
             val cur = episodeInt()
             for (n in 1..total) {
                 val on = n == cur
@@ -1831,7 +1994,7 @@ class PlayerActivity : Activity() {
             }
         }
         // تمرير للحلقة الحالية (صف ≈ 79dp)
-        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79)) }, 280)
+        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79) + if ((seasons?.size ?: 0) > 1 && together != null) dp(68) else 0) }, 280)
     }
 
     private fun showQuality() {
@@ -2487,6 +2650,7 @@ class PlayerActivity : Activity() {
         presenceActive = false
         main.removeCallbacks(presenceTick)
         player.playWhenReady = false
+        if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
         main.removeCallbacks(stallWatchdog)
         report(final = false)
@@ -2516,6 +2680,7 @@ class PlayerActivity : Activity() {
         scope.cancel()
         main.removeCallbacksAndMessages(null)
         report(final = true)
+        if (::seekPreview.isInitialized) seekPreview.release()
         player.release()
         engine.closeSession(sessionId)
         discardWarmup()

@@ -308,6 +308,14 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       }
       return transitionEpisode(s,episode);
     },
+    /** موسم آخر من لوحة الحلقات (المضيف): الغرفة كلها تنتقل لأول حلقة فيه، والكل يختار سيرفره من جديد. */
+    async changeWork({session,prefix,label}){
+      const s=sessionOf(session),t=s.playArgs?.together,room=t?.session?.room;
+      if(!room)throw new Error('الغرفة غير متاحة');
+      if(room.status!=='live'||!room.canControl)throw new Error('المضيف يختار الموسم');
+      if(!/^anime:\d+$/.test(String(prefix))||prefix===t.mediaPrefix)return;
+      room.command('load',{media:{kind:'anime',key:`${prefix}#1`,label:String(label??'').slice(0,200)},pos:0});
+    },
     async retryPlayback({session}){const s=sessionOf(session);return engine.switchSource({session,candidate:s.playArgs.candidate,position:s.progress.position??s.playArgs.position??0});},
     async switchSource({session,candidate,position}){const s=sessionOf(session),c=s.candidates.get(candidate);if(c&&!live(c))throw new Error('انتهت صلاحية الرابط؛ افتح السيرفرات من جديد');if(c&&s.routes.get(c.route)?.state==='FAILED')routeUpdate(s,{...s.routes.get(c.route),state:'READY',reason:null});return engine.play({...s.playArgs,candidate,position:position??s.progress.position??0});},
     presentRoom(args){emit('desktopRoomEntry',args);return true;},

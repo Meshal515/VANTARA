@@ -80,6 +80,8 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     clearTimeout(scheduled); scheduled = null;
     if (intent && state?.seq !== intent.seq) intent = null;
     const number = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
+    // عمل آخر (موسم ثانٍ): لا مزامنة على فيديو الموسم القديم؛ مركز الغرفة يعرض غرفة الموسم الجديد ويغلق المشغّل
+    if (state?.media?.key && !state.media.key.startsWith(`${together.mediaPrefix}#`)) return;
     if (state?.media?.key?.startsWith(`${together.mediaPrefix}#`) && number > 0 && number !== episode()) {
       if (loadingEpisode !== number) { prepared = false; failed = false; loadingEpisode = number; videoOffsetMs=0; native.duration = null; onEpisode(number); }
     } else {

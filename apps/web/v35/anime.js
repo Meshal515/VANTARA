@@ -2366,6 +2366,8 @@ export function createAnime(deps) {
       deps.setWatching?.({ ref: `anime:${cur.m.id}`, title: cur.m.title, episode: n });
     }
   });
+  // موسم آخر اختاره مضيف الغرفة من المشغّل الأصلي: غرفة الموسم الجديد تُفتح للجميع
+  engine.on('togetherWork', (e) => { deps.together?.()?.switchWork?.(e?.code, e?.key, e?.label ?? '', e?.mode ?? 'sync'); });
   engine.on('episode', (e) => {
     const cur = state.playing;
     if (!cur || String(e.animeId) !== String(cur.m.id)) return;

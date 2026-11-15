@@ -1,7 +1,15 @@
 import { renderLobby, pendingInvitees } from '../lib/together/lobby.js';
 import { aniZipArt, episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
+import { fetchSeasonChain } from '../lib/anime-meta.js';
 
 /** Same room renderer as the web/APK design; MPV stays prepared behind it. */
+/** مواسم AniList لكل عمل مرة واحدة في الجلسة (المشي على السابق والتالي طلبات متتالية). */
+const seasonCache = new Map();
+const seasonChain = id => {
+  if (!seasonCache.has(id)) seasonCache.set(id, fetchSeasonChain(id).catch(() => { seasonCache.delete(id); return []; }));
+  return seasonCache.get(id);
+};
+
 export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
   let latest = null, closed = false, revision = 0, artKey = null, art = null, lastState = null, lastMedia = null;
   const doc = host.ownerDocument;
@@ -72,13 +80,43 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       rows.push([row, img, small]);
       list.append(row);
     }
-    panel.append(head, list);
+    // زر «الموسم» المنسدل (طلب المالك 15 نوفمبر): القائمة تفتح في مكانها وتتسع لـ24 موسمًا، واختيار المضيف ينقل الغرفة
+    const seasons = doc.createElement('div'); seasons.className = 'pl-season'; seasons.hidden = true;
+    panel.append(head, seasons, list);
     wrap.append(scrim, panel);
     host.parentNode.append(wrap);
     side = wrap;
     rows[current - 1]?.[0].scrollIntoView?.({ block: 'center' });
     // صور الحلقات وعناوينها من ani.zip (نفس مصدر فن الغرفة، مخزّن)
     const anilist = media?.kind === 'anime' ? Number(/^anime:(\d+)/.exec(media.seriesRef ?? '')?.[1]) : 0;
+    if (anilist > 0 && typeof engine.changeWork === 'function') void seasonChain(anilist).then(chain => {
+      if (side !== wrap || chain.length < 2) return;
+      const at = chain.findIndex(s => s.current);
+      const toggle = doc.createElement('button'); toggle.type = 'button'; toggle.className = 'pl-season-btn'; toggle.setAttribute('aria-expanded', 'false');
+      const cap = doc.createElement('small'); cap.textContent = `الموسم · ${chain.length} مواسم`;
+      const val = doc.createElement('b'); val.textContent = at >= 0 ? `الموسم ${at + 1}` : 'الموسم';
+      const caret = doc.createElement('i'); caret.textContent = '▾'; caret.setAttribute('aria-hidden', 'true');
+      toggle.append(cap, val, caret);
+      const menu = doc.createElement('div'); menu.className = 'pl-season-menu'; menu.hidden = true; menu.setAttribute('role', 'listbox');
+      chain.forEach((s, i) => {
+        const opt = doc.createElement('button'); opt.type = 'button'; opt.className = `pl-season-opt${s.current ? ' is-on' : ''}`; opt.setAttribute('role', 'option'); opt.setAttribute('aria-selected', String(s.current));
+        const b = doc.createElement('b'); b.textContent = `الموسم ${i + 1}`;
+        // اسم الموسم إنجليزي غالبًا: معزول في سطر عربي حتى لا ينقلب ترتيب «12 حلقة»
+        const small = doc.createElement('small'); small.dir = 'rtl';
+        if (s.title) { const name = doc.createElement('bdi'); name.textContent = s.title; small.append(name); }
+        if (s.episodes) small.append(`${s.title ? ' · ' : ''}${s.episodes} حلقة`);
+        opt.append(b, small);
+        opt.onclick = () => {
+          if (s.current) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); return; }
+          closeEpisodes();
+          void Promise.resolve(engine.changeWork({ session, prefix: `anime:${s.id}`, label: `${s.title ?? `الموسم ${i + 1}`} — الحلقة 1` })).catch(() => {});
+        };
+        menu.append(opt);
+      });
+      toggle.onclick = () => { menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); caret.textContent = menu.hidden ? '▾' : '▴'; };
+      seasons.append(toggle, menu);
+      seasons.hidden = false;
+    }).catch(() => {});
     if (anilist > 0) void aniZipArt(anilist).then(z => {
       if (side !== wrap) return;
       rows.forEach(([, img, small], i) => {
@@ -114,6 +152,22 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
   return { update, destroy() { closed = true; revision++; clearInterval(host._countdown); closeEpisodes(); host.remove(); } };
 }
 
+/** ورقة السيرفرات فوق الغرفة على الكمبيوتر: تُعلَّم حتى تُغلق الورقة (تختفي show عن خلفيتها). */
+export function markRoomServers(doc) {
+  const html = doc.documentElement;
+  html.classList.add('room-servers');
+  const view = doc.defaultView;
+  let seen = false;
+  const check = () => {
+    const open = Boolean(doc.querySelector('.sheet-backdrop.show'));
+    if (open) seen = true;
+    if (seen && !open) { html.classList.remove('room-servers'); clearInterval(timer); }
+  };
+  const timer = (view?.setInterval ?? setInterval)(check, 150);
+  // لم تُفتح ورقة خلال 8 ث (فشل أو إلغاء): لا يبقى الوضع معلّقًا
+  (view?.setTimeout ?? setTimeout)(() => { if (!seen) { html.classList.remove('room-servers'); clearInterval(timer); } }, 8000);
+}
+
 /** Invitation entry: no MPV process, no automatic source pick, no duplicate room socket. */
 export function openDesktopRoomEntry({ document: doc, together, media, chooseServer }) {
   const root = doc.createElement('section'); root.className = 'desktop-player pwa-player v35 desktop-room-entry';
@@ -124,7 +178,9 @@ export function openDesktopRoomEntry({ document: doc, together, media, chooseSer
   const room = together.session.room;
   const facade = { roomHub:()=>together.hub,playerState:async()=>({ media, title:media.title, poster:media.cover,episode:media.episode }) };
   const view = createDesktopLobby({ host, engine:facade,session:together.session.code,
-    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{destroy();chooseServer();} });
+    // «اختر السيرفر»: الغرفة تبقى، والورقة لوحة جانبية فوقها (html.room-servers)؛ إغلاقها يرجعك للغرفة نفسها،
+    // واختيار سيرفر يفتح المشغّل الذي يُغلق هذه الشاشة (player.js open).
+    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{markRoomServers(doc);chooseServer();} });
   const paint = () => {
     if (disposed) return;
     void view.update({ visible:true, selectingSource:true, prepared:false, host:room.isHost, connection:room.status,
