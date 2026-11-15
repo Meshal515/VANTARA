@@ -226,3 +226,34 @@ describe('manager while the network is gone', () => {
     m.destroy();
   });
 });
+
+describe('image integrity rules on real JPEG shapes', () => {
+  const jpeg = (...parts) => new Uint8Array(parts.flat()).buffer;
+  const head = [0xff, 0xd8, 0xff, 0xe0, ...Array(20).fill(1)];
+  const scan = [0xff, 0xda, ...Array(40).fill(0x22), 0xff, 0x00, ...Array(20).fill(0x33)];
+  it('accepts a complete JPEG with data appended after EOI (watermark, padding)', () => {
+    expect(imageIntegrity(jpeg(head, scan, [0xff, 0xd9], Array(500).fill(7)), 'image/jpeg')).toBeNull();
+  });
+  it('rejects a JPEG cut inside its scan even if an EXIF thumbnail has its own EOI', () => {
+    const thumb = [0xff, 0xda, 1, 2, 3, 0xff, 0xd9];
+    expect(imageIntegrity(jpeg(head, thumb, scan), 'image/jpeg')).toBe('jpeg-truncated');
+  });
+});
+
+describe('manga downloads keep the app process alive in background', () => {
+  it('holds the native foreground service while a chapter downloads, and releases it after', async () => {
+    const { keepAliveWhileManga } = await import('./index.js');
+    const calls = [];
+    const native = { keepAlive: vi.fn(async (o) => calls.push(o)) };
+    let runs = [];
+    const driver = { run: vi.fn((item, ctl) => new Promise((resolve) => runs.push({ resolve, ctl }))) };
+    const m = createDownloadManager({ store: memoryStore(), drivers: { manga: driver, video: null }, settings: { parallel: 1 } });
+    keepAliveWhileManga(m, native);
+    await m.enqueue([spec()]);
+    await vi.waitFor(() => expect(runs).toHaveLength(1));
+    expect(calls.at(-1)).toMatchObject({ key: 'manga', on: true });
+    runs[0].resolve({ pages: 1, pagesTotal: 1 });
+    await vi.waitFor(() => expect(calls.at(-1)).toEqual({ key: 'manga', on: false }));
+    m.destroy();
+  });
+});

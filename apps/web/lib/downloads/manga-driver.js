@@ -45,15 +45,22 @@ export function imageIntegrity(bytes, type) {
   const tail = (k) => b.subarray(Math.max(0, n - k));
   switch (type) {
     case 'image/jpeg': {
-      // EOI (FFD9) في الذيل؛ بعض المضيفات تُلحق أصفارًا أو بايتات قليلة بعده
-      const t = tail(64);
-      for (let i = t.length - 2; i >= 0; i--) if (t[i] === 0xff && t[i + 1] === 0xd9) return null;
-      return 'jpeg-truncated';
+      // EOI (FFD9) بعد آخر مسح (FFDA). لا يظهر FFD9 داخل بيانات المسح (FF فيها محشوّة FF00)، فوجوده بعد
+      // آخر FFDA يعني أن الملف اكتمل ولو ألحق المضيف بعده بيانات (علامة مائية، حشو). صورة EXIF المصغّرة
+      // لها FFDA/FFD9 قبل مسح الصورة نفسها، فلا تخدع القاعدة. المبتور: آخر FFD9 قبل آخر FFDA أو لا FFD9.
+      let lastSos = -1;
+      let lastEoi = -1;
+      for (let i = 2; i < n - 1; i++) {
+        if (b[i] !== 0xff) continue;
+        const m = b[i + 1];
+        if (m === 0xda) lastSos = i;
+        else if (m === 0xd9) lastEoi = i;
+      }
+      return lastEoi > lastSos && lastEoi > 0 ? null : 'jpeg-truncated';
     }
     case 'image/png': {
-      // قطعة IEND آخر الملف
-      const t = tail(64);
-      for (let i = t.length - 4; i >= 0; i--) if (t[i] === 0x49 && t[i + 1] === 0x45 && t[i + 2] === 0x4e && t[i + 3] === 0x44) return null;
+      // قطعة IEND (قد يليها حشو)
+      for (let i = n - 4; i >= 8; i--) if (b[i] === 0x49 && b[i + 1] === 0x45 && b[i + 2] === 0x4e && b[i + 3] === 0x44) return null;
       return 'png-truncated';
     }
     case 'image/webp': {

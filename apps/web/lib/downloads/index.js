@@ -12,6 +12,7 @@ import * as animeEngine from '../anime-engine.js';
 import * as mangaEngine from '../extension-engine.js';
 import { desktopPlugin, isDesktop, isNative } from '../../pwa/platform.js';
 import { createDownloadManager, DEFAULT_PARALLEL } from './manager.js';
+import { ACTIVE_STATES, unitLabel } from './model.js';
 import { createMangaDriver } from './manga-driver.js';
 import { memoryStore, openStore } from './store.js';
 import { createVideoDriver } from './video-driver.js';
@@ -95,6 +96,46 @@ function networkWatch(g = globalThis) {
   };
 }
 
+/**
+ * فصول المانجا تُنزَّل في الواجهة نفسها: بعد الخروج من التطبيق يجمّد Android العملية فيتوقف التنزيل بلا كلمة.
+ * ما دام فصل يُنزَّل تُمسك خدمة التنزيل الأمامية (إشعار تقدّم) فتبقى العملية حية، وتُترك حين ينتهي آخرها.
+ */
+export function keepAliveWhileManga(manager, native = nativeDownloads()) {
+  if (typeof native?.keepAlive !== 'function') return () => {};
+  let on = false;
+  let lastLabel = '';
+  let lastAt = 0;
+  const send = (o) => {
+    try {
+      void Promise.resolve(native.keepAlive(o)).catch(() => {});
+    } catch {
+      /* الإشعار تحسين؛ التنزيل لا يتوقف لأجله */
+    }
+  };
+  const sync = () => {
+    const active = manager.list().filter((i) => i.kind === 'manga' && ACTIVE_STATES.has(i.state));
+    if (!active.length) {
+      if (on) {
+        on = false;
+        send({ key: 'manga', on: false });
+      }
+      return;
+    }
+    const head = active[0];
+    const label = active.length === 1
+      ? `${head.work?.title ?? ''} — ${unitLabel(head)}${head.pagesTotal ? ` · ${head.pages ?? 0}/${head.pagesTotal}` : ''}`
+      : `${active.length} فصول مانجا تُنزَّل`;
+    const now = Date.now();
+    if (!on || (label !== lastLabel && now - lastAt > 2000)) {
+      on = true;
+      lastLabel = label;
+      lastAt = now;
+      send({ key: 'manga', on: true, label });
+    }
+  };
+  return manager.subscribe(sync);
+}
+
 let shared = null;
 
 /** المدير المشترك (يُنشأ مرة). يرجع وعدًا بالمدير والمخزن والقدرات. */
@@ -116,6 +157,7 @@ export function downloads() {
         video: caps.video ? createVideoDriver({ engine: () => globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? animeEngine, native: () => nativeDownloads(), platform: () => capabilities() }) : null,
       },
     });
+    keepAliveWhileManga(manager);
     // التطبيق عاد للواجهة: ما انتظر الشبكة أو خانة يُفحص من جديد
     globalThis.document?.addEventListener?.('visibilitychange', () => {
       if (globalThis.document.visibilityState === 'visible') manager.pump();

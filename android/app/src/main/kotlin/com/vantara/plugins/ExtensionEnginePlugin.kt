@@ -752,13 +752,12 @@ class ExtensionEnginePlugin : Plugin() {
                         }
                     }
                     bytes = fetched.first
-                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: الحجم وحده لا
-                    // يكفي، فصفحة HTML كبيرة تمرّ منه. التوقيع يُفحص قبل الكاش
-                    if (bytes.size <= 1024) throw PageImageException("image too small: ${bytes.size} bytes")
+                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: التوقيع هو الحكم (لا الحجم: صفحة فاصلة
+                    // بيضاء PNG أقل من كيلوبايت صورة صحيحة، وكانت تُرفض فيفشل الفصل كله). يُفحص قبل الكاش
                     val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
-                    if (!verdict.accepted) throw PageImageException("not an image: ${verdict.reason}")
-                    // النوع من الاستجابة أولًا، فإن سكتت فمن امتداد الرابط
-                    type = fetched.second?.substringBefore(';')?.trim()?.takeIf {
+                    if (!verdict.accepted) throw PageImageException("not an image (${bytes.size} bytes): ${verdict.reason}")
+                    // النوع من البايتات أولًا، ثم الاستجابة، ثم امتداد الرابط
+                    type = ImagePayloadPolicy.sniffType(bytes) ?: fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
                     } ?: typeForUrl(url)
                     file = cacheFile(url, extensionForType(type))
@@ -905,7 +904,7 @@ class ExtensionEnginePlugin : Plugin() {
      * الامتداد يُقرَّر من نوع الاستجابة وقت التنزيل، فلا يُعرف وقت البحث في
      * الكاش. والبحث بالبادئة يجد الملف بلا أن نخمّن نوعه مرة ثانية.
      */
-    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 1024)
+    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 64)
 
     /**
      * الملف المحفوظ لرابط، بفحص مباشر لا بمسح المجلد: مسحُ آلاف الملفات عند
