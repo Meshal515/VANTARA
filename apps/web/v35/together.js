@@ -544,6 +544,10 @@ export function createTogether(deps) {
         episodeTitle: art.episodeTitle ?? media.episodeTitle ?? null,
         // صورة الحلقة لزر «البدء» (الخلفية banner فن العمل)
         episodeImage: art.episodeImage ?? null,
+        // تقييم الحلقة ومدتها تحت اسمها (نصان: المشغّل الأصلي يقرأهما String)
+        rating: Number(media.rating) > 0 ? Number(media.rating).toFixed(1) : null,
+        ratingSource: media.ratingSource ?? null,
+        duration: media.duration ?? null,
         season: media.season ?? null,
         // المدعوون بأسمائهم وصورهم: من لم يدخل يظهر «بانتظاره…»
         invitees: Array.isArray(invited) ? invited.map(personById) : [],

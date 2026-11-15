@@ -50,6 +50,11 @@ data class TogetherLaunch(
     val season: Int? = null,
     /** صورة الحلقة لزر «البدء» (الخلفية فن العمل نفسه — تصميم الغرفة المعتمد 14 نوفمبر). */
     val episodeImage: String? = null,
+    /** تقييم الحلقة («8.7») ومدتها («43 دقيقة») تحت اسمها في الغرفة؛ كلاهما اختياري. */
+    val rating: String? = null,
+    /** مصدر التقييم: «IMDb» للأفلام والمسلسلات؛ بلا مصدر لا يُعرض تقييم الأنمي المخمَّن. */
+    val ratingSource: String? = null,
+    val duration: String? = null,
     val invitees: List<Invitee> = emptyList(),
     /** الغرفة أولًا: دخل بلا سيرفر، فالغرفة تعرض «اختر سيرفر» حتى يختار (لا اختيار تلقائي). */
     val pick: Boolean = false,
@@ -118,6 +123,8 @@ class TogetherPlayer(
     private var lobbyBar: LinearLayout? = null
     private var lobbyConn: TextView? = null
     private var lobbyMore: View? = null
+    /** بطاقة «البدء» الكبيرة فوق الشريط (المضيف وحده): صورة الحلقة ودائرة تشغيل. */
+    private var lobbyStart: FrameLayout? = null
     private var lobbyCount: TextView? = null
     private var countdownAt = 0.0
     private var markFill: View? = null
@@ -730,7 +737,22 @@ class TogetherPlayer(
                 background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x00050507, 0x00050507, 0x00050507, 0x8C050507.toInt(), 0xFF050507.toInt()))
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(bannerBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
-            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp -> if (bmp != null) { banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start() } }
+            // تعتيم يساري تكيّفي (LobbyDim): بنر Cinemeta لأعمال مثل أركين أبيض ناصع في نصفه الأيسر فيضيع عليه زر الإغلاق
+            // والبطاقة والشريط. يُقاس من إضاءة اليسار بعد وصول الصورة؛ البنر الغامق لا يُمسّ. الجهة اليمنى لها تدرجها المستقل.
+            val dim = View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xDB050507.toInt(), 0xB8050507.toInt(), 0x66050507, 0x14050507, 0x00050507))
+                alpha = 0f
+            }
+            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp ->
+                if (bmp != null) {
+                    banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start()
+                    val small = android.graphics.Bitmap.createScaledBitmap(bmp, 32, 18, true)
+                    val px = IntArray(32 * 18)
+                    small.getPixels(px, 0, 32, 0, 0, 32, 18)
+                    dim.animate().alpha(LobbyDim.strength(LobbyDim.leftLuma(px, 32, 18))).setDuration(420).start()
+                }
+            }
+            root.addView(dim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             // تعتيم خفيف من الأسفل حيث الشريط فقط
             root.addView(View(context).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xEB050507.toInt(), 0x66050507, 0x00050507, 0x00050507, 0x00050507))
@@ -813,6 +835,12 @@ class TogetherPlayer(
             root.addView(hero, FrameLayout.LayoutParams((context.resources.displayMetrics.widthPixels * 0.44f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
                 marginStart = context.dp(28); bottomMargin = context.dp(92)
             })
+            // بطاقة «البدء»: يسار الشاشة (END في الاتجاه RTL) فوق الشريط، ومكانها يُضبط في positionContent
+            val startCard = FrameLayout(context).apply { visibility = View.GONE; elevation = context.dp(6).toFloat() }
+            lobbyStart = startCard
+            root.addView(startCard, FrameLayout.LayoutParams(context.dp(300), context.dp(169), Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = context.dp(28); bottomMargin = context.dp(102)
+            })
 
             // «⋯»: الديلاي (فوق زر «⋯» في نهاية السطر)
             val more = FrameLayout(context).apply {
@@ -847,6 +875,17 @@ class TogetherPlayer(
                 if (heroParams.width != heroWidth || heroParams.bottomMargin != heroBottom || heroParams.marginStart != heroStart) {
                     heroParams.width = heroWidth; heroParams.bottomMargin = heroBottom; heroParams.marginStart = heroStart
                     hero.layoutParams = heroParams
+                }
+                // البطاقة: أفقيًا 300×169 يسارًا بحذاء أسفل المعلومات، وطوليًا بعرض الشاشة (حتى 340) وسط الصفحة فوق المعلومات
+                val cardW = if (portrait) maxOf(context.dp(120), minOf(root.width - context.dp(40), context.dp(340))) else context.dp(300)
+                val cardH = cardW * 9 / 16
+                val cardBottom = if (portrait) heroBottom + hero.height + context.dp(16) else heroBottom
+                val cardGravity = if (portrait) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.BOTTOM or Gravity.END
+                val cardEnd = if (portrait) 0 else heroStart
+                val cp = startCard.layoutParams as FrameLayout.LayoutParams
+                if (cp.width != cardW || cp.height != cardH || cp.bottomMargin != cardBottom || cp.gravity != cardGravity || cp.marginEnd != cardEnd) {
+                    cp.width = cardW; cp.height = cardH; cp.bottomMargin = cardBottom; cp.gravity = cardGravity; cp.marginEnd = cardEnd
+                    startCard.layoutParams = cp
                 }
                 val moreParams = more.layoutParams as FrameLayout.LayoutParams
                 val moreWidth = minOf(context.dp(380), root.width - context.dp(40))
@@ -892,6 +931,7 @@ class TogetherPlayer(
         lobbyBar = null
         lobbyConn = null
         lobbyMore = null
+        lobbyStart = null
         lobbyCount = null
         lobbySig = ""
         markFill = null
@@ -1027,37 +1067,71 @@ class TogetherPlayer(
             setOnClickListener { hooks.openServers() }
         }
         actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
-        // البدء: صورة الحلقة ← دائرة بمثلث (مزاح نحو رأسه: متمركز بصريًا) ← «البدء». أزرق فقط حين يجهز فيديوك.
+        // البدء: بطاقة كبيرة فوق الشريط (lobbyStart) لا زرًا فيه. غير المضيف يرى «بانتظار المضيف» في الشريط
         val canStart = TogetherStart.gate(ready, connected, awaitingPick) == TogetherStart.Gate.SEND
-        val action: View = if (client.isHost) LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(context.dp(16), context.dp(4), context.dp(4), context.dp(4))
-            background = if (canStart) rounded(accent, context.dp(12).toFloat()) else rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
-            contentDescription = "ابدأ للجميع"
-            launch.episodeImage?.let { url ->
-                val thumb = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    background = rounded(0x22FFFFFF, context.dp(9).toFloat())
-                    clipToOutline = true
-                    if (!canStart) { alpha = 0.55f; colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.3f) }) }
-                }
-                images.load(url, context.dp(160)) { bmp -> if (bmp != null) thumb.setImageBitmap(bmp) }
-                addView(thumb, LinearLayout.LayoutParams(context.dp(58), context.dp(36)).apply { marginEnd = context.dp(10) })
+        val startHost = lobbyStart
+        if (startHost != null) {
+            if (client.isHost) {
+                paintStartCard(startHost, canStart)
+                startHost.visibility = View.VISIBLE
+            } else {
+                startHost.visibility = View.GONE
             }
-            val dot = FrameLayout(context).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (canStart) Color.WHITE else 0x40FFFFFF) } }
-            dot.addView(ImageView(context).apply {
-                setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) accent else 0xFF0A0C14.toInt()))
-                translationX = context.dp(1).toFloat()
-            }, FrameLayout.LayoutParams(context.dp(13), context.dp(13), Gravity.CENTER))
-            addView(dot, LinearLayout.LayoutParams(context.dp(28), context.dp(28)).apply { marginEnd = context.dp(10) })
-            addView(context.label("البدء", 15f, if (canStart) Color.WHITE else 0x8CFFFFFF.toInt(), bold = true))
-            // أول بدء: عدّ 3-2-1 مشترك عند الجميع
-            setOnClickListener { pressStart() }
-        } else context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) }
-        actions.addView(action, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f))
+        }
+        if (!client.isHost) actions.addView(context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)))
         if ((lobbyMore as? FrameLayout)?.visibility == View.VISIBLE) { (lobbyMore as FrameLayout).removeAllViews(); (lobbyMore as FrameLayout).addView(offsetRow()) }
+    }
+
+    /**
+     * بطاقة «البدء»: صورة الحلقة تملأها بحواف 10، وبالنص دائرة 60 بمثلث تشغيل، وبلا كتابة. الدائرة بلون القسم حين
+     * يجهز فيديوك، وقبل ذلك خافتة والصورة تخفت معها.
+     */
+    private fun paintStartCard(card: FrameLayout, canStart: Boolean) {
+        card.removeAllViews()
+        val radius = context.dp(10).toFloat()
+        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF)
+        card.clipToOutline = true
+        card.contentDescription = "ابدأ للجميع"
+        launch.episodeImage?.let { url ->
+            val thumb = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                if (!canStart) { alpha = 0.6f; colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.35f) }) }
+            }
+            images.load(url, context.dp(480)) { bmp -> if (bmp != null) thumb.setImageBitmap(bmp) }
+            card.addView(thumb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            // تعتيم خفيف يثبّت وضوح الدائرة على أي صورة (فاتحة أو داكنة)
+            card.addView(View(context).apply { setBackgroundColor(if (canStart) 0x2E000000 else 0x4D000000) },
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        val dot = FrameLayout(context).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (canStart) accent else 0x8C000000.toInt()) }
+            elevation = if (canStart) context.dp(4).toFloat() else 0f
+        }
+        val glyph = context.dp(28)
+        dot.addView(ImageView(context).apply {
+            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) Color.WHITE else 0xBFFFFFFF.toInt()))
+            // التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر
+            // الفرق (~2.3% من حجمه) لا أكثر: الإزاحة السابقة (1dp) كانت تضع مركز ثقله أبعد من مركز الدائرة
+            translationX = glyph * 0.023f
+        }, FrameLayout.LayoutParams(glyph, glyph, Gravity.CENTER))
+        val dotSize = context.dp(60)
+        card.addView(dot, FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER))
+        // التقييم بمصدره والمدة: سطر صغير أسفل البطاقة نفسها (لا تحت عنوان الحلقة). لا يظهر ما لا نعرفه ولا يُخترع مصدر.
+        val source = launch.ratingSource?.takeIf { it.isNotBlank() }
+        val ratingText = launch.rating?.takeIf { it.isNotBlank() }?.let { r -> "\u2066★ " + r + (if (source != null) " " + source else "") + "\u2069" }
+        val facts = listOfNotNull(ratingText, launch.duration?.takeIf { it.isNotBlank() })
+        if (facts.isNotEmpty()) {
+            card.addView(View(context).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0x99000000.toInt(), 0x00000000)) },
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56), Gravity.BOTTOM))
+            card.addView(context.label(facts.joinToString("  ·  "), 12.5f, 0xEBFFFFFF.toInt(), bold = true).apply {
+                maxLines = 1; setShadowLayer(context.dp(4).toFloat(), 0f, 0f, 0xB3000000.toInt())
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+                marginStart = context.dp(14); bottomMargin = context.dp(10)
+            })
+        }
+        // أول بدء: عدّ 3-2-1 مشترك عند الجميع
+        card.setOnClickListener { pressStart() }
     }
 
     companion object {

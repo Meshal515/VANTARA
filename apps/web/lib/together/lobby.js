@@ -100,6 +100,48 @@ export function lobbyStep(m, progress) {
 const arabic = (text) => /[؀-ۿ]/.test(String(text ?? ''));
 
 /**
+ * قوة التعتيم اليساري (0..1) من إضاءة الثلث الأيسر من البنر. بنر مثل أركين من Cinemeta أبيض ناصع في نصفه الأيسر فيضيع عليه
+ * زر الخروج والبطاقة والشريط؛ أما البنر الغامق فلا يُلمس (لا تعتيم ثابت على كل الأعمال: بلاغ المالك).
+ * القياس يحتاج صورة بترويسة CORS (metahub تعطيها)؛ بدونها يتعذر القراءة فيبقى البنر كما هو.
+ */
+export function dimStrength(luma) {
+  if (!Number.isFinite(luma)) return 0;
+  return Math.min(1, Math.max(0, (luma - 0.45) / 0.25));
+}
+function measureLeftLuma(src) {
+  return new Promise((resolve) => {
+    const probe = new Image();
+    probe.crossOrigin = 'anonymous';
+    probe.decoding = 'async';
+    probe.onload = () => {
+      try {
+        const w = 32, h = 18;
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(probe, 0, 0, w, h);
+        const left = Math.round(w * 0.45);
+        const px = g.getImageData(0, 0, left, h).data;
+        let sum = 0;
+        for (let i = 0; i < px.length; i += 4) sum += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+        resolve(sum / (px.length / 4));
+      } catch { resolve(NaN); }
+    };
+    probe.onerror = () => resolve(NaN);
+    probe.src = src;
+  });
+}
+
+/** «★ 8.7 IMDb · 41 دقيقة»: التقييم بمصدره (IMDb للأفلام والمسلسلات) والمدة، وكلاهما اختياري ولا يُخترع. */
+export function startFacts(art) {
+  const out = [];
+  const rating = Number(art?.rating);
+  if (rating > 0) out.push({ text: `★ ${rating.toFixed(1)}${art.ratingSource ? ` ${art.ratingSource}` : ''}`, dir: 'ltr' });
+  if (art?.duration) out.push({ text: String(art.duration), dir: 'rtl' });
+  return out;
+}
+
+/**
  * الخلفية والشعار ومعلومات الحلقة. قرار فن واحد (CLAUDE.md): الشعار يُحسم مرة — صورة الشعار إن حُمّلت خلال
  * 1.2 ث، وإلا اسم العمل — ومكانه محجوز ومخفي حتى الحسم، فلا يظهر الاسم ثم يُستبدل بالشعار أمام المستخدم.
  * الامتلاء بطبقتين (رمادية تحت وملوّنة فوق) في اتجاه الكتابة نفسها: الشعار اللاتيني من اليسار، والاسم العربي من اليمين.
@@ -113,6 +155,7 @@ function buildArt(m, key) {
     img.src = m.art.banner;
     img.onerror = () => img.remove();
     bg.append(img);
+    void measureLeftLuma(m.art.banner).then((l) => bg.style.setProperty('--pl-dim', String(dimStrength(l))));
   }
   bg.append(el('i', 'pl-shade'));
   const hero = el('div', 'pl-hero');
@@ -237,6 +280,13 @@ export function renderLobby(host, m, a) {
     if (m.art.episodeImage) { const thumb = new Image(); thumb.className = 'pl-start-thumb'; thumb.alt = ''; thumb.decoding = 'async'; thumb.src = m.art.episodeImage; thumb.onerror = () => thumb.remove(); go.append(thumb); }
     const playDot = el('span', 'pl-start-play'); playDot.innerHTML = ICON.play;
     go.append(playDot, el('span', 'pl-start-label', 'البدء'));
+    // التقييم والمدة بسطر صغير في أسفل البطاقة نفسها (لا تحت عنوان الحلقة)
+    const facts = startFacts(m.art);
+    if (facts.length) {
+      const meta = el('span', 'pl-start-meta');
+      facts.forEach((f, i) => { if (i) meta.append(el('i', null, '·')); const b = el('bdi', null, f.text); b.dir = f.dir; meta.append(b); });
+      go.append(meta);
+    }
     go.disabled = !ready;
     cta.append(go);
   } else cta.append(el('span', 'pl-wait', 'بانتظار المضيف'));

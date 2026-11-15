@@ -1178,6 +1178,45 @@ html.pwa-playing body {
   .pwa-player .pl-icon { width: 44px; height: 44px; border-radius: 12px; }
   .pwa-player .pl-start-thumb { width: 58px; height: 34px; border-radius: 9px; }
 }
+/* تعتيم يساري تكيّفي: --pl-dim (0..1) يقيسه lobby.js من إضاءة البنر (0 للغامق)؛ بنر أبيض ناصع من اليسار (أركين) يضيع عليه
+   زر الخروج والبطاقة والشريط. لا تعتيم ثابت على كل الأعمال. */
+.pwa-player .pl-bg::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: var(--pl-dim, 0); transition: opacity 0.5s ease;
+  background: linear-gradient(to right, rgba(5, 5, 7, 0.86) 0, rgba(5, 5, 7, 0.7) 35%, rgba(5, 5, 7, 0.2) 62%, rgba(5, 5, 7, 0) 80%), rgba(5, 5, 7, 0.18);
+}
+/* «البدء» بطاقة كبيرة (16:9) فوق الشريط في الجهة المقابلة للشعار: صورة الحلقة تملأها، ودائرة بلون القسم بمثلث تشغيل
+   ممتمركز بصريًا، وبلا كتابة (كلمة «البدء» لقارئات الشاشة فقط). الهاتف الطولي (≤760px) يبقى على شكله. */
+@media (min-width: 761px) {
+  .pwa-player .pl-start {
+    position: absolute; inset-inline-end: max(40px, env(safe-area-inset-left)); bottom: calc(100% + 28px);
+    display: grid; place-items: center; width: clamp(320px, 26vw, 520px); height: auto; aspect-ratio: 16 / 9; padding: 0; gap: 0;
+    overflow: hidden; border-radius: 12px; background: #15171f; border: 1px solid rgba(255, 255, 255, 0.14); color: #fff;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+  }
+  .pwa-player .pl-start.is-primary { background: #15171f; border-color: rgba(255, 255, 255, 0.14); }
+  .pwa-player .pl-start::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0) 45%), rgba(0, 0, 0, 0.14); }
+  .pwa-player .pl-start-thumb { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
+  .pwa-player .pl-start:not(.is-primary) .pl-start-thumb { filter: grayscale(0.65) brightness(0.62); }
+  .pwa-player .pl-start-play {
+    position: relative; z-index: 2; width: clamp(56px, 4.4vw, 84px); height: clamp(56px, 4.4vw, 84px);
+    background: var(--pl-accent); color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+  .pwa-player .pl-start.is-primary .pl-start-play { background: var(--pl-accent); color: #fff; }
+  .pwa-player .pl-start:not(.is-primary) .pl-start-play { background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.78); box-shadow: none; }
+  /* التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر الفرق (~2.3%) لا أكثر */
+  .pwa-player .pl-start-play svg { width: 46%; height: 46%; transform: translateX(2.3%); }
+  .pwa-player .pl-start-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; padding: 0; }
+  .pwa-player .pl-start-meta { position: absolute; z-index: 2; inset-inline: 14px; bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7); }
+  .pwa-player .pl-start-meta i { font-style: normal; opacity: 0.6; }
+}
+@media (min-width: 761px) and (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .pwa-player .pl-start { inset-inline-end: 56px; }
+  .pwa-player .pl-start-meta { font-size: 14px; inset-inline: 18px; bottom: 12px; }
+}
+@media (min-width: 761px) and (max-height: 500px) {
+  .pwa-player .pl-start { width: clamp(190px, 24vw, 260px); bottom: calc(100% + 16px); }
+  .pwa-player .pl-start-play { width: 46px; height: 46px; }
+}
 /* «الحلقات» من الغرفة (المضيف): لوحة جانبية بصور الحلقات، الحالية مميّزة، والاختيار ينقل الغرفة كلها */
 .pl-side-wrap { position: absolute; inset: 0; z-index: 30; }
 .pl-side-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); }

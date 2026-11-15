@@ -38,6 +38,26 @@ describe('room art', () => {
     expect(a.episodeImage).toBe('https://img/ep1.jpg');
   });
 
+  it('cinema invite: the work backdrop is the room background even though banner is the episode still', async () => {
+    // انحدار: دعوة السينما ترسل banner = لقطة الحلقة بلا backdrop، فكانت خلفية الغرفة لقطة الحلقة (بلاغ المالك، Arcane)
+    const offline = async () => { throw new TypeError('offline'); };
+    const a = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', banner: 'https://img/ep-still.jpg', backdrop: 'https://img/work-bg.jpg', episodeImage: 'https://img/ep-still.jpg' }, { fetchImpl: offline });
+    expect(a.banner).toBe('https://img/work-bg.jpg');
+    expect(a.episodeImage).toBe('https://img/ep-still.jpg');
+    // بلا backdrop (دعوة قديمة): الاحتياط كما كان
+    const old = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', banner: 'https://img/ep-still.jpg' }, { fetchImpl: offline });
+    expect(old.banner).toBe('https://img/ep-still.jpg');
+  });
+
+  it('rating (with its source) and duration reach the room art only when the work page knows them', async () => {
+    const offline = async () => { throw new TypeError('offline'); };
+    const a = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', rating: 8.7, ratingSource: 'IMDb', duration: '41 دقيقة' }, { fetchImpl: offline });
+    expect(a).toMatchObject({ rating: 8.7, ratingSource: 'IMDb', duration: '41 دقيقة' });
+    const none = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', rating: 0 }, { fetchImpl: offline });
+    expect(none).not.toHaveProperty('rating');
+    expect(none).not.toHaveProperty('duration');
+  });
+
   it('keeps what the invite sent and never guesses without data', async () => {
     const offline = async () => { throw new TypeError('offline'); };
     const a = await resolveArt({ kind: 'anime', seriesRef: 'anime:1', episode: 2, title: 'X', cover: 'c.jpg' }, { fetchImpl: offline });

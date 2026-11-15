@@ -104,7 +104,7 @@ class TogetherRoomScreensDeviceTest {
             .put("banner", "https://artworks.thetvdb.com/banners/series/267440/backgrounds/5f8611eaa79ff.jpg")
             .put("logo", "https://images.metahub.space/logo/medium/tt2560140/img")
             .put("episodeImage", "https://artworks.thetvdb.com/banners/episodes/267440/5978808.jpg")
-            .put("episodeTitle", "Beast Titan").put("pick", true)
+            .put("episodeTitle", "Beast Titan").put("rating", "8.7").put("ratingSource", "IMDb").put("duration", "24 دقيقة").put("pick", true)
             .put("invitees", JSONArray().put(JSONObject().put("userId", "friend").put("displayName", "صديق")))
         val launch = PlayerActivity.Launch(
             session = "room-shots", title = "Attack on Titan Season 2", animeId = "20958", episode = 1f, total = 12,
