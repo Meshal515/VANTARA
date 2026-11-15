@@ -159,7 +159,13 @@ class TogetherRoomScreensDeviceTest {
         while (SystemClock.elapsedRealtime() < seasonsBy && seasonCount() < 0) Thread.sleep(250)
         assertTrue("سلسلة المواسم من AniList (${seasonCount()})", seasonCount() >= 3)
         shot("room-08-episodes-season-button", 1500)
-        field("seasonMenu", true); refreshSheet(); shot("room-09-seasons-menu")
+        // ضغطة حقيقية على زر «الموسم» (لا تعديل حقل): نفس مسار المستخدم
+        instrumentation.runOnMainSync {
+            val found = ArrayList<android.view.View>()
+            activity.window.decorView.findViewsWithText(found, "الموسم: ", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION)
+            found.firstOrNull { it.isClickable }?.performClick()
+        }
+        shot("room-09-seasons-menu", 1200)
         var option: android.view.View? = null
         instrumentation.runOnMainSync {
             val found = ArrayList<android.view.View>()

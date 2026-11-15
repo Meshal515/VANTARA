@@ -1906,7 +1906,8 @@ class PlayerActivity : Activity() {
             contentDescription = "الموسم: $value من ${list.size}"
             addView(label("الموسم · ${list.size} مواسم", 11.5f, Tone.TEXT_3, bold = true))
             addView(label("$value  ${if (open) "▴" else "▾"}", 14f, Tone.TEXT, bold = true))
-            setOnClickListener { seasonMenu = !seasonMenu; sheet.refresh() }
+            // فتح القائمة يعيد الورقة لأعلاها: زر «الموسم» والمواسم ظاهرة لا مخفية فوق الحلقة الحالية
+            setOnClickListener { seasonMenu = !seasonMenu; sheet.refresh(); if (seasonMenu) main.post { sheet.scrollTo(0) } }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
         if (!open) return
         val menu = LinearLayout(this).apply {
