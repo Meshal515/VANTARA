@@ -96,7 +96,8 @@ class VerificationLedger(private val capacity: Int = 8, private val ttlMs: Long 
     fun begin(host: String, now: Long): VerificationPending? {
         val entry = entries[host] ?: return null
         if (entry.state != "required" || now - entry.createdAt >= ttlMs || entries.values.any { it.state == "active" }) return null
-        return entry.copy(state = "active").also { entries[host] = it }
+        // The user's own attempt starts its own clock: a request recorded minutes ago must not expire mid-check
+        return entry.copy(state = "active", createdAt = now).also { entries[host] = it }
     }
     fun finish(host: String, token: String): VerificationPending? {
         val entry = entries[host]?.takeIf { it.token == token } ?: return null
@@ -108,6 +109,11 @@ class VerificationLedger(private val capacity: Int = 8, private val ttlMs: Long 
         return entry.copy(createdAt = now, token = UUID.randomUUID().toString(), state = "required")
             .also { entries[host] = it }
     }
+    /**
+     * Old requests are re-armed with a new token, still waiting for the user. An active check counts from when the user
+     * started it ([begin]), so it is re-armed only if stuck (the page died without answering), never mid-check: counting
+     * from the original request rejected a challenge the user had just passed.
+     */
     fun expire(now: Long): List<VerificationPending> = entries.values
         .filter { now - it.createdAt >= ttlMs }
         .mapNotNull { retry(it.host, it.token, now) }
