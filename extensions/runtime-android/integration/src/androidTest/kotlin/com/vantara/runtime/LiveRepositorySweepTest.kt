@@ -51,7 +51,8 @@ class LiveRepositorySweepTest {
     private fun head(url: String,headers: Map<String,String>): Pair<okhttp3.Response,ByteArray> {
         val request=okhttp3.Request.Builder().url(url).header("Range","bytes=0-4095").apply { headers.forEach { (k,v) -> header(k,v) } }
             .build()
-        val response=com.vantara.addons.nativeAddonMediaClient(http,url,headers).newCall(request).execute()
+        // كل ما تفحصه هذه الأداة مصادر CloudStream المعزولة: المشغّل يمرّرها بـplainMedia (رابط http عادي مسموح) كما في PlayerActivity
+        val response=com.vantara.addons.nativeAddonMediaClient(http,url,headers,plainMedia=true).newCall(request).execute()
         return response to response.use { r ->
             val input=r.body?.byteStream() ?: return@use ByteArray(0)
             val out=java.io.ByteArrayOutputStream();val buf=ByteArray(4096)
