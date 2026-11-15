@@ -132,7 +132,7 @@ class TogetherRoomScreensDeviceTest {
         field("serverMenu", "q"); refreshSheet(); shot("room-03-servers-quality-menu")
         field("serverMenu", null); field("serverSource", "Torrentio"); refreshSheet(); shot("room-04-servers-filtered")
         field("serverSource", null); back()
-        call("showEpisodes"); shot("room-05-episodes"); back()
+        call("showEpisodes"); shot("room-05-episodes", 6000); back() // ani.zip ثم الصور: وقت للشبكة قبل اللقطة
         // اختيار سيرفر: التجهيز ثم الجاهزية (البدء أزرق)
         instrumentation.runOnMainSync {
             val c = session.take("t1") ?: prep.candidate("t1")
