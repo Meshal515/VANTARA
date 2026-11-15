@@ -749,7 +749,7 @@ class TogetherPlayer(
             }
             val logoUrl = launch.logo
             if (logoUrl != null) {
-                main.postDelayed({ decide(null) }, 1200)
+                main.postDelayed({ decide(null) }, 3000) // أول تحميل للشعار على شبكة جوال قد يتجاوز ثانية؛ مكانه مخفي حتى الحسم
                 images.load(logoUrl, context.dp(360)) { bmp -> decide(bmp?.takeIf { it.width > 1 }) }
             } else decide(null)
             // النوع صغيرًا، ثم «الحلقة N» بخط كبير، ثم عنوان الحلقة معزول الاتجاه، ثم مراحل التجهيز بأسمائها

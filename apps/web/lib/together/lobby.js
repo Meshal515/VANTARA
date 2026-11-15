@@ -142,7 +142,7 @@ function buildArt(m, key) {
       if (ok) layers(() => { const i = new Image(); i.className = 'pl-logo'; i.alt = ''; i.src = m.art.logo; return i; }, false);
       else showName();
     };
-    const timer = setTimeout(() => decide(false), 1200);
+    const timer = setTimeout(() => decide(false), 3000); // أول تحميل للشعار قد يتجاوز ثانية (ظهر الاسم بدله على محاكي الجوال)
     probe.onload = () => decide(probe.naturalWidth > 1);
     probe.onerror = () => decide(false);
     probe.src = m.art.logo;

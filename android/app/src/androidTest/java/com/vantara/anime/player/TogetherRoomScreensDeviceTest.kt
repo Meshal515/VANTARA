@@ -101,7 +101,7 @@ class TogetherRoomScreensDeviceTest {
             .put("episodeTitle", "The Boys` Promise").put("pick", true)
             .put("invitees", JSONArray().put(JSONObject().put("userId", "friend").put("displayName", "صديق")))
         val launch = PlayerActivity.Launch(
-            session = "room-shots", title = "Black Clover", episode = 2f, total = 170,
+            session = "room-shots", title = "Black Clover", animeId = "97940", episode = 2f, total = 170,
             copies = Json.encodeToString(ListSerializer(SourceAnime.serializer()), copies), together = together.toString(),
         )
         instrumentation.startActivitySync(PlayerActivity.intent(context, launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
