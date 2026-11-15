@@ -42,7 +42,7 @@ export function sameRoute(route, source) {
  * يجهّز الحلقة وينتظر السيرفرات: يرجع حين ينتهي التجهيز، أو حين يجهز ما يكفي للاختيار
  * (اليدوي: سيرفره وحده؛ الذكي: كل ما يُجهَّز انتهى أو مرّت المهلة).
  */
-export async function resolveRoutes(engine, request, { signal, wanted = null, settleMs = SETTLE_MS } = {}) {
+export async function resolveRoutes(engine, request, { signal, wanted = null, settleMs = SETTLE_MS, onRoutes = null } = {}) {
   const out = await engine.prepare({ copies: request.copies ?? [], identity: request.identity ?? null, episode: request.episode, pinned: Boolean(request.pinned), probe: true, signal });
   if (!out?.session) throw new DownloadError('NO_ROUTE', 'لم تبدأ جلسة تجهيز السيرفرات', { retryable: true });
   const session = out.session;
@@ -55,7 +55,10 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, se
     if (e?.session === session) done = true;
   });
   const until = Date.now() + settleMs;
+  // ورقة «اختر السيرفر» تعرض كل سيرفر لحظة جاهزيته، لا بعد أن يستقر آخر مصدر
+  const report = () => { try { onRoutes?.(routes); } catch { /* عرض فقط */ } };
   try {
+    report();
     while (!signal?.aborted) {
       const pending = (r) => r.state === 'RESOLVING' || r.state === 'CHECKING';
       // يدوي/مقفل: يكفي أن تستقر سيرفرات ذلك المصدر وحده، لا ننتظر بقية المصادر
@@ -72,6 +75,7 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, se
       } catch {
         /* لقطة فاشلة لا تُسقط ما وصل بالأحداث */
       }
+      report();
     }
   } finally {
     off?.();

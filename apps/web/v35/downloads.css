@@ -226,6 +226,7 @@ html[dir='ltr'] .v35 .dl-bar.is-indeterminate > i { animation-direction: reverse
 }
 .v35 .dl-seg-btn.is-on { background: var(--surface-3); color: var(--text-1); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px -6px rgba(0, 0, 0, 0.6); }
 .v35 .dl-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 240px; overflow-y: auto; }
+.v35 .dl-source-list { display: contents; } /* سيرفرات تظهر تباعًا: الغلاف لا يغيّر تخطيط القائمة */
 .v35 .dl-source {
   display: flex;
   align-items: center;

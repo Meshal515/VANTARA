@@ -237,7 +237,7 @@ html, body, body * { scrollbar-width: none; -ms-overflow-style: none; }
 .gate__enter--locked:not(.v35 *), .gate__enter--locked:hover:not(.v35 *) { background: rgba(255,255,255,.045); border-color: rgba(255,255,255,.09); color: #8f8d98; cursor: not-allowed; }
 .gate__enter--locked:active:not(.v35 *) { transform: none; }
 
-.gate__message:not(.v35 *) { min-height: 18px; margin: 8px 0 0; color: #9897a3; font-size: 12px; }
+.gate__message:not(.v35 *) { min-height: 18px; margin: 8px 0 0; color: #9897a3; font-size: 12px; line-height: 18px; } /* سطر بارتفاع ثابت: «مستخدم الآن على جهاز آخر» لا يرفع القائمة */
 .gate__message--error:not(.v35 *) { color: var(--danger); }
 /* جوال جديد: رمز الاعتماد في بطاقة زجاجية فوق الحرير */
 .gate-approval:not(.v35 *) {

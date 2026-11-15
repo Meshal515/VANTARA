@@ -1460,6 +1460,7 @@ let v35 = null;
 async function switchToAccountGate() {
   try {
     if (!await sync.signOut()) throw new Error('session_storage_full');
+    if (localMode) leaveLocalMode();
     dropV35();
     await go({ name: 'gate' });
   } catch {
@@ -1470,6 +1471,47 @@ async function switchToAccountGate() {
 function dropV35() {
   v35?.destroy();
   v35 = null;
+}
+
+/**
+ * «على جهازي»: فتح التطبيق بلا إنترنت ولا جلسة.
+ *
+ * الحسابات والجلسة تُصدر من الخادم، فبوابة «من يتابع؟» لا تعمل بلا اتصال. لكن التحميلات على
+ * الجهاز (فصول وحلقات وترجمات) لا تحتاج خادمًا ولا حسابًا: ندخل إليها مباشرة. وحين يعود الاتصال
+ * يظهر تنبيه «اختر حسابك»؛ والدخول يهدم هذه الواجهة فلا يرث الحساب شيئًا منها.
+ */
+let localMode = false;
+let onlineAgain = null;
+
+function leaveLocalMode() {
+  localMode = false;
+  if (onlineAgain) window.removeEventListener('online', onlineAgain);
+  onlineAgain = null;
+  dropV35();
+}
+
+async function screenLocal() {
+  if (sync.signedIn) return go({ name: 'home' });
+  if (!localMode) {
+    // واجهة من جلسة سابقة (خروج) لا تُستعمل هنا
+    dropV35();
+    localMode = true;
+    onlineAgain = () => {
+      showToast({
+        title: 'رجع الاتصال',
+        body: 'اضغط لاختيار حسابك',
+        lifetimeMs: 12_000,
+        onOpen: () => {
+          leaveLocalMode();
+          void go({ name: 'gate' });
+        },
+      });
+    };
+    window.addEventListener('online', onlineAgain);
+  }
+  screenV35('library');
+  state.screen = 'LOCAL';
+  await v35?.openDownloads?.('device');
 }
 
 function screenV35(page) {
@@ -1596,7 +1638,7 @@ function attachBackButton() {
   app.addListener('backButton', () => {
     if (state.back?.()) return;
     const { name } = state.route ?? {};
-    if (name === 'gate' || name === 'home' || name === 'v35') {
+    if (name === 'gate' || name === 'home' || name === 'v35' || name === 'local') {
       void app.exitApp?.();
       return;
     }
@@ -1615,14 +1657,19 @@ async function go(route) {
         sync,
         mount,
         onSignedIn: async () => {
+          // واجهة «على جهازي» بُنيت بلا حساب: لا تُورَّث للحساب الذي دخل
+          if (localMode) leaveLocalMode();
           startHeartbeat();
           void sync.pull();
           await go({ name: 'home' });
         },
+        onLocal: () => go({ name: 'local' }),
       });
       state.teardown = teardown;
       return;
     }
+    case 'local':
+      return screenLocal();
     case 'home':
       return screenV35('home');
     case 'library':
