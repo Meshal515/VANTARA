@@ -14,6 +14,7 @@ import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localWork, 
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
 import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
+import { createStorageView } from './storage-view.js';
 import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, progressRatio } from '../lib/downloads/units.js';
 import { glyph } from './icons.js';
 import { parseRelease } from '../addons/release-info.js';
@@ -50,6 +51,13 @@ export function createDownloadsUI(deps) {
   let ctx = null; // { manager, store, caps }
 
   const ready = () => (ctx ? Promise.resolve(ctx) : downloads().then((c) => (ctx = c)));
+
+  // إدارة المساحة: كل ما يأخذه VANTARA بفئاته، وحذف انتقائي بعد أن ترى الاسم والحجم والأثر
+  const storage = createStorageView({
+    el, openSheet, closeSheet, toast,
+    mangaBytes: async () => (await ready()).manager.list().filter((i) => i.kind === 'manga' && i.state === STATES.ready).reduce((n, i) => n + (Number(i.storage?.bytes ?? i.bytes) || 0), 0),
+    openDownloads: () => { view.tab = 'device'; void open('device'); },
+  });
 
   // ───────────── المدخل: زر «التحميلات» في مكتبتي ─────────────
 
@@ -488,6 +496,13 @@ export function createDownloadsUI(deps) {
     const box = el('div', 'dl-empty');
     box.innerHTML = `<span class="dl-empty-icon">${glyph(icon, { size: 30 })}</span>`;
     box.append(el('b', null, title), el('p', null, hint));
+    // المساحة لا تتعلق بوجود تنزيلات: الكاش وبقايا البث قد تكون جيجابايتات والقائمة فارغة
+    const space = el('button', 'btn dl-empty-space');
+    space.type = 'button';
+    space.innerHTML = glyph('chart', { size: 16 });
+    space.append(el('span', null, 'إدارة المساحة'));
+    space.onclick = () => void storage.open();
+    box.append(space);
     return box;
   }
 
@@ -913,6 +928,7 @@ export function createDownloadsUI(deps) {
       if (s.active + s.waiting > 0) body.append(sheetButton('pause', 'إيقاف الكل', () => { closeSheet(); c.manager.pauseAll(); }));
       if (s.paused) body.append(sheetButton('play', 'استئناف الكل', () => { closeSheet(); c.manager.resumeAll(); }));
       if (pending.length) body.append(sheetButton('trash', `إلغاء كل ما في الطابور (${pending.length})`, () => { closeSheet(); confirmCancelMany(pending); }, true));
+      body.append(sheetButton('chart', 'إدارة المساحة', () => { closeSheet(); void storage.open(); }));
       body.append(sheetButton('sliders', 'إعدادات التحميل', () => { closeSheet(); void openSettings(); }));
     });
   }
@@ -938,6 +954,7 @@ export function createDownloadsUI(deps) {
       usage.append(free);
       void storageFree(c).then((f) => { if (f != null && f >= 0) free.append(el('span', null, 'متاح على الجهاز'), ltr(el, formatBytes(f))); });
       body.append(usage);
+      body.append(sheetButton('chart', 'إدارة المساحة (الكاش والبقايا وكل ما يأخذه التطبيق)', () => { closeSheet(); void storage.open(); }));
       body.append(sheetButton('check', 'تحديد…', () => { closeSheet(); view.select = { scope: 'device', ids: new Set() }; render({ keepScroll: true }); }));
       if (done.length) {
         const b = sheetButton('trash', `حذف كل المقروء والمشاهَد (${done.length})`, () => { closeSheet(); confirmDelete(done, { title: 'حذف المقروء والمشاهَد من الجهاز' }); }, true);
@@ -955,6 +972,8 @@ export function createDownloadsUI(deps) {
     if (view.sort === 'name') return list.sort((a, b) => String(a.work.title ?? '').localeCompare(String(b.work.title ?? ''), 'ar'));
     return list;
   }
+
+  const storageView = () => storage;
 
   async function openSettings() {
     const c = await ready();
@@ -988,7 +1007,8 @@ export function createDownloadsUI(deps) {
       const wifi = toggleRow('Wi-Fi فقط', 'لا يُنزَّل شيء على بيانات الجوال. ما في الطابور ينتظر الشبكة.', s.wifiOnly, (on) => c.manager.setWifiOnly(on));
       const storage = el('div', 'dl-setting dl-storage');
       storage.append(el('div', 'dl-setting-head'));
-      body.append(par, wifi, storage);
+      const manageSpace = sheetButton('chart', 'إدارة المساحة', () => { closeSheet(); void storageView().open(); });
+      body.append(par, wifi, storage, manageSpace);
       void storageLine(c, native).then((nodes) => storage.firstChild.append(...nodes));
     });
   }
@@ -1323,6 +1343,7 @@ export function createDownloadsUI(deps) {
     manage,
     openDownloadSheet,
     openSettings,
+    openStorage: () => storage.open(),
     isActive: (id) => ACTIVE_STATES.has(ctx?.manager.get(id)?.state),
     /** كم عنصرًا من هذا العمل على الجهاز (0 قبل أن يُقرأ البيان). */
     count: (ref) => (ctx ? ctx.manager.list().filter((i) => i.work.ref === ref && i.state === STATES.ready).length : 0),

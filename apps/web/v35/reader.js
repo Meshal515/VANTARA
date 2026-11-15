@@ -143,6 +143,15 @@ export function openSmartReader(deps, ctx) {
 
   const settings = loadSettings();
   const sequence = chapterSequence(ctx.rows?.length ? ctx.rows : [ctx.row]);
+  /**
+   * بلا اتصال: التالي والسابق والتمرير المتواصل تمر على الفصول المحمّلة وحدها (كقارئ Mihon)، فلا يقف القارئ عند
+   * فصل غير محمّل بينها. مع الاتصال: كل الفصول كما هي. محرك «على الجهاز» فصوله كلها محمّلة أصلًا.
+   */
+  const reach = (row) => {
+    if (globalThis.navigator?.onLine !== false || typeof engine.hasLocal !== 'function') return sequence;
+    const same = (a, b) => a === b || (Number.isFinite(a?.number) && a.number >= 0 && a.number === b?.number) || Boolean(a?.chapter?.url && a.chapter.url === b?.chapter?.url);
+    return sequence.filter((r) => same(r, row) || engine.hasLocal(r.sourceId, r.chapter) !== false);
+  };
   const ref = ctx.seriesRef;
   const me = () => sync.user?.userId;
   const readingUser = me();
@@ -380,7 +389,7 @@ export function openSmartReader(deps, ctx) {
   // ───────────────────────── الفصل ─────────────────────────
 
   const keyOf = (row) => chapterKeyOf(ref, row);
-  const nav = () => neighbors(sequence, state.row);
+  const nav = () => neighbors(reach(state.row), state.row);
   const sameRow = (a, b) => a === b || (a && b && chapterId(a) === chapterId(b));
 
   function openChapters() {
@@ -401,6 +410,8 @@ export function openSmartReader(deps, ctx) {
           current = b;
         }
         b.append(el('span', 'rd-chapter-choice__number', chapterLabel(row)));
+        // محمّل على الجهاز: يُقرأ بلا إنترنت
+        if (engine.hasLocal?.(row.sourceId, row.chapter)) { const mark = el('span', 'rd-chapter-local'); mark.innerHTML = glyph('downloaded', { size: 16 }); mark.setAttribute('aria-label', 'على الجهاز'); b.append(mark); }
         if (row.label) b.append(el('span', 'rd-chapter-choice__title', row.label));
         b.onclick = () => {
           closeSheet();
@@ -565,7 +576,7 @@ export function openSmartReader(deps, ctx) {
   function announce(row) {
     q('rdWork').textContent = ctx.title;
     q('rdChapter').textContent = [chapterLabel(row), row.label].filter(Boolean).join(' · ');
-    const { prev, next } = neighbors(sequence, row);
+    const { prev, next } = neighbors(reach(row), row);
     root.querySelector('.rd-prev').disabled = !prev;
     root.querySelector('.rd-next').disabled = !next;
     const number = Number.isFinite(row.number) && row.number >= 0 ? row.number : null;
@@ -688,7 +699,7 @@ export function openSmartReader(deps, ctx) {
    * وإعدادك وبأولوية لا تنافس ما تقرؤه. التمرير يدخل فيه بلا زرّ.
    */
   function appendNext(seg) {
-    const { next } = neighbors(sequence, seg.row);
+    const { next } = neighbors(reach(seg.row), seg.row);
     if (!next || seg.next || seg.appending) return;
     const plan = nextChapterPlan({ mode: settings.prefetch, network: readNetwork() });
     seg.appending = true;
@@ -957,7 +968,7 @@ export function openSmartReader(deps, ctx) {
    * شيء بعده — وعندها وحدها يقول «وصلت إلى آخر فصل متاح حاليًا».
    */
   function paintBoundary(seg) {
-    const { next } = neighbors(sequence, seg.row);
+    const { next } = neighbors(reach(seg.row), seg.row);
     const end = seg.end;
     end.replaceChildren();
     end.classList.toggle('rd-end--last', !next);
@@ -1004,7 +1015,7 @@ export function openSmartReader(deps, ctx) {
   /** «التالي» باللمس: إلى أول صفحته إن كان تحتك، وإلا يُفتح من الصفر. */
   function goNext(seg = state.seg) {
     if (!seg) return;
-    const { next } = neighbors(sequence, seg.row);
+    const { next } = neighbors(reach(seg.row), seg.row);
     if (!next) return;
     if (seg.next) {
       seg.next.current = 0;
@@ -1184,7 +1195,7 @@ export function openSmartReader(deps, ctx) {
         activeMs: Math.round(readMs),
       });
       // آخر فصل في عمل انتهى نشره = أكملته: يظهر في «المكتمل» عندك وفي ملفك
-      if (!neighbors(sequence, seg.row).next && ctx.work?.status === 'FINISHED') {
+      if (!neighbors(reach(seg.row), seg.row).next && ctx.work?.status === 'FINISHED') {
         sync.enqueue('completed.set', {
           seriesRef: ref,
           seriesTitle: ctx.title,
@@ -1893,7 +1904,7 @@ export function openSmartReader(deps, ctx) {
       if (!prev) return;
       // الفصل السابق ما زال فوقك؟ إلى أوله بلا تحميل
       const above = segs[segs.indexOf(state.seg) - 1];
-      if (above && neighbors(sequence, above.row).next && sameRow(above.row, prev)) {
+      if (above && neighbors(reach(above.row), above.row).next && sameRow(above.row, prev)) {
         above.current = 0;
         scrollToFrame(above.slots[0]?.frame, false);
       } else void openChapter(prev, { startAt: 0 });

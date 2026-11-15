@@ -730,6 +730,8 @@ class ExtensionEnginePlugin : Plugin() {
 
                 if (hit != null) {
                     file = hit
+                    // «آخر استعمال» للتسقيف: الصفحة التي تقرؤها الآن لا تُطرد أولًا
+                    runCatching { hit.setLastModified(System.currentTimeMillis()) }
                     bytes = withContext(Dispatchers.IO) { hit.readBytes() }
                     type = typeForExtension(hit.extension)
                 } else {
@@ -763,6 +765,8 @@ class ExtensionEnginePlugin : Plugin() {
                     file = cacheFile(url, extensionForType(type))
                     // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
                     // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
+                    // كاش الصفحات كان بلا سقف: كل صفحة قُرئت تبقى للأبد (جيجابايتات). يُسقَّف كل 150 صفحة جديدة
+                    if (++pageWrites % 150 == 0) scope.launch(Dispatchers.IO) { runCatching { StoragePlugin.capDir(pageCacheDir, StoragePlugin.PAGE_CACHE_CAP) } }
                     withContext(Dispatchers.IO) {
                         val tmp = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.part")
                         tmp.writeBytes(bytes)
@@ -876,6 +880,7 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    @Volatile private var pageWrites = 0
     private val pageCacheDir by lazy {
         java.io.File(context.cacheDir, "pages").apply { mkdirs() }
     }

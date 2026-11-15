@@ -743,3 +743,6 @@
 .v35.rd--scrubbing .rd-knob { transform: scale(1.25); }
 .v35.rd--scrubbing .rd-knob em { opacity: 1; }
 .v35.rd--scrubbing .rd-scrub > i, .v35.rd--scrubbing .rd-knob { transition: none; }
+
+/* فصل محمّل على الجهاز في قائمة الفصول */
+.v35 .rd-chapter-local { display: inline-flex; color: var(--accent-text, var(--accent)); margin-inline-start: 6px; flex: none; }

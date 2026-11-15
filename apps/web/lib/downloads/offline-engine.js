@@ -33,7 +33,15 @@ export function readyItemFor(items, sourceId, chapter) {
 export function withDownloads(engine, downloads) {
   const urls = new Map();
   const online = new Map();
-  const ctx = () => Promise.resolve().then(downloads).catch(() => null);
+  /** آخر قائمة تنزيلات قُرئت: بها يعرف القارئ متزامنًا أي فصل على الجهاز (للتنقل بلا اتصال). */
+  let snapshot = null;
+  const ctx = () => Promise.resolve().then(downloads).then((c) => {
+    if (c?.manager) {
+      snapshot = c.manager.list();
+      if (!c.__readerSub) { c.__readerSub = true; c.manager.subscribe?.(() => { snapshot = c.manager.list(); }); }
+    }
+    return c;
+  }).catch(() => null);
 
   async function localItem(sourceId, chapter) {
     const c = await ctx();
@@ -57,6 +65,11 @@ export function withDownloads(engine, downloads) {
   return {
     ...engine,
     downloadsAware: true,
+    /** هل هذا الفصل جاهز على الجهاز؟ (متزامن: من آخر قائمة قُرئت؛ null إن لم تُقرأ بعد) */
+    hasLocal(sourceId, chapter) {
+      if (!snapshot) { void ctx(); return null; }
+      return Boolean(readyItemFor(snapshot, sourceId, chapter));
+    },
     async pages(sourceId, chapter) {
       const hit = await localItem(sourceId, chapter);
       if (!hit) return engine.pages(sourceId, chapter);

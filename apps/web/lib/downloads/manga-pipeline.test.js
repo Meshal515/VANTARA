@@ -297,3 +297,23 @@ describe('queue management (pro-level bulk actions)', () => {
     m.destroy();
   });
 });
+
+describe('chapter names and offline navigation in the reader', () => {
+  it('shows «الفصل N» and only a real title, never the raw source name', async () => {
+    const { chapterLabel } = await import('../../v35/reader-core.js');
+    expect(chapterLabel({ number: 2, chapter: { name: 'Vol.1 Ch.2 - 2' } })).toBe('الفصل 2');
+    expect(chapterLabel({ number: 137, chapter: { name: 'Chapter 137 - Anger and Grief' } })).toBe('الفصل 137 · Anger and Grief');
+    expect(chapterLabel({ number: 201, chapter: { name: 'الفصل 201' } })).toBe('الفصل 201');
+    expect(chapterLabel({ number: 386, chapter: { name: 'Group 2 Chapter 386' } })).toBe('الفصل 386');
+    expect(chapterLabel({ number: -1, chapter: { name: 'Prologue' } })).toBe('Prologue');
+  });
+
+  it('the reader engine knows synchronously which chapters are on the device', async () => {
+    const item = { ...createItem(spec()), state: 'ready', pagesTotal: 1 };
+    const hybrid = withDownloads({ pages: async () => [], pageImage: async () => ({}) }, async () => ({ manager: { list: () => [item], subscribe: () => () => {} }, store: memoryStore() }));
+    expect(hybrid.hasLocal('a', { url: '/a/1' })).toBeNull();
+    await hybrid.pages('a', { url: '/a/1' });
+    expect(hybrid.hasLocal('a', { url: '/a/1' })).toBe(true);
+    expect(hybrid.hasLocal('a', { url: '/a/9' })).toBe(false);
+  });
+});
