@@ -257,3 +257,43 @@ describe('manga downloads keep the app process alive in background', () => {
     m.destroy();
   });
 });
+
+describe('queue management (pro-level bulk actions)', () => {
+  const make = () => {
+    const runs = new Map();
+    // كالمحرك الحقيقي: الإجهاض (إيقاف/إلغاء) ينهي التشغيل
+    const driver = { run: vi.fn((item, ctl) => new Promise((resolve, reject) => { runs.set(item.id, { resolve, reject, ctl }); ctl.signal.addEventListener('abort', () => resolve(null)); })), remove: vi.fn(async () => {}) };
+    const m = createDownloadManager({ store: memoryStore(), drivers: { manga: driver, video: null }, settings: { parallel: 1 } });
+    return { m, runs, driver };
+  };
+  const unit = (n) => spec({ unit: { key: `c${n}`, number: n } });
+
+  it('prioritize moves chosen items to the head of the queue in their order', async () => {
+    const { m } = make();
+    const { added } = await m.enqueue([1, 2, 3, 4].map(unit));
+    m.prioritize([added[3].id, added[2].id]);
+    const order = m.list().map((i) => i.unit.number);
+    expect(order.slice(0, 2)).toEqual([4, 3]);
+    m.destroy();
+  });
+
+  it('retryFailed requeues every failed item with full attempts', async () => {
+    const { m, runs } = make();
+    const { added } = await m.enqueue([unit(1)]);
+    await vi.waitFor(() => expect(runs.size).toBe(1));
+    runs.get(added[0].id).reject(Object.assign(new Error('gone'), { code: 'SOURCE' }));
+    await vi.waitFor(() => expect(m.get(added[0].id).state).toBe(STATES.failed));
+    expect(m.retryFailed()).toBe(1);
+    expect(['queued', 'resolving']).toContain(m.get(added[0].id).state);
+    m.destroy();
+  });
+
+  it('cancelMany removes unfinished items and their partial data', async () => {
+    const { m, driver } = make();
+    const { added } = await m.enqueue([1, 2, 3].map(unit));
+    expect(await m.cancelMany(added.map((i) => i.id))).toBe(3);
+    expect(m.list()).toHaveLength(0);
+    expect(driver.remove).toHaveBeenCalledTimes(3);
+    m.destroy();
+  });
+});

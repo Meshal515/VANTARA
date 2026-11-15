@@ -183,7 +183,28 @@ html[dir='ltr'] .v35 .dl-bar.is-indeterminate > i { animation-direction: reverse
 .v35 .dl-row[data-state='queued'] .dl-title { color: var(--text-2); }
 
 /* ── على الجهاز ── */
-.v35 .dl-device-head { margin: 0 0 12px; color: var(--text-3); font-size: var(--fs-meta); display: flex; align-items: center; }
+.v35 .dl-device-head { margin: 0 0 12px; color: var(--text-3); font-size: var(--fs-meta); display: flex; align-items: center; gap: 8px; }
+.v35 .dl-device-facts { flex: 1; min-width: 0; margin: 0; display: flex; align-items: center; }
+.v35 .dl-sort { min-height: 34px; padding: 0 12px; flex: none; }
+.v35 .dl-summary-more, .v35 .dl-device-more { flex: none; }
+
+/* وضع التحديد: شريط ثابت المكان فوق القائمة (لا يدفع الصفوف ولا يتحرك معها) */
+.v35 .dl-selectbar {
+  position: sticky; top: 0; z-index: 3;
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 16px;
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent-line);
+  display: grid; gap: 10px;
+}
+.v35 .dl-selectbar-head { display: flex; align-items: center; gap: 10px; }
+.v35 .dl-selectbar-head b { flex: 1; min-width: 0; font-size: var(--fs-body); }
+.v35 .dl-selectbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.v35 .dl-select-act { min-height: 38px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
+.v35 .dl-select-act[disabled] { opacity: 0.45; }
+.v35 .dl-row.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.v35 .dl-card.is-selected .work-card-frame { box-shadow: 0 0 0 3px var(--accent); border-radius: var(--radius-card, 14px); }
+.v35 .dl-card.is-selected .poster { opacity: 0.72; }
+.v35 .dl-usage { margin: 0 0 8px; }
+.v35 .dl-usage .dl-hint { margin: 2px 0; }
 .v35 .dl-card .poster { background: var(--surface-2); }
 @media (min-width: 900px) {
   .v35 .dl-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

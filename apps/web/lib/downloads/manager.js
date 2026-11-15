@@ -322,6 +322,38 @@ export function createDownloadManager(deps) {
       api.resume(id);
     },
 
+    /** «أعد كل الفاشل»: الفاشل ونقص المساحة يعودان للطابور بمحاولات كاملة. يرجع عددها. */
+    retryFailed() {
+      let n = 0;
+      for (const item of [...items.values()].sort((a, b) => a.order - b.order)) {
+        if (item.state !== STATES.failed && item.state !== STATES.noSpace) continue;
+        patch(item.id, { state: STATES.queued, error: null, attempts: 0, retryFrom: null });
+        n++;
+      }
+      if (n) pump();
+      return n;
+    },
+
+    /**
+     * «قدّمه»: العناصر المختارة إلى رأس الطابور بترتيبها. ما يعمل الآن لا يُقطع؛ المقدَّم يأخذ أول خانة تفرغ.
+     */
+    prioritize(ids) {
+      const list = [].concat(ids).map((id) => items.get(id)).filter((i) => i && i.state !== STATES.ready);
+      if (!list.length) return 0;
+      let min = Math.min(...[...items.values()].map((i) => Number(i.order) || 0));
+      for (const item of [...list].reverse()) patch(item.id, { order: --min });
+      emit({ type: 'list' });
+      pump();
+      return list.length;
+    },
+
+    /** إلغاء عدة تنزيلات لم تكتمل معًا (ما نُزّل منها يُحذف). يرجع عددها. */
+    async cancelMany(ids) {
+      let n = 0;
+      for (const id of [].concat(ids)) if (await api.cancel(id)) n++;
+      return n;
+    },
+
     pauseAll() {
       for (const item of items.values()) if (item.state !== STATES.ready && item.state !== STATES.paused) api.pause(item.id);
     },

@@ -7362,6 +7362,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // «التحميلات»: الصفحة وورقة البدء ومدخلها في ترويسة مكتبتي (downloads.js)
   const downloadsUI = createDownloadsUI({
     root, q, el, toast, openSheet, closeSheet, currentPage,
+    // «حذف المقروء/المشاهَد»: من علامات حسابك نفسها (مفتاح فصل المانجا هو مفتاح التنزيل)
+    consumed: (item) => {
+      if (item.kind === 'manga') return isChapterRead(sync, item.work.ref, item.unit.key);
+      if (item.section === 'anime' && String(item.work.ref).startsWith('anime:')) return Boolean(animeAccount.isSeen(String(item.work.ref).slice(6), item.unit.number ?? 1));
+      return false;
+    },
     showPage: (id) => showPage(id),
     goBack: () => goBack(),
     openReader: (target) => deps.openReader(target),
