@@ -18,6 +18,14 @@ import { glyph } from './icons.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
+/** https أو صورة PNG مضمّنة صغيرة فقط: لا مخطط آخر يصل إلى CSS. */
+const safeIconUrl = (value) => {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (/^https:\/\/[^\s"'()\\]{1,2000}$/i.test(text)) return text;
+  if (text.length <= 90 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(text)) return text;
+  return null;
+};
+
 export const isAddonRoute = (r) => String(r?.sourceId ?? '').startsWith('addon|');
 export { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 
@@ -600,7 +608,7 @@ export function createServerSheet(body, o) {
     if (!b) {
       b = el('button');
       b.type = 'button';
-      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
+      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
       rows.set(r.id, b);
     }
     const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
@@ -615,6 +623,14 @@ export function createServerSheet(body, o) {
     qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
     qb.lastElementChild.setAttribute('aria-hidden', 'true');
     b.querySelector('.ss-name').textContent = d.name;
+    // صورة المصدر (إضافته: CloudStream أو Aniyomi) بجانب اسمه، في خانة محجوزة من البداية فلا يتحرك الاسم حين تصل
+    const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
+    const ico = b.querySelector('.ss-ico');
+    if (ico.dataset.src !== (icon ?? '')) {
+      ico.dataset.src = icon ?? '';
+      ico.style.backgroundImage = icon ? `url("${icon.replace(/["\\\n]/g, '')}")` : '';
+    }
+    ico.hidden = d.torrent;
     const host = b.querySelector('.ss-host');
     // اسم إصدار التورنت الطويل (بأعلامه) ليس مما يُختار به: مكانه التفاصيل
     host.textContent = d.torrent ? '' : d.host ?? '';

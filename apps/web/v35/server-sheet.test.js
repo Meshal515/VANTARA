@@ -377,3 +377,23 @@ it('one torrent release is one row even when Torrentio arrives from three provid
   expect(rows).toHaveLength(1);
   expect(rows[0].textContent).toContain('65');
 });
+
+// طلب المالك (15 نوفمبر): «كيف أعرف أنها من CloudStream؟ المفروض تبان صورة الموقع واسمه»
+it('each direct row shows its source picture beside the name, in a slot reserved before it arrives', () => {
+  const { el, body } = dom();
+  const icons = { anime4up: 'https://raw.githubusercontent.com/repo/icons/anime4up.png', bad: 'javascript:alert(1)' };
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId, sourceIcon: (r) => icons[r.sourceId] ?? null });
+  ui.update({ routes: [
+    { id: 'a', sourceId: 'anime4up', server: 'voe', quality: 720, state: 'READY', probed: true },
+    { id: 'b', sourceId: 'bad', server: 'mp4upload', quality: 720, state: 'READY', probed: true },
+    { id: 't', sourceId: TORR, sourceName: 'Torrentio', quality: 1080, state: 'READY', runtimeReady: true, label: 'X.1080p\n👤 50 💾 1 GB' },
+  ], settled: true, status: { text: '' } });
+  const icon = (id) => [...body.querySelectorAll('.ss-row')].find((b) => b.querySelector('.ss-name').textContent === id).querySelector('.ss-ico');
+  expect(icon('anime4up').getAttribute('style')).toContain('anime4up.png');
+  expect(icon('anime4up').hidden).toBe(false);
+  // عنوان غير آمن لا يصل إلى CSS، والخانة باقية بمقاسها
+  expect(icon('bad').getAttribute('style') ?? '').not.toContain('javascript');
+  expect(icon('bad').hidden).toBe(false);
+  expect(icon('Torrentio').hidden).toBe(true);
+});
+
