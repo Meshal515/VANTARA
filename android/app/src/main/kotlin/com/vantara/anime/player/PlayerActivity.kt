@@ -1678,23 +1678,49 @@ class PlayerActivity : Activity() {
             val routes = serverFilters(body, p.routes())
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
             val ready = routes.count { it.state == RouteState.READY }
-            body.addView(pillButton("شغّل الأفضل", primary = true) { playBest() }.apply {
-                minHeight = dp(48)
-                setCompoundDrawablesRelativeWithIntrinsicBounds(Glyph(Glyph.Kind.SPARK, Color.WHITE, dp(16)), null, null, null)
-                compoundDrawablePadding = dp(8)
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
             val status = when {
                 !p.done -> "يتجهّز… $ready جاهز حتى الآن"
                 ready == 0 -> "لم يجهز أي سيرفر لهذه الحلقة"
                 else -> "$ready سيرفر جاهز"
             }
-            body.addView(label(status, 12f, Tone.TEXT_3).apply { setPadding(dp(4), dp(6), dp(4), 0) })
-            for ((name, list) in RouteGroups.group(routes)) {
-                body.addView(sectionLabel(name))
-                // صف لكل سيرفر كورقة السيرفرات في التطبيق: اسم المصدر، وتحته ما يميّزه (الحجم،
-                // الترميز، البذور…) وحالته — لا مربعات رموز متشابهة («TRR 3»، «TRR 4») لا تقول شيئًا
-                list.forEach { r -> body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }) }
+            body.addView(label(status, 12f, Tone.TEXT_3).apply { setPadding(dp(4), 0, dp(4), dp(2)) })
+            // «تورنت» و«مباشر» بدل مجموعات الجودة (الجودة في الصف نفسه وفي فلترها)
+            fun rank(r: Route) = when (r.state) { RouteState.READY -> 0; RouteState.RESOLVING -> 1; RouteState.FAILED -> 2; else -> 3 }
+            val usable = routes.filter { it.state != RouteState.UNAVAILABLE }
+            val (torrents, direct) = usable.partition { r -> r.candidates.any { id -> p.candidate(id)?.url?.startsWith("vantara-torrent:") == true } }
+            fun section(name: String, hint: String, list: List<Route>) {
+                if (list.isEmpty()) return
+                val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(14), dp(6), dp(6)) }
+                head.addView(label("$name  ${list.size}", 14f, Tone.TEXT, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                head.addView(label(hint, 12f, Tone.TEXT_3, bold = true))
+                body.addView(head)
+                list.sortedWith(compareBy<Route> { rank(it) }.thenByDescending { it.quality ?: 0 }).forEach { r ->
+                    body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+                }
             }
+            section("تورنت", "جودة أعلى · يبدأ أبطأ", torrents)
+            section("مباشر", "يبدأ أسرع", direct)
+            val dead = routes.filter { it.state == RouteState.UNAVAILABLE }
+            if (dead.isNotEmpty()) {
+                body.addView(sectionLabel("غير متاح الآن (${dead.size})"))
+                dead.forEach { r -> body.addView(routeRow(r, false), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) }) }
+            }
+            // «شغّل الأفضل» في آخر الورقة ومعه ما سيشغّله فعلًا (الجودة والمصدر والحجم)
+            val best = p.best(preferCode)
+            val go = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = pressable(Tone.ACCENT, dp(14).toFloat())
+                contentDescription = "شغّل الأفضل"
+                addView(label("▶  شغّل الأفضل", 15.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER })
+                best?.let { c ->
+                    val bits = listOfNotNull(c.quality?.takeIf { it > 0 }?.let { "${it}p" }, c.sourceName.takeIf { it.isNotBlank() }, c.videoSize?.takeIf { it > 0 }?.let { "${it / 1_048_576} MB" })
+                    if (bits.isNotEmpty()) addView(label("\u2068${bits.joinToString(" · ")}\u2069", 11.5f, 0xD9FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; maxLines = 1 })
+                }
+                setOnClickListener { playBest() }
+            }
+            body.addView(go, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
     }
 
@@ -1722,7 +1748,8 @@ class PlayerActivity : Activity() {
             alpha = if (dim) 0.55f else 1f
             val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            top.addView(label(title, 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val heading = listOfNotNull(r.quality?.takeIf { it > 0 }?.let { "${it}p" }, title).joinToString(" ")
+            top.addView(label("\u2068$heading\u2069", 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             else if (r.code == preferCode && !isCurrent) top.addView(chip("آخر اختيار", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             texts.addView(top)
@@ -1737,35 +1764,74 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /** صور الحلقات وعناوينها من ani.zip (نفس مصدر فن الغرفة في الويب)، تُجلب مرة للجلسة. */
+    private var episodeArt: Map<Int, Pair<String?, String?>>? = null
+    private var episodeArtLoading = false
+    private fun fetchEpisodeArt() {
+        if (episodeArt != null || episodeArtLoading) return
+        val id = launch.animeId.toIntOrNull()?.takeIf { launch.section == "anime" && it > 0 } ?: return
+        episodeArtLoading = true
+        scope.launch {
+            val map = withContext(Dispatchers.IO) {
+                runCatching {
+                    network.client.newCall(Request.Builder().url("https://api.ani.zip/mappings?anilist_id=$id").build()).execute().use { res ->
+                        if (!res.isSuccessful) return@use null
+                        val eps = JSONObject(res.body.string()).optJSONObject("episodes") ?: return@use null
+                        val out = HashMap<Int, Pair<String?, String?>>()
+                        for (k in eps.keys()) {
+                            val n = k.toIntOrNull() ?: continue
+                            val e = eps.optJSONObject(k) ?: continue
+                            val t = e.optJSONObject("title")
+                            val title = t?.optString("ar")?.takeIf { it.isNotBlank() } ?: t?.optString("en")?.takeIf { it.isNotBlank() }
+                            out[n] = e.optString("image").takeIf { it.startsWith("https://") } to title
+                        }
+                        out
+                    }
+                }.getOrNull()
+            }
+            episodeArtLoading = false
+            episodeArt = map ?: emptyMap()
+            if (openSheet == SheetKind.EPISODES) sheet.refresh()
+        }
+    }
+
     private fun showEpisodes() {
         val total = launch.total
         if (total <= 0 || copies.isEmpty()) return message("قائمة الحلقات من صفحة الأنمي")
+        fetchEpisodeArt()
         open(SheetKind.EPISODES, "الحلقات", "$total حلقة") { body ->
             val cur = episodeInt()
-            val perRow = 6
-            var row: LinearLayout? = null
             for (n in 1..total) {
-                if ((n - 1) % perRow == 0) {
-                    row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
-                }
                 val on = n == cur
-                val watched = resume.containsKey(n)
-                row!!.addView(label("$n", 15f, if (on) Color.WHITE else Tone.TEXT, bold = true).apply {
-                    gravity = Gravity.CENTER
-                    textAlignment = View.TEXT_ALIGNMENT_CENTER
-                    minHeight = dp(48)
-                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat(), if (watched && !on) dp(1) else 0, Tone.ACCENT_LINE)
+                val art = episodeArt?.get(n)
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(6), dp(6), dp(6))
+                    background = pressable(if (on) Tone.ACCENT_SOFT else Color.TRANSPARENT, dp(12).toFloat(), if (on) dp(1) else 0, Tone.ACCENT_LINE)
+                    contentDescription = "الحلقة $n"
                     // داخل غرفة متزامنة: المضيف ينقل الغرفة كلها (أمر load)، والصديق يُبلَّغ أن المضيف يختار
                     setOnClickListener { if (n == cur) sheet.close() else if (together?.requestEpisode(n) == true) sheet.close() else switchEpisode(n) }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                }
+                val thumb = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    background = rounded(Tone.SURFACE_3, dp(9).toFloat())
+                    clipToOutline = true
+                }
+                // الصور حول الحلقة الحالية فقط (لا عشرات الطلبات دفعة واحدة لعمل طويل)
+                if (kotlin.math.abs(n - cur) <= 30) art?.first?.let { url -> stageImages.load(url, dp(240)) { bmp -> if (bmp != null) thumb.setImageBitmap(bmp) } }
+                row.addView(thumb, LinearLayout.LayoutParams(dp(112), dp(63)))
+                val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(4), 0) }
+                if (on) texts.addView(label("الآن", 11f, Color.WHITE, bold = true).apply { background = rounded(Tone.ACCENT, dp(6).toFloat()); setPadding(dp(7), dp(1), dp(7), dp(1)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(3) })
+                texts.addView(label("الحلقة $n", 14.5f, Tone.TEXT, bold = true))
+                art?.second?.let { texts.addView(label("\u2068$it\u2069", 12f, Tone.TEXT_2).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }) }
+                if (!on && resume.containsKey(n)) texts.addView(label("شاهدت جزءًا منها", 11f, Tone.TEXT_3))
+                row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
             }
-            // الصف الأخير يكمل بفراغ فلا تتمدد أرقامه
-            val last = row
-            if (last != null) repeat((perRow - total % perRow) % perRow) { last.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = dp(8) }) }
         }
-        // تمرير للحلقة الحالية
-        main.postDelayed({ sheet.scrollTo(((episodeInt() - 1) / 6 - 1) * dp(56)) }, 280)
+        // تمرير للحلقة الحالية (صف ≈ 79dp)
+        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79)) }, 280)
     }
 
     private fun showQuality() {
