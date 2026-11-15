@@ -166,6 +166,10 @@ class AnimeEngine(context: Context) {
 
     private fun entry(id: String): SourceEntry? = manifest.sources.firstOrNull { it.id == id }
 
+    /** اسم المصدر كما يعرفه المستخدم (CloudStream أو Aniyomi). */
+    private fun sourceTitle(id: String): String = runtimeSources[id]?.entry?.name ?: entry(id)?.name ?: "المصدر"
+
+
     /** المصدر جاهزًا للعمل، أو null مع سبب في [loadErrors]. */
     suspend fun adapter(id: String): AnimeAdapter? {
         runtimeSources[id]?.let { return it.adapter.takeIf { _ -> it.entry.enabled && it.entry.disabledReason == null } }
@@ -666,16 +670,30 @@ class AnimeEngine(context: Context) {
                         fun trace(stage: String, detail: Any? = null) { android.util.Log.i("VantaraPrepare",
                             "trace=${prep.id} source=${copy.sourceId.take(80)} stage=$stage ms=${(System.nanoTime() - t0) / 1_000_000}${detail?.let { " $it" } ?: ""}") }
                         trace("start", "episode=${prep.number}")
+                        // مصدر بلا أي سيرفر يقول لماذا (جهاز المالك 15 نوفمبر: «نسخ بلا أي سيرفر: WitAnime» بلا سبب).
+                        // صف واحد «غير متاح» باسمه وسببه في الورقة والتشخيص، لا إسقاط صامت
+                        var spoke = false
+                        fun silent(reason: String) {
+                            if (spoke) return
+                            spoke = true
+                            prep.report(com.vantara.anime.stream.RouteReport(copy.sourceId, "source", sourceTitle(copy.sourceId), null,
+                                com.vantara.anime.stream.Variant.SUB, com.vantara.anime.stream.RouteState.UNAVAILABLE, emptyList(), reason))
+                        }
                         runCatching {
                             withTimeout(PREPARE_TIMEOUT_MS) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
                                 val list = resolver.episodes(c)
                                 trace("episodes", "count=${list.size} numbers=${list.take(5).map { it.number }}")
-                                val ep = resolver.pick(list, prep.number) ?: return@withTimeout trace("no-episode", "wanted=${prep.number}")
-                                val a = adapter(copy.sourceId) ?: return@withTimeout trace("no-adapter")
+                                val ep = resolver.pick(list, prep.number) ?: return@withTimeout run {
+                                    trace("no-episode", "wanted=${prep.number}")
+                                    silent(if (list.isEmpty()) "لم يُرجع المصدر حلقات لهذا العمل"
+                                        else "لم يجد المصدر الحلقة ${prep.number.let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} (عنده ${list.size} حلقة)")
+                                }
+                                val a = adapter(copy.sourceId) ?: return@withTimeout run { trace("no-adapter"); silent("المصدر غير جاهز الآن") }
                                 val scope = this
                                 val tickets = TorrentTickets(prep)
                                 val trace = com.vantara.anime.adapters.ResolveTrace { raw ->
+                                    spoke = true
                                     val r = tickets.report(raw)
                                     for (c in r.candidates) if (c.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(c.id)
                                     prep.report(r)
@@ -689,6 +707,7 @@ class AnimeEngine(context: Context) {
                                     a.preferredCandidates(ep, preferredServer, trace = trace)
                                 else a.candidates(ep, trace = trace, enough = Int.MAX_VALUE)
                                 trace("links", "count=${links.size}")
+                                if (links.isEmpty()) silent("لم يُرجع المصدر روابط لهذه الحلقة")
                                 prep.adopt(copy.sourceId, links.mapNotNull(tickets::candidate).onEach {
                                     if (it.url.startsWith(com.vantara.anime.stream.MagnetLinks.TICKET_SCHEME)) prep.allowRuntimeCandidate(it.id)
                                 })
@@ -696,6 +715,7 @@ class AnimeEngine(context: Context) {
                         }.onFailure {
                             trace(if (it is TimeoutCancellationException) "timeout" else "error", "${it.javaClass.simpleName}: ${it.message?.take(160)}")
                             if (it is CancellationException && it !is TimeoutCancellationException) throw it
+                            silent(silentSourceReason(it))
                         }
                     }
                 }
@@ -1018,5 +1038,20 @@ internal class AnimeSourcePublication(private val monitor: Any) {
     }
     fun <T> publish(id: String, expected: Long, block: () -> T): T? = synchronized(monitor) {
         if ((revisions[id] ?: 0) != expected) null else block()
+    }
+}
+
+/** سبب مقروء لمصدر انتهى بلا سيرفر: رمز الخطأ لا نصه الخام (لا رابط ولا محتوى). */
+internal fun silentSourceReason(t: Throwable): String {
+    val text = generateSequence(t) { it.cause }.take(4).joinToString(" ") { "${it.javaClass.simpleName} ${it.message.orEmpty()}" }
+    return when {
+        t is TimeoutCancellationException -> "انتهت المهلة قبل أن يرد المصدر"
+        "VERIFICATION_REQUIRED" in text || "Cloudflare" in text -> "يحتاج تحقق Cloudflare (من صفحة الإضافات)"
+        "NO_VIDEO_LINKS" in text -> "لم يُرجع المصدر روابط لهذه الحلقة"
+        "SEASON_SELECTION_REQUIRED" in text -> "العمل مقسّم مواسم: افتحه من صفحة المصدر"
+        "UnknownHost" in text -> "اسم موقع المصدر لا يُحل (نطاق ميت أو محجوب)"
+        "OPERATION_TIMEOUT" in text || "SocketTimeout" in text -> "الموقع لم يرد في الوقت"
+        "ABI_MISMATCH" in text -> "الإضافة غير متوافقة مع هذا الإصدار"
+        else -> "تعذّر جلب السيرفرات (${Regex("[A-Z][A-Z_]{3,40}").find(text)?.value ?: t.javaClass.simpleName})"
     }
 }
