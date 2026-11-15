@@ -908,7 +908,10 @@ export function createDownloadsUI(deps) {
             const { routes } = await resolveRoutes(eng, first.request, { settleMs: 25_000 });
             rows = routes.filter((r) => r.state === 'READY').sort((x, y) => (y.quality ?? 0) - (x.quality ?? 0)).map((r) => ({
               route: r, sourceId: r.sourceId, name: r.sourceName ?? r.server ?? r.sourceId,
-              sub: r.type === 'torrent' ? 'تورنت' : (r.server && r.server !== r.sourceName ? r.server : null),
+              // التورنت: اسم الإصدار والحجم من وصف الإضافة (Torrentio وغيرها) بجانب الجودة والسرب
+              sub: r.type === 'torrent'
+                ? [String(r.label ?? '').split('\n').map((l) => l.trim()).find((l) => /\.(mkv|mp4|avi)$|\b(1080p|720p|2160p|x26[45]|HEVC)\b/i.test(l)) ?? 'تورنت', /💾\s*([\d.,]+\s*[GMK]B)/i.exec(r.label ?? '')?.[1]].filter(Boolean).join(' · ')
+                : (r.server && r.server !== r.sourceName ? r.server : null),
               quality: r.quality ? (r.quality >= 2000 ? '4K' : `${r.quality}p`) : null,
               seeds: r.type === 'torrent' ? Number(/👤\s*(\d+)/.exec(r.label ?? '')?.[1] ?? NaN) || 0 : null,
             }));

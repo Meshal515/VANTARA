@@ -308,7 +308,8 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 .v35 .dl-num { height: 44px; border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font: inherit; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .v35 .dl-num.is-on { background: var(--accent); color: #fff; }
 .v35 .dl-num.is-saved { background: none; color: var(--text-4); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
-.v35 .dl-sources { display: flex; flex-direction: column; margin-top: 4px; max-height: 280px; overflow-y: auto; }
+.v35 .dl-sources { display: flex; flex-direction: column; margin-top: 4px; max-height: 320px; overflow-y: auto; }
+.v35 .dl-source-main small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; text-align: end; }
 .v35 .dl-source { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 0 2px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; color: var(--text-1); font: inherit; text-align: start; cursor: pointer; }
 .v35 .dl-source:last-child { border-bottom: 0; }
 .v35 .dl-source.is-on { background: none; box-shadow: none; }
