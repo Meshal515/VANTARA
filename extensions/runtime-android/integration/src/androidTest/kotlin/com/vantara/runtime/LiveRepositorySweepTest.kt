@@ -101,7 +101,9 @@ class LiveRepositorySweepTest {
                 val solver=eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current
                     ?: run { uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client;eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.current }
                 solver?.silentClearance(url,agent)
-            })
+            },
+            // كالتطبيق (RuntimePlugin): أداة CloudStream ‏WebViewResolver عبر متصفح فانتارا المخفي
+            browser=HiddenPageBrowser(context.applicationContext))
         val reports=mutableListOf<JsonObject>()
         val output=File(context.getExternalFilesDir(null),"live-sweep").apply { mkdirs() }
         try {
