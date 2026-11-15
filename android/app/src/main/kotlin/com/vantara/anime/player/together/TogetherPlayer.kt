@@ -264,6 +264,9 @@ class TogetherPlayer(
         return true
     }
 
+    /** هل يبدأ الفيديو وحده عند تحميل سيرفر؟ في غرفة متزامنة لم تبدأ: لا، ينتظر «ابدأ» (onReady يقف عند البداية). */
+    fun mayAutoplay(): Boolean = !synced || client.timeline?.started == true
+
     /** المستخدم ضغط تشغيل/إيقاف. المضيف يأمر الغرفة؛ غيره في المتزامن لا يحرّكها. */
     fun onUserPlayPause(playing: Boolean): Boolean {
         if (applying) return false
