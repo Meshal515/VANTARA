@@ -365,3 +365,33 @@ export function compactCount(n) {
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '')}K`;
   return String(n);
 }
+
+/**
+ * مواسم العمل في غرفة «مشاهدة معًا» (طلب المالك 15 نوفمبر): كل موسم في AniList عمل مستقل، فالسلسلة تُبنى بالمشي
+ * عبر «الجزء السابق» ثم «الجزء التالي» حتى `max` موسمًا (عمل له 24 موسمًا يظهر كاملًا). الأفلام والأغاني خارجها.
+ * يُرجع [{id, label: «الموسم N», title, episodes, current}] بترتيب العرض.
+ */
+export async function fetchSeasonChain(id, { max = 30, detail = fetchAnimeDetail } = {}) {
+  const start = await detail(id).catch(() => null);
+  if (!start) return [];
+  const isSeason = (r) => r && r.format !== 'MOVIE' && r.format !== 'MUSIC';
+  const seen = new Set([start.id]);
+  const walk = async (relation) => {
+    const out = [];
+    let cur = start;
+    for (let i = 0; i < max && cur; i++) {
+      const next = (cur.relations ?? []).find((r) => r.relation === relation && isSeason(r) && !seen.has(r.id));
+      if (!next) break;
+      seen.add(next.id);
+      cur = await detail(next.id).catch(() => null);
+      out.push(cur ? { ...next, ...cur } : next);
+    }
+    return out;
+  };
+  const before = (await walk('الجزء السابق')).reverse();
+  const after = await walk('الجزء التالي');
+  return [...before, start, ...after].map((m, i) => ({
+    id: Number(m.id), label: `الموسم ${i + 1}`, title: m.title ?? null,
+    episodes: Number(m.episodes ?? m.aired) || null, current: Number(m.id) === Number(start.id),
+  }));
+}

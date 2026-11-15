@@ -163,6 +163,7 @@ class PlayerActivity : Activity() {
     private lateinit var timeNow: TextView
     private lateinit var timeTotal: TextView
     private lateinit var bar: TimeBar
+    private lateinit var seekPreview: SeekPreview
     private lateinit var playButton: ImageView
     private lateinit var fitButton: ImageView
     private lateinit var nextButton: ImageView
@@ -868,6 +869,10 @@ class PlayerActivity : Activity() {
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
         val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
+        // المعاينة: مصدر مستقل بلا قياس شبكة (لا تُحسب حركتها على سرعة المشاهدة)، والتورنت بإطارات المشاهدة وحدها
+        if (::seekPreview.isInitialized) seekPreview.bind(if (c.url.startsWith("vantara-torrent:")) null else {
+            { CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false), false, "${c.id}|preview").mediaSource }
+        })
         externalAudioUrls = media.externalAudioUrls
         if (BuildConfig.DEBUG) {
             if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")
@@ -887,12 +892,13 @@ class PlayerActivity : Activity() {
     }
 
     /** Shared by playback and external subtitle selection, including local downloaded subtitle files. */
-    private fun playbackDataSourceFactory(c: Candidate): androidx.media3.datasource.DataSource.Factory {
+    private fun playbackDataSourceFactory(c: Candidate, measured: Boolean = true): androidx.media3.datasource.DataSource.Factory {
         val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers,
             plainMedia = c.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else network.client
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
         val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
         // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)
+        if (!measured) return base
         return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net); if (BuildConfig.DEBUG) it.addTransferListener(diag) } }
     }
 
@@ -1266,6 +1272,8 @@ class PlayerActivity : Activity() {
         buildTop()
         buildBottom()
         root.addView(controls, match())
+        seekPreview = SeekPreview(this, main)
+        root.addView(seekPreview.view, FrameLayout.LayoutParams(dp(176), dp(99), Gravity.TOP or Gravity.LEFT))
 
         skipButton = pillButton("تخطي المقدمة  »", primary = true) {
             IntroSkip.active(skipState.result?.timings ?: IntroSkip.Timings(), position())?.let { player.seekTo(it.interval.endMs) }
@@ -1354,8 +1362,8 @@ class PlayerActivity : Activity() {
         times.addView(timeTotal, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT))
         col.addView(times, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8); rightMargin = dp(8) })
         bar = TimeBar(this).apply {
-            onDragState = { dragging -> if (dragging) main.removeCallbacks(hideControls) else scheduleHide() }
-            onScrub = { ms -> timeNow.text = ClipMath.clock(ms) }
+            onDragState = { dragging -> if (dragging) main.removeCallbacks(hideControls) else { seekPreview.hide(); scheduleHide() } }
+            onScrub = { ms -> timeNow.text = ClipMath.clock(ms); showSeekPreview(ms) }
             onSeek = { ms -> player.seekTo(ms) }
         }
         col.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1432,6 +1440,20 @@ class PlayerActivity : Activity() {
         timeNow.text = ClipMath.clock(position())
         timeTotal.text = if (d > 0) ClipMath.clock(d) else "--:--"
         clip?.tick(position())
+        if (player.isPlaying && firstFrameShown && ::seekPreview.isInitialized) {
+            seekPreview.aspect(player.videoSize.width, player.videoSize.height)
+            seekPreview.capture(video.videoSurfaceView, position(), d)
+        }
+    }
+
+    /** مربع المعاينة فوق مقبض الشريط (إحداثيات الجذر). */
+    private fun showSeekPreview(ms: Long) {
+        if (!::seekPreview.isInitialized || bar.durationMs <= 0) return
+        val at = IntArray(2); val base = IntArray(2)
+        bar.getLocationInWindow(at); root.getLocationInWindow(base)
+        val pad = dp(10).toFloat()
+        val x = at[0] - base[0] + pad + (bar.width - pad * 2) * (ms.toFloat() / bar.durationMs).coerceIn(0f, 1f)
+        seekPreview.show(ms, x, (at[1] - base[1]).toFloat(), root.width)
     }
 
     private fun updateQualityLabel() {
@@ -2487,6 +2509,7 @@ class PlayerActivity : Activity() {
         presenceActive = false
         main.removeCallbacks(presenceTick)
         player.playWhenReady = false
+        if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
         main.removeCallbacks(stallWatchdog)
         report(final = false)
@@ -2516,6 +2539,7 @@ class PlayerActivity : Activity() {
         scope.cancel()
         main.removeCallbacksAndMessages(null)
         report(final = true)
+        if (::seekPreview.isInitialized) seekPreview.release()
         player.release()
         engine.closeSession(sessionId)
         discardWarmup()

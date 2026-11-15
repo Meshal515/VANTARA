@@ -105,3 +105,17 @@ describe('weekly schedule spans the whole week (several pages)', () => {
     expect(home.latest.length).toBeGreaterThan(40);
   });
 });
+
+describe('مواسم الغرفة', () => {
+  it('تمشي السابق ثم التالي عبر AniList وتُسمّى «الموسم N» وتستبعد الأفلام', async () => {
+    const { fetchSeasonChain } = await import('./anime-meta.js');
+    const db = {
+      1: { id: 1, title: 'S1', episodes: 12, relations: [{ id: 2, relation: 'الجزء التالي', format: 'TV' }] },
+      2: { id: 2, title: 'S2', episodes: 13, relations: [{ id: 1, relation: 'الجزء السابق', format: 'TV' }, { id: 9, relation: 'الجزء التالي', format: 'MOVIE' }, { id: 3, relation: 'الجزء التالي', format: 'TV' }] },
+      3: { id: 3, title: 'S3', episodes: 24, relations: [{ id: 2, relation: 'الجزء السابق', format: 'TV' }] },
+    };
+    const chain = await fetchSeasonChain(2, { detail: async (id) => db[id] });
+    expect(chain.map((s) => [s.id, s.label, s.current])).toEqual([[1, 'الموسم 1', false], [2, 'الموسم 2', true], [3, 'الموسم 3', false]]);
+    expect(chain[2].episodes).toBe(24);
+  });
+});
