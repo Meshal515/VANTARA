@@ -158,8 +158,9 @@ html[dir='ltr'] .v35 .dl-bar.is-indeterminate > i { animation-direction: reverse
 .v35 .dl-state.is-warn { color: var(--warning); }
 .v35 .dl-state.is-bad { color: var(--danger); }
 /* السبب الفعلي للفشل وطور التجهيز: سطر هادئ تحت الحالة، لا يلتف أكثر من سطر */
-.v35 .dl-why,
 .v35 .dl-stage { color: var(--text-3); min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* السبب يُقرأ كاملًا (سطران على الأكثر) لا «…P 404)» مقصوصًا */
+.v35 .dl-why { color: var(--text-3); min-width: 0; max-width: 100%; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; line-height: 1.45; }
 .v35 .dl-ctl,
 .v35 .dl-info {
   flex: none;

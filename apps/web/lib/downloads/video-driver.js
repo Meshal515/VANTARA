@@ -340,7 +340,9 @@ export function createVideoDriver(deps) {
           // فشل قبل البدء: choose جرّب أفضل ما عنده بالفعل، فلا جولة تجهيز ثانية بلا جديد
           if (!started) throw error;
           skip.add(started);
-          if (skip.size >= SMART_TRIES) throw error;
+          // لا بديل جاهز في هذه الجولة: السبب الحقيقي (404…) لا «لا سيرفر صالح» عام، ولا جولة تجهيز بلا جدوى
+          const others = rankRoutes(routes.filter((r) => !skip.has(routeIdentity(r))), { platform: deps.platform() });
+          if (skip.size >= SMART_TRIES || !others.length) throw error;
           current = { ...current, source: { ...current.source, locked: false, fingerprint: null, server: null, routeCode: null } };
           ctl.update({ source: current.source, stage: 'السيرفر رفض — نجرّب غيره…' });
         } finally {

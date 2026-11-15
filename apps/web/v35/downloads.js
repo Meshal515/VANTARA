@@ -342,7 +342,8 @@ export function createDownloadsUI(deps) {
     if (/^(?:TypeError:\s*)?(?:Failed to fetch|NetworkError\b|Load failed|network error|aborted)/i.test(raw)) return null;
     const http = /HTTP (\d{3})/.exec(raw)?.[1];
     const meaning = { 400: 'طلب مرفوض من الخادم', 401: 'الخادم يطلب تسجيل دخول', 403: 'الخادم منع الوصول (حماية أو رابط منتهي)', 404: 'الملف غير موجود عند المصدر', 405: 'الخادم لا يقبل هذا النوع من الطلبات', 410: 'الرابط حُذف أو انتهى', 429: 'كثرة طلبات — الخادم يطلب التمهّل', 451: 'المحتوى محجوب قانونيًا في هذه المنطقة' }[http];
-    const text = meaning && !raw.includes(meaning) ? `${meaning} (HTTP ${http})` : raw;
+    // الرمز وحدة واحدة باتجاهها (LRI…PDI) ومسافة لا تنكسر: لا «(HTTP» في سطر و«404)» في آخر
+    const text = meaning && !raw.includes(meaning) ? `${meaning} · \u2066HTTP\u00a0${http}\u2069` : raw;
     return text.length > 120 ? `${text.slice(0, 117)}…` : text;
   }
 
@@ -355,7 +356,8 @@ export function createDownloadsUI(deps) {
       const why = failureDetail(item.error, label);
       if (why) {
         const d = el('span', 'dl-why', why);
-        d.dir = 'auto';
+        // سبب عربي فيه «HTTP 404»: اتجاه ثابت من اليمين، فلا تنقلب الأقواس والرقم
+        d.dir = /^[\u0600-\u06FF]/.test(why) ? 'rtl' : 'auto';
         out.push(el('span', 'dl-break'), d);
       }
       return out;
@@ -369,7 +371,7 @@ export function createDownloadsUI(deps) {
     }
     if (item.state === STATES.reconnecting && item.error?.message) {
       const why = failureDetail(item.error, null);
-      if (why) out.push(el('span', 'dl-break'), Object.assign(el('span', 'dl-why', why), { dir: 'auto' }));
+      if (why) out.push(el('span', 'dl-break'), Object.assign(el('span', 'dl-why', why), { dir: /^[\u0600-\u06FF]/.test(why) ? 'rtl' : 'auto' }));
     }
     if (item.kind === 'manga') {
       if (item.pagesTotal) out.push(ltr(el, `${item.pages ?? 0}/${item.pagesTotal}`), el('span', null, 'صفحة'));
