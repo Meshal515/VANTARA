@@ -2279,11 +2279,12 @@ export function createAnime(deps) {
   }
 
   const SOURCE_NAMES = {};
+  const SOURCE_ICONS = {};
   // نسخ الإضافات تحمل اسم الإضافة في `title`؛ وإلا يُستخرج من مضيفها (torrentio ← Torrentio)
   const sourceName = (id) => sourceLabel(id, { names: SOURCE_NAMES, title: state.work?.copies?.find((c) => c.sourceId === id)?.title ?? null });
   // مصادر CloudStream تُسجَّل بعد الإقلاع: تُحدَّث الأسماء عند فتح الورقة والتشخيص، وإلا ظهرت «Cs3» أو عنوان العمل
   const refreshSourceNames = () => engine.sources().then((list) => {
-    for (const s of list ?? []) SOURCE_NAMES[s.id] = s.name;
+    for (const s of list ?? []) { SOURCE_NAMES[s.id] = s.name; if (s.iconUrl) SOURCE_ICONS[s.id] = s.iconUrl; }
   }).catch(() => {});
   void refreshSourceNames();
 
@@ -2604,6 +2605,7 @@ export function createAnime(deps) {
         // المصادر العربية تترجم الحلقة على الصورة نفسها؛ المدبلج يُقال صراحة
         directLang: 'مترجم عربي',
         sourceName: (r) => sourceName(r.sourceId),
+        sourceIcon: (r) => SOURCE_ICONS[r.sourceId] ?? null,
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),

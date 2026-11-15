@@ -33,5 +33,7 @@ object VerificationCoordinator {
             else ledger.retry(host, token, SystemClock.elapsedRealtime())
         return item?.also { listener?.invoke(it, state, reason) }
     }
-    private fun expire() { ledger.expire(SystemClock.elapsedRealtime()).forEach { listener?.invoke(it, "expired", "timeout") } }
+    // A request that aged out is still waiting for the user, not a failed attempt: it is announced as required again
+    // («تحتاج تحقق»), never as «انتهت مهلة التحقق», which read as if the user's check had timed out.
+    private fun expire() { ledger.expire(SystemClock.elapsedRealtime()).forEach { listener?.invoke(it, "required", null) } }
 }

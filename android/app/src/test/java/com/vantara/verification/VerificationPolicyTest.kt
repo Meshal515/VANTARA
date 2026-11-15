@@ -101,9 +101,20 @@ class VerificationPolicyTest {
         val ledger = VerificationLedger(2, 100)
         val first = ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
         assertNotNull(ledger.begin("example.org", 1))
-        assertEquals("required", ledger.expire(100).single().state)
+        // A stuck session (the page died without answering) still frees the slot, counted from when it began
+        assertTrue(ledger.expire(100).isEmpty())
+        assertEquals("required", ledger.expire(101).single().state)
         assertFalse(ledger.snapshot().any { it.state == "active" })
         assertNull(ledger.finish("example.org", first.token))
-        assertNotNull(ledger.begin("example.org", 101))
+        assertNotNull(ledger.begin("example.org", 102))
+    }
+
+    // جهاز المالك (15 نوفمبر): طلب تحقق قديم ثم تحقق المستخدم قرب نهاية مهلة الطلب؛ تجدد الطلب أثناء التحقق فرُفض نجاحه
+    @Test fun aCheckStartedNearTheRequestsAgeIsNotRejectedMidway() {
+        val ledger = VerificationLedger(2, 100)
+        ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
+        val active = ledger.begin("example.org", 95)!!
+        assertTrue("still within the user's own session", ledger.expire(150).isEmpty())
+        assertEquals(active.token, ledger.finish("example.org", active.token)?.token)
     }
 }

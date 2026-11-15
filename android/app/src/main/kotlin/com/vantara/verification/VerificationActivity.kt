@@ -87,7 +87,7 @@ class VerificationActivity : Activity() {
         main.postDelayed(timeout, SESSION_MS)
         showHeader(current)
         worker.execute {
-            if (runtimeProfile != null && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE))
+            if ((runtimeProfile != null || intent.getBooleanExtra("engineNetwork", false)) && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE))
                 tunnel = runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull()
             val safe = isPublic(current.host)
             main.post {

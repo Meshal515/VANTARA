@@ -599,6 +599,16 @@
   gap: 8px;
   min-width: 0;
 }
+/* صورة المصدر بجانب اسمه: خانة محجوزة بمقاس ثابت (لا قفزة حين تصل الصورة) */
+.v35 .ss-ico {
+  flex: none;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--surface-1) center / cover no-repeat;
+}
+.v35 .ss-ico[hidden] { display: none; }
 .v35 .ss-name {
   flex: none;
   max-width: 60%;
