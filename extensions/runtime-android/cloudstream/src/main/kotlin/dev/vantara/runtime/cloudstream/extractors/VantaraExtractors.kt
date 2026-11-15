@@ -21,8 +21,9 @@ interface VantaraExtractor {
 object PlayerPageHosts:VantaraExtractor {
     override val name="PlayerPage"
     // mp4upload وanafast وvidspeed: أعادت فيديو فعليًا في تمريرة القارئ العام الحية (31 أكتوبر، تشغيل 41162877481)
+    // iplayerhls (Eshek): JW Player مضغوط بـP.A.C.K.E.R، مفتاح hls2 يعيد قائمة HLS رئيسية 1080p حية (15 نوفمبر، فحص 43706826777)
     override val hosts=listOf("vidmoly.org","vidmoly.to","vidmoly.me","lulustream.com","luluvid.com","luluvdo.com","minochinos.com","morencius.com",
-        "mp4upload.com","anafast.cyou","vidspeed.cyou")
+        "mp4upload.com","anafast.cyou","vidspeed.cyou","iplayerhls.com")
     override suspend fun extract(url:String,referer:String?,subtitles:(SubtitleFile)->Unit,links:(ExtractorLink)->Unit)=
         PlayerPage.extract(java.net.URI(url).host.substringBefore('.').replaceFirstChar{it.uppercase()},url,referer,subtitles,links)
 }
