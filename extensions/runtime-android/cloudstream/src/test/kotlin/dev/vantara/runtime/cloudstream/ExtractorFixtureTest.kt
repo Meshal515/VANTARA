@@ -54,6 +54,14 @@ class ExtractorFixtureTest {
         val text=PlayerPage.scripts(html)
         assertEquals(listOf("https://cdn.example/master.m3u8"),PlayerPage.mediaUrls(text,"https://host.example/e/1"))
     }
+    // شكل iplayerhls الحي (15 نوفمبر): كائن links بمفاتيح hls؛ hls3 ملف txt وhls4 مسار نسبي، والصالح hls2 وحده
+    @Test fun iplayerhlsLinksObjectGivesTheAbsoluteHlsMaster() {
+        val page="""<script>var links={"hls3":"https://edge.example/hls3/01/x/master.txt","hls4":"/stream/abc/master.m3u8","hls2":"https://edge.example/hls2/01/x/master.m3u8?t=1"};jwplayer("v").setup({sources:[{file:links.hls4||links.hls2}]});</script>"""
+        serve(mapOf("https://iplayerhls.com/e/abc" to page))
+        val link=resolve("https://iplayerhls.com/e/abc").single()
+        assertEquals("https://edge.example/hls2/01/x/master.m3u8?t=1",link.url);assertEquals(ExtractorLinkType.M3U8,link.type)
+        assertEquals("https://iplayerhls.com/",link.referer)
+    }
     @Test fun playerPageResolvesProtocolRelativeAndEscapedAddresses() {
         assertEquals(listOf("https://cdn.example/v.mp4"),PlayerPage.mediaUrls("""sources:[{src:"\/\/cdn.example\/v.mp4",type:"video/mp4"}]""".replace("\\/","/").let{"""{file:"//cdn.example/v.mp4"}"""},"https://host.example/e/1"))
     }

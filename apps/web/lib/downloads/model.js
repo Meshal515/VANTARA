@@ -19,12 +19,14 @@ export const STATES = Object.freeze({
   failed: 'failed',
   noSpace: 'no_space',
   waitingWifi: 'waiting_wifi',
+  /** سُلِّم لطابور الجهاز (Android) وينتظر خانته هناك: يكمل ولو أُغلق التطبيق، ولا يشغل خانة في الواجهة. */
+  scheduled: 'scheduled',
 });
 
 /** الحالات التي تشغل خانة من خانات التوازي. */
 export const ACTIVE_STATES = new Set([STATES.resolving, STATES.downloading, STATES.reconnecting, STATES.verifying]);
 /** حالات «جاري التحميل» (كل ما لم يصبح على الجهاز بعد). */
-export const PENDING_STATES = new Set([...ACTIVE_STATES, STATES.queued, STATES.paused, STATES.failed, STATES.noSpace, STATES.waitingWifi]);
+export const PENDING_STATES = new Set([...ACTIVE_STATES, STATES.queued, STATES.scheduled, STATES.paused, STATES.failed, STATES.noSpace, STATES.waitingWifi]);
 
 export const STATE_LABEL = Object.freeze({
   queued: 'في الانتظار',
@@ -37,6 +39,7 @@ export const STATE_LABEL = Object.freeze({
   failed: 'فشل التنزيل',
   no_space: 'مساحة غير كافية',
   waiting_wifi: 'بانتظار Wi-Fi',
+  scheduled: 'في طابور الجهاز',
 });
 
 /** أسباب الفشل كما تُعرض: سطر قصير، والتفصيل التقني في ورقة المعلومات. */
@@ -245,7 +248,7 @@ export function queueSummary(items) {
     if (ACTIVE_STATES.has(i.state)) {
       active++;
       speed += i.state === STATES.downloading ? Number(i.speed) || 0 : 0;
-    } else if (i.state === STATES.queued || i.state === STATES.waitingWifi) waiting++;
+    } else if (i.state === STATES.queued || i.state === STATES.waitingWifi || i.state === STATES.scheduled) waiting++;
     else if (i.state === STATES.paused) paused++;
     else if (i.state === STATES.failed || i.state === STATES.noSpace) failed++;
   }

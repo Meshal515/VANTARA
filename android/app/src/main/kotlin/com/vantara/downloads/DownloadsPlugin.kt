@@ -205,7 +205,8 @@ class DownloadsPlugin : Plugin() {
                 subtitleIdentity = previous.subtitleIdentity ?: fresh.subtitleIdentity, subtitleProviders = previous.subtitleProviders ?: fresh.subtitleProviders,
                 audio = previous.audio.ifEmpty { fresh.audio }, state = "queued", error = null, message = null)
         }
-        if (DownloadService.isRunning(id)) return call.resolve(JSObject().put("started", false).put("running", true))
+        DownloadService.configure(call.getInt("parallel"), call.getBoolean("wifiOnly"))
+        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) return call.resolve(JSObject().put("started", false).put("running", true))
         DownloadService.start(context, next)
         call.resolve(JSObject().put("started", true).put("resumedFrom", next.bytes))
     }
@@ -219,8 +220,8 @@ class DownloadsPlugin : Plugin() {
     @PluginMethod
     fun cancel(call: PluginCall) {
         val id = call.getString("id") ?: return call.reject("id مطلوب")
-        if (DownloadService.isRunning(id)) DownloadService.stop(id, "cancel")
-        else runCatching { DownloadService.store(context).delete(id) }
+        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) DownloadService.stop(id, "cancel")
+        runCatching { if (!DownloadService.isRunning(id)) DownloadService.store(context).delete(id) }
         call.resolve()
     }
 
@@ -239,7 +240,14 @@ class DownloadsPlugin : Plugin() {
     fun status(call: PluginCall) {
         val id = call.getString("id") ?: return call.reject("id مطلوب")
         val job = runCatching { DownloadService.store(context).read(id) }.getOrNull() ?: return call.resolve(JSObject().put("exists", false))
-        call.resolve(event(job).put("exists", true).put("running", DownloadService.isRunning(id)))
+        call.resolve(event(job).put("exists", true).put("running", DownloadService.isRunning(id)).put("queued", DownloadService.isQueued(id)))
+    }
+
+    /** إعدادات طابور الجهاز (التوازي و«Wi-Fi فقط») حين تتغير في الواجهة. */
+    @PluginMethod
+    fun configure(call: PluginCall) {
+        DownloadService.configure(call.getInt("parallel"), call.getBoolean("wifiOnly"))
+        call.resolve()
     }
 
     /**

@@ -72,7 +72,8 @@ export function createDownloadManager(deps) {
     for (const item of saved) {
       if (!item?.id) continue;
       // ما كان يعمل لحظة الإغلاق يعود للانتظار ويُستأنف من الجزئي المحفوظ
-      if (ACTIVE_STATES.has(item.state)) {
+      // وما سُلِّم لطابور الجهاز: يعود للمحرك فيسأل الجهاز عن حاله ويتابعه بلا تجهيز سيرفر جديد
+      if (ACTIVE_STATES.has(item.state) || item.state === STATES.scheduled) {
         item.state = STATES.queued;
         item.speed = 0;
       }
@@ -106,8 +107,10 @@ export function createDownloadManager(deps) {
         }
         return;
       }
-      let free = settings.parallel - running.size;
+      // ما سُلِّم لطابور الجهاز لا يشغل خانة هنا: الجهاز يطبّق التوازي نفسه، والواجهة تجهّز التالي
+      let free = settings.parallel - [...running.values()].filter((s) => !s.handed).length;
       for (const i of queue) {
+        if (running.has(i.id)) continue;
         if (free <= 0) {
           if (i.state === STATES.waitingWifi) patch(i.id, { state: STATES.queued });
           continue;
@@ -128,7 +131,7 @@ export function createDownloadManager(deps) {
     }
     const controller = new AbortController();
     const meter = createRateMeter();
-    const slot = { controller, meter, savedAt: 0, promise: null };
+    const slot = { controller, meter, savedAt: 0, promise: null, handed: false };
     running.set(item.id, slot);
     patch(item.id, { state: STATES.resolving, error: null, startedAt: item.startedAt ?? now(), attempts: (item.attempts ?? 0) + 1 });
     const ctl = {
@@ -152,6 +155,13 @@ export function createDownloadManager(deps) {
         if (save) slot.savedAt = at;
         patch(item.id, next, { save, type: next.state ? 'change' : 'progress' });
       },
+      /** سُلِّم للجهاز: خانته هنا تفرغ للتالي، والمتابعة مستمرة. */
+      handoff() {
+        if (slot.handed || controller.signal.aborted) return;
+        slot.handed = true;
+        queueMicrotask(pump);
+      },
+      settings: () => ({ ...settings }),
       /** حالة وسطى يعلنها المحرك: يعيد الاتصال، يتحقق، أو وصف المصدر الذي اختاره. */
       update(change) {
         if (controller.signal.aborted) return;
