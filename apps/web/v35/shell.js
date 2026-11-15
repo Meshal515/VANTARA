@@ -5529,6 +5529,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (from === 'anime' && id !== 'anime') anime.leaveDetail();
     if (from === 'downloads' && id !== 'downloads') downloadsUI.leave();
+    // العودة للتحميلات (رجوع من صفحة عمل محلي): الاشتراك يعود قبل أول إطار، وإلا تجمّد التقدّم والحالة على آخر رسم
+    else if (id === 'downloads' && from !== 'downloads') downloadsUI.resume();
     const inAnime = root.dataset.section === 'anime';
     const inCinema = root.dataset.section === 'cinema';
     // خلل «إعادة رسم الشريط السفلي» (8 نوفمبر): رسم الصفحة الثقيلة (40–110ms على جوال متوسط) كان يجري في

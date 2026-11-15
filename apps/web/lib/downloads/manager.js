@@ -141,10 +141,12 @@ export function createDownloadManager(deps) {
         const at = now();
         const rate = change.bytes != null ? meter.sample(at, bytes) : meter.rate();
         const next = { ...change, speed: rate, stable: meter.stable() };
-        if (cur.state !== STATES.downloading && cur.state !== STATES.verifying) {
-          next.state = STATES.downloading;
-          // نقلٌ بدأ فعلًا: انقطاع لاحق يستحق محاولاته كاملة
+        if (cur.state !== STATES.downloading && cur.state !== STATES.verifying) next.state = STATES.downloading;
+        // نقلٌ تقدّم فعلًا بعد آخر انقطاع: انقطاع لاحق يستحق محاولاته كاملة. التقدّم المستأنف وحده (الصفحات أو
+        // البايتات المحفوظة قبل الانقطاع) لا يصفّر العدّاد، وإلا أعاد عطل دائم في صفحة واحدة المحاولة بلا نهاية
+        if (cur.retryFrom == null ? next.state === STATES.downloading : bytes > cur.retryFrom) {
           next.attempts = 1;
+          next.retryFrom = null;
         }
         const save = at - slot.savedAt >= PROGRESS_SAVE_MS;
         if (save) slot.savedAt = at;
@@ -188,6 +190,7 @@ export function createDownloadManager(deps) {
         speed: 0,
         error: null,
         attempts: 0,
+        retryFrom: null,
         finishedAt: now(),
       });
       emit({ type: 'completed', id, item: items.get(id) });
@@ -205,7 +208,7 @@ export function createDownloadManager(deps) {
     const attempt = cur.attempts ?? 1;
     if (retryable && attempt <= RETRY_DELAYS_MS.length) {
       // نفس المصدر بعد مهلة متزايدة؛ الخانة تفرغ لغيره أثناء الانتظار
-      patch(id, { state: STATES.reconnecting, speed: 0, error: { code, message } });
+      patch(id, { state: STATES.reconnecting, speed: 0, error: { code, message }, retryFrom: Number(cur.bytes) || 0 });
       const t = timers.setTimeout(() => {
         retryTimers.delete(id);
         const again = items.get(id);
@@ -266,7 +269,7 @@ export function createDownloadManager(deps) {
         const existing = items.get(item.id);
         if (existing) {
           if (existing.state === STATES.failed || existing.state === STATES.noSpace) {
-            patch(existing.id, { state: STATES.queued, error: null, attempts: 0, source: item.source, request: item.request });
+            patch(existing.id, { state: STATES.queued, error: null, attempts: 0, retryFrom: null, source: item.source, request: item.request });
             added.push(existing);
           } else skipped.push({ spec, reason: existing.state === STATES.ready ? 'على الجهاز' : 'في الطابور', item: existing });
           continue;
@@ -290,7 +293,7 @@ export function createDownloadManager(deps) {
       const item = items.get(id);
       if (!item || ![STATES.paused, STATES.failed, STATES.noSpace, STATES.reconnecting].includes(item.state)) return;
       stopRunning(id, 'requeue');
-      patch(id, { state: STATES.queued, error: null, attempts: 0 });
+      patch(id, { state: STATES.queued, error: null, attempts: 0, retryFrom: null });
       pump();
     },
 
