@@ -38,6 +38,19 @@
 - **أداة الفحص** تمرّر روابط CloudStream كالمشغّل (`plainMedia`): Akwam ظهر فاشلًا بسببها وهو يشغّل.
 - **مستخرج iplayerhls** (Eshek): JW Player مضغوط، قائمة HLS رئيسية 1080p حية.
 
+## فجوات في محرك VANTARA نفسه (من سجلات المسح الحي)
+
+| الإضافات | السبب | الحالة |
+|---|---|---|
+| Carateen | `NoSuchMethodError Score.from5(Double)`: واجهة CloudStream عندنا فيها `from10` وحدها | ✅ أُصلحت (عائلة `from` كاملة + اختبار ABI) |
+| MyCima، FaselHD، Elif | الإضافة تستدعي `android.webkit.CookieManager.getInstance()` داخل عملية العزل، ولا WebView في عملية معزولة (لا مجلد بيانات) ⇒ `InvocationTargetException` ⇒ PROVIDER_FAILED | ⏳ قرار معماري (أدناه) |
+
+**قرار مطلوب من المالك (CookieManager في العزل):**
+- الخيار المقترح: إعادة كتابة مراجع `android/webkit/CookieManager` في DEX الإضافة عند التحميل إلى بديل من فانتارا
+  يقرأ ويكتب الكوكيز عبر وسيط HTTP الموجود (نفس جرة الكوكي). العزل يبقى كما هو. يحتاج مكتبة تحرير DEX
+  (dexlib2، BSD-3، متوافقة مع AGPL) وتسجيلها في `NOTICE.md`.
+- البديل الأسهل والأخطر: تشغيل هذه الإضافات خارج العزل. لا يُنصح به: كود طرف ثالث بصلاحيات التطبيق.
+
 ## باقٍ ومعروف
 
 - 🟠 مستضيفات EgyWatch الناقصة (d0o0d وstreamwish.fun وuqload.vc وearnvids وvidtube وupdown وmzfi): تحقق Cloudflare أو صفحة تحميل من عنوان مركز البيانات؛ لا تُسجَّل قبل دليل MEDIA.

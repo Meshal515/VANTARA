@@ -520,6 +520,17 @@ describe('video driver: the server the user chose is the one downloaded', () => 
     expect(engine.closeSession).toHaveBeenCalled();
   });
 
+  it('manual: a release the user picked is honored even if its description says 0 seeders', async () => {
+    const { createVideoDriver } = await import('./video-driver.js');
+    const engine = engineWith([torrent('s|a', 'btih:aaaa:0', 'Big\\n👤 289'), torrent('s|z', 'btih:zzzz:0', 'Rare.Cut\\n👤 0 💾 700 MB')]);
+    const native = nativeReady();
+    const driver = createVideoDriver({ engine: () => engine, native: () => native, platform: () => ({ platform: 'android', torrent: true }) });
+    const item = { id: 'dl_r', kind: 'movie', section: 'cinema', work: { title: 'W' }, unit: { number: null }, request: { copies: [], episode: -1 },
+      source: { mode: 'manual', sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: 'btih:zzzz:0' } };
+    await driver.run(item, ctlOf());
+    expect(native.start.mock.calls[0][0].candidate).toBe('cand-s|z');
+  });
+
   it('manual: a picked release that did not come back fails honestly instead of downloading another', async () => {
     const { createVideoDriver } = await import('./video-driver.js');
     const engine = engineWith([torrent('s|a', 'btih:aaaa:0', 'Big\n👤 289')]);

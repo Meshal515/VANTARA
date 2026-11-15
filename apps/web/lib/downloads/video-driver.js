@@ -143,7 +143,10 @@ export function createVideoDriver(deps) {
     if (exact) {
       // اليدوي والمقفول: السيرفر نفسه بهويته، لا «الأفضل» من مصدره (كان اليدوي يختار أعلى تورنت في Torrentio
       // بدل الذي ضغطه المستخدم)
-      const route = rankRoutes(routes.filter((r) => sameRoute(r, source)), { platform: deps.platform() })[0];
+      // اختيار المستخدم يُحترم كما هو: لا ترتيب «ذكي» يستبعد تورنتًا لأن وصفه يقول 0 مشاركين
+      const route = routes.filter((r) => sameRoute(r, source) && isDownloadReady(r))
+        .sort((a, b) => Number(Boolean(b.fingerprint && b.fingerprint === source.fingerprint)) - Number(Boolean(a.fingerprint && a.fingerprint === source.fingerprint))
+          || Number(b.probed === true) - Number(a.probed === true))[0];
       if (!route || !isDownloadReady(route)) {
         throw new DownloadError('NO_ROUTE', source.locked ? 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله الآن' : 'السيرفر الذي اخترته لم يعد متاحًا لهذه الحلقة الآن', { retryable: true });
       }
@@ -291,7 +294,6 @@ export function createVideoDriver(deps) {
             server: route.server,
             routeCode: route.code ?? null,
             fingerprint: routeIdentity(route),
-            torrent: route.type === 'torrent' || undefined,
             label: route.label ?? current.source?.label ?? null,
             quality: route.quality ?? info.quality ?? null,
             locked: true,
