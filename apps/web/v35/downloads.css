@@ -200,11 +200,13 @@ html[dir='ltr'] .v35 .dl-bar.is-indeterminate > i { animation-direction: reverse
 .v35 .dl-selectbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .v35 .dl-select-act { min-height: 38px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
 .v35 .dl-select-act[disabled] { opacity: 0.45; }
-.v35 .dl-row.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.v35 .dl-row.is-selected { background: var(--accent-soft); box-shadow: inset -3px 0 0 var(--accent); }
 .v35 .dl-card.is-selected .work-card-frame { box-shadow: 0 0 0 3px var(--accent); border-radius: var(--radius-card, 14px); }
 .v35 .dl-card.is-selected .poster { opacity: 0.72; }
-.v35 .dl-usage { margin: 0 0 8px; }
-.v35 .dl-usage .dl-hint { margin: 2px 0; }
+.v35 .dl-usage { margin: 0 0 8px; display: grid; gap: 6px; }
+.v35 .dl-usage-row { margin: 0; display: flex; justify-content: space-between; gap: 12px; color: var(--text-2); font-size: var(--fs-meta); }
+.v35 .dl-usage-row:empty { display: none; }
+.v35 .dl-usage-free { color: var(--text-3); border-top: 1px solid var(--line); padding-top: 6px; }
 .v35 .dl-card .poster { background: var(--surface-2); }
 @media (min-width: 900px) {
   .v35 .dl-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

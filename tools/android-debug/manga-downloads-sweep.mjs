@@ -215,7 +215,7 @@ try {
       const series = await js(`${EE}.series({sourceId:${JSON.stringify(source.sourceId)},manga:${JSON.stringify(work)}}).then(r=>({manga:r.manga,chapters:r.chapters}))`, 180000).catch((e) => ({ error: String(e.message) }));
       if (!series?.chapters?.length) { rec.chapters.push({ work: work.title, error: series?.error ?? 'no chapters' }); continue; }
       const chs = series.chapters.filter((c) => c.url && !/^(n-a|#)$/.test(c.url));
-      const candidates = [chs[0], chs[Math.floor(chs.length / 2)], chs[chs.length - 1]].filter(Boolean);
+      const candidates = [...new Map([chs[0], chs[Math.floor(chs.length / 2)], chs[chs.length - 1]].filter(Boolean).map((c) => [c.url, c])).values()];
       for (const ch of candidates) {
         if (picked >= CHAPTERS_PER_SOURCE) break;
         const c = { work: work.title, chapter: ch.name, number: ch.chapterNumber };
@@ -297,9 +297,28 @@ try {
     });
   }
 
+  // ───── الذكي: مصدر الفصل الأول معطوب ⇒ يكمل من نسخة حقيقية أخرى (بديل) ─────
+  if (ready.length) {
+    const alt = ready[ready.length - 1];
+    await step(proof.scenarios, 'smartFallbackToAlternate', async () => {
+      const broken = ready.find((x) => x.source.sourceId !== alt.source.sourceId) ?? alt;
+      const spec = { section: 'manga', work: { ref: `qa-fallback:${alt.work.url}`, title: alt.work.title }, unit: { key: `qa-fallback-${alt.ch.url}`, number: alt.ch.chapterNumber },
+        source: { mode: 'smart', sourceId: broken.source.sourceId, sourceName: broken.source.name },
+        request: { sourceId: broken.source.sourceId, chapter: { ...broken.ch, url: `${broken.ch.url}-vantara-qa-missing` }, alternates: [{ sourceId: alt.source.sourceId, chapter: alt.ch, sourceName: alt.source.name }] } };
+      const id = await js(`__qa.dl().then(({manager})=>manager.enqueue([${JSON.stringify(spec)}])).then(r=>r.added[0]?.id)`);
+      const end = await waitItem(id, 6 * 60000);
+      if (end?.state !== 'ready') throw new Error(JSON.stringify(end));
+      const stored = await verifyStored(id);
+      if (stored.pages.some((x) => !x.ok)) throw new Error('bad pages after fallback');
+      return { from: broken.source.name, to: end.source?.sourceId, fallbackFrom: end.source?.fallbackFrom, pages: stored.pagesTotal };
+    });
+  }
+
   // ───── القارئ الحقيقي: فصل من الإنترنت ثم المحمّل بلا اتصال ─────
   if (ready.length) {
-    const r = ready[0];
+    // عمل فيه فصل محمّل وفصل آخر غير محمّل: الأول يُقرأ من الإنترنت (يربط القارئ بمحرك المصادر)، ثم المحمّل بلا اتصال
+    const readyUrls0 = new Set(ready.map((x) => x.ch.url));
+    const r = ready.find((x) => (x.series.chapters ?? []).some((c) => c.url && !readyUrls0.has(c.url))) ?? ready[0];
     const mountReader = (row, rows) => js(`(async()=>{
       const {openSmartReader}=await import('/v35/reader.js');const {readerEngine}=await import('/lib/reader-engine.js');
       const sync={user:{userId:'qa',displayName:'QA'},ready:Promise.resolve(),rows:()=>[],row:()=>null,onChange:()=>()=>{},enqueue:()=>Promise.resolve(),refreshSession:async()=>{},translation:async()=>({status:200,body:{rows:[]}})};

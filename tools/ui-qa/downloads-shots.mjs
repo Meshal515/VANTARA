@@ -137,7 +137,7 @@ await step('queue', async () => {
   await page.waitForFunction(() => document.querySelectorAll('.dl-row').length > 0);
   await sleep(1500);
   await shot('queue-start', '«جاري التحميل»: حلقتان نشطتان (التوازي 2) واثنتان تنتظران');
-  await page.waitForFunction(() => document.querySelectorAll('.dl-row').length === 2, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll('.dl-row').length >= 1, null, { timeout: 30000 });
   await sleep(4500);
   await shot('queue-progress', 'تقدّم حقيقي في الواجهة: الحجم/الإجمالي، النسبة، السرعة، والوقت المتبقي حين تستقر السرعة');
   await tap('.dl-row .dl-info');
@@ -148,6 +148,24 @@ await step('queue', async () => {
   await page.waitForSelector('.dl-settings');
   await shot('settings', 'إعدادات التحميل: التوازي 1–4، Wi-Fi فقط، والتخزين');
   await closeSheet();
+  // الإدارة: ⋯ الطابور، ثم التحديد المتعدد بضغطة مطوّلة وشريط أوامره
+  await tap('.dl-summary-more');
+  await page.waitForSelector('.dl-manage');
+  await shot('queue-manage', '⋯ إدارة التحميلات: تحديد، أعد الفاشل، إيقاف/استئناف الكل، إلغاء الطابور');
+  await closeSheet();
+  const first = page.locator('.dl-row').first();
+  const box = await first.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 20);
+  await page.mouse.down();
+  await sleep(700);
+  await page.mouse.up();
+  await page.waitForSelector('.dl-selectbar');
+  await shot('queue-select', 'ضغطة مطوّلة: وضع التحديد وشريط أوامره (إيقاف، استئناف، قدّمه، إلغاء)');
+  if ((await page.locator('.dl-row').count()) > 1) {
+    await tap('.dl-selectbar .dl-chip');
+    await shot('queue-select-all', 'تحديد الكل');
+  }
+  await tap('.dl-selectbar .icon-btn');
 });
 
 // ───────────── السينما (Cinemeta حيّ): Breaking Bad ─────────────
@@ -199,6 +217,20 @@ await step('device', async () => {
   await page.waitForSelector('.dl-card');
   await sleep(1500);
   await shot('device-grid', '«على الجهاز»: بطاقات مكتبتي نفسها، عمل واحد لكل بطاقة بعدد المحفوظ');
+  await tap('.dl-device-more');
+  await page.waitForSelector('.dl-manage');
+  await shot('device-manage', '⋯ ما على الجهاز: المساحة لكل قسم والمتاح، التحديد، وحذف المقروء والمشاهَد');
+  await closeSheet();
+  await tap('.dl-sort');
+  await shot('device-sort-size', 'الترتيب: الأكبر حجمًا');
+  const card = await page.locator('.dl-card').first().boundingBox();
+  await page.mouse.move(card.x + card.width / 2, card.y + card.height / 3);
+  await page.mouse.down();
+  await sleep(700);
+  await page.mouse.up();
+  await page.waitForSelector('.dl-selectbar');
+  await shot('device-select', 'تحديد أعمال على الجهاز وحذفها معًا');
+  await tap('.dl-selectbar .icon-btn');
 });
 
 const openDeviceCard = async (title) => {

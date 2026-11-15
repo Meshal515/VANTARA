@@ -930,13 +930,13 @@ export function createDownloadsUI(deps) {
       body.append(el('h3', null, 'ما على الجهاز'));
       const usage = el('div', 'dl-usage');
       for (const [sec, bytes] of [...bySection].sort((a, b) => b[1] - a[1])) {
-        const line = el('p', 'dl-hint');
-        line.append(el('span', null, `${SECTION_LABEL[sec] ?? sec} `), ltr(el, formatBytes(bytes) ?? '0 B'));
+        const line = el('p', 'dl-usage-row');
+        line.append(el('span', null, SECTION_LABEL[sec] ?? sec), ltr(el, formatBytes(bytes) ?? '0 B'));
         usage.append(line);
       }
-      const free = el('p', 'dl-hint');
+      const free = el('p', 'dl-usage-row dl-usage-free');
       usage.append(free);
-      void storageFree(c).then((f) => { if (f != null && f >= 0) free.append(el('span', null, 'متاح على الجهاز '), ltr(el, formatBytes(f))); });
+      void storageFree(c).then((f) => { if (f != null && f >= 0) free.append(el('span', null, 'متاح على الجهاز'), ltr(el, formatBytes(f))); });
       body.append(usage);
       body.append(sheetButton('check', 'تحديد…', () => { closeSheet(); view.select = { scope: 'device', ids: new Set() }; render({ keepScroll: true }); }));
       if (done.length) {
