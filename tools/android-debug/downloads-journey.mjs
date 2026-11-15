@@ -25,6 +25,8 @@ const save = () => writeFileSync(`${out}/downloads.json`, JSON.stringify(proof, 
 let shotNo = 0;
 /** لقطة الشاشة كما يراها المستخدم (شريط النظام والإشعارات معها). */
 const shot = async (name) => {
+  // نوافذ النظام (المحاكي) لا تغطي التصميم: تُغلق قبل كل لقطة
+  try { adb('shell', 'am', 'broadcast', '-a', 'android.intent.action.CLOSE_SYSTEM_DIALOGS'); } catch {}
   await delay(700);
   const file = `shot-${String(++shotNo).padStart(2, '0')}-${name}.png`;
   writeFileSync(`${out}/${file}`, execFileSync('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }));
@@ -32,6 +34,10 @@ const shot = async (name) => {
   save();
 };
 
+// مشغّل المحاكي (Pixel Launcher) يعلق على runner بلا GPU ويغطي كل لقطة بنافذة «لا يستجيب»، وتأكيد ملء الشاشة
+// يحجب المشغّل ويبتلع زر الرجوع. كلاهما من المحاكي لا من VANTARA.
+for (const cmd of [['pm', 'disable-user', '--user', '0', 'com.google.android.apps.nexuslauncher'], ['settings', 'put', 'secure', 'immersive_mode_confirmations', 'confirmed']]) { try { adb('shell', ...cmd); } catch {} }
+const topActivity = () => adb('shell', 'dumpsys', 'activity', 'activities').split('\n').filter((l) => /topResumedActivity|mResumedActivity/.test(l)).join(' ');
 const pid = adb('shell', 'pidof', pkg);
 adb('forward', 'tcp:9225', `localabstract:webview_devtools_remote_${pid}`);
 let pages;
@@ -216,8 +222,9 @@ try {
     await delay(12000);
     await shot('offline-player');
     const still = /PlayerActivity/.test(adb('shell', 'dumpsys', 'activity', 'activities').split('\n').filter((l) => /topResumedActivity|mResumedActivity/.test(l)).join(' '));
-    adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
-    await delay(2500);
+    // يُغلق المشغّل فعلًا قبل المانجا: WebView خلف نشاط آخر لا يرسم إطاراته
+    for (let n = 0; n < 6 && /PlayerActivity/.test(topActivity()); n++) { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); await delay(1500); }
+    if (/PlayerActivity/.test(topActivity())) throw new Error('player did not close');
     if (!still) throw new Error('player closed during offline playback');
     return { episode: episode.unit, bytes: episode.bytes, stillPlayingAfter12s: true };
   });

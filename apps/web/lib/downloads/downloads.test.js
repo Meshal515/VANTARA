@@ -62,6 +62,10 @@ describe('units', () => {
     expect(Math.round(m.rate())).toBe(1_000_000);
     expect(etaSeconds({ done: 4e6, total: 64e6, rate: m.rate(), stable: m.stable() })).toBeCloseTo(60, 0);
     expect(formatEta(60)).toBe('نحو دقيقة');
+    // سرعة غير مستقرة ⇒ لا وقت متبقٍ، لا «أقل من دقيقة» عند 2% (خلل ظهر في لقطة المحاكي الحقيقية)
+    expect(formatEta(etaSeconds({ done: 9.8e6, total: 452e6, rate: 725000, stable: false }))).toBeNull();
+    expect(formatEta(undefined)).toBeNull();
+    expect(formatEta(etaSeconds({ done: 9.8e6, total: 452e6, rate: 725000, stable: true }))).toBe('نحو 10 دقائق');
     const jumpy = createRateMeter();
     [0, 100, 5_000_000, 5_000_100, 12_000_000].forEach((b, i) => jumpy.sample(i * 1000, b));
     expect(jumpy.stable()).toBe(false);

@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '01d75c2ba2e2fa3adcbf3f10a9cdfaaa61a427d54238037e0cce4a9091fa03f9';
+const SHELL_DIGEST = '6b5110b98ad72fa685cab18edf85e1287d345cf84e17d441ce63eaffa78292e1';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 

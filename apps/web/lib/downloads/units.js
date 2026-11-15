@@ -40,6 +40,8 @@ export function formatProgressBytes(done, total) {
 
 /** الوقت المتبقي نصًا عربيًا قصيرًا: «نحو دقيقة»، «نحو 12 دقيقة»، «نحو ساعتين». */
 export function formatEta(seconds) {
+  // null/undefined تعني «لا يصح الحساب» (سرعة غير مستقرة أو حجم مجهول): لا نص. Number(null) صفر فكان يعرض «أقل من دقيقة»
+  if (seconds == null || seconds === '') return null;
   const s = Number(seconds);
   if (!Number.isFinite(s) || s < 0) return null;
   if (s < 45) return 'أقل من دقيقة';
