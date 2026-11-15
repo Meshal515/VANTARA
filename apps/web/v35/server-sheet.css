@@ -1479,3 +1479,37 @@ html.room-servers .v35 .sheet-backdrop.sheet-backdrop--full { z-index: 10020; ba
 html.room-servers .v35 .sheet-backdrop.sheet-backdrop--full > .sheet { width: clamp(420px, 36vw, 560px); border-inline-end: 1px solid var(--line, rgba(255, 255, 255, 0.08)); }
 html.room-servers .v35 .an-pick { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'src' 'foot'; }
 html.room-servers .v35 .ss-info { display: none; }
+
+/* تصميم واحد للجوال والكمبيوتر في ورقة سيرفرات الغرفة (قرار المالك 15 نوفمبر): عنوان «السيرفرات» ورقم الحلقة،
+   مرشّحا الجودة والمصدر مربعان متجاوران باسم صغير فوق القيمة، وقائمتهما بعرض الورقة تحتهما، ولون القسم للفعل وحده. */
+.v35 .ss-room-head,
+.v35 .ss-drop-cap { display: none; }
+:is(html.room-servers, .desktop-room-layer--servers) .v35 .ss-room-head,
+.desktop-room-layer--servers .ss-room-head { display: grid; gap: 4px; padding: 16px 0 14px; padding-inline-start: 28px; }
+/* زر الرجوع في جهة البداية على سطر العنوان نفسه، والمرشّحات تحت العنوان مباشرة (لا سطر حالة فارغ يباعدهما) */
+:is(html.room-servers, .desktop-room-layer--servers) .ss-tools { padding-top: 0; }
+/* سطر الحالة («يتجهّز… 3 جاهز») تحت المرشّحين كما في الجوال، ويختفي إن كان فارغًا */
+:is(html.room-servers, .desktop-room-layer--servers) .ss-tools { display: flex; flex-direction: column; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-tools-head { order: 2; min-height: 0; padding: 8px 4px 0; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-tools-head:not(:has(.an-srv-status > span:not(:empty))) { display: none; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-room-head h2 { margin: 0; font-size: 22px; font-weight: 800; color: var(--text, #f3f6fc); }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-room-head small { font-size: 14px; font-weight: 600; color: var(--text-3, #7d879d); }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drops { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop { min-width: 0; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop .ss-addon-btn {
+  position: relative; display: grid; justify-items: start; gap: 2px; width: 100%; max-width: none;
+  padding: 9px 16px 10px; padding-inline-end: 36px; border-radius: 12px;
+  border: 1px solid var(--line, rgba(160, 190, 255, 0.12)); background: var(--surface-2, #131826);
+  color: var(--text, #f3f6fc); font-size: 15px; font-weight: 700; text-align: start;
+}
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop.open .ss-addon-btn { background: var(--surface-3, #1b2233); border-color: rgba(255, 255, 255, 0.28); }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop .ss-drop-cap { display: block; font-size: 12px; font-weight: 700; color: var(--text-3, #7d879d); }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop .ss-addon-chev { position: absolute; inset-inline-end: 14px; top: 50%; translate: 0 -50%; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop .ss-addon-btn:disabled { opacity: 1; }
+:is(html.room-servers, .desktop-room-layer--servers) .ss-drop .ss-addon-btn:disabled > span:not(.ss-drop-cap) { color: var(--text-2, #b4bdd0); }
+/* القائمة بعرض صف المرشّحين تحتهما مباشرة، مثل الجوال */
+:is(html.room-servers, .desktop-room-layer--servers) .ss-addon-menu {
+  left: 28px !important; right: 28px; min-width: 0; padding: 6px; border-radius: 12px;
+  background: var(--surface-3, #1b2233); border: 1px solid var(--line, rgba(160, 190, 255, 0.12));
+}
+:is(html.room-servers, .desktop-room-layer--servers) .ss-addon-opt { min-height: 46px; border-radius: 10px; font-size: 15px; font-weight: 700; }

@@ -336,7 +336,7 @@ class VSheet(private val host: FrameLayout) {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             background = GradientDrawable().apply {
-                setColor(if (side) Tone.alpha(Tone.SURFACE, 0xF0) else Tone.SURFACE)
+                setColor(Tone.SURFACE) // معتمة: نصوص الغرفة لا تظهر من خلف الورقة (ملاحظة المالك 15 نوفمبر)
                 val r = dp(22).toFloat()
                 cornerRadii = if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(dp(1), Tone.LINE)
@@ -504,3 +504,29 @@ fun Context.chip(text: String, fg: Int, bg: Int): TextView = label(text, 11f, fg
 
 /** يمنع وصول اللمس للطبقات تحت العنصر. */
 fun View.swallowTouches() = setOnTouchListener { _, e: MotionEvent -> true.also { if (e.action == MotionEvent.ACTION_UP) performClick() } }
+
+/** مؤشر قوة السرب (أربعة أعمدة متدرجة) بجانب عدد المشاركين: نفس مؤشر ورقة سيرفرات الكمبيوتر. */
+class SeedMeter(context: Context, private val bars: Int, private val color: Int) : View(context) {
+    private val on = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = this@SeedMeter.color }
+    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0x33FFFFFF }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) = setMeasuredDimension(dp(17), dp(13))
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val w = dp(3).toFloat(); val gap = dp(1.6f).toFloat(); val r = dp(1).toFloat()
+        for (i in 0 until 4) {
+            val h = height * (0.35f + 0.65f * i / 3f)
+            val x = i * (w + gap)
+            canvas.drawRoundRect(x, height - h, x + w, height.toFloat(), r, r, if (i < bars) on else off)
+        }
+    }
+    companion object {
+        /** عدد المشاركين من وصف التورنت («👤 156» أو «👤 1.2k»)، أو null إن لم يُعلن. */
+        fun seeders(text: String?): Int? {
+            val m = Regex("👤\\s*([0-9][0-9.,]*)\\s*([kK])?").find(text ?: return null) ?: return null
+            val n = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
+            return (if (m.groupValues[2].isNotEmpty()) n * 1000 else n).toInt()
+        }
+        /** نفس حدود الكمبيوتر (`swarmTier` و`meterBars`): 100+ أربعة، 20+ قوي، 5+ متوسط، 1+ ضعيف. */
+        fun bars(s: Int) = when { s >= 100 -> 4; s >= 20 -> 3; s >= 5 -> 2; s >= 1 -> 1; else -> 0 }
+        fun color(s: Int) = when { s >= 20 -> Tone.OK; s >= 5 -> Tone.WARN; else -> Tone.BAD }
+    }
+}

@@ -374,6 +374,11 @@ export function createServerSheet(body, o) {
 
   // ── المصادر: المرشّحات وسطر الحالة ثم القائمة ──
   const src = el('section', 'ss-src');
+  // عنوان الورقة كما في الجوال («السيرفرات» ورقم الحلقة): يظهر في الورقة الجانبية للغرفة حيث لا لوحة معلومات
+  const roomHead = el('div', 'ss-room-head');
+  roomHead.append(el('h2', null, 'السيرفرات'));
+  if (media.label) roomHead.append(el('small', null, media.label));
+  src.append(roomHead);
   const tools = el('div', 'ss-tools');
   const toolsHead = el('div', 'ss-tools-head');
   // لا عنوان «المصادر»: المرشّحات أول ما تحت الحلقة، وسطر الحالة يظهر وقت التجهيز فقط
@@ -539,8 +544,9 @@ export function createServerSheet(body, o) {
     s.append(h, grid, more);
     return { s, count, grid, more, summary, moreGrid };
   };
-  const direct = section('ss-group--direct', 'سيرفرات مباشرة', 'تبدأ خلال ثوانٍ');
-  const torrent = section('ss-group--torrent', 'تورنت', 'يبدأ أبطأ · جودة وحجم أعلى');
+  // نفس أسماء أقسام مشغّل الجوال (تصميم واحد للمنصتين، قرار المالك 15 نوفمبر)
+  const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع');
+  const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ');
   const fold = (cls) => {
     const d = el('details', `cn-srv-dead ${cls}`);
     const summary = el('summary');
@@ -727,6 +733,8 @@ export function createServerSheet(body, o) {
   const dropdown = (label) => {
     const wrap = el('div', 'ss-addon ss-drop');
     const toggle = btn('ss-addon-btn', '', label);
+    // اسم المرشّح صغيرًا فوق قيمته داخل المربع (مثل الجوال)؛ يظهر حيث تُصمَّم المرشّحات مربعات
+    toggle.append(el('small', 'ss-drop-cap', label));
     const caption = el('span');
     caption.dir = 'auto';
     toggle.append(caption);

@@ -1717,6 +1717,9 @@ class PlayerActivity : Activity() {
             fun rank(r: Route) = when (r.state) { RouteState.READY -> 0; RouteState.RESOLVING -> 1; RouteState.FAILED -> 2; else -> 3 }
             val usable = routes.filter { it.state != RouteState.UNAVAILABLE }
             val (torrents, direct) = usable.partition { r -> r.candidates.any { id -> p.candidate(id)?.url?.startsWith("vantara-torrent:") == true } }
+            // «مقترح» على صف ما سيشغّله «شغّل الأفضل» (نفس علامة الكمبيوتر)
+            val suggested = p.best(preferCode)?.let { p.routeOf(it.id)?.id }
+            val torrentIds = torrents.map { it.id }.toSet()
             fun section(name: String, hint: String, list: List<Route>) {
                 if (list.isEmpty()) return
                 val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(14), dp(6), dp(6)) }
@@ -1724,7 +1727,7 @@ class PlayerActivity : Activity() {
                 head.addView(label(hint, 12f, Tone.TEXT_3, bold = true))
                 body.addView(head)
                 list.sortedWith(compareBy<Route> { rank(it) }.thenByDescending { it.quality ?: 0 }).forEach { r ->
-                    body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+                    body.addView(routeRow(r, r.id == currentRoute, suggested = r.id == suggested, torrent = r.id in torrentIds), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
                 }
             }
             section("تورنت", "جودة أعلى · يبدأ أبطأ", torrents)
@@ -1753,7 +1756,7 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private fun routeRow(r: Route, isCurrent: Boolean): View {
+    private fun routeRow(r: Route, isCurrent: Boolean, suggested: Boolean = false, torrent: Boolean = false): View {
         val (text, color, pulse) = when {
             isCurrent -> Triple(if (reportedStart) "يعمل الآن" else "يبدأ…", Tone.ACCENT, !reportedStart)
             r.state == RouteState.RESOLVING -> Triple("يتجهّز…", Tone.WARN, true)
@@ -1765,8 +1768,10 @@ class PlayerActivity : Activity() {
         val dim = r.state == RouteState.UNAVAILABLE || r.state == RouteState.RESOLVING
         val title = r.sourceName?.takeIf { it.isNotBlank() } ?: r.server.ifBlank { r.code }
         // ما يميّز هذا السيرفر عن جاره: وصف المصدر (الحجم والترميز والبذور للتورنت)، وإلا اسم الخادم ورمزه
-        val detail = r.label?.takeIf { it.isNotBlank() && it != title }
-            ?: listOf(r.server.takeIf { it.isNotBlank() && it != title }, r.code.takeIf { it != title }).filterNotNull().joinToString(" · ")
+        // التورنت: عدد المشاركين في مؤشر السرب يسار الصف (مثل الكمبيوتر) لا في سطر الوصف
+        val seeds = if (torrent) SeedMeter.seeders(r.label) else null
+        val detail = (r.label?.takeIf { it.isNotBlank() && it != title }?.let { if (seeds != null) it.replace(Regex("\\s*·?\\s*👤\\s*[0-9][0-9.,]*\\s*[kK]?"), "").trim() else it }
+            ?: listOf(r.server.takeIf { it.isNotBlank() && it != title }, r.code.takeIf { it != title }).filterNotNull().joinToString(" · "))
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1781,12 +1786,18 @@ class PlayerActivity : Activity() {
             top.addView(label("\u2068$heading\u2069", 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             else if (r.code == preferCode && !isCurrent) top.addView(chip("آخر اختيار", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
+            else if (suggested && !isCurrent) top.addView(label("مقترح", 12.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(dp(8), 0, 0, 0) })
             texts.addView(top)
             if (detail.isNotBlank()) texts.addView(label(detail, 12.5f, Tone.TEXT_2).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, dp(3), 0, 0) })
             addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             val state = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
-            state.addView(StatusDot(context, color, pulse))
-            state.addView(label(text, 12f, if (r.state == RouteState.FAILED) Tone.BAD else Tone.TEXT_2, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            if (seeds != null && !isCurrent && r.state == RouteState.READY) {
+                state.addView(SeedMeter(context, SeedMeter.bars(seeds), SeedMeter.color(seeds)))
+                state.addView(label(if (seeds >= 1000) "${"%.1f".format(seeds / 1000.0).removeSuffix(".0")}k" else "$seeds", 13f, Tone.TEXT, bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            } else {
+                state.addView(StatusDot(context, color, pulse))
+                state.addView(label(text, 12f, if (r.state == RouteState.FAILED) Tone.BAD else Tone.TEXT_2, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(7) })
+            }
             addView(state)
             contentDescription = "$title، $detail، $text"
             if (playable) setOnClickListener { switchTo(r) }

@@ -76,19 +76,20 @@ class TogetherRoomScreensDeviceTest {
         com.vantara.plugins.ensureEngineInjekt(context.applicationContext as android.app.Application)
         val engine = AnimeEngine.get(context)
         val now = System.currentTimeMillis()
-        fun candidate(id: String, source: String, server: String, quality: Int, label: String) = Candidate(
+        fun candidate(id: String, source: String, server: String, quality: Int, label: String, url: String = Uri.fromFile(video).toString()) = Candidate(
             id = id, sourceId = source, sourceName = source, server = server, host = "local.fixture",
-            url = Uri.fromFile(video).toString(), quality = quality, label = label, resolvedAt = now, expiresAt = now + 3_600_000,
+            url = url, quality = quality, label = label, resolvedAt = now, expiresAt = now + 3_600_000,
         )
         val copies = listOf(SourceAnime(sourceId = "torrentio", url = "fixture://attack-on-titan-s2", title = "Attack on Titan Season 2"))
         val session = PlaybackSession(emptyList(), engine.health)
         val prep = PreparedEpisode(id = "room-shots", copies = copies, number = 1f, prefs = Preferences(), session = session, health = engine.health)
+        // تورنت حقيقي الشكل (vantara-torrent:) لقسم «تورنت» ومؤشر السرب؛ لا يُشغَّل في الاختبار (لا تذكرة مسجّلة)
         prep.adopt("Torrentio", listOf(
-            candidate("t1", "Torrentio", "Torrentio 1080p", 1080, "Attack on Titan S02E01 1080p · 1.1 GB · 👤 212"),
-            candidate("t2", "Torrentio", "Torrentio 1080p HEVC", 1080, "Attack on Titan S02E01 HEVC · 260 MB · 👤 88"),
-            candidate("t3", "Torrentio", "Torrentio 720p", 720, "Attack on Titan S02E01 720p · 540 MB · 👤 31"),
+            candidate("t2", "Torrentio", "Torrentio 1080p", 1080, "Attack on Titan S02E01 1080p · 1.1 GB · 👤 212", "vantara-torrent://fixture-a/0"),
+            candidate("t3", "Torrentio", "Torrentio 720p", 720, "Attack on Titan S02E01 720p · 540 MB · 👤 7", "vantara-torrent://fixture-b/0"),
         ))
-        prep.adopt("AnimeKai", listOf(candidate("k1", "AnimeKai", "MegaUp", 1080, "مترجم عربي")))
+        prep.allowRuntimeCandidate("t2"); prep.allowRuntimeCandidate("t3")
+        prep.adopt("AnimeKai", listOf(candidate("t1", "AnimeKai", "MegaUp", 1080, "مترجم عربي"), candidate("k2", "AnimeKai", "MegaUp 720p", 720, "مترجم عربي")))
         prep.adopt("WitAnime", listOf(candidate("w1", "WitAnime", "StreamWish", 720, "مترجم عربي")))
         AnimeEngine::class.java.getDeclaredField("sessions").apply { isAccessible = true }.let {
             @Suppress("UNCHECKED_CAST") (it.get(engine) as MutableMap<String, PlaybackSession>)["room-shots"] = session
@@ -136,6 +137,7 @@ class TogetherRoomScreensDeviceTest {
         call("showServers"); shot("room-02-servers")
         field("serverMenu", "q"); refreshSheet(); shot("room-03-servers-quality-menu")
         field("serverMenu", null); field("serverSource", "Torrentio"); refreshSheet(); shot("room-04-servers-filtered")
+        field("serverSource", null); refreshSheet(); instrumentation.runOnMainSync { PlayerActivity::class.java.getDeclaredField("sheet").apply { isAccessible = true }.get(activity).let { it.javaClass.getDeclaredMethod("scrollTo", Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(it, 10_000) } }; shot("room-04b-servers-bottom")
         field("serverSource", null); back()
         call("showEpisodes"); shot("room-05-episodes", 6000); back() // ani.zip ثم الصور: وقت للشبكة قبل اللقطة
         // اختيار سيرفر: التجهيز ثم الجاهزية (البدء أزرق)
