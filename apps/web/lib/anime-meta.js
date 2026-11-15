@@ -374,7 +374,8 @@ export function compactCount(n) {
 export async function fetchSeasonChain(id, { max = 30, detail = fetchAnimeDetail } = {}) {
   const start = await detail(id).catch(() => null);
   if (!start) return [];
-  const isSeason = (r) => r && r.format !== 'MOVIE' && r.format !== 'MUSIC';
+  // مسلسلات فقط (نفس قاعدة مشغّل الجوال): لا أفلام ولا OVA ولا أغانٍ داخل قائمة المواسم
+  const isSeason = (r) => r && (r.format == null || ['TV', 'TV_SHORT', 'ONA'].includes(r.format));
   const seen = new Set([start.id]);
   const walk = async (relation) => {
     const out = [];

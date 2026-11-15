@@ -53,7 +53,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     serverSheet=null;serverBusy=false;viewport();
   };
   const dismiss=()=>{link?.close();link=null;overlayServers=false;overlayRoutes=null;skipController?.abort();skipKey=null;skipResult=null;playerInfo=null;viewport(true);roomState=null;lobbyUi?.destroy();lobbyUi=null;roomModal?.remove();roomModal=null;const cleanup=roomModalCleanup;roomModalCleanup=null;try{cleanup?.();}catch{}serverSheet=null;releaseRoomSurface?.();releaseRoomSurface=null;observer?.disconnect();observer=null;revision++;panel?.remove();panel=null;session=null;ready=false;previousFocus?.focus?.();};
-  const close=async()=>{const id=session;if(!id)return;engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
+  // keepRoom: الغرفة انتقلت لموسم آخر (تُعرض غرفته فورًا)، فالمشغّل يُغلق دون الخروج منها
+  const close=async(keepRoom)=>{const id=session;if(!id)return;if(keepRoom!==true)engine.leavePlayerRoom?.({session:id});viewport(true);dismiss();try{await Promise.all([engine.closeSession?.({session:id}),bridge.stopPlayback({session:id}),bridge.playerFullscreen?.({enabled:false})]);}catch{}fullscreen=false;};
   const button=(label,action,fn)=>{const b=node('button',label,{'type':'button','data-action':action,'aria-label':label,title:label});b.onclick=fn;return b;};
   const iconButton=(label,action,icon,fn)=>{const b=button(label,action,fn);b.innerHTML=action==='fullscreen'?'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>':glyph(icon,{size:24});return b;};
   // The native mpv child window hides DOM mounted in the main renderer.
@@ -266,7 +267,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     roomState=event;void lobbyUi?.update({...event,progress:loadProgress});void sources();
   });
   const entryListener=engine.addListener?.('desktopRoomEntry',event=>{
-    entryView?.destroy();if(panel)void close();ensureStyles();
+    entryView?.destroy();if(panel)void close(true);ensureStyles();
     entryView=openDesktopRoomEntry({document:doc,...event});
   });
   const noticeListener=engine.addListener?.('desktopNotice',event=>{if(event.session===session)tell(event.message,true);});

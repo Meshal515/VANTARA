@@ -182,3 +182,18 @@ it('Windows: إنشاء الغرفة من صفحة العمل يفتح شاشة 
  expect(bind).toHaveBeenCalledOnce();expect(presentRoom).not.toHaveBeenCalled();
  player.leave();
 });
+it('المضيف ينقل الغرفة لموسم آخر: مرجع العمل يتبعه، وحدث الجوال يفتح غرفة الموسم الجديد بنفس الرمز', () => {
+  vi.stubGlobal('Capacitor', undefined); const room = roomOf(); const openMedia = vi.fn();
+  const hub = createTogether({ sync:{}, baseUrl:()=> 'https://sync.test', joinRoomImpl:()=>room, openMedia, toast:vi.fn() });
+  hub.joinByCode('ABCDEF', {media_json:JSON.stringify({seriesRef:'anime:16498',kind:'anime',key:'anime:16498#3'}),mode:'sync'});
+  room.emit('state', {state:{media:{key:'anime:20958#1',kind:'anime',label:'Attack on Titan Season 2 — الحلقة 1'}}});
+  expect(hub.session.media.seriesRef).toBe('anime:20958');
+  expect(hub.session.media.title).toBe('Attack on Titan Season 2');
+  expect(hub.handOff('anime:20958')).not.toBeNull();
+  openMedia.mockClear();
+  expect(hub.switchWork('ABCDEF', 'anime:99147#1', 'Attack on Titan Season 3 — الحلقة 1', 'sync')).toBe(true);
+  expect(openMedia).toHaveBeenCalledOnce();
+  expect(openMedia.mock.calls[0][0]).toMatchObject({ kind:'anime', seriesRef:'anime:99147', episode:1, title:'Attack on Titan Season 3' });
+  expect(hub.session.code).toBe('ABCDEF');
+  hub.leave();
+});

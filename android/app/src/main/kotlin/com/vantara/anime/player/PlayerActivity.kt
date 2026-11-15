@@ -653,6 +653,11 @@ class PlayerActivity : Activity() {
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
+            // موسم آخر اختاره المضيف: الواجهة تفتح غرفة الموسم الجديد (الكل يختار سيرفره من جديد)
+            override fun switchWork(key: String, label: String?) {
+                PlaybackEvents.emit("togetherWork", JSONObject().put("code", cfg.code).put("mode", cfg.mode).put("key", key).put("label", label ?: ""))
+                finish()
+            }
             // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
             override fun loadProgress(): Float {
                 if (current == null) return 0f
@@ -1453,7 +1458,9 @@ class PlayerActivity : Activity() {
         bar.getLocationInWindow(at); root.getLocationInWindow(base)
         val pad = dp(10).toFloat()
         val x = at[0] - base[0] + pad + (bar.width - pad * 2) * (ms.toFloat() / bar.durationMs).coerceIn(0f, 1f)
-        seekPreview.show(ms, x, (at[1] - base[1]).toFloat(), root.width)
+        // فوق صف الوقت لا فوق الشريط مباشرة: المربع لا يغطي «الوقت الحالي» ولا «المدة»
+        val clock = IntArray(2); timeNow.getLocationInWindow(clock)
+        seekPreview.show(ms, x, minOf(at[1], clock[1]).toFloat() - base[1], root.width)
     }
 
     private fun updateQualityLabel() {
@@ -1817,11 +1824,120 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /**
+     * مواسم العمل في الغرفة (طلب المالك 15 نوفمبر): كل موسم في AniList عمل مستقل، فالسلسلة تُبنى بالمشي عبر
+     * PREQUEL ثم SEQUEL (مسلسلات TV/ONA فقط، حتى 30 في كل اتجاه)، مرة للجلسة. نفس قاعدة `fetchSeasonChain` في الويب.
+     */
+    private data class SeasonEntry(val id: Int, val title: String, val episodes: Int?)
+    private var seasons: List<SeasonEntry>? = null
+    private var seasonsLoading = false
+    private var seasonMenu = false
+    private fun fetchSeasons() {
+        if (seasons != null || seasonsLoading) return
+        val id = launch.animeId.toIntOrNull()?.takeIf { launch.section == "anime" && it > 0 } ?: return
+        seasonsLoading = true
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { seasonChain(id) }.getOrNull() }
+            seasonsLoading = false
+            seasons = list ?: emptyList()
+            if (openSheet == SheetKind.EPISODES) sheet.refresh()
+        }
+    }
+
+    private fun aniMedia(id: Int): JSONObject? {
+        val q = "query(\$id:Int){Media(id:\$id,type:ANIME){id format episodes title{romaji english} relations{edges{relationType node{id type format}}}}}"
+        val body = JSONObject().put("query", q).put("variables", JSONObject().put("id", id)).toString().toRequestBody("application/json".toMediaType())
+        return network.client.newCall(Request.Builder().url("https://graphql.anilist.co").header("Accept", "application/json").post(body).build()).execute().use { res ->
+            if (!res.isSuccessful) null else JSONObject(res.body.string()).optJSONObject("data")?.optJSONObject("Media")
+        }
+    }
+
+    private fun seasonChain(id: Int): List<SeasonEntry> {
+        val series = setOf("TV", "TV_SHORT", "ONA")
+        fun entry(m: JSONObject): SeasonEntry {
+            val t = m.optJSONObject("title")
+            val name = listOf(t?.optString("english"), t?.optString("romaji")).firstOrNull { !it.isNullOrBlank() && it != "null" }.orEmpty()
+            return SeasonEntry(m.optInt("id"), name, m.optInt("episodes").takeIf { it > 0 })
+        }
+        val start = aniMedia(id) ?: return emptyList()
+        val seen = mutableSetOf(id)
+        fun walk(relation: String): List<SeasonEntry> {
+            val out = mutableListOf<SeasonEntry>()
+            var cur: JSONObject = start
+            for (step in 0 until 30) {
+                val edges = cur.optJSONObject("relations")?.optJSONArray("edges") ?: break
+                var next = 0
+                for (i in 0 until edges.length()) {
+                    val e = edges.optJSONObject(i) ?: continue
+                    val n = e.optJSONObject("node") ?: continue
+                    if (e.optString("relationType") == relation && n.optString("type") == "ANIME" && n.optString("format") in series && n.optInt("id") !in seen) { next = n.optInt("id"); break }
+                }
+                if (next <= 0) break
+                seen += next
+                cur = aniMedia(next) ?: break
+                out += entry(cur)
+            }
+            return out
+        }
+        return walk("PREQUEL").reversed() + entry(start) + walk("SEQUEL")
+    }
+
+    /** زر «الموسم» المنسدل أعلى ورقة الحلقات (نفس نمط فلاتر السيرفرات)، وقائمته تفتح في مكانها: 24 موسمًا تظهر كلها. */
+    private fun seasonPicker(body: LinearLayout, list: List<SeasonEntry>) {
+        val curId = launch.animeId.toIntOrNull()
+        val index = list.indexOfFirst { it.id == curId }
+        val value = if (index >= 0) "الموسم ${index + 1}" else "الموسم"
+        val open = seasonMenu
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(7), dp(14), dp(8))
+            background = pressable(if (open) Tone.SURFACE_3 else Tone.SURFACE_2, dp(12).toFloat(), dp(1), if (open) Tone.TEXT_3 else Tone.LINE)
+            contentDescription = "الموسم: $value من ${list.size}"
+            addView(label("الموسم · ${list.size} مواسم", 11.5f, Tone.TEXT_3, bold = true))
+            addView(label("$value  ${if (open) "▴" else "▾"}", 14f, Tone.TEXT, bold = true))
+            setOnClickListener { seasonMenu = !seasonMenu; sheet.refresh() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        if (!open) return
+        val menu = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = rounded(Tone.SURFACE_3, dp(12).toFloat(), dp(1), Tone.LINE)
+        }
+        for ((i, season) in list.withIndex()) {
+            val on = season.id == curId
+            menu.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                background = pressable(Color.TRANSPARENT, dp(10).toFloat())
+                contentDescription = "الموسم ${i + 1}"
+                addView(label(if (on) "✓  الموسم ${i + 1}" else "الموسم ${i + 1}", 14f, if (on) Tone.ACCENT_TEXT else Tone.TEXT, bold = true))
+                val sub = listOfNotNull(season.title.takeIf { it.isNotBlank() }?.let { "\u2068$it\u2069" }, season.episodes?.let { "$it حلقة" }).joinToString(" · ")
+                if (sub.isNotEmpty()) addView(label(sub, 12f, Tone.TEXT_3).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                setOnClickListener {
+                    seasonMenu = false
+                    when {
+                        on -> sheet.refresh()
+                        // المضيف ينقل الغرفة كلها لأول حلقة في الموسم؛ الصديق يُبلَّغ أن المضيف يختار
+                        together?.requestWork("anime:${season.id}", "${season.title.ifBlank { "الموسم ${i + 1}" }} — الحلقة 1") == true -> sheet.close()
+                        else -> { message("الغرفة تتصل… جرّب بعد لحظة"); sheet.refresh() }
+                    }
+                }
+            })
+        }
+        body.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+    }
+
     private fun showEpisodes() {
         val total = launch.total
         if (total <= 0 || copies.isEmpty()) return message("قائمة الحلقات من صفحة الأنمي")
         fetchEpisodeArt()
+        // المواسم داخل الغرفة فقط: هناك تنقل الغرفة كلها (وحدك تُختار من صفحة الأنمي)
+        if (together != null) fetchSeasons()
+        seasonMenu = false
         open(SheetKind.EPISODES, "الحلقات", "$total حلقة") { body ->
+            seasons?.takeIf { together != null && it.size > 1 }?.let { seasonPicker(body, it) }
             val cur = episodeInt()
             for (n in 1..total) {
                 val on = n == cur
@@ -1853,7 +1969,7 @@ class PlayerActivity : Activity() {
             }
         }
         // تمرير للحلقة الحالية (صف ≈ 79dp)
-        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79)) }, 280)
+        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79) + if ((seasons?.size ?: 0) > 1 && together != null) dp(68) else 0) }, 280)
     }
 
     private fun showQuality() {
