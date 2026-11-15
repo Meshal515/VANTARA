@@ -668,9 +668,12 @@ class RuntimeHost(
     fun beginVerification(host: String): VerificationPending = synchronized(lock) {
         val retry=pending.values.firstOrNull { it.owner===owner && sourceEndpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
         checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
-        val original=VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
-        require(original.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
-        val item=VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")
+        VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
+        // The page presents the User-Agent and URL the replay will send: a clearance is bound to that User-Agent. The
+        // ledger keeps a host's first challenge, while this source's retry is its latest one; a plugin that changes its
+        // User-Agent between requests (or a second source on the same host) made them differ, and the button failed at
+        // once with no page (VERIFICATION_SESSION_MISMATCH).
+        val item=(VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")).copy(userAgent=retry.userAgent,url=retry.url)
         activeVerifications[item.token]=retry;item
     }
     fun verificationProfile(item: VerificationPending): String = synchronized(lock) {

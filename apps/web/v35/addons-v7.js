@@ -8,6 +8,7 @@ import { assessAddon, supportedCapabilities } from "../addons/assessment.js";
 import { configureLink } from "./addons-view.js";
 import { choosePackage, isBundled, packageOf } from "../lib/source-entitlement.js";
 import { manifestEndpoint } from "../addons/import.js";
+import { verificationMessage } from "../lib/source-verification.js";
 
 const icons = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -150,8 +151,10 @@ export function renderV7Addons({
       if(result?.ok===true||result?.state==="verified"){
         if(button)button.textContent="تم التحقق";
         // Do not claim the source can play until its own runtime succeeds.
-      }else if(button){
-        button.disabled=false;button.textContent="إعادة التحقق";
+      }else{
+        // السبب نفسه (أُلغي، مهلة، نطاق آخر...) لا «إعادة التحقق» صامتة
+        notify(result?.error||(result?.state?verificationMessage(result):"لم يكتمل التحقق. تقدر تحاول مرة ثانية."));
+        if(button){button.disabled=false;button.textContent="إعادة التحقق";}
       }
     }catch(err){if(alive){notify(fmtErr(err));if(button){button.disabled=false;button.textContent="إعادة التحقق";}}}
   }

@@ -918,7 +918,9 @@ export function createServerSheet(body, o) {
     const fill = (g, items, cap, weak) => {
       const main = [];
       const extra = [];
-      // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها
+      // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها.
+      // كل سيرفر مباشر صالح يظهر (طلب المالك 15 نوفمبر): كان الظاهر 12 فقط، فيصل سيرفر CloudStream الصالح بعدها مطويًّا
+      // في «نسخ إضافية» ولا يراه أحد. التورنت وحده يبقى بستة إصدارات ظاهرة (عشرات الإصدارات للحلقة نفسها) والضعيف مطويّ.
       for (const r of items) {
         let shownHere = folded.get(r.id);
         if (shownHere == null) {
@@ -934,7 +936,7 @@ export function createServerSheet(body, o) {
       g.count.textContent = String(items.length);
       g.s.hidden = !items.length;
     };
-    fill(direct, directLive, 12);
+    fill(direct, directLive, Infinity);
     fill(torrent, torrentLive, 6, (r) => {
       const d = view(r);
       return d.tier === 'dead' || d.info?.source === 'CAM';

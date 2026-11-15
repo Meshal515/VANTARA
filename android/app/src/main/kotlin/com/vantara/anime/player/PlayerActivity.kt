@@ -688,7 +688,7 @@ class PlayerActivity : Activity() {
         sessionId = id
         session = engine.session(id)
         prep = engine.prepared(id)
-        unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refresh() } }
+        unlisten = prep?.listen { main.post { if (openSheet == SheetKind.SERVERS) sheet.refreshSoon() } }
         expanded = false
         titleView.text = launch.title
         episodeView.text = episodeLabel()
@@ -875,9 +875,10 @@ class PlayerActivity : Activity() {
         val mediaFactory = playbackDataSourceFactory(c)
         val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
         // المعاينة: مصدر مستقل بلا قياس شبكة (لا تُحسب حركتها على سرعة المشاهدة)، والتورنت بإطارات المشاهدة وحدها
-        if (::seekPreview.isInitialized) seekPreview.bind(if (c.url.startsWith("vantara-torrent:")) null else {
-            { CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false), false, "${c.id}|preview").mediaSource }
-        })
+        // المعاينة: مصدر مستقل بلا قياس شبكة؛ التورنت بقارئ معاينة لا يحرّك نافذة المشاهدة
+        if (::seekPreview.isInitialized) seekPreview.bind({
+            CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource
+        }, torrent = c.url.startsWith("vantara-torrent:"))
         externalAudioUrls = media.externalAudioUrls
         if (BuildConfig.DEBUG) {
             if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")
@@ -892,16 +893,18 @@ class PlayerActivity : Activity() {
         startup.active(usageForeground && player.playWhenReady)
         main.post(startupWatchdog)
         updateQualityLabel()
-        if (openSheet == SheetKind.SERVERS) sheet.refresh()
+        if (openSheet == SheetKind.SERVERS) sheet.refreshSoon()
         discoverAddonSubtitles(c, subtitleGeneration)
     }
 
     /** Shared by playback and external subtitle selection, including local downloaded subtitle files. */
-    private fun playbackDataSourceFactory(c: Candidate, measured: Boolean = true): androidx.media3.datasource.DataSource.Factory {
+    private fun playbackDataSourceFactory(c: Candidate, measured: Boolean = true, preview: Boolean = false): androidx.media3.datasource.DataSource.Factory {
         val transport = if (c.sourceId.startsWith("addon|")) com.vantara.addons.nativeAddonMediaClient(network.client, c.url, c.headers,
             plainMedia = c.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else network.client
         val delegate = DefaultDataSource.Factory(this, MediaCache.factory(this, transport, c.headers))
-        val base = if (c.url.startsWith("vantara-torrent:")) com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate) else delegate
+        val base = if (!c.url.startsWith("vantara-torrent:")) delegate
+            else if (preview) com.vantara.addons.torrent.TorrentEngine.get(this).previewDataSourceFactory(delegate)
+            else com.vantara.addons.torrent.TorrentEngine.get(this).dataSourceFactory(delegate)
         // كل طلب فيديو يمرّ على قياس الشبكة (زمن الاستجابة والسرعة الفعلية)
         if (!measured) return base
         return androidx.media3.datasource.DataSource.Factory { base.createDataSource().also { it.addTransferListener(net); if (BuildConfig.DEBUG) it.addTransferListener(diag) } }
@@ -945,7 +948,7 @@ class PlayerActivity : Activity() {
         current = null
         val at = position()
         val next = session?.failed(c, reason)
-        if (openSheet == SheetKind.SERVERS) sheet.refresh()
+        if (openSheet == SheetKind.SERVERS) sheet.refreshSoon()
         if (next != null) {
             message("تم التبديل إلى سيرفر آخر")
             start(next, at)
@@ -1278,6 +1281,8 @@ class PlayerActivity : Activity() {
         buildBottom()
         root.addView(controls, match())
         seekPreview = SeekPreview(this, main)
+        // سطح مشغّل المعاينة خلف الفيديو (لا يُرى، لكنه يُرسم فتُقرأ صوره)
+        root.addView(seekPreview.probe, 0, seekPreview.probeSize)
         root.addView(seekPreview.view, FrameLayout.LayoutParams(dp(176), dp(99), Gravity.TOP or Gravity.LEFT))
 
         skipButton = pillButton("تخطي المقدمة  »", primary = true) {
@@ -1367,7 +1372,8 @@ class PlayerActivity : Activity() {
         times.addView(timeTotal, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT))
         col.addView(times, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8); rightMargin = dp(8) })
         bar = TimeBar(this).apply {
-            onDragState = { dragging -> if (dragging) main.removeCallbacks(hideControls) else { seekPreview.hide(); scheduleHide() } }
+            // أثناء السحب لا تختفي الأدوات أبدًا (كان مؤقت آخر يخفيها فيبقى مربع المعاينة وحده وسط الشاشة)
+            onDragState = { dragging -> scrubbing = dragging; if (dragging) main.removeCallbacks(hideControls) else { seekPreview.hide(); scheduleHide() } }
             onScrub = { ms -> timeNow.text = ClipMath.clock(ms); showSeekPreview(ms) }
             onSeek = { ms -> player.seekTo(ms) }
         }
@@ -1445,9 +1451,12 @@ class PlayerActivity : Activity() {
         timeNow.text = ClipMath.clock(position())
         timeTotal.text = if (d > 0) ClipMath.clock(d) else "--:--"
         clip?.tick(position())
-        if (player.isPlaying && firstFrameShown && ::seekPreview.isInitialized) {
-            seekPreview.aspect(player.videoSize.width, player.videoSize.height)
-            seekPreview.capture(video.videoSurfaceView, position(), d)
+        if (::seekPreview.isInitialized) {
+            val playing = player.isPlaying && firstFrameShown
+            if (playing) seekPreview.aspect(player.videoSize.width, player.videoSize.height)
+            // لوحة القصة فقط والمشاهدة مستقرة: تعمل، وقدّامها 8 ث مخزنة على الأقل، وليست قصاصة
+            val healthy = playing && clip == null && player.bufferedPosition - player.currentPosition >= 8_000L
+            seekPreview.tick(video.videoSurfaceView, position(), d, playing, healthy)
         }
     }
 
@@ -1468,7 +1477,11 @@ class PlayerActivity : Activity() {
         qualityLabel.text = h?.let { "${it}p" } ?: "HD"
     }
 
+    private var scrubbing = false
+
     private fun setControls(show: Boolean) {
+        if (!show && scrubbing) return
+        if (!show && ::seekPreview.isInitialized) seekPreview.hide()
         if (locked || clip != null) {
             controls.visibility = View.GONE
             return
@@ -1488,7 +1501,7 @@ class PlayerActivity : Activity() {
 
     private fun scheduleHide() {
         main.removeCallbacks(hideControls)
-        if (openSheet != null) return
+        if (openSheet != null || scrubbing) return
         if (player.isPlaying) main.postDelayed(hideControls, HIDE_AFTER_MS)
         // إيقاف مقصود (لا تحميل ولا نهاية): الأدوات تختفي بعد 5 ث بلا لمس
         else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) main.postDelayed(hideControls, PAUSED_HIDE_AFTER_MS)

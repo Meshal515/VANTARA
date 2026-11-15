@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.SurfaceTexture
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.PixelCopy
 import android.view.SurfaceView
@@ -27,30 +29,26 @@ import kotlin.math.max
 
 /**
  * معاينة شريط التقدم (طلب المالك 15 نوفمبر، مثل CloudStream): مربع فوق المقبض يتبع الإصبع ويعرض إطار الموضع ووقته،
- * في كل تشغيل، وحدك أو في غرفة.
+ * وحدك أو في غرفة، ولما قدّامك لا لما مررت عليه فقط.
  *
- * مصدران للإطار:
- *  1. مشغّل معاينة ثانٍ صامت (فيديو فقط، أقل جودة، أقرب إطار مفتاحي) على نفس مصدر البيانات والكاش والترويسات.
- *     للروابط المباشرة وHLS فقط. التورنت مستثنى، لأن قارئًا ثانيًا يغيّر أولوية القطع ويسرق تحميل المشاهدة نفسها.
- *  2. إطارات تُلتقط من المشغّل نفسه أثناء المشاهدة (PixelCopy)، بعدد محدود (240 إطارًا كحد أعلى، نحو 14MB).
- *     تظهر فورًا قبل وصول إطار المعاينة، وهي وحدها مصدر التورنت (يعرض أقرب إطار حتى 30 ثانية من الموضع).
- * إن لم يتوفر إطار يبقى المربع ظاهرًا بالوقت، بلا اختفاء ولا قفز.
+ * مصادر الإطار، كلها في ذاكرة واحدة مرتبة بالوقت:
+ *  1. «لوحة القصة»: مشغّل معاينة صامت (فيديو فقط، أقل جودة، أقرب إطار مفتاحي) يجهّز في الخلفية إطارًا كل دقيقتين على
+ *     الأكثر (10 إطارات على الأقل للحلقة)، الأقرب لموضعك قدّامك أولًا. لا يعمل إلا والمشاهدة مستقرة ومخزونها كافٍ.
+ *     التورنت عبر قارئ معاينة لا يحرّك نافذة المشاهدة (TorrentEngine.previewDataSourceFactory).
+ *  2. أثناء السحب: نفس المشغّل يقفز لموضع الإصبع، وكل إطار يصل يُحفظ.
+ *  3. ما شاهدته: إطار من المشغّل نفسه كل ~12 ث (PixelCopy).
+ * المشغّل يرسم في سطح مخفي خلف الفيديو (`probe`)، والمربع يعرض صورًا ثابتة فقط: لا سطح فيديو ثانٍ يظهر ويختفي.
+ * إن لم يتوفر إطار قريب يبقى المربع ظاهرًا بالوقت، بلا اختفاء ولا قفز.
  */
 class SeekPreview(private val ctx: Context, private val main: Handler) {
     private fun dp(v: Number) = ctx.dp(v)
 
     private val boxW = dp(176)
     private var boxH = dp(99)
-    private val frame = FrameLayout(ctx).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(0xFF0B0E16.toInt()) }
-        outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
-        }
-        clipToOutline = true
-        elevation = dp(10).toFloat()
-    }
+    private val frameW = 256
+    private var frameH = 144
+
     private val still = ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-    private val live = TextureView(ctx).apply { alpha = 0f }
     private val ring = View(ctx).apply {
         background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setStroke(dp(1.5f), 0x66FFFFFF) }
     }
@@ -59,62 +57,126 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
         background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(0xB3000000.toInt()) }
         setPadding(dp(8), dp(2), dp(8), dp(3))
     }
-    /** المربع كاملًا (يُضاف إلى جذر المشغّل فوق كل الطبقات). */
-    val view: FrameLayout = frame.apply {
+    /** المربع (يُضاف إلى جذر المشغّل فوق كل الطبقات). */
+    val view: FrameLayout = FrameLayout(ctx).apply {
+        background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(0xFF0B0E16.toInt()) }
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
+        }
+        clipToOutline = true
+        elevation = dp(10).toFloat()
         addView(still, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        addView(live, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(ring, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(time, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(6) })
         visibility = View.GONE
     }
 
-    // ───── إطارات المشاهدة ─────
+    /**
+     * سطح مشغّل المعاينة: يُضاف أول ابن في جذر المشغّل (خلف الفيديو، فلا يُرى) ليبقى يُرسم وتُقرأ صوره بـgetBitmap.
+     * سطح مخفي (GONE/INVISIBLE) لا يُنشأ أصلًا، ولهذا هو تحت الفيديو لا مخفيًا.
+     */
+    val probe = TextureView(ctx).apply {
+        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture) = true
+            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = frameArrived()
+        }
+    }
+    // في المنتصف: الفيديو يغطي المنتصف دائمًا (الحواف السوداء الجانبية قد لا تُرسم فوقها)
+    val probeSize get() = FrameLayout.LayoutParams(frameW, frameH, Gravity.CENTER)
+
+    // ───── الإطارات ─────
     private val frames = TreeMap<Long, Bitmap>()
-    private var bucketMs = 6_000L
+    private var watchBucketMs = 12_000L
     private var lastCaptureAt = -1L
     private var copying = false
+    private var durationMs = 0L
 
     // ───── مشغّل المعاينة ─────
     private var source: (() -> MediaSource)? = null
+    private var torrent = false
     private var preview: ExoPlayer? = null
-    private var seeking = false
-    private var targetMs = -1L
+    private var seekingTo = -1L
+    private var seekStartedAt = 0L
     private var wantedMs = -1L
-    private var renderedMs = -1L
-    private val unstick = Runnable { seeking = false; pump() }
+    private var dragging = false
+    private var storyboard = ArrayDeque<Long>()
+    private val attempts = HashMap<Long, Int>()
+    private var restUntil = 0L
+    private val giveUp = Runnable { if (seekingTo >= 0) { failed(seekingTo); seekingTo = -1; pump() } }
 
-    /** سيرفر جديد: إطارات وأبعاد جديدة. `source` null للتورنت (إطارات المشاهدة فقط). */
-    fun bind(source: (() -> MediaSource)?) {
+    /** سيرفر جديد: إطارات ولوحة قصة جديدة. `torrent`: القفزات أبطأ (قطع تُنزَّل)، فالمهلة أطول والراحة بينها أطول. */
+    fun bind(source: (() -> MediaSource)?, torrent: Boolean) {
         releasePlayer()
         still.setImageDrawable(null)
         frames.values.forEach { it.recycle() }
         frames.clear()
         lastCaptureAt = -1L
+        storyboard.clear(); attempts.clear(); durationMs = 0L
         this.source = source
+        this.torrent = torrent
     }
 
     fun aspect(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
         boxH = (boxW * height.toFloat() / width).toInt().coerceIn(dp(72), dp(132))
+        val h = (frameW * height.toFloat() / width).toInt().coerceIn(96, 192)
+        if (h != frameH) { frameH = h; probe.layoutParams = probe.layoutParams?.apply { this.height = h } }
     }
 
-    /** يُستدعى مع تحديث الشريط أثناء التشغيل: يلتقط إطارًا كل فترة ثابتة من سطح الفيديو. */
-    fun capture(surface: View?, positionMs: Long, durationMs: Long) {
+    /** خطوة لوحة القصة: دقيقتان على الأكثر، و10 إطارات على الأقل للحلقة. */
+    private fun storyStep() = if (durationMs > 0) minOf(120_000L, durationMs / 10).coerceAtLeast(20_000L) else 120_000L
+
+    /**
+     * كل 500ms من المشغّل: يلتقط ما تشاهده، ويُكمل لوحة القصة إن كانت المشاهدة مستقرة (`healthy`: تعمل، وقدّامها مخزون).
+     */
+    fun tick(surface: View?, positionMs: Long, duration: Long, playing: Boolean, healthy: Boolean) {
+        if (duration > 0 && duration != durationMs) {
+            durationMs = duration
+            watchBucketMs = max(12_000L, duration / 120)
+            val step = storyStep()
+            storyboard = ArrayDeque((0 until (duration / step).toInt().coerceAtLeast(1)).map { step / 2 + it * step }.filter { it < duration })
+        }
+        if (playing) capture(surface, positionMs)
+        if (healthy && !dragging && seekingTo < 0 && SystemClock.uptimeMillis() >= restUntil) nextStory(positionMs)
+    }
+
+    private fun nextStory(positionMs: Long) {
+        if (source == null || storyboard.isEmpty()) return
+        // الأقرب قدّامك أولًا، ثم ما خلفك؛ ما له إطار قريب من المشاهدة لا يُكرَّر
+        val near = max(15_000L, watchBucketMs)
+        storyboard.removeAll { t -> frameNear(t, near) || (attempts[t] ?: 0) >= 3 }
+        val next = storyboard.filter { it >= positionMs }.minOrNull() ?: storyboard.maxOrNull() ?: return
+        wantedMs = next
+        pump()
+    }
+
+    private fun frameNear(ms: Long, within: Long): Boolean {
+        val lo = frames.floorKey(ms); val hi = frames.ceilingKey(ms)
+        return (lo != null && ms - lo <= within) || (hi != null && hi - ms <= within)
+    }
+
+    private fun capture(surface: View?, positionMs: Long) {
         val sv = surface as? SurfaceView ?: return
         if (copying || durationMs <= 0 || !sv.holder.surface.isValid) return
-        bucketMs = max(6_000L, durationMs / 240)
-        val bucket = positionMs / bucketMs * bucketMs
+        val bucket = positionMs / watchBucketMs * watchBucketMs
         if (bucket == lastCaptureAt || frames.containsKey(bucket)) return
-        val bmp = Bitmap.createBitmap(dp(160).coerceAtMost(320), (dp(160).coerceAtMost(320) * boxH / boxW).coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createBitmap(frameW, frameH, Bitmap.Config.ARGB_8888)
         copying = true
         lastCaptureAt = bucket
         runCatching {
             PixelCopy.request(sv, bmp, { result ->
                 copying = false
-                if (result == PixelCopy.SUCCESS && !blank(bmp)) frames.put(bucket, bmp)?.recycle() else bmp.recycle()
+                if (result == PixelCopy.SUCCESS && !blank(bmp)) store(bucket, bmp) else bmp.recycle()
             }, main)
         }.onFailure { copying = false; bmp.recycle() }
     }
+
+    private fun store(at: Long, bmp: Bitmap) {
+        frames.put(at, bmp)?.let { old -> if (old !== bmp) { if (isShowing(old)) still.setImageBitmap(bmp); old.recycle() } }
+    }
+    private fun isShowing(b: Bitmap) = (still.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap === b
 
     /** إطار أسود تمامًا (قبل أول إطار أو محتوى محمي) لا يُحفظ. */
     private fun blank(b: Bitmap): Boolean {
@@ -123,8 +185,9 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
         return xs.all { x -> ys.all { y -> (b.getPixel(x, y) and 0xFFFFFF) == 0 } }
     }
 
-    /** بداية السحب أو حركته: `centerX` مركز المقبض و`barTop` أعلى الشريط، كلاهما بإحداثيات جذر المشغّل. */
-    fun show(ms: Long, centerX: Float, barTop: Float, parentWidth: Int) {
+    /** بداية السحب أو حركته: `centerX` مركز المقبض و`top` أعلى صف الوقت، كلاهما بإحداثيات جذر المشغّل. */
+    fun show(ms: Long, centerX: Float, top: Float, parentWidth: Int) {
+        dragging = true
         if (view.visibility != View.VISIBLE) {
             view.layoutParams = (view.layoutParams as? FrameLayout.LayoutParams ?: FrameLayout.LayoutParams(boxW, boxH)).apply {
                 width = boxW; height = boxH; gravity = Gravity.TOP or Gravity.LEFT
@@ -133,79 +196,96 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
         }
         val margin = dp(12).toFloat()
         view.translationX = (centerX - boxW / 2f).coerceIn(margin, max(margin, parentWidth - boxW - margin))
-        view.translationY = barTop - boxH - dp(6)
+        view.translationY = top - boxH - dp(6)
         time.text = ClipMath.clock(ms)
-        nearest(ms)?.let { still.setImageBitmap(it) }
-        val hasNear = nearest(ms) != null
-        // إطار المعاينة القديم يبقى ما دام قريبًا؛ وإلا يختفي حتى يصل إطار الموضع الجديد
-        if (renderedMs < 0 || abs(renderedMs - ms) > (if (hasNear) 2_500L else 20_000L)) live.alpha = 0f
-        request(ms)
+        val near = nearest(ms)
+        if (near != null) { if (!isShowing(near)) still.setImageBitmap(near) } else still.setImageDrawable(null)
+        // إطار دقيق للموضع إن لم يكن هناك إطار خلال ثانيتين منه
+        if (!frameNear(ms, 2_000L)) { wantedMs = ms; pump() }
     }
 
     fun hide() {
+        dragging = false
         view.visibility = View.GONE
         wantedMs = -1L
-        preview?.playWhenReady = false
     }
 
     private fun nearest(ms: Long): Bitmap? {
         val lo = frames.floorEntry(ms); val hi = frames.ceilingEntry(ms)
         val best = listOfNotNull(lo, hi).minByOrNull { abs(it.key - ms) } ?: return null
-        return best.value.takeIf { abs(best.key - ms) <= max(30_000L, bucketMs * 2) }
+        // لوحة القصة كل دقيقتين على الأكثر: أي موضع له إطار خلال دقيقة منه
+        return best.value.takeIf { abs(best.key - ms) <= max(30_000L, storyStep() / 2 + 5_000L) }
     }
 
-    private fun request(ms: Long) {
-        val make = source ?: return
-        wantedMs = ms
-        val p = preview ?: runCatching { create(make()) }.getOrNull() ?: return
-        if (preview == null) preview = p
-        pump()
+    private fun player(): ExoPlayer? {
+        preview?.let { return it }
+        val make = source ?: return null
+        return runCatching {
+            ExoPlayer.Builder(ctx).build().apply {
+                trackSelectionParameters = trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .setMaxVideoSize(854, 480)
+                    .setForceLowestBitrate(true)
+                    .build()
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
+                volume = 0f
+                setVideoTextureView(probe)
+                addListener(object : Player.Listener {
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        // قارئ المعاينة فشل (قطعة لم تصل، رابط انتهى): يُعاد بناؤه عند الطلب التالي
+                        if (seekingTo >= 0) failed(seekingTo)
+                        main.post { releasePlayer(); restUntil = SystemClock.uptimeMillis() + 10_000L }
+                    }
+                })
+                setMediaSource(make())
+                playWhenReady = false
+                prepare()
+            }
+        }.getOrNull()?.also { preview = it }
     }
 
-    private fun create(media: MediaSource): ExoPlayer = ExoPlayer.Builder(ctx).build().apply {
-        trackSelectionParameters = trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .setMaxVideoSize(854, 480)
-            .setForceLowestBitrate(true)
-            .build()
-        setSeekParameters(SeekParameters.CLOSEST_SYNC)
-        volume = 0f
-        setVideoTextureView(live)
-        addListener(object : Player.Listener {
-            override fun onRenderedFirstFrame() = landed()
-            override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_READY && seeking) main.postDelayed({ if (seeking) landed() }, 120) }
-        })
-        setMediaSource(media)
-        playWhenReady = false
-        prepare()
-    }
-
-    private fun landed() {
-        main.removeCallbacks(unstick)
-        seeking = false
-        renderedMs = targetMs
-        if (view.visibility == View.VISIBLE && abs(targetMs - wantedMs) <= 2_500L) live.animate().alpha(1f).setDuration(90).start()
-        pump()
-    }
-
-    /** طلب واحد في الطريق دائمًا: لا طابور قفزات خلف الإصبع. */
+    /** قفزة واحدة في الطريق دائمًا: لا طابور خلف الإصبع، والسحب يسبق لوحة القصة. */
     private fun pump() {
-        val p = preview ?: return
-        if (seeking || wantedMs < 0 || abs(wantedMs - targetMs) < 1_000L && renderedMs == targetMs) return
-        targetMs = wantedMs
-        seeking = true
-        p.seekTo(targetMs)
-        main.removeCallbacks(unstick)
-        main.postDelayed(unstick, 2_500)
+        if (seekingTo >= 0 || wantedMs < 0) return
+        val p = player() ?: return
+        val target = wantedMs
+        wantedMs = -1L
+        seekingTo = target
+        seekStartedAt = SystemClock.uptimeMillis()
+        p.seekTo(target)
+        main.removeCallbacks(giveUp)
+        main.postDelayed(giveUp, if (torrent) 30_000L else 8_000L)
     }
+
+    /** إطار جديد في سطح المعاينة: يُحفظ عند موضعه ويُعرض إن كان الإصبع قريبًا منه. */
+    private fun frameArrived() {
+        val at = seekingTo
+        if (at < 0 || SystemClock.uptimeMillis() - seekStartedAt < 40) return
+        main.removeCallbacks(giveUp)
+        seekingTo = -1
+        val bmp = runCatching { probe.getBitmap(Bitmap.createBitmap(frameW, frameH, Bitmap.Config.ARGB_8888)) }.getOrNull()
+        if (bmp != null && !blank(bmp)) {
+            store(at, bmp)
+            storyboard.remove(at)
+            if (dragging) nearest(currentShownMs())?.let { if (!isShowing(it)) still.setImageBitmap(it) }
+        } else bmp?.recycle()
+        // راحة بين إطارات لوحة القصة: لا تزاحم المشاهدة (التورنت أطول)
+        if (!dragging) restUntil = SystemClock.uptimeMillis() + if (torrent) 4_000L else 1_500L
+        pump()
+    }
+
+    private fun currentShownMs(): Long = time.text?.toString()?.let { t ->
+        t.split(':').mapNotNull { it.toLongOrNull() }.fold(0L) { acc, v -> acc * 60 + v } * 1000
+    } ?: 0L
+
+    private fun failed(at: Long) { attempts[at] = (attempts[at] ?: 0) + 1 }
 
     private fun releasePlayer() {
-        main.removeCallbacks(unstick)
+        main.removeCallbacks(giveUp)
         preview?.release()
         preview = null
-        seeking = false; targetMs = -1L; renderedMs = -1L
-        live.alpha = 0f
+        seekingTo = -1L
     }
 
     fun release() {

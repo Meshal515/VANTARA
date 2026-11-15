@@ -72,7 +72,16 @@ class RuntimePlugin : Plugin() {
                 .putExtra("host",item.host).putExtra("origin",item.origin).putExtra("url",item.url)
                 .putExtra("userAgent",item.userAgent).putExtra("sourceName",item.sourceName).putExtra("token",item.token)
                 .putExtra("runtimeProfile",host.verificationProfile(item)),"verified")
-        }catch(_:Exception){ active?.let { VerificationCoordinator.finish(it.host,it.token,"failed","launch_failed") };active=null;call.reject("تعذر فتح التحقق","VERIFICATION_LAUNCH_FAILED") }
+        }catch(failure:Exception){
+            active?.let { VerificationCoordinator.finish(it.host,it.token,"failed","launch_failed") };active=null
+            // The reason, never only «تعذر فتح التحقق»: the button had nothing to say when no page opened
+            val code=failure.message?.takeIf { it.matches(Regex("[A-Z_]{3,64}")) } ?: "VERIFICATION_LAUNCH_FAILED"
+            call.reject(when(code) {
+                "VERIFICATION_NOT_PENDING","VERIFICATION_EXPIRED" -> "انتهى طلب التحقق. افتح المصدر مرة أخرى ليُطلب من جديد."
+                "VERIFICATION_BUSY" -> "تحقق آخر مفتوح الآن. أكمله أو أغلقه ثم أعد المحاولة."
+                else -> "تعذر فتح صفحة التحقق ($code)."
+            },code)
+        }
     } }
     @ActivityCallback private fun verified(call: PluginCall?,result: ActivityResult) {
         val item=active;active=null

@@ -134,7 +134,21 @@ class TogetherRoomScreensDeviceTest {
         val end = SystemClock.elapsedRealtime() + 8_000
         while (SystemClock.elapsedRealtime() < end) Thread.sleep(250)
         shot("room-01-pick")
-        call("showServers"); shot("room-02-servers")
+        // تقطيع الورقة: سيرفرات تصل تباعًا أثناء انزلاقها (كما في الواقع). أطول فجوة بين إطارين تُسجَّل
+        val gaps = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        var lastFrame = 0L
+        var measuring = true
+        val tickFrame = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(t: Long) { if (lastFrame > 0) gaps += (t - lastFrame) / 1_000_000; lastFrame = t; if (measuring) android.view.Choreographer.getInstance().postFrameCallback(this) }
+        }
+        instrumentation.runOnMainSync { android.view.Choreographer.getInstance().postFrameCallback(tickFrame) }
+        Thread.sleep(300); gaps.clear()
+        call("showServers")
+        for (i in 1..6) { Thread.sleep(60); prep.adopt("Late$i", listOf(candidate("late$i", "Late$i", "Late $i", 720, "مترجم عربي"))) }
+        Thread.sleep(900)
+        measuring = false
+        File(out, "room-02-sheet-frames.txt").writeText("frames=${gaps.size} maxGapMs=${gaps.maxOrNull()} over50ms=${gaps.count { it > 50 }} gaps=${gaps.joinToString(",")}")
+        shot("room-02-servers")
         field("serverMenu", "q"); refreshSheet(); shot("room-03-servers-quality-menu")
         field("serverMenu", null); field("serverSource", "Torrentio"); refreshSheet(); shot("room-04-servers-filtered")
         field("serverSource", null); refreshSheet(); instrumentation.runOnMainSync { PlayerActivity::class.java.getDeclaredField("sheet").apply { isAccessible = true }.get(activity).let { it.javaClass.getDeclaredMethod("scrollTo", Int::class.javaPrimitiveType).apply { isAccessible = true }.invoke(it, 10_000) } }; shot("room-04b-servers-bottom")

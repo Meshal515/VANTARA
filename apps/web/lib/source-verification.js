@@ -2,7 +2,7 @@
 const validHost = value => typeof value === 'string' && value.length <= 253 && /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(value) && value.includes('.') && !/^\d+(?:\.\d+){3}$/.test(value) && !/\.(?:local|internal|localhost|invalid|lan)$/i.test(value);
 // Native reason codes stay available for diagnostics; only these local messages
 // enter the UI. Never echo a source URL, bridge exception or cookie value.
-function verificationMessage(result={}) {
+export function verificationMessage(result={}) {
   // «إلغاء» من المستخدم وحده يقال إلغاءً؛ إغلاق الصفحة لسبب آخر يقول سببه
   if(result.state==='cancelled'&&(!result.reason||result.reason==='user_cancelled'))return 'أُلغي التحقق. تقدر تحاول مرة ثانية.';
   const messages={
