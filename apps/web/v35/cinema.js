@@ -2358,6 +2358,7 @@ export function createCinema(deps) {
             backdrop: m.background ?? null,
             episodeImage: thumb ?? null,
             rating: (series ? epMeta?.rating : m.rating) ?? null,
+            ratingSource: 'IMDb',
             duration: runtimeAr(m.runtime),
             logo: m.logo ?? null,
             episodeTitle: m.type === 'series' ? epMeta?.title ?? null : null,

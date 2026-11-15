@@ -546,6 +546,7 @@ export function createTogether(deps) {
         episodeImage: art.episodeImage ?? null,
         // تقييم الحلقة ومدتها تحت اسمها (نصان: المشغّل الأصلي يقرأهما String)
         rating: Number(media.rating) > 0 ? Number(media.rating).toFixed(1) : null,
+        ratingSource: media.ratingSource ?? null,
         duration: media.duration ?? null,
         season: media.season ?? null,
         // المدعوون بأسمائهم وصورهم: من لم يدخل يظهر «بانتظاره…»

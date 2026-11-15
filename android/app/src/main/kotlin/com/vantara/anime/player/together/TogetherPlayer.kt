@@ -52,6 +52,8 @@ data class TogetherLaunch(
     val episodeImage: String? = null,
     /** تقييم الحلقة («8.7») ومدتها («43 دقيقة») تحت اسمها في الغرفة؛ كلاهما اختياري. */
     val rating: String? = null,
+    /** مصدر التقييم: «IMDb» للأفلام والمسلسلات؛ بلا مصدر لا يُعرض تقييم الأنمي المخمَّن. */
+    val ratingSource: String? = null,
     val duration: String? = null,
     val invitees: List<Invitee> = emptyList(),
     /** الغرفة أولًا: دخل بلا سيرفر، فالغرفة تعرض «اختر سيرفر» حتى يختار (لا اختيار تلقائي). */
@@ -735,13 +737,22 @@ class TogetherPlayer(
                 background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x00050507, 0x00050507, 0x00050507, 0x8C050507.toInt(), 0xFF050507.toInt()))
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(bannerBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
-            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp -> if (bmp != null) { banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start() } }
-            // تعتيم هادئ يذوب نحو اليمين: بنر Cinemeta لأعمال مثل أركين أبيض ناصع في نصفه الأيسر، فيضيع عليه زر الإغلاق
-            // والبطاقة والشريط. الجهة اليمنى (الشعار والمعلومات) لها تدرجها المستقل بعده.
-            root.addView(View(context).apply {
+            // تعتيم يساري تكيّفي (LobbyDim): بنر Cinemeta لأعمال مثل أركين أبيض ناصع في نصفه الأيسر فيضيع عليه زر الإغلاق
+            // والبطاقة والشريط. يُقاس من إضاءة اليسار بعد وصول الصورة؛ البنر الغامق لا يُمسّ. الجهة اليمنى لها تدرجها المستقل.
+            val dim = View(context).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xDB050507.toInt(), 0xB8050507.toInt(), 0x66050507, 0x14050507, 0x00050507))
-            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            root.addView(View(context).apply { setBackgroundColor(0x2E050507) }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                alpha = 0f
+            }
+            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp ->
+                if (bmp != null) {
+                    banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start()
+                    val small = android.graphics.Bitmap.createScaledBitmap(bmp, 32, 18, true)
+                    val px = IntArray(32 * 18)
+                    small.getPixels(px, 0, 32, 0, 0, 32, 18)
+                    dim.animate().alpha(LobbyDim.strength(LobbyDim.leftLuma(px, 32, 18))).setDuration(420).start()
+                }
+            }
+            root.addView(dim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             // تعتيم خفيف من الأسفل حيث الشريط فقط
             root.addView(View(context).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xEB050507.toInt(), 0x66050507, 0x00050507, 0x00050507, 0x00050507))
@@ -814,14 +825,6 @@ class TogetherPlayer(
             launch.episodeTitle?.takeIf { it.isNotBlank() }?.let {
                 hero.addView(context.label("\u2068$it\u2069", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             }
-            // التقييم والمدة بسطر هادئ تحت اسم الحلقة (الرقم معزول الاتجاه فلا تنقلب النجمة)
-            val facts = listOfNotNull(
-                launch.rating?.takeIf { it.isNotBlank() }?.let { "⁦★ $it⁩" },
-                launch.duration?.takeIf { it.isNotBlank() },
-            )
-            if (facts.isNotEmpty()) hero.addView(context.label(facts.joinToString("  ·  "), 12.5f, 0xB8FFFFFF.toInt(), bold = true).apply {
-                maxLines = 1; setPadding(0, context.dp(3), 0, 0)
-            })
             val steps = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(8), 0, 0) }
             val bars = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_LTR }
             stepBars = (0 until STEPS.size).map { View(context).also { v -> bars.addView(v, LinearLayout.LayoutParams(context.dp(20), context.dp(3)).apply { marginEnd = context.dp(4) }) } }
@@ -835,7 +838,7 @@ class TogetherPlayer(
             // بطاقة «البدء»: يسار الشاشة (END في الاتجاه RTL) فوق الشريط، ومكانها يُضبط في positionContent
             val startCard = FrameLayout(context).apply { visibility = View.GONE; elevation = context.dp(6).toFloat() }
             lobbyStart = startCard
-            root.addView(startCard, FrameLayout.LayoutParams(context.dp(256), context.dp(144), Gravity.BOTTOM or Gravity.END).apply {
+            root.addView(startCard, FrameLayout.LayoutParams(context.dp(300), context.dp(169), Gravity.BOTTOM or Gravity.END).apply {
                 marginEnd = context.dp(28); bottomMargin = context.dp(102)
             })
 
@@ -873,8 +876,8 @@ class TogetherPlayer(
                     heroParams.width = heroWidth; heroParams.bottomMargin = heroBottom; heroParams.marginStart = heroStart
                     hero.layoutParams = heroParams
                 }
-                // البطاقة: أفقيًا 256×144 يسارًا بحذاء أسفل المعلومات، وطوليًا بعرض الشاشة (حتى 300) وسط الصفحة فوق المعلومات
-                val cardW = if (portrait) maxOf(context.dp(120), minOf(root.width - context.dp(40), context.dp(300))) else context.dp(256)
+                // البطاقة: أفقيًا 300×169 يسارًا بحذاء أسفل المعلومات، وطوليًا بعرض الشاشة (حتى 340) وسط الصفحة فوق المعلومات
+                val cardW = if (portrait) maxOf(context.dp(120), minOf(root.width - context.dp(40), context.dp(340))) else context.dp(300)
                 val cardH = cardW * 9 / 16
                 val cardBottom = if (portrait) heroBottom + hero.height + context.dp(16) else heroBottom
                 val cardGravity = if (portrait) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.BOTTOM or Gravity.END
@@ -1081,7 +1084,7 @@ class TogetherPlayer(
     }
 
     /**
-     * بطاقة «البدء»: صورة الحلقة تملأها بحواف 10، وبالنص دائرة 58 بمثلث تشغيل، وبلا كتابة. الدائرة بلون القسم حين
+     * بطاقة «البدء»: صورة الحلقة تملأها بحواف 10، وبالنص دائرة 60 بمثلث تشغيل، وبلا كتابة. الدائرة بلون القسم حين
      * يجهز فيديوك، وقبل ذلك خافتة والصورة تخفت معها.
      */
     private fun paintStartCard(card: FrameLayout, canStart: Boolean) {
@@ -1105,15 +1108,28 @@ class TogetherPlayer(
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (canStart) accent else 0x8C000000.toInt()) }
             elevation = if (canStart) context.dp(4).toFloat() else 0f
         }
-        val glyph = context.dp(26)
+        val glyph = context.dp(28)
         dot.addView(ImageView(context).apply {
             setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) Color.WHITE else 0xBFFFFFFF.toInt()))
             // التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر
             // الفرق (~2.3% من حجمه) لا أكثر: الإزاحة السابقة (1dp) كانت تضع مركز ثقله أبعد من مركز الدائرة
             translationX = glyph * 0.023f
         }, FrameLayout.LayoutParams(glyph, glyph, Gravity.CENTER))
-        val dotSize = context.dp(58)
+        val dotSize = context.dp(60)
         card.addView(dot, FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER))
+        // التقييم بمصدره والمدة: سطر صغير أسفل البطاقة نفسها (لا تحت عنوان الحلقة). لا يظهر ما لا نعرفه ولا يُخترع مصدر.
+        val source = launch.ratingSource?.takeIf { it.isNotBlank() }
+        val ratingText = launch.rating?.takeIf { it.isNotBlank() }?.let { r -> "\u2066★ " + r + (if (source != null) " " + source else "") + "\u2069" }
+        val facts = listOfNotNull(ratingText, launch.duration?.takeIf { it.isNotBlank() })
+        if (facts.isNotEmpty()) {
+            card.addView(View(context).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0x99000000.toInt(), 0x00000000)) },
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56), Gravity.BOTTOM))
+            card.addView(context.label(facts.joinToString("  ·  "), 12.5f, 0xEBFFFFFF.toInt(), bold = true).apply {
+                maxLines = 1; setShadowLayer(context.dp(4).toFloat(), 0f, 0f, 0xB3000000.toInt())
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+                marginStart = context.dp(14); bottomMargin = context.dp(10)
+            })
+        }
         // أول بدء: عدّ 3-2-1 مشترك عند الجميع
         card.setOnClickListener { pressStart() }
     }

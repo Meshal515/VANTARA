@@ -272,5 +272,8 @@ export async function resolveArt(media, { fetchImpl = globalThis.fetch, now = Da
   }
   art.banner ??= media?.banner ?? art.episodeImage ?? media?.cover ?? null;
   art.episodeImage ??= media?.banner ?? null;
+  // تقييم الحلقة ومصدره ومدتها لبطاقة «البدء»: تُضاف حين تعرفها صفحة العمل فقط (لا تخمين)
+  if (Number(media?.rating) > 0) { art.rating = Number(media.rating); if (media.ratingSource) art.ratingSource = String(media.ratingSource); }
+  if (media?.duration) art.duration = String(media.duration);
   return art;
 }

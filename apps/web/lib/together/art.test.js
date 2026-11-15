@@ -49,6 +49,15 @@ describe('room art', () => {
     expect(old.banner).toBe('https://img/ep-still.jpg');
   });
 
+  it('rating (with its source) and duration reach the room art only when the work page knows them', async () => {
+    const offline = async () => { throw new TypeError('offline'); };
+    const a = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', rating: 8.7, ratingSource: 'IMDb', duration: '41 دقيقة' }, { fetchImpl: offline });
+    expect(a).toMatchObject({ rating: 8.7, ratingSource: 'IMDb', duration: '41 دقيقة' });
+    const none = await resolveArt({ kind: 'cinema', seriesRef: 'cinema:tt11126994:1', title: 'Arcane', rating: 0 }, { fetchImpl: offline });
+    expect(none).not.toHaveProperty('rating');
+    expect(none).not.toHaveProperty('duration');
+  });
+
   it('keeps what the invite sent and never guesses without data', async () => {
     const offline = async () => { throw new TypeError('offline'); };
     const a = await resolveArt({ kind: 'anime', seriesRef: 'anime:1', episode: 2, title: 'X', cover: 'c.jpg' }, { fetchImpl: offline });
