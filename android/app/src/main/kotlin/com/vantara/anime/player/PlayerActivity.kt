@@ -152,6 +152,8 @@ class PlayerActivity : Activity() {
 
     private lateinit var launch: Launch
     private var together: com.vantara.anime.player.together.TogetherPlayer? = null
+    /** هذا المشغّل سلّم الغرفة لمشغّل موسم آخر يُفتح فوقه، ويُغلق حين يظهر. */
+    @Volatile private var handingOff = false
     private lateinit var topBar: LinearLayout
     private lateinit var player: ExoPlayer
     private lateinit var video: PlayerView
@@ -538,6 +540,9 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // مشغّل الموسم الجديد ظهر: القديم (تحته بشاشة الغرفة) يُغلق الآن، فلا تظهر صفحة بينهما
+        handoffFrom?.get()?.takeIf { it !== this && it.handingOff && !it.isFinishing }?.finish()
+        handoffFrom = null
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -643,7 +648,8 @@ class PlayerActivity : Activity() {
             override fun message(text: String) = this@PlayerActivity.message(text)
             override fun episode() = episodeInt()
             override fun sourceName() = current?.let { codeOf(it) ?: it.server }
-            override fun switchToEpisode(n: Int) = switchEpisode(n)
+            // حلقة أخرى في الغرفة: تُجهّز سيرفراتها ولا يبدأ شيء حتى يختار كل واحد سيرفره
+            override fun switchToEpisode(n: Int) = switchEpisode(n, roomPick = true)
             override fun hasNextEpisode() = hasNext()
             override fun openPanel(title: String, build: (LinearLayout) -> Unit) = open(SheetKind.TOGETHER, title, build = build)
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
@@ -654,9 +660,18 @@ class PlayerActivity : Activity() {
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
             // موسم آخر اختاره المضيف: الواجهة تفتح غرفة الموسم الجديد (الكل يختار سيرفره من جديد)
+            // كان المشغّل يُغلق فورًا فتظهر صفحة الأنمي ثوانيَ ثم يعود للغرفة. الآن يبقى ظاهرًا بشاشة الغرفة، والواجهة
+            // تفتح مشغّل الموسم الجديد فوقه، فيُغلق هذا حين يظهر الجديد (أو بعد مهلة إن تعذّر)
             override fun switchWork(key: String, label: String?) {
+                waiting?.cancel()
+                player.stop()
+                current = null
+                loading(false)
+                together?.handOff(label)
+                handingOff = true
+                handoffFrom = java.lang.ref.WeakReference(this@PlayerActivity)
+                main.postDelayed({ if (!isFinishing) finish() }, HANDOFF_TIMEOUT_MS)
                 PlaybackEvents.emit("togetherWork", JSONObject().put("code", cfg.code).put("mode", cfg.mode).put("key", key).put("label", label ?: ""))
-                finish()
             }
             // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
             override fun loadProgress(): Float {
@@ -1069,7 +1084,7 @@ class PlayerActivity : Activity() {
         warmedEpisode = -1
     }
 
-    private fun switchEpisode(n: Int) {
+    private fun switchEpisode(n: Int, roomPick: Boolean = false) {
         val addonProviders = engine.addonProviders(sessionId)
         if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
         attemptAbandon()
@@ -1105,8 +1120,13 @@ class PlayerActivity : Activity() {
         if (warmed != null) engine.completePreparation(id)
         hideError()
         loading(true)
-        if (warmed == null) message("نجهّز الحلقة $n…", long = true)
+        if (warmed == null && !roomPick) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
+        if (roomPick && together != null) {
+            loading(false)
+            together?.awaitPick()
+            return
+        }
         val p = prep ?: return
         val s = session ?: return
         val from = resume[n] ?: 0L
@@ -2723,6 +2743,9 @@ class PlayerActivity : Activity() {
         const val STREAK_MS = 800L
         const val BEST_WAIT_MS = 45_000L
         const val WAIT_NEXT_MS = 60_000L
+        /** مهلة تسليم الغرفة لمشغّل الموسم الجديد: إن لم يظهر يُغلق القديم فتظهر الواجهة بسببها. */
+        const val HANDOFF_TIMEOUT_MS = 45_000L
+        @Volatile private var handoffFrom: java.lang.ref.WeakReference<PlayerActivity>? = null
 
         private val json = Json { encodeDefaults = true }
 
