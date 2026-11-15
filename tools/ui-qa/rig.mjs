@@ -129,6 +129,14 @@ export async function launch({ unified = false, section = 'manga', viewport = { 
     return route.abort();
   });
   await page.goto(origin + '/__ui');
+  await boot(page, { unified, section, rows, appearance });
+  await page.waitForSelector('#home.active');
+  const close = async () => { await context.close(); await browser.close(); server.close(); };
+  return { page, browser, context, origin, log, close };
+}
+
+/** يركّب القشرة الحقيقية بمزامنة بديلة (يُعاد بعد reload لمحاكاة إعادة فتح التطبيق). */
+export async function boot(page, { unified = false, section = 'manga', rows = {}, appearance = null } = {}) {
   await page.evaluate(async ({ unified, section, rows, appearance }) => {
     localStorage.setItem('vantara.experience.v1', JSON.stringify({ v: 2, unifyContent: unified }));
     localStorage.setItem('vantara.section', section);
@@ -157,9 +165,6 @@ export async function launch({ unified = false, section = 'manga', viewport = { 
       : kind === 'anime' ? window.__shell.openAnimeRef(`anime:${20 + n}`, { title: `Fixture Anime ${20 + n}` })
       : window.__shell.openCinemaRef(`cinema:tt09037${String(n).padStart(2, '0')}`, { title: 'Fixture', type: kind === 'movie' ? 'movie' : 'series' });
   }, { unified, section, rows, appearance });
-  await page.waitForSelector('#home.active');
-  const close = async () => { await context.close(); await browser.close(); server.close(); };
-  return { page, browser, context, origin, log, close };
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

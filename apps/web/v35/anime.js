@@ -1441,8 +1441,11 @@ export function createAnime(deps) {
       previous: () => { closeMenu(); movie ? toggleSeen(work(), 1) : openPreviousSheet(work(), total); paintMenu(m); },
       top: () => { closeMenu(); deps.openWorkMenu?.({ ref, title: work().title, cover: m.posterSmall ?? m.poster ?? null }); },
       options: () => { closeMenu(); deps.openWorkOptions?.(target()); },
+      download: () => { closeMenu(); void openDownload(work()); },
     };
+    const dl = deps.downloads;
     const spec = workMenuEntries(kind, {
+      download: dl?.can(movie ? 'movie' : 'episode') ? { onDevice: dl.count(ref) } : null,
       library: inList(m.id),
       later: Boolean(account?.inCollection('read_later', m.id)),
       top: Boolean(media?.top),
@@ -1453,6 +1456,49 @@ export function createAnime(deps) {
     const rows = spec.map((x) => entry(x.icon, x.label, run[x.id], { pressed: x.pressed }));
     rows.forEach((r, i) => r.style.setProperty('--i', String(i)));
     v.menu.replaceChildren(...rows);
+  }
+
+  /**
+   * «تحميل» من قائمة ⋮: ورقة التنزيل المشتركة (downloads.js) بحلقات هذا العمل.
+   * الطلب نفسه الذي يجهّز به التشغيل (نسخ العمل وهويته)، والاختيار اليدوي يثبّت الجلسة
+   * على المصدر المختار وحده: لا Torrentio ولا غيره داخل مصدر مباشر لم يختره المستخدم.
+   */
+  async function openDownload(m) {
+    const dl = deps.downloads;
+    if (!dl) return;
+    const movie = isMovie(m);
+    const total = m.aired || m.episodes || 0;
+    if (!movie && !total) return toast('الحلقات ما وصلت بعد، لحظة');
+    const units = movie ? [{ key: 'movie', number: 1 }] : Array.from({ length: total }, (_, i) => ({ key: `e${i + 1}`, number: i + 1 }));
+    let current = 1;
+    if (!movie) while (current < total && epRecord(m, current).done) current++;
+    const work = {
+      ref: `anime:${m.id}`, title: m.title, cover: m.poster ?? m.posterSmall ?? null,
+      banner: (state.view?.id === m.id ? state.view.heroSrc : null) ?? artOf(m)?.fanart ?? m.banner ?? null,
+      logo: artOf(m)?.logo ?? null, color: m.color ?? null, format: m.format ?? null,
+    };
+    const copiesOf = async () => (await locateWork(m))?.copies ?? [];
+    dl.open({
+      section: 'anime',
+      kind: movie ? 'movie' : 'episode',
+      work,
+      units,
+      current: movie ? 'movie' : `e${current}`,
+      sources: async () => (await copiesOf()).map((c) => ({ id: c.sourceId, name: sourceLabel(c.sourceId, { names: SOURCE_NAMES, title: c.title }) })),
+      build: async (list, choice) => {
+        const copies = await copiesOf();
+        const scoped = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : copies;
+        if (!scoped.length) throw new Error(choice.mode === 'manual' ? 'المصدر المختار لم يعد متاحًا لهذا العمل' : 'لم نجد هذا العمل في مصادرك بعد');
+        return list.map((u) => ({
+          section: 'anime',
+          kind: movie ? 'movie' : 'episode',
+          work,
+          unit: { key: u.key, number: u.number },
+          source: { mode: choice.mode, sourceId: choice.mode === 'manual' ? choice.sourceId : null, sourceName: choice.sourceName ?? null, quality: choice.quality },
+          request: { copies: withSeasonHint(m, scoped), identity: animeAddonIdentity(m, u.number), pinned: choice.mode === 'manual' || Boolean(m._sourceCopy), episode: movie ? -1 : u.number },
+        }));
+      },
+    });
   }
 
   function toggleMenu(force) {

@@ -57,9 +57,11 @@ export async function resolveRoutes(engine, request, { signal, wanted = null, se
   const until = Date.now() + settleMs;
   try {
     while (!signal?.aborted) {
-      const target = wanted ? routes.find((r) => wanted(r)) : null;
-      if (target && (isDownloadReady(target) || target.state === 'FAILED' || target.state === 'UNAVAILABLE')) break;
-      const checking = routes.some((r) => r.state === 'RESOLVING' || r.state === 'CHECKING');
+      const pending = (r) => r.state === 'RESOLVING' || r.state === 'CHECKING';
+      // يدوي/مقفل: يكفي أن تستقر سيرفرات ذلك المصدر وحده، لا ننتظر بقية المصادر
+      const mine = wanted ? routes.filter((r) => wanted(r)) : [];
+      if (wanted && mine.length && !mine.some(pending)) break;
+      const checking = routes.some(pending);
       if (done && !checking) break;
       if (Date.now() >= until) break;
       await sleep(700, signal);
@@ -86,10 +88,10 @@ export function createVideoDriver(deps) {
   async function choose(engine, native, item, session, routes, signal) {
     const locked = item.source?.locked;
     const manual = item.source?.mode === 'manual';
-    if (manual || locked) {
+    if (locked) {
       const route = routes.find((r) => sameRoute(r, item.source));
       if (!route || !isDownloadReady(route)) {
-        throw new DownloadError('NO_ROUTE', manual ? 'السيرفر الذي اخترته لم يجهز لهذه الحلقة الآن' : 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله', { retryable: !manual });
+        throw new DownloadError('NO_ROUTE', 'سيرفر هذا التنزيل لم يعد متاحًا لإكماله الآن', { retryable: true });
       }
       const candidate = await engine.pick(session, route.id);
       if (!candidate) throw new DownloadError('NO_ROUTE', 'السيرفر لم يرجع رابطًا');
@@ -98,8 +100,12 @@ export function createVideoDriver(deps) {
       if (why) throw new DownloadError(why, info?.reason ?? null);
       return { route, candidate, info };
     }
-    const ranked = rankRoutes(routes, { platform: deps.platform(), prefer: { quality: item.source?.quality ?? null } });
-    if (!ranked.length) throw new DownloadError('NO_ROUTE', 'لا سيرفر جاهز يدعم التنزيل لهذه الحلقة الآن', { retryable: true });
+    // يدوي: سيرفرات المصدر الذي اختاره المستخدم وحدها، ولا انتقال لغيره مهما كان أفضل
+    const pool = manual ? routes.filter((r) => r.sourceId === item.source.sourceId) : routes;
+    const ranked = rankRoutes(pool, { platform: deps.platform(), prefer: { quality: item.source?.quality ?? null } });
+    if (!ranked.length) {
+      throw new DownloadError('NO_ROUTE', manual ? 'المصدر الذي اخترته لم يجهز سيرفرًا قابلًا للتنزيل لهذه الحلقة الآن' : 'لا سيرفر جاهز يدعم التنزيل لهذه الحلقة الآن', { retryable: true });
+    }
     let last = null;
     for (const route of ranked.slice(0, SMART_TRIES)) {
       if (signal.aborted) return null;
@@ -159,7 +165,8 @@ export function createVideoDriver(deps) {
       let current = item;
       for (let renewal = 0; renewal <= MAX_RENEWALS; renewal++) {
         ctl.update({ state: 'resolving' });
-        const wanted = current.source?.mode === 'manual' || current.source?.locked ? (r) => sameRoute(r, current.source) : null;
+        const wanted = current.source?.locked ? (r) => sameRoute(r, current.source)
+          : current.source?.mode === 'manual' ? (r) => r.sourceId === current.source.sourceId : null;
         const { session, routes } = await resolveRoutes(engine, current.request, { signal: ctl.signal, wanted });
         try {
           if (ctl.signal.aborted) return null;

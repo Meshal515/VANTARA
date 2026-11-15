@@ -1679,8 +1679,11 @@ export function createCinema(deps) {
       },
       top: () => { toggleCinemaMenu(false); deps.openWorkMenu?.({ ref: `cinema:${m.id}`, title: displayTitle(m), cover: m.poster ?? null }); },
       options: () => { toggleCinemaMenu(false); deps.openWorkOptions?.(target()); },
+      download: () => { toggleCinemaMenu(false); void openDownload(work()); },
     };
+    const dl = deps.downloads;
     const list = workMenuEntries(kind, {
+      download: dl?.can(movie ? 'movie' : 'episode') ? { onDevice: dl.count(ref) } : null,
       library: inList('later', m.id),
       later: me() ? inLater(m.id) : false,
       top: Boolean(media?.top),
@@ -1688,10 +1691,74 @@ export function createCinema(deps) {
       canMark: seasons.length > 0,
       signedIn: Boolean(me()),
     })
-      .filter((x) => (x.id !== 'previous' || movie || seasons.length) && (x.id !== 'top' || deps.openWorkMenu) && (x.id !== 'options' || deps.openWorkOptions))
+      .filter((x) => (x.id !== 'previous' || movie || seasons.length) && (x.id !== 'top' || deps.openWorkMenu) && (x.id !== 'options' || deps.openWorkOptions) && (x.id !== 'download' || movie || seasons.length))
       .map((x) => entry(x.icon, x.label, run[x.id], x.pressed));
     list.forEach((r, i) => r.style.setProperty('--i', String(i)));
     v.menu.replaceChildren(...list);
+  }
+  /**
+   * «تحميل» للفيلم أو المسلسل: ورقة التنزيل المشتركة بمواسم العمل المعروضة فعلًا.
+   * نسخ كل موسم من البحث نفسه الذي يجهّز به التشغيل، والهوية نفسها (IMDb/الموسم/الحلقة).
+   * اليدوي يثبّت الجلسة على المصدر المختار وحده.
+   */
+  async function openDownload(m) {
+    const dl = deps.downloads;
+    if (!dl) return;
+    const movie = m.type === 'movie';
+    const now = Date.now();
+    const seasons = movie ? [] : (m.seasons ?? []).filter((s) => s.n !== 0 && s.episodes?.length);
+    const units = movie
+      ? [{ key: 'movie', number: 1 }]
+      : seasons.flatMap((s) => s.episodes.filter((e) => !(e.released && e.released > now)).map((e) => ({ key: `s${s.n}e${e.n}`, number: e.n, season: s.n, title: e.name ?? e.title ?? null })));
+    if (!units.length) return toast('الحلقات ما وصلت بعد، لحظة');
+    const point = movie ? null : resumePoint(m);
+    const work = {
+      ref: refOf(m.id), title: displayTitle(m), cover: m.poster ?? null, banner: m.background ?? null, logo: m.logo ?? null,
+      color: m.color ?? null, year: m.year ?? null, format: movie ? 'MOVIE' : 'SERIES',
+    };
+    const identityFor = (season, n) => ({ canonicalId: m.canonicalId ?? `cinema:${m.id}`, kind: m.type, externalIds: m.externalIds ?? { imdb: /^tt\d+$/.test(m.id) ? m.id : null }, season, episode: n });
+    const copiesFor = async (season) => {
+      const h = locateHandle(m, season);
+      const found = h.pinned ? await h.first : await engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identityFor(season, 1)));
+      return { copies: found.copies ?? [], pinned: Boolean(h.pinned) };
+    };
+    const firstSeason = movie ? undefined : point?.season ?? seasons[0]?.n;
+    dl.open({
+      section: 'cinema',
+      kind: movie ? 'movie' : 'episode',
+      work,
+      units,
+      seasons: movie ? undefined : seasons.map((s) => ({ n: s.n, label: `الموسم ${s.n}` })),
+      season: firstSeason,
+      current: movie ? 'movie' : `s${point?.season ?? firstSeason}e${point?.episode ?? 1}`,
+      sources: async () => (await copiesFor(firstSeason)).copies.map((c) => ({ id: c.sourceId, name: c.sourceId.startsWith('addon|') ? addonName(c.sourceId) : SOURCE_NAMES[c.sourceId] ?? c.sourceName ?? c.sourceId })),
+      build: async (list, choice) => {
+        const bySeason = new Map();
+        for (const u of list) {
+          const k = movie ? 0 : u.season;
+          if (!bySeason.has(k)) bySeason.set(k, []);
+          bySeason.get(k).push(u);
+        }
+        const specs = [];
+        for (const [season, group] of bySeason) {
+          const { copies, pinned } = await copiesFor(movie ? undefined : season);
+          const scoped = choice.mode === 'manual' ? copies.filter((c) => c.sourceId === choice.sourceId) : copies;
+          if (!scoped.length) throw new Error(choice.mode === 'manual' ? `المصدر المختار لا يحمل ${movie ? 'الفيلم' : `الموسم ${season}`}` : 'لم نجد هذا العمل في مصادرك بعد');
+          const prepared = movie ? scoped : scoped.map((c) => ({ ...c, requestedSeason: season }));
+          for (const u of group) {
+            specs.push({
+              section: 'cinema',
+              kind: movie ? 'movie' : 'episode',
+              work,
+              unit: { key: u.key, number: movie ? null : u.number, season: movie ? null : season, title: u.title ?? null },
+              source: { mode: choice.mode, sourceId: choice.mode === 'manual' ? choice.sourceId : null, sourceName: choice.sourceName ?? null, quality: choice.quality },
+              request: { copies: prepared, identity: identityFor(movie ? undefined : season, movie ? undefined : u.number), pinned: choice.mode === 'manual' || pinned, episode: movie ? -1 : u.number },
+            });
+          }
+        }
+        return specs;
+      },
+    });
   }
   function toggleCinemaMenu(force) {
     const v = toolsView;

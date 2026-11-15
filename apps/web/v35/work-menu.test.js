@@ -84,3 +84,13 @@ describe('صفحات العمل تستعمل القائمة الموحدة، و�
     expect(src('./anime.js')).not.toContain("'قائمتي';\n    const inMine");
   });
 });
+
+describe('download entry in the ⋮ dial', () => {
+  it('comes first, only where the device can download this kind', () => {
+    expect(workMenuEntries('anime', { signedIn: true }).some((x) => x.id === 'download')).toBe(false);
+    const list = workMenuEntries('manga', { signedIn: true, download: { onDevice: 0 } });
+    expect(list[0]).toMatchObject({ id: 'download', icon: 'downloads', label: 'تحميل', pressed: false });
+    const saved = workMenuEntries('movie', { download: { onDevice: 1 } });
+    expect(saved[0]).toMatchObject({ id: 'download', icon: 'downloaded', pressed: true });
+  });
+});

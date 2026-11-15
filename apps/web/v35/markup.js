@@ -20,13 +20,18 @@ const bell = (extra = '') =>
   `<button class="icon-btn has-dot" type="button" data-act="navTo" data-arg="notifications" aria-label="الإشعارات" title="الإشعارات"${extra}>` +
   `<span class="notify-dot"></span>${glyph('bell')}</button>`;
 
-/** ترويسة صفحة رئيسية: القائمة في البداية، العنوان، الجرس في النهاية. */
-const mainTop = (title) =>
+/** ترويسة صفحة رئيسية: القائمة في البداية، العنوان، الجرس في النهاية (وما قبله إن مُرّر). */
+const mainTop = (title, extra = '') =>
   `<div class="page-top">` +
   `<div class="page-top-right">${iconButton('menu', 'القائمة', { act: 'openDrawer' })}</div>` +
   `<h1>${title}</h1>` +
-  `<div class="page-top-left">${bell()}</div>` +
+  `<div class="page-top-left">${extra}${bell()}</div>` +
   `</div>`;
+
+/** مدخل «التحميلات» في ترويسة مكتبتي: أيقونة الرف، وحلقة هادئة حولها ما دام شيء يُنزَّل. */
+const downloadsEntry = () =>
+  `<button class="icon-btn dl-entry" type="button" data-act="openDownloads" aria-label="التحميلات" title="التحميلات">` +
+  `<span class="dl-entry-ring" aria-hidden="true"></span>${glyph('downloads')}</button>`;
 
 /** ترويسة صفحة فرعية: رجوع في البداية. */
 const subTop = (title, { id, back = 'goBack', end = '' } = {}) =>
@@ -115,7 +120,7 @@ export const SHELL_HTML = `<div class="app">
   </section>
 
   <section class="page" id="library">
-    ${mainTop('مكتبتي')}
+    ${mainTop('مكتبتي', downloadsEntry())}
     <div class="page-body anime-only" id="animeLibrary"></div>
     <div class="page-body cinema-only" id="cinemaLibrary"></div>
     <div class="page-body" id="unifiedLibrary"></div>
@@ -129,6 +134,15 @@ export const SHELL_HTML = `<div class="app">
       </div>
       <div class="grid" id="libraryGrid"></div>
     </div>
+  </section>
+
+  <section class="page dl-page" id="downloads">
+    ${subTop('التحميلات')}
+    <div class="page-body" id="downloadsBody"></div>
+  </section>
+
+  <section class="page dl-work-page" id="downloadWork">
+    <div id="downloadWorkBody"></div>
   </section>
 
   <section class="page" id="discover">
