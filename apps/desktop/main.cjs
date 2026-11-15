@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, Menu, shell, screen, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -66,6 +66,7 @@ const reportOption = process.argv.find(x => x.startsWith('--smoke-report='));
 const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-report='));
 const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
 const updateReportOption=process.argv.find(x=>x.startsWith('--update-smoke-report='));
+const sourceReportOption=process.argv.find(x=>x.startsWith('--source-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -139,7 +140,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       return result;
     } catch { return new Response('الملف غير موجود', { status: 404 }); }
   });
-  const { createDesktopServices } = await import('./src/services.mjs');
+  const { createDesktopServices, challengePage } = await import('./src/services.mjs');
+  // صفحات تحقق المواقع (Cloudflare وحمايات الاستضافة): Chromium مخفي يحلها كـWebView الـAPK (source-browser.cjs)
+  const { createSourceBrowser, chromeUserAgent } = require('./source-browser.cjs');
+  // بلا جلسات Electron (بيئة اختبار): لا متصفح مخفي، والطلبات كما كانت
+  const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
   if(process.platform==='win32')videoHost=createVideoHost({
     getWindow:()=>window,
     executable:process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),
@@ -161,6 +166,8 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     videoHost,
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
+    browserFetch: sourceBrowser?.fetch ?? null,
+    sourceUserAgent: sourceBrowser?.userAgent,
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['preview-frame', 'previewFrame']]) register(name, args => services[method](args));
   register('open-external', ({ url }) => openSettings(url));
@@ -255,6 +262,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     const fixtureOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-fixture='));
     if(!fixtureOption)throw new Error('إثبات التورنت يحتاج fixture مؤلفًا');
     await require('./torrent-smoke.cjs').runEmbeddedTorrentSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-torrent-smoke-fixture='.length),reportPath:torrentReportOption.slice('--native-torrent-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
+    app.quit();return;
+  }
+  if (sourceReportOption) {
+    // إثبات مصادر المانجا في ويندوز الحقيقي: Node ثم المتصفح المخفي عند صفحة تحقق (source-smoke.cjs)
+    await require('./source-smoke.cjs').runSourceSmoke({ services, reportPath: sourceReportOption.slice('--source-smoke-report='.length) }).catch(() => {});
     app.quit();return;
   }
   await window.loadURL('vantara://app/index.html');

@@ -339,7 +339,8 @@ test('نقل الإضافات يحد حجم الاستجابة ويرفض الت
   await assert.rejects(services.requestResource({url:'https://example.com/large',limit:20}),/حجم/);
   await assert.rejects(services.requestResource({url:'https://example.com/redirect'}),/توجيه|داخلي/);
   assert.match(requests[0].accept,/^application\/json, application\/\*\+json/);assert.equal(requests[0].authorization,undefined);
-  assert.match(requests[0]['user-agent'],/^Mozilla\/5\.0 VANTARA\/Windows/);
+  // هوية متصفح حقيقي (كالـAPK والويب)، لا «VANTARA/Windows» التي تُقرأ آليًا
+  assert.match(requests[0]['user-agent'],/^Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\//);
   // MangaDex (الواجهة وخوادم الصور) ترفض هوية المتصفح بتحويل لفحص الآليين: هوية التطبيق الصريحة هنا وحدها
   for(const url of ['https://api.mangadex.org/manga','https://uploads.mangadex.org/covers/a/b.jpg','https://x1.mangadex.network/data/h/1.png'])await services.requestResource({url,json:true,limit:100});
   for(const r of requests.slice(-3))assert.match(r['user-agent'],/^VANTARA\/1\.0 /);
@@ -758,4 +759,35 @@ test('real libtorrent engine: services plays through its own proxy with exact by
   assert.ok(part.equals(data.subarray(at,at+65536)),'seek through services proxy returns exact bytes');
   const whole=Buffer.from(await (await fetch(url)).arrayBuffer());
   assert.ok(whole.equals(data),'full file through services proxy is exact');
+});
+
+test('صفحة تحقق الموقع تُحل بالمتصفح المخفي كالـAPK، والمضيف يبقى عليه، وبلا متصفح تبقى الصفحة لسببها',async t=>{
+  const {default:https}=await import('node:https'),{default:http}=await import('node:http'),{default:dns}=await import('node:dns/promises');
+  const {challengePage}=await import('./services.mjs');
+  const hits=[];
+  const server=http.createServer((req,res)=>{hits.push(req.url);
+    if(req.url.startsWith('/img'))return res.writeHead(403,{'content-type':'text/html'}),res.end('<html><head><title>Just a moment...</title></head><body>cf-chl-x</body></html>');
+    if(req.url.startsWith('/sg'))return res.writeHead(200,{'content-type':'text/html'}),res.end('<!DOCTYPE html><html><head><title>One moment, please...</title></head><body><div id="text">Please wait</div></body></html>');
+    res.writeHead(200,{'content-type':'text/html'});res.end('<html><title>manga</title>ok</html>');});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+  t.mock.method(dns,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
+  t.mock.method(https,'request',(url,options,callback)=>http.request(`http://127.0.0.1:${server.address().port}${url.pathname}`,{method:options.method,headers:options.headers,signal:options.signal},callback));
+  const asked=[];
+  const browserFetch=async request=>{asked.push(request);return request.binary?{base64:'aW1n',contentType:'image/png',status:200,url:request.url,headers:{},viaBrowser:true}:{text:'<title>المحتوى الحقيقي</title>',status:200,url:request.url,headers:{},location:null,viaBrowser:true};};
+  const {services}=await fixture(t,'normal',{browserFetch});
+  const page=await services.requestResource({url:'https://sites.example/sg/list'});
+  assert.equal(page.viaBrowser,true);assert.match(page.text,/المحتوى الحقيقي/);
+  assert.equal(asked[0].url,'https://sites.example/sg/list');assert.match(asked[0].headers['user-agent'],/Chrome\//);
+  // المضيف نفسه بعدها من المتصفح مباشرة، بلا طلب Node يُرد مجددًا
+  const before=hits.length;await services.requestResource({url:'https://sites.example/other'});
+  assert.equal(hits.length,before);assert.equal(asked.length,2);
+  // صورة الفصل خلف تحقق: من المتصفح أيضًا
+  const image=await services.requestResource({url:'https://cdn.example/img/1.jpg',binary:true});
+  assert.equal(image.contentType,'image/png');assert.equal(asked.at(-1).binary,true);
+  // صفحة عادية لا تمر بالمتصفح
+  const n=asked.length;await services.requestResource({url:'https://plain.example/ok'});assert.equal(asked.length,n);
+  // بلا متصفح (اختبارات قديمة/غير ويندوز): الصفحة كما هي ليقول القارئ «يطلب تحققًا»
+  assert.equal(challengePage({status:200,headers:{},text:'<title>One moment, please...</title>'}),true);
+  assert.equal(challengePage({status:403,headers:{'cf-mitigated':'challenge'},text:''}),true);
+  assert.equal(challengePage({status:200,headers:{},text:'<html><title>مانجا ليك</title><p>One moment please read</p></html>'}),false);
 });
