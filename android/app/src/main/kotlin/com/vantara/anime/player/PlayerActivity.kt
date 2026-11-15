@@ -609,8 +609,14 @@ class PlayerActivity : Activity() {
         }
         val startAt = clipWatch?.first ?: launch.positionMs
         val picked = launch.candidate?.let { s.take(it) }
+        // الغرفة أولًا (قرار المالك): دخل الغرفة بلا سيرفر، فلا يُختار له شيء؛ الغرفة تعرض «اختر سيرفر» والورقة من زرها
+        val roomPick = picked == null && launch.together?.let { raw ->
+            runCatching { json.decodeFromString(com.vantara.anime.player.together.TogetherLaunch.serializer(), raw).pick }.getOrNull()
+        } == true
         if (picked != null) {
             start(picked, startAt)
+        } else if (roomPick) {
+            loading(false)
         } else if (prep != null) {
             loading(true)
             message("نجهّز أفضل سيرفر…", long = true)
@@ -644,6 +650,22 @@ class PlayerActivity : Activity() {
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
             override fun leaveRoom() = finish()
             override fun openServers() = showServers()
+            override fun openEpisodes() = showEpisodes()
+            override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
+            // مراحل حقيقية: فتح المصدر، بيانات التورنت، أول قطعة، تخزين أمامي، ثم أول إطار (=1)
+            override fun loadProgress(): Float {
+                if (current == null) return 0f
+                if (firstFrameShown) return 1f
+                val ahead = player.bufferedPosition - player.currentPosition
+                val t = torrentStats()
+                return when {
+                    ahead > 1500 || (t != null && t.warmedAt > 0) -> 0.7f
+                    t != null && t.firstPieceAt > 0 -> 0.4f
+                    t == null && player.playbackState == Player.STATE_BUFFERING -> 0.4f
+                    t != null && t.metadataAt > 0 -> 0.16f
+                    else -> 0.06f
+                }
+            }
             override fun serverLabel() = current?.let { c ->
                 val q = (player.videoFormat?.height?.takeIf { it > 0 } ?: c.quality?.takeIf { it > 0 })?.let { "${it}p" }
                 listOfNotNull(codeOf(c) ?: c.server, q).joinToString(" · ")
@@ -738,7 +760,8 @@ class PlayerActivity : Activity() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             sampleUsage()
-            if (isPlaying) scheduleHide() else main.removeCallbacks(hideControls)
+            // متوقف: تُخفى الأدوات أيضًا لكن بعد مهلة أطول (قرار المالك: ترى اللقطة صافية؛ لمسة ترجعها)
+            scheduleHide()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -1274,7 +1297,8 @@ class PlayerActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(netChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.LEFT).apply { topMargin = dp(18); leftMargin = dp(22) })
-        if (com.vantara.plugins.DiagnosticVisibility.visible(this) && settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
+        // قرار المالك (14 نوفمبر): قياس الشبكة جزء طبيعي من المشغل، لا يتبع «إظهار التشخيص»؛ مفتاحه في لوحة الشبكة
+        if (settings.getBoolean("netChip", false)) { netChip?.visibility = View.VISIBLE; main.post(netTick) }
 
         sheet = VSheet(root)
         sheet.onClose = {
@@ -1346,17 +1370,18 @@ class PlayerActivity : Activity() {
         row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 28, boxDp = 52, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
-        playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 26, boxDp = 60, desc = "إيقاف مؤقت") { togglePlay() }.apply {
+        // قرار المالك (14 نوفمبر): دائرة التشغيل/الإيقاف وزرّا ±10 في منتصف الشاشة لا في الصف السفلي، وأكبر قليلًا
+        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
+        playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 30, boxDp = 72, desc = "إيقاف مؤقت") { togglePlay() }.apply {
             background = android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF),
                 GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(dp(2), Color.WHITE); setColor(0x33000000) },
                 null,
             )
         }
-        center.addView(playButton, LinearLayout.LayoutParams(dp(60), dp(60)).apply { leftMargin = dp(26); rightMargin = dp(26) })
-        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 28, boxDp = 52, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
-        row.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
+        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
+        controls.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         qualityLabel = label("HD", 12.5f, Color.WHITE, bold = true).apply {
@@ -1434,7 +1459,10 @@ class PlayerActivity : Activity() {
 
     private fun scheduleHide() {
         main.removeCallbacks(hideControls)
-        if (player.isPlaying && openSheet == null) main.postDelayed(hideControls, HIDE_AFTER_MS)
+        if (openSheet != null) return
+        if (player.isPlaying) main.postDelayed(hideControls, HIDE_AFTER_MS)
+        // إيقاف مقصود (لا تحميل ولا نهاية): الأدوات تختفي بعد 5 ث بلا لمس
+        else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) main.postDelayed(hideControls, PAUSED_HIDE_AFTER_MS)
     }
 
     private fun controlsShown() = controls.visibility == View.VISIBLE && controls.alpha > 0.5f
@@ -1585,30 +1613,114 @@ class PlayerActivity : Activity() {
     }
 
     /** نفس نموذج ورقة الواجهة: رموز لا أسماء، مجمّعة بالجودة، بحالتها الآن. */
+    // ورقة السيرفرات (طلب المالك 15 نوفمبر): زرّان فقط — «الجودة» و«المصدر» — كلٌّ يفتح خياراته داخل الورقة نفسها
+    // (لا نافذة نظام). الاختيار والقائمة المفتوحة يبقيان مع كل تحديث: السيرفرات تصل تباعًا فتُعاد الورقة، ولا تُغلق وحدها.
+    private var serverQuality: Int? = null
+    private var serverSource: String? = null
+    private var serverMenu: String? = null
+    private fun sourceOf(r: Route) = r.sourceName?.takeIf { it.isNotBlank() } ?: r.server.ifBlank { r.code }
+
+    private fun serverFilters(body: LinearLayout, routes: List<Route>): List<Route> {
+        val live = routes.filter { it.state != RouteState.UNAVAILABLE }
+        val qualities = live.mapNotNull { RouteGroups.bucket(it.quality) }.distinct().sortedDescending()
+        val sources = live.map { sourceOf(it) }.distinct()
+        if (serverQuality != null && serverQuality !in qualities) serverQuality = null
+        if (serverSource != null && serverSource !in sources) serverSource = null
+        val qualityText = serverQuality?.let { "${it}p" } ?: "كل الجودات"
+        val sourceText = serverSource ?: "كل المصادر"
+        fun picker(key: String, caption: String, value: String, enabled: Boolean) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(7), dp(14), dp(8))
+            val open = serverMenu == key
+            background = pressable(if (open) Tone.SURFACE_3 else Tone.SURFACE_2, dp(12).toFloat(), dp(1), if (open) Tone.TEXT_3 else Tone.LINE)
+            alpha = if (enabled) 1f else 0.5f
+            contentDescription = "$caption: $value"
+            addView(label(caption, 11.5f, Tone.TEXT_3, bold = true))
+            addView(label("$value  ${if (open) "▴" else "▾"}", 14f, Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_FIRST_STRONG })
+            setOnClickListener { if (enabled) { serverMenu = if (serverMenu == key) null else key; sheet.refresh() } }
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(picker("q", "الجودة", qualityText, qualities.size > 1), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        row.addView(picker("s", "المصدر", sourceText, sources.size > 1), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        val menuKey = serverMenu
+        if (menuKey != null) {
+            val options: List<Pair<String, () -> Unit>> = if (menuKey == "q")
+                listOf<Pair<String, () -> Unit>>("كل الجودات" to { serverQuality = null }) + qualities.map { q -> "${q}p" to { serverQuality = q } }
+            else listOf<Pair<String, () -> Unit>>("كل المصادر" to { serverSource = null }) + sources.map { name -> name to { serverSource = name } }
+            val selected = if (menuKey == "q") qualityText else sourceText
+            val menu = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                background = rounded(Tone.SURFACE_3, dp(12).toFloat(), dp(1), Tone.LINE)
+            }
+            for ((text, choose) in options) {
+                val on = text == selected
+                menu.addView(label(if (on) "✓  $text" else text, 14f, if (on) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply {
+                    minHeight = dp(42)
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                    textDirection = View.TEXT_DIRECTION_FIRST_STRONG
+                    setPadding(dp(12), 0, dp(12), 0)
+                    background = pressable(Color.TRANSPARENT, dp(10).toFloat())
+                    setOnClickListener { choose(); serverMenu = null; sheet.refresh() }
+                })
+            }
+            body.addView(menu, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        }
+        return routes.filter { r -> (serverQuality == null || RouteGroups.bucket(r.quality) == serverQuality) && (serverSource == null || sourceOf(r) == serverSource) }
+    }
+
     private fun showServers() {
         val p = prep ?: return message("السيرفرات غير متاحة لهذه الجلسة")
         engine.completePreparation(sessionId)
+        serverMenu = null
         open(SheetKind.SERVERS, "السيرفرات", episodeLabel()) { body ->
-            val routes = p.routes()
+            val routes = serverFilters(body, p.routes())
             val currentRoute = current?.let { p.routeOf(it.id)?.id }
             val ready = routes.count { it.state == RouteState.READY }
-            body.addView(pillButton("شغّل الأفضل", primary = true) { playBest() }.apply {
-                minHeight = dp(48)
-                setCompoundDrawablesRelativeWithIntrinsicBounds(Glyph(Glyph.Kind.SPARK, Color.WHITE, dp(16)), null, null, null)
-                compoundDrawablePadding = dp(8)
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
             val status = when {
                 !p.done -> "يتجهّز… $ready جاهز حتى الآن"
                 ready == 0 -> "لم يجهز أي سيرفر لهذه الحلقة"
                 else -> "$ready سيرفر جاهز"
             }
-            body.addView(label(status, 12f, Tone.TEXT_3).apply { setPadding(dp(4), dp(6), dp(4), 0) })
-            for ((name, list) in RouteGroups.group(routes)) {
-                body.addView(sectionLabel(name))
-                // صف لكل سيرفر كورقة السيرفرات في التطبيق: اسم المصدر، وتحته ما يميّزه (الحجم،
-                // الترميز، البذور…) وحالته — لا مربعات رموز متشابهة («TRR 3»، «TRR 4») لا تقول شيئًا
-                list.forEach { r -> body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }) }
+            body.addView(label(status, 12f, Tone.TEXT_3).apply { setPadding(dp(4), 0, dp(4), dp(2)) })
+            // «تورنت» و«مباشر» بدل مجموعات الجودة (الجودة في الصف نفسه وفي فلترها)
+            fun rank(r: Route) = when (r.state) { RouteState.READY -> 0; RouteState.RESOLVING -> 1; RouteState.FAILED -> 2; else -> 3 }
+            val usable = routes.filter { it.state != RouteState.UNAVAILABLE }
+            val (torrents, direct) = usable.partition { r -> r.candidates.any { id -> p.candidate(id)?.url?.startsWith("vantara-torrent:") == true } }
+            fun section(name: String, hint: String, list: List<Route>) {
+                if (list.isEmpty()) return
+                val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(14), dp(6), dp(6)) }
+                head.addView(label("$name  ${list.size}", 14f, Tone.TEXT, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                head.addView(label(hint, 12f, Tone.TEXT_3, bold = true))
+                body.addView(head)
+                list.sortedWith(compareBy<Route> { rank(it) }.thenByDescending { it.quality ?: 0 }).forEach { r ->
+                    body.addView(routeRow(r, r.id == currentRoute), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+                }
             }
+            section("تورنت", "جودة أعلى · يبدأ أبطأ", torrents)
+            section("مباشر", "يبدأ أسرع", direct)
+            val dead = routes.filter { it.state == RouteState.UNAVAILABLE }
+            if (dead.isNotEmpty()) {
+                body.addView(sectionLabel("غير متاح الآن (${dead.size})"))
+                dead.forEach { r -> body.addView(routeRow(r, false), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) }) }
+            }
+            // «شغّل الأفضل» في آخر الورقة ومعه ما سيشغّله فعلًا (الجودة والمصدر والحجم)
+            val best = p.best(preferCode)
+            val go = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = pressable(Tone.ACCENT, dp(14).toFloat())
+                contentDescription = "شغّل الأفضل"
+                addView(label("▶  شغّل الأفضل", 15.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER })
+                best?.let { c ->
+                    val bits = listOfNotNull(c.quality?.takeIf { it > 0 }?.let { "${it}p" }, c.sourceName.takeIf { it.isNotBlank() }, c.videoSize?.takeIf { it > 0 }?.let { "${it / 1_048_576} MB" })
+                    if (bits.isNotEmpty()) addView(label("\u2068${bits.joinToString(" · ")}\u2069", 11.5f, 0xD9FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; maxLines = 1 })
+                }
+                setOnClickListener { playBest() }
+            }
+            body.addView(go, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
     }
 
@@ -1636,7 +1748,8 @@ class PlayerActivity : Activity() {
             alpha = if (dim) 0.55f else 1f
             val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            top.addView(label(title, 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val heading = listOfNotNull(r.quality?.takeIf { it > 0 }?.let { "${it}p" }, title).joinToString(" ")
+            top.addView(label("\u2068$heading\u2069", 15f, if (isCurrent) Tone.ACCENT_TEXT else Tone.TEXT, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (r.variant == Variant.DUB) top.addView(chip("مدبلج", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             else if (r.code == preferCode && !isCurrent) top.addView(chip("آخر اختيار", Tone.ACCENT_TEXT, Tone.ACCENT_SOFT))
             texts.addView(top)
@@ -1651,34 +1764,74 @@ class PlayerActivity : Activity() {
         }
     }
 
+    /** صور الحلقات وعناوينها من ani.zip (نفس مصدر فن الغرفة في الويب)، تُجلب مرة للجلسة. */
+    private var episodeArt: Map<Int, Pair<String?, String?>>? = null
+    private var episodeArtLoading = false
+    private fun fetchEpisodeArt() {
+        if (episodeArt != null || episodeArtLoading) return
+        val id = launch.animeId.toIntOrNull()?.takeIf { launch.section == "anime" && it > 0 } ?: return
+        episodeArtLoading = true
+        scope.launch {
+            val map = withContext(Dispatchers.IO) {
+                runCatching {
+                    network.client.newCall(Request.Builder().url("https://api.ani.zip/mappings?anilist_id=$id").build()).execute().use { res ->
+                        if (!res.isSuccessful) return@use null
+                        val eps = JSONObject(res.body.string()).optJSONObject("episodes") ?: return@use null
+                        val out = HashMap<Int, Pair<String?, String?>>()
+                        for (k in eps.keys()) {
+                            val n = k.toIntOrNull() ?: continue
+                            val e = eps.optJSONObject(k) ?: continue
+                            val t = e.optJSONObject("title")
+                            val title = t?.optString("ar")?.takeIf { it.isNotBlank() } ?: t?.optString("en")?.takeIf { it.isNotBlank() }
+                            out[n] = e.optString("image").takeIf { it.startsWith("https://") } to title
+                        }
+                        out
+                    }
+                }.getOrNull()
+            }
+            episodeArtLoading = false
+            episodeArt = map ?: emptyMap()
+            if (openSheet == SheetKind.EPISODES) sheet.refresh()
+        }
+    }
+
     private fun showEpisodes() {
         val total = launch.total
         if (total <= 0 || copies.isEmpty()) return message("قائمة الحلقات من صفحة الأنمي")
+        fetchEpisodeArt()
         open(SheetKind.EPISODES, "الحلقات", "$total حلقة") { body ->
             val cur = episodeInt()
-            val perRow = 6
-            var row: LinearLayout? = null
             for (n in 1..total) {
-                if ((n - 1) % perRow == 0) {
-                    row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
-                }
                 val on = n == cur
-                val watched = resume.containsKey(n)
-                row!!.addView(label("$n", 15f, if (on) Color.WHITE else Tone.TEXT, bold = true).apply {
-                    gravity = Gravity.CENTER
-                    textAlignment = View.TEXT_ALIGNMENT_CENTER
-                    minHeight = dp(48)
-                    background = pressable(if (on) Tone.ACCENT else Tone.SURFACE_2, dp(12).toFloat(), if (watched && !on) dp(1) else 0, Tone.ACCENT_LINE)
-                    setOnClickListener { if (n != cur) switchEpisode(n) else sheet.close() }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                val art = episodeArt?.get(n)
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(6), dp(6), dp(6))
+                    background = pressable(if (on) Tone.ACCENT_SOFT else Color.TRANSPARENT, dp(12).toFloat(), if (on) dp(1) else 0, Tone.ACCENT_LINE)
+                    contentDescription = "الحلقة $n"
+                    // داخل غرفة متزامنة: المضيف ينقل الغرفة كلها (أمر load)، والصديق يُبلَّغ أن المضيف يختار
+                    setOnClickListener { if (n == cur) sheet.close() else if (together?.requestEpisode(n) == true) sheet.close() else switchEpisode(n) }
+                }
+                val thumb = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    background = rounded(Tone.SURFACE_3, dp(9).toFloat())
+                    clipToOutline = true
+                }
+                // الصور حول الحلقة الحالية فقط (لا عشرات الطلبات دفعة واحدة لعمل طويل)
+                if (kotlin.math.abs(n - cur) <= 30) art?.first?.let { url -> stageImages.load(url, dp(240)) { bmp -> if (bmp != null) thumb.setImageBitmap(bmp) } }
+                row.addView(thumb, LinearLayout.LayoutParams(dp(112), dp(63)))
+                val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(4), 0) }
+                if (on) texts.addView(label("الآن", 11f, Color.WHITE, bold = true).apply { background = rounded(Tone.ACCENT, dp(6).toFloat()); setPadding(dp(7), dp(1), dp(7), dp(1)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(3) })
+                texts.addView(label("الحلقة $n", 14.5f, Tone.TEXT, bold = true))
+                art?.second?.let { texts.addView(label("\u2068$it\u2069", 12f, Tone.TEXT_2).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }) }
+                if (!on && resume.containsKey(n)) texts.addView(label("شاهدت جزءًا منها", 11f, Tone.TEXT_3))
+                row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
             }
-            // الصف الأخير يكمل بفراغ فلا تتمدد أرقامه
-            val last = row
-            if (last != null) repeat((perRow - total % perRow) % perRow) { last.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = dp(8) }) }
         }
-        // تمرير للحلقة الحالية
-        main.postDelayed({ sheet.scrollTo(((episodeInt() - 1) / 6 - 1) * dp(56)) }, 280)
+        // تمرير للحلقة الحالية (صف ≈ 79dp)
+        main.postDelayed({ sheet.scrollTo(((episodeInt() - 2).coerceAtLeast(0)) * dp(79)) }, 280)
     }
 
     private fun showQuality() {
@@ -1881,7 +2034,6 @@ class PlayerActivity : Activity() {
     }
 
     private fun showNetwork() {
-        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) return
         open(SheetKind.NETWORK, "الشبكة", "قياس حي من طلبات هذا الفيديو نفسها") { body ->
             val latency = net.latencyMs()
             val bps = net.bytesPerSecond()
@@ -2017,7 +2169,7 @@ class PlayerActivity : Activity() {
                 settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
                 sheet.refresh()
             })
-            if (com.vantara.plugins.DiagnosticVisibility.visible(this)) body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
+            body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow(if (isMovie()) "رشّح الفيلم لصديق" else "رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
                     pickFriend("رشّح ${episodeLabel()}") { to, name -> queueMoment(to, name, null) }
@@ -2343,10 +2495,6 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
-        if (!com.vantara.plugins.DiagnosticVisibility.visible(this)) {
-            netChip?.visibility = View.GONE
-            if (openSheet == SheetKind.NETWORK) sheet.close()
-        }
         startup.active(player.playWhenReady)
         watchStall()
         sampleUsage()
@@ -2393,6 +2541,7 @@ class PlayerActivity : Activity() {
         const val STALL_TIMEOUT_MS = 20_000L
         const val PROGRESS_EVERY_MS = 10_000L
         const val HIDE_AFTER_MS = 3_500L
+        const val PAUSED_HIDE_AFTER_MS = 5_000L
         const val SEEK_MS = 10_000L
         const val STREAK_MS = 800L
         const val BEST_WAIT_MS = 45_000L

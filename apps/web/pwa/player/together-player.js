@@ -65,6 +65,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     const t = room.timeline;
     if (destroyed || !prepared || !synced() || !live() || !t || t.media?.key !== mediaKey()) return;
     const now = room.clock.serverNow();
+    // أمر المتحكّم نفسه نُفّذ عنده فورًا: حتى يصل صداه لا يُرجعه المؤقت للحالة القديمة
+    if (intent && t.seq === intent.seq && now < intent.until) return;
     // قبل البدء: الفيديو مجهّز ومتوقف عند نقطة البداية (مع ديلايك)، فيبدأ الكل فورًا
     if (!t.started) {
       if (!video.paused) video.pause();
@@ -89,6 +91,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   function receive({ state }) {
     if (destroyed) return;
     clearTimeout(scheduled);
+    if (intent && state?.seq !== intent.seq) intent = null;
     const n = Number(/#(\d+)$/.exec(state?.media?.key ?? '')?.[1]);
     if (state?.media?.key?.startsWith(`${mediaPrefix}#`) && n > 0 && n !== episode() && loadingEpisode !== n) {
       prepared = false; failed = false; loadingEpisode = n; onEpisode(n);
@@ -100,6 +103,13 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       }
     }
     paintLobby(); report(true);
+  }
+  // أمر المتحكّم: يُنفَّذ عنده فورًا ويُرسل بلحظة ضغطه بساعة الغرفة (الخادم يختمه بها؛ لا انتظار مصطنع)
+  let intent = null;
+  function hostCommand(op, roomPos) {
+    const at = room.clock.serverNow();
+    room.command(op, { pos: roomPos, at });
+    intent = { seq: room.timeline?.seq, until: at + 2000 };
   }
   const offs = [room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
     room.on('roster', paintLobby), room.on('connection', () => { paintLobby(); if (live()) { align(true); report(true); } }),
@@ -140,12 +150,15 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       if (destroyed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       // أول بدء من غرفة الانتظار: عدّ 3-2-1 مشترك عند الجميع
-      if (room.canControl && prepared) room.command(playing ? 'play' : 'pause', { pos: room.timeline?.started ? position() : 0, ...(playing && !room.timeline?.started ? { countdownMs: 3000 } : {}) });
-      else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');
+      if (room.canControl && prepared) {
+        if (!room.timeline?.started && playing) room.command('play', { pos: 0, countdownMs: 3000 });
+        else if (room.instant) { hostCommand(playing ? 'play' : 'pause', position()); if (playing) play(); else if (!video.paused) video.pause(); }
+        else room.command(playing ? 'play' : 'pause', { pos: position() }); // خادم قديم: ننتظر بثّه
+      } else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');
       return true;
     },
     // pos بوقت فيديوك؛ الغرفة تستلمه بوقتها (بلا ديلايك)
-    seek(pos) { if (destroyed || !synced()) return false; if (live() && room.canControl && prepared) room.command('seek', { pos: Math.max(0, pos - syncOffset()) }); else message('المضيف يتحكم بالتقديم'); return true; },
+    seek(pos) { if (destroyed || !synced()) return false; if (live() && room.canControl && prepared && room.instant) { hostCommand('seek', Math.max(0, pos - syncOffset())); video.currentTime = Math.max(0, pos) / 1000; } else if (live() && room.canControl && prepared) room.command('seek', { pos: Math.max(0, pos - syncOffset()) }); else message('المضيف يتحكم بالتقديم'); return true; },
     changeEpisode(n) {
       if (destroyed || !synced()) return false;
       if (!live() || !room.canControl) { message('بانتظار المضيف للحلقة التالية…'); return true; }

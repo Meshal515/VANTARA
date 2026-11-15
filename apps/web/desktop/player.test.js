@@ -8,7 +8,7 @@ function fixture({skipLoader,overlay=false}={}){
  const engine={addListener:(name,fn)=>{listeners.set(name,fn);return{remove(){}};},playerState:async()=>({title:'فيلم',candidate:'source-1',sources:[{id:'source-1',label:'مصدر · 1080p'}]}),switchSource:vi.fn(async()=>{}),closeSession:vi.fn(async()=>{})};
  document.defaultView.HTMLElement.prototype.getBoundingClientRect=function(){return{x:0,y:64,width:1000,height:600};};
  const g={document,innerWidth:1000,innerHeight:800,addEventListener:vi.fn(),removeEventListener:vi.fn()};const player=installDesktopPlayer({g,bridge,engine,skipLoader});
- return{document,bridge,engine,commands,player,overlay:message=>overlayCommand?.(message),event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
+ return{g,document,bridge,engine,commands,player,overlay:message=>overlayCommand?.(message),event:e=>callbacks.forEach(fn=>fn(e)),lobby:e=>listeners.get('desktopTogether')?.(e),route:e=>listeners.get('route')?.(e)};
 }
 it('opens an in-app native viewport with controls outside it and sends pause/seek safely',async()=>{
  const f=fixture();f.event({type:'playback/preparing',session:'one',title:'فيلم'});await Promise.resolve();
@@ -76,16 +76,18 @@ it('shows the cinematic room before native playback and hides its HWND until the
  f.lobby({session:'one',visible:true,host:true,prepared:false,connection:'live',me:'host',invited:['mansour'],roster:[],start,setVideoOffset});
  await new Promise(resolve=>setTimeout(resolve,0));
  const lobby=f.document.querySelector('.desktop-player .pp-lobby');
- expect(lobby?.querySelector('.pl-title')?.textContent).toBe('فيلم التجربة');
+ // الشعار يُحسم مرة (CLAUDE.md): مكانه محجوز باسم العمل للقارئ الآلي، ولا يظهر الاسم ثم يُستبدل بالشعار
+ expect(lobby?.querySelector('.pl-mark')?.getAttribute('aria-label')).toBe('فيلم التجربة');
+ expect(lobby?.querySelector('.pl-mark')?.dataset.ready).toBeUndefined();
  expect(lobby?.querySelector('.pl-bg img')?.src).toBe('https://images.example/banner.jpg');
- expect(lobby?.textContent).toContain('اختر السيرفر');expect(lobby?.querySelector('.pl-go[aria-label="ابدأ للجميع"]').disabled).toBe(true);
+ expect(lobby?.textContent).toContain('اختر سيرفر');expect(lobby?.querySelector('.pl-start[aria-label="ابدأ للجميع"]').disabled).toBe(true);
  expect(avatar).toHaveBeenCalledWith(expect.objectContaining({displayName:'منصور',avatarKey:'/avatars/mansour.webp'}),44);
  f.event({type:'playback/preparing',session:'one',title:'فيلم التجربة'});
  f.event({type:'playback/ready',session:'one',embedded:true});
  expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:true}));
  f.lobby({session:'one',visible:true,host:true,prepared:true,connection:'live',me:'host',invited:[],roster:[],start,setVideoOffset});
  await new Promise(resolve=>setTimeout(resolve,0));
- f.document.querySelector('.pl-go[aria-label="ابدأ للجميع"]').click();expect(start).toHaveBeenCalledOnce();
+ f.document.querySelector('.pl-start[aria-label="ابدأ للجميع"]').click();expect(start).toHaveBeenCalledOnce();
  f.lobby({session:'one',visible:false,prepared:true,roster:[]});
  expect(f.document.querySelector('.pp-lobby').hidden).toBe(true);
  expect(f.bridge.playerViewport).toHaveBeenLastCalledWith(expect.objectContaining({hidden:false}));
@@ -207,4 +209,32 @@ it('ignores a canceled subtitle selection error after the user turns subtitles o
  f.overlay({session:'one',name:'subtitle-select',value:-1});f.overlay({session:'one',name:'subtitle-off'});fail(new Error('خطأ اختيار قديم'));
  await Promise.resolve();await Promise.resolve();expect(f.document.querySelector('.desktop-player').textContent).not.toContain('خطأ اختيار قديم');
  expect(f.bridge.playbackCommand).toHaveBeenCalledWith({session:'one',command:'subtitle-off',value:undefined});
+});
+
+it('لوحة المفاتيح: ↑↓ للصوت بخطوة 5 وM يكتم ثم يعيد الصوت السابق (كما في الـAPK والطبقة)',async()=>{
+ const f=fixture();f.event({type:'playback/preparing',session:'one',title:'فيلم'});f.event({type:'playback/ready',session:'one',embedded:true});
+ const keydown=f.g.addEventListener.mock.calls.find(([name])=>name==='keydown')[1];
+ const press=key=>keydown({key,target:{tagName:'BODY'},preventDefault(){}});
+ press('ArrowDown');press('ArrowDown');await Promise.resolve();
+ expect(f.commands.filter(c=>c.command==='volume').map(c=>c.value)).toEqual([95,90]);
+ press('m');await Promise.resolve();press('M');await Promise.resolve();
+ expect(f.commands.filter(c=>c.command==='volume').map(c=>c.value)).toEqual([95,90,0,90]);
+ press('ArrowUp');press('ArrowUp');press('ArrowUp');await Promise.resolve();
+ expect(f.commands.filter(c=>c.command==='volume').at(-1).value).toBe(100);
+});
+
+it('شاشة التحميل تأخذ البنر والشعار (HTTPS فقط) ونسبة المراحل الفعلية للمحرك، وتعيدها من الصفر عند تبديل المصدر',async()=>{
+ const f=fixture({overlay:true});
+ f.engine.playerState=async()=>({title:'Frieren',candidate:'c',sources:[],backdrop:'https://img.example/bg.jpg',logo:'http://insecure.example/logo.png'});
+ f.event({type:'playback/preparing',session:'one',title:'Frieren'});
+ for(let i=0;i<6;i++)await Promise.resolve();
+ const last=()=>f.bridge.playerOverlay.mock.calls.map(([m])=>m).filter(m=>m.art).at(-1);
+ expect(last().art).toEqual({backdrop:'https://img.example/bg.jpg',logo:null});
+ const epoch=last().loadEpoch;
+ f.event({type:'playback/stage',session:'one',stage:'metadata'});f.event({type:'playback/stage',session:'one',stage:'file-selected'});
+ expect(last().loadProgress).toBe(.3);
+ f.event({type:'playback/stage',session:'one',stage:'engine-start'});
+ expect(last().loadProgress).toBe(.3);
+ f.event({type:'playback/preparing',session:'one',title:'Frieren'});
+ expect(last().loadProgress).toBe(0);expect(last().loadEpoch).toBe(epoch+1);
 });

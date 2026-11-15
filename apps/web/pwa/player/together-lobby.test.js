@@ -49,7 +49,9 @@ describe('pending identity and visible lobby actions', () => {
     renderLobby(host, { ...base, art: { title: 'Spider-Man' }, server: { code: 'MYS', quality: '720p' }, offset: 0, pending: [{ userId: MANSOUR, displayName: 'صديق', avatarKey: null }] }, { avatar, changeServer, start, setOffset, leave: vi.fn() });
     expect(host.querySelector('.pl-face.is-pending img').getAttribute('src')).toBe('/avatars/man.webp');
     host.querySelector('.pl-choose-server').click();
-    host.querySelector('.pl-go:not(.pl-choose-server)').click();
+    host.querySelector('.pl-start').click();
+    // التصميم المعتمد: البدء صورة الحلقة ثم دائرة بمثلث ثم «البدء»
+    expect(host.querySelector('.pl-start .pl-start-label').textContent).toBe('البدء');
     expect(changeServer).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledOnce();
     expect(host.querySelector('.pl-more').hidden).toBe(true);

@@ -106,6 +106,9 @@ class AppUpdatePlugin : Plugin() {
                 // للبيانات القديمة: نسخة 0.0.3 تقارن هذا الرقم
                 .put("nativeApi", NATIVE_API)
                 .put("official", signerDigests(installedInfo()) == setOf(ApkCheck.STABLE_CERT_SHA256))
+                // تشخيص فشل التحديث: اسم الحزمة وأول 12 حرفًا من بصمة التوقيع المثبت (تظهر في الإعدادات)
+                .put("package", context.packageName)
+                .put("signer", signerDigests(installedInfo()).sorted().joinToString(",") { it.take(12) })
                 .put("staged", state.stagedVersion())
                 .put("good", state.goodVersion())
                 .put("bad", org.json.JSONArray(state.bad().toList()))

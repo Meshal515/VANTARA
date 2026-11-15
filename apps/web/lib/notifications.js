@@ -87,3 +87,14 @@ export function toastable(rows, context) {
     .filter((row) => shouldToast(row, context))
     .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 }
+
+/**
+ * دعوة «مشاهدة معًا» في التنبيه المنبثق: عنوانها («مشعل يدعوك تشاهد معه») ورمز الغرفة الذي يُدخل إليها عند الضغط.
+ * null لغير الدعوات. كان التنبيه يكتب «إشعار» واسم العمل فقط، ويفتح صفحة العمل لا الغرفة.
+ */
+export function togetherInvite(row, actor) {
+  if (row?.kind !== 'TOGETHER') return null;
+  const code = /#together=([A-Z0-9]{6})/.exec(row.link ?? '')?.[1] ?? null;
+  const reading = !/^(anime|cinema):/.test(row.series_ref ?? '');
+  return { code, title: `${actor} يدعوك ${reading ? 'تقرأ' : 'تشاهد'} معه` };
+}

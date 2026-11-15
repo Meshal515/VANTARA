@@ -262,6 +262,8 @@ dependencies {
     // شهادات TLS محلية لاختبار شبكة يحجبها فلتر SNI (CensoredNetworkTest)
     testImplementation "com.squareup.okhttp3:okhttp-tls:$okhttpVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    // TogetherRoomScreensDeviceTest: خادم غرفة محلي (WebSocket) للقطات غرفة «مشاهدة معًا» الحقيقية
+    androidTestImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }

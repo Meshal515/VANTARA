@@ -6,7 +6,8 @@ afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 function fixture(){
   vi.useFakeTimers();
   const {document}=parseHTML('<html><body></body></html>');
-  return {document,view:createOverlayView(document,()=>{}, {timers:globalThis})};
+  const send=vi.fn();
+  return {document,send,view:createOverlayView(document,send, {timers:globalThis})};
 }
 it('يخفي أزرار البداية بعد وصول أول إطار دون انتظار حركة الماوس',()=>{
   const {view}=fixture();
@@ -24,11 +25,20 @@ it('تحديثات التقدم لا تعيد إظهار الأدوات وتظه
   expect(view.root.classList.contains('pp--shown')).toBe(true);
   vi.advanceTimersByTime(3500);expect(view.root.classList.contains('pp--shown')).toBe(false);
 });
-it('تبقى أدوات الإيقاف مرئية ثم تختفي بعد الاستئناف',()=>{
-  const {view}=fixture();view.update({ready:true,paused:true});
-  vi.advanceTimersByTime(10000);expect(view.root.classList.contains('pp--shown')).toBe(true);
-  view.update({paused:false});vi.advanceTimersByTime(3500);
-  expect(view.root.classList.contains('pp--shown')).toBe(false);
+it('وقت الإيقاف: الأدوات تختفي بعد 5 ث بلا حركة لترى اللقطة، وزر «إخفاء الأدوات» يخفيها فورًا (قرار المالك)',()=>{
+  const {document,view}=fixture();view.update({ready:true,paused:true});
+  const hide=view.root.querySelector('[data-action="hide"]');
+  expect(hide.hidden).toBe(false);
+  vi.advanceTimersByTime(4000);expect(view.root.classList.contains('pp--shown')).toBe(true);
+  vi.advanceTimersByTime(1500);expect(view.root.classList.contains('pp--shown')).toBe(false);
+  // حركة الفأرة ترجعها، والزر يخفيها فورًا
+  {const e=new document.defaultView.Event('mousemove');Object.defineProperty(e,'screenX',{value:10});Object.defineProperty(e,'screenY',{value:10});view.root.dispatchEvent(e);}
+  expect(view.root.classList.contains('pp--shown')).toBe(true);
+  hide.click();expect(view.root.classList.contains('pp--shown')).toBe(false);
+  // أثناء التشغيل لا يظهر الزر، والإخفاء بعد 3 ث كما كان
+  view.update({paused:false});expect(hide.hidden).toBe(true);
+  {const e=new document.defaultView.Event('mousemove');Object.defineProperty(e,'screenX',{value:20});Object.defineProperty(e,'screenY',{value:20});view.root.dispatchEvent(e);}
+  vi.advanceTimersByTime(3500);expect(view.root.classList.contains('pp--shown')).toBe(false);
 });
 
 it('anchors compact subtitle dialog above its button and restores focus on Escape',()=>{
@@ -126,8 +136,8 @@ it('desktop provides audio track menu and advanced settings instead of hiding ex
   expect(audio.hidden).toBe(false);
   view.open.more();
   expect([...view.root.querySelector('.pp-sheet').querySelectorAll('button')].some(b=>b.textContent.includes('jpn'))).toBe(false);
-  [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('الإعدادات المتقدمة')).click();
-  expect(send).toHaveBeenCalledWith({name:'settings'});
+  // «الإعدادات المتقدمة» حُذفت (قرار المالك): لا شاشة منفصلة؛ الترجمة الإضافية في لوحة الترجمة
+  expect(view.root.querySelector('.pp-sheet').textContent).not.toContain('الإعدادات المتقدمة');
 });
 
 it('keeps server buttons mounted during cloned progress snapshots so scrolling and clicks survive',()=>{
@@ -145,11 +155,144 @@ it('keeps subtitle adjustment buttons mounted across transport snapshots',()=>{
  expect([...view.root.querySelectorAll('button')].find(b=>b.textContent==='أتأخر 0.5')).toBe(before);
 });
 
-it('uses the common visibility gate for technical network metrics without hiding player controls',()=>{
- const gate=vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
- const {view}=fixture();view.open.more();
- expect(view.root.querySelector('.pp-net')).toBeNull();
- expect(view.root.textContent).toContain('الإعدادات المتقدمة');
- gate.mockReturnValue(true);view.open.more();
- expect(view.root.querySelector('.pp-net')).not.toBeNull();
+it('network metrics are a normal part of the player, independent of the diagnostics toggle (owner, 14 Nov)',()=>{
+ vi.spyOn(diagnosticsUi,'visible').mockReturnValue(false);
+ const {view,send}=fixture();
+ const net={openAt:0,stages:{'engine-start':300,downloading:2100,'player-start':2600,ready:3900},torrentBps:1750000,peers:58,seeds:45,aheadMs:41000,inputBps:1690000,videoBps:4200000,videoHeight:1080};
+ view.update({ready:true,paused:true,net,serverCode:'TR',skipStatus:'المقدمة 1:30–3:00'});
+ view.open.more();
+ const more=view.root.querySelector('.pp-sheet');
+ // ترتيب الـAPK: التخطي ثم الشبكة، بلا تكرار لأزرار الشريط العلوي
+ expect([...more.querySelectorAll('.pp-row-item strong')].map(n=>n.textContent)).toEqual(['تخطي المقدمة والنهاية','الشبكة']);
+ [...more.querySelectorAll('button')].find(b=>b.textContent.includes('الشبكة')).click();
+ const sheet=view.root.querySelector('.pp-sheet');
+ expect(sheet.dataset.kind).toBe('network');
+ const rows=Object.fromEntries([...sheet.querySelectorAll('.pp-metric')].map(r=>[r.querySelector('span').textContent,r.querySelector('b').textContent]));
+ expect(rows['تجهيز التورنت']).toBe('1800 ms');
+ expect(rows['جاهز أمامك']).toBe('41 ثانية');
+ expect(rows['مشاركون متصلون']).toBe('58 (زارعون 45)');
+ expect(rows['تحميل التورنت']).toBe('14.0 Mbps');
+ expect(rows['الفيديو']).toBe('1080p · 4.2 Mbps');
+ expect(rows['السيرفر']).toBe('TR');
+ expect(sheet.querySelector('.pp-metric--bad span').textContent).toBe('تجهيز التورنت');
+ // شريحة القياس فوق الفيديو تُفعّل من اللوحة وتبقى بعد الإغلاق
+ expect(view.root.querySelector('.pp-netchip').hidden).toBe(true);
+ [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('إظهار القياس فوق الفيديو')).click();
+ expect(view.root.querySelector('.pp-netchip').hidden).toBe(false);
+ view.closeSheet();view.update({position:1000});
+ expect(view.root.querySelector('.pp-netchip').textContent).toContain('58 مشارك');
+ expect(send).not.toHaveBeenCalledWith({name:'settings'});
+ try{localStorage.removeItem('vantara.player.netChip');}catch{}
+});
+
+it('extra subtitles load from an https link inside the subtitles popover, like the APK',()=>{
+ const {view,send}=fixture();view.update({subtitles:[]});view.open.subtitles();
+ const form=view.root.querySelector('.pp-url'),input=form.querySelector('input');
+ input.value='https://example.com/a.srt';form.onsubmit({preventDefault(){}});
+ expect(send).toHaveBeenCalledWith({name:'subtitle-load',value:'https://example.com/a.srt'});
+});
+
+it('شاشة التحميل كالـAPK: الشعار يمتلئ من اليسار بقدر التقدم ثم تتلاشى عند أول إطار',()=>{
+  const {view}=fixture();
+  view.update({ready:false,title:'Frieren',art:{backdrop:'https://img/bg.jpg',logo:'https://img/logo.png'},loadProgress:.4,loadEpoch:1});
+  const stage=view.root.querySelector('.pp-stage');
+  expect(stage.hidden).toBe(false);expect(stage.classList.contains('pp-stage--startup')).toBe(true);
+  expect(view.root.querySelector('.pp-stage__bg').getAttribute('src')).toBe('https://img/bg.jpg');
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 60% 0 0)');
+  expect(view.root.querySelector('.pp-spinner').hidden).toBe(true);
+  view.update({loadProgress:.2});
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 60% 0 0)');
+  view.update({ready:true,paused:false});
+  expect(stage.classList.contains('pp-stage--out')).toBe(true);
+  vi.advanceTimersByTime(320);expect(stage.hidden).toBe(true);
+});
+it('بلا شعار: الاسم بعد نصف ثانية لا فورًا، والروابط غير الآمنة لا تُحمَّل',()=>{
+  const {view}=fixture();
+  view.update({ready:false,title:'Blue Lock',art:{backdrop:'http://img/bg.jpg',logo:null}});
+  const name=view.root.querySelector('.pp-stage__name');
+  expect(name.hidden).toBe(true);vi.advanceTimersByTime(520);expect(name.hidden).toBe(false);
+  expect(name.textContent).toBe('Blue Lock');
+  expect(view.root.querySelector('.pp-stage__bg').getAttribute('src')).toBeNull();
+});
+it('التوقف أثناء المشاهدة: بعد 450ms فقط، والشعار كامل يومض، والخطأ يخفي الشاشة ليظهر زر الإعادة',()=>{
+  const {view}=fixture();
+  view.update({ready:true,paused:false,buffering:false,title:'X'});
+  const stage=view.root.querySelector('.pp-stage');
+  view.update({buffering:true});vi.advanceTimersByTime(300);expect(stage.hidden).toBe(true);
+  vi.advanceTimersByTime(200);expect(stage.hidden).toBe(false);expect(stage.classList.contains('pp-stage--stalled')).toBe(true);
+  expect(view.root.querySelector('.pp-stage__fill').style.clipPath).toBe('inset(0 0% 0 0)');
+  view.update({ready:false,buffering:false,status:{text:'تعذّر',error:true}});
+  expect(stage.hidden).toBe(true);expect(view.root.querySelector('.pp-retry').hidden).toBe(false);
+});
+
+it('auto-next like the APK: countdown card at the end, plays the next episode, cancel and settings work',()=>{
+ const {view,send}=fixture();
+ view.update({ready:true,paused:false,episode:3,total:12,ended:false});
+ view.update({ended:true});
+ const card=view.root.querySelector('.pp-next');
+ expect(card.hidden).toBe(false);
+ expect(card.textContent).toContain('الحلقة 4');
+ expect(card.textContent).toContain('تبدأ خلال 10 ث');
+ vi.advanceTimersByTime(10000);
+ expect(send).toHaveBeenCalledWith({name:'episode',value:4});
+ expect(card.hidden).toBe(true);
+ // إلغاء
+ send.mockClear();view.update({ended:false,episode:4});view.update({ended:true});
+ [...card.querySelectorAll('button')].find(b=>b.textContent==='إلغاء').click();
+ vi.advanceTimersByTime(20000);
+ expect(send).not.toHaveBeenCalledWith({name:'episode',value:5});
+ // الإعداد من «المزيد»: إيقاف ⇒ لا بطاقة
+ view.open.more();
+ [...view.root.querySelectorAll('.pp-sheet button')].find(b=>b.textContent==='إيقاف').click();
+ view.closeSheet();view.update({ended:false});view.update({ended:true});
+ expect(card.hidden).toBe(true);
+ try{localStorage.removeItem('vantara.player.autoNext');}catch{}
+});
+
+it('auto-next never fires in a watch-together room, for a movie, or on the last episode',()=>{
+ for(const s of [{together:true,episode:1,total:3},{movie:true,episode:1,total:1},{episode:3,total:3}]){
+  const {view,send}=fixture();view.update({ready:true,...s,ended:false});view.update({ended:true});
+  expect(view.root.querySelector('.pp-next').hidden).toBe(true);vi.advanceTimersByTime(20000);
+  expect(send).not.toHaveBeenCalledWith(expect.objectContaining({name:'episode'}));
+ }
+});
+
+it('recommend popover: «الجميع» then friends, sends and confirms (PlayerActivity.pickFriend)',()=>{
+ const {view,send}=fixture();
+ view.update({ready:true,episode:5,total:12,canRecommend:true,friends:[{userId:'u2',displayName:'سارة'}]});
+ view.open.more();
+ [...view.root.querySelectorAll('.pp-sheet button')].find(b=>b.textContent.includes('رشّح الحلقة لصديق')).click();
+ const sheet=view.root.querySelector('.pp-sheet');
+ expect(sheet.dataset.kind).toBe('recommend');
+ expect([...sheet.querySelectorAll('.pp-row-item strong')].map(n=>n.textContent)).toEqual(['الجميع','سارة']);
+ [...sheet.querySelectorAll('button')].find(b=>b.textContent.includes('سارة')).click();
+ expect(send).toHaveBeenCalledWith({name:'recommend',value:'u2'});
+ expect(view.root.querySelector('.pp-toast').textContent).toBe('انرسلت لـ سارة');
+ view.update({canRecommend:false});view.open.more();
+ expect(view.root.querySelector('.pp-sheet').textContent).not.toContain('رشّح');
+});
+it('لوحة الغرفة داخل المشغّل كالـAPK: الأعضاء ومن لم يدخل والديلاي والأوضاع، والموضع يتحدث دون إعادة بناء الأزرار',()=>{
+  const {view,send}=fixture();
+  const room={mode:'sync',host:true,status:'live',label:'ONE PIECE — الحلقة 1',pending:[{userId:'u3',name:'صديق ثالث',avatarKey:null}],
+    members:[{userId:'u1',name:'مضيف',state:'playing',host:true,me:true,source:'Torrentio',posMs:3000,driftMs:null,sameVersion:null},
+      {userId:'u2',name:'صديق',state:'preparing',host:false,me:false,source:null,posMs:null,driftMs:40,sameVersion:false}]};
+  view.update({ready:true,together:true,videoOffsetMs:0,room});
+  view.root.querySelector('[data-action="users"]').click();
+  const sheet=view.root.querySelector('.pp-sheet--room');
+  expect(sheet).toBeTruthy();expect(send).not.toHaveBeenCalledWith({name:'room'});
+  expect(sheet.querySelector('.pp-sheet__head strong').textContent).toBe('مشاهدة معًا · متزامنة');
+  const text=sheet.textContent;
+  for(const s of ['أنت','Torrentio','0:03','المضيف','نسخة مختلفة','فرق 40ms','صديق ثالث · لم يدخل بعد','ديلاي فيديوي','حوّلها منفصلة','اطلع من الغرفة'])expect(text).toContain(s);
+  const leave=[...sheet.querySelectorAll('.pp-room__btn')].find(b=>b.textContent==='اطلع من الغرفة');
+  view.update({room:{...room,members:room.members.map(m=>m.userId==='u1'?{...m,posMs:4000}:m)}});
+  expect(sheet.textContent).toContain('0:04');
+  expect([...sheet.querySelectorAll('.pp-room__btn')].includes(leave)).toBe(true); // نفس الزر، لم يُستبدل
+  [...sheet.querySelectorAll('.pp-room__btn')].find(b=>b.textContent==='حوّلها منفصلة').click();
+  expect(send).toHaveBeenCalledWith({name:'room-mode',value:'free'});
+  leave.click();expect(send).toHaveBeenCalledWith({name:'room-leave'});
+});
+it('بلا غرفة: زر الأصدقاء يفتح الدعوة كما هو',()=>{
+  const {view,send}=fixture();view.update({ready:true});
+  view.root.querySelector('[data-action="users"]').click();
+  expect(send).toHaveBeenCalledWith({name:'room'});
 });

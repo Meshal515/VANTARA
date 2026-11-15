@@ -147,7 +147,9 @@ export function detailMarkup(look, { glyph, iconButton }) {
     return (
       bar +
       // .mw-lift: طبقة عمق التمرير (depth.js)، منفصلة عن الغلاف الذي يحمل حركة الدخول
-      `<div class="mw-stage">${amb()}<div class="mw-lift">${cover}</div><div class="mw-center mw-wrap">${title}${stats}${genres}${beat}</div></div>` +
+      // «ويبتوني» على الكمبيوتر: لوحا كوميكس جانبيان من الفن نفسه (desktop-work.css)؛ مخفيان على الجوال
+      `<div class="mw-stage">${amb()}${L === 'webtoon' ? '<div class="wt-panels" aria-hidden="true"><img class="wt-p" data-wt-panel alt="" decoding="async"><img class="wt-p" data-wt-panel alt="" decoding="async"></div>' : ''}` +
+      `<div class="mw-lift">${cover}</div><div class="mw-center mw-wrap">${title}${stats}${genres}${beat}</div></div>` +
       `<div class="mw-wrap mw-acts"><div class="mw-row">${square('libraryBtn', 'toggleLibraryCurrent', 'library', 'مكتبتي')}${cta()}` +
       `${square('togetherBtn', 'readTogetherCurrent', 'users', 'اقرأ مع أصدقائك')}</div>${progress()}</div>` +
       `<div class="mw-tabbed"><div class="mw-tabs" role="tablist" id="detailTabs">` +

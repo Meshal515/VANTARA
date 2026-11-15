@@ -34,6 +34,7 @@ import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
 import {
   APK_ERRORS,
+  versionLine,
   activateStaged,
   canInstall,
   deviceInfo,
@@ -52,6 +53,7 @@ import {
   NOTIFICATION_LABELS,
   popupPatch,
   popupSettings,
+  togetherInvite,
   toastable,
   unreadCount,
 } from './lib/notifications.js';
@@ -1513,7 +1515,7 @@ function screenV35(page) {
           resync: () => sync.resync(),
           checkUpdate: () => checkUpdates({ force: true }),
           resetWeb: () => resetWeb(),
-          apkVersion: async () => (await deviceInfo())?.versionName ?? null,
+          apkVersion: async () => versionLine(await deviceInfo()),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
           setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
           labels: NOTIFICATION_LABELS,
@@ -2012,11 +2014,8 @@ async function checkUpdates({ force = false } = {}) {
   }
   // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
   if (globalThis.VantaraDesktopUpdates) {
+    // التحديث المتاح يظهر في بطاقة update-check (تنزيل بموافقة)؛ «محدثة» يعرضها زر الإعدادات.
     const result = await globalThis.VantaraDesktopUpdates.check({ force });
-    if (force && !result.update) {
-      showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
-        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
-    }
     return result.update ? { desktop: result.update } : null;
   }
   const found = await findUpdate({ force });
@@ -2063,11 +2062,13 @@ function showApkUpdate(apk) {
       onProgress: (p) => {
         go.textContent = `${Math.round(p * 100)}%`;
       },
-      onResult: (status) => {
+      onResult: (status, message) => {
+        // سبب أندرويد الحرفي يظهر مع الرسالة: «تعارض» لا يعني دائمًا مفتاحًا مختلفًا
+        const why = message ? ` (${message})` : '';
         if (status === 'cancelled') idle('ألغيت التثبيت. اضغط «تثبيت» متى ما بغيت');
-        else if (status === 'storage') idle('المساحة ما تكفي. فضّ مساحة وجرّب');
-        else if (status === 'conflict') idle(APK_ERRORS.INSTALLED_DIFFERENT_KEY);
-        else if (status !== 'success') idle('ما اكتمل التثبيت. جرّب مرة ثانية');
+        else if (status === 'storage') idle(`المساحة ما تكفي. فضّ مساحة وجرّب${why}`);
+        else if (status === 'conflict') idle(`أندرويد رفض التحديث لتعارض مع النسخة المثبتة${why}`);
+        else if (status !== 'success') idle(`ما اكتمل التثبيت${why}. جرّب مرة ثانية`);
       },
     });
     if (out.needsPermission) {
@@ -2205,14 +2206,22 @@ function toastNewNotifications() {
     else if (row.kind === 'REACTION' && majlisKind) {
       title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
       body = '';
-    } else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    } else if (row.kind === 'TOGETHER') title = togetherInvite(row, actor).title;
+    else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    // دعوة «مشاهدة معًا»: الضغط يدخل الغرفة لا صفحة العمل (بلاغ المالك)
+    const togetherCode = togetherInvite(row, actor)?.code ?? null;
     showToast({
       title,
       body,
       avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        if (frameId) void go({ name: 'frame', id: frameId });
+        if (togetherCode) {
+          // الضغط يدخلك الغرفة نفسها (كبطاقة الدعوة في الإشعارات والمجلس)، لا صفحة العمل
+          screenV35(null);
+          const invite = sync.rows('together_invites', (x) => x.code === togetherCode)[0] ?? null;
+          void v35?.together?.joinByCode?.(togetherCode, invite);
+        } else if (frameId) void go({ name: 'frame', id: frameId });
         else if (majlisKind) void go({ name: 'majlis' });
         else if (row.series_ref) {
           screenV35(null);
