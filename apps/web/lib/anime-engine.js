@@ -633,6 +633,20 @@ export async function pick(session, route) {
 }
 
 /** يفتح المشغّل الأصلي على جلسة مجهّزة (والسيرفر المختار إن وُجد). */
+/**
+ * سياق ترجمات الإضافات كما يمرّره open() للمشغّل: هوية الحلقة (مع IMDb والموسم) وقائمة إضافات الترجمة المثبتة.
+ * التنزيلات تستعمله لتحفظ الترجمات الخارجية نفسها بجانب الملف (العربية أولًا).
+ */
+export async function subtitleContext(identity) {
+  let subtitleIdentity = identity ?? null;
+  try { if (subtitleIdentity) subtitleIdentity = await withImdbEpisode(subtitleIdentity); } catch { /* الهوية كما هي */ }
+  let addonSubtitleProviders = [];
+  if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
+    try { const a = await getAddonRuntime(); await a.ready; addonSubtitleProviders = a.nativeSubtitleProviders(); } catch { /* بلا إضافات ترجمة */ }
+  }
+  return { subtitleIdentity, addonSubtitleProviders };
+}
+
 export async function open(args) {
   const plugin = bridge();
   if (!plugin) return null;

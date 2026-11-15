@@ -189,6 +189,63 @@ class TorrentEngine internal constructor(
         tickets[token] = Ticket(request)
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
+    /** طلب التورنت خلف تذكرة تشغيل (`vantara-torrent://…`): للتنزيل الدائم من الاختيار نفسه. */
+    fun requestOf(uri: Uri): TorrentRequest? =
+        if (uri.scheme == SCHEME && uri.path == "/file") uri.host?.let(tickets::get)?.request else null
+
+    /** تقدّم تنزيل تورنت دائم: بايتات الملف المطلوب، المشاركون، والقطع المتحقق منها. */
+    data class PermanentProgress(val done: Long, val total: Long, val peers: Int, val rate: Long, val pieces: Int, val piecesTotal: Int, val file: String?)
+
+    /**
+     * تنزيل دائم (التحميلات): ملف واحد من التورنت كاملًا إلى [dest] — مجلد التحميلات لا كاش البث.
+     *
+     * نفس جلسة libtorrent (DHT وحظر العناوين الداخلية نفسها)، لكن بلا نافذة بث ولا إخلاء قطع: كل قطع الملف
+     * المختار بأولوية عادية وبقية ملفات التورنت IGNORE. libtorrent يتحقق من بصمة كل قطعة قبل عدّها، وعند
+     * الإضافة فوق بيانات موجودة يفحصها ويكمل من الصالح (الاستئناف). عند الاكتمال يُزال من الجلسة والملف باقٍ.
+     * التورنت نفسه وهو يُشغَّل بثًا لا يُضاف مرتين: TORRENT_BUSY بسبب واضح.
+     */
+    fun downloadPermanent(request: TorrentRequest, dest: File, cancelled: () -> Boolean, progress: (PermanentProgress) -> Unit): File {
+        check(!shutdown.get()) { "Torrent engine is closed" }
+        val hash = request.infoHash
+        if (states.containsKey(hash)) throw IOException("TORRENT_BUSY")
+        dest.mkdirs()
+        var handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid }
+        if (handle == null) {
+            manager.download(request.magnetUri(), dest, com.frostwire.jlibtorrent.swig.torrent_flags_t())
+            handle = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") { manager.find(Sha1Hash(hash))?.takeIf { it.isValid } }
+        }
+        val h = handle!!
+        try {
+            runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED); h.resume() }
+            val info = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { h.torrentFile()?.takeIf { it.isValid } }
+            val files = info.files()
+            val index = request.fileIdx?.takeIf { it in 0 until files.numFiles() }
+                ?: (0 until files.numFiles()).maxByOrNull { files.fileSize(it) } ?: throw IOException("Torrent has no files")
+            h.prioritizeFiles(Array(files.numFiles()) { if (it == index) Priority.DEFAULT else Priority.IGNORE })
+            val name = files.filePath(index)
+            var lastDone = -1L
+            var stalledSince = System.currentTimeMillis()
+            while (true) {
+                if (cancelled() || Thread.currentThread().isInterrupted) {
+                    runCatching { h.pause() }
+                    throw InterruptedIOException("Torrent download cancelled")
+                }
+                val st = h.status()
+                val done = st.totalWantedDone()
+                val total = st.totalWanted()
+                progress(PermanentProgress(done, total, st.numPeers(), st.downloadPayloadRate().toLong(), st.numPieces(), info.numPieces(), name))
+                if (total > 0 && done >= total && st.isFinished) break
+                if (done != lastDone) { lastDone = done; stalledSince = System.currentTimeMillis() }
+                else if (System.currentTimeMillis() - stalledSince > PERMANENT_STALL_MS) throw IOException(if (st.numPeers() == 0) "NO_PEERS" else "TORRENT_STALLED")
+                try { Thread.sleep(1000) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent download interrupted") }
+            }
+            return File(dest, name)
+        } finally {
+            // الملف يبقى في مجلده؛ الجلسة لا تحتفظ بالتورنت بعد انتهاء العمل أو إيقافه (يُستأنف بإضافته من جديد وفحص قطعه)
+            runCatching { manager.remove(h) }
+        }
+    }
+
     fun release(uri: Uri) {
         val hash = uri.host?.let(tickets::remove)?.request?.infoHash ?: return
         // تذكرة أُغلقت جلستها: أوقف تسخينها المسبق إن لم تعد له تذكرة أخرى
@@ -708,6 +765,8 @@ class TorrentEngine internal constructor(
     }
     private fun allocatedBytes(folder: File): Long = folder.walkTopDown().filter { it.isFile }.sumOf { runCatching { Os.stat(it.path).st_blocks * 512L }.getOrDefault(it.length()) }
     companion object {
+        /** تنزيل دائم بلا أي تقدّم ثلاث دقائق: يُبلَّغ بسببه (لا مشاركين) بدل انتظار بلا نهاية. */
+        const val PERMANENT_STALL_MS = 3 * 60_000L
         const val SCHEME = "vantara-torrent"
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024

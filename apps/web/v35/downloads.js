@@ -326,6 +326,7 @@ export function createDownloadsUI(deps) {
       out.push(el('span', 'dl-break'));
       const speed = formatSpeed(item.speed);
       if (speed) out.push(ltr(el, speed, 'dl-speed'));
+      if (item.torrent) out.push(el('span', null, `${item.torrent.peers} ${item.torrent.peers === 1 ? 'مشارك' : 'مشاركين'}`));
       const eta = item.kind === 'manga' ? null : formatEta(etaSeconds({ done: item.bytes, total: item.total, rate: item.speed, stable: item.stable }));
       if (eta) out.push(el('span', 'dl-eta', `متبقٍ ${eta.replace(/^نحو /, 'نحو ')}`));
     }
@@ -605,6 +606,12 @@ export function createDownloadsUI(deps) {
           ['الترميز', media.codec ?? null, true],
           ['مسارات الصوت', media.audio?.length ? media.audio.map((a) => (typeof a === 'string' ? a : `${a.lang}${a.saved === false ? ' (لم يُحفظ)' : ''}`)).join('، ') : null],
           ['الترجمات', media.subtitles?.length ? media.subtitles.map((s) => (typeof s === 'string' ? s : `${s.lang}${s.saved === false ? ' (لم تُحفظ)' : ''}`)).join('، ') : null],
+        ]],
+        ['التورنت', item.transport !== 'torrent' ? [] : [
+          ['المشاركون المتصلون', item.torrent ? String(item.torrent.peers) : null, true],
+          ['القطع المكتملة', item.torrent?.piecesTotal ? `${item.torrent.pieces} / ${item.torrent.piecesTotal}` : null, true],
+          ['فحص القطع', 'كل قطعة تُطابَق ببصمتها قبل عدّها'],
+          ['الحالة', STATE_LABEL[item.state] ?? item.state],
         ]],
         ['التخزين', [
           ['المكان', item.storage?.location ?? (item.kind === 'manga' ? 'مخزن التطبيق على هذا الجهاز' : null)],

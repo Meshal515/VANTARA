@@ -140,7 +140,12 @@ export function createVideoDriver(deps) {
       ctl.signal.addEventListener('abort', onAbort, { once: true });
       const listener = (e) => {
         if (e?.id !== item.id) return;
-        if (e.state === 'downloading') ctl.progress({ bytes: e.bytes ?? 0, total: e.total > 0 ? e.total : null });
+        if (e.state === 'downloading') ctl.progress({
+          bytes: e.bytes ?? 0,
+          total: e.total > 0 ? e.total : null,
+          // التورنت: المشاركون والقطع المتحقق من بصمتها (segmentsDone للقطع في محرك التورنت)
+          ...(item.transport === 'torrent' || e.peers > 0 ? { torrent: { peers: e.peers ?? 0, pieces: e.segmentsDone ?? 0, piecesTotal: e.segmentsTotal ?? 0 } } : {}),
+        });
         else if (e.state === 'reconnecting' || e.state === 'verifying') ctl.update({ state: e.state, bytes: e.bytes ?? item.bytes });
         else if (e.state === 'ready' || e.state === 'failed' || e.state === 'expired') {
           ctl.signal.removeEventListener('abort', onAbort);
@@ -190,7 +195,10 @@ export function createVideoDriver(deps) {
             total: info.size > 0 ? info.size : current.total ?? null,
             media: { container: info.container ?? null, quality: route.quality ?? info.quality ?? null, codec: info.codec ?? null, audio: info.audio ?? [], subtitles: info.subtitles ?? [] },
           });
+          // ترجمات الإضافات المثبتة (العربية أولًا) تُحفظ بجانب الملف: نفس ما يجلبه المشغّل أونلاين
+          const subs = await engine.subtitleContext?.(current.request.identity).catch?.(() => null) ?? null;
           await native.start({
+            ...(subs?.subtitleIdentity ? { subtitleIdentity: subs.subtitleIdentity, addonSubtitleProviders: subs.addonSubtitleProviders ?? [], episode: current.request.episode ?? 1 } : {}),
             id: current.id,
             session,
             candidate,

@@ -76,8 +76,9 @@ class DownloadService : Service() {
         if (running.containsKey(job.id)) return
         val store = store(this)
         val transfers = Transfers { url, headers -> clientFor(job, url, headers) }
-        val runner = DownloadRunner(store, transfers)
         val handle = Running(transfers)
+        val runner = DownloadRunner(store, transfers, torrent = { j, dest, onProgress -> torrentDownload(j, dest, handle, onProgress) },
+            addonSubtitles = { j -> addonSubtitles(j) })
         running[job.id] = handle
         handle.job = scope.launch {
             try {
@@ -112,6 +113,52 @@ class DownloadService : Service() {
         }
     }
 
+    /** تنزيل تورنت دائم بمحرك التطبيق نفسه، وإيقافه بإشارة الإلغاء نفسها. */
+    private fun torrentDownload(job: DownloadJob, dest: java.io.File, handle: Running, onProgress: (DownloadJob) -> Unit): java.io.File {
+        val hash = job.torrentHash ?: throw DownloadFailure("SOURCE", "تورنت بلا بصمة")
+        val request = com.vantara.addons.torrent.TorrentRequest(hash, job.torrentFile, emptyList(), job.torrentMagnet)
+        val engine = com.vantara.addons.torrent.TorrentEngine.get(this)
+        if (!com.vantara.addons.torrent.TorrentEngine.nativeAvailable()) throw DownloadFailure("UNSUPPORTED", "محرك التورنت غير متاح لمعمارية هذا الجهاز")
+        var current = job
+        try {
+            return engine.downloadPermanent(request, dest, cancelled = { handle.cancelled }) { p ->
+                current = current.copy(bytes = p.done, total = p.total, peers = p.peers, segmentsDone = p.pieces, segmentsTotal = p.piecesTotal)
+                onProgress(current)
+            }
+        } catch (e: java.io.InterruptedIOException) {
+            throw Transfers.Cancelled()
+        } catch (e: java.io.IOException) {
+            throw when (e.message) {
+                "TORRENT_BUSY" -> DownloadFailure("SOURCE", "هذا التورنت يُشغَّل الآن؛ أغلق المشغّل ثم أعد المحاولة")
+                "NO_PEERS" -> DownloadFailure("NETWORK", "لا مشاركين في التورنت الآن")
+                else -> DownloadFailure("NETWORK", e.message ?: "انقطع التورنت")
+            }
+        }
+    }
+
+    /**
+     * ترجمات الإضافات المثبتة بنفس مسار المشغّل (SubtitleProviders.discover + RemoteAddonClient): العربية أولًا (حتى 3)
+     * ثم إنجليزية واحدة. النص يُقرأ بفك ترميز العربية القديم (windows-1256) ويُحفظ UTF-8، والتوقيت كما هو.
+     */
+    private fun addonSubtitles(job: DownloadJob): List<Triple<String, String, String>> {
+        val providers = com.vantara.addons.SubtitleProviders.providers(job.subtitleProviders)
+        if (providers.isEmpty() || com.vantara.addons.SubtitleProviders.videoId(job.subtitleIdentity, job.episode) == null) return emptyList()
+        val client = com.vantara.addons.nativeAddonClient(this)
+        val found = providers.flatMap { p -> runCatching { com.vantara.addons.SubtitleProviders.discover(client, p, job.subtitleIdentity, job.episode, "download-${job.id}-${p.key}") }.getOrDefault(emptyList()) }
+        val chosen = found.filter { it.lang == "ar" }.distinctBy { it.url }.take(3) + found.filter { it.lang == "en" }.take(1)
+        return chosen.mapIndexedNotNull { i, t ->
+            val text = runCatching { client.request(t.url, "download-${job.id}-sub-$i", fallbackCharset = if (t.lang == "ar") "windows-1256" else null) }.getOrNull()
+            if (text.isNullOrBlank()) return@mapIndexedNotNull null
+            val head = text.trimStart().take(40)
+            val ext = when {
+                head.startsWith("WEBVTT") -> "vtt"
+                head.startsWith("[Script Info]", true) -> "ass"
+                else -> "srt"
+            }
+            Triple(t.lang, text, ext)
+        }
+    }
+
     private fun emit(job: DownloadJob) {
         progress[job.id] = job
         listeners.forEach { runCatching { it(job) } }
@@ -128,12 +175,13 @@ class DownloadService : Service() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
-        running.values.forEach { it.reason = "pause"; it.transfers.cancel() }
+        running.values.forEach { it.reason = "pause"; it.cancelled = true; it.transfers.cancel() }
         wakeLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()
     }
 
     private class Running(val transfers: Transfers) {
+        @Volatile var cancelled = false
         @Volatile var reason: String = "pause"
         var job: Job? = null
     }
@@ -172,7 +220,7 @@ class DownloadService : Service() {
         /** إيقاف مؤقت (يبقى الجزئي) أو إلغاء (يُحذف). */
         fun stop(id: String, reason: String) {
             pending.removeAll { it.id == id }
-            running[id]?.let { it.reason = reason; it.transfers.cancel() }
+            running[id]?.let { it.reason = reason; it.cancelled = true; it.transfers.cancel() }
         }
 
         private fun channels(context: Context) {

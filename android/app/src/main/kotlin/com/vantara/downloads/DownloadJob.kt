@@ -17,7 +17,7 @@ data class DownloadJob(
     val sourceKey: String,
     val url: String,
     val headers: Map<String, String> = emptyMap(),
-    /** HLS أو FILE (MP4/MKV/WebM مباشر). */
+    /** HLS أو FILE (MP4/MKV/WebM مباشر) أو TORRENT (ملف من تورنت، يُحفظ كاملًا). */
     val kind: String,
     val sourceId: String = "",
     val quality: Int? = null,
@@ -40,6 +40,16 @@ data class DownloadJob(
     val verified: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    /** التورنت: البصمة ورقم الملف والرابط بمتتبّعاته — يكفي لإعادة الإضافة والاستئناف بعد إعادة التشغيل. */
+    val torrentHash: String? = null,
+    val torrentFile: Int? = null,
+    val torrentMagnet: String? = null,
+    val peers: Int = 0,
+    /** ترجمات الإضافات: هوية الحلقة وقائمة الإضافات (JSON كما يمرّرها المشغّل) ورقم الحلقة. */
+    val subtitleIdentity: String? = null,
+    val subtitleProviders: String? = null,
+    val episode: Float = 1f,
+    val addonSubtitlesDone: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val finishedAt: Long? = null,
 )

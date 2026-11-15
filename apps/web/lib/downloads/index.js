@@ -35,7 +35,8 @@ export function capabilities(g = globalThis) {
     platform,
     manga: Boolean(g?.indexedDB),
     video: Boolean(native),
-    torrent: Boolean(native) && platform === 'android' && g?.__vantaraTorrentDownloads === true,
+    // التورنت يُحفظ كاملًا بمحرك libtorrent في التطبيق (Android)؛ ويندوز لاحقًا بمحركه
+    torrent: Boolean(native) && platform === 'android',
   };
 }
 

@@ -62,7 +62,7 @@ class DownloadsPlugin : Plugin() {
     private fun event(job: DownloadJob) = JSObject()
         .put("id", job.id).put("state", job.state).put("bytes", job.bytes).put("total", job.total)
         .put("segmentsDone", job.segmentsDone).put("segmentsTotal", job.segmentsTotal)
-        .put("code", job.error).put("message", job.message).put("verified", job.verified)
+        .put("code", job.error).put("message", job.message).put("verified", job.verified).put("peers", job.peers)
         .apply {
             if (job.state == "ready") {
                 val dir = DownloadService.store(context).dir(job.id)
@@ -89,7 +89,7 @@ class DownloadsPlugin : Plugin() {
     @PluginMethod
     fun capabilities(call: PluginCall) {
         val root = DownloadService.root(context).apply { mkdirs() }
-        call.resolve(JSObject().put("video", true).put("torrent", false)
+        call.resolve(JSObject().put("video", true).put("torrent", com.vantara.addons.torrent.TorrentEngine.nativeAvailable())
             .put("freeBytes", Transfers.freeBytes(root)).put("location", "Android/data/${context.packageName}/files/VANTARA/Downloads"))
     }
 
@@ -97,6 +97,12 @@ class DownloadsPlugin : Plugin() {
         engine.prepared(session)?.candidate(id) ?: engine.session(session)?.let { engine.sessionCandidate(it, id) }
 
     private fun isTorrent(c: Candidate) = c.url.startsWith("vantara-torrent:") || c.url.startsWith("magnet:")
+
+    /** طلب التورنت من المرشّح: تذكرة البث (من الإضافة) أو رابط magnet مباشر. */
+    private fun torrentRequest(c: Candidate): com.vantara.addons.torrent.TorrentRequest? = runCatching {
+        if (c.url.startsWith("magnet:")) com.vantara.anime.stream.MagnetLinks.request(c.url)
+        else com.vantara.addons.torrent.TorrentEngine.get(context).requestOf(android.net.Uri.parse(c.url))
+    }.getOrNull()
 
     /** فحص المرشّح قبل التنزيل. لا يكتب شيئًا على القرص. */
     @PluginMethod
@@ -109,9 +115,13 @@ class DownloadsPlugin : Plugin() {
                 val out = JSObject().put("quality", c.quality).put("sourceId", c.sourceId)
                     .put("subtitles", JSArray(c.subtitles.map { it.lang })).put("audio", JSArray(c.audio.map { it.lang }))
                 if (isTorrent(c)) {
-                    // تنزيل التورنت الكامل لم يُفعَّل بعد في محرك الحفظ: يُقال ذلك صراحة
-                    call.resolve(out.put("container", "TORRENT").put("transport", "torrent").put("supported", false)
-                        .put("reason", "تنزيل التورنت الكامل غير مفعّل في هذه النسخة"))
+                    val request = torrentRequest(c)
+                    if (request == null || !com.vantara.addons.torrent.TorrentEngine.nativeAvailable()) {
+                        call.resolve(out.put("container", "UNKNOWN").put("error", "UNSUPPORTED").put("reason", "محرك التورنت غير متاح لهذا الاختيار على هذا الجهاز"))
+                        return@launch
+                    }
+                    // الحجم يُعرف من بيانات التورنت عند البدء؛ القطع يُتحقق منها ويُستأنف منها
+                    call.resolve(out.put("container", "TORRENT").put("transport", "torrent").put("resumable", true).put("size", c.videoSize ?: -1))
                     return@launch
                 }
                 val transfers = Transfers { url, headers -> DownloadService.clientFor(job(c, "inspect"), url, headers) }
@@ -174,15 +184,25 @@ class DownloadsPlugin : Plugin() {
         val candidateId = call.getString("candidate") ?: return call.reject("candidate مطلوب")
         val sourceKey = call.getString("sourceKey") ?: return call.reject("sourceKey مطلوب")
         val c = candidateOf(session, candidateId) ?: return call.reject("انتهت جلسة السيرفر")
-        if (isTorrent(c)) return call.reject("تنزيل التورنت الكامل غير مفعّل في هذه النسخة", "UNSUPPORTED")
         val store = DownloadService.store(context)
-        val fresh = job(c, id, sourceKey, call.getString("title").orEmpty(), call.getString("label").orEmpty(), call.getString("section") ?: "anime")
+        var fresh = job(c, id, sourceKey, call.getString("title").orEmpty(), call.getString("label").orEmpty(), call.getString("section") ?: "anime")
+        fresh = fresh.copy(
+            subtitleIdentity = call.getObject("subtitleIdentity")?.toString(),
+            subtitleProviders = call.getArray("addonSubtitleProviders")?.toString(),
+            episode = (call.getDouble("episode") ?: 1.0).toFloat(),
+        )
+        if (isTorrent(c)) {
+            val request = torrentRequest(c) ?: return call.reject("تعذّر قراءة التورنت من هذا الاختيار", "SOURCE")
+            fresh = fresh.copy(kind = "TORRENT", url = request.magnetUri(), headers = emptyMap(), torrentHash = request.infoHash,
+                torrentFile = request.fileIdx, torrentMagnet = request.magnetUri())
+        }
         val previous = runCatching { store.read(id) }.getOrNull()
         val next = when {
             previous == null -> fresh
             previous.sourceKey != sourceKey || previous.kind != fresh.kind -> { store.delete(id); fresh }
             // نفس السيرفر: الرابط والترويسات الجديدة، والتقدّم ومعرّفات الملف من السابق
             else -> previous.copy(url = fresh.url, headers = fresh.headers, subtitles = previous.subtitles.ifEmpty { fresh.subtitles },
+                subtitleIdentity = previous.subtitleIdentity ?: fresh.subtitleIdentity, subtitleProviders = previous.subtitleProviders ?: fresh.subtitleProviders,
                 audio = previous.audio.ifEmpty { fresh.audio }, state = "queued", error = null, message = null)
         }
         if (DownloadService.isRunning(id)) return call.resolve(JSObject().put("started", false).put("running", true))

@@ -11,6 +11,10 @@ import java.io.File
 class DownloadRunner(
     private val store: JobStore,
     private val transfers: Transfers,
+    /** محرك التورنت الدائم (TorrentEngine.downloadPermanent)؛ null حيث لا يتوفر (الاختبارات). */
+    private val torrent: ((DownloadJob, File, (DownloadJob) -> Unit) -> File)? = null,
+    /** ترجمات الإضافات المثبتة لهذه الحلقة: (اللغة، النص UTF-8، الامتداد). null حيث لا تتوفر. */
+    private val addonSubtitles: ((DownloadJob) -> List<Triple<String, String, String>>)? = null,
 ) {
     fun interface Listener { fun on(job: DownloadJob) }
 
@@ -31,13 +35,14 @@ class DownloadRunner(
         val dir = store.dir(job.id)
         job = when (job.kind) {
             "HLS" -> hls(job, dir, listener)
+            "TORRENT" -> torrentFile(job, dir, listener)
             else -> file(job, dir, listener)
         }
         job = sidecars(job, dir, listener)
         job = save(job.copy(state = "verifying"), listener)
         val main = job.main?.let { File(dir, it) }
         if (main == null || !main.isFile || main.length() <= 0) throw DownloadFailure("VERIFY", "الملف الرئيسي غير موجود بعد التنزيل")
-        if (job.kind != "HLS") {
+        if (job.kind == "FILE") {
             val head = main.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
             val sniffed = Signatures.sniff(head)
             if (sniffed == "PAGE" || sniffed == "HLS" || sniffed == "UNKNOWN") throw DownloadFailure("VERIFY", "المحفوظ ليس ملف فيديو ($sniffed)")
@@ -45,6 +50,17 @@ class DownloadRunner(
         }
         val size = store.sizeOnDisk(job.id)
         return save(job.copy(state = "ready", verified = true, bytes = size, total = size, finishedAt = System.currentTimeMillis()), listener)
+    }
+
+    /** التورنت: الملف كاملًا في مجلد العنصر، وكل قطعة متحقق من بصمتها قبل عدّها. */
+    private fun torrentFile(start: DownloadJob, dir: File, listener: Listener): DownloadJob {
+        val engine = torrent ?: throw DownloadFailure("UNSUPPORTED", "محرك التورنت غير متاح على هذا الجهاز")
+        var job = start
+        val out = engine(job, File(dir, "t")) { next -> job = next; save(job, listener, force = false) }
+        if (!out.isFile || out.length() <= 0) throw DownloadFailure("VERIFY", "ملف التورنت غير موجود بعد التنزيل")
+        val head = out.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
+        val container = Signatures.sniff(head).takeIf { it != "UNKNOWN" } ?: out.extension.uppercase()
+        return job.copy(main = out.relativeTo(dir).path, container = container, bytes = out.length(), total = out.length())
     }
 
     private fun file(start: DownloadJob, dir: File, listener: Listener): DownloadJob {
@@ -189,6 +205,15 @@ class DownloadRunner(
             runCatching { transfers.whole(a.url, job.headers, File(dir, name)) }.fold({ a.copy(file = name) }, { a })
         }
         job = job.copy(subtitles = subs, audio = audio)
+        // ترجمات الإضافات (OpenSubtitles وغيرها): نص UTF-8 بجانب الفيديو، فلا ينكسر ترميز العربية بلا إنترنت
+        if (!job.addonSubtitlesDone && addonSubtitles != null && job.subtitleProviders != null) {
+            val fetched = runCatching { addonSubtitles.invoke(job) }.getOrDefault(emptyList())
+            val saved = fetched.mapIndexedNotNull { i, (lang, text, ext) ->
+                val name = "addon-$i-$lang.$ext"
+                runCatching { File(dir, name).writeText(text, Charsets.UTF_8) }.getOrNull()?.let { Sidecar(url = "addon:$i", lang = lang, file = name) }
+            }
+            job = job.copy(subtitles = job.subtitles + saved, addonSubtitlesDone = true)
+        }
         store.write(job)
         listener.on(job)
         return job
