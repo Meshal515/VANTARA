@@ -291,7 +291,7 @@ export function readySources() {
 		remove: async (url) => {
 			if (url !== READY_REPOSITORY) throw new Error('معرّف القائمة غير صالح');
 			const plugin = required();
-			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث نسخة Debug لإزالة هذه القائمة');
+			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث التطبيق لإزالة هذه القائمة');
 			await plugin.removeReadySources();
 		},
 		extensions: () => items(),

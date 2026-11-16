@@ -107,12 +107,10 @@ class CloudflareInterceptor(
         }
 
         Log.i(TAG, "Cloudflare challenge detected for ${request.url.host}")
-        // A background request may report a challenge, never start a human UI.
-        // The coordinator opens its isolated browser only after an explicit tap.
-        if (classifyCloudflareRequest(response.code, response.header("Server"), response.header("cf-mitigated"), request.isImageRequest()) == CloudflareRequestKind.HUMAN_CHALLENGE) {
-            response.close()
-            throw interactiveError(request)
-        }
+        // CFI1: «cf-mitigated: challenge» كثيرًا ما يكون تحديًا يحلّه WebView مخفي وحده (Mihon يحاوله أولًا، وCloudStream
+        // يستعمل silentClearance نفسه). كان يُرمى فورًا «يحتاج إنسانًا» فيتطلب كل انتهاء لكوكي التحقق ضغطة يدوية.
+        // الحل الصامت لا يفتح واجهة؛ الإنسان فقط حين يفشل، ولا جلب بايتات أمام أداة تنتظر إنسانًا.
+        val humanChallenge = classifyCloudflareRequest(response.code, response.header("Server"), response.header("cf-mitigated"), request.isImageRequest()) == CloudflareRequestKind.HUMAN_CHALLENGE
         response.close()
 
         synchronized(solveLock) {
@@ -132,7 +130,7 @@ class CloudflareInterceptor(
 
             // Host previously found to be fingerprint-gated: skip the (useless)
             // cookie solve and fetch the bytes through the browser engine.
-            if (host in byteFetchHosts) {
+            if (!humanChallenge && host in byteFetchHosts) {
                 return byteFetchResponse(request) ?: throw cloudflareError(request)
             }
 
@@ -161,6 +159,8 @@ class CloudflareInterceptor(
                     SolveOutcome.NOT_A_CHALLENGE, SolveOutcome.TIMEOUT -> Unit
                 }
             }
+            // الحل الصامت لم ينجح لتحدٍّ يطلب إنسانًا: «تحتاج تحقق» كما كان
+            if (humanChallenge) throw interactiveError(request)
 
             // Fall back to fetching the resource through the WebView.
             val fetched = byteFetchResponse(request)

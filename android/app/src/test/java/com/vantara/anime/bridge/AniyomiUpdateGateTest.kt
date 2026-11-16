@@ -21,17 +21,29 @@ class AniyomiUpdateGateTest {
         }
         assertEquals(listOf("100","200","300"),visited)
     }
-    @Test fun aBrokenUpdatedSourceCannotPassPreflight() = runBlocking {
-        val visited=mutableListOf<String>()
+    @Test fun everySourceBrokenCannotPassPreflight() = runBlocking {
         try {
-            AniyomiUpdateGate.verify("old","new",listOf("100","200","300")) {
-                visited+=it
-                it!="200"
-            }
-            fail("An unusable updated source was admitted")
+            AniyomiUpdateGate.verify("old","new",listOf("100","200")) { false }
+            fail("An unusable update was admitted")
         } catch (expected: IllegalArgumentException) {
             assertTrue(expected.message.orEmpty().startsWith("ANIYOMI_UPDATE_PREFLIGHT_FAILED"))
-            assertEquals(listOf("100","200"),visited)
+        }
+    }
+    /** AU1: مصدر واحد سليم يكفي، والإخفاقات بسبب البيئة (Cloudflare، HLS مشفّر، magnet) لا ترفض الإصلاح. */
+    @Test fun oneWorkingSourceOrEnvironmentOnlyFailuresAdmitTheUpdate() = runBlocking {
+        AniyomiUpdateGate.verify("old","new",listOf("100","200","300")) { id ->
+            when (id) { "100" -> true; "200" -> error("ANIYOMI_UPDATE_CATALOGUE_EMPTY"); else -> throw IllegalStateException("CANDIDATE_MEDIA_UNVERIFIED", IllegalArgumentException("CANDIDATE_MEDIA_ENCRYPTED_UNVERIFIED")) }
+        }
+        AniyomiUpdateGate.verify("old","new",listOf("1","2")) { id ->
+            if (id == "1") throw IllegalArgumentException("Expected URL scheme 'http' or 'https' but was 'magnet'") else throw java.net.SocketTimeoutException()
+        }
+    }
+    @Test fun incompatibleCandidateCodeIsRejected() = runBlocking {
+        try {
+            AniyomiUpdateGate.verify("old","new",listOf("1","2")) { id -> if (id == "1") true else throw NoSuchMethodError("x") }
+            fail("Incompatible code admitted")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("RUNTIME_UPDATE_INCOMPATIBLE"))
         }
     }
 }

@@ -2,9 +2,9 @@ package com.vantara.anime.bridge
 
 /**
  * Aniyomi publisher updates cannot replace a working content-addressed APK based
- * only on signature, DexClassLoader, or factory registration. Every source in the
- * candidate must pass a bounded actual catalogue/details/episode/media journey before saving the new
- * metadata. On failure the old source IDs, user library and APK pointer remain.
+ * only on signature, DexClassLoader, or factory registration. Every source in the candidate runs a bounded
+ * catalogue/details/episode/media journey; [com.vantara.plugins.UpdatePreflight] decides. On failure the old
+ * source IDs, user library and APK pointer remain.
  */
 internal object AniyomiUpdateGate {
     suspend fun verify(
@@ -17,11 +17,22 @@ internal object AniyomiUpdateGate {
         require(sourceIds.isNotEmpty() && sourceIds.toSet().size == sourceIds.size) {
             "ANIYOMI_UPDATE_SOURCE_ID_INVALID"
         }
-        for (id in sourceIds) {
-            require(probe(id)) {
-                "ANIYOMI_UPDATE_PREFLIGHT_FAILED: candidate source $id is not usable"
+        // AU1: كل مصدر يُفحص، والقاعدة المشتركة (UpdatePreflight) تحكم: عدم توافق الكود يرفض، ومصدر ناجح واحد أو
+        // إخفاقات بسبب البيئة فقط (حجب، Cloudflare، HLS مشفّر، magnet، مهلة) تقبل. كان أي مصدر لا يُفحص يرفض للأبد.
+        val outcomes = sourceIds.map { id ->
+            try {
+                if (probe(id)) com.vantara.plugins.UpdatePreflight.Outcome.Passed
+                else com.vantara.plugins.UpdatePreflight.Outcome.Failed(IllegalStateException("candidate source $id is not usable"))
+            } catch (timedOut: kotlinx.coroutines.TimeoutCancellationException) {
+                com.vantara.plugins.UpdatePreflight.Outcome.Failed(timedOut)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                com.vantara.plugins.UpdatePreflight.Outcome.Failed(failure)
             }
         }
+        val verdict = com.vantara.plugins.UpdatePreflight.decide(outcomes)
+        require(verdict.accept) { "ANIYOMI_UPDATE_PREFLIGHT_FAILED: ${verdict.code}" }
     }
 
     /** The adapter is the real candidate APK, before any active metadata changes. */

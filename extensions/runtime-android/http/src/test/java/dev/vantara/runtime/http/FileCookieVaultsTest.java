@@ -65,4 +65,15 @@ public class FileCookieVaultsTest {
         vault.save(url,List.of(unrelated));
         assertTrue(vault.load(HttpUrl.get("https://other.example/")).isEmpty());
     }
+    /** FCV1 (تدقيق §16): كوكيز كل المضيفات في مخزن واحد للمصدر؛ عند 128 كان كل طلب يفشل للأبد. يُخلى الأقدم بدلها. */
+    @Test public void aFullVaultEvictsTheOldestInsteadOfFailingEveryRequestForever() {
+        var vaults=new FileCookieVaults(directory);var vault=vaults.forScope(owner());
+        for(int i=0;i<300;i++){HttpUrl host=HttpUrl.get("https://cdn"+i+".source.vantara.example/x");vault.save(host,List.of(Cookie.parse(host,"session"+i+"=v"+i+"; Path=/; Secure")));}
+        HttpUrl newest=HttpUrl.get("https://cdn299.source.vantara.example/x");
+        assertEquals("v299",new FileCookieVaults(directory).forScope(owner()).load(newest).get(0).value());
+        assertTrue(new FileCookieVaults(directory).forScope(owner()).load(HttpUrl.get("https://cdn0.source.vantara.example/x")).isEmpty());
+        // الطلب الحالي يحفظ كوكيه ولو امتلأ المخزن
+        vault.save(url,List.of(Cookie.parse(url,"clearance=fresh; Path=/; Secure")));
+        assertEquals("fresh",new FileCookieVaults(directory).forScope(owner()).load(url).get(0).value());
+    }
 }

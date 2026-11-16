@@ -135,7 +135,8 @@ export function groupEvents(events, canonical = null) {
     const key = `${e.section ?? ''}|${e.work}`;
     const g = byWork.get(key);
     if (!g) {
-      const group = { ...e, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [], units: new Set([`${e.season ?? ''}:${e.number}`]) };
+      // coverSource: المصدر الذي نشر الغلاف؛ يُطلب الغلاف بمحرّكه وترويساته، لا بمحرّك نسخة أخرى (أغلفة حروف)
+      const group = { ...e, coverSource: e.cover ? e.sources?.[0]?.s ?? null : null, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [], units: new Set([`${e.season ?? ''}:${e.number}`]) };
       byWork.set(key, group);
       out.push(group);
       continue;
@@ -143,7 +144,7 @@ export function groupEvents(events, canonical = null) {
     const sources=new Map(g.sources.map(s=>[s.s,s]));
     for(const s of e.sources??[])sources.set(s.s,{...s,...sources.get(s.s)});
     g.sources=[...sources.values()];
-    g.cover ??= e.cover;
+    if (!g.cover && e.cover) { g.cover = e.cover; g.coverSource = e.sources?.[0]?.s ?? null; }
     // نفس الفصل من مفتاحين قديمين (قبل التصحيح) لا يُعدّ مرتين
     const unit = `${e.season ?? ''}:${e.number}`;
     if (g.units.has(unit)) continue;

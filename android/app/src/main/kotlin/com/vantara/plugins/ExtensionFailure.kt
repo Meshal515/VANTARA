@@ -93,6 +93,10 @@ object ExtensionFailure {
         "OPERATION_TIMEOUT" to (Owner.SITE to TIMEOUT),
         "VERIFICATION_REQUIRED" to (Owner.SITE to "الموقع يطلب تحققًا (حماية Cloudflare)؛ افتح «تحتاج تحقق» في الإضافات"),
         "NO_VIDEO_LINKS" to (Owner.EXTENSION to "المصدر لم يُرجع روابط تشغيل لهذه الحلقة"),
+        // RH8 وAU1: رفض تحديث إضافة سببه الإصدار نفسه لا VANTARA
+        "RUNTIME_UPDATE_PREFLIGHT_FAILED" to (Owner.EXTENSION to "الإصدار الجديد لم يُشغّل أي مصدر في الحزمة؛ بقيت النسخة الحالية"),
+        "RUNTIME_UPDATE_PREFLIGHT_TIMEOUT" to (Owner.SITE to "مواقع الإضافة لم ترد أثناء فحص التحديث؛ أعد المحاولة لاحقًا"),
+        "RUNTIME_UPDATE_INCOMPATIBLE" to (Owner.EXTENSION to "الإصدار الجديد غير متوافق مع محرك التطبيق؛ بقيت النسخة الحالية"),
         "NO_SEARCH_RESULT" to (Owner.EXTENSION to "الإضافة لم تُرجع نتيجة للبحث"),
         "NO_DETAIL_RESULT" to (Owner.EXTENSION to "الإضافة لم تُرجع تفاصيل هذا العمل"),
         "NO_CATALOGUE_RESULT" to (Owner.EXTENSION to "الإضافة لم تُرجع صفحة الكتالوج"),

@@ -790,3 +790,40 @@ it('الويب: مصدر مانجا مدمج سابقًا يُحذف من الص
  expect(entitlement.choosePackage).toHaveBeenCalledWith(pkg,false);
  view.close();
 });
+
+it('audit §14 AV7 + owner rule: a 1000-extension repository paints with one registry snapshot, Arabic first, specialized adult sources gone', async () => {
+  setup();
+  const items = Array.from({ length: 1000 }, (_, i) => ({ name: `Source ${i}`, pkg: `eu.kanade.tachiyomi.extension.en.s${i}`, lang: 'en', version: '1.0' }));
+  items.splice(500, 0, { name: 'Team X', pkg: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', version: '1.0' });
+  items.splice(10, 0, { name: 'NHentai', pkg: 'eu.kanade.tachiyomi.extension.all.nhentai', lang: 'all', nsfw: 1 });
+  items.splice(20, 0, { name: 'MangaDex', pkg: 'eu.kanade.tachiyomi.extension.all.mangadex', lang: 'all', nsfw: 1 });
+  const installed = Array.from({ length: 47 }, (_, i) => ({ key: `k${i}`, pkg: `p${i}`, name: `I${i}` }));
+  let calls = 0;
+  const reg = { runtimeName: 'apk', list: () => { calls++; return installed; } };
+  const api = { list: async () => ({ repos: [{ name: 'Keiyoushi', url: 'https://repo.example/index.min.json' }] }), extensions: async () => items };
+  const view = renderV7Addons({ registry: reg, repositories: api }); await tick(); browse(view); await tick();
+  const names = [...view.querySelectorAll('.v7-body .v7-row')].map((r) => r.textContent);
+  expect(names[0]).toContain('Team X');
+  expect(names[1]).toContain('MangaDex');
+  expect(names.some((t) => t.includes('NHentai'))).toBe(false);
+  calls = 0;
+  view.querySelector('.v7-search, input[type="search"], input')?.dispatchEvent(new window.Event('input'));
+  await tick();
+  // كان: نداءان لكل صف (أكثر من 2000)؛ الآن لقطة واحدة لكل رسمة
+  expect(calls).toBeLessThan(10);
+  view.close();
+});
+
+it('audit §13 RS1: «استعادة» on a formerly bundled source restores it instead of opening a missing package', async () => {
+  setup();
+  const install = vi.fn(async () => {}); const open = vi.fn();
+  const item = { pkg: 'eu.kanade.tachiyomi.extension.all.mangafire', name: 'MangaFire', lang: 'all', version: '1.4', builtin: true, formerlyBundled: true, selected: true, pendingRestore: true, installed: null };
+  const api = { list: async () => ({ repos: [{ name: 'مصادر جاهزة', url: 'vantara:ready-sources' }], installed: [], pending: [item] }), extensions: async () => [item], install };
+  const view = renderV7Addons({ registry: registry(), repositories: api, onOpenNativeSource: open }); await tick(); browse(view); await tick();
+  const flip = [...view.querySelectorAll('.v7-body .v7-flip')].find((b) => (b.getAttribute('aria-label') || '').includes('MangaFire'));
+  expect(flip.getAttribute('aria-label')).toContain('استعادة');
+  flip.click(); await tick();
+  expect(open).not.toHaveBeenCalled();
+  expect(install).toHaveBeenCalled();
+  view.close();
+});

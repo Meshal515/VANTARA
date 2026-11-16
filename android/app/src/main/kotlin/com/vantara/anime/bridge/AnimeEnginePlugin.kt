@@ -520,7 +520,8 @@ class AnimeEnginePlugin : Plugin() {
                 // Updates are never promoted solely because the APK and its factory load.
                 // Probe each actual candidate source while the old metadata and APK pointer
                 // still refer to the working revision. No user library rows are changed here.
-                kotlinx.coroutines.withTimeout(90_000L) {
+                // مهلة لكل مصدر (60 ث داخل الفحص) لا للحزمة كلها (AU1): حزمة بعدة مصادر لا تُرفض لأنها كبيرة
+                kotlinx.coroutines.withTimeout(publisherSources.size.coerceAtLeast(1) * 70_000L) {
                     AniyomiUpdateGate.verify(previous?.sha256, com.vantara.plugins.sha256Hex(bytes),
                         publisherSources.map { it.id }) { sourceId ->
                         val candidateSource = actual.single { it.id.toString() == sourceId }

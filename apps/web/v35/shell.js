@@ -588,15 +588,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * عقد نُزعت من الصفحة قبل أن تقترب (قائمة أُعيد رسمها) لا تبقى منتظرة ولا مراقبة (#311 D-016): تُكنس حين
    * تكبر الخريطة، فتبقى محدودة بما في الصفحة فعلًا.
    */
+  // البطاقة تطلب غلافها قبل إلحاقها بالقائمة (updates-view وinsights): كنسها في اللحظة نفسها كان يحذف بطاقات الدفعة
+  // التي لم تُلحق بعد، فيبقى هيكلها فارغًا للأبد حتى تخرج وترجع (ST1، وصور المالك 16 نوفمبر). يُكنس فقط ما بقي
+  // منزوعًا بعد مهلة: المنزوعة فعلًا من قائمة أُعيد رسمها، لا المبنية الآن.
+  const registeredAt = new WeakMap();
+  const DETACHED_GRACE_MS = 10_000;
   const sweepDetached = (map, release) => {
     if (map.size < 120) return;
-    for (const node of [...map.keys()]) if (!node.isConnected) { map.delete(node); release?.(node); }
+    const now = Date.now();
+    for (const node of [...map.keys()]) {
+      if (node.isConnected || now - (registeredAt.get(node) ?? 0) < DETACHED_GRACE_MS) continue;
+      map.delete(node); release?.(node);
+    }
   };
   function nearViewport(node) {
     if (!nearObserver) return Promise.resolve();
     return new Promise((resolve) => {
       nearWaiters.get(node)?.();
       sweepDetached(nearWaiters, (n) => nearObserver.unobserve(n));
+      registeredAt.set(node, Date.now());
       nearWaiters.set(node, resolve);
       nearObserver.observe(node);
     });
@@ -651,7 +661,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       // ثمانية أعمال تُحسم في آنٍ: الشبكة تحمّل 30 غلافًا بالتوازي في ربع ثانية، وثلاثة فقط كانت تجعل قائمة من
       // ثلاثين تنتظر عشر جولات متتالية
-      if (artActive < 8) void run();
+      // 16 لا 8: كل حسم ينتظر الرسمي حتى 6 ث، وطلب AniList يجمع 20 عنوانًا، فثمانية كانت تجعل شاشة من ثلاثين غلافًا
+      // تنتظر أربع جولات متتالية (حتى 24 ثانية في «آخر التحديثات»، بلاغ المالك 16 نوفمبر)
+      if (artActive < 16) void run();
       else artWaiting.push(run);
     });
   }
@@ -815,7 +827,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();
-  const waitCover = (container, work) => { sweepDetached(waitingCovers); waitingCovers.set(container, work); };
+  const waitCover = (container, work) => { sweepDetached(waitingCovers); registeredAt.set(container, Date.now()); waitingCovers.set(container, work); };
   onCoverKnown((workId, url) => {
     for (const [container, work] of waitingCovers) {
       if (!container.isConnected) {
@@ -962,6 +974,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     setMeta(m, meta ?? latestLabel(work));
     const facts = el('div', 'work-facts');
     facts.append(score);
+    // عمل بلا نسخة عربية: وسم لغته بصدق («إنجليزي»، «ياباني»…)؛ العربي بلا وسم (قرار المالك، 16 نوفمبر)
+    if (work.foreignLang) facts.append(el('span', 'work-lang', work.foreignLang));
     void mountImage(p, work);
     a.append(frame, t, m, facts);
     if (work._viewAt) a.append(el('div', 'work-when', `آخر قراءة ${agoAr(work._viewAt)}`));
@@ -1052,7 +1066,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (entitlement().state === 'unknown') return null;
     if (section === 'manga') {
       const list = await engine.sources().catch(() => null);
-      return list ? list.filter((s) => !s.filler).length : null;
+      // إضافة غير عربية ثبّتها المستخدم تقرأ فعلًا: تُعدّ، فلا يُقال «أضف مصدرًا» وهي موجودة (UE10)
+      return list ? list.length : null;
     }
     const addons = await getAddonRuntime().catch(() => null);
     if (!addons) return null;
@@ -3053,7 +3068,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const t = el('span', 't');
     const b = el('b', null, plainChapterName(name) ? `الفصل ${chapterNumberText(r)}` : name);
     b.dir = 'auto';
-    t.append(b, el('span', null, [when, r.chapter.scanlator].filter(Boolean).join(' · ')));
+    t.append(b, el('span', null, [r.langLabel, when, r.chapter.scanlator].filter(Boolean).join(' · ')));
     open.append(num, t);
     const picked = Boolean(state.marking?.picked.has(chapterKeyOf(String(w.id), r)));
     if (state.marking) {
@@ -3079,7 +3094,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     open.type = 'button';
     const num = el('b', 'mw-cell-n', chapterNumberText(r));
     num.dir = 'ltr';
-    open.append(num, el('small', 'mw-cell-t', dateLabel(r.chapter?.dateUpload) || ' '));
+    // فصل من نسخة غير عربية: لغته بدل التاريخ («إنجليزي»)، والعربي كما هو
+    open.append(num, el('small', 'mw-cell-t', r.langLabel || dateLabel(r.chapter?.dateUpload) || ' '));
     const mark = el('button', 'mw-cell-mark');
     mark.type = 'button';
     let on = isRead;
@@ -4662,8 +4678,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
     const snapshot = createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) });
-    // حارس أخير في البحث: عمل بلا نسخة عربية واحدة، أو للكبار، لا يظهر مهما كان مساره
-    const arabicOnly = (items) => items.filter((w) => !w._work || ((w._work.editions ?? []).some((e) => !isFiller(e.sourceId) && (!String(e.sourceId).includes('#') || /\.ar\./.test(String(e.sourceId)))) && !isAdult(w._work)));
+    // حارس أخير في البحث: عمل للكبار لا يظهر مهما كان مساره. عمل بلا نسخة عربية يظهر بوسم لغته (قرار المالك، 16 نوفمبر)
+    const arabicOnly = (items) => items.filter((w) => !w._work || !isAdult(w._work));
     const paintSnapshot = (items) => {
       renderGrid(grid, snapshot.accept(arabicOnly(items)));
       let refresh = grid.parentNode?.querySelector('.search-refresh');
@@ -5179,7 +5195,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if(run!==addonViewGeneration || currentPage()!=='utility' || (sync.user?.userId??'local')!==profile)return; resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if((sync.user?.userId??'local')!==profile)return; /* SRC2: المصدر المثبت يدخل البحث وصفحة العمل ولو غادرت صفحة الإضافات قبل الإشعار؛ إعادة فتحها فقط إن بقيت فيها */ resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run!==addonViewGeneration || currentPage()!=='utility')return; if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
   }

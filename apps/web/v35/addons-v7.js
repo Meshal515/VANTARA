@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { adultSource } from '../lib/adult-filter.js';
 
 /* VANTARA V7 live add-on manager.
  * Presentation only: no migration, reset, deletion, or replacement of stored data.
@@ -237,6 +238,13 @@ export function renderV7Addons({
     return [kindName(a),a.arabic||code==="ar"?"العربية":(LANG_AR[code]??code)].filter(Boolean).join(" · ");
   }
   const diagnosticKey=a=>JSON.stringify([a._store?.id,a.key||a.pkg||a.id||a.domain,a.version,a.cacheEpoch]);
+  // AV7: registry.list() يبني كل الإضافات المثبتة بنسخ عميق؛ كان يُنادى مرتين لكل صف (آلاف النداءات في مستودع كبير).
+  // لقطة واحدة لكل رسمة متزامنة، تسقط بعد انتهائها فتبقى البيانات حية.
+  let listSnapshot=null;
+  function registryList(){
+    if(!listSnapshot){listSnapshot=registry.list?.()||[];queueMicrotask(()=>{listSnapshot=null;});}
+    return listSnapshot;
+  }
   function installedState(a){
     if(sourceChallenges(a).length)return {state:"attention",label:"تحتاج انتباه",detail:"المصدر يحتاج تحققًا."};
     if(a.enabled===false)return {state:"attention",label:"تحتاج انتباه",detail:"الإضافة معطلة."};
@@ -247,7 +255,7 @@ export function renderV7Addons({
       return {state:"unavailable",label:"غير متاحة",detail:a.availability.reason||"أكد المحرك أن المصدر غير متاح."};
     // Native packages may expose several canonical sources. Package identity is
     // authoritative; a matching display name never supplies health evidence.
-    const bound=a._store&&a.pkg?(registry.list?.()||[]).filter(x=>x.pkg===a.pkg):[];
+    const bound=a._store&&a.pkg?registryList().filter(x=>x.pkg===a.pkg):[];
     const sources=bound.length?bound:[a],passed=[],untested=[],errors=[];
     let empty=false;
     const recent=(at,age)=>Number.isFinite(at)&&at<=Date.now()&&Date.now()-at<=age;
@@ -313,7 +321,8 @@ export function renderV7Addons({
     let logoBox=logo(a,parent);const info=el("div","v7-info");
     info.append(el("div","v7-name",a.name),el("div","v7-meta",sourceMeta(a)));
     const statusSlot=el("div","v7-status-slot"),stateLabel=status(a);
-    const isAdded=mode==="remote"?true:!!(a.installed||a.builtin||a.update);
+    // RS1: «بانتظار الاستعادة» يغلب علم builtin؛ الحزمة غير موجودة على الجهاز فلا «فتح»
+    const isAdded=mode==="remote"?true:!a.pendingRestore&&!!(a.installed||a.builtin||a.update);
     if(!isAdded&&!a.pendingRestore)stateLabel.classList.remove("visible");
     statusSlot.append(stateLabel);
     const reason=isAdded?why(a):null;if(reason)statusSlot.append(reason);
@@ -359,7 +368,7 @@ export function renderV7Addons({
       flip.onclick=async e=>{
         e.stopPropagation();
         if(flip.disabled)return;
-        if(a.installed||a.builtin||a.update){
+        if(!a.pendingRestore&&(a.installed||a.builtin||a.update)){
           if(onOpenNativeSource)openNative(a);else showDetails(a,"native",parent);
           return;
         }
@@ -558,6 +567,20 @@ export function renderV7Addons({
     installedCount.textContent=String(records.allRemote.length+records.installedNative.length+siteRows.length);
     return records;
   }
+  // AD1: وصول المستودعات واحدًا واحدًا كان يعيد بناء القائمة 2×N مرة تحت الإصبع. ما يأتي من الخلفية في الدفعة نفسها يُجمع في
+  // رسمة واحدة، ويبقى موضع التمرير كما هو.
+  let drawQueued=false;
+  function scheduleDraw(){
+    if(drawQueued||!alive)return;
+    drawQueued=true;
+    queueMicrotask(()=>{
+      drawQueued=false;
+      if(!alive)return;
+      const keep=restoreScroll?null:root.scrollTop;
+      draw();
+      if(keep!=null&&root.scrollTop!==keep)root.scrollTop=keep;
+    });
+  }
   function draw(){
     if(!alive)return;
     const {allRemote,installedNative}=updateCounts();
@@ -586,7 +609,11 @@ export function renderV7Addons({
         }
         const items=repositoryItems(opened);
         if(!ext&&!items.length){if(!failure)body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
-        const records=filtered(items.filter(x=>!x.nsfw).map(item=>nativeRecord(item,opened.group,opened.data.url)));
+        // قرار المالك (16 نوفمبر): المصدر المتخصص في الإباحية يختفي (لا رسالة حجب)، والعام الموسوم NSFW يبقى وأعماله
+        // تُفلتر واحدًا واحدًا. والعربي أولًا ثم متعدد اللغات ثم البقية، فلا تبحث بين آلاف الإضافات
+        const langRank=x=>{const l=String(x.lang||"").toLowerCase();return l==="ar"?0:l==="all"?1:2;};
+        const records=filtered(items.filter(x=>!adultSource(x)).map(item=>nativeRecord(item,opened.group,opened.data.url)))
+          .map((x,i)=>[x,i]).sort((a,b)=>langRank(a[0])-langRank(b[0])||a[1]-b[1]).map(([x])=>x);
         for(const item of records)list.append(sourceRow(item,"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
@@ -683,7 +710,7 @@ export function renderV7Addons({
         }catch(err){
           if(alive&&job.run===generation){extensionErrors.set(job.repo.key,fmtErr(err));notify(fmtErr(err));}
         }finally{
-          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);if(tab!=="repos"||opened?.key===job.repo.key)draw();else updateCounts();drainRequests();}
+          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);if(tab!=="repos"||opened?.key===job.repo.key)scheduleDraw();else updateCounts();drainRequests();}
           job.resolve();
         }
       })();
@@ -697,7 +724,7 @@ export function renderV7Addons({
     let resolve;
     const promise=new Promise(done=>{resolve=done;});
     requests.set(r.key,promise);queue.push({repo:r,run,resolve});
-    draw();drainRequests();return promise;
+    scheduleDraw();drainRequests();return promise;
   }
   let releaseDiagnosticUi = () => {};
   function cancelDiagnostic(){
@@ -814,17 +841,17 @@ export function renderV7Addons({
       if(advancedActions.childElementCount){advanced.append(advancedActions);dialog.append(advanced);}
     }else{
       const acts=el("div","v7-dialog-actions");
-      if(onCheck&&(a.installed||a.builtin||a.update))renderDiagnostics(a,dialog,acts);
+      if(onCheck&&!a.pendingRestore&&(a.installed||a.builtin||a.update))renderDiagnostics(a,dialog,acts);
       const wrongFamily=(a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true);
       if(wrongFamily){
         dialog.append(el("p","v7-notice",a._store?.kind==="anime"?"هذه إضافة مانجا؛ ثبّتها من مستودع مانجا.":"هذه إضافة أنمي؛ ثبّتها من مستودع أنمي."));
-      }else if(!a.installed&&!a.builtin&&!a.update){
+      }else if(a.pendingRestore||(!a.installed&&!a.builtin&&!a.update)){
         acts.append(btn(a.pendingRestore?"استعادة":"تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
           try{await installNative(a);closeModal(true);}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
-        if(a.pendingRestore&&!a.builtin)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
+        if(a.pendingRestore)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
         if(a._store?.kind==="anime"){
           // البديل عكس النوع المعلن: إضافة سينما تُعرض «ثبّت في الأنمي» والعكس
           const other=a.content==="cinema"?"anime":"cinema";
