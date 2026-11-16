@@ -25,11 +25,10 @@ export const ROSTER_EVERY_MS = 1_000;
 /** فرق المدة الذي يُعدّ نفس النسخة. أكبر منه = «نسخة مختلفة» وتُقترح إزاحة. */
 export const SAME_VERSION_MS = 2_000;
 /**
- * الحلقة التالية لا تبدأ إلا بـ«ابدأ» من المضيف، أو وحدها حين يجهز كل الحاضرين فعلًا على
- * الحلقة الجديدة (ومعه ضيف واحد على الأقل). لا مهلة تبدأ بدونهم: قرار المالك.
- * البدء التلقائي بعدّ تنازلي مشترك، فلا يتفاجأ أحد.
+ * قاعدة البدء (قرار المالك، 16 نوفمبر 2026): لا بدء تلقائي أبدًا. الفيديو لا يبدأ إلا بـ«ابدأ» من
+ * المضيف، وإن كان في الغرفة ضيوف فلا يُقبل «ابدأ» حتى يكونوا كلهم جاهزين على الحلقة نفسها.
+ * المانجا خارج القاعدة: القراءة لا غرفة انتظار لها.
  */
-export const AUTOSTART_COUNTDOWN_MS = 3_000;
 /** حالات تعني «الحلقة محمّلة عندي وجاهزة». */
 const READY_STATES: readonly MemberState[] = ['ready', 'paused', 'playing'];
 /** حد قائمة المُخرَجين المحفوظة للغرفة. */
@@ -50,7 +49,7 @@ export interface Timeline {
   media: MediaRef | null;
   /** بدأ التشغيل في هذه الحلقة؟ لا = غرفة الانتظار («جاري التجهيز… جاهز»). */
   started: boolean;
-  /** الحلقة التالية: تبدأ وحدها فقط حين يجهز كل الحاضرين عليها، وإلا بـ«ابدأ» من المضيف. */
+  /** قديم: لم يعد شيء يبدأ وحده (قاعدة البدء أعلاه)؛ يبقى false دائمًا لتوافق الغرف المحفوظة. */
   autoStart: boolean;
   playing: boolean;
   /** موقع الحلقة بالمللي ثانية (أو رقم الصفحة في المانجا) عند لحظة الخادم at. */
@@ -264,7 +263,7 @@ export class RoomCore {
     if (m.userId === this.settings.hostUserId) this.hostAwaySince = now;
     this.dirty = true;
     // من كان يُنتظر طلع: إن صار الباقون كلهم جاهزين تبدأ الحلقة
-    return [{ to: 'all', msg: { t: 'left', userId: m.userId, name: m.name } }, ...this.maybeAutoStart(now), this.rosterOut(now)];
+    return [{ to: 'all', msg: { t: 'left', userId: m.userId, name: m.name } }, this.rosterOut(now)];
   }
 
   isHost(conn: string): boolean {
@@ -351,6 +350,10 @@ export class RoomCore {
     const given = finite(msg['pos']);
     const t = this.timeline;
     let next: Timeline;
+    if (op === 'play' && !t.started && t.media?.kind !== 'manga') {
+      const waiting = this.notReady();
+      if (waiting.length) return [{ to: [conn], msg: { t: 'denied', reason: 'not_ready', waiting: waiting.map((m) => m.name) } }];
+    }
     if (op === 'play') {
       next = { ...t, started: true, autoStart: false, playing: true, pos: Math.max(0, given ?? positionAt(t, at)), at };
     } else if (op === 'pause') {
@@ -362,7 +365,7 @@ export class RoomCore {
       const media = parseMedia(msg['media']);
       if (!media) return [];
       // الحلقة التالية في نفس الغرفة: الكل يرجع «جاري التجهيز»، وتبدأ وحدها حين يجهزون
-      next = { ...t, media, started: false, autoStart: msg['autoStart'] !== false, playing: false, pos: Math.max(0, given ?? 0), at };
+      next = { ...t, media, started: false, autoStart: false, playing: false, pos: Math.max(0, given ?? 0), at };
       for (const m of this.members.values()) if (m.report) m.report = { ...m.report, state: 'preparing', mediaKey: null, version: null };
     } else return [];
     next.seq = t.seq + 1;
@@ -403,7 +406,6 @@ export class RoomCore {
     // تغيّر الحالة يُبث فورًا (تنبيه «اشتغل الفيديو عند دحمي»)، والمواقع وحدها مقيّدة بثانية
     if (after !== before) {
       const out: Out[] = [{ to: 'all', msg: { t: 'status', userId: member.userId, name: member.name, state: after, source: member.report.source } }];
-      out.push(...this.maybeAutoStart(now));
       out.push(this.rosterOut(now));
       return out;
     }
@@ -411,23 +413,12 @@ export class RoomCore {
     return [this.rosterOut(now)];
   }
 
-  /**
-   * الحلقة التالية تبدأ وحدها فقط حين يكون كل الحاضرين (المضيف وضيف على الأقل) جاهزين
-   * على الحلقة الجديدة نفسها. تقرير قديم وصل بعد «load» (الحلقة السابقة) لا يُحسب جاهزية،
-   * ومن تعذّر سيرفره أو ما زال يجهّز يوقف البدء التلقائي — المضيف وحده يقرر «ابدأ» حينها.
-   */
-  private maybeAutoStart(now: number): Out[] {
-    const t = this.timeline;
-    if (t.started || !t.autoStart || !t.media || this.settings.mode !== 'sync') return [];
-    const present = [...this.members.values()];
-    if (present.length < 2 || !present.some((m) => m.userId === this.settings.hostUserId)) return [];
-    const key = t.media.key;
-    const ready = (m: Member) => m.report != null && m.report.mediaKey === key && READY_STATES.includes(m.report.state);
-    if (!present.every(ready)) return [];
-    const at = now + AUTOSTART_COUNTDOWN_MS;
-    this.timeline = { ...t, started: true, autoStart: false, playing: true, at, seq: t.seq + 1 };
-    this.dirty = true;
-    return [{ to: 'all', msg: { t: 'state', state: this.timeline, by: null } }];
+  /** من لم يجهز بعد على الحلقة الحالية (غير المضيف). «ابدأ» يُرفض حتى تفرغ القائمة. */
+  notReady(): Member[] {
+    const key = this.timeline.media?.key;
+    if (!key) return [];
+    return [...this.members.values()].filter((m) => m.userId !== this.settings.hostUserId
+      && !(m.report != null && m.report.mediaKey === key && READY_STATES.includes(m.report.state)));
   }
 
   /** المضيف يُخرج شخصًا: يُغلق اتصاله، ولا يعود إلا بدعوة جديدة. */
@@ -446,7 +437,7 @@ export class RoomCore {
     }
     if (this.members.size === 0) this.emptySince = now;
     if (name != null) out.push({ to: 'all', msg: { t: 'left', userId, name, kicked: true } });
-    out.push({ to: 'all', msg: { t: 'room', room: this.roomView() } }, ...this.maybeAutoStart(now), this.rosterOut(now));
+    out.push({ to: 'all', msg: { t: 'room', room: this.roomView() } }, this.rosterOut(now));
     return out;
   }
 
@@ -465,8 +456,6 @@ export class RoomCore {
   /** مواعيد: انتقال الاستضافة إن غاب المضيف، وحذف الغرفة الفارغة. */
   tick(now: number): { out: Out[]; expired: boolean } {
     if (this.members.size === 0 && this.emptySince != null && now - this.emptySince >= EMPTY_TTL_MS) return { out: [], expired: true };
-    const auto = this.maybeAutoStart(now);
-    if (auto.length) return { out: auto, expired: false };
     if (this.hostAwaySince != null && now - this.hostAwaySince >= HOST_GRACE_MS && this.members.size > 0) {
       const oldest = [...this.members.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0]!;
       return { out: this.transferHost(oldest.userId, now), expired: false };

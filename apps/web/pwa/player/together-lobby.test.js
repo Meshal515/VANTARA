@@ -93,3 +93,21 @@ describe('بطاقة البدء: التقييم بمصدره والمدة، وا
     expect(go.querySelector('.pl-start-meta').textContent).toContain('IMDb');
   });
 });
+
+import { deniedText, guestsNotReady } from '../../lib/together/lobby.js';
+describe('قاعدة البدء: المضيف وحده، والضيوف كلهم جاهزون على الحلقة نفسها', () => {
+  it('تقرير حلقة سابقة أو تجهيز أو تعذّر = غير جاهز؛ المضيف ونفسي خارج الحساب', () => {
+    const roster = [
+      { userId: 'h', name: 'المضيف', host: true, state: 'ready', mediaKey: 'anime:1#2' },
+      { userId: 'b', name: 'دحمي', host: false, state: 'playing', mediaKey: 'anime:1#1' },
+      { userId: 'c', name: 'منصور', host: false, state: 'ready', mediaKey: 'anime:1#2' },
+      { userId: 'd', name: 'مشعل', host: false, state: 'failed', mediaKey: 'anime:1#2' },
+    ];
+    expect(guestsNotReady(roster, { me: 'h', roomKey: 'anime:1#2' }).map((r) => r.userId)).toEqual(['b', 'd']);
+    expect(guestsNotReady(roster.slice(0, 1), { me: 'h', roomKey: 'anime:1#2' })).toEqual([]);
+  });
+  it('رفض الخادم يقول من ننتظر', () => {
+    expect(deniedText({ t: 'denied', reason: 'not_ready', waiting: ['دحمي'] })).toBe('ما نقدر نبدأ: بانتظار دحمي يجهز');
+    expect(deniedText({ t: 'denied' })).toBe('الغرفة رفضت الأمر: التحكم بالتشغيل للمضيف');
+  });
+});

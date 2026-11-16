@@ -57,8 +57,26 @@ export function pendingInvitees(invited, roster, me, personOf) {
 /** أسماء قصيرة: «منصور» / «منصور ودحمي» / «منصور ودحمي و2 غيرهم». */
 const names = (list) => `${list.slice(0, 2).join(' و')}${list.length > 2 ? ` و${list.length - 2} غيرهم` : ''}`;
 
+/**
+ * قاعدة البدء (قرار المالك): «البدء» من المضيف وحده، ولا يُقبل حتى يجهز كل الضيوف على حلقة الغرفة نفسها.
+ * جاهز = تقريره على مفتاح الحلقة الحالية بحالة جاهز/متوقف/يشاهد؛ تقرير قديم من حلقة سابقة لا يُحسب.
+ */
+const READY = new Set(['ready', 'paused', 'playing']);
+export function guestsNotReady(roster = [], { me = null, roomKey = null } = {}) {
+  return roster.filter((r) => !r.host && r.userId !== me && !(READY.has(r.state) && (roomKey == null || r.mediaKey == null || r.mediaKey === roomKey)));
+}
+
+/** رسالة رفض الغرفة لأمر: بانتظار ضيوف لم يجهزوا، أو التحكم للمضيف. */
+export function deniedText(d) {
+  if (d?.reason === 'not_ready') {
+    const who = Array.isArray(d.waiting) ? d.waiting.filter((x) => typeof x === 'string') : [];
+    return who.length ? `ما نقدر نبدأ: بانتظار ${who.slice(0, 3).join(' و')} ${who.length > 1 ? 'يجهزون' : 'يجهز'}` : 'ما نقدر نبدأ: بانتظار الكل يجهز';
+  }
+  return 'الغرفة رفضت الأمر: التحكم بالتشغيل للمضيف';
+}
+
 /** جملة الحالة الواحدة في الشريط — حيّة وبلا تكرار. */
-export function lobbyHeadline({ selectingSource = false, host, me = null, prepared, failed, blocked, connection, roster = [], pending = [] }) {
+export function lobbyHeadline({ selectingSource = false, host, me = null, prepared, failed, blocked, connection, roster = [], pending = [], roomKey = null }) {
   if (connection !== 'live') return connection === 'reconnecting' ? 'انقطع الاتصال · نعيد الاتصال…' : 'جاري الاتصال بالغرفة…';
   if (selectingSource) return 'اختر سيرفرك للانضمام للمشاهدة';
   if (blocked) return 'المتصفح يحتاج ضغطة منك لتشغيل الفيديو';
@@ -67,7 +85,7 @@ export function lobbyHeadline({ selectingSource = false, host, me = null, prepar
   const others = roster.filter((r) => r.userId !== me);
   const waiting = pending.map((p) => p.displayName);
   const broken = others.filter((r) => r.state === 'failed').map((r) => r.name);
-  const preparing = others.filter((r) => r.state === 'preparing').map((r) => r.name);
+  const preparing = guestsNotReady(others, { me, roomKey }).filter((r) => r.state !== 'failed').map((r) => r.name);
   if (waiting.length) return `${names(waiting)} ${waiting.length > 1 ? 'ما دخلوا' : 'ما دخل'} بعد`;
   if (broken.length) return `سيرفر ${names(broken)} تعذّر`;
   if (preparing.length) return `${names(preparing)} ${preparing.length > 1 ? 'يجهّزون' : 'يجهّز'}…`;
@@ -275,7 +293,8 @@ export function renderLobby(host, m, a) {
   cta.append(serverBtn);
   if (m.blocked) cta.append(btn('pl-go is-primary', `${ICON.play}<span>تابع معهم</span>`, a.resume));
   else if (m.host) {
-    const ready = m.prepared && m.connection === 'live' && !picking;
+    // الضيوف كلهم جاهزون على هذه الحلقة، وإلا فالبدء معطّل (والخادم يرفضه أيضًا)
+    const ready = m.prepared && m.connection === 'live' && !picking && guestsNotReady(m.roster, { me: m.me, roomKey: m.roomKey }).length === 0;
     const go = btn(`pl-start${ready ? ' is-primary' : ''}`, '', a.start, 'ابدأ للجميع');
     if (m.art.episodeImage) { const thumb = new Image(); thumb.className = 'pl-start-thumb'; thumb.alt = ''; thumb.decoding = 'async'; thumb.src = m.art.episodeImage; thumb.onerror = () => thumb.remove(); go.append(thumb); }
     const playDot = el('span', 'pl-start-play'); playDot.innerHTML = ICON.play;

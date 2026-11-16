@@ -1,3 +1,4 @@
+import { deniedText, guestsNotReady } from '../../lib/together/lobby.js';
 import { createDriftController, targetAt } from '../../lib/together/sync.js';
 
 const OFFSET_PREFIX = 'vantara.tg.offset.';
@@ -64,7 +65,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   function paintLobby() {
     if (destroyed) return;
     const cd = countdownTo();
-    onLobby({ episode: roomEpisode(), visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(), videoOffsetMs: syncOffset(), setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ episode: roomEpisode(), roomKey: room.timeline?.media?.key ?? null, visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(), videoOffsetMs: syncOffset(), setVideoOffset: ms => api.setVideoOffset(ms),
       start: () => api.playPause(true), resume: () => { blocked = false; play(); paintLobby(); } });
   }
   function align(force = false) {
@@ -118,7 +119,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     intent = { seq: room.timeline?.seq, until: at + 2000 };
   }
   // رفض الخادم (ليس المضيف عنده أو لا يملك التحكم) كان يمر بلا أثر: الزر «لا يستجيب» (15 نوفمبر)
-  const offs = [room.on('denied', () => message('الغرفة رفضت الأمر: التحكم بالتشغيل للمضيف')), room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
+  const offs = [room.on('denied', (d) => message(deniedText(d))), room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
     room.on('roster', paintLobby), room.on('connection', () => { paintLobby(); if (live()) { align(true); report(true); } }),
     room.on('room', () => { if (!synced()) video.playbackRate = 1; else align(true); paintLobby(); })];
   const timer = setInterval(() => {
@@ -158,7 +159,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       // أول بدء من غرفة الانتظار: عدّ 3-2-1 مشترك عند الجميع
       if (room.canControl && prepared) {
-        if (!room.timeline?.started && playing) { if (!room.command('play', { pos: 0, countdownMs: 3000 })) message('ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة'); }
+        if (!room.timeline?.started && playing) { const wait = guestsNotReady(room.roster, { me: room.me, roomKey: room.timeline?.media?.key }); if (wait.length) message(`ما نقدر نبدأ: بانتظار ${wait.map((r) => r.name).slice(0, 3).join(' و')} ${wait.length > 1 ? 'يجهزون' : 'يجهز'}`); else if (!room.command('play', { pos: 0, countdownMs: 3000 })) message('ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة'); }
         else if (room.instant) { hostCommand(playing ? 'play' : 'pause', position()); if (playing) play(); else if (!video.paused) video.pause(); }
         else room.command(playing ? 'play' : 'pause', { pos: position() }); // خادم قديم: ننتظر بثّه
       } else message(prepared ? 'بانتظار المضيف يبدأ…' : 'جاري تجهيز الفيديو…');

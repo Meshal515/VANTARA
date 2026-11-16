@@ -377,8 +377,11 @@ class TogetherPlayer(
         if (startSentAt != 0L && client.timeline?.started != true && lobbyCount == null) hooks.message(TogetherStart.NO_REPLY)
         startSentAt = 0L
     }
+    private fun guestsWaiting() = TogetherStart.notReady(client.roster, client.me, client.timeline?.mediaKey)
     private fun pressStart() {
-        val gate = TogetherStart.gate(ready, connected, awaitingPick)
+        val waiting = guestsWaiting()
+        val gate = TogetherStart.gate(ready, connected, awaitingPick, waiting.size)
+        if (gate == TogetherStart.Gate.GUESTS) { hooks.message(TogetherStart.waitingText(waiting.map { it.name })); paintLobby(); return }
         if (gate != TogetherStart.Gate.SEND) { hooks.message(TogetherStart.message(gate)!!); paintLobby(); return }
         if (!client.command("play", 0.0, countdownMs = TogetherStart.COUNTDOWN_MS)) { hooks.message(TogetherStart.SEND_FAILED); return }
         startSentAt = android.os.SystemClock.uptimeMillis()
@@ -386,10 +389,11 @@ class TogetherPlayer(
         main.postDelayed(startWatch, TogetherStart.REPLY_TIMEOUT_MS)
     }
 
-    override fun onDenied() {
+    override fun onDenied(reason: String?, waiting: List<String>) {
         startSentAt = 0L
         main.removeCallbacks(startWatch)
-        hooks.message(TogetherStart.DENIED)
+        hooks.message(if (reason == "not_ready") TogetherStart.waitingText(waiting) else TogetherStart.DENIED)
+        paintLobby()
     }
 
     override fun onHost(userId: String) { if (userId == client.me) hooks.message("صرت المضيف"); paintLobby() }
@@ -604,7 +608,8 @@ class TogetherPlayer(
         val others = client.roster.filter { it.userId != client.me }
         val waiting = pending().map { it.displayName }
         val broken = others.filter { it.state == "failed" }.map { it.name }
-        val preparing = others.filter { it.state == "preparing" }.map { it.name }
+        // غير الجاهزين على حلقة الغرفة (يجهّز، أو تقريره من حلقة سابقة)؛ المتعذّر له سطره
+        val preparing = TogetherStart.notReady(others, client.me, client.timeline?.mediaKey).filter { it.state != "failed" }.map { it.name }
         return when {
             waiting.isNotEmpty() -> "${names(waiting)} ${if (waiting.size > 1) "ما دخلوا" else "ما دخل"} بعد" to false
             broken.isNotEmpty() -> "سيرفر ${names(broken)} تعذّر" to false
@@ -1070,7 +1075,7 @@ class TogetherPlayer(
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
         val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
-            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
         if (sig == lobbySig && bar.childCount > 0) return
         lobbySig = sig
         bar.removeAllViews()
@@ -1155,7 +1160,7 @@ class TogetherPlayer(
         }
         actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
         // البدء: بطاقة كبيرة فوق الشريط (lobbyStart) لا زرًا فيه. غير المضيف يرى «بانتظار المضيف» في الشريط
-        val canStart = TogetherStart.gate(ready, connected, awaitingPick) == TogetherStart.Gate.SEND
+        val canStart = TogetherStart.gate(ready, connected, awaitingPick, guestsWaiting().size) == TogetherStart.Gate.SEND
         val startHost = lobbyStart
         if (startHost != null) {
             if (client.isHost) {

@@ -29,6 +29,8 @@ data class Member(
     val sameVersion: Boolean?,
     /** نفس مفتاح الويب: `/avatars/x.webp` أو رابط. */
     val avatarKey: String? = null,
+    /** الحلقة التي أبلغ عنها (لجاهزية «البدء»: تقرير حلقة سابقة لا يُحسب). */
+    val mediaKey: String? = null,
 )
 
 /**
@@ -75,7 +77,8 @@ class TogetherClient(
         fun onClosed(reason: String) {}
         fun onConnection(live: Boolean) {}
         /** الخادم رفض أمرًا من هذا الاتصال (ليس المضيف عنده أو لا يملك التحكم). */
-        fun onDenied() {}
+        /** رفض الخادم أمرًا. reason=not_ready: ضيوف لم يجهزوا بعد ([waiting] أسماؤهم). */
+        fun onDenied(reason: String? = null, waiting: List<String> = emptyList()) {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -213,7 +216,10 @@ class TogetherClient(
             "status" -> listener.onStatus(m.optString("userId"), m.optString("name"), m.optString("state"), m.optString("source").takeIf { it.isNotEmpty() && it != "null" })
             "joined" -> listener.onJoined(m.optString("name"))
             "left" -> listener.onLeft(m.optString("name"), m.optBoolean("kicked"))
-            "denied" -> listener.onDenied()
+            "denied" -> listener.onDenied(
+                m.optString("reason").takeIf { it.isNotEmpty() },
+                m.optJSONArray("waiting")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } } ?: emptyList(),
+            )
             "full", "gone", "uninvited", "kicked" -> finish(m.optString("t"))
         }
     }
@@ -298,6 +304,7 @@ class TogetherClient(
                     driftMs = if (o.isNull("driftMs")) null else o.optLong("driftMs"),
                     sameVersion = if (o.isNull("sameVersion") || !o.has("sameVersion")) null else o.optBoolean("sameVersion"),
                     avatarKey = o.optString("avatarKey").takeIf { !o.isNull("avatarKey") && it.isNotEmpty() },
+                    mediaKey = o.optString("mediaKey").takeIf { !o.isNull("mediaKey") && it.isNotEmpty() },
                 )
             }
         }

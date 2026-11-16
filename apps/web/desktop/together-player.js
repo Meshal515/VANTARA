@@ -1,3 +1,4 @@
+import { deniedText, guestsNotReady } from '../lib/together/lobby.js';
 import { createDriftController, targetAt } from '../lib/together/sync.js';
 
 /** MPV يتبع جلسة الغرفة الأصلية؛ المواضع والأوامر كلها بالمللي ثانية. */
@@ -64,7 +65,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   };
   function lobby() {
     if (closed) return;
-    onLobby({ episode: roomEpisode(), visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared || countdownTo() != null), countdownTo: countdownTo(), now: () => room.clock.serverNow(), me: room.me, invited: room.info?.invited ?? together.session.invited ?? null, offset: videoOffsetMs, prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ episode: roomEpisode(), roomKey: room.timeline?.media?.key ?? null, visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared || countdownTo() != null), countdownTo: countdownTo(), now: () => room.clock.serverNow(), me: room.me, invited: room.info?.invited ?? together.session.invited ?? null, offset: videoOffsetMs, prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
       roster: room.roster, start: () => api.playPause(true), openPanel: () => together.hub.openPanel() });
   }
   function align(force = false) {
@@ -106,7 +107,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   }
   function detach() { if (closed) return; api.close(); onDetach(); }
   // رفض الخادم (ليس المضيف عنده أو لا يملك التحكم) كان يمر بلا أثر: الزر «لا يستجيب» (15 نوفمبر)
-  const offs = [room.on('denied', () => message('الغرفة رفضت الأمر: التحكم بالتشغيل للمضيف')), room.on('state', receive), room.on('welcome', () => receive({ state: room.timeline })), room.on('roster', lobby),
+  const offs = [room.on('denied', (d) => message(deniedText(d))), room.on('state', receive), room.on('welcome', () => receive({ state: room.timeline })), room.on('roster', lobby),
     room.on('connection', () => { if (room.status === 'closed') return detach(); if (live()) { align(true); report(true); } lobby(); }),
     room.on('room', () => { if (synced()) align(true); else if (native.rate !== 1) { native.rate = 1; command('rate', 1); } lobby(); report(true); })];
   if (together.hub.onChange) offs.push(together.hub.onChange(() => { if (together.hub.session !== together.session) detach(); }));
@@ -119,7 +120,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       if (closed || !synced()) return false;
       if (!live()) { message('انتظر عودة الاتصال بالغرفة'); return true; }
       if (room.canControl && prepared) {
-        if (!room.timeline?.started && playing) { if (!room.command('play', { pos: 0, countdownMs: 3000 })) message('ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة'); } // البداية: عدّ مشترك
+        if (!room.timeline?.started && playing) { const wait = guestsNotReady(room.roster, { me: room.me, roomKey: room.timeline?.media?.key }); if (wait.length) message(`ما نقدر نبدأ: بانتظار ${wait.map((r) => r.name).slice(0, 3).join(' و')} ${wait.length > 1 ? 'يجهزون' : 'يجهز'}`); else if (!room.command('play', { pos: 0, countdownMs: 3000 })) message('ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة'); } // البداية: عدّ مشترك
         else if (room.instant) { hostCommand(playing ? 'play' : 'pause', native.position); pause(!playing); }
         else room.command(playing ? 'play' : 'pause', { pos: localToRoom(native.position) }); // خادم قديم: ننتظر بثّه
       }
