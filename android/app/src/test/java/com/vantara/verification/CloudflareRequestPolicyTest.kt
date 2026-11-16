@@ -2,6 +2,8 @@ package com.vantara.verification
 
 import eu.kanade.tachiyomi.network.interceptor.CloudflareRequestKind
 import eu.kanade.tachiyomi.network.interceptor.classifyCloudflareRequest
+import eu.kanade.tachiyomi.network.interceptor.SILENT_RETRY_MS
+import eu.kanade.tachiyomi.network.interceptor.silentSolveAllowed
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -42,5 +44,15 @@ class CloudflareRequestPolicyTest {
         assertEquals(CloudflareRequestKind.NONE, classifyCloudflareRequest(403, "nginx", null, true))
         assertEquals(CloudflareRequestKind.NONE, classifyCloudflareRequest(200, "cloudflare", null, true))
         assertEquals(CloudflareRequestKind.NONE, classifyCloudflareRequest(429, "cloudflare", null, true))
+    }
+
+    // تراجع Debug 0.0.3192: كل غلاف خلف تحدٍّ كان ينشئ WebView مخفيًا على الخيط الرئيسي ويحجز القفل العام
+    @Test fun silentSolveNeverRunsForImagesAndOncePerHostWindow() {
+        val now = 1_000_000_000L
+        assertEquals(false, silentSolveAllowed(isImage = true, lastFailedAt = null, now = now))
+        assertEquals(true, silentSolveAllowed(isImage = false, lastFailedAt = null, now = now))
+        assertEquals(false, silentSolveAllowed(isImage = false, lastFailedAt = now - 1_000, now = now))
+        assertEquals(false, silentSolveAllowed(isImage = false, lastFailedAt = now - SILENT_RETRY_MS + 1, now = now))
+        assertEquals(true, silentSolveAllowed(isImage = false, lastFailedAt = now - SILENT_RETRY_MS, now = now))
     }
 }

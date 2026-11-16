@@ -821,7 +821,11 @@ class ExtensionEnginePlugin : Plugin() {
                 // مصدر الغلاف غير مثبت أو رُفض الطلب: Referer من موقع الصورة قبل الاستسلام (CoverReferers)
                 var lastError: Throwable? = null
                 var fetched: Pair<ByteArray, String?>? = null
+                // سقف واحد للغلاف كله (callTimeout يلغي الطلب الجاري فعلًا، لا يتركه في الخلفية)
+                val deadline = System.currentTimeMillis() + CoverReferers.BUDGET_MS
                 for (attempt in CoverReferers.attempts(url, sourceHeaders != null)) {
+                    val left = deadline - System.currentTimeMillis()
+                    if (left <= 0) break
                     val request = Request.Builder().url(url).apply {
                         when (attempt) {
                             CoverReferers.SOURCE_HEADERS -> sourceHeaders?.let { headers(it) }
@@ -829,15 +833,19 @@ class ExtensionEnginePlugin : Plugin() {
                             else -> header("Referer", attempt)
                         }
                     }.build()
-                    fetched = runCatching {
+                    var status: Int? = null
+                    val got = runCatching {
                         withContext(Dispatchers.IO) {
-                            client.newCall(request).execute().use { res ->
+                            client.newCall(request).also { it.timeout().timeout(left, java.util.concurrent.TimeUnit.MILLISECONDS) }.execute().use { res ->
+                                status = res.code
                                 require(res.isSuccessful) { "cover HTTP ${res.code}" }
                                 res.body.bytes() to res.header("content-type")
                             }
                         }
-                    }.onFailure { lastError = it }.getOrNull()?.takeIf { it.first.size > 256 && ImagePayloadPolicy.validate(it.second, it.first).accepted }
+                    }.onFailure { lastError = it }.getOrNull()
+                    fetched = got?.takeIf { it.first.size > 256 && ImagePayloadPolicy.validate(it.second, it.first).accepted }
                     if (fetched != null) break
+                    if (!CoverReferers.worthNextAttempt(status, gotNonImage = got != null)) break
                 }
                 val (bytes, contentType) = fetched ?: throw (lastError ?: IllegalStateException("cover not an image"))
                 require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }

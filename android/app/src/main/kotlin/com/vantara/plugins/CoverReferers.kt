@@ -19,6 +19,17 @@ object CoverReferers {
             add(NO_REFERER)
         }.distinct()
     }
+    /**
+     * المحاولة التالية تغيّر Referer وحده، فلا تفيد إلا إذا رفض الموقع بسبب Referer (401/403) أو أعاد شيئًا ليس صورة
+     * (صفحة حماية الروابط). انقطاع أو مهلة أو 404 أو 5xx = توقّف فورًا: كانت تُكرَّر حتى 4 مرات متتالية فيتأخر الحرف.
+     * [status] null = لم يصل رد (استثناء شبكة أو مهلة).
+     */
+    fun worthNextAttempt(status: Int?, gotNonImage: Boolean): Boolean =
+        gotNonImage || status == 401 || status == 403
+
+    /** سقف الغلاف كله بكل محاولاته: يظهر خلال ثوانٍ، وما لم يصل يأخذ الحرف ولا يحجز غيره. */
+    const val BUDGET_MS = 6_000L
+
     /** علامتان: ترويسات المصدر كما هي، وطلب بلا Referer. */
     const val SOURCE_HEADERS = "\u0000source"
     const val NO_REFERER = "\u0000none"

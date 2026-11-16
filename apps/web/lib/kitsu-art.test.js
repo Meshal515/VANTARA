@@ -32,13 +32,18 @@ describe('Kitsu art by confirmed AniList identity', () => {
 });
 
 describe('the one art decision weighs every official source', () => {
-  it('a sharper Kitsu cover and wider Kitsu banner win over AniList; AniList stays when Kitsu is absent', async () => {
+  // قاعدة المالك (16 نوفمبر 2026): الغلاف أول مقبول يصل (لا الأعلى جودة)، والبنر أعرض حقيقي من الرسميين يُكمَّل بعده
+  it('the first official cover to arrive wins (owner rule); the widest real banner among AniList and Kitsu completes it', async () => {
     const dims = { al: [460, 650], alb: [1900, 400], k: [550, 780], kb: [3360, 800] };
-    const probe = async (url) => (dims[url] ? { url, width: dims[url][0], height: dims[url][1] } : null);
+    const delay = { al: 5, k: 40 };
+    const probe = (url) => new Promise((r) => setTimeout(() => r(dims[url] ? { url, width: dims[url][0], height: dims[url][1] } : null), delay[url] ?? 0));
     const store = createArtStore({ storage: null, probe });
     const d = await store.decide('ext:x', { official: Promise.resolve({ cover: 'al', banner: 'alb', more: [{ cover: 'k', banner: 'kb' }] }) });
-    expect(d).toMatchObject({ cover: 'k', w: 550, h: 780, banner: 'kb', wide: true, bw: 3360, bh: 800 });
-    const e = await store.decide('ext:y', { official: Promise.resolve({ cover: 'al', banner: 'alb' }) });
-    expect(e).toMatchObject({ cover: 'al', banner: 'alb', wide: true });
+    expect(d).toMatchObject({ cover: 'al', w: 460, h: 650 });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(store.get('ext:x')).toMatchObject({ cover: 'al', banner: 'kb', wide: true, bw: 3360, bh: 800 });
+    await store.decide('ext:y', { official: Promise.resolve({ cover: 'al', banner: 'alb' }) });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.get('ext:y')).toMatchObject({ cover: 'al', banner: 'alb', wide: true });
   });
 });
