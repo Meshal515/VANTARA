@@ -3587,13 +3587,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const b = el('button', `drawer-section drawer-section--${id}`);
       b.type = 'button';
       b.dataset.arg = id;
-      b.dataset.short = id[0].toUpperCase();
       b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
-      const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
-      word.dir = 'ltr';
-      b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
+      // أيقونة القسم واسمه في سطر واحد؛ اللون للقسم الحالي وحده (لون القسم نفسه)
+      b.setAttribute('aria-label', b.title);
+      b.insertAdjacentHTML('afterbegin', glyph({ manga: 'book', anime: 'tv', cinema: 'film' }[id], { size: 18 }));
+      b.append(el('span', null, b.title));
       b.onclick = () => {
         closeDrawer();
         pickSection(null, b);
