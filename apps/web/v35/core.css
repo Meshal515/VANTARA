@@ -2186,7 +2186,8 @@ html[data-motion='off'] .v35 .dock-scrim {
   color: var(--text-4);
 }
 
-/* الأقسام في رأس القائمة: ثلاث خانات بكلمة كل قسم بلونه */
+/* الأقسام في رأس القائمة: ثلاث خانات بكلمة كل قسم بلونه. اللون (--tone) هو لون القسم
+   الذي اختاره المستخدم في المظهر (shell.js يضعه)، وهذه القيم احتياط فقط. */
 .v35 .drawer-sections {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2198,9 +2199,9 @@ html[data-motion='off'] .v35 .dock-scrim {
   position: relative;
   display: grid;
   justify-items: center;
-  gap: 4px;
-  min-height: 58px;
-  padding: 10px 4px 9px;
+  align-content: center;
+  min-height: 50px;
+  padding: 8px 4px;
   border: 0;
   border-radius: var(--r-md);
   background: var(--surface-1);
@@ -2214,17 +2215,17 @@ html[data-motion='off'] .v35 .dock-scrim {
   --tone: #3b82f6;
 }
 .v35 .drawer-section--cinema {
-  --tone: #e0303a;
+  --tone: #c1121f;
 }
 .v35 .drawer-section b {
-  font-size: 11.5px;
-  font-weight: 850;
-  letter-spacing: 2.4px;
-  margin-inline-end: -2.4px;
-  color: color-mix(in srgb, var(--tone) 55%, var(--text-2));
-}
-.v35 .drawer-section small {
-  font-size: 10.5px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 1.6px;
+  margin-inline-end: -1.6px;
+  font-feature-settings: 'cv11', 'ss01';
+  color: color-mix(in srgb, var(--tone) 50%, var(--text-2));
 }
 .v35 .drawer-section[aria-checked='true'] {
   background: color-mix(in srgb, var(--tone) 14%, var(--surface-1));
@@ -2232,7 +2233,7 @@ html[data-motion='off'] .v35 .dock-scrim {
   color: var(--text-2);
 }
 .v35 .drawer-section[aria-checked='true'] b {
-  color: color-mix(in srgb, var(--tone) 70%, #fff);
+  color: color-mix(in srgb, var(--tone) 62%, #fff);
 }
 .v35 .drawer-section:active {
   transform: scale(0.97);

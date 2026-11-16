@@ -88,7 +88,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { ACCENTS, accentOf, applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
 import { sideDock } from './side-dock.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
@@ -4969,9 +4969,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
+      // لون كل خانة = لون قسمها كما اختاره المستخدم في المظهر (أنمي أحمر؟ خانته حمراء)
+      b.style.setProperty('--tone', accentOf(id) ?? ACCENTS.find((c) => c.id === id)?.hex ?? '#8f5cff');
       const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
       word.dir = 'ltr';
-      b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
+      b.append(word);
       b.onclick = () => {
         closeDrawer();
         selectSection(b.dataset.arg);

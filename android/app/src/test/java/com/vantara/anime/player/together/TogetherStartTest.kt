@@ -24,4 +24,16 @@ class TogetherStartTest {
         assert(TogetherStart.REPLY_TIMEOUT_MS > TogetherStart.COUNTDOWN_MS)
         listOf(TogetherStart.SEND_FAILED, TogetherStart.DENIED, TogetherStart.NO_REPLY).forEach { assert(it.isNotBlank()) }
     }
+
+    private fun m(id: String, state: String, key: String?, host: Boolean = false) =
+        Member(userId = id, name = id, host = host, joinedAt = 0, pos = null, at = null, state = state, source = null, driftMs = null, sameVersion = null, mediaKey = key)
+
+    @Test fun `start waits for every guest to be ready on the room episode`() {
+        val roster = listOf(m("host", "ready", "anime:1#2", host = true), m("b", "playing", "anime:1#1"), m("c", "ready", "anime:1#2"), m("d", "failed", "anime:1#2"))
+        // تقرير الحلقة السابقة والمتعذّر غير جاهزين؛ المضيف ونفسي خارج الحساب
+        assertEquals(listOf("b", "d"), TogetherStart.notReady(roster, "host", "anime:1#2").map { it.userId })
+        assertEquals(TogetherStart.Gate.GUESTS, TogetherStart.gate(ready = true, connected = true, awaitingPick = false, guestsWaiting = 2))
+        assertEquals(TogetherStart.Gate.SEND, TogetherStart.gate(ready = true, connected = true, awaitingPick = false, guestsWaiting = 0))
+        assertEquals("ما نقدر نبدأ: بانتظار b يجهز", TogetherStart.waitingText(listOf("b")))
+    }
 }

@@ -84,16 +84,40 @@ class EpisodeResolver(
         val ordered = health.rank(copies, { priorityOf(it.sourceId) }) { HealthStore.sourceKey(it.sourceId) }
         val enough = if (exhaustive) Int.MAX_VALUE else minHosts
         val gathered = mutableListOf<Candidate>()
+        // اسم الحلقة المطلوبة في أول مصدر وجدها: مرجع هويتها لبقية المصادر ([EpisodeAlign])
+        var anchorName: String? = null
         // دفعات من مصدرين بالتوازي: الأول يبدأ فورًا، والثاني احتياطٌ جاهز
         for (batch in ordered.chunked(2)) {
             val found = coroutineScope {
-                batch.map { copy ->
+                // 1) حلقة كل مصدر بالرقم (بالتوازي)
+                val picked = batch.map { copy ->
                     async {
                         withTimeoutOrNull(perSourceTimeoutMs) {
-                            runCatching {
-                                val ep = pick(episodes(copy), number) ?: return@runCatching emptyList()
-                                adapterOf(copy.sourceId)?.candidates(ep, enough = enough).orEmpty()
-                            }.onFailure { health.fail(HealthStore.sourceKey(copy.sourceId), it.message ?: it.javaClass.simpleName) }
+                            runCatching { episodes(copy).let { list -> list to pick(list, number) } }
+                                .onFailure { health.fail(HealthStore.sourceKey(copy.sourceId), it.message ?: it.javaClass.simpleName) }
+                                .getOrNull()
+                        }
+                    }
+                }.awaitAll()
+                // 2) نفس الحلقة في كل المصادر: بترتيب المصادر، والأول يحدد الاسم (سيرفرات حلقة أخرى لا تُخلط)
+                val chosen = batch.indices.mapNotNull { i ->
+                    val (list, ep) = picked[i] ?: return@mapNotNull null
+                    if (ep == null) return@mapNotNull null
+                    if (number < 0f) return@mapNotNull batch[i] to ep
+                    when (val r = EpisodeAlign.align(anchorName, ep, list, batch[i].anime.title)) {
+                        is EpisodeAlign.Result.Use -> {
+                            if (anchorName == null) anchorName = r.episode.name
+                            batch[i] to r.episode
+                        }
+                        else -> null
+                    }
+                }
+                // 3) سيرفراتها (بالتوازي)
+                chosen.map { (copy, ep) ->
+                    async {
+                        withTimeoutOrNull(perSourceTimeoutMs) {
+                            runCatching { adapterOf(copy.sourceId)?.candidates(ep, enough = enough).orEmpty() }
+                                .onFailure { health.fail(HealthStore.sourceKey(copy.sourceId), it.message ?: it.javaClass.simpleName) }
                                 .getOrDefault(emptyList())
                         }.orEmpty()
                     }

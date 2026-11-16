@@ -60,9 +60,9 @@ export function parseInvite(hash) {
 
 /**
  * joinRoom({baseUrl, code, getToken}) ← room
- *   room.on(event, fn): welcome | state | roster | status | joined | left | host | room | presence | full | gone | uninvited | denied
+ *   room.on(event, fn): welcome | state | roster | status | joined | left | host | room | presence | full | gone | uninvited | kicked | denied
  *   room.command('play'|'pause'|'seek'|'load', {pos, media})
- *   room.report({...})، room.setMode('sync'|'free')، room.settings({control})، room.invite(userIds)، room.giveHost(userId)
+ *   room.report({...})، room.setMode('sync'|'free')، room.settings({control})، room.invite(userIds)، room.giveHost(userId)، room.kick(userId)
  *   room.clock، room.timeline، room.roster، room.info، room.me، room.isHost، room.close()
  */
 export function joinRoom({
@@ -154,10 +154,13 @@ export function joinRoom({
       clearPending();
       ws = null;
       if (closed) return;
-      // 4003 ممتلئة، 4001 دخلت من جهاز آخر، 1008/4004 لا غرفة أو لا صلاحية: لا إعادة محاولة
-      if (event?.code === 4003 || event?.code === 4001 || event?.code === 4004 || event?.code === 1008) {
+      // 4003 ممتلئة، 4001 دخلت من جهاز آخر، 4005 غير مدعو، 4006 أخرجك المضيف،
+      // 1008/4004 لا غرفة أو لا صلاحية: لا إعادة محاولة
+      const final = { 4003: 'full', 4001: 'replaced', 4004: 'gone', 1008: 'gone', 4005: 'uninvited', 4006: 'kicked' }[event?.code];
+      if (final) {
         closed = true;
-        setStatus(event.code === 4003 ? 'full' : event.code === 4001 ? 'replaced' : 'gone');
+        setStatus(final);
+        if (final === 'kicked' || final === 'uninvited') emit(final, {});
         return;
       }
       setStatus('reconnecting');
@@ -203,6 +206,7 @@ export function joinRoom({
       case 'full':
       case 'gone':
       case 'uninvited':
+      case 'kicked':
         // نهائي: لا إعادة محاولة، حتى لو لم يصل رمز الإغلاق
         closed = true;
         clearPending();
@@ -260,6 +264,8 @@ export function joinRoom({
     setMode(mode) { return send({ t: 'mode', mode }); },
     settings(s) { return send({ t: 'settings', ...s }); },
     giveHost(userId) { return send({ t: 'host', userId }); },
+    /** المضيف يُخرج شخصًا؛ لا يعود إلا بدعوة جديدة. */
+    kick(userId) { return send({ t: 'kick', userId }); },
     invite(userIds) { return send({ t: 'invite', ...(userIds === '*' ? { all: true } : { userIds }) }); },
     close() {
       closed = true;

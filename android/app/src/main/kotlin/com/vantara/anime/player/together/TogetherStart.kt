@@ -8,20 +8,34 @@ package com.vantara.anime.player.together
  * عنها شيء. هنا: كل حالة لها نتيجة صريحة، والمشغّل يعرض رسالتها فوق كل الطبقات.
  */
 object TogetherStart {
-    enum class Gate { SEND, PICK_SERVER, PREPARING, OFFLINE }
+    enum class Gate { SEND, PICK_SERVER, PREPARING, OFFLINE, GUESTS }
 
-    /** ترتيب الأسباب: السيرفر أولًا (لا فيديو بلا سيرفر)، ثم الاتصال، ثم التجهيز. */
-    fun gate(ready: Boolean, connected: Boolean, awaitingPick: Boolean): Gate = when {
+    /**
+     * ترتيب الأسباب: السيرفر أولًا (لا فيديو بلا سيرفر)، ثم الاتصال، ثم التجهيز، ثم الضيوف.
+     * قاعدة المالك (16 نوفمبر): لا بدء تلقائي، و«البدء» لا يُقبل حتى يجهز كل الضيوف على الحلقة نفسها.
+     */
+    fun gate(ready: Boolean, connected: Boolean, awaitingPick: Boolean, guestsWaiting: Int = 0): Gate = when {
         awaitingPick -> Gate.PICK_SERVER
         !connected -> Gate.OFFLINE
         !ready -> Gate.PREPARING
+        guestsWaiting > 0 -> Gate.GUESTS
         else -> Gate.SEND
     }
+
+    private val READY = setOf("ready", "paused", "playing")
+    /** الضيف جاهز = تقريره على حلقة الغرفة الحالية بحالة جاهز/متوقف/يشاهد. */
+    fun notReady(roster: List<Member>, me: String?, roomKey: String?): List<Member> =
+        roster.filter { !it.host && it.userId != me && !(it.state in READY && (roomKey == null || it.mediaKey == null || it.mediaKey == roomKey)) }
+
+    fun waitingText(names: List<String>): String =
+        if (names.isEmpty()) "ما نقدر نبدأ: بانتظار الكل يجهز"
+        else "ما نقدر نبدأ: بانتظار ${names.take(3).joinToString(" و")} ${if (names.size > 1) "يجهزون" else "يجهز"}"
 
     fun message(gate: Gate): String? = when (gate) {
         Gate.PICK_SERVER -> "اختر سيرفرك أول"
         Gate.OFFLINE -> "الاتصال بالغرفة انقطع — نعيد الاتصال…"
         Gate.PREPARING -> "نجهّز فيديوك… «البدء» يتفعّل لحظة جاهزيته"
+        Gate.GUESTS -> "ما نقدر نبدأ: بانتظار الكل يجهز"
         Gate.SEND -> null
     }
 

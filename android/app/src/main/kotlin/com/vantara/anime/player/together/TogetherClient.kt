@@ -29,6 +29,8 @@ data class Member(
     val sameVersion: Boolean?,
     /** نفس مفتاح الويب: `/avatars/x.webp` أو رابط. */
     val avatarKey: String? = null,
+    /** الحلقة التي أبلغ عنها (لجاهزية «البدء»: تقرير حلقة سابقة لا يُحسب). */
+    val mediaKey: String? = null,
 )
 
 /**
@@ -69,13 +71,14 @@ class TogetherClient(
         fun onMode(mode: String) {}
         fun onStatus(userId: String, name: String, state: String, source: String?) {}
         fun onJoined(name: String) {}
-        fun onLeft(name: String) {}
+        fun onLeft(name: String, kicked: Boolean = false) {}
         fun onHost(userId: String) {}
         /** نهائي: full | gone | uninvited | replaced. لا إعادة محاولة بعده. */
         fun onClosed(reason: String) {}
         fun onConnection(live: Boolean) {}
         /** الخادم رفض أمرًا من هذا الاتصال (ليس المضيف عنده أو لا يملك التحكم). */
-        fun onDenied() {}
+        /** رفض الخادم أمرًا. reason=not_ready: ضيوف لم يجهزوا بعد ([waiting] أسماؤهم). */
+        fun onDenied(reason: String? = null, waiting: List<String> = emptyList()) {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -163,7 +166,7 @@ class TogetherClient(
         ws = null
         setLive(false)
         if (closed) return
-        val final = when (code) { 4003 -> "full"; 4001 -> "replaced"; 4004 -> "gone"; 4005 -> "uninvited"; else -> null }
+        val final = when (code) { 4003 -> "full"; 4001 -> "replaced"; 4004 -> "gone"; 4005 -> "uninvited"; 4006 -> "kicked"; else -> null }
         if (final != null) { finish(final); return }
         val wait = BACKOFF[minOf(attempt, BACKOFF.size - 1)]
         attempt++
@@ -212,9 +215,12 @@ class TogetherClient(
             "host" -> { hostUserId = m.optString("userId"); listener.onHost(hostUserId!!) }
             "status" -> listener.onStatus(m.optString("userId"), m.optString("name"), m.optString("state"), m.optString("source").takeIf { it.isNotEmpty() && it != "null" })
             "joined" -> listener.onJoined(m.optString("name"))
-            "left" -> listener.onLeft(m.optString("name"))
-            "denied" -> listener.onDenied()
-            "full", "gone", "uninvited" -> finish(m.optString("t"))
+            "left" -> listener.onLeft(m.optString("name"), m.optBoolean("kicked"))
+            "denied" -> listener.onDenied(
+                m.optString("reason").takeIf { it.isNotEmpty() },
+                m.optJSONArray("waiting")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } } ?: emptyList(),
+            )
+            "full", "gone", "uninvited", "kicked" -> finish(m.optString("t"))
         }
     }
 
@@ -245,6 +251,12 @@ class TogetherClient(
     )
 
     fun setMode(next: String) = send(JSONObject().put("t", "mode").put("mode", next))
+
+    /** المضيف يُخرج شخصًا (لا يعود إلا بدعوة جديدة). */
+    fun kick(userId: String) = send(JSONObject().put("t", "kick").put("userId", userId))
+
+    /** المضيف ينقل الاستضافة. */
+    fun giveHost(userId: String) = send(JSONObject().put("t", "host").put("userId", userId))
 
     fun close() {
         closed = true
@@ -292,6 +304,7 @@ class TogetherClient(
                     driftMs = if (o.isNull("driftMs")) null else o.optLong("driftMs"),
                     sameVersion = if (o.isNull("sameVersion") || !o.has("sameVersion")) null else o.optBoolean("sameVersion"),
                     avatarKey = o.optString("avatarKey").takeIf { !o.isNull("avatarKey") && it.isNotEmpty() },
+                    mediaKey = o.optString("mediaKey").takeIf { !o.isNull("mediaKey") && it.isNotEmpty() },
                 )
             }
         }

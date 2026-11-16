@@ -381,11 +381,11 @@ export function openPlayer(args) {
     const inviteMedia = together.session.media ?? {};
     let art = { banner: inviteMedia.banner ?? inviteMedia.cover ?? args.poster ?? null, logo: inviteMedia.logo ?? null, title: inviteMedia.title ?? args.title ?? '', episodeTitle: inviteMedia.episodeTitle ?? null };
     let artEpisode = null;
-    const refreshArt = () => {
-      if (artEpisode === state.episode) return;
-      artEpisode = state.episode;
-      const same = Number(inviteMedia.episode) === state.episode;
-      const media = { ...inviteMedia, episode: state.episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
+    const refreshArt = (episode) => {
+      if (artEpisode === episode) return;
+      artEpisode = episode;
+      const same = Number(inviteMedia.episode) === episode;
+      const media = { ...inviteMedia, episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
       if (!same) art = { ...art, banner: inviteMedia.cover ?? args.poster ?? art.banner, episodeTitle: null };
       void resolveArt(media).then((a) => {
         if (artEpisode !== media.episode || state.closed) return;
@@ -401,7 +401,9 @@ export function openPlayer(args) {
         lobby.hidden = !l.visible;
         root.classList.toggle('pp--lobby', l.visible);
         if (!l.visible) return;
-        refreshArt();
+        // الحلقة التي في الغرفة الآن: أثناء تجهيز حلقة المضيف الجديدة لا تبقى «الحلقة 1» مكتوبة
+        const episode = l.episode ?? state.episode;
+        refreshArt(episode);
         const media = together.session.media ?? {};
         const c = state.current;
         renderLobby(lobby, {
@@ -411,7 +413,7 @@ export function openPlayer(args) {
           kindText: mediaKind(media),
           // لون القسم: أحمر السينما، بنفسجي المانجا، ولون الأنمي للأنمي
           accent: media.kind === 'manga' ? '#8f5cff' : media.kind === 'anime' ? '#3b82f6' : '#c1121f',
-          episodeText: episodeLine(media, state.episode),
+          episodeText: episodeLine(media, episode),
           connectionText: connectionLabel(l.connection),
           pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),
           server: c ? { code: c.code, quality: fmtQ(c.quality ?? currentHeight()) } : null,

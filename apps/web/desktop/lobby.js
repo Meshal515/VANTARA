@@ -28,12 +28,15 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
     // قرار فن واحد لكل حلقة (CLAUDE.md، ووميض مثبت في tools/together/lobby-flicker.cjs): الغرفة لا تُرسم حتى يُحسم الفن
     // (resolveArt، بحد 1.2 ث ثم المتاح)، ثم لا يتبدل. المفتاح من حلقة الغرفة نفسها لا من نداء playerState الذي قد يفشل
     // (كان فشل نداء واحد يعيد الغلاف ثم البنر: وميض متكرر).
-    const episode = media.episode ?? state?.episode;
+    // حلقة الغرفة نفسها (event.episode): أثناء تجهيز الحلقة التي نقل لها المضيف لا تبقى السابقة مكتوبة
+    const episode = event.episode ?? media.episode ?? state?.episode;
     const key = `${media.seriesRef}|${episode}`;
     if (key !== artKey) {
       artKey = key; art = null;
-      const initial = { banner: media.backdrop ?? media.banner ?? media.cover ?? state?.poster ?? null, episodeImage: media.episodeImage ?? null, logo: media.logo ?? null,
-        title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
+      // صورة الحلقة وعنوانها من الدعوة يخصّان حلقة الدعوة وحدها
+      const sameEpisode = Number(media.episode) === Number(episode);
+      const initial = { banner: media.backdrop ?? media.banner ?? media.cover ?? state?.poster ?? null, episodeImage: sameEpisode ? media.episodeImage ?? null : null, logo: media.logo ?? null,
+        title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: sameEpisode ? media.episodeTitle ?? null : null };
       const decide = value => {
         if (closed || artKey !== key || art) return;
         art = { ...initial, ...(value ?? {}), banner: value?.banner ?? initial.banner, episodeImage: value?.episodeImage ?? initial.episodeImage, title: value?.title || initial.title };
@@ -126,14 +129,14 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       });
     }).catch(() => {});
   }
-  function paint(state, media) {
+  function paint(state, media, episode = latest?.episode ?? state?.episode ?? media.episode) {
     if (closed || !latest?.visible) return;
     const roomHub = hub(), event = latest;
     const person = id => roomHub?.person?.(id) ?? { userId: id, displayName: 'صديق' };
     const roster = (event.roster ?? []).map(r => ({ ...r, avatarKey: r.avatarKey || person(r.userId).avatarKey || null }));
     const model = { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
       pending: pendingInvitees(event.invited, roster, event.me, person),
-      kindText: mediaKind(media), episodeText: episodeLine(media, state?.episode ?? media.episode),
+      kindText: mediaKind(media), episodeText: episodeLine(media, episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: media.kind === 'anime' ? '#3b82f6' : '#c1121f',
     };

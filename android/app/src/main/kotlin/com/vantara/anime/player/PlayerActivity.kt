@@ -1084,9 +1084,16 @@ class PlayerActivity : Activity() {
         warmedEpisode = -1
     }
 
+    /**
+     * [roomPick]: الغرفة نفسها نقلتنا (المضيف اختار الحلقة). غير ذلك (زر «التالي»، بطاقة نهاية
+     * الحلقة، القائمة) يمر على الغرفة أولًا: في المتزامنة المضيف ينقل الجميع والضيف لا يبدّل وحده.
+     * كان «التالي» يبدّل محليًا فتبقى الغرفة على الحلقة السابقة، وأول ما يجهز سيرفر يشغّل
+     * الحلقة الجديدة على وقت القديمة.
+     */
     private fun switchEpisode(n: Int, roomPick: Boolean = false) {
         val addonProviders = engine.addonProviders(sessionId)
         if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
+        if (!roomPick && together?.requestEpisode(n) == true) { cancelCountdown(); sheet.close(); return }
         attemptAbandon()
         attemptBegin()
         cancelCountdown()
