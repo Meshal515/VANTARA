@@ -366,7 +366,13 @@
     transition: opacity var(--dur) var(--ease);
   }
   .v35 .drawer-sections {
-    margin: 0 0 14px;
+    padding: 0 0 12px;
+  }
+  .v35 .drawer-section {
+    min-height: 46px;
+  }
+  .v35 .drawer-section:hover {
+    background: var(--surface-2);
   }
   .v35 .drawer-group {
     padding: 6px 0;
@@ -430,18 +436,27 @@
   .v35.rail-collapsed .drawer-group > .drawer-item {
     margin-inline: 0;
   }
-  /* مطويّ: نفس الشريط عموديًا بالأيقونات وحدها */
   .v35.rail-collapsed .drawer-sections {
     grid-template-columns: 1fr;
-    gap: 2px;
-    margin-bottom: 10px;
+    gap: 6px;
+    padding-bottom: 10px;
   }
   .v35.rail-collapsed .drawer-section {
-    height: 40px;
+    min-height: 40px;
     padding: 0;
+    place-items: center;
   }
-  .v35.rail-collapsed .drawer-section > span {
+  .v35.rail-collapsed .drawer-section > * {
     display: none;
+  }
+  .v35.rail-collapsed .drawer-section::before {
+    content: attr(data-short);
+    font-size: 14px;
+    font-weight: 850;
+    color: color-mix(in srgb, var(--tone) 60%, var(--text-2));
+  }
+  .v35.rail-collapsed .drawer-section[aria-checked='true']::before {
+    color: color-mix(in srgb, var(--tone) 70%, #fff);
   }
   .v35.rail-collapsed .drawer-me {
     justify-content: center;

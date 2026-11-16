@@ -88,7 +88,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { ACCENTS, accentOf, applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
 import { sideDock } from './side-dock.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
@@ -4965,13 +4965,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const b = el('button', `drawer-section drawer-section--${id}`);
       b.type = 'button';
       b.dataset.arg = id;
+      b.dataset.short = id[0].toUpperCase();
       b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
-      // أيقونة القسم واسمه في سطر واحد؛ اللون للقسم الحالي وحده (لون القسم نفسه)
-      b.setAttribute('aria-label', b.title);
-      b.insertAdjacentHTML('afterbegin', glyph({ manga: 'book', anime: 'tv', cinema: 'film' }[id], { size: 18 }));
-      b.append(el('span', null, b.title));
+      // لون كل خانة = لون قسمها كما اختاره المستخدم في المظهر (أنمي أحمر؟ خانته حمراء)
+      b.style.setProperty('--tone', accentOf(id) ?? ACCENTS.find((c) => c.id === id)?.hex ?? '#8f5cff');
+      const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
+      word.dir = 'ltr';
+      b.append(word);
       b.onclick = () => {
         closeDrawer();
         selectSection(b.dataset.arg);

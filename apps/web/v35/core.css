@@ -2186,71 +2186,57 @@ html[data-motion='off'] .v35 .dock-scrim {
   color: var(--text-4);
 }
 
-/*
- * الأقسام في رأس القائمة: شريط مقسّم واحد (لا ثلاث بطاقات). أيقونة واسم في سطر،
- * والأقسام غير الحالية رمادية هادئة؛ القسم الحالي وحده يأخذ لون القسم نفسه
- * (`--accent` من [data-section])، فلا بنفسجي ثابت ولا ألوان متنافسة.
- */
+/* الأقسام في رأس القائمة: ثلاث خانات بكلمة كل قسم بلونه. اللون (--tone) هو لون القسم
+   الذي اختاره المستخدم في المظهر (shell.js يضعه)، وهذه القيم احتياط فقط. */
 .v35 .drawer-sections {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
-  margin: 4px 2px 14px;
-  padding: 3px;
-  border-radius: 14px;
-  background: var(--surface-1);
-  box-shadow: inset 0 0 0 1px var(--line);
+  gap: 6px;
+  padding: 4px 2px 12px;
 }
 .v35 .drawer-section {
+  --tone: #8f5cff;
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 0;
-  height: 40px;
-  padding: 0 8px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 50px;
+  padding: 8px 4px;
   border: 0;
-  border-radius: 11px;
-  background: transparent;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text-3);
   font: inherit;
-  font-size: 13.5px;
-  font-weight: 700;
-  white-space: nowrap;
-  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-.v35 .drawer-section .icon {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  opacity: 0.85;
-}
-.v35 .drawer-section > span {
   overflow: hidden;
-  text-overflow: ellipsis;
+  transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.v35 .drawer-section--anime {
+  --tone: #3b82f6;
+}
+.v35 .drawer-section--cinema {
+  --tone: #c1121f;
+}
+.v35 .drawer-section b {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 1.6px;
+  margin-inline-end: -1.6px;
+  font-feature-settings: 'cv11', 'ss01';
+  color: color-mix(in srgb, var(--tone) 50%, var(--text-2));
 }
 .v35 .drawer-section[aria-checked='true'] {
-  background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent), 0 1px 2px rgba(0, 0, 0, 0.35);
-  color: #fff;
+  background: color-mix(in srgb, var(--tone) 14%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 45%, transparent);
+  color: var(--text-2);
 }
-.v35 .drawer-section[aria-checked='true'] .icon {
-  color: var(--accent-text);
-  opacity: 1;
-}
-.v35 .drawer-section:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.v35 .drawer-section[aria-checked='true'] b {
+  color: color-mix(in srgb, var(--tone) 62%, #fff);
 }
 .v35 .drawer-section:active {
   transform: scale(0.97);
-}
-@media (hover: hover) {
-  .v35 .drawer-section:not([aria-checked='true']):hover {
-    background: var(--surface-2);
-    color: var(--text-2);
-  }
 }
 .v35 .drawer-item .badge {
   margin-inline-start: auto;
