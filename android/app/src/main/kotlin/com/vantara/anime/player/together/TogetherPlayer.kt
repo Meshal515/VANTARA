@@ -1148,7 +1148,7 @@ class TogetherPlayer(
             actions.addView(episodes, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)).apply { marginEnd = context.dp(10) })
         }
         val picking = awaitingPick || failedSource != null
-        val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, Color.WHITE, bold = true).apply {
+        val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, if (picking) com.vantara.anime.player.Tone.ON_ACCENT else Color.WHITE, bold = true).apply {
             gravity = Gravity.CENTER
             maxLines = 1
             setPadding(context.dp(18), 0, context.dp(18), 0)
@@ -1202,7 +1202,7 @@ class TogetherPlayer(
         }
         val glyph = context.dp(28)
         dot.addView(ImageView(context).apply {
-            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) Color.WHITE else 0xBFFFFFFF.toInt()))
+            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) com.vantara.anime.player.Tone.ON_ACCENT else 0xBFFFFFFF.toInt()))
             // التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر
             // الفرق (~2.3% من حجمه) لا أكثر: الإزاحة السابقة (1dp) كانت تضع مركز ثقله أبعد من مركز الدائرة
             translationX = glyph * 0.023f

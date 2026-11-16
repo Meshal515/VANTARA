@@ -1,4 +1,4 @@
-import { renderLobby, pendingInvitees } from '../lib/together/lobby.js';
+import { renderLobby, pendingInvitees, sectionAccent } from '../lib/together/lobby.js';
 import { aniZipArt, episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 import { fetchSeasonChain } from '../lib/anime-meta.js';
 
@@ -138,7 +138,7 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       pending: pendingInvitees(event.invited, roster, event.me, person),
       kindText: mediaKind(media), episodeText: episodeLine(media, episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
-      accent: media.kind === 'anime' ? '#3b82f6' : '#c1121f',
+      accent: sectionAccent(media.kind),
     };
     // الموضع والزمن وانحراف كل عضو تتغير مع كل تقرير ولا تُرى في الغرفة: لا تُعيد الرسم
     const VOLATILE = new Set(['pos', 'at', 'driftMs', 'driftP95', 'seenAt', 'lastSeen', 'rtt', 'now']);

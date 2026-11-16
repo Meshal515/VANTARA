@@ -26,6 +26,7 @@ import { createTogetherPlayer } from './together-player.js';
 import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
 import { connectionLabel } from '../../v35/together.js';
 import { renderLobby, pendingInvitees } from './together-lobby.js';
+import { sectionAccent } from '../../lib/together/lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
 import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
 
@@ -412,7 +413,7 @@ export function openPlayer(args) {
           art,
           kindText: mediaKind(media),
           // لون القسم: أحمر السينما، بنفسجي المانجا، ولون الأنمي للأنمي
-          accent: media.kind === 'manga' ? '#8f5cff' : media.kind === 'anime' ? '#3b82f6' : '#c1121f',
+          accent: sectionAccent(media.kind),
           episodeText: episodeLine(media, episode),
           connectionText: connectionLabel(l.connection),
           pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),

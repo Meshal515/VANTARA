@@ -359,6 +359,7 @@ html,
 }
 .v35 .btn-primary:active {
   background: var(--accent-press);
+  color: var(--on-accent, #fff);
 }
 .v35 .btn-secondary {
   background: var(--surface-2);
@@ -3595,6 +3596,7 @@ html[data-motion='off'] .v35 .dock-scrim {
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
+  color: var(--on-accent, #fff);
 }
 .v35 :is(#settingsBody, #settingsPaneBody) .settings-title {
   font-size: 19px;

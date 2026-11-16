@@ -887,6 +887,7 @@
 }
 .v35 .an-pick-best:not(:disabled):active {
   background: var(--accent-press);
+  color: var(--on-accent, #fff);
 }
 .v35 .an-pick-best.waiting {
   background: var(--surface-2);
@@ -943,7 +944,8 @@
   }
   .v35 .an-pick-best:not(:disabled):hover {
     background: var(--accent-press);
-  }
+    color: var(--on-accent, #fff);
+}
 }
 @media (max-width: 370px) {
   .v35 .an-pick-together span {
@@ -1378,7 +1380,8 @@
   .v35 .ss-art > .an-pick-best:not(:disabled):active > .icon {
     background: var(--accent-press);
     transform: scale(0.94);
-  }
+    color: var(--on-accent, #fff);
+}
   .v35 .ss-art > .an-pick-best .ss-best-copy small {
     color: var(--text-3);
     opacity: 1;
