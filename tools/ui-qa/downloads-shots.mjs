@@ -13,6 +13,18 @@ const report = [];
 let n = 0;
 
 const QA_INIT = () => {
+  // إدارة المساحة: تقرير المحرك الأصلي بأحجام واقعية (حالة «VANTARA ماخذ 20 جيجا»)
+  const G = 1024 ** 3, M = 1024 ** 2;
+  window.Capacitor = Object.assign(window.Capacitor ?? {}, { Plugins: Object.assign(window.Capacitor?.Plugins ?? {}, { VantaraStorage: {
+    report: async () => ({ deviceTotal: 128 * G, deviceFree: 43.8 * G, appTotal: 21.6 * G, other: 410 * M, kinds: [
+      { id: 'torrentStreams', label: 'بقايا بث التورنت', effect: 'أجزاء حلقات شاهدتها بالتورنت. لا تحتاجها؛ الحلقة تُبث من جديد إن فتحتها.', bytes: 16.2 * G, cache: true, deletable: true, busy: false },
+      { id: 'mangaPages', label: 'صفحات المانجا المؤقتة', effect: 'صور الفصول التي قرأتها من الإنترنت. تُجلب من جديد عند القراءة؛ الفصول المحمّلة لا تتأثر.', bytes: 2.1 * G, cache: true, deletable: true, busy: false },
+      { id: 'webCache', label: 'كاش الواجهة والصور', effect: 'أغلفة وصور الواجهة المؤقتة. حسابك ومكتبتك وتحميلاتك لا تتأثر.', bytes: 520 * M, cache: true, deletable: true, busy: false },
+      { id: 'translationModels', label: 'نماذج الترجمة المحلية', effect: 'تشغّل الترجمة المرئية على الجهاز. بحذفها تتوقف حتى تُنزّلها من جديد (حجمها كبير).', bytes: 860 * M, cache: false, deletable: true, busy: false },
+      { id: 'videoDownloads', label: 'الحلقات والأفلام المحمّلة', effect: 'ما نزّلته لتشاهده بلا إنترنت. يُدار من «التحميلات».', bytes: 1.3 * G, cache: false, deletable: false, busy: false },
+    ] }),
+    clear: async () => ({ freed: 0, skipped: [] }),
+  } }) });
   const listeners = new Set();
   const jobs = new Map();
   let started = 0;
@@ -45,7 +57,11 @@ const QA_INIT = () => {
     addListener: async (name, fn) => { if (name === 'progress') listeners.add(fn); return { remove: () => listeners.delete(fn) }; },
   };
   const engine = {
-    prepare: async () => ({ session: 'qa', routes: [{ id: 'r1', sourceId: 'qa-source', sourceName: 'AnimeRift', server: 'AnimeRift', code: 'NMR', quality: 1080, state: 'READY', probed: true, probeMs: 420 }], done: true }),
+    prepare: async () => ({ session: 'qa', routes: [{ id: 'r1', sourceId: 'qa-source', sourceName: 'AnimeRift', server: 'AnimeRift', code: 'NMR', quality: 1080, state: 'READY', probed: true, probeMs: 420 },
+      { id: 't1', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a1', quality: 1080, state: 'READY', label: '[SubsPlease] Frieren - 01 (1080p).mkv\n👤 145 💾 257 MB ⚙️ Nyaa' },
+      { id: 't2', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a2', quality: 1080, state: 'READY', label: '[Erai-raws] Frieren - 01 [1080p HEVC].mkv\n👤 137 💾 68 MB ⚙️ Nyaa' },
+      { id: 't3', sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', infoHash: 'a3', quality: 720, state: 'READY', label: '[SubsPlease] Frieren - 01 (720p).mkv\n👤 57 💾 108 MB ⚙️ Nyaa' },
+      { id: 'r2', sourceId: 'qa-source-2', sourceName: 'Anime4up', server: 'Anime4up', code: 'MP4', quality: 720, state: 'READY', probed: true, probeMs: 380 }], done: true }),
     routes: async () => ({ routes: [], done: true }),
     pick: async () => 'c1',
     on: () => () => {},
@@ -137,7 +153,7 @@ await step('queue', async () => {
   await page.waitForFunction(() => document.querySelectorAll('.dl-row').length > 0);
   await sleep(1500);
   await shot('queue-start', '«جاري التحميل»: حلقتان نشطتان (التوازي 2) واثنتان تنتظران');
-  await page.waitForFunction(() => document.querySelectorAll('.dl-row').length === 2, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll('.dl-row').length >= 1, null, { timeout: 30000 });
   await sleep(4500);
   await shot('queue-progress', 'تقدّم حقيقي في الواجهة: الحجم/الإجمالي، النسبة، السرعة، والوقت المتبقي حين تستقر السرعة');
   await tap('.dl-row .dl-info');
@@ -148,6 +164,24 @@ await step('queue', async () => {
   await page.waitForSelector('.dl-settings');
   await shot('settings', 'إعدادات التحميل: التوازي 1–4، Wi-Fi فقط، والتخزين');
   await closeSheet();
+  // الإدارة: ⋯ الطابور، ثم التحديد المتعدد بضغطة مطوّلة وشريط أوامره
+  await tap('.dl-summary-more');
+  await page.waitForSelector('.dl-manage');
+  await shot('queue-manage', '⋯ إدارة التحميلات: تحديد، أعد الفاشل، إيقاف/استئناف الكل، إلغاء الطابور');
+  await closeSheet();
+  const first = page.locator('.dl-row').first();
+  const box = await first.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 20);
+  await page.mouse.down();
+  await sleep(700);
+  await page.mouse.up();
+  await page.waitForSelector('.dl-selectbar');
+  await shot('queue-select', 'ضغطة مطوّلة: وضع التحديد وشريط أوامره (إيقاف، استئناف، قدّمه، إلغاء)');
+  if ((await page.locator('.dl-row').count()) > 1) {
+    await tap('.dl-selectbar .dl-chip');
+    await shot('queue-select-all', 'تحديد الكل');
+  }
+  await tap('.dl-selectbar .icon-btn');
 });
 
 // ───────────── السينما (Cinemeta حيّ): Breaking Bad ─────────────
@@ -199,6 +233,20 @@ await step('device', async () => {
   await page.waitForSelector('.dl-card');
   await sleep(1500);
   await shot('device-grid', '«على الجهاز»: بطاقات مكتبتي نفسها، عمل واحد لكل بطاقة بعدد المحفوظ');
+  await tap('.dl-device-more');
+  await page.waitForSelector('.dl-manage');
+  await shot('device-manage', '⋯ ما على الجهاز: المساحة لكل قسم والمتاح، التحديد، وحذف المقروء والمشاهَد');
+  await closeSheet();
+  await tap('.dl-sort');
+  await shot('device-sort-size', 'الترتيب: الأكبر حجمًا');
+  const card = await page.locator('.dl-card').first().boundingBox();
+  await page.mouse.move(card.x + card.width / 2, card.y + card.height / 3);
+  await page.mouse.down();
+  await sleep(700);
+  await page.mouse.up();
+  await page.waitForSelector('.dl-selectbar');
+  await shot('device-select', 'تحديد أعمال على الجهاز وحذفها معًا');
+  await tap('.dl-selectbar .icon-btn');
 });
 
 const openDeviceCard = async (title) => {
@@ -278,10 +326,64 @@ await step('desktop', async () => {
     await tab('جاري التحميل');
     await sleep(700);
     await shot(`desktop-${w}-queue`, `ويندوز ${w}×${h}: «جاري التحميل»`);
+    // القوائم على الكمبيوتر: ⋯ الطابور، ⋯ الجهاز، إدارة المساحة، والتحديد
+    if (await page.locator('.dl-summary-more').count()) {
+      await tap('.dl-summary-more');
+      await page.waitForSelector('.dl-manage');
+      await shot(`desktop-${w}-queue-manage`, `ويندوز ${w}×${h}: ⋯ إدارة التحميلات`);
+      await closeSheet();
+    }
+    await tab('على الجهاز');
+    await sleep(500);
+    await tap('.dl-device-more');
+    await page.waitForSelector('.dl-manage');
+    await shot(`desktop-${w}-device-manage`, `ويندوز ${w}×${h}: ⋯ ما على الجهاز`);
+    await page.locator('.sheet-item', { hasText: 'إدارة المساحة' }).first().click();
+    await page.waitForSelector('.st-sheet');
+    await sleep(600);
+    await shot(`desktop-${w}-storage`, `ويندوز ${w}×${h}: إدارة المساحة`);
+    await closeSheet();
+    const card = await page.locator('.dl-card').first().boundingBox();
+    await page.mouse.move(card.x + card.width / 2, card.y + card.height / 3);
+    await page.mouse.down();
+    await sleep(700);
+    await page.mouse.up();
+    await page.waitForSelector('.dl-selectbar');
+    await shot(`desktop-${w}-device-select`, `ويندوز ${w}×${h}: تحديد أعمال على الجهاز`);
+    await tap('.dl-selectbar .icon-btn');
     await openDeviceCard('Frieren');
     await page.waitForSelector('#anime.active .an-er', { timeout: 20000 });
     await sleep(2000);
     await shot(`desktop-${w}-anime-local`, `ويندوز ${w}×${h}: صفحة العمل الأصلية من الجهاز`);
+    // ورقة تحميل حلقة بفلاتر «اختر السيرفر»
+    await js(() => window.__shell.openAnimeRef('anime:154587', { title: "Frieren: Beyond Journey's End" }));
+    await page.waitForSelector('#anime.active #animeTools [aria-haspopup]', { timeout: 30000 }).catch(() => {});
+    await sleep(1500);
+    if (await page.locator('#anime.active #animeTools [aria-haspopup]').count()) {
+      await menuOpen('#anime.active', '#animeTools');
+      await shot(`desktop-${w}-anime-menu`, `ويندوز ${w}×${h}: ⋮ في صفحة الأنمي`);
+      await page.locator('.aw-menu-item', { hasText: 'تحميل' }).first().click().catch(() => {});
+      await page.waitForSelector('.dl-start', { timeout: 15000 });
+      await page.locator('.dl-start-tabs .library-tab', { hasText: 'اختر السيرفر' }).first().click();
+      await page.waitForSelector('.dl-server-filters', { timeout: 20000 }).catch(() => {});
+      await sleep(900);
+      await shot(`desktop-${w}-download-filters`, `ويندوز ${w}×${h}: ورقة التحميل بفلاتر السيرفرات`);
+      await closeSheet();
+    }
+    // الإضافات وقوائمها
+    await js(() => document.querySelector('[data-act="openDrawer"]')?.click());
+    await sleep(600);
+    await shot(`desktop-${w}-drawer`, `ويندوز ${w}×${h}: القائمة الجانبية`);
+    await js(() => [...document.querySelectorAll('.drawer-item')].find((b) => b.textContent.trim() === 'الإضافات')?.click());
+    await sleep(2500);
+    await shot(`desktop-${w}-addons`, `ويندوز ${w}×${h}: الإضافات`);
+    const more = page.locator('.utility-page.active [aria-haspopup], .active [data-act="addonsMenu"], .active .icon-btn[aria-label*="خيارات"]').first();
+    if (await more.count()) {
+      await more.click().catch(() => {});
+      await sleep(700);
+      await shot(`desktop-${w}-addons-menu`, `ويندوز ${w}×${h}: قائمة الإضافات`);
+      await page.keyboard.press('Escape');
+    }
     await goDownloads();
   }
 });

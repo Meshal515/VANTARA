@@ -10,7 +10,7 @@
    زر غير مربّع). opacity وtransform فقط على الأيقونة: لا يمسّ تخطيط الترويسة */
 .v35 .dl-entry-ring { display: none; }
 .v35 .dl-entry .icon { transition: color var(--dur) var(--ease); }
-.v35 .dl-entry.is-busy .icon { color: var(--accent); animation: dl-entry-pulse 1.6s var(--ease) infinite; }
+.v35 .dl-entry.is-busy .icon { color: var(--danger, #e5484d); animation: dl-entry-pulse 1.6s var(--ease) infinite; }
 @keyframes dl-entry-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.88); }
@@ -183,7 +183,30 @@ html[dir='ltr'] .v35 .dl-bar.is-indeterminate > i { animation-direction: reverse
 .v35 .dl-row[data-state='queued'] .dl-title { color: var(--text-2); }
 
 /* ── على الجهاز ── */
-.v35 .dl-device-head { margin: 0 0 12px; color: var(--text-3); font-size: var(--fs-meta); display: flex; align-items: center; }
+.v35 .dl-device-head { margin: 0 0 12px; color: var(--text-3); font-size: var(--fs-meta); display: flex; align-items: center; gap: 8px; }
+.v35 .dl-device-facts { flex: 1; min-width: 0; margin: 0; display: flex; align-items: center; }
+.v35 .dl-sort { min-height: 34px; padding: 0 12px; flex: none; }
+.v35 .dl-summary-more, .v35 .dl-device-more { flex: none; }
+
+/* وضع التحديد: شريط ثابت المكان فوق القائمة (لا يدفع الصفوف ولا يتحرك معها) */
+.v35 .dl-selectbar {
+  position: sticky; top: 0; z-index: 3;
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 16px;
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent-line);
+  display: grid; gap: 10px;
+}
+.v35 .dl-selectbar-head { display: flex; align-items: center; gap: 10px; }
+.v35 .dl-selectbar-head b { flex: 1; min-width: 0; font-size: var(--fs-body); }
+.v35 .dl-selectbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.v35 .dl-select-act { min-height: 38px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
+.v35 .dl-select-act[disabled] { opacity: 0.45; }
+.v35 .dl-row.is-selected { background: var(--accent-soft); box-shadow: inset -3px 0 0 var(--accent); }
+.v35 .dl-card.is-selected .work-card-frame { box-shadow: 0 0 0 3px var(--accent); border-radius: var(--radius-card, 14px); }
+.v35 .dl-card.is-selected .poster { opacity: 0.72; }
+.v35 .dl-usage { margin: 0 0 8px; display: grid; gap: 6px; }
+.v35 .dl-usage-row { margin: 0; display: flex; justify-content: space-between; gap: 12px; color: var(--text-2); font-size: var(--fs-meta); }
+.v35 .dl-usage-row:empty { display: none; }
+.v35 .dl-usage-free { color: var(--text-3); border-top: 1px solid var(--line); padding-top: 6px; }
 .v35 .dl-card .poster { background: var(--surface-2); }
 @media (min-width: 900px) {
   .v35 .dl-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -309,7 +332,7 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 .v35 .dl-scope { min-height: 24px; }
 .v35 .dl-grid-nums { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; max-height: 236px; overflow-y: auto; padding: 2px 0 4px; }
 .v35 .dl-num { height: 44px; border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-1); font: inherit; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
-.v35 .dl-num.is-on { background: var(--accent); color: #fff; }
+.v35 .dl-num.is-on { background: var(--accent); color: var(--on-accent, #fff); }
 .v35 .dl-num.is-saved { background: none; color: var(--text-4); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
 .v35 .dl-sources { display: flex; flex-direction: column; margin-top: 4px; max-height: 320px; overflow-y: auto; }
 .v35 .dl-source-main small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; text-align: end; }
@@ -323,3 +346,37 @@ html[dir='ltr'] .v35 .dl-toggle input:checked + .dl-switch::after { transform: t
 .v35 .dl-source-size { color: var(--text-2); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; white-space: nowrap; } /* حجم الملف: تختار الأخف قبل التنزيل */
 .v35 .dl-seeds { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
 .v35 .dl-start-foot { background: linear-gradient(to bottom, transparent, var(--surface-1) 24%); }
+
+/* ── إدارة المساحة ── */
+.v35 .st-sheet h4 { margin: 16px 0 6px; font-size: var(--fs-meta); color: var(--text-3); font-weight: 700; }
+.v35 .st-device { margin: 4px 0 14px; display: grid; gap: 10px; }
+.v35 .st-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
+.v35 .st-bar i { display: block; min-width: 3px; }
+.v35 .st-bar-app, .v35 .st-legend-item.st-bar-app i { background: var(--accent); }
+.v35 .st-bar-other, .v35 .st-legend-item.st-bar-other i { background: color-mix(in srgb, var(--text-3) 55%, transparent); }
+.v35 .st-bar-free, .v35 .st-legend-item.st-bar-free i { background: var(--surface-3, var(--line)); }
+.v35 .st-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.v35 .st-legend-item { margin: 0; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-meta); color: var(--text-2); background: none !important; }
+.v35 .st-legend-item i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.v35 .st-list, .v35 .st-managed { display: grid; }
+.v35 .st-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); text-align: start; width: 100%; background: none; color: inherit; font: inherit; }
+.v35 .st-row:last-child { border-bottom: 0; }
+.v35 .st-row input { margin-top: 3px; width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.v35 .st-row.is-busy { opacity: 0.6; }
+.v35 .st-row-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.v35 .st-row-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.v35 .st-size { color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
+.v35 .st-effect { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.v35 .st-go-arrow { color: var(--text-3); align-self: center; transform: scaleX(-1); }
+.v35 .st-footer { position: sticky; bottom: 0; padding: 12px 0 4px; background: var(--sheet-bg, var(--surface)); display: grid; gap: 10px; }
+.v35 .st-summary { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+.v35 .st-go { min-height: 48px; }
+.v35 .st-note { color: var(--text-3); font-size: var(--fs-meta); }
+.v35 .dl-empty-space { margin-top: 14px; min-height: 42px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; }
+.v35 button.st-row--info { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; cursor: pointer; padding-inline: 0; }
+.v35 button.st-row--info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* فلاتر «اختر السيرفر» في ورقة التحميل */
+.v35 .dl-server-filters { display: grid; gap: 8px; margin: 4px 0 10px; }
+.v35 .dl-server-filters .dl-filters { margin: 0; }
+.v35 .dl-server-count { margin: 0; }
+.v35 .dl-source[hidden] { display: none; }

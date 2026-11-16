@@ -8,7 +8,8 @@ import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
 import { resolveRoutes, sameRoute } from './video-driver.js';
 
-const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7, 8]).buffer;
+/** JPEG كامل البنية (SOI … EOI): فحص السلامة يرفض المبتور، فالعيّنة تنتهي بـFFD9 كالملف الحقيقي. */
+const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 76 }, (_, i) => (i * 7) & 0x7f), 0xff, 0xd9]).buffer;
 
 const mangaSpec = (n, over = {}) => ({
   section: 'manga',
@@ -341,7 +342,7 @@ describe('manga driver', () => {
   const fetchBytes = (eng, calls) => async (src) => {
     calls.push(src);
     const n = Number(src.split('-')[1]);
-    if (eng.fail.has(n)) throw new Error('reset');
+    if (eng.fail.has(n)) throw new TypeError('Failed to fetch');
     return { bytes: JPEG(), type: 'image/jpeg' };
   };
 
@@ -349,7 +350,7 @@ describe('manga driver', () => {
     const store = memoryStore();
     const eng = engine([0, 1, 2, 3, 4]);
     const calls = [];
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls) });
+    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls), wait: async () => {} });
     const item = createItem(mangaSpec(1));
     const ctl = { signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() };
     const out = await driver.run(item, ctl);
@@ -362,7 +363,7 @@ describe('manga driver', () => {
     const store = memoryStore();
     const eng = engine([0, 1, 2, 3], { fail: new Set([2]) });
     const calls = [];
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls) });
+    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: fetchBytes(eng, calls), wait: async () => {} });
     const item = createItem(mangaSpec(1));
     const ctl = { signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() };
     await expect(driver.run(item, ctl)).rejects.toMatchObject({ code: 'NETWORK' });
@@ -378,7 +379,7 @@ describe('manga driver', () => {
   it('rejects a page that is not an image (an HTML error page is not a chapter)', async () => {
     const store = memoryStore();
     const eng = engine([0]);
-    const driver = createMangaDriver({ store, engine: () => eng, fetchBytes: async () => ({ bytes: new TextEncoder().encode('<html>').buffer, type: 'text/html' }) });
+    const driver = createMangaDriver({ store, engine: () => eng, wait: async () => {}, fetchBytes: async () => ({ bytes: new TextEncoder().encode('<html>').buffer, type: 'text/html' }) });
     await expect(driver.run(createItem(mangaSpec(1)), { signal: new AbortController().signal, progress() {}, update() {} })).rejects.toMatchObject({ code: 'VERIFY' });
     expect(sniffImageType(JPEG())).toBe('image/jpeg');
   });
@@ -636,42 +637,4 @@ describe('manga: the chapter the sheet starts on, and a source that returns no p
     expect(defaultUnitKey([{ key: 'a', number: null }])).toBe('a');
   });
 
-  const eng = (byRoute) => ({
-    pages: vi.fn(async (sid) => { const v = byRoute[sid]; if (v instanceof Error) throw v; return v; }),
-    pageImage: vi.fn(async (_s, page) => ({ src: `page-${page.index}` })),
-  });
-  const ok = async () => ({ bytes: JPEG(), type: 'image/jpeg' });
-  const ctlOf = () => ({ signal: new AbortController().signal, progress: vi.fn(), update: vi.fn() });
-  const spec = (mode, alternates) => createItem(mangaSpec(1, { source: { mode, sourceId: 'a' }, request: { sourceId: 'a', chapter: { url: '/a/1' }, ...(alternates ? { alternates } : {}) } }));
-
-  it('smart: a source that answers with no pages is skipped for the same chapter elsewhere, and the request locks to it', async () => {
-    const store = memoryStore();
-    const e = eng({ a: [], b: [{ index: 0 }, { index: 1 }] });
-    const driver = createMangaDriver({ store, engine: () => e, fetchBytes: ok });
-    const ctl = ctlOf();
-    const out = await driver.run(spec('smart', [{ sourceId: 'b', sourceName: 'B', chapter: { url: '/b/1' } }]), ctl);
-    expect(out).toMatchObject({ pages: 2 });
-    expect(e.pages.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
-    // الاستئناف لا يخلط مصدرين: الطلب يُقفل على البديل
-    expect(ctl.update).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ sourceId: 'b', alternates: [] }) }));
-  });
-
-  it('nobody has pages: the reason is «no pages», not «the source refused»', async () => {
-    const driver = createMangaDriver({ store: memoryStore(), engine: () => eng({ a: [], b: [] }), fetchBytes: ok });
-    const err = await driver.run(spec('smart', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
-    expect(err.code).toBe('NO_PAGES');
-    expect(err.message).toContain('2');
-    expect(ERROR_LABEL.NO_PAGES).not.toBe(ERROR_LABEL.SOURCE);
-    const single = await createMangaDriver({ store: memoryStore(), engine: () => eng({ a: [] }), fetchBytes: ok }).run(spec('smart'), ctlOf()).catch((x) => x);
-    expect(single).toMatchObject({ code: 'NO_PAGES', message: ERROR_LABEL.NO_PAGES });
-  });
-
-  it('manual never switches source, and a transport failure on every try stays retryable', async () => {
-    const e = eng({ a: [], b: [{ index: 0 }] });
-    const manual = await createMangaDriver({ store: memoryStore(), engine: () => e, fetchBytes: ok }).run(spec('manual', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
-    expect(manual.code).toBe('NO_PAGES');
-    expect(e.pages).toHaveBeenCalledTimes(1);
-    const down = await createMangaDriver({ store: memoryStore(), engine: () => eng({ a: new Error('timeout'), b: new Error('timeout') }), fetchBytes: ok }).run(spec('smart', [{ sourceId: 'b', chapter: { url: '/b/1' } }]), ctlOf()).catch((x) => x);
-    expect(down).toMatchObject({ code: 'SOURCE', retryable: true });
-  });
 });

@@ -989,6 +989,7 @@ html[data-section='cinema'],
 .v35 .aw-play:active {
   transform: scale(0.98);
   background: var(--accent-press);
+  color: var(--on-accent, #fff);
 }
 .v35 .aw-play--soon {
   background: var(--surface-2);
@@ -2703,6 +2704,7 @@ html[data-section='cinema'],
 .v35 .aw-still-play:active {
   transform: scale(0.92);
   background: var(--accent-press);
+  color: var(--on-accent, #fff);
 }
 .v35 .aw-still-play.nudge {
   animation: aw-nudge 0.42s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -2939,7 +2941,7 @@ html[dir='rtl'] .v35 .aw-menu::before {
 .v35 .wl .th { position: relative; overflow: hidden; border-radius: 10px; aspect-ratio: 16 / 9; background: var(--surface-2); }
 .v35 .wl .th img { width: 100%; height: 100%; }
 .v35 .wl .th em { position: absolute; bottom: 6px; left: 6px; font-style: normal; font-size: 12px; background: rgba(0, 0, 0, 0.6); padding: 1px 7px; border-radius: 5px; color: #fff; }
-.v35 .wl .th u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.v35 .wl .th u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); color: var(--on-accent, #fff); }
 .v35 .wl .seen .th img { opacity: 0.55; }
 .v35 .wl .dot { display: grid; place-items: center; border-radius: 50%; }
 /* The shared play path already carries its optical correction. No second CSS offset. */
@@ -3486,7 +3488,7 @@ html[dir='rtl'] .v35 .aw-menu::before {
 .v35 .wl-card .wl-logo-group { display: flex; align-items: center; flex: 0 0 var(--wl-logo-period); width: var(--wl-logo-period); height: 100%; gap: var(--wl-logo-gap); padding-right: var(--wl-logo-gap); box-sizing: border-box; }
 .v35 .wl-card .wl-logo-group img { flex: 0 0 var(--wl-logo-width); width: var(--wl-logo-width); max-width: none; height: 86%; object-fit: contain; filter: none; }
 .v35 .wl-card .wl-info { position: relative; z-index: 1; }
-.v35 .wl-card .wl-big:active { background: var(--accent-press) !important; }
+.v35 .wl-card .wl-big:active { background: var(--accent-press) !important; color: var(--on-accent, #fff); }
 .v35 .wl-card .wl-big:active .dot { color: var(--accent-press); }
 .v35 .wl-card .wl-big:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 4px; }
 .v35 .aw > .an-sources { margin: 28px var(--wl-g, 16px); max-width: calc(100% - 32px); }

@@ -27,6 +27,8 @@ class PreparedEpisode(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val preparationStartedAt = monotonicClock()
+    /** اسم الحلقة كما وجدها أول مصدر: كل المصادر الأخرى تُطابق عليه (EpisodeAlign) فلا تختلط حلقتان في ورقة واحدة. */
+    val episodeAnchor = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private val primaryQuality = HashMap<String, Int?>()
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
@@ -318,6 +320,27 @@ class PreparedEpisode(
     /** Cinema's search/extraction result is not a playable stream until its probe succeeds. */
     fun playable(list: List<Candidate>): List<Candidate> = if (!probe) list else synchronized(this) {
         list.filter { candidateProbes[it.id] == true || it.id in runtimeCandidates }
+    }
+
+    /**
+     * لاختيار سيرفر بعينه (التنزيل اليدوي): ما لم يُرفض فحصه بعد. السيرفر يظهر «جاهز» في ورقة التحميل وفحص روابطه
+     * ما زال يجري، و[playable] كانت ترجع فارغًا فيقول التنزيل «السيرفر لم يرجع رابطًا» وعنده روابط. التنزيل يفحص
+     * الرابط بنفسه (inspect) قبل أن يكتب بايتًا.
+     */
+    fun notRejected(list: List<Candidate>): List<Candidate> = synchronized(this) {
+        list.filter { candidateProbes[it.id] != false }
+    }
+
+    /** لماذا لا رابط لسيرفر: لا روابط، أو انتهت صلاحيتها، أو رُفضت كلها في الفحص. */
+    fun pickFailure(routeId: String): String {
+        val all = candidatesOf(routeId)
+        val now = clock()
+        return when {
+            all.isEmpty() -> "NO_CANDIDATES"
+            all.all { it.expiresAt <= now } -> "EXPIRED"
+            all.all { session.isFailed(it.id) } -> "FAILED"
+            else -> "PROBE_FAILED"
+        }
     }
 
     fun best(preferCode: String? = null): Candidate? = rank(playable(synchronized(this) { candidates.values.toList() }), preferCode).firstOrNull()

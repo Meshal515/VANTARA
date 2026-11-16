@@ -158,7 +158,7 @@ export function createTogether(deps) {
     if (artOf && media && media.kind !== 'manga') void artOf(media).then((a) => { s.art = a; }).catch(() => {});
     const kind = () => (s.room.timeline?.media ?? s.media)?.kind ?? 'anime';
     s.offs.push(room.on('joined', (m) => pop({ displayName: m.name, avatarKey: m.avatarKey ?? null }, `${m.name} دخل`, 'in')));
-    s.offs.push(room.on('left', (m) => pop(personByName(s, m.name), `${m.name} طلع`)));
+    s.offs.push(room.on('left', (m) => pop(personByName(s, m.name), m.kicked ? `المضيف أخرج ${m.name}` : `${m.name} طلع`)));
     s.offs.push(room.on('status', (m) => {
       if (m.userId === room.me) return;
       const text = statusToast(m, kind());
@@ -171,7 +171,8 @@ export function createTogether(deps) {
       else if (c === 'gone') ui().toast('انتهت الغرفة');
       else if (c === 'uninvited') ui().toast('هالغرفة لأشخاص محددين');
       else if (c === 'replaced') ui().toast('دخلت الغرفة من جهاز ثاني');
-      if (['full', 'gone', 'uninvited', 'replaced'].includes(c)) leave();
+      else if (c === 'kicked') ui().toast('المضيف أخرجك من الغرفة');
+      if (['full', 'gone', 'uninvited', 'replaced', 'kicked'].includes(c)) leave();
     }));
     s.offs.push(room.on('room', (r) => { s.mode = r.mode; paintStrips(); }));
     s.offs.push(room.on('roster', paintStrips));
@@ -461,6 +462,7 @@ export function createTogether(deps) {
       const list = el('div', 'tg-list');
       const actions = el('div', 'tg-actions');
       body.append(head, list, actions);
+      let confirmKick = null;
       const paint = () => {
         const now = s.room.clock.serverNow();
         count.textContent = `${s.room.roster.length} في الغرفة · ${connectionLabel(s.room.status)}`;
@@ -483,6 +485,25 @@ export function createTogether(deps) {
             where.append(el('span', 'tg-drift', `فرق ${Math.abs(r.driftMs)}ms`));
           }
           row.append(who, where);
+          // المضيف: «اجعله المضيف» و«أخرج» لكل شخص غيره (الإخراج بضغطتين حتى لا يقع خطأً)
+          if (s.room.isHost && r.userId !== s.room.me) {
+            const tools = el('div', 'tg-row-tools');
+            tools.append(button('tg-mini', '<span>اجعله المضيف</span>', () => { s.room.giveHost(r.userId); }, `اجعل ${r.name} المضيف`));
+            const kick = button('tg-mini is-danger', '<span>أخرج</span>', () => {
+              if (confirmKick !== r.userId) {
+                const armed = r.userId;
+                confirmKick = armed;
+                setTimeout(() => { if (confirmKick === armed) { confirmKick = null; paint(); } }, 4000);
+                paint();
+                return;
+              }
+              confirmKick = null;
+              s.room.kick(r.userId);
+            }, `أخرج ${r.name} من الغرفة`);
+            if (confirmKick === r.userId) { kick.classList.add('is-armed'); kick.querySelector('span').textContent = 'تأكيد الإخراج'; }
+            tools.append(kick);
+            row.append(tools);
+          }
           return row;
         }));
         actions.replaceChildren();
@@ -683,5 +704,5 @@ export function readerBridge(session, { seriesRef, onFollow }) {
 }
 
 export function connectionLabel(status) {
-  return ({ live: 'متصل', connecting: 'جاري الاتصال…', reconnecting: 'انقطع الاتصال · نعيد الاتصال…', closed: 'غادرت الغرفة', gone: 'انتهت الغرفة', replaced: 'الجلسة على جهاز آخر', uninvited: 'غير مدعو', full: 'الغرفة ممتلئة' })[status] ?? 'جاري الاتصال…';
+  return ({ live: 'متصل', connecting: 'جاري الاتصال…', reconnecting: 'انقطع الاتصال · نعيد الاتصال…', closed: 'غادرت الغرفة', gone: 'انتهت الغرفة', replaced: 'الجلسة على جهاز آخر', uninvited: 'غير مدعو', full: 'الغرفة ممتلئة', kicked: 'أخرجك المضيف' })[status] ?? 'جاري الاتصال…';
 }

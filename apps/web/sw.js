@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '887a1360cdf2dae3c2cc7b8cc4f72afd58077fd44d50db04e51e18f0d5e1b97e';
+const SHELL_DIGEST = '379a2c5436860fb4c3f899bc5e050dd86857971f740ed10a4bfb7e595f24ab37';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -133,6 +133,7 @@ const SHELL = [
   '/lib/unified-identity.js',
   '/lib/manga-twins.js',
   '/lib/adult-filter.js',
+  '/lib/removed-works.js',
   '/lib/manga-evidence.js',
   '/data/manga-aliases.json',
   '/lib/manga-meta.js',
@@ -276,6 +277,7 @@ const SHELL = [
   '/v35/library-model.js',
   '/v35/work-menu.js',
   '/v35/downloads.js',
+  '/v35/storage-view.js',
   '/v35/downloads.css',
   '/lib/downloads/index.js',
   '/lib/downloads/manager.js',
@@ -287,6 +289,8 @@ const SHELL = [
   '/lib/downloads/video-driver.js',
   '/lib/downloads/art.js',
   '/lib/downloads/local-reader.js',
+  '/lib/downloads/offline-engine.js',
+  '/lib/reader-engine.js',
   '/v35/addons.css',
   '/v35/addons-v7.css',
   '/v35/addons-v7.js',

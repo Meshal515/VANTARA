@@ -369,7 +369,7 @@
     padding: 0 0 12px;
   }
   .v35 .drawer-section {
-    min-height: 52px;
+    min-height: 46px;
   }
   .v35 .drawer-section:hover {
     background: var(--surface-2);

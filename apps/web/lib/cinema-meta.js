@@ -1,3 +1,4 @@
+import { isRemovedAny } from './removed-works.js';
 /**
  * بيانات أعمال VANTARA CINEMA: Cinemeta (قاعدة ستريمو المفتوحة) للبحث والقوائم
  * والمواسم والحلقات، بلا مفتاح ولا حساب. القصة تُعرَّب في الخادم
@@ -82,6 +83,8 @@ const episodesOf = (m, id) => (m?.videos ?? []).filter((v) => String(v?.id ?? ''
 /** شكل واحد للعمل في كل الواجهة. */
 export function normalize(m) {
   if (!m?.id || !/^tt\d+$/.test(String(m.imdb_id ?? m.id))) return null;
+  // عمل حذفه المالك من التطبيق: لا يظهر في أي قائمة ولا بحث ولا تفاصيل (كأنه غير موجود)
+  if (isRemovedAny([`cinema:${m.imdb_id ?? m.id}`, String(m.imdb_id ?? m.id)])) return null;
   const rating = Number.parseFloat(m.imdbRating);
   const type = kindOf(m);
   return {

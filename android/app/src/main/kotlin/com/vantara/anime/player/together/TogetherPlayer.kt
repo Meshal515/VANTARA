@@ -133,6 +133,13 @@ class TogetherPlayer(
     private var stepText: TextView? = null
     private var progressShown = 0f
     private var lobbySig = ""
+    /** «الحلقة N» وعنوانها في شاشة الغرفة: يتحدّثان حين ينقل المضيف الغرفة لحلقة أخرى. */
+    private var lobbyEpisode: TextView? = null
+    private var lobbyEpisodeTitle: TextView? = null
+    /** الحلقة التي فُتح عليها المشغّل: عنوانها من الدعوة لا يُكتب على حلقة أخرى. */
+    private var initialEpisode = -1
+    /** «أخرج» يحتاج ضغطة تأكيد ثانية خلال 4 ث. */
+    private var confirmKick: String? = null
     /** الغرفة أولًا: لم يختر سيرفره بعد. تبقى الغرفة ظاهرة (حتى لو بدأت) لأنه لا فيديو يُشاهد بلا سيرفر. */
     private var awaitingPick = launch.pick
     /** لون القسم: أحمر السينما، ولون الأنمي للأنمي. */
@@ -154,6 +161,10 @@ class TogetherPlayer(
     private val synced get() = client.mode == "sync"
     private fun mediaKey(ep: Int = hooks.episode()) = "${launch.mediaPrefix}#$ep"
     private fun episodeOf(key: String?) = key?.substringAfterLast('#', "")?.toIntOrNull()
+    /** حلقة الغرفة الآن (قد تسبق حلقة المشغّل أثناء تجهيز ما اختاره المضيف). */
+    private fun roomEpisode() = client.timeline?.mediaKey?.takeIf { it.startsWith("${launch.mediaPrefix}#") }?.let { episodeOf(it) } ?: hooks.episode()
+    /** خط الغرفة الزمني يخص الحلقة المعروضة عندي؟ لا = لا يُطبَّق أبدًا (لا تشغيل الحلقة 2 على وقت الحلقة 1). */
+    private fun sameEpisode(t: Timeline?) = t != null && episodeOf(t.mediaKey) == hooks.episode()
 
     // ───────────── ديلاي الفيديو الشخصي ─────────────
     // لك وحدك: مصدرك فيه مقدمة 10 ث زيادة؟ +10 ث تجعل فيديوك متقدّمًا عن وقت الغرفة،
@@ -187,6 +198,7 @@ class TogetherPlayer(
     }
 
     fun start() {
+        initialEpisode = hooks.episode()
         client.connect()
         main.post(tick)
         // غرفة متزامنة: شاشة الغرفة من أول لحظة (الأصدقاء، سيرفرك وزر «غيّر»)، لا شاشة سوداء
@@ -236,7 +248,8 @@ class TogetherPlayer(
         if (!ready) {
             ready = true
             preparedEpisode = hooks.episode()
-            if (synced && t?.started != true) {
+            // الغرفة على حلقة غير حلقتي (انتقال لم يكتمل) = انتظار أيضًا: لا نشغّل على وقت حلقة أخرى
+            if (synced && (t?.started != true || !sameEpisode(t))) {
                 // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ».
                 // حالة الغرفة لم تصل بعد (السيرفر أسرع من الاتصال)؟ نفس الشيء؛ الترحيب يقفز إن كانت بدأت.
                 withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
@@ -260,13 +273,15 @@ class TogetherPlayer(
 
     /** انتهت الحلقة: المضيف ينقل الغرفة للتالية، والبقية ينتظرونه. يعيد true إن تولّى Together الأمر. */
     fun onEnded(): Boolean {
+        // المنفصلة: كل واحد بوقته، وبطاقة «الحلقة التالية» العادية
+        if (!synced) return false
         if (!client.isHost) {
-            if (synced) hooks.message("بانتظار المضيف للحلقة التالية…")
-            return synced
+            hooks.message("بانتظار المضيف للحلقة التالية…")
+            return true
         }
         if (!hooks.hasNextEpisode()) return false
         val next = hooks.episode() + 1
-        client.command("load", 0.0, mediaKey(next), "الحلقة $next")
+        if (!client.command("load", 0.0, mediaKey(next), "الحلقة $next")) { hooks.message("انتظر عودة الاتصال بالغرفة"); return true }
         hooks.switchToEpisode(next)
         return true
     }
@@ -280,8 +295,13 @@ class TogetherPlayer(
         val t = client.timeline ?: return false
         if (!synced) return false
         if (client.canControl) {
-            if (!t.started && playing) client.command("play", 0.0)
-            else { client.command(if (playing) "play" else "pause", roomPos(), at = serverNow()); holdIntent(t) }
+            if (!t.started && playing) {
+                // من غرفة الانتظار: «ابدأ» بعدّ 3-2-1 مشترك، ولا يشتغل عندي قبل الجميع
+                if (ready) client.command("play", 0.0, countdownMs = 3000L) else hooks.message("نجهّز فيديوك…")
+                withApplying { hooks.player.playWhenReady = false }
+                return true
+            }
+            client.command(if (playing) "play" else "pause", roomPos(), at = serverNow()); holdIntent(t)
             return false
         }
         hooks.message("المضيف يتحكم بالتشغيل")
@@ -306,7 +326,7 @@ class TogetherPlayer(
         if (awaitingPick) showLobby()
         else if (counting(t)) startCountdown(t!!.at) else if (!synced || t?.started == true) hideLobby() else showLobby()
         if (synced && ready && t != null) {
-            if (!t.started) withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
+            if (!t.started || !sameEpisode(t)) withApplying { hooks.player.playWhenReady = false; if (!t.started) hooks.player.seekTo(max(0L, offsetMs)) }
             else jumpToRoom(t)
         }
         paintStrip()
@@ -348,7 +368,7 @@ class TogetherPlayer(
     }
     override fun onConnection(live: Boolean) { connected = live; paintLobby() }
     override fun onJoined(name: String) = hooks.message("$name دخل")
-    override fun onLeft(name: String) = hooks.message("$name طلع")
+    override fun onLeft(name: String, kicked: Boolean) = hooks.message(if (kicked) "المضيف أخرج $name" else "$name طلع")
     /**
      * «البدء»: الحالة تُقرأ لحظة اللمس لا لحظة رسم الزر، وكل نتيجة لها أثر: عدّ 3-2-1 عند الجميع، أو رسالة بالسبب.
      */
@@ -357,8 +377,11 @@ class TogetherPlayer(
         if (startSentAt != 0L && client.timeline?.started != true && lobbyCount == null) hooks.message(TogetherStart.NO_REPLY)
         startSentAt = 0L
     }
+    private fun guestsWaiting() = TogetherStart.notReady(client.roster, client.me, client.timeline?.mediaKey)
     private fun pressStart() {
-        val gate = TogetherStart.gate(ready, connected, awaitingPick)
+        val waiting = guestsWaiting()
+        val gate = TogetherStart.gate(ready, connected, awaitingPick, waiting.size)
+        if (gate == TogetherStart.Gate.GUESTS) { hooks.message(TogetherStart.waitingText(waiting.map { it.name })); paintLobby(); return }
         if (gate != TogetherStart.Gate.SEND) { hooks.message(TogetherStart.message(gate)!!); paintLobby(); return }
         if (!client.command("play", 0.0, countdownMs = TogetherStart.COUNTDOWN_MS)) { hooks.message(TogetherStart.SEND_FAILED); return }
         startSentAt = android.os.SystemClock.uptimeMillis()
@@ -366,16 +389,19 @@ class TogetherPlayer(
         main.postDelayed(startWatch, TogetherStart.REPLY_TIMEOUT_MS)
     }
 
-    override fun onDenied() {
+    override fun onDenied(reason: String?, waiting: List<String>) {
         startSentAt = 0L
         main.removeCallbacks(startWatch)
-        hooks.message(TogetherStart.DENIED)
+        hooks.message(if (reason == "not_ready") TogetherStart.waitingText(waiting) else TogetherStart.DENIED)
+        paintLobby()
     }
 
     override fun onHost(userId: String) { if (userId == client.me) hooks.message("صرت المضيف"); paintLobby() }
     override fun onClosed(reason: String) {
-        hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; else -> "انقطعت الغرفة" })
+        hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; "kicked" -> "المضيف أخرجك من الغرفة"; else -> "انقطعت الغرفة" })
         hideLobby()
+        mute(false)
+        strip?.visibility = View.GONE
         withApplying { hooks.player.setPlaybackSpeed(1f) }
     }
 
@@ -437,6 +463,7 @@ class TogetherPlayer(
     }
 
     private fun jumpToRoom(t: Timeline, force: Boolean = false) {
+        if (!sameEpisode(t)) return
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
         if (at < t.at) {
             // Apply the scheduled command at the shared instant, not on receipt.
@@ -581,7 +608,8 @@ class TogetherPlayer(
         val others = client.roster.filter { it.userId != client.me }
         val waiting = pending().map { it.displayName }
         val broken = others.filter { it.state == "failed" }.map { it.name }
-        val preparing = others.filter { it.state == "preparing" }.map { it.name }
+        // غير الجاهزين على حلقة الغرفة (يجهّز، أو تقريره من حلقة سابقة)؛ المتعذّر له سطره
+        val preparing = TogetherStart.notReady(others, client.me, client.timeline?.mediaKey).filter { it.state != "failed" }.map { it.name }
         return when {
             waiting.isNotEmpty() -> "${names(waiting)} ${if (waiting.size > 1) "ما دخلوا" else "ما دخل"} بعد" to false
             broken.isNotEmpty() -> "سيرفر ${names(broken)} تعذّر" to false
@@ -624,7 +652,10 @@ class TogetherPlayer(
                 )
                 if (tags.isNotEmpty()) where.addView(context.label(tags.joinToString(" · "), 11f, Tone.TEXT_3))
                 row.addView(where)
-                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(6) })
+                val tools = client.isHost && m.userId != client.me
+                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(if (tools) 2 else 6) })
+                // المضيف: «اجعله المضيف» و«أخرج» (بضغطتين حتى لا يقع خطأً)
+                if (tools) body.addView(hostTools(m), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(8) })
             }
             for (p in pending()) {
                 val row = LinearLayout(context).apply {
@@ -645,7 +676,61 @@ class TogetherPlayer(
         }
     }
 
-    fun panelClosed() { panelOpen = false }
+    fun panelClosed() { panelOpen = false; confirmKick = null }
+
+    private fun hostTools(m: Member): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        layoutDirection = View.LAYOUT_DIRECTION_RTL
+        setPadding(context.dp(10), 0, context.dp(10), 0)
+        addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        fun pill(text: String, fg: Int, bg: Int, stroke: Int, desc: String, onClick: () -> Unit) = context.label(text, 12.5f, fg, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
+            background = rounded(bg, context.dp(16).toFloat(), context.dp(1), stroke)
+            contentDescription = desc
+            setOnClickListener { onClick() }
+        }
+        addView(pill("اجعله المضيف", 0xD9FFFFFF.toInt(), 0x0AFFFFFF, 0x2EFFFFFF, "اجعل ${m.name} المضيف") { client.giveHost(m.userId) })
+        val armed = confirmKick == m.userId
+        addView(pill(if (armed) "تأكيد الإخراج" else "أخرج", if (armed) Color.WHITE else 0xFFFF8B8E.toInt(), if (armed) 0xFFE5484D.toInt() else 0x00000000, if (armed) 0xFFE5484D.toInt() else 0x59FF6B6E, "أخرج ${m.name} من الغرفة") {
+            if (confirmKick != m.userId) {
+                val id = m.userId
+                confirmKick = id
+                main.postDelayed({ if (confirmKick == id) { confirmKick = null; if (panelOpen) hooks.refreshPanel() } }, 4000)
+            } else { confirmKick = null; client.kick(m.userId) }
+            if (panelOpen) hooks.refreshPanel()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = context.dp(8) })
+    }
+
+    /**
+     * الغرفة انتقلت لحلقة أخرى: لا سيرفر يُختار تلقائيًا ولا تشغيل (قرار المالك، 15 نوفمبر). الكل يرجع لشاشة الغرفة
+     * و«اختر سيرفر» كما عند دخولها، والسيرفرات تتجهّز في الخلفية للورقة.
+     */
+    fun awaitPick() {
+        awaitingPick = true
+        ready = false
+        failedSource = null
+        progressShown = 0f
+        mute(false)
+        showLobby()
+        report("preparing", force = true)
+        paintLobby()
+    }
+
+    /**
+     * المضيف نقل الغرفة لموسم آخر: الواجهة تجهّز مشغّل الموسم الجديد تحت هذا المشغّل، وهذا يبقى ظاهرًا بشاشة الغرفة
+     * حتى يأخذ الجديد مكانه. يُغلق اتصاله الآن (الجديد يدخل الغرفة بالحساب نفسه).
+     */
+    fun handOff(label: String?) {
+        main.removeCallbacksAndMessages(null)
+        client.close()
+        awaitingPick = true
+        ready = false
+        showLobby()
+        paintLobby()
+        hooks.message(listOfNotNull("ننقل الغرفة", label?.takeIf { it.isNotBlank() }).joinToString(" · ") + "…")
+    }
 
     /** اختيار حلقة من ورقة المشغّل داخل غرفة متزامنة: المضيف ينقل الغرفة كلها، والصديق يُبلَّغ. منفصلة: تبديل محلي. */
     /** الموسم من ورقة الحلقات: المضيف ينقل الغرفة كلها لأول حلقة في الموسم (`anime:<id>#1`)؛ الصديق يُبلَّغ. */
@@ -659,8 +744,10 @@ class TogetherPlayer(
 
     fun requestEpisode(n: Int): Boolean {
         if (!synced) return false
+        // «إعادة المحاولة» لنفس الحلقة: محلية، لا تعيد الغرفة كلها لغرفة الانتظار
+        if (n == hooks.episode() && n == roomEpisode()) return false
         if (!client.isHost) { hooks.message("المضيف يختار الحلقة"); return true }
-        client.command("load", 0.0, mediaKey(n), "الحلقة $n")
+        if (!client.command("load", 0.0, mediaKey(n), "الحلقة $n")) hooks.message("انتظر عودة الاتصال بالغرفة")
         return true
     }
 
@@ -821,9 +908,9 @@ class TogetherPlayer(
             launch.kindText?.takeIf { it.isNotBlank() && it != episodeText() }?.let {
                 hero.addView(context.label(it, 13.5f, 0x99FFFFFF.toInt(), bold = true).apply { setPadding(0, context.dp(8), 0, 0) })
             }
-            hero.addView(context.label(episodeText(), 26f, Color.WHITE, bold = true).apply { setShadowLayer(context.dp(12).toFloat(), 0f, context.dp(2).toFloat(), 0x80000000.toInt()) })
+            hero.addView(context.label(episodeText(), 26f, Color.WHITE, bold = true).apply { setShadowLayer(context.dp(12).toFloat(), 0f, context.dp(2).toFloat(), 0x80000000.toInt()) }.also { lobbyEpisode = it })
             launch.episodeTitle?.takeIf { it.isNotBlank() }?.let {
-                hero.addView(context.label("\u2068$it\u2069", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                hero.addView(context.label("\u2068$it\u2069", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE }.also { lobbyEpisodeTitle = it })
             }
             val steps = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(8), 0, 0) }
             val bars = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_LTR }
@@ -920,7 +1007,7 @@ class TogetherPlayer(
     }
 
     private fun episodeText(): String {
-        val n = hooks.episode()
+        val n = roomEpisode()
         if (launch.kindText == "فيلم") return "فيلم"
         return launch.season?.let { "م$it · الحلقة $n" } ?: "الحلقة $n"
     }
@@ -934,6 +1021,8 @@ class TogetherPlayer(
         lobbyStart = null
         lobbyCount = null
         lobbySig = ""
+        lobbyEpisode = null
+        lobbyEpisodeTitle = null
         markFill = null
         stepBars = emptyList()
         stepText = null
@@ -977,13 +1066,16 @@ class TogetherPlayer(
     }
 
     private fun paintLobby() {
+        // «الحلقة N» من الغرفة نفسها، وعنوان حلقة الدعوة لا يبقى على حلقة أخرى
+        lobbyEpisode?.let { v -> val text = episodeText(); if (v.text.toString() != text) v.text = text }
+        lobbyEpisodeTitle?.visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE
         val bar = lobbyBar ?: return
         if (lobbyCount != null) return
         val root = lobby
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
         val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
-            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
         if (sig == lobbySig && bar.childCount > 0) return
         lobbySig = sig
         bar.removeAllViews()
@@ -1056,7 +1148,7 @@ class TogetherPlayer(
             actions.addView(episodes, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)).apply { marginEnd = context.dp(10) })
         }
         val picking = awaitingPick || failedSource != null
-        val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, Color.WHITE, bold = true).apply {
+        val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, if (picking) com.vantara.anime.player.Tone.ON_ACCENT else Color.WHITE, bold = true).apply {
             gravity = Gravity.CENTER
             maxLines = 1
             setPadding(context.dp(18), 0, context.dp(18), 0)
@@ -1068,7 +1160,7 @@ class TogetherPlayer(
         }
         actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
         // البدء: بطاقة كبيرة فوق الشريط (lobbyStart) لا زرًا فيه. غير المضيف يرى «بانتظار المضيف» في الشريط
-        val canStart = TogetherStart.gate(ready, connected, awaitingPick) == TogetherStart.Gate.SEND
+        val canStart = TogetherStart.gate(ready, connected, awaitingPick, guestsWaiting().size) == TogetherStart.Gate.SEND
         val startHost = lobbyStart
         if (startHost != null) {
             if (client.isHost) {
@@ -1110,7 +1202,7 @@ class TogetherPlayer(
         }
         val glyph = context.dp(28)
         dot.addView(ImageView(context).apply {
-            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) Color.WHITE else 0xBFFFFFFF.toInt()))
+            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) com.vantara.anime.player.Tone.ON_ACCENT else 0xBFFFFFFF.toInt()))
             // التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر
             // الفرق (~2.3% من حجمه) لا أكثر: الإزاحة السابقة (1dp) كانت تضع مركز ثقله أبعد من مركز الدائرة
             translationX = glyph * 0.023f

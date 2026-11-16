@@ -30,9 +30,10 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
+import { readerEngine } from '../lib/reader-engine.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
@@ -68,6 +69,7 @@ import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/ma
 import { artRatio, createArtStore } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
+import { isRemovedAny, removeWorkEverywhere, restoreRemovedWork, setRemovedSource } from '../lib/removed-works.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
@@ -88,7 +90,7 @@ import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
-import { applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
+import { ACCENTS, accentOf, applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
 import { sideDock } from './side-dock.js';
 import { experienceView, readStructure } from './experience.js';
 import { appearanceFeature, CATEGORIES, categoryOf, renderAppearancePane } from './settings-center.js';
@@ -433,6 +435,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const me = () => sync.user?.userId;
   setHiddenUser(me);
+  // «حذف العمل» من التطبيق كله: بصمات الأعمال المحذوفة (بلا أسماء) من المزامنة، تُخفي العمل في كل مكان
+  setRemovedSource(() => sync.rows('removed_work_tokens', () => true));
+  /** مالك التطبيق (الشارة من الخادم): وحده يحذف الأعمال ويرى أرشيفها. */
+  const iAmOwner = () => Boolean(me()) && sync.rows('accounts', (a) => a.user_id === me())[0]?.badge === 'owner';
 
   // ترجمة الفصول مقدمًا: الطابور المحفوظ (lib/translate-jobs.js)، يُنشأ مبكرًا فكل من يسأله يجده
   const translationJobs = createJobRunner({ sync, engine, translatePage, readerQuiet, concurrency:24, lookahead:40, prepareConcurrency:2, native: { jobProgress, jobFinished, jobStop } });
@@ -896,12 +902,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (ratingQueue.length) ratingTimer ??= setTimeout(flushRatings, 0);
   }
-  /** «حذف العمل»: يختفي من كل القوائم والبحث وآخر التحديثات، ويبقى في أرشيف حسابك لإعادته. */
+  /**
+   * «حذف العمل» (المالك وحده): يُحذف من التطبيق كله عند الجميع — الرئيسيات والقوائم والبحث وآخر التحديثات —
+   * ولا يُفتح، ويبقى في أرشيف المالك لإعادته. غير المالك لا يرى الخيار ولا يعرف أن عملًا حُذف.
+   */
   function deleteWork(work) {
+    if (!iAmOwner()) return;
     const keys = [work._work?.key, ...(work._work?.keys ?? []), String(work.id)].filter(Boolean);
-    hideWork({ id: String(work.id), keys, title: titleOf(work), cover: work.coverUrl ?? work.cover ?? work._work?.thumbnailUrl ?? null });
+    const cover = work.coverUrl ?? work.cover ?? work._work?.thumbnailUrl ?? null;
+    if (!removeWorkEverywhere(sync, { key: String(work.id), kind: 'manga', keys, title: titleOf(work), cover })) return toast('ما قدرنا نحذف العمل، جرّب بعد لحظة');
     for (const node of root.querySelectorAll('.work-card')) if (node._work && (String(node._work.id) === String(work.id) || keys.includes(node._work._work?.key))) node.remove();
-    toast('حُذف العمل — تلقاه في الإعدادات › أرشيف الأعمال المحذوفة');
+    toast('حُذف العمل من التطبيق — تلقاه في الإعدادات › أرشيف الأعمال المحذوفة');
   }
   function openCardActions(work) {
     const ref = String(work.id);
@@ -920,16 +931,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
           if (!inCollection('read_later', ref)) { sync.enqueue('readLater.set', { ...descriptorOf(work), member: true }); toast('في «أقرأ لاحقًا»'); }
           else toast('العمل في «أقرأ لاحقًا»');
         }, { pressed: inCollection('read_later', ref) }),
-        sheetItem('trash', 'حذف العمل', () => {
+        ...(iAmOwner() ? [sheetItem('trash', 'حذف العمل', () => {
           closeSheet();
           deleteWork(work);
-        }, { danger: true }),
+        }, { danger: true })] : []),
       );
     }, { tone: 'manga' });
   }
 
   function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
+    // محذوف من التطبيق: لا بطاقة في أي قائمة (المكتبة والسجل لا يمران من فلتر البحث)
+    if (isRemovedAny([String(work?.id ?? ''), work?._work?.key, ...(work?._work?.keys ?? [])].filter(Boolean))) { a.hidden = true; a.style.display = 'none'; return a; }
     a.dataset.workId = String(work.id);
     a._work = work;
     a.tabIndex = 0;
@@ -1647,6 +1660,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // عملٌ فُتح من نتائج بحث مكتوب: هذا ما قصدته، فيُحفظ في «آخر ما بحثت عنه»
     if (currentPage() === 'search' && searchTerm) rememberSearch(searchTerm);
     // أنمي (ترشيح، إشعار، حضور…): صفحته في قسم الأنمي، لا صفحة مانجا بنفس العنوان
+    // محذوف من التطبيق (المالك): لا يُفتح من أي مكان — رابط، إشعار، مكتبة، سجل — بلا ذكر لسبب
+    if (isRemovedAny([String(work?.id ?? ''), work?._work?.key, ...(work?._work?.keys ?? [])].filter(Boolean))) return toast('هذا العمل غير متاح');
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
@@ -1969,6 +1984,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const cover = q('detailCover');
     if (cover.dataset.for !== String(w.id)) {
       cover.dataset.for = String(w.id);
+      cover.style.removeProperty('--art-bg');
       const glow = q('detailGlow');
       glow?.classList.remove('ready');
       glow?.removeAttribute('src');
@@ -1997,6 +2013,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
+        // خلفية مموّهة من الفن نفسه تملأ أي فراغ حول الغلاف (نسبة الفن غير نسبة مكانه): لا قص ولا سواد
+        cover.style.setProperty('--art-bg', `url("${String(img.src).replace(/["\\\n]/g, encodeURIComponent)}")`);
         cover.replaceChildren(img);
         // ألواح «ويبتوني» على الكمبيوتر تأخذ الغلاف المحسوم نفسه (لا مسار غلاف ثانٍ)
         for (const panel of document.querySelectorAll('#detail [data-wt-panel]')) panel.src = img.src;
@@ -2820,7 +2838,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (warmKey && warmKey !== state.warmKey && available()) {
       state.warmKey = warmKey;
       clearTimeout(state.warmTimer);
-      state.warmTimer = setTimeout(() => warmChapter(engine, next), 600);
+      state.warmTimer = setTimeout(() => warmChapter(readerEngine, next), 600);
     }
     paintProgress(w, readCount, counted.length);
     paintStats(w);
@@ -3637,21 +3655,28 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sources: async () => (w._editions ?? []).filter((e) => e.chapters?.length).map((e) => ({ id: e.sourceId, name: displayName(e.label, e.sourceId) + (isFiller(e.sourceId) ? ' · إنجليزي' : ''), note: `${e.chapters.length}` })),
       build: async (list, choice) => {
         const manual = choice.mode === 'manual' ? new Map(editionRows(w, choice.sourceId).map((r) => [chapterKeyOf(ref, r), r])) : null;
-        // الذكي: نفس الفصل عند المصادر الأخرى (بمفتاحه) احتياطًا إن ردّ مصدره بلا صفحات
-        const others = manual ? [] : (w._editions ?? []).filter((e) => e.chapters?.length)
-          .map((e) => ({ id: e.sourceId, rows: new Map(editionRows(w, e.sourceId).map((r) => [chapterKeyOf(ref, r), r])) }));
+        // الذكي: نفس الفصل (بالرقم) عند نسخ العمل الأخرى، بترتيب ثقة المصادر. فصل بلا صفحات أو مصدر رفضه
+        // يُكمل من غيره بدل أن يفشل «المصدر رفض الطلب» وعند غيره الفصل كاملًا (كما يفعل القارئ)
+        const alternatesOf = (row) => {
+          if (manual || !Number.isFinite(row?.number) || row.number < 0) return [];
+          return (w._editions ?? [])
+            .filter((e) => e.sourceId !== row.sourceId)
+            .map((e) => editionRows(w, e.sourceId).find((r) => r.number === row.number))
+            .filter((r) => r?.chapter)
+            .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))
+            .slice(0, 4)
+            .map((r) => ({ sourceId: r.sourceId, chapter: r.chapter, sourceName: displayName(r.label, r.sourceId) }));
+        };
         const specs = [];
         for (const u of list) {
           const row = manual ? manual.get(u.key) : u.row;
           if (!row?.chapter) continue;
-          const alternates = others.filter((o) => o.id !== row.sourceId).map((o) => o.rows.get(u.key)).filter((r) => r?.chapter).slice(0, 3)
-            .map((r) => ({ sourceId: r.sourceId, sourceName: displayName(null, r.sourceId), chapter: r.chapter }));
           specs.push({
             section: 'manga',
             work,
             unit: { key: u.key, number: u.number, title: u.title },
             source: { mode: choice.mode, sourceId: row.sourceId, sourceName: choice.sourceName ?? displayName(null, row.sourceId) },
-            request: { sourceId: row.sourceId, chapter: row.chapter, ...(alternates.length ? { alternates } : {}) },
+            request: { sourceId: row.sourceId, chapter: row.chapter, alternates: alternatesOf(row) },
           });
         }
         if (!specs.length) throw new Error(manual ? 'المصدر المختار لا يحمل هذه الفصول' : 'لا فصول قابلة للتنزيل');
@@ -3844,9 +3869,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
           target?.onChange?.();
         },
         report: () => { closeSheet(); openReport(w); },
-        delete: () => { closeSheet(); deleteWork(w); goBack(); },
+        // الأنمي والسينما (target): الحذف بمرجعها نفسه (`anime:<id>` / `cinema:<id>`)، والمانجا بمفاتيح العمل
+        delete: () => {
+          closeSheet();
+          if (target) {
+            const kind = String(target.ref).startsWith('cinema:') ? 'cinema' : String(target.ref).startsWith('anime:') ? 'anime' : 'manga';
+            const id = String(target.ref).split(':').slice(1).join(':');
+            if (!iAmOwner() || !removeWorkEverywhere(sync, { key: target.ref, kind, keys: [target.ref, id].filter(Boolean), title: target.title ?? null, cover: target.cover ?? null })) return;
+            toast('حُذف العمل من التطبيق — تلقاه في الإعدادات › أرشيف الأعمال المحذوفة');
+          } else deleteWork(w);
+          goBack();
+        },
       };
-      for (const x of workOptionEntries({ rating: ratingOf(ref), completed: inCollection('completed', ref), canReport: Boolean(deps.report), canDelete: !target })) {
+      for (const x of workOptionEntries({ rating: ratingOf(ref), completed: inCollection('completed', ref), canReport: Boolean(deps.report), canDelete: iAmOwner() })) {
         body.append(sheetItem(x.icon, x.label, run[x.id], { pressed: x.pressed, danger: x.danger }));
       }
     });
@@ -4962,9 +4997,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       b.title = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id];
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(root.dataset.section === id));
+      // لون كل خانة = لون قسمها كما اختاره المستخدم في المظهر (أنمي أحمر؟ خانته حمراء)
+      b.style.setProperty('--tone', accentOf(id) ?? ACCENTS.find((c) => c.id === id)?.hex ?? '#8f5cff');
       const word = el('b', null, SECTIONS[id]?.word ?? id.toUpperCase());
       word.dir = 'ltr';
-      b.append(word, el('small', null, { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[id]));
+      b.append(word);
       b.onclick = () => {
         closeDrawer();
         selectSection(b.dataset.arg);
@@ -5994,8 +6031,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
     openSheet((body) => {
       const paint = () => {
         body.replaceChildren(el('h3', null, 'أرشيف الأعمال المحذوفة'));
+        // المحذوف من التطبيق كله (المالك): يصل من الخادم لحسابه وحده، والإعادة تُرجعه للجميع
+        const removed = iAmOwner() ? sync.rows('removed_works', (r) => Number(r.active) === 1).sort((a, b) => (b.removed_at ?? 0) - (a.removed_at ?? 0)) : [];
+        for (const r of removed) {
+          const line = el('div', 'hidden-work');
+          line.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)';
+          if (r.cover) { const img = el('img'); img.src = r.cover; img.alt = ''; img.style.cssText = 'width:44px;height:62px;border-radius:8px;object-fit:cover;flex:none'; line.append(img); }
+          const t = el('div'); t.style.flex = '1';
+          const name = el('strong', null, r.title || 'عمل'); name.dir = 'auto';
+          t.append(name, el('small', 'settings-note', { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' }[r.kind] ?? ''));
+          const back = el('button', 'btn btn-secondary', 'إعادة العمل'); back.type = 'button';
+          back.onclick = () => { restoreRemovedWork(sync, r.key); toast('رجع العمل للجميع'); setTimeout(() => { paint(); renderSettings(); }, 400); };
+          line.append(t, back);
+          body.append(line);
+        }
         const list = hiddenWorks();
-        if (!list.length) { body.append(el('p', 'settings-note', 'ما حذفت أي عمل.')); return; }
+        if (!list.length && !removed.length) { body.append(el('p', 'settings-note', 'ما حذفت أي عمل.')); return; }
         for (const h of list) {
           const line = el('div', 'hidden-work');
           line.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)';
@@ -6251,7 +6302,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
       if (on('playback') && supports('translation')) renderTranslationSettings(group, row, toggle);
-      if (on('privacy')) group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'ما حذفته بنفسك — أعده متى شئت', { value: hiddenWorks().length ? String(hiddenWorks().length) : null, run: openHiddenArchive })]);
+      // الأرشيف للمالك وحده (ومن بقي عنده إخفاء محلي قديم): غيره لا يعرف أن أعمالًا حُذفت
+      const archived = (iAmOwner() ? sync.rows('removed_works', (r) => Number(r.active) === 1).length : 0) + hiddenWorks().length;
+      if (on('privacy') && (iAmOwner() || hiddenWorks().length)) group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'المحذوف من التطبيق — أعده متى شئت', { value: archived ? String(archived) : null, run: openHiddenArchive })]);
       if (!pane) group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
@@ -7355,6 +7408,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // «التحميلات»: الصفحة وورقة البدء ومدخلها في ترويسة مكتبتي (downloads.js)
   const downloadsUI = createDownloadsUI({
     root, q, el, toast, openSheet, closeSheet, currentPage,
+    // «حذف المقروء/المشاهَد»: من علامات حسابك نفسها (مفتاح فصل المانجا هو مفتاح التنزيل)
+    consumed: (item) => {
+      if (item.kind === 'manga') return isChapterRead(sync, item.work.ref, item.unit.key);
+      if (item.section === 'anime' && String(item.work.ref).startsWith('anime:')) return Boolean(animeAccount.isSeen(String(item.work.ref).slice(6), item.unit.number ?? 1));
+      return false;
+    },
     showPage: (id) => showPage(id),
     goBack: () => goBack(),
     openReader: (target) => deps.openReader(target),

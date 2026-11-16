@@ -106,7 +106,8 @@ export function detailMarkup(look, { glyph, iconButton }) {
   const amb = (cls = 'mw-amb') => `<div class="${cls}" aria-hidden="true"><img id="detailGlow" alt="" decoding="async"></div>`;
   const cover = '<div class="mw-cover" id="detailCover"></div>';
   const kick = '<div class="mw-kick" id="detailKicker"></div>';
-  const title = '<h1 class="mw-title" id="detailTitle" dir="auto" data-copyable>—</h1>';
+  // فارغ حتى يصل الاسم: هيكل بلون القسم (manga.css) بدل «—» على بقعة داكنة
+  const title = '<h1 class="mw-title" id="detailTitle" dir="auto" data-copyable></h1>';
   const who = '<div class="mw-who" id="detailWho" dir="auto"></div>';
   const stats = '<div class="mw-stats" id="detailStats"></div>';
   const genres = '<div class="mw-chips" id="detailGenres"></div>';

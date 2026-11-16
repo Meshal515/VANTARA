@@ -345,6 +345,9 @@ const DELTA_TABLES = [
   ['majlis_message_receipts', 'message_id, user_id, seen_at, rev'],
   // بطاقة دعوة Together: للمضيف ومن دُعي فقط
   ['together_invites', 'code, host_id, invitees_json, mode, kind, media_json, created_at, rev'],
+  // «حذف العمل»: الأرشيف للمالك وحده، والبصمات (بلا اسم ولا غلاف) لكل جهاز ليخفي العمل
+  ['removed_works', 'key, kind, title, cover, keys_json, removed_at, active, rev'],
+  ['removed_work_tokens', 'token, active, rev'],
 ] as const;
 
 /** سقف الدفعة لكل جدول. دفعة ضخمة تتجاوز حد زمن الـWorker وتفشل كلها. */
@@ -482,6 +485,10 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
           sql: " AND (from_id = ? OR to_id = ? OR (audience = 'MAJLIS' AND instr(hidden_json, ?) = 0))",
           values: [userId, userId, hiddenToken(userId)],
         };
+
+      // أرشيف المحذوفات: لا يصل إلا المالك. غيره لا يعرف أن عملًا حُذف أصلًا
+      case 'removed_works':
+        return { sql: " AND EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND badge = 'owner')", values: [userId] };
 
       case 'together_invites':
         return {
@@ -1904,6 +1911,48 @@ export function statementsFor(
              WHERE excluded.read_at > majlis_reads.read_at`,
           )
           .bind(userId, at, rev),
+      ];
+    }
+
+    /**
+     * «حذف العمل» من التطبيق كله: المالك وحده (الشارة من الخادم، لا من الجهاز). البصمات تُحسب في جهازه
+     * (lib/removed-works.js) لأن هذه الدالة متزامنة؛ نتحقق من شكلها فقط، والعملية لا تُقبل إلا منه.
+     */
+    case 'work.remove': {
+      const key = asString(p['key'], 200);
+      const kind = p['kind'] === 'anime' || p['kind'] === 'cinema' || p['kind'] === 'manga' ? p['kind'] : null;
+      const keys = Array.isArray(p['keys']) ? [...new Set(p['keys'].map((k) => asString(k, 200)).filter((k): k is string => Boolean(k)))].slice(0, 40) : [];
+      const tokens = Array.isArray(p['tokens']) ? [...new Set(p['tokens'].filter((t): t is string => typeof t === 'string' && /^[0-9a-f]{16,64}$/.test(t)))].slice(0, 40) : [];
+      if (!key || !kind || !tokens.length) return null;
+      const owner = "EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND badge = 'owner')";
+      return [
+        db
+          .prepare(
+            `INSERT INTO removed_works (key, kind, title, cover, keys_json, tokens_json, removed_by, removed_at, active, rev)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ? WHERE ${owner}
+             ON CONFLICT (key) DO UPDATE SET kind = excluded.kind, title = excluded.title, cover = excluded.cover,
+               keys_json = excluded.keys_json, tokens_json = excluded.tokens_json, removed_by = excluded.removed_by,
+               removed_at = excluded.removed_at, active = 1, rev = excluded.rev`,
+          )
+          .bind(key, kind, asString(p['title'], 200), asString(p['cover'], 500), JSON.stringify(keys.length ? keys : [key]), JSON.stringify(tokens), userId, now, rev, userId),
+        ...tokens.map((token) =>
+          db
+            .prepare(
+              `INSERT INTO removed_work_tokens (token, work_key, active, rev) SELECT ?, ?, 1, ? WHERE ${owner}
+               ON CONFLICT (token) DO UPDATE SET work_key = excluded.work_key, active = 1, rev = excluded.rev`,
+            )
+            .bind(token, key, rev, userId),
+        ),
+      ];
+    }
+
+    case 'work.restore': {
+      const key = asString(p['key'], 200);
+      if (!key) return null;
+      const owner = "EXISTS (SELECT 1 FROM accounts WHERE user_id = ? AND badge = 'owner')";
+      return [
+        db.prepare(`UPDATE removed_works SET active = 0, rev = ? WHERE key = ? AND active = 1 AND ${owner}`).bind(rev, key, userId),
+        db.prepare(`UPDATE removed_work_tokens SET active = 0, rev = ? WHERE work_key = ? AND active = 1 AND ${owner}`).bind(rev, key, userId),
       ];
     }
 

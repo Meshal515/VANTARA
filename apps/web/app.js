@@ -32,6 +32,8 @@ import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
+// الفصل المحمّل يُقرأ من الجهاز أينما فُتح؛ نفس الكائن الذي تجهّز به صفحة العمل الفصل التالي
+import { readerEngine } from './lib/reader-engine.js';
 import {
   APK_ERRORS,
   versionLine,
@@ -1603,7 +1605,7 @@ function screenSmartReader(target) {
     {
       sync,
       // فصل من «التحميلات» يُقرأ من الجهاز بمحرك محلي بنفس الواجهة؛ غيره من المصادر
-      engine: target.engine ?? engine,
+      engine: target.engine ?? readerEngine,
       // الترجمة المرئية تمرّ من خادم المحتوى (وكيل إلى عامل جهاز البيت)
       api,
       mount,

@@ -730,6 +730,8 @@ class ExtensionEnginePlugin : Plugin() {
 
                 if (hit != null) {
                     file = hit
+                    // «آخر استعمال» للتسقيف: الصفحة التي تقرؤها الآن لا تُطرد أولًا
+                    runCatching { hit.setLastModified(System.currentTimeMillis()) }
                     bytes = withContext(Dispatchers.IO) { hit.readBytes() }
                     type = typeForExtension(hit.extension)
                 } else {
@@ -752,18 +754,19 @@ class ExtensionEnginePlugin : Plugin() {
                         }
                     }
                     bytes = fetched.first
-                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: الحجم وحده لا
-                    // يكفي، فصفحة HTML كبيرة تمرّ منه. التوقيع يُفحص قبل الكاش
-                    if (bytes.size <= 1024) throw PageImageException("image too small: ${bytes.size} bytes")
+                    // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: التوقيع هو الحكم (لا الحجم: صفحة فاصلة
+                    // بيضاء PNG أقل من كيلوبايت صورة صحيحة، وكانت تُرفض فيفشل الفصل كله). يُفحص قبل الكاش
                     val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
-                    if (!verdict.accepted) throw PageImageException("not an image: ${verdict.reason}")
-                    // النوع من الاستجابة أولًا، فإن سكتت فمن امتداد الرابط
-                    type = fetched.second?.substringBefore(';')?.trim()?.takeIf {
+                    if (!verdict.accepted) throw PageImageException("not an image (${bytes.size} bytes): ${verdict.reason}")
+                    // النوع من البايتات أولًا، ثم الاستجابة، ثم امتداد الرابط
+                    type = ImagePayloadPolicy.sniffType(bytes) ?: fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
                     } ?: typeForUrl(url)
                     file = cacheFile(url, extensionForType(type))
                     // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
                     // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
+                    // كاش الصفحات كان بلا سقف: كل صفحة قُرئت تبقى للأبد (جيجابايتات). يُسقَّف كل 150 صفحة جديدة
+                    if (++pageWrites % 150 == 0) scope.launch(Dispatchers.IO) { runCatching { StoragePlugin.capDir(pageCacheDir, StoragePlugin.PAGE_CACHE_CAP) } }
                     withContext(Dispatchers.IO) {
                         val tmp = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.part")
                         tmp.writeBytes(bytes)
@@ -877,6 +880,7 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
+    @Volatile private var pageWrites = 0
     private val pageCacheDir by lazy {
         java.io.File(context.cacheDir, "pages").apply { mkdirs() }
     }
@@ -905,7 +909,7 @@ class ExtensionEnginePlugin : Plugin() {
      * الامتداد يُقرَّر من نوع الاستجابة وقت التنزيل، فلا يُعرف وقت البحث في
      * الكاش. والبحث بالبادئة يجد الملف بلا أن نخمّن نوعه مرة ثانية.
      */
-    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 1024)
+    private fun cacheHit(url: String): java.io.File? = hitIn(pageCacheDir, url, 64)
 
     /**
      * الملف المحفوظ لرابط، بفحص مباشر لا بمسح المجلد: مسحُ آلاف الملفات عند

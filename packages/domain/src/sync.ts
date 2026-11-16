@@ -167,6 +167,9 @@ export type OpKind =
   | 'majlis.read'
   | 'majlis.meta'
   | 'together.invite'
+  /** حذف عمل من التطبيق كله وإعادته: المالك وحده (الخادم يتحقق من الشارة). */
+  | 'work.remove'
+  | 'work.restore'
   | 'activity.add'
   | 'activity.delivered'
   | 'activity.seen'

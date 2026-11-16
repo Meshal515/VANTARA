@@ -173,7 +173,7 @@ html.desktop-overlay .pp-chip:hover {
 }
 html.desktop-overlay .pp-chip.is-on {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 html.desktop-overlay .pp-big {
   text-align: center;
@@ -268,7 +268,7 @@ html.desktop-overlay .pp-people:focus-visible { outline: 2px solid var(--accent)
 /* Until the first decoded frame, cover the previous application surface. */
 html.desktop-overlay .pwa-player.pp--loading{background:#000}
 
-html.desktop-overlay .pp-retry{position:absolute;left:50%;top:58%;transform:translateX(-50%);z-index:10;border-radius:24px;padding:12px 22px;background:var(--accent);color:white;font:inherit;cursor:pointer}html.desktop-overlay .pp-retry[hidden]{display:none}
+html.desktop-overlay .pp-retry{position:absolute;left:50%;top:58%;transform:translateX(-50%);z-index:10;border-radius:24px;padding:12px 22px;background:var(--accent);color: var(--on-accent, #fff);font:inherit;cursor:pointer}html.desktop-overlay .pp-retry[hidden]{display:none}
 
 /* ── شاشة التحميل (LoadingStage.kt في الـAPK) ──
  * البداية: أسود، وبنر العمل بعرض الشاشة معتّمًا (0x99 = 60%)، والشعار في الوسط بعرض 32% (حد 30% من الارتفاع)
@@ -366,7 +366,7 @@ html.desktop-overlay .pwa-player .pp-quality:hover { background: rgba(255,255,25
 html.desktop-overlay .pp-url { display: flex; gap: 8px; margin: 2px 0 6px; }
 html.desktop-overlay .pp-url input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; }
 html.desktop-overlay .pp-url input:focus { outline: none; border-color: var(--accent-line); }
-html.desktop-overlay .pp-url__go { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; }
+html.desktop-overlay .pp-url__go { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--accent); color: var(--on-accent, #fff); font-weight: 700; font-size: 13px; }
 html.desktop-overlay .pp-url__go:hover { filter: brightness(1.1); }
 /* قرار المالك (14 نوفمبر): صور الأصحاب وحالاتهم تظهر مع الأدوات وتختفي معها؛ أثناء المشاهدة فراغ كامل */
 html.desktop-overlay .pp-people { transition: opacity .22s ease; }
@@ -379,7 +379,7 @@ html.desktop-overlay .pp-next strong { font-size: 17px; font-weight: 800; color:
 html.desktop-overlay .pp-next span { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 html.desktop-overlay .pp-next__row { display: flex; gap: 8px; margin-top: 10px; }
 html.desktop-overlay .pp-next__btn { flex: 1; min-height: 40px; border-radius: 20px; background: var(--surface-3); color: #fff; font-weight: 700; font-size: 13.5px; }
-html.desktop-overlay .pp-next__btn--primary { background: var(--accent); }
+html.desktop-overlay .pp-next__btn--primary { background: var(--accent); color: var(--on-accent, #fff); }
 html.desktop-overlay .pp-next__btn:hover { filter: brightness(1.12); }
 /* اختيار صديق: حرف أول في دائرة كـavatar() في الـAPK (36dp بلون SURFACE_3) */
 html.desktop-overlay .pwa-player .pp-row-item__face { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); color: var(--text); font-weight: 800; font-size: 13px; }
