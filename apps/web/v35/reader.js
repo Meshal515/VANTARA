@@ -33,6 +33,8 @@ import {
   loadSettings,
   neighbors,
   nextChapterPlan,
+  PAGES_TIMEOUT_MS,
+  withDeadline,
   readRatio,
   saveSettings,
 } from './reader-core.js';
@@ -96,7 +98,8 @@ function sharedPages(engine, row) {
   const id = chapterId(row);
   let promise = pageLists.get(id);
   if (!promise) {
-    promise = engine.pages(row.sourceId, row.chapter).then((list) => {
+    // بلا مهلة كانت «جارٍ فتح الفصل» تبقى للأبد إن علق المحرك (بلاغ المالك 16 نوفمبر)
+    promise = withDeadline(engine.pages(row.sourceId, row.chapter), PAGES_TIMEOUT_MS, 'المصدر ما ردّ بصفحات الفصل').then((list) => {
       if (!list.length) throw new Error('الفصل بلا صفحات عند المصدر');
       return list;
     });
@@ -151,6 +154,16 @@ export function openSmartReader(deps, ctx) {
     if (globalThis.navigator?.onLine !== false || typeof engine.hasLocal !== 'function') return sequence;
     const same = (a, b) => a === b || (Number.isFinite(a?.number) && a.number >= 0 && a.number === b?.number) || Boolean(a?.chapter?.url && a.chapter.url === b?.chapter?.url);
     return sequence.filter((r) => same(r, row) || engine.hasLocal(r.sourceId, r.chapter) !== false);
+  };
+  /**
+   * التالي ومعه ما تُخطّي (بلاغ المالك: «انتقال مفاجئ إلى الفصل 272»). بلا اتصال، أو حين يظن WebView ذلك لحظة،
+   * كان `reach` يجعل «التالي» أقرب فصل **محمّل** فيُلحق بالتمرير بصمت ولو كان بعد مئات الفصول. الآن التالي
+   * الحقيقي (`skipped`) يُعرف، والقفز لا يحدث إلا بضغطة صريحة على زر يقول إنه المحمّل التالي.
+   */
+  const nextOf = (row) => {
+    const { next } = neighbors(reach(row), row);
+    const real = neighbors(sequence, row).next;
+    return { next, skipped: next && real && next !== real ? real : null };
   };
   const ref = ctx.seriesRef;
   const me = () => sync.user?.userId;
@@ -699,8 +712,9 @@ export function openSmartReader(deps, ctx) {
    * وإعدادك وبأولوية لا تنافس ما تقرؤه. التمرير يدخل فيه بلا زرّ.
    */
   function appendNext(seg) {
-    const { next } = neighbors(reach(seg.row), seg.row);
-    if (!next || seg.next || seg.appending) return;
+    const { next, skipped } = nextOf(seg.row);
+    // لا إلحاق صامت لفصل بعيد: فصول تُخطّت (غير محمّلة بلا اتصال) = زر صريح في حد الفصل لا تمرير
+    if (!next || skipped || seg.next || seg.appending) return;
     const plan = nextChapterPlan({ mode: settings.prefetch, network: readNetwork() });
     seg.appending = true;
     seg.nextError = null;
@@ -968,7 +982,7 @@ export function openSmartReader(deps, ctx) {
    * شيء بعده — وعندها وحدها يقول «وصلت إلى آخر فصل متاح حاليًا».
    */
   function paintBoundary(seg) {
-    const { next } = neighbors(reach(seg.row), seg.row);
+    const { next, skipped } = nextOf(seg.row);
     const end = seg.end;
     end.replaceChildren();
     end.classList.toggle('rd-end--last', !next);
@@ -989,16 +1003,17 @@ export function openSmartReader(deps, ctx) {
       end.append(back);
       return;
     }
+    if (skipped) end.append(el('p', 'rd-end-state', `${chapterLabel(skipped)} غير محمّل على الجهاز`));
     const go = el('button', 'rd-end-next');
     go.type = 'button';
-    go.append(el('span', 'rd-end-kicker', 'الفصل التالي'));
+    go.append(el('span', 'rd-end-kicker', skipped ? 'التالي المحمّل' : 'الفصل التالي'));
     const no = el('bdi', 'rd-end-no', chapterShort(next));
     go.append(no);
     const name = next.chapter?.name?.trim();
     if (name && name !== chapterLabel(next) && !/^\s*(ال)?فصل\s*[\d.]+\s*$/.test(name)) go.append(el('bdi', 'rd-end-name', name));
     if (seg.nextError) {
       go.append(el('span', 'rd-end-state rd-end-state--error', 'ما تجهّز. المس لإعادة المحاولة'));
-    } else if (!seg.next) {
+    } else if (!seg.next && !skipped) {
       const wait = el('span', 'rd-end-state');
       wait.append(el('i', 'rd-spinner rd-spinner--sm'), document.createTextNode('يتجهّز…'));
       go.append(wait);
@@ -1015,8 +1030,9 @@ export function openSmartReader(deps, ctx) {
   /** «التالي» باللمس: إلى أول صفحته إن كان تحتك، وإلا يُفتح من الصفر. */
   function goNext(seg = state.seg) {
     if (!seg) return;
-    const { next } = neighbors(reach(seg.row), seg.row);
+    const { next, skipped } = nextOf(seg.row);
     if (!next) return;
+    if (skipped) toast(`${chapterLabel(skipped)} غير محمّل، فتحنا ${chapterLabel(next)} المحمّل`);
     if (seg.next) {
       seg.next.current = 0;
       scrollToFrame(seg.next.slots[0]?.frame, true);

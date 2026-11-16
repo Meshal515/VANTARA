@@ -829,7 +829,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
     waitCover(container, work);
     resolveCoverLater(work);
+    retryCoverLater(container, work, token);
     return null;
+  }
+  /**
+   * لم يصل أي غلاف (طلب المالك 16 نوفمبر): مهلة الغلاف الواحد (6 ث في المحرّك) لا تنهي البحث. المرشحون كلهم يُعاد
+   * تجريبهم في الخلفية بعد COVER_RETRY_MS، ما دامت البطاقة نفسها في الصفحة وما زالت بحرفها، والأول الذي يصل يثبت
+   * (قاعدة «أول غلاف يفوز»). محدود لكل عمل في الجلسة فلا يُستنزف موقع رافض.
+   */
+  const coverRetries = new Map();
+  /** مواعيد إعادة تجريب غلاف لم يصل: بعد 15 ثانية، ثم دقيقة، ثم 5 دقائق. */
+  const COVER_RETRY_MS = [15_000, 60_000, 300_000];
+  function retryCoverLater(container, work, token) {
+    const id = idOf(work);
+    if (!id) return;
+    const n = coverRetries.get(id) ?? 0;
+    if (n >= COVER_RETRY_MS.length) return;
+    coverRetries.set(id, n + 1);
+    setTimeout(() => {
+      if (!container.isConnected || container.dataset.imageToken !== token || container.querySelector(':scope > img')) return;
+      void mountImage(container, work);
+    }, COVER_RETRY_MS[n]);
   }
   /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();

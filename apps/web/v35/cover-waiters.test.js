@@ -39,3 +39,25 @@ it('cards that really left the page are still swept, so waiters stay bounded', a
   void nearViewport({ isConnected: true });
   expect(observed.size).toBe(1);
 });
+
+// طلب المالك (16 نوفمبر): مهلة الغلاف لا تنهي البحث؛ ما لم يصل يُعاد تجريبه في الخلفية، والبطاقة الحية فقط
+it('a card left with its letter retries its cover in the background (15 s, 1 min, 5 min), only while it is still on the page', () => {
+  const code = pick('  const coverRetries = new Map();', '  /** بطاقات بلا غلاف تنتظر معرفته.');
+  const timers = [];
+  const remounts = [];
+  const make = new Function('setTimeout', 'mountImage', 'idOf', `${code}; return retryCoverLater;`);
+  const retry = make((fn, ms) => timers.push({ fn, ms }), (c, w) => remounts.push(w.id), (w) => String(w?.id ?? ''));
+  const card = { isConnected: true, dataset: { imageToken: 't1' }, querySelector: () => null };
+  const work = { id: 'ext:x' };
+  for (let i = 0; i < 5; i++) retry(card, work, 't1');
+  expect(timers.map((t) => t.ms)).toEqual([15_000, 60_000, 300_000]); // محدود لكل عمل في الجلسة
+  timers[0].fn();
+  expect(remounts).toEqual(['ext:x']);
+  // ظهر غلاف، أو أُعيد استعمال البطاقة لعمل آخر، أو نُزعت: لا إعادة
+  card.querySelector = () => ({});
+  timers[1].fn();
+  card.querySelector = () => null;
+  card.dataset.imageToken = 't2';
+  timers[2].fn();
+  expect(remounts).toEqual(['ext:x']);
+});
