@@ -29,6 +29,8 @@ import { frameIdFromLink } from './lib/frame.js';
 import { createPhoneNotify, notificationLinkTarget, phoneWanted } from './lib/phone-notify.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
+import { glyph } from './v35/icons.js';
+import { buildCelebration, celebrationFor, markCelebrated } from './lib/celebrate.js';
 import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
@@ -2177,7 +2179,7 @@ if ('serviceWorker' in navigator) {
     reloading = true;
     window.location.reload();
   });
-  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(showWhatsNew, 1500));
+  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(() => !document.querySelector('.vcele') && !celebrationFor('pwa') && showWhatsNew(), 1500));
 }
 
 /** نتيجة الفحص اليدوي: تأكيد تطبيق نسخة PWA الجاهزة. */
@@ -2203,6 +2205,36 @@ function showWebUpdate(apply) {
   card.append(copy, go, later);
   bar.append(card);
   document.body.append(bar);
+}
+
+/**
+ * احتفال التحديث الكبير (lib/celebrate.js): مرة واحدة بعد الدخول لكل إصدار موسوم. هادئ وفخم:
+ * الشعار بتوهج لون القسم، والعنوان، والجديد يدخل بندًا بندًا، وزر واحد.
+ */
+function maybeCelebrate() {
+  if (!sync.signedIn || document.querySelector('.vcele')) return;
+  // ويندوز والمتصفح: بنود الكمبيوتر والويب؛ الأندرويد: بنوده
+  const platform = globalThis.VantaraDesktop || supports('webUpdate') ? 'pwa' : 'apk';
+  const release = celebrationFor(platform);
+  if (release) showCelebration(release);
+}
+
+function showCelebration(release) {
+  const { layer, button } = buildCelebration(document, release, glyph);
+  const previousBack = state.back;
+  const close = () => {
+    markCelebrated(release.version);
+    state.back = previousBack;
+    document.removeEventListener('keydown', onKey);
+    layer.classList.add('vcele--out');
+    setTimeout(() => layer.remove(), 260);
+  };
+  const onKey = (event) => event.key === 'Escape' && close();
+  button.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  state.back = () => (close(), true);
+  document.body.append(layer);
+  button.focus({ preventScroll: true });
 }
 
 /** «ما الجديد» مرة بعد تحديث طبّقه الشخص: المشترك + ما يخص منصته. */
@@ -2526,6 +2558,7 @@ async function boot() {
     // جلسة قائمة: نفتح على الرئيسية فورًا من المرآة، والشبكة تُصحّح بعدها
     startHeartbeat();
     await go({ name: 'home' });
+    setTimeout(maybeCelebrate, 1200);
     void sync.pull();
     void refreshPresence();
     void startUpdates();
